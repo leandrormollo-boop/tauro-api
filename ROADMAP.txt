@@ -1,0 +1,115 @@
+============================================================
+  TAURO API — ROADMAP
+============================================================
+Última actualización: 2026-04-24
+
+────────────────────────────────────────────────────────────
+✅ FASE 0 — BASE EXISTENTE (terminado antes de hoy)
+────────────────────────────────────────────────────────────
+[x] FastAPI con /cotizar y /pedido
+[x] FedExClient con OAuth2 + get_rates()
+[x] sheets_client con gspread (PERFILES, COTI, PRODUCTOS)
+[x] email_sender con PDF ReportLab + SMTP
+[x] APScheduler con job semanal
+[x] Auth por X-API-Key
+[x] requirements.txt + venv
+
+────────────────────────────────────────────────────────────
+✅ FASE 1 — REORGANIZACIÓN (24/04/2026)
+────────────────────────────────────────────────────────────
+[x] Estructura de carpetas (core/endpoints/modelos/servicios/jobs/templates/static/scripts/docs)
+[x] README.txt en cada carpeta con qué hace y la lógica
+[x] Mover archivos existentes a su carpeta
+[x] Actualizar imports en main.py
+[x] Verificar que la app sigue arrancando
+[x] Script inicializar_hojas.py listo (NO ejecutado todavía)
+
+────────────────────────────────────────────────────────────
+🔧 FASE 2 — INFRAESTRUCTURA INTERNA (en curso)
+────────────────────────────────────────────────────────────
+[ ] Ejecutar inicializar_hojas.py (crea las 8 hojas nuevas)
+[ ] Modelos Pydantic (cotizacion, pedido, producto, ruta, cliente)
+[ ] Servicio logger.py (log_request, log_error a Sheets)
+[ ] Servicio auth.py (login mágico)
+[ ] Servicio rutas.py (leer RUTAS_DEFAULT)
+[ ] Servicio catalogo.py (leer/escribir PRODUCTOS_CATALOGO)
+[ ] Servicio cuenta_corriente.py (calcular saldos)
+[ ] Servicio cotizador.py (refactor de la lógica de /cotizar)
+[ ] Servicio circuit_breaker.py
+[ ] Servicio health.py
+
+────────────────────────────────────────────────────────────
+🌐 FASE 3 — PORTAL DEL CLIENTE
+────────────────────────────────────────────────────────────
+[ ] /portal/login (form de email)
+[ ] /portal/login/send (mandar link mágico)
+[ ] /portal/auth?token=X (validar token, crear cookie)
+[ ] /portal/home (saldo + últimos envíos)
+[ ] /portal/envios (tabla completa filtrable)
+[ ] /portal/cuenta (timeline cuenta corriente)
+[ ] /portal/factura/{nfc} (descargar PDF de Drive)
+[ ] /portal/cotizar (form simple con dropdowns de ruta)
+[ ] /portal/cotizar (POST → llamar a cotizador)
+[ ] /portal/catalogo (productos del cliente)
+[ ] /portal/catalogo/add (agregar nuevo producto)
+[ ] templates/base.html con layout
+[ ] static/css/tauro.css con paleta Tauro
+
+────────────────────────────────────────────────────────────
+🛡️ FASE 4 — DASHBOARD ADMIN (TU PANEL)
+────────────────────────────────────────────────────────────
+[ ] /admin con auth por password
+[ ] /admin/health (estado FedEx/Sheets/SMTP/Cron)
+[ ] /admin/cotizaciones (últimas 100)
+[ ] /admin/errores (con botón replay)
+[ ] /admin/clientes (lista PERFILES editable)
+[ ] /admin/replay/{id}
+
+────────────────────────────────────────────────────────────
+⏰ FASE 5 — JOBS PROGRAMADOS
+────────────────────────────────────────────────────────────
+[x] reporte_semanal.py (existente)
+[ ] health_check.py (cada 5 min)
+[ ] resumen_diario.py (8am)
+[ ] limpiar_sessions.py (3am)
+
+────────────────────────────────────────────────────────────
+📦 FASE 6 — GENERACIÓN DE GUÍAS (Phase 2 del FedEx)
+────────────────────────────────────────────────────────────
+[ ] Implementar fedex_client.create_shipment()
+[ ] Implementar fedex_client.track()
+[ ] Implementar fedex_client.cancel_shipment()
+[ ] /portal/guia (form completo con catálogo)
+[ ] Generación de invoice PDF
+[ ] Subida automática de guía a Drive (TAURO/GUIAS/{CLIENTE}/)
+
+────────────────────────────────────────────────────────────
+🚀 FASE 7 — DEPLOY
+────────────────────────────────────────────────────────────
+[ ] Dockerfile
+[ ] Test local con uvicorn
+[ ] Deploy a Render (free tier) o Railway
+[ ] DNS: tauro.app o api.tauro.app
+[ ] HTTPS automático
+[ ] Backup periódico de credenciales.json + .env (1Password)
+
+────────────────────────────────────────────────────────────
+💎 IDEAS FUTURAS (Phase X)
+────────────────────────────────────────────────────────────
+[ ] Pago online con MercadoPago en /portal/cuenta
+[ ] Bot de Telegram para alertas en tiempo real
+[ ] Calculadora pública de cotización (sin login, marketing)
+[ ] Multi-courier: agregar DHL, UPS al CarrierBase
+[ ] App nativa iOS con SwiftUI (consume el mismo API)
+[ ] Webhooks para clientes (notificar cuando entregamos)
+[ ] Dashboard analytics (heatmap de rutas, márgenes por cliente)
+
+────────────────────────────────────────────────────────────
+PRIORIDADES — qué hacer primero
+────────────────────────────────────────────────────────────
+1. Ejecutar inicializar_hojas.py (5 min)
+2. Servicios base (logger, auth, rutas) — para todo lo demás
+3. /portal/login + /portal/home — primer valor visible
+4. /portal/cotizar — engancha clientes, demo-able
+5. /admin/health + /admin/errores — control para vos
+6. Deploy a Render — para que el cliente lo use de verdad

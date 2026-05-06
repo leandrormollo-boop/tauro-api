@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Inicio{% endblock %}
+
+{% block content %}
+<h1>Hola, {{ cliente }}</h1>
+
+<div class="grid-2">
+    <div class="card">
+        <h2>Cuenta corriente</h2>
+        <div class="kpi">
+            <span class="kpi-label">Saldo pendiente</span>
+            <span class="kpi-value">ARS {{ "{:,.0f}".format(saldo.saldo_pendiente_ars).replace(",", ".") }}</span>
+        </div>
+        <div class="kpi-row">
+            <div>
+                <span class="kpi-label">Facturado</span>
+                <span class="kpi-sub">ARS {{ "{:,.0f}".format(saldo.facturado_ars).replace(",", ".") }}</span>
+            </div>
+            <div>
+                <span class="kpi-label">Pagado</span>
+                <span class="kpi-sub">ARS {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Acciones rápidas</h2>
+        <div class="actions">
+            <a href="/portal/cotizar" class="btn-primary">Cotizar nuevo envío</a>
+            <a href="/portal/catalogo" class="btn-secondary">Ver mi catálogo</a>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Últimos pagos</h2>
+    {% if pagos_recientes %}
+    <table class="tabla">
+        <thead>
+            <tr><th>Fecha</th><th>Método</th><th>Referencia</th><th>Monto</th></tr>
+        </thead>
+        <tbody>
+        {% for p in pagos_recientes %}
+            <tr>
+                <td>{{ p.fecha }}</td>
+                <td>{{ p.metodo }}</td>
+                <td>{{ p.referencia }}</td>
+                <td class="num">ARS {{ "{:,.0f}".format(p.monto_ars).replace(",", ".") }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p class="empty">No hay pagos registrados todavía.</p>
+    {% endif %}
+</div>
+{% endblock %}

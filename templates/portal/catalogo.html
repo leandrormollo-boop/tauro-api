@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Catálogo{% endblock %}
+
+{% block content %}
+<h1>Mi catálogo</h1>
+<p class="subtitle">Productos pre-cargados para usar al armar guías. Cuando agregás uno nuevo, queda pendiente de revisión por Tauro antes de activarse.</p>
+
+<div class="card">
+    <h2>Productos</h2>
+    {% if productos %}
+    <table class="tabla">
+        <thead>
+            <tr>
+                <th>Alias</th><th>Invoice</th><th>HS Code</th>
+                <th>Medidas (cm)</th><th>Peso</th><th>Valor USD</th><th>Estado</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for p in productos %}
+            <tr>
+                <td><strong>{{ p.alias_interno }}</strong></td>
+                <td>{{ p.nombre_invoice }}</td>
+                <td><code>{{ p.hs_code }}</code></td>
+                <td>{{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }}</td>
+                <td>{{ p.peso_kg }} kg</td>
+                <td>${{ p.valor_usd_default }}</td>
+                <td>
+                    {% if p.activo %}
+                        <span class="badge badge-ok">Activo</span>
+                    {% else %}
+                        <span class="badge badge-pending">Pendiente</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+        <p class="empty">Todavía no agregaste productos. Empezá agregando el primero abajo.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2>Agregar producto</h2>
+    <form method="POST" action="/portal/catalogo/add" class="form">
+        <label>Alias interno (cómo lo llamás)
+            <input type="text" name="alias_interno" required placeholder="Mini bag">
+        </label>
+        <label>Descripción para invoice (en inglés, formal)
+            <input type="text" name="nombre_invoice" required placeholder="Leather handbag 100%">
+        </label>
+        <label>Código HS (formato XXXX.XX.XX)
+            <input type="text" name="hs_code" required pattern="\d{4}\.\d{2}\.\d{2}" placeholder="4202.21.00">
+        </label>
+
+        <div class="grid-3">
+            <label>Largo (cm)<input type="number" name="largo_cm" step="0.5" required></label>
+            <label>Ancho (cm)<input type="number" name="ancho_cm" step="0.5" required></label>
+            <label>Alto (cm)<input type="number" name="alto_cm" step="0.5" required></label>
+        </div>
+
+        <div class="grid-2">
+            <label>Peso (kg)<input type="number" name="peso_kg" step="0.1" required></label>
+            <label>Valor declarado USD<input type="number" name="valor_usd_default" step="1" required></label>
+        </div>
+
+        <button type="submit" class="btn-primary">Agregar al catálogo</button>
+    </form>
+</div>
+{% endblock %}

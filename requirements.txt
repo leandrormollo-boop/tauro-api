@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+gspread
+oauth2client
+python-dotenv
+reportlab
+apscheduler
+requests
+jinja2
+python-multipart
+pydantic[email]

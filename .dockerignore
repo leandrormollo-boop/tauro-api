@@ -1,0 +1,27 @@
+# venv y caches locales
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Git
+.git/
+.gitignore
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Secretos (los inyectamos como env vars / secret files en Render)
+.env
+
+# Macros de macOS
+.DS_Store
+
+# Logs locales
+*.log
+
+# Carpetas grandes
+node_modules/

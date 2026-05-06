@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tauro Solutions — Soluciones logísticas internacionales</title>
+  <meta name="description" content="Logística internacional para empresas argentinas. Cotizá, despachá y trackeá envíos aéreos, marítimos y terrestres desde un solo lugar." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Bricolage+Grotesque:wght@400;500;600;700&family=Instrument+Serif:wght@400&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <script>
+    // Vacío = misma origen (cuando se sirve desde la API)
+    window.TAURO_API_URL = "";
+  </script>
+
+  <style>
+    @keyframes spin { to { transform: rotate(360deg); } }
+    html { scroll-behavior: smooth; }
+    ::selection { background: var(--accent); color: #fff; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--fg-4); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="tweaks-panel.jsx"></script>
+  <script type="text/babel" src="components/01-nav-hero.jsx"></script>
+  <script type="text/babel" src="components/02-quote-widget.jsx"></script>
+  <script type="text/babel" src="components/03-services-tracking.jsx"></script>
+  <script type="text/babel" src="components/04-stats-contact-footer.jsx"></script>
+  <script type="text/babel" src="components/05-app.jsx"></script>
+</body>
+</html>

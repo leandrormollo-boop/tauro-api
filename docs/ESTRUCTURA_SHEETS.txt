@@ -1,0 +1,165 @@
+============================================================
+  ESTRUCTURA DE GOOGLE SHEETS — TAURO API
+============================================================
+Spreadsheet: el indicado en .env (GOOGLE_SHEET_URL)
+Service account: credenciales.json (debe tener permiso de editor)
+
+Cada hoja describe sus columnas en orden. Ese orden NO debe cambiar
+porque el código lee por índice.
+
+────────────────────────────────────────────────────────────
+1. CONFIG
+────────────────────────────────────────────────────────────
+Parámetros globales del sistema.
+
+  PARAMETRO              VALOR              DESCRIPCION
+  ─────────────────────  ─────────────────  ────────────────────
+  COTIZACION_DOLAR_ARS   1450               USD a ARS para mostrar
+  MARGEN_MINIMO_USD      10                 Alerta si margen < X
+  CRON_DIA               mon                Día reporte semanal
+  CRON_HORA              06:00              Hora reporte semanal
+  ADMIN_EMAIL            tu@email.com       Para alertas
+  MODO                   PROD | TEST        Test = mock FedEx
+  VALIDAR_HS_CODES       TRUE               Pide review manual
+  CIRCUIT_BREAKER_FAILS  3                  Fallas para abrir
+  CIRCUIT_BREAKER_RESET  60                 Segundos para retry
+
+────────────────────────────────────────────────────────────
+2. PERFILES
+────────────────────────────────────────────────────────────
+Clientes B2B que usan la API.
+
+  CLIENTE       Nombre del cliente (UPPERCASE, único)
+  EMAIL         Email para login mágico + reportes
+  API_KEY       Token único (X-API-Key) — generar con secrets.token_urlsafe(32)
+  MARKUP_PCT    % adicional sobre costo FedEx (ej: 25 = 25%)
+  ACTIVO        TRUE/FALSE — si está deshabilitado, /cotizar devuelve 403
+  CREADO        Timestamp ISO
+  NOTAS         Texto libre
+
+────────────────────────────────────────────────────────────
+3. COTI
+────────────────────────────────────────────────────────────
+Histórico de cotizaciones (auto-llenado por /cotizar).
+
+  TIMESTAMP    CLIENTE    RUTA_ID    PESO_KG   DIM_LWH       PESO_USADO
+  COSTO_FEDEX_USD   MARKUP_PCT   PRECIO_USD   PRECIO_ARS
+  DIAS_ESTIMADOS    VALIDA_HASTA   IP    USER_AGENT
+
+────────────────────────────────────────────────────────────
+4. PEDIDOS
+────────────────────────────────────────────────────────────
+Pedidos generados (auto-llenado por /pedido).
+
+  PEDIDO_ID         UUID
+  TIMESTAMP         Cuándo se creó
+  CLIENTE           Quien lo pidió
+  COTI_ID           Referencia a COTI
+  REMITENTE_JSON    Datos completos
+  DESTINATARIO_JSON Datos completos
+  ITEMS_JSON        Array de items (catálogo)
+  PESO_TOTAL_KG
+  VALOR_DECLARADO_USD
+  ESTADO            PENDIENTE | EN_PROCESO | DESPACHADO | ENTREGADO | CANCELADO
+  TRACKING_FEDEX    Cuando se genere la guía
+  GUIA_PDF_URL      Drive link
+  NOTAS
+
+────────────────────────────────────────────────────────────
+5. PRODUCTOS_CATALOGO  (NUEVO)
+────────────────────────────────────────────────────────────
+Catálogo de productos POR CLIENTE.
+
+  CLIENTE             Filtrar dropdown del portal
+  ALIAS_INTERNO       "Mini bag" — lo que el cliente reconoce
+  NOMBRE_INVOICE      "Leather handbag 100%" — va a la aduana
+  HS_CODE             4202.21.00 (formato Mercosur 8 dígitos)
+  LARGO_CM            33
+  ANCHO_CM            33
+  ALTO_CM             12
+  PESO_KG             1.2
+  VALOR_USD_DEFAULT   45 (editable por envío)
+  ACTIVO              TRUE/FALSE
+  CREADO              Timestamp
+
+  NOTA: Cuando el cliente agrega un producto desde el portal,
+  inicialmente queda ACTIVO=FALSE hasta que Tauro valide el HS Code.
+
+────────────────────────────────────────────────────────────
+6. RUTAS_DEFAULT  (NUEVO)
+────────────────────────────────────────────────────────────
+Rutas predefinidas para cotización rápida (sin tipear ZIP/ciudad).
+
+  RUTA_ID         AR-US, AR-ES, etc.
+  ORIGEN_PAIS     Argentina
+  ORIGEN_CITY     Buenos Aires
+  ORIGEN_ZIP      C1000
+  DESTINO_PAIS    Estados Unidos
+  DESTINO_CITY    Miami
+  DESTINO_ZIP     33166
+  DIAS_ESTIMADOS  5
+  ACTIVA          TRUE/FALSE — sólo TRUE aparece en dropdown
+
+────────────────────────────────────────────────────────────
+7. PAGOS  (NUEVO)
+────────────────────────────────────────────────────────────
+Registro de pagos recibidos (cuenta corriente).
+
+  FECHA          DD/MM/YYYY
+  CLIENTE        UPPERCASE — match con PERFILES
+  MONTO_ARS      Positivo
+  METODO         TRANSFERENCIA | EFECTIVO | MERCADOPAGO | OTRO
+  REFERENCIA     N° de operación / comprobante
+  NOTA           Texto libre
+
+  Saldo cliente = SUM(facturado en ENVIOS 2026) - SUM(MONTO_ARS aquí)
+
+────────────────────────────────────────────────────────────
+8. SESSIONS  (NUEVO)
+────────────────────────────────────────────────────────────
+Sesiones del login mágico del portal.
+
+  TOKEN     Random urlsafe (32 chars) — único
+  EMAIL     Quien lo pidió
+  CLIENTE   UPPERCASE — resuelto al validar
+  CREADO    Timestamp ISO
+  EXPIRA    Timestamp ISO (7 días después)
+  USADO     TRUE cuando se canjea
+
+  El job limpiar_sessions.py borra los expirados cada noche.
+
+────────────────────────────────────────────────────────────
+9. LOG_REQUESTS  (NUEVO)
+────────────────────────────────────────────────────────────
+Log de TODAS las requests al API.
+
+  TIMESTAMP    CLIENTE    ENDPOINT    METHOD
+  INPUT (JSON resumido)   OUTPUT (JSON resumido)
+  STATUS (200/422/500)    DURACION_MS    IP
+
+────────────────────────────────────────────────────────────
+10. LOG_ERRORES  (NUEVO)
+────────────────────────────────────────────────────────────
+Errores 500 con traceback completo (para debug + replay).
+
+  TIMESTAMP    CLIENTE    ENDPOINT    INPUT (JSON)
+  ERROR (mensaje)    TRACEBACK (texto completo)
+  RESUELTO (TRUE/FALSE)    NOTAS (texto manual)
+
+  El dash /admin/errores muestra esta hoja con botón "Replay".
+
+────────────────────────────────────────────────────────────
+11. LOG_HEALTH  (NUEVO)
+────────────────────────────────────────────────────────────
+Estado de servicios externos (escrito por health_check.py cada 5min).
+
+  TIMESTAMP    SERVICIO (FEDEX | SHEETS | SMTP)
+  ESTADO (OK | DOWN)    DURACION_MS    DETALLE
+
+────────────────────────────────────────────────────────────
+12. LOG_JOBS  (NUEVO)
+────────────────────────────────────────────────────────────
+Ejecución de cron jobs.
+
+  TIMESTAMP    JOB (reporte_semanal | health_check | etc.)
+  ESTADO (OK | ERROR)    DURACION_S    DETALLE

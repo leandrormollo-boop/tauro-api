@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}TAURO{% endblock %} · Tauro Solutions</title>
+    <link rel="stylesheet" href="/static/css/tauro.css">
+</head>
+<body>
+    <header class="topbar">
+        <a href="/portal/home" class="logo">TAURO</a>
+        {% if cliente %}
+        <nav class="nav">
+            <a href="/portal/home">Inicio</a>
+            <a href="/portal/cotizar">Cotizar</a>
+            <a href="/portal/catalogo">Catálogo</a>
+            <span class="user">{{ cliente }}</span>
+            <a href="/portal/logout" class="logout">Salir</a>
+        </nav>
+        {% endif %}
+    </header>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>Tauro Solutions · Logística internacional · 2026</p>
+    </footer>
+</body>
+</html>

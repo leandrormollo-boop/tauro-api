@@ -1,0 +1,239 @@
+============================================================
+  TAURO API — BITÁCORA DE CAMBIOS
+============================================================
+Cada vez que avancemos algo, queda registrado acá.
+Lo más nuevo arriba.
+
+Formato:
+  YYYY-MM-DD · QUIÉN · QUÉ HICIMOS · POR QUÉ
+
+────────────────────────────────────────────────────────────
+2026-04-29 · Lean + Claude (CEO) + Codex + Gemini
+────────────────────────────────────────────────────────────
+
+✅ Backend cerrado y listo para deploy en app.taurosolutions.ar.
+
+QUÉ SE HIZO
+  - Bug fix cotizador.py (línea 124): variable inexistente costo_fedex →
+    costo_fedex_usd. Aplicado por Codex.
+  - Login mágico real:
+      core/email_sender.py → función enviar_link_magico(email, link, cliente)
+        con plantilla HTML negra/dorada de Tauro.
+      endpoints/portal_cliente.py → login_send ahora llama a la función
+        en vez de solo print. Sigue logueando link en consola para debug.
+  - Markup por cliente:
+      Sheet PERFILES → agregada columna MARKUP_PCT (default 25 para
+        clientes existentes). Script: scripts/agregar_markup_pct.py.
+      servicios/auth.py → función get_markup_pct(cliente, default=25.0).
+      portal_cliente.py /cotizar → reemplazado hardcoded 25% por la
+        lectura real del sheet.
+  - Saldo real desde sheet operativo TAURO 2026:
+      servicios/cuenta_corriente.py:
+        - _abrir_sheet_operativo() abre el sheet TAURO 2026 (ID hardcoded).
+        - get_facturado_real(cliente) suma col K=FACTURADO matcheando por
+          col V=EMPRESA, filtra ESTADO con CANCEL/NC.
+        - get_facturas_recientes(cliente, limite) para el timeline.
+      portal /home ahora pasa facturado real al saldo, no más 0.
+      ⚠ FALTA: compartir el sheet TAURO 2026 con la cuenta de servicio
+         tauro-api@tauro-fedex-2.iam.gserviceaccount.com (con permiso de
+         Lector alcanza). Hasta que se haga, el saldo muestra 0.
+  - Job programado nuevo:
+      jobs/limpiar_sessions.py → borra filas de SESSIONS expiradas.
+      Registrado en main.py scheduler para correr todos los días a las 3am.
+  - Endpoint /health:
+      main.py /health (público, sin auth) devuelve {status: ok}.
+      Para que Render / cualquier monitor externo verifique liveness.
+      Eliminado el viejo @app.get("/") health_check muerto (estaba
+      pisado por el redirect a /portal/login).
+  - Preparación para producción (Render + app.taurosolutions.ar):
+      Dockerfile (python:3.11-slim, uvicorn, $PORT dinámico).
+      .dockerignore (excluye venv, .env, .git, etc.).
+      .env.example (template completo con BASE_URL, ENV, COOKIE_SECURE).
+      .gitignore (excluye .env y credenciales.json — NO subir a GitHub).
+      portal_cliente.py → cookie con secure=True cuando
+        SESSION_COOKIE_SECURE=1 (HTTPS de prod).
+
+POR QUÉ ASÍ
+  - Hostinger es el registrador del dominio. Render free tier tiene
+    HTTPS automático y deploy via GitHub. CNAME app→Render desde
+    panel de Hostinger es 1 paso. Sin tocar el WordPress.
+  - PERFILES + MARKUP_PCT por cliente permite distintos márgenes sin
+    redeploy. Default 25% mantiene compat con clientes que no se
+    actualicen.
+  - Sheet TAURO 2026 separado del sheet API mantiene el flujo
+    operativo del equipo Tauro intacto. Solo lectura desde el API.
+
+QUÉ FALTA
+  [ ] Compartir sheet TAURO 2026 con la cuenta de servicio (Lean).
+  [ ] Subir código a GitHub privado (cuando Lean tenga cuenta).
+  [ ] Crear servicio en Render + cargar variables + Secret File.
+  [ ] CNAME app.taurosolutions.ar → tauro-api.onrender.com en Hostinger.
+  [ ] Update home.html para mostrar facturas_recientes (data ya viene).
+  [ ] Implementar fedex_client.create_shipment() para guías reales.
+  [ ] Dashboard /admin con health + replay de errores.
+
+────────────────────────────────────────────────────────────
+2026-04-25 (sesión nocturna) · Lean + Claude
+────────────────────────────────────────────────────────────
+
+✅ Portal del cliente FUNCIONAL end-to-end (HTML + CSS + sheets creadas).
+
+QUÉ SE HIZO
+  - Carpeta movida a Desktop/TAURO 2026/API TAURO (más visible).
+  - Archivos clave llevados al root: README.txt, ROADMAP.txt, BITACORA.txt.
+  - venv recreado (después de mover la carpeta).
+  - Conectado portal_router en main.py + montado /static.
+  - Endpoint root "/" redirige a /portal/login.
+
+  - 7 hojas nuevas creadas en el Sheet "API TAURO COTIZACIONES":
+      PAGOS, SESSIONS, RUTAS_DEFAULT (con 4 rutas iniciales),
+      LOG_REQUESTS, LOG_ERRORES, LOG_HEALTH, LOG_JOBS.
+    PRODUCTOS_CATALOGO ya existía con esquema más simple — NO se pisó.
+
+  - Templates HTML creados en templates/:
+      base.html              → layout (topbar, container, footer)
+      portal/login.html      → form de email
+      portal/home.html       → saldo + KPIs + pagos recientes
+      portal/cotizar.html    → form con dropdown de rutas + resultado
+      portal/catalogo.html   → tabla + form para agregar productos
+
+  - CSS Tauro en static/css/tauro.css:
+      Paleta negro + dorado (#1a1a1a, #d4af37).
+      Mobile-first, responsive.
+      Componentes: card, kpi, tabla, form, badge, alert.
+
+  - requirements.txt actualizado: jinja2, python-multipart, pydantic[email].
+
+  - Verificado: app arranca con 18 rutas activas, todos los endpoints OK.
+
+CÓMO PROBAR
+  cd "Desktop/TAURO 2026/API TAURO"
+  source venv/bin/activate
+  uvicorn main:app --reload
+  → Abrir http://localhost:8000  (redirige a /portal/login)
+
+QUÉ FALTA
+  [ ] Email real para login mágico (hoy va a print en consola).
+  [ ] Migrar PRODUCTOS_CATALOGO al esquema nuevo (con HS Code).
+  [ ] Conectar saldo real desde sheet operativo TAURO 2026 (hoy = 0).
+  [ ] Markup_pct desde PERFILES (hoy hardcoded 25%).
+  [ ] Dashboard /admin para vos (control + replay errores).
+  [ ] Implementar fedex_client.create_shipment() para guías reales.
+  [ ] Setup GitHub para backup + deploy.
+
+────────────────────────────────────────────────────────────
+2026-04-25 (sesión tarde) · Lean + Claude
+────────────────────────────────────────────────────────────
+
+✅ Arquitectura interna del API completa (modelos + servicios + endpoints).
+
+QUÉ SE HIZO
+  - Modelos Pydantic en modelos/:
+      cotizacion.py    → validar inputs/outputs de cotización
+      producto.py      → validar productos del catálogo (HS code, etc.)
+      ruta.py          → modelo de RUTAS_DEFAULT
+      cliente.py       → perfil de cliente (con/sin API_KEY)
+      pedido.py        → estructura de pedido + dirección + items
+
+  - Servicios en servicios/:
+      logger.py            → log_request/log_error/log_health/log_job a Sheets
+      auth.py              → login mágico: generar/validar/revocar token
+      rutas.py             → leer RUTAS_DEFAULT (activas + por ID)
+      catalogo.py          → CRUD de PRODUCTOS_CATALOGO por cliente
+      cuenta_corriente.py  → saldos y timeline de movimientos
+      cotizador.py         → orquesta cotización end-to-end
+
+  - Endpoints en endpoints/portal_cliente.py:
+      GET  /portal/login          → form de email
+      POST /portal/login/send     → manda link mágico
+      GET  /portal/auth?token=X   → valida y crea cookie
+      GET  /portal/logout         → cierra sesión
+      GET  /portal/home           → saldo + pagos recientes
+      GET  /portal/cotizar        → form con dropdowns de ruta
+      POST /portal/cotizar        → ejecuta cotización + muestra precio
+      GET  /portal/catalogo       → ver productos
+      POST /portal/catalogo/add   → agregar producto
+
+POR QUÉ ASÍ
+  - Separación de responsabilidades: cada capa tiene un trabajo claro.
+  - Endpoints solo orquestan — la lógica está en servicios.
+  - Servicios no conocen FastAPI — se pueden testear aisladamente.
+  - Modelos validan inputs antes de que lleguen a la lógica.
+
+QUÉ FALTA (próxima sesión)
+  [ ] Templates HTML en templates/ (login, home, cotizar, catalogo, base)
+  [ ] CSS en static/css/tauro.css
+  [ ] Conectar el router del portal en main.py (app.include_router)
+  [ ] Correr python scripts/inicializar_hojas.py
+  [ ] Probar end-to-end con uvicorn main:app --reload
+
+────────────────────────────────────────────────────────────
+2026-04-24 · Lean + Claude
+────────────────────────────────────────────────────────────
+
+✅ Reorganización completa de la carpeta API TAURO.
+
+QUÉ SE HIZO
+  - De carpeta plana → estructura por responsabilidad.
+  - 9 carpetas creadas con README.txt cada una:
+      core/        → clientes externos (FedEx, Sheets, Email)
+      endpoints/   → rutas FastAPI
+      modelos/     → schemas Pydantic
+      servicios/   → lógica de negocio
+      jobs/        → tareas programadas
+      templates/   → HTML del portal
+      static/      → CSS, JS, imágenes
+      scripts/     → herramientas auxiliares
+      docs/        → documentación
+
+  - Archivos existentes movidos a sus carpetas:
+      fedex_client.py / sheets_client.py / email_sender.py → core/
+      generar_csv_notas.py / generar_xlsx_notas.py / read_pdf_scratch.py → scripts/
+      ARQUITECTURA_TAURO_API.md → docs/
+
+  - main.py actualizado con nuevos imports.
+  - Verificado: la app sigue arrancando sin errores.
+
+  - Documentos creados:
+      README.txt (raíz)              → visión general
+      docs/ESTRUCTURA_SHEETS.txt     → todas las hojas con sus columnas
+      docs/ROADMAP.txt               → checklist con fases [x]/[ ]
+      scripts/inicializar_hojas.py   → script para crear 8 hojas nuevas
+
+POR QUÉ ASÍ
+  - El usuario quiere "todo bien ordenado" y entender qué hace cada cosa.
+  - Cada carpeta con su README → cualquier persona (incluido vos en 6 meses)
+    puede leer 2 minutos y entender la lógica.
+  - Estructura preparada para crecer (portal cliente, dash admin) sin
+    que se transforme en un único archivo monstruoso.
+
+DECISIONES IMPORTANTES
+  - Sheets como base de datos (no SQL).
+    Razón: Lean lo edita directo, backups automáticos de Google,
+    cero infraestructura propia para mantener.
+
+  - Login mágico por email (sin contraseñas).
+    Razón: clientes B2B, simpleza, no hay "olvidé mi password".
+
+  - Dropdowns de rutas en cotización (no escribir país/ZIP).
+    Razón: evitar errores de tipeo del cliente.
+
+  - Catálogo por cliente con HS Code pre-cargado.
+    Razón: la invoice sale perfecta sin que el cliente sepa de aduana.
+
+────────────────────────────────────────────────────────────
+2026-04-23 (y antes) · contexto
+────────────────────────────────────────────────────────────
+- API TAURO MVP existente: FastAPI + /cotizar + /pedido + FedEx OAuth
+  + APScheduler weekly job + email PDF.
+- create_shipment() y track() siguen como NotImplementedError.
+- Arquitectura general descripta en docs/ARQUITECTURA_TAURO_API.md.
+
+────────────────────────────────────────────────────────────
+PARA AGREGAR UNA NUEVA ENTRADA
+────────────────────────────────────────────────────────────
+Al terminar cada sesión de trabajo, agregar arriba un bloque con:
+  - Fecha
+  - Qué se hizo (lista concreta)
+  - Por qué (decisiones tomadas)
+  - Qué falta (próximos pasos)
