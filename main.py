@@ -352,7 +352,12 @@ def job_actualizar_precios_fedex():
         resultado = fedex.get_rates(origen, destino, paquete)
 
         if resultado.get("encontrado"):
-            nuevo_costo = resultado["costo_ars"]
+            # Producción AR devuelve ARS, sandbox devuelve USD → convertimos
+            dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+            if resultado.get("moneda", "USD") == "USD":
+                nuevo_costo = round(resultado["costo"] * dolar)
+            else:
+                nuevo_costo = round(resultado["costo"])
             actualizar_costo_fedex_en_coti(cliente_id, producto_id, destino_pais, nuevo_costo)
 
             margen = precio_ars - nuevo_costo
