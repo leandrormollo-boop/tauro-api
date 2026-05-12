@@ -2,31 +2,31 @@
 {% block title %}Ingresar{% endblock %}
 
 {% block content %}
-<div class="login-card">
+<div class="login-wrap">
+  <div class="login-card fade-up">
     <h1>Ingresar al portal</h1>
-    <p class="subtitle">Te enviamos un link mágico a tu email para entrar.</p>
+    <p class="sub">Te enviamos un link mágico a tu email para entrar.</p>
 
     {% if mensaje %}
-        <div class="alert alert-{{ tipo_msg or 'info' }}">{{ mensaje }}</div>
+      <div class="msg {{ tipo_msg or 'ok' }}">{{ mensaje }}</div>
     {% endif %}
 
     {% if dev_link %}
-        <div class="alert alert-info">
-            <strong>Modo DEV</strong> — El email todavía no está configurado. Entrá directo:
-            <div style="margin-top:12px">
-                <a href="{{ dev_link }}" class="btn-primary" style="display:block;text-align:center">Entrar al portal →</a>
-            </div>
-        </div>
+      <div class="dev-link-box">
+        <p>Modo DEV — Email no configurado. Entrá directo:</p>
+        <a href="{{ dev_link }}" class="btn btn-primary btn-full">Entrar al portal →</a>
+      </div>
     {% endif %}
 
-    <form method="POST" action="/portal/login/send" class="form">
-        <label>
-            Email
-            <input type="email" name="email" required placeholder="tu@email.com" autofocus>
-        </label>
-        <button type="submit" class="btn-primary">Enviar link</button>
+    <form method="POST" action="/portal/login/send">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required placeholder="tu@email.com" autofocus>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Enviar link</button>
     </form>
 
-    <p class="help">¿No tenés acceso? Contactá a Tauro para crear tu cuenta.</p>
+    <p class="login-hint">¿No tenés acceso? Contactá a Tauro para crear tu cuenta.</p>
+  </div>
 </div>
 {% endblock %}
