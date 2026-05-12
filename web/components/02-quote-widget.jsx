@@ -1,7 +1,7 @@
 /* global React */
 const { useState: useStateQ } = React;
 
-const API_URL = window.TAURO_API_URL || "http://localhost:8000";
+const API_URL = window.TAURO_API_URL ?? "http://localhost:8000";
 
 const DESTINOS = [
   { value: "US", label: "Estados Unidos" },
