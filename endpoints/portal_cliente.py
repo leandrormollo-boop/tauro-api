@@ -55,21 +55,20 @@ def cliente_actual(token: Optional[str] = Cookie(None)) -> str:
 # ── Login ───────────────────────────────────────────────────
 @router.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
-    return templates.TemplateResponse("portal/login.html", {
-        "request": request,
-        "mensaje": None,
-    })
+    return templates.TemplateResponse(
+        request=request, name="portal/login.html",
+        context={"mensaje": None},
+    )
 
 
 @router.post("/login/send", response_class=HTMLResponse)
 def login_send(request: Request, email: str = Form(...)):
     cliente = buscar_cliente_por_email(email)
     if not cliente:
-        return templates.TemplateResponse("portal/login.html", {
-            "request": request,
-            "mensaje": "Email no registrado. Contactá a Tauro.",
-            "tipo_msg": "error",
-        })
+        return templates.TemplateResponse(
+            request=request, name="portal/login.html",
+            context={"mensaje": "Email no registrado. Contactá a Tauro.", "tipo_msg": "error"},
+        )
 
     token = generar_token(email, cliente)
     link = link_magico_url(BASE_URL, token)
@@ -86,14 +85,16 @@ def login_send(request: Request, email: str = Form(...)):
     # En DEV mostramos el link en pantalla (no hay SMTP configurado todavía)
     es_dev = os.getenv("ENV", "DEV").upper() != "PROD"
 
-    return templates.TemplateResponse("portal/login.html", {
-        "request": request,
-        "mensaje": f"Link generado para {email}. " + (
-            "Hacé click en el botón de abajo para entrar." if es_dev else "Revisá tu inbox."
-        ),
-        "tipo_msg": "ok",
-        "dev_link": link if es_dev else None,
-    })
+    return templates.TemplateResponse(
+        request=request, name="portal/login.html",
+        context={
+            "mensaje": f"Link generado para {email}. " + (
+                "Hacé click en el botón de abajo para entrar." if es_dev else "Revisá tu inbox."
+            ),
+            "tipo_msg": "ok",
+            "dev_link": link if es_dev else None,
+        },
+    )
 
 
 @router.get("/auth")
@@ -132,25 +133,29 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
     pagos_recientes = get_pagos(cliente)[-5:][::-1]
     facturas_recientes = get_facturas_recientes(cliente, limite=5)
 
-    return templates.TemplateResponse("portal/home.html", {
-        "request": request,
-        "cliente": cliente,
-        "saldo": saldo_data,
-        "pagos_recientes": pagos_recientes,
-        "facturas_recientes": facturas_recientes,
-    })
+    return templates.TemplateResponse(
+        request=request, name="portal/home.html",
+        context={
+            "cliente": cliente,
+            "saldo": saldo_data,
+            "pagos_recientes": pagos_recientes,
+            "facturas_recientes": facturas_recientes,
+        },
+    )
 
 
 # ── Cotizar ─────────────────────────────────────────────────
 @router.get("/cotizar", response_class=HTMLResponse)
 def cotizar_form(request: Request, cliente: str = Depends(cliente_actual)):
-    return templates.TemplateResponse("portal/cotizar.html", {
-        "request": request,
-        "cliente": cliente,
-        "paises_origen": get_paises_origen(),
-        "paises_destino": get_paises_destino(),
-        "resultado": None,
-    })
+    return templates.TemplateResponse(
+        request=request, name="portal/cotizar.html",
+        context={
+            "cliente": cliente,
+            "paises_origen": get_paises_origen(),
+            "paises_destino": get_paises_destino(),
+            "resultado": None,
+        },
+    )
 
 
 @router.post("/cotizar", response_class=HTMLResponse)
@@ -184,25 +189,26 @@ def cotizar_post(
     except Exception as e:
         error = str(e)
 
-    return templates.TemplateResponse("portal/cotizar.html", {
-        "request": request,
-        "cliente": cliente,
-        "paises_origen": get_paises_origen(),
-        "paises_destino": get_paises_destino(),
-        "resultado": resultado,
-        "error": error,
-    })
+    return templates.TemplateResponse(
+        request=request, name="portal/cotizar.html",
+        context={
+            "cliente": cliente,
+            "paises_origen": get_paises_origen(),
+            "paises_destino": get_paises_destino(),
+            "resultado": resultado,
+            "error": error,
+        },
+    )
 
 
 # ── Catálogo ────────────────────────────────────────────────
 @router.get("/catalogo", response_class=HTMLResponse)
 def catalogo_view(request: Request, cliente: str = Depends(cliente_actual)):
     productos = get_productos(cliente, solo_activos=False)
-    return templates.TemplateResponse("portal/catalogo.html", {
-        "request": request,
-        "cliente": cliente,
-        "productos": productos,
-    })
+    return templates.TemplateResponse(
+        request=request, name="portal/catalogo.html",
+        context={"cliente": cliente, "productos": productos},
+    )
 
 
 @router.post("/catalogo/add")
