@@ -57,8 +57,8 @@ def servir_tweaks():
 
 @app.get("/", include_in_schema=False)
 def root():
-    """Redirige el root al portal del cliente."""
-    return RedirectResponse(url="/portal/login")
+    """Redirige el root a la web pública."""
+    return RedirectResponse(url="/web")
 
 fedex = FedExClient()
 
