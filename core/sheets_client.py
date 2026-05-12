@@ -27,14 +27,25 @@ def get_cliente_sheets():
     global _cliente_sheets
     if _cliente_sheets is None:
         try:
-            credenciales = ServiceAccountCredentials.from_json_keyfile_name(
-                "credenciales.json", SCOPE
-            )
+            # Producción: credenciales como variable de entorno (JSON en base64 o raw)
+            creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+            if creds_json:
+                import json
+                creds_dict = json.loads(creds_json)
+                credenciales = ServiceAccountCredentials.from_json_keyfile_dict(
+                    creds_dict, SCOPE
+                )
+            else:
+                # Desarrollo local: archivo credenciales.json
+                credenciales = ServiceAccountCredentials.from_json_keyfile_name(
+                    "credenciales.json", SCOPE
+                )
             _cliente_sheets = gspread.authorize(credenciales)
         except FileNotFoundError:
             raise RuntimeError(
                 "credenciales.json no encontrado. "
-                "Descargalo desde Google Cloud Console y ponelo en la raíz del proyecto."
+                "Descargalo desde Google Cloud Console y ponelo en la raíz del proyecto, "
+                "o configurá la variable de entorno GOOGLE_CREDENTIALS_JSON."
             )
         except Exception as e:
             raise RuntimeError(f"Error al conectar con Google Sheets: {e}")
