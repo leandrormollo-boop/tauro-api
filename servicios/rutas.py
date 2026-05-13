@@ -1,18 +1,13 @@
 # ============================================================
-# Servicio de rutas predefinidas
-# ============================================================
-# Lee la hoja RUTAS_DEFAULT.
-# El portal usa get_rutas_activas() para llenar el dropdown del cliente.
+# Servicio de rutas predefinidas — PostgreSQL
 # ============================================================
 
 from typing import List, Optional
-from core.sheets_client import _abrir_sheet
+from core.database import get_conn
 from modelos.ruta import Ruta
 
 
-# ── Mapeos para FedEx (que pide ISO-2 + state code) ─────────
-# El sheet guarda nombres legibles ("Argentina"); FedEx pide "AR".
-# Si agregás un país nuevo a RUTAS_DEFAULT, sumalo acá también.
+# ── Mapeos para FedEx ────────────────────────────────────────
 PAIS_A_ISO = {
     "ARGENTINA": "AR",
     "ESTADOS UNIDOS": "US",
@@ -23,9 +18,8 @@ PAIS_A_ISO = {
     "URUGUAY": "UY",
 }
 
-# Provincia/Estado por ciudad (FedEx lo pide en stateOrProvinceCode).
 CIUDAD_A_STATE = {
-    "BUENOS AIRES": "B",   # Provincia de Buenos Aires (FedEx AR usa código provincia)
+    "BUENOS AIRES": "B",
     "CABA": "C",
     "MIAMI": "FL",
     "NEW YORK": "NY",
@@ -36,64 +30,59 @@ CIUDAD_A_STATE = {
 
 
 def pais_a_iso2(nombre: str) -> str:
-    """Devuelve el código ISO-2 de un país. Si no lo conoce, devuelve el input."""
     return PAIS_A_ISO.get((nombre or "").strip().upper(), (nombre or "").strip().upper())
 
 
 def ciudad_a_state(ciudad: str) -> str:
-    """Devuelve el código de estado/provincia para una ciudad. '' si no se conoce."""
     return CIUDAD_A_STATE.get((ciudad or "").strip().upper(), "")
 
 
 def _row_a_ruta(r: dict) -> Ruta:
     return Ruta(
-        ruta_id=str(r.get("RUTA_ID", "")).strip(),
-        origen_pais=str(r.get("ORIGEN_PAIS", "")).strip(),
-        origen_ciudad=str(r.get("ORIGEN_CITY", "")).strip(),
-        origen_zip=str(r.get("ORIGEN_ZIP", "")).strip(),
-        destino_pais=str(r.get("DESTINO_PAIS", "")).strip(),
-        destino_ciudad=str(r.get("DESTINO_CITY", "")).strip(),
-        destino_zip=str(r.get("DESTINO_ZIP", "")).strip(),
-        dias_estimados=int(r.get("DIAS_ESTIMADOS", 5) or 5),
-        activa=str(r.get("ACTIVA", "")).strip().upper() == "TRUE",
+        ruta_id=str(r["ruta_id"]).strip(),
+        origen_pais=str(r["origen_pais"]).strip(),
+        origen_ciudad=str(r["origen_ciudad"]).strip(),
+        origen_zip=str(r["origen_zip"]).strip(),
+        destino_pais=str(r["destino_pais"]).strip(),
+        destino_ciudad=str(r["destino_ciudad"]).strip(),
+        destino_zip=str(r["destino_zip"]).strip(),
+        dias_estimados=int(r["dias_estimados"] or 5),
+        activa=bool(r["activa"]),
     )
 
 
 def get_rutas_activas() -> List[Ruta]:
-    """Solo rutas con ACTIVA=TRUE. Para el dropdown del portal."""
-    sh = _abrir_sheet()
-    hoja = sh.worksheet("RUTAS_DEFAULT")
-    rows = hoja.get_all_records()
-    rutas = []
-    for r in rows:
-        try:
-            ruta = _row_a_ruta(r)
-            if ruta.activa and ruta.ruta_id:
-                rutas.append(ruta)
-        except Exception:
-            continue  # fila mal formada, ignorar
-    return rutas
+    """Rutas con activa=TRUE."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM rutas WHERE activa = TRUE ORDER BY ruta_id")
+            rows = cur.fetchall()
+    return [_row_a_ruta(r) for r in rows]
+
+
+def get_todas_las_rutas() -> List[Ruta]:
+    """Todas las rutas (admin)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM rutas ORDER BY ruta_id")
+            rows = cur.fetchall()
+    return [_row_a_ruta(r) for r in rows]
 
 
 def get_ruta(ruta_id: str) -> Optional[Ruta]:
-    """Busca una ruta por su ID. Devuelve None si no existe o está inactiva."""
+    """Busca una ruta activa por su ID."""
     ruta_id = ruta_id.strip().upper()
-    sh = _abrir_sheet()
-    hoja = sh.worksheet("RUTAS_DEFAULT")
-    rows = hoja.get_all_records()
-    for r in rows:
-        if str(r.get("RUTA_ID", "")).strip().upper() == ruta_id:
-            try:
-                ruta = _row_a_ruta(r)
-                if ruta.activa:
-                    return ruta
-            except Exception:
-                return None
-    return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM rutas WHERE ruta_id = %s AND activa = TRUE",
+                (ruta_id,),
+            )
+            row = cur.fetchone()
+    return _row_a_ruta(row) if row else None
 
 
 def get_paises_origen() -> List[str]:
-    """Países distintos de origen entre las rutas activas."""
     rutas = get_rutas_activas()
     vistos = []
     for r in rutas:
@@ -103,7 +92,6 @@ def get_paises_origen() -> List[str]:
 
 
 def get_paises_destino() -> List[str]:
-    """Países distintos de destino entre las rutas activas."""
     rutas = get_rutas_activas()
     vistos = []
     for r in rutas:
@@ -113,14 +101,57 @@ def get_paises_destino() -> List[str]:
 
 
 def find_ruta_por_paises(origen_pais: str, destino_pais: str) -> Optional[Ruta]:
-    """
-    Encuentra la primera ruta activa que matchea origen+destino.
-    El portal usa esto: el cliente solo elige países, el sistema resuelve
-    internamente ciudad/ZIP de la ruta predefinida.
-    """
     origen_pais = (origen_pais or "").strip().upper()
     destino_pais = (destino_pais or "").strip().upper()
-    for r in get_rutas_activas():
-        if r.origen_pais.upper() == origen_pais and r.destino_pais.upper() == destino_pais:
-            return r
-    return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM rutas
+                WHERE UPPER(origen_pais) = %s
+                  AND UPPER(destino_pais) = %s
+                  AND activa = TRUE
+                LIMIT 1
+                """,
+                (origen_pais, destino_pais),
+            )
+            row = cur.fetchone()
+    return _row_a_ruta(row) if row else None
+
+
+def upsert_ruta(ruta: Ruta) -> None:
+    """Crea o actualiza una ruta."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO rutas
+                    (ruta_id, origen_pais, origen_ciudad, origen_zip,
+                     destino_pais, destino_ciudad, destino_zip, dias_estimados, activa)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (ruta_id) DO UPDATE SET
+                    origen_pais    = EXCLUDED.origen_pais,
+                    origen_ciudad  = EXCLUDED.origen_ciudad,
+                    origen_zip     = EXCLUDED.origen_zip,
+                    destino_pais   = EXCLUDED.destino_pais,
+                    destino_ciudad = EXCLUDED.destino_ciudad,
+                    destino_zip    = EXCLUDED.destino_zip,
+                    dias_estimados = EXCLUDED.dias_estimados,
+                    activa         = EXCLUDED.activa
+                """,
+                (
+                    ruta.ruta_id.upper(),
+                    ruta.origen_pais, ruta.origen_ciudad, ruta.origen_zip,
+                    ruta.destino_pais, ruta.destino_ciudad, ruta.destino_zip,
+                    ruta.dias_estimados, ruta.activa,
+                ),
+            )
+
+
+def toggle_ruta(ruta_id: str, activa: bool) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE rutas SET activa = %s WHERE ruta_id = %s",
+                (activa, ruta_id.strip().upper()),
+            )

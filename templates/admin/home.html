@@ -1,0 +1,65 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Tauro Admin</div>
+  <h1>Dashboard</h1>
+</div>
+
+<div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 28px;">
+  <div class="stat-card">
+    <div class="label">Clientes activos</div>
+    <div class="value">{{ stats.clientes_activos }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Facturas cargadas</div>
+    <div class="value">{{ stats.total_envios }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Pagos registrados</div>
+    <div class="value">{{ stats.total_pagos }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Productos pendientes</div>
+    <div class="value {% if stats.productos_pendientes > 0 %}warn{% endif %}">
+      {{ stats.productos_pendientes }}
+    </div>
+  </div>
+</div>
+
+<!-- Resumen por cliente -->
+<div class="card">
+  <h3>Saldo por cliente</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Cliente</th>
+          <th>Facturado ARS</th>
+          <th>Pagado ARS</th>
+          <th>Saldo pendiente</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in resumen_clientes %}
+        <tr>
+          <td><strong>{{ c.cliente_id }}</strong><br><small style="color:var(--fg-4)">{{ c.email }}</small></td>
+          <td class="mono">$ {{ "{:,.0f}".format(c.facturado) }}</td>
+          <td class="mono">$ {{ "{:,.0f}".format(c.pagado) }}</td>
+          <td class="mono">
+            <span class="badge {% if c.saldo > 0 %}warn{% elif c.saldo < 0 %}ok{% else %}muted{% endif %}">
+              $ {{ "{:,.0f}".format(c.saldo) }}
+            </span>
+          </td>
+          <td><a href="/admin/clientes/{{ c.cliente_id }}" class="btn btn-sm btn-ghost">Ver →</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" style="color:var(--fg-4);text-align:center;padding:24px;">Sin clientes todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

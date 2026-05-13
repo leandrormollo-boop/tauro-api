@@ -1,0 +1,113 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ cliente.cliente_id }}{% endblock %}
+
+{% block content %}
+<div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;">
+  <div>
+    <div class="eyebrow"><a href="/admin/clientes" style="color:var(--fg-4)">Clientes</a> / {{ cliente.cliente_id }}</div>
+    <h1>{{ cliente.nombre or cliente.cliente_id }}</h1>
+    <p style="color:var(--fg-3);font-size:13px;margin-top:4px;">{{ cliente.email }}</p>
+  </div>
+  <a href="/admin/clientes/{{ cliente.cliente_id }}/editar" class="btn btn-ghost btn-sm" style="margin-top:8px;">Editar</a>
+</div>
+
+<!-- Saldo rápido -->
+<div class="card-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:24px;">
+  <div class="stat-card">
+    <div class="label">Facturado ARS</div>
+    <div class="value">$ {{ "{:,.0f}".format(saldo.facturado_ars) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Pagado ARS</div>
+    <div class="value ok">$ {{ "{:,.0f}".format(saldo.pagado_ars) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Saldo pendiente</div>
+    <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% elif saldo.saldo_pendiente_ars < 0 %}ok{% endif %}">
+      $ {{ "{:,.0f}".format(saldo.saldo_pendiente_ars) }}
+    </div>
+  </div>
+</div>
+
+<!-- Acciones rápidas -->
+<div style="display:flex;gap:12px;margin-bottom:28px;">
+  <a href="/admin/envios/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-primary btn-sm">+ Cargar factura</a>
+  <a href="/admin/pagos/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">+ Registrar pago</a>
+</div>
+
+<!-- Facturas -->
+<div class="card" style="margin-bottom:16px;">
+  <h3>Facturas / envíos</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Nro. FC</th>
+          <th>Descripción</th>
+          <th>Tracking</th>
+          <th>Monto ARS</th>
+          <th>Estado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in envios %}
+        <tr>
+          <td class="mono">{{ e.fecha.strftime("%d/%m/%Y") if e.fecha else "—" }}</td>
+          <td class="mono">{{ e.nro_fc or "—" }}</td>
+          <td style="color:var(--fg-3)">{{ e.descripcion or "—" }}</td>
+          <td class="mono" style="font-size:11px">{{ e.tracking or "—" }}</td>
+          <td class="mono">$ {{ "{:,.0f}".format(e.monto_ars) }}</td>
+          <td>
+            <span class="badge {% if e.estado == 'ACTIVO' %}ok{% elif e.estado == 'CANCELADO' %}error{% else %}warn{% endif %}">
+              {{ e.estado }}
+            </span>
+          </td>
+          <td>
+            {% if e.estado == 'ACTIVO' %}
+            <form method="POST" action="/admin/envios/{{ e.id }}/cancelar" style="display:inline;">
+              <button type="submit" class="btn btn-sm btn-ghost" style="color:var(--error)">Cancelar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" style="color:var(--fg-4);text-align:center;padding:16px;">Sin facturas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagos -->
+<div class="card">
+  <h3>Pagos recibidos</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Monto ARS</th>
+          <th>Método</th>
+          <th>Referencia</th>
+          <th>Nota</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pagos %}
+        <tr>
+          <td class="mono">{{ p.fecha.strftime("%d/%m/%Y") if p.fecha else "—" }}</td>
+          <td class="mono" style="color:var(--ok)">$ {{ "{:,.0f}".format(p.monto_ars) }}</td>
+          <td>{{ p.metodo }}</td>
+          <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}</td>
+          <td style="color:var(--fg-3)">{{ p.nota or "—" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" style="color:var(--fg-4);text-align:center;padding:16px;">Sin pagos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

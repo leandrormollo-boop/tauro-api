@@ -1,0 +1,105 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ "Editar" if cliente else "Nuevo" }} cliente{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Clientes</div>
+  <h1>{{ "Editar" if cliente else "Nuevo" }} cliente</h1>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <form method="POST" action="{{ '/admin/clientes/' + cliente.cliente_id + '/editar' if cliente else '/admin/clientes/nuevo' }}">
+
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>ID del cliente *</label>
+        <input type="text" name="cliente_id" required
+               value="{{ cliente.cliente_id if cliente else '' }}"
+               placeholder="MENDEZ"
+               {% if cliente %}readonly style="opacity:.5"{% endif %}>
+      </div>
+      <div class="form-group">
+        <label>Email *</label>
+        <input type="email" name="email" required
+               value="{{ cliente.email if cliente else '' }}"
+               placeholder="cliente@empresa.com">
+      </div>
+    </div>
+
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Nombre / Razón social</label>
+        <input type="text" name="nombre"
+               value="{{ cliente.nombre if cliente else '' }}"
+               placeholder="Juan Pérez">
+      </div>
+      <div class="form-group">
+        <label>CUIT</label>
+        <input type="text" name="cuit"
+               value="{{ cliente.cuit if cliente else '' }}"
+               placeholder="20-12345678-9">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Dirección</label>
+      <input type="text" name="direccion"
+             value="{{ cliente.direccion if cliente else '' }}"
+             placeholder="Av. Corrientes 1234">
+    </div>
+
+    <div class="form-grid-3">
+      <div class="form-group">
+        <label>CP</label>
+        <input type="text" name="cp"
+               value="{{ cliente.cp if cliente else '' }}"
+               placeholder="1043">
+      </div>
+      <div class="form-group">
+        <label>Ciudad</label>
+        <input type="text" name="ciudad"
+               value="{{ cliente.ciudad if cliente else '' }}"
+               placeholder="Buenos Aires">
+      </div>
+      <div class="form-group">
+        <label>País</label>
+        <input type="text" name="pais"
+               value="{{ cliente.pais if cliente else 'AR' }}"
+               placeholder="AR">
+      </div>
+    </div>
+
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Teléfono</label>
+        <input type="text" name="telefono"
+               value="{{ cliente.telefono if cliente else '' }}"
+               placeholder="+54 11 1234-5678">
+      </div>
+      <div class="form-group">
+        <label>Markup % *</label>
+        <input type="number" name="markup_pct" required min="0" max="200" step="0.1"
+               value="{{ cliente.markup_pct if cliente else '25' }}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Notas internas</label>
+      <textarea name="notas" rows="2" placeholder="Observaciones...">{{ cliente.notas if cliente else '' }}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label>Estado</label>
+      <select name="activo">
+        <option value="true" {% if not cliente or cliente.activo %}selected{% endif %}>Activo</option>
+        <option value="false" {% if cliente and not cliente.activo %}selected{% endif %}>Inactivo</option>
+      </select>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:8px;">
+      <button type="submit" class="btn btn-primary">Guardar</button>
+      <a href="/admin/clientes" class="btn btn-ghost">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

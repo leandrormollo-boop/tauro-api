@@ -1,31 +1,27 @@
 # ============================================================
-# Servicio de catálogo de productos por cliente
-# ============================================================
-# Lee/escribe PRODUCTOS_CATALOGO.
-# Filtrado por cliente — Mendez no ve catálogo de Tenuta.
-# Productos nuevos quedan ACTIVO=FALSE hasta que Tauro valide HS Code.
+# Servicio de catálogo de productos — PostgreSQL
 # ============================================================
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
-from core.sheets_client import _abrir_sheet
+from core.database import get_conn
 from modelos.producto import Producto, ProductoNuevo
 
 
 def _row_a_producto(r: dict) -> Optional[Producto]:
     try:
         return Producto(
-            cliente=str(r.get("CLIENTE", "")).strip().upper(),
-            alias_interno=str(r.get("ALIAS_INTERNO", "")).strip(),
-            nombre_invoice=str(r.get("NOMBRE_INVOICE", "")).strip(),
-            hs_code=str(r.get("HS_CODE", "")).strip(),
-            largo_cm=float(r.get("LARGO_CM", 0) or 0),
-            ancho_cm=float(r.get("ANCHO_CM", 0) or 0),
-            alto_cm=float(r.get("ALTO_CM", 0) or 0),
-            peso_kg=float(r.get("PESO_KG", 0) or 0),
-            valor_usd_default=float(r.get("VALOR_USD_DEFAULT", 0) or 0),
-            activo=str(r.get("ACTIVO", "")).strip().upper() == "TRUE",
+            cliente=str(r["cliente_id"]).strip().upper(),
+            alias_interno=str(r["alias_interno"]).strip(),
+            nombre_invoice=str(r["nombre_invoice"]).strip(),
+            hs_code=str(r["hs_code"]).strip(),
+            largo_cm=float(r["largo_cm"] or 0),
+            ancho_cm=float(r["ancho_cm"] or 0),
+            alto_cm=float(r["alto_cm"] or 0),
+            peso_kg=float(r["peso_kg"] or 0),
+            valor_usd_default=float(r["valor_usd_default"] or 0),
+            activo=bool(r["activo"]),
         )
     except Exception:
         return None
@@ -34,35 +30,70 @@ def _row_a_producto(r: dict) -> Optional[Producto]:
 def get_productos(cliente: str, solo_activos: bool = True) -> List[Producto]:
     """Productos del catálogo de un cliente."""
     cliente = cliente.strip().upper()
-    sh = _abrir_sheet()
-    hoja = sh.worksheet("PRODUCTOS_CATALOGO")
-    rows = hoja.get_all_records()
-    productos = []
-    for r in rows:
-        p = _row_a_producto(r)
-        if not p or p.cliente != cliente:
-            continue
-        if solo_activos and not p.activo:
-            continue
-        productos.append(p)
-    return productos
+    query = "SELECT * FROM productos WHERE cliente_id = %s"
+    params = [cliente]
+    if solo_activos:
+        query += " AND activo = TRUE"
+    query += " ORDER BY alias_interno"
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+    return [p for r in rows if (p := _row_a_producto(r)) is not None]
 
 
 def get_producto(cliente: str, alias_interno: str) -> Optional[Producto]:
-    """Buscar un producto específico del cliente."""
     cliente = cliente.strip().upper()
     alias = alias_interno.strip()
-    for p in get_productos(cliente, solo_activos=False):
-        if p.alias_interno == alias:
-            return p
-    return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM productos WHERE cliente_id = %s AND alias_interno = %s",
+                (cliente, alias),
+            )
+            row = cur.fetchone()
+    return _row_a_producto(row) if row else None
+
+
+def get_productos_pendientes() -> List[dict]:
+    """Todos los productos pendientes de validación (activo=FALSE) — para admin."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.*, c.nombre as cliente_nombre
+                FROM productos p
+                JOIN clientes c ON c.cliente_id = p.cliente_id
+                WHERE p.activo = FALSE
+                ORDER BY p.created_at ASC
+                """
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_todos_productos() -> List[dict]:
+    """Todos los productos — para admin."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.*, c.nombre as cliente_nombre
+                FROM productos p
+                JOIN clientes c ON c.cliente_id = p.cliente_id
+                ORDER BY p.cliente_id, p.alias_interno
+                """
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
 
 
 def agregar_producto(cliente: str, nuevo: ProductoNuevo) -> Producto:
-    """Agrega un producto al catálogo. Queda ACTIVO=FALSE hasta validación."""
+    """Agrega producto al catálogo. Queda activo=FALSE hasta validación."""
     cliente = cliente.strip().upper()
 
-    # Validar que no exista ya un alias igual para ese cliente
     if get_producto(cliente, nuevo.alias_interno):
         raise ValueError(f"Ya existe un producto con alias '{nuevo.alias_interno}'")
 
@@ -76,17 +107,36 @@ def agregar_producto(cliente: str, nuevo: ProductoNuevo) -> Producto:
         alto_cm=nuevo.alto_cm,
         peso_kg=nuevo.peso_kg,
         valor_usd_default=nuevo.valor_usd_default,
-        activo=False,  # pendiente de validación
+        activo=False,
     )
 
-    sh = _abrir_sheet()
-    hoja = sh.worksheet("PRODUCTOS_CATALOGO")
-    hoja.append_row([
-        producto.cliente, producto.alias_interno, producto.nombre_invoice,
-        producto.hs_code, producto.largo_cm, producto.ancho_cm,
-        producto.alto_cm, producto.peso_kg, producto.valor_usd_default,
-        "FALSE",  # ACTIVO
-        datetime.now().isoformat(timespec="seconds"),
-    ], value_input_option="USER_ENTERED")
-
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO productos
+                    (cliente_id, alias_interno, nombre_invoice, hs_code,
+                     largo_cm, ancho_cm, alto_cm, peso_kg, valor_usd_default, activo)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE)
+                """,
+                (
+                    producto.cliente, producto.alias_interno, producto.nombre_invoice,
+                    producto.hs_code, producto.largo_cm, producto.ancho_cm,
+                    producto.alto_cm, producto.peso_kg, producto.valor_usd_default,
+                ),
+            )
     return producto
+
+
+def aprobar_producto(producto_id: int) -> None:
+    """Admin: aprueba un producto (activo=TRUE)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE productos SET activo = TRUE WHERE id = %s", (producto_id,))
+
+
+def rechazar_producto(producto_id: int) -> None:
+    """Admin: elimina un producto rechazado."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM productos WHERE id = %s", (producto_id,))

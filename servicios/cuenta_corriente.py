@@ -1,191 +1,115 @@
 # ============================================================
-# Servicio de cuenta corriente
+# Servicio de cuenta corriente — PostgreSQL
 # ============================================================
-# Calcula saldo y movimientos del cliente cruzando:
-#   - Hoja PAGOS (pagos recibidos, propia del API)
-#   - Hoja ENVIOS 2026 del sheet operativo TAURO 2026 (facturado)
-#
-# El sheet operativo de Tauro tiene un ID distinto al del API.
-# Lo abrimos con la misma cuenta de servicio (credenciales.json),
-# que ya tiene permiso de lectura sobre ambos.
+# Lee envíos/facturas y pagos directamente de la base de datos.
+# El admin carga los datos desde el panel.
 # ============================================================
 
-import os
 from datetime import datetime
 from typing import List, Dict, Any
 
-import gspread
-from google.oauth2.service_account import Credentials
-
-from core.sheets_client import _abrir_sheet
-
-
-# ID del sheet operativo TAURO 2026 (el que llena el equipo de Tauro)
-TAURO_2026_SHEET_ID = "1-c83aUq5LOUM5RkFrcaZaPhPDz3mC3Mf1blecJcrPGg"
-
-_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-
-
-def _abrir_sheet_operativo():
-    """Abre el sheet TAURO 2026 con la cuenta de servicio del API."""
-    creds_path = os.getenv("GOOGLE_CREDENTIALS_FILE", "credenciales.json")
-    creds = Credentials.from_service_account_file(creds_path, scopes=_SCOPES)
-    gc = gspread.authorize(creds)
-    return gc.open_by_key(TAURO_2026_SHEET_ID)
+from core.database import get_conn
 
 
 def _parse_monto(valor) -> float:
-    """Parsea valores en formato ARS con $ / coma / punto. Devuelve 0.0 si no se puede."""
     if valor is None or valor == "":
         return 0.0
-    s = str(valor).strip()
-    if not s or s in ("-", "N/A", "n/a"):
-        return 0.0
-    # Sacar $ y espacios
-    s = s.replace("$", "").replace(" ", "").replace("\xa0", "")
-    # Si tiene coma decimal estilo ES (1.234,56) → quitar puntos, cambiar coma por punto
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif "," in s:
-        # Asumimos coma como decimal
-        s = s.replace(",", ".")
     try:
-        return float(s)
-    except ValueError:
+        return float(valor)
+    except (ValueError, TypeError):
         return 0.0
 
 
 def get_facturado_real(cliente: str) -> float:
     """
-    Suma col K=FACTURADO de ENVIOS 2026 matcheando por col V=EMPRESA.
-    Filtra filas con ESTADO (col S o W) que sea CANCELADO o contenga NC.
-    Si el sheet operativo no es accesible, devuelve 0.0 y loguea el error.
+    Suma el monto de envíos activos del cliente (estado != CANCELADO / NC).
     """
     cliente = cliente.strip().upper()
-    try:
-        sh = _abrir_sheet_operativo()
-        hoja = sh.worksheet("ENVIOS 2026")
-        # Lectura por filas en bruto — la hoja tiene cols hasta W
-        valores = hoja.get_all_values()
-    except Exception as e:
-        print(f"[cuenta_corriente] No se pudo leer TAURO 2026: {e}")
-        return 0.0
-
-    if len(valores) < 2:
-        return 0.0
-
-    # Indices fijos según ESTRUCTURA documentada (0-indexed)
-    IDX_FACTURADO = 10  # K
-    IDX_EMPRESA = 21    # V
-    IDX_ESTADO_S = 18   # S
-    IDX_ESTADO_W = 22   # W
-
-    total = 0.0
-    for fila in valores[1:]:  # skip header
-        if len(fila) <= IDX_EMPRESA:
-            continue
-        empresa = str(fila[IDX_EMPRESA]).strip().upper()
-        if empresa != cliente:
-            continue
-
-        # Filtrar canceladas / NC
-        estado_s = str(fila[IDX_ESTADO_S]).strip().upper() if len(fila) > IDX_ESTADO_S else ""
-        estado_w = str(fila[IDX_ESTADO_W]).strip().upper() if len(fila) > IDX_ESTADO_W else ""
-        if any(x in estado_s for x in ("CANCEL", "NC")) or any(x in estado_w for x in ("CANCEL", "NC")):
-            continue
-
-        total += _parse_monto(fila[IDX_FACTURADO])
-
-    return round(total, 2)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(monto_ars), 0) AS total
+                FROM envios
+                WHERE cliente_id = %s
+                  AND estado NOT IN ('CANCELADO', 'NC')
+                """,
+                (cliente,),
+            )
+            row = cur.fetchone()
+    return round(float(row["total"]) if row else 0.0, 2)
 
 
 def get_facturas_recientes(cliente: str, limite: int = 10) -> List[Dict[str, Any]]:
-    """
-    Devuelve facturas del cliente desde ENVIOS 2026, ordenadas por fecha desc.
-    Formato: [{fecha, nro_fc, monto_ars}, ...]
-    """
+    """Envíos del cliente ordenados por fecha descendente."""
     cliente = cliente.strip().upper()
-    try:
-        sh = _abrir_sheet_operativo()
-        hoja = sh.worksheet("ENVIOS 2026")
-        valores = hoja.get_all_values()
-    except Exception as e:
-        print(f"[cuenta_corriente] No se pudo leer TAURO 2026: {e}")
-        return []
-
-    if len(valores) < 2:
-        return []
-
-    IDX_FECHA = 1
-    IDX_NRO_FC = 9
-    IDX_FACTURADO = 10
-    IDX_EMPRESA = 21
-    IDX_ESTADO_S = 18
-    IDX_ESTADO_W = 22
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT fecha, nro_fc, monto_ars
+                FROM envios
+                WHERE cliente_id = %s
+                  AND estado NOT IN ('CANCELADO', 'NC')
+                  AND monto_ars > 0
+                ORDER BY fecha DESC
+                LIMIT %s
+                """,
+                (cliente, limite),
+            )
+            rows = cur.fetchall()
 
     facturas = []
-    for fila in valores[1:]:
-        if len(fila) <= IDX_EMPRESA:
-            continue
-        if str(fila[IDX_EMPRESA]).strip().upper() != cliente:
-            continue
-        estado_s = str(fila[IDX_ESTADO_S]).strip().upper() if len(fila) > IDX_ESTADO_S else ""
-        estado_w = str(fila[IDX_ESTADO_W]).strip().upper() if len(fila) > IDX_ESTADO_W else ""
-        if any(x in estado_s for x in ("CANCEL", "NC")) or any(x in estado_w for x in ("CANCEL", "NC")):
-            continue
-        monto = _parse_monto(fila[IDX_FACTURADO])
-        if monto <= 0:
-            continue
+    for r in rows:
         facturas.append({
-            "fecha": str(fila[IDX_FECHA]).strip(),
-            "nro_fc": str(fila[IDX_NRO_FC]).strip(),
-            "monto_ars": monto,
+            "fecha": r["fecha"].strftime("%d/%m/%Y") if r["fecha"] else "",
+            "nro_fc": str(r["nro_fc"] or ""),
+            "monto_ars": float(r["monto_ars"] or 0),
         })
-
-    # Ordenar por fecha desc
-    def _fecha_key(f):
-        try:
-            return datetime.strptime(f["fecha"], "%d/%m/%Y")
-        except (ValueError, TypeError):
-            return datetime.min
-
-    facturas.sort(key=_fecha_key, reverse=True)
-    return facturas[:limite]
+    return facturas
 
 
 def get_pagos(cliente: str) -> List[Dict[str, Any]]:
-    """Lista de pagos recibidos del cliente."""
+    """Lista de pagos recibidos del cliente, ordenados por fecha asc."""
     cliente = cliente.strip().upper()
-    sh = _abrir_sheet()
-    hoja = sh.worksheet("PAGOS")
-    rows = hoja.get_all_records()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT fecha, monto_ars, metodo, referencia, nota
+                FROM pagos
+                WHERE cliente_id = %s
+                ORDER BY fecha ASC
+                """,
+                (cliente,),
+            )
+            rows = cur.fetchall()
+
     pagos = []
     for r in rows:
-        if str(r.get("CLIENTE", "")).strip().upper() == cliente:
-            try:
-                monto = float(str(r.get("MONTO_ARS", 0)).replace(",", ""))
-            except (ValueError, TypeError):
-                continue
-            pagos.append({
-                "fecha": str(r.get("FECHA", "")),
-                "monto_ars": monto,
-                "metodo": str(r.get("METODO", "")),
-                "referencia": str(r.get("REFERENCIA", "")),
-                "nota": str(r.get("NOTA", "")),
-            })
+        pagos.append({
+            "fecha": r["fecha"].strftime("%d/%m/%Y") if r["fecha"] else "",
+            "monto_ars": float(r["monto_ars"] or 0),
+            "metodo": str(r["metodo"] or ""),
+            "referencia": str(r["referencia"] or ""),
+            "nota": str(r["nota"] or ""),
+        })
     return pagos
 
 
 def total_pagado(cliente: str) -> float:
-    """Suma total pagada por el cliente."""
-    return sum(p["monto_ars"] for p in get_pagos(cliente))
+    cliente = cliente.strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(SUM(monto_ars), 0) AS total FROM pagos WHERE cliente_id = %s",
+                (cliente,),
+            )
+            row = cur.fetchone()
+    return round(float(row["total"]) if row else 0.0, 2)
 
 
 def saldo(cliente: str, total_facturado_ars: float) -> Dict[str, float]:
-    """
-    Calcula saldo. Recibe el total facturado (que viene del sheet operativo)
-    y devuelve el desglose.
-    """
     pagado = total_pagado(cliente)
     return {
         "facturado_ars": round(total_facturado_ars, 2),
@@ -195,34 +119,23 @@ def saldo(cliente: str, total_facturado_ars: float) -> Dict[str, float]:
 
 
 def movimientos(cliente: str, facturas: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Timeline de movimientos: facturas + pagos mezclados ordenados por fecha.
-
-    facturas: lista que viene del sheet operativo, formato esperado:
-        [{"fecha": "DD/MM/YYYY", "nro_fc": "0106-00921623", "monto_ars": 45300}, ...]
-
-    Devuelve:
-        [{"fecha": ..., "tipo": "FC"|"PAGO", "concepto": ..., "monto_ars": +/-}]
-    """
+    """Timeline mezclado: facturas + pagos ordenados por fecha desc."""
     items = []
-
     for fc in facturas:
         items.append({
             "fecha": fc.get("fecha", ""),
             "tipo": "FC",
             "concepto": fc.get("nro_fc", ""),
-            "monto_ars": float(fc.get("monto_ars", 0)),  # positivo = aumenta deuda
+            "monto_ars": float(fc.get("monto_ars", 0)),
         })
-
     for p in get_pagos(cliente):
         items.append({
             "fecha": p["fecha"],
             "tipo": "PAGO",
             "concepto": f"{p['metodo']} {p['referencia']}".strip(),
-            "monto_ars": -p["monto_ars"],  # negativo = baja deuda
+            "monto_ars": -p["monto_ars"],
         })
 
-    # Ordenar por fecha (parseando DD/MM/YYYY)
     def _parse_fecha(s: str):
         try:
             return datetime.strptime(s, "%d/%m/%Y")
@@ -231,3 +144,64 @@ def movimientos(cliente: str, facturas: List[Dict[str, Any]]) -> List[Dict[str, 
 
     items.sort(key=lambda x: _parse_fecha(x["fecha"]), reverse=True)
     return items
+
+
+# ── Funciones de escritura (para el admin) ───────────────────
+
+def registrar_pago(
+    cliente_id: str,
+    fecha: str,        # "YYYY-MM-DD"
+    monto_ars: float,
+    metodo: str,
+    referencia: str = "",
+    nota: str = "",
+) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO pagos (cliente_id, fecha, monto_ars, metodo, referencia, nota)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (cliente_id.upper(), fecha, monto_ars, metodo, referencia, nota),
+            )
+
+
+def registrar_envio(
+    cliente_id: str,
+    fecha: str,        # "YYYY-MM-DD"
+    monto_ars: float,
+    nro_fc: str = "",
+    estado: str = "ACTIVO",
+    descripcion: str = "",
+    tracking: str = "",
+) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO envios
+                    (cliente_id, fecha, nro_fc, monto_ars, estado, descripcion, tracking)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (cliente_id.upper(), fecha, nro_fc, monto_ars, estado.upper(), descripcion, tracking),
+            )
+
+
+def cancelar_envio(envio_id: int) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE envios SET estado = 'CANCELADO' WHERE id = %s", (envio_id,))
+
+
+def get_envios_cliente(cliente: str) -> List[Dict[str, Any]]:
+    """Todos los envíos del cliente — para el admin."""
+    cliente = cliente.strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM envios WHERE cliente_id = %s ORDER BY fecha DESC",
+                (cliente,),
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]

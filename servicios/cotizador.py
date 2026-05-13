@@ -1,22 +1,13 @@
 # ============================================================
-# Servicio de cotización
-# ============================================================
-# Orquesta:
-#   1. Lee la ruta de RUTAS_DEFAULT (origen/destino con ZIP)
-#   2. Calcula peso volumétrico vs real (usa el mayor)
-#   3. Llama a fedex_client.get_rates()
-#   4. Aplica MARKUP_% del cliente
-#   5. Loguea en COTI
-#   6. Devuelve CotizacionOutput con UUID para crear pedido después
+# Servicio de cotización — PostgreSQL
 # ============================================================
 
 import os
 import uuid
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
 
+from core.database import get_conn
 from core.fedex_client import FedExClient
-from core.sheets_client import _abrir_sheet
 from modelos.cotizacion import (
     CotizacionInput, CotizacionOutput, calcular_peso_volumetrico,
 )
@@ -27,17 +18,20 @@ COTIZACION_VALIDA_HORAS = 24
 
 
 def _get_dolar_ars() -> float:
-    """Lee el tipo de cambio del CONFIG. Default 1450 si no existe."""
+    """Lee el tipo de cambio de la tabla config."""
     try:
-        sh = _abrir_sheet()
-        hoja = sh.worksheet("CONFIG")
-        rows = hoja.get_all_records()
-        for r in rows:
-            if str(r.get("PARAMETRO", "")).strip().upper() == "COTIZACION_DOLAR_ARS":
-                return float(r.get("VALOR", 1450))
-    except Exception:
-        pass
-    return 1450.0
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT valor FROM config WHERE parametro = 'COTIZACION_DOLAR_ARS'",
+                )
+                row = cur.fetchone()
+        if row:
+            return float(row["valor"])
+    except Exception as e:
+        print(f"[cotizador] Error leyendo tipo de cambio: {e}")
+    # fallback al env var
+    return float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
 
 
 def cotizar(
@@ -58,8 +52,7 @@ def cotizar(
     )
     peso_usado = max(input_data.peso_kg, peso_volumetrico)
 
-    # 3. Llamar FedEx (firma: origen, destino, paquete como dicts)
-    # FedEx pide ISO-2 ('AR', 'US') y state code ('B', 'FL').
+    # 3. Llamar FedEx
     fedex = FedExClient()
     rate_resp = fedex.get_rates(
         origen={
@@ -87,7 +80,7 @@ def cotizar(
             f"FedEx no devolvió tarifa: {rate_resp.get('error', 'sin detalles')}"
         )
 
-    # 4. FedEx Argentina cotiza en ARS — convertir a USD para el negocio
+    # 4. Convertir a USD/ARS
     dolar = _get_dolar_ars()
     costo_ars = float(rate_resp.get("costo_ars", 0))
     costo_fedex_usd = round(costo_ars / dolar, 2) if dolar else 0.0
@@ -98,22 +91,32 @@ def cotizar(
 
     # 6. UUID + validez
     coti_id = uuid.uuid4().hex[:16]
-    valida_hasta = (datetime.now() + timedelta(hours=COTIZACION_VALIDA_HORAS)).isoformat(timespec="seconds")
+    valida_hasta = (
+        datetime.now(tz=timezone.utc) + timedelta(hours=COTIZACION_VALIDA_HORAS)
+    ).isoformat(timespec="seconds")
 
-    # 7. Loguear en COTI
+    # 7. Loguear en cotizaciones
     try:
-        sh = _abrir_sheet()
-        hoja = sh.worksheet("COTI")
-        hoja.append_row([
-            datetime.now().isoformat(timespec="seconds"),
-            cliente, ruta.ruta_id, input_data.peso_kg,
-            f"{input_data.largo_cm}x{input_data.ancho_cm}x{input_data.alto_cm}",
-            peso_usado, costo_fedex_usd, markup_pct,
-            precio_final_usd, precio_final_ars,
-            ruta.dias_estimados, valida_hasta, "-", "-",
-        ], value_input_option="USER_ENTERED")
+        dimensiones = f"{input_data.largo_cm}x{input_data.ancho_cm}x{input_data.alto_cm}"
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO cotizaciones
+                        (cliente_id, ruta_id, peso_kg, dimensiones, peso_usado_kg,
+                         costo_fedex_usd, markup_pct, precio_final_usd, precio_final_ars,
+                         dias_estimados, valida_hasta)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        cliente, ruta.ruta_id, input_data.peso_kg, dimensiones,
+                        peso_usado, costo_fedex_usd, markup_pct,
+                        precio_final_usd, precio_final_ars,
+                        ruta.dias_estimados, valida_hasta,
+                    ),
+                )
     except Exception as e:
-        print(f"[cotizador] No se pudo loguear COTI: {e}")
+        print(f"[cotizador] No se pudo loguear cotización: {e}")
 
     return CotizacionOutput(
         coti_id=coti_id,

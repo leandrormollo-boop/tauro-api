@@ -1,0 +1,40 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Configuración{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Sistema</div>
+  <h1>Configuración</h1>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="POST" action="/admin/config">
+    {% for item in config_items %}
+    <div class="form-group">
+      <label>{{ item.parametro }}</label>
+      <input type="text" name="{{ item.parametro }}" value="{{ item.valor }}"
+             placeholder="{{ item.valor }}">
+    </div>
+    {% endfor %}
+
+    <hr class="divider">
+
+    <!-- Nuevo parámetro -->
+    <p style="font-family:var(--font-mono);font-size:11px;color:var(--fg-4);margin-bottom:12px;">
+      AGREGAR NUEVO PARÁMETRO
+    </p>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Nombre</label>
+        <input type="text" name="_nuevo_parametro" placeholder="NUEVO_PARAM">
+      </div>
+      <div class="form-group">
+        <label>Valor</label>
+        <input type="text" name="_nuevo_valor" placeholder="valor">
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Guardar cambios</button>
+  </form>
+</div>
+{% endblock %}

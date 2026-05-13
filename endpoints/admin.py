@@ -1,0 +1,637 @@
+# ============================================================
+# Panel de administración — /admin/...
+# ============================================================
+# Autenticación simple por contraseña (ADMIN_PASSWORD en env).
+# Cookie httponly "admin_token" durante 8hs.
+# ============================================================
+
+import os
+import secrets
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Request, Form, Cookie, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+
+from core.database import get_conn
+from servicios.cuenta_corriente import (
+    registrar_pago, registrar_envio, cancelar_envio,
+    get_envios_cliente, get_pagos,
+    get_facturado_real, total_pagado, saldo,
+)
+from servicios.catalogo import (
+    get_productos_pendientes, get_todos_productos,
+    aprobar_producto, rechazar_producto,
+)
+from servicios.rutas import get_todas_las_rutas, upsert_ruta, toggle_ruta
+from modelos.ruta import Ruta
+
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+templates = Jinja2Templates(directory="templates")
+
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "tauro2026")
+COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
+
+# Token en memoria (se regenera en cada restart — suficiente para un solo admin)
+_ADMIN_TOKEN: str = secrets.token_urlsafe(32)
+
+
+# ── Auth ────────────────────────────────────────────────────
+
+def admin_actual(admin_token: Optional[str] = Cookie(None)) -> bool:
+    if admin_token and admin_token == _ADMIN_TOKEN:
+        return True
+    raise Exception("no auth")
+
+
+def check_admin(admin_token: Optional[str] = Cookie(None)) -> bool:
+    return admin_token == _ADMIN_TOKEN
+
+
+def require_admin(admin_token: Optional[str] = Cookie(None)):
+    if admin_token != _ADMIN_TOKEN:
+        raise Exception("redirect")
+
+
+# ── Helpers internos ─────────────────────────────────────────
+
+def _get_clientes_lista():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM clientes ORDER BY cliente_id")
+            return [dict(r) for r in cur.fetchall()]
+
+
+def _get_config():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM config ORDER BY parametro")
+            return [dict(r) for r in cur.fetchall()]
+
+
+def _redirect_login():
+    return RedirectResponse(url="/admin/login", status_code=303)
+
+
+def _is_auth(admin_token: Optional[str]) -> bool:
+    return admin_token == _ADMIN_TOKEN
+
+
+# ── Login ───────────────────────────────────────────────────
+
+@router.get("/login", response_class=HTMLResponse)
+def admin_login_form(request: Request):
+    return templates.TemplateResponse(
+        request=request, name="admin/login.html", context={}
+    )
+
+
+@router.post("/login", response_class=HTMLResponse)
+def admin_login(request: Request, password: str = Form(...)):
+    if password != ADMIN_PASSWORD:
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "Contraseña incorrecta."},
+        )
+    response = RedirectResponse(url="/admin/home", status_code=303)
+    response.set_cookie(
+        key="admin_token", value=_ADMIN_TOKEN,
+        httponly=True, max_age=60 * 60 * 8,
+        samesite="lax", secure=COOKIE_SECURE,
+    )
+    return response
+
+
+@router.get("/logout")
+def admin_logout():
+    response = RedirectResponse(url="/admin/login", status_code=303)
+    response.delete_cookie("admin_token")
+    return response
+
+
+# ── Dashboard ────────────────────────────────────────────────
+
+@router.get("/home", response_class=HTMLResponse)
+def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    clientes = _get_clientes_lista()
+
+    # Stats generales
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM clientes WHERE activo=TRUE")
+            clientes_activos = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM envios")
+            total_envios = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM pagos")
+            total_pagos = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM productos WHERE activo=FALSE")
+            productos_pendientes = cur.fetchone()["n"]
+
+    # Resumen por cliente
+    resumen = []
+    for c in clientes:
+        if not c["activo"]:
+            continue
+        facturado = get_facturado_real(c["cliente_id"])
+        pagado = total_pagado(c["cliente_id"])
+        resumen.append({
+            "cliente_id": c["cliente_id"],
+            "email": c["email"],
+            "nombre": c.get("nombre") or "",
+            "facturado": facturado,
+            "pagado": pagado,
+            "saldo": round(facturado - pagado, 2),
+        })
+
+    return templates.TemplateResponse(
+        request=request, name="admin/home.html",
+        context={
+            "seccion": "home",
+            "stats": {
+                "clientes_activos": clientes_activos,
+                "total_envios": total_envios,
+                "total_pagos": total_pagos,
+                "productos_pendientes": productos_pendientes,
+            },
+            "resumen_clientes": resumen,
+        },
+    )
+
+
+# ── Clientes ─────────────────────────────────────────────────
+
+@router.get("/clientes", response_class=HTMLResponse)
+def admin_clientes(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    clientes = _get_clientes_lista()
+    return templates.TemplateResponse(
+        request=request, name="admin/clientes.html",
+        context={"seccion": "clientes", "clientes": clientes},
+    )
+
+
+@router.get("/clientes/nuevo", response_class=HTMLResponse)
+def admin_cliente_nuevo_form(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    return templates.TemplateResponse(
+        request=request, name="admin/cliente_form.html",
+        context={"seccion": "cliente_nuevo", "cliente": None},
+    )
+
+
+@router.post("/clientes/nuevo")
+def admin_cliente_nuevo(
+    request: Request,
+    cliente_id: str = Form(...),
+    email: str = Form(...),
+    nombre: str = Form(""),
+    cuit: str = Form(""),
+    direccion: str = Form(""),
+    cp: str = Form(""),
+    ciudad: str = Form(""),
+    pais: str = Form("AR"),
+    telefono: str = Form(""),
+    markup_pct: float = Form(25.0),
+    notas: str = Form(""),
+    activo: str = Form("true"),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    cliente_id = cliente_id.strip().upper()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO clientes
+                        (cliente_id, email, markup_pct, activo, nombre, cuit, direccion, cp, ciudad, pais, telefono, notas)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        cliente_id, email.strip().lower(), markup_pct,
+                        activo.lower() == "true",
+                        nombre or None, cuit or None, direccion or None,
+                        cp or None, ciudad or None, pais or "AR",
+                        telefono or None, notas or None,
+                    ),
+                )
+        return RedirectResponse(url=f"/admin/clientes/{cliente_id}?ok=creado", status_code=303)
+    except Exception as e:
+        return templates.TemplateResponse(
+            request=request, name="admin/cliente_form.html",
+            context={"seccion": "cliente_nuevo", "cliente": None, "flash_error": str(e)},
+        )
+
+
+@router.get("/clientes/{cliente_id}", response_class=HTMLResponse)
+def admin_cliente_detail(
+    request: Request, cliente_id: str,
+    ok: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    cliente_id = cliente_id.strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM clientes WHERE cliente_id = %s", (cliente_id,))
+            row = cur.fetchone()
+
+    if not row:
+        return RedirectResponse(url="/admin/clientes", status_code=303)
+
+    cliente = dict(row)
+    facturado = get_facturado_real(cliente_id)
+    saldo_data = saldo(cliente_id, facturado)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM envios WHERE cliente_id = %s ORDER BY fecha DESC", (cliente_id,))
+            envios = [dict(r) for r in cur.fetchall()]
+            cur.execute("SELECT * FROM pagos WHERE cliente_id = %s ORDER BY fecha DESC", (cliente_id,))
+            pagos = [dict(r) for r in cur.fetchall()]
+
+    flash_ok = "Cliente creado." if ok == "creado" else None
+
+    return templates.TemplateResponse(
+        request=request, name="admin/cliente_detail.html",
+        context={
+            "seccion": "clientes",
+            "cliente": cliente,
+            "saldo": saldo_data,
+            "envios": envios,
+            "pagos": pagos,
+            "flash_ok": flash_ok,
+        },
+    )
+
+
+@router.get("/clientes/{cliente_id}/editar", response_class=HTMLResponse)
+def admin_cliente_editar_form(
+    request: Request, cliente_id: str,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM clientes WHERE cliente_id = %s", (cliente_id.upper(),))
+            row = cur.fetchone()
+
+    if not row:
+        return RedirectResponse(url="/admin/clientes", status_code=303)
+
+    return templates.TemplateResponse(
+        request=request, name="admin/cliente_form.html",
+        context={"seccion": "clientes", "cliente": dict(row)},
+    )
+
+
+@router.post("/clientes/{cliente_id}/editar")
+def admin_cliente_editar(
+    request: Request,
+    cliente_id: str,
+    email: str = Form(...),
+    nombre: str = Form(""),
+    cuit: str = Form(""),
+    direccion: str = Form(""),
+    cp: str = Form(""),
+    ciudad: str = Form(""),
+    pais: str = Form("AR"),
+    telefono: str = Form(""),
+    markup_pct: float = Form(25.0),
+    notas: str = Form(""),
+    activo: str = Form("true"),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE clientes SET
+                    email=%s, markup_pct=%s, activo=%s, nombre=%s, cuit=%s,
+                    direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s
+                WHERE cliente_id=%s
+                """,
+                (
+                    email.strip().lower(), markup_pct, activo.lower() == "true",
+                    nombre or None, cuit or None, direccion or None,
+                    cp or None, ciudad or None, pais or "AR",
+                    telefono or None, notas or None,
+                    cliente_id.strip().upper(),
+                ),
+            )
+    return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
+
+
+# ── Envíos ───────────────────────────────────────────────────
+
+@router.get("/envios/nuevo", response_class=HTMLResponse)
+def admin_envio_form(
+    request: Request,
+    cliente: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    clientes = _get_clientes_lista()
+    today = datetime.now().strftime("%Y-%m-%d")
+    return templates.TemplateResponse(
+        request=request, name="admin/envio_form.html",
+        context={
+            "seccion": "envio_nuevo",
+            "clientes": clientes,
+            "today": today,
+            "preselect_cliente": (cliente or "").upper(),
+        },
+    )
+
+
+@router.post("/envios/nuevo")
+def admin_envio_nuevo(
+    request: Request,
+    cliente_id: str = Form(...),
+    fecha: str = Form(...),
+    nro_fc: str = Form(""),
+    monto_ars: float = Form(...),
+    descripcion: str = Form(""),
+    tracking: str = Form(""),
+    estado: str = Form("ACTIVO"),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    try:
+        registrar_envio(
+            cliente_id=cliente_id.upper(),
+            fecha=fecha,
+            monto_ars=monto_ars,
+            nro_fc=nro_fc,
+            estado=estado,
+            descripcion=descripcion,
+            tracking=tracking,
+        )
+        return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
+    except Exception as e:
+        clientes = _get_clientes_lista()
+        today = datetime.now().strftime("%Y-%m-%d")
+        return templates.TemplateResponse(
+            request=request, name="admin/envio_form.html",
+            context={
+                "seccion": "envio_nuevo",
+                "clientes": clientes,
+                "today": today,
+                "preselect_cliente": cliente_id.upper(),
+                "flash_error": str(e),
+            },
+        )
+
+
+@router.post("/envios/{envio_id}/cancelar")
+def admin_envio_cancelar(
+    envio_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    # Obtener cliente_id para redirigir
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT cliente_id FROM envios WHERE id=%s", (envio_id,))
+            row = cur.fetchone()
+
+    cancelar_envio(envio_id)
+    cliente_id = row["cliente_id"] if row else ""
+    return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
+
+
+# ── Pagos ────────────────────────────────────────────────────
+
+@router.get("/pagos/nuevo", response_class=HTMLResponse)
+def admin_pago_form(
+    request: Request,
+    cliente: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    clientes = _get_clientes_lista()
+    today = datetime.now().strftime("%Y-%m-%d")
+    return templates.TemplateResponse(
+        request=request, name="admin/pago_form.html",
+        context={
+            "seccion": "pago_nuevo",
+            "clientes": clientes,
+            "today": today,
+            "preselect_cliente": (cliente or "").upper(),
+        },
+    )
+
+
+@router.post("/pagos/nuevo")
+def admin_pago_nuevo(
+    request: Request,
+    cliente_id: str = Form(...),
+    fecha: str = Form(...),
+    monto_ars: float = Form(...),
+    metodo: str = Form("transferencia"),
+    referencia: str = Form(""),
+    nota: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    try:
+        registrar_pago(
+            cliente_id=cliente_id.upper(),
+            fecha=fecha,
+            monto_ars=monto_ars,
+            metodo=metodo,
+            referencia=referencia,
+            nota=nota,
+        )
+        return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
+    except Exception as e:
+        clientes = _get_clientes_lista()
+        today = datetime.now().strftime("%Y-%m-%d")
+        return templates.TemplateResponse(
+            request=request, name="admin/pago_form.html",
+            context={
+                "seccion": "pago_nuevo",
+                "clientes": clientes,
+                "today": today,
+                "preselect_cliente": cliente_id.upper(),
+                "flash_error": str(e),
+            },
+        )
+
+
+# ── Productos ────────────────────────────────────────────────
+
+@router.get("/productos", response_class=HTMLResponse)
+def admin_productos(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    pendientes = get_productos_pendientes()
+    todos = get_todos_productos()
+    return templates.TemplateResponse(
+        request=request, name="admin/productos.html",
+        context={"seccion": "productos", "pendientes": pendientes, "todos": todos},
+    )
+
+
+@router.post("/productos/{producto_id}/aprobar")
+def admin_aprobar_producto(
+    producto_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    aprobar_producto(producto_id)
+    return RedirectResponse(url="/admin/productos", status_code=303)
+
+
+@router.post("/productos/{producto_id}/rechazar")
+def admin_rechazar_producto(
+    producto_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    rechazar_producto(producto_id)
+    return RedirectResponse(url="/admin/productos", status_code=303)
+
+
+# ── Rutas ────────────────────────────────────────────────────
+
+@router.get("/rutas", response_class=HTMLResponse)
+def admin_rutas(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    rutas = get_todas_las_rutas()
+    return templates.TemplateResponse(
+        request=request, name="admin/rutas.html",
+        context={"seccion": "rutas", "rutas": rutas},
+    )
+
+
+@router.post("/rutas/nueva")
+def admin_ruta_nueva(
+    ruta_id: str = Form(...),
+    origen_pais: str = Form(...),
+    origen_ciudad: str = Form(...),
+    origen_zip: str = Form(...),
+    destino_pais: str = Form(...),
+    destino_ciudad: str = Form(...),
+    destino_zip: str = Form(...),
+    dias_estimados: int = Form(5),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    ruta = Ruta(
+        ruta_id=ruta_id.strip().upper(),
+        origen_pais=origen_pais.strip().upper(),
+        origen_ciudad=origen_ciudad.strip().upper(),
+        origen_zip=origen_zip.strip(),
+        destino_pais=destino_pais.strip().upper(),
+        destino_ciudad=destino_ciudad.strip().upper(),
+        destino_zip=destino_zip.strip(),
+        dias_estimados=dias_estimados,
+        activa=True,
+    )
+    upsert_ruta(ruta)
+    return RedirectResponse(url="/admin/rutas", status_code=303)
+
+
+@router.post("/rutas/{ruta_id}/toggle")
+def admin_ruta_toggle(
+    ruta_id: str,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    # Leer estado actual y hacer toggle
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT activa FROM rutas WHERE ruta_id=%s", (ruta_id.upper(),))
+            row = cur.fetchone()
+
+    if row:
+        toggle_ruta(ruta_id, not row["activa"])
+    return RedirectResponse(url="/admin/rutas", status_code=303)
+
+
+# ── Config ───────────────────────────────────────────────────
+
+@router.get("/config", response_class=HTMLResponse)
+def admin_config(
+    request: Request,
+    ok: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    config_items = _get_config()
+    return templates.TemplateResponse(
+        request=request, name="admin/config.html",
+        context={
+            "seccion": "config",
+            "config_items": config_items,
+            "flash_ok": "Configuración guardada." if ok else None,
+        },
+    )
+
+
+@router.post("/config")
+async def admin_config_save(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    form = await request.form()
+    data = dict(form)
+
+    nuevo_param = data.pop("_nuevo_parametro", "").strip()
+    nuevo_valor = data.pop("_nuevo_valor", "").strip()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for param, valor in data.items():
+                cur.execute(
+                    "UPDATE config SET valor=%s WHERE parametro=%s",
+                    (str(valor).strip(), param),
+                )
+            if nuevo_param and nuevo_valor:
+                cur.execute(
+                    "INSERT INTO config (parametro, valor) VALUES (%s, %s) ON CONFLICT (parametro) DO UPDATE SET valor=EXCLUDED.valor",
+                    (nuevo_param.upper(), nuevo_valor),
+                )
+
+    return RedirectResponse(url="/admin/config?ok=1", status_code=303)

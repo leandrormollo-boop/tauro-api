@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
+psycopg2-binary
 gspread
+google-auth
 oauth2client
 python-dotenv
 reportlab

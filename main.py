@@ -17,7 +17,9 @@ from core.sheets_client import (
 )
 from core.fedex_client import FedExClient
 from core.email_sender import enviar_email_pedido, enviar_alerta_margen
+from core.database import init_db
 from endpoints.portal_cliente import router as portal_router
+from endpoints.admin import router as admin_router
 
 load_dotenv()
 
@@ -34,9 +36,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files (CSS, JS, imágenes) y portal del cliente
+# Inicializar base de datos PostgreSQL al arrancar
+try:
+    init_db()
+except Exception as _db_err:
+    print(f"[startup] DB init error: {_db_err}")
+
+# Static files (CSS, JS, imágenes), portal del cliente y admin
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(portal_router)
+app.include_router(admin_router)
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
 

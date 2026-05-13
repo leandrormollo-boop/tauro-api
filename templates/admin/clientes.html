@@ -1,0 +1,47 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Clientes{% endblock %}
+
+{% block content %}
+<div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;">
+  <div>
+    <div class="eyebrow">Clientes</div>
+    <h1>Lista de clientes</h1>
+  </div>
+  <a href="/admin/clientes/nuevo" class="btn btn-primary btn-sm" style="margin-top:8px;">+ Nuevo</a>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nombre</th>
+          <th>Email</th>
+          <th>Markup %</th>
+          <th>Estado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in clientes %}
+        <tr>
+          <td class="mono">{{ c.cliente_id }}</td>
+          <td>{{ c.nombre or "—" }}</td>
+          <td style="color:var(--fg-3)">{{ c.email }}</td>
+          <td class="mono">{{ c.markup_pct }}%</td>
+          <td>
+            <span class="badge {% if c.activo %}ok{% else %}muted{% endif %}">
+              {{ "Activo" if c.activo else "Inactivo" }}
+            </span>
+          </td>
+          <td><a href="/admin/clientes/{{ c.cliente_id }}" class="btn btn-sm btn-ghost">Ver →</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="color:var(--fg-4);text-align:center;padding:24px;">Sin clientes.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

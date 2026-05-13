@@ -1,0 +1,98 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Rutas{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Operaciones</div>
+  <h1>Rutas predefinidas</h1>
+</div>
+
+<!-- Formulario nueva ruta -->
+<div class="card" style="margin-bottom:20px;">
+  <h3>+ Nueva ruta</h3>
+  <form method="POST" action="/admin/rutas/nueva">
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Ruta ID *</label>
+        <input type="text" name="ruta_id" required placeholder="AR-US" style="text-transform:uppercase;">
+      </div>
+      <div class="form-group">
+        <label>Días estimados *</label>
+        <input type="number" name="dias_estimados" required min="1" value="5">
+      </div>
+    </div>
+    <div class="form-grid-3">
+      <div class="form-group">
+        <label>Origen país *</label>
+        <input type="text" name="origen_pais" required placeholder="ARGENTINA">
+      </div>
+      <div class="form-group">
+        <label>Origen ciudad *</label>
+        <input type="text" name="origen_ciudad" required placeholder="BUENOS AIRES">
+      </div>
+      <div class="form-group">
+        <label>Origen ZIP *</label>
+        <input type="text" name="origen_zip" required placeholder="1043">
+      </div>
+    </div>
+    <div class="form-grid-3">
+      <div class="form-group">
+        <label>Destino país *</label>
+        <input type="text" name="destino_pais" required placeholder="ESTADOS UNIDOS">
+      </div>
+      <div class="form-group">
+        <label>Destino ciudad *</label>
+        <input type="text" name="destino_ciudad" required placeholder="MIAMI">
+      </div>
+      <div class="form-group">
+        <label>Destino ZIP *</label>
+        <input type="text" name="destino_zip" required placeholder="33101">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Crear ruta</button>
+  </form>
+</div>
+
+<!-- Lista de rutas -->
+<div class="card">
+  <h3>Rutas existentes</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Origen</th>
+          <th>Destino</th>
+          <th>Días</th>
+          <th>Estado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rutas %}
+        <tr>
+          <td class="mono"><strong>{{ r.ruta_id }}</strong></td>
+          <td>{{ r.origen_pais }} · {{ r.origen_ciudad }} ({{ r.origen_zip }})</td>
+          <td>{{ r.destino_pais }} · {{ r.destino_ciudad }} ({{ r.destino_zip }})</td>
+          <td class="mono">{{ r.dias_estimados }}d</td>
+          <td>
+            <span class="badge {% if r.activa %}ok{% else %}muted{% endif %}">
+              {{ "Activa" if r.activa else "Inactiva" }}
+            </span>
+          </td>
+          <td>
+            <form method="POST" action="/admin/rutas/{{ r.ruta_id }}/toggle">
+              <button class="btn btn-sm btn-ghost">
+                {{ "Desactivar" if r.activa else "Activar" }}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="color:var(--fg-4);text-align:center;padding:16px;">Sin rutas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
