@@ -5,19 +5,19 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  --bg:           #0a0e12;
-  --bg-elev:      #11161c;
-  --bg-elev-2:    #181f27;
-  --line:         #232c36;
-  --line-soft:    #1a2129;
+  --bg:           #0c0a14;
+  --bg-elev:      #13101e;
+  --bg-elev-2:    #1a1628;
+  --line:         #2a2440;
+  --line-soft:    #1f1a30;
   --fg:           #f4f5f7;
   --fg-2:         #b9bfc7;
   --fg-3:         #7a828c;
   --fg-4:         #4a525c;
-  --accent:       #ff2d6b;
-  --accent-soft:  #ff6b97;
-  --accent-deep:  #c81653;
-  --accent-glow:  rgba(255, 45, 107, 0.18);
+  --accent:       #a78bfa;
+  --accent-soft:  #c4b0fc;
+  --accent-deep:  #7c5cf6;
+  --accent-glow:  rgba(167, 139, 250, 0.18);
   --ok:           #2ec27e;
   --ok-glow:      rgba(46,194,126,0.15);
   --warn:         #f5b800;
