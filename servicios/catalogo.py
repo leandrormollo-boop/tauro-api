@@ -50,7 +50,11 @@ def get_producto(cliente: str, alias_interno: str) -> Optional[Producto]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT * FROM productos WHERE cliente_id = %s AND alias_interno = %s",
+                """
+                SELECT * FROM productos
+                WHERE cliente_id = %s AND UPPER(alias_interno) = UPPER(%s)
+                LIMIT 1
+                """,
                 (cliente, alias),
             )
             row = cur.fetchone()

@@ -16,6 +16,10 @@ PAIS_A_ISO = {
     "BRASIL": "BR",
     "CHILE": "CL",
     "URUGUAY": "UY",
+    "MEXICO": "MX",
+    "MÉXICO": "MX",
+    "ESPAÑA": "ES",
+    "SPAIN": "ES",
 }
 
 CIUDAD_A_STATE = {

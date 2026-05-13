@@ -27,6 +27,9 @@ class Producto(BaseModel):
     @validator("hs_code")
     def validar_hs_code(cls, v):
         v = v.strip()
+        solo_digitos = re.sub(r"\D", "", v)
+        if len(solo_digitos) == 8:
+            return f"{solo_digitos[:4]}.{solo_digitos[4:6]}.{solo_digitos[6:8]}"
         if not HS_CODE_REGEX.match(v):
             raise ValueError(f"HS Code inválido. Formato esperado: XXXX.XX.XX (ej 4202.21.00)")
         return v

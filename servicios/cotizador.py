@@ -80,10 +80,16 @@ def cotizar(
             f"FedEx no devolvió tarifa: {rate_resp.get('error', 'sin detalles')}"
         )
 
-    # 4. Convertir a USD/ARS
+    # 4. Convertir a USD/ARS. FedEx sandbox suele devolver USD; producción ARS.
     dolar = _get_dolar_ars()
-    costo_ars = float(rate_resp.get("costo_ars", 0))
-    costo_fedex_usd = round(costo_ars / dolar, 2) if dolar else 0.0
+    costo = float(rate_resp.get("costo", 0))
+    moneda = str(rate_resp.get("moneda", "USD")).upper()
+    if moneda == "USD":
+        costo_fedex_usd = round(costo, 2)
+        costo_ars = round(costo * dolar, 2)
+    else:
+        costo_ars = costo
+        costo_fedex_usd = round(costo_ars / dolar, 2) if dolar else 0.0
 
     # 5. Aplicar markup
     precio_final_usd = round(costo_fedex_usd * (1 + markup_pct / 100), 2)
@@ -103,13 +109,13 @@ def cotizar(
                 cur.execute(
                     """
                     INSERT INTO cotizaciones
-                        (cliente_id, ruta_id, peso_kg, dimensiones, peso_usado_kg,
+                        (coti_id, cliente_id, ruta_id, peso_kg, dimensiones, peso_usado_kg,
                          costo_fedex_usd, markup_pct, precio_final_usd, precio_final_ars,
                          dias_estimados, valida_hasta)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        cliente, ruta.ruta_id, input_data.peso_kg, dimensiones,
+                        coti_id, cliente, ruta.ruta_id, input_data.peso_kg, dimensiones,
                         peso_usado, costo_fedex_usd, markup_pct,
                         precio_final_usd, precio_final_ars,
                         ruta.dias_estimados, valida_hasta,

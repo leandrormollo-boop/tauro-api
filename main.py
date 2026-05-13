@@ -7,19 +7,16 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import os
 from dotenv import load_dotenv
 
-from core.sheets_client import (
-    obtener_cliente_por_api_key,
-    obtener_precio_envio,
-    obtener_datos_producto,
-    obtener_todas_las_combinaciones_coti,
-    actualizar_costo_fedex_en_coti,
-    obtener_margen_minimo_ars,
-)
 from core.fedex_client import FedExClient
-from core.email_sender import enviar_email_pedido, enviar_alerta_margen
+from core.email_sender import enviar_email_pedido
 from core.database import init_db
 from endpoints.portal_cliente import router as portal_router
 from endpoints.admin import router as admin_router
+from servicios.api_b2b import (
+    obtener_cliente_por_api_key,
+    obtener_precio_envio,
+    obtener_datos_producto,
+)
 
 load_dotenv()
 
@@ -215,9 +212,13 @@ def cotizar(body: CotizarRequest, x_api_key: str = Header(default=None)):
         "status": "success",
         "producto_id": body.producto_id,
         "destino_pais": body.destino_pais,
+        "ruta_id": resultado["ruta_id"],
+        "coti_id": resultado["coti_id"],
         "precio_ars": resultado["precio_ars"],
         "precio_usd": resultado["precio_usd"],
         "tipo_cambio_usado": resultado["tipo_cambio_usado"],
+        "dias_estimados": resultado["dias_estimados"],
+        "valida_hasta": resultado["valida_hasta"],
     }
 
 
@@ -249,7 +250,7 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
 
     # Construir datos completos del pedido para el PDF
     datos_pedido = {
-        # Remitente (del perfil del cliente en PERFILES)
+        # Remitente (del perfil del cliente en PostgreSQL)
         "remitente_nombre": perfil["nombre"],
         "remitente_cuit": perfil["cuit"],
         "remitente_direccion": perfil["direccion"],
@@ -269,7 +270,7 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
         "dest_telefono": body.telefono,
         "dest_email": body.email_comprador,
 
-        # Producto / Aduana (de PRODUCTOS_CATALOGO)
+        # Producto / Aduana (del catálogo en PostgreSQL)
         "producto_nombre_es": producto["nombre_es"],
         "producto_nombre_en": producto["nombre_en"],
         "producto_hs_code": producto["hs_code"],
@@ -312,81 +313,10 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
 
 def job_actualizar_precios_fedex():
     """
-    Corre todos los lunes a las 6am (hora Argentina).
-    Consulta FedEx por cada combinación en COTI y actualiza COSTO_FEDEX_ARS.
-    Si el margen cae por debajo del mínimo, envía alerta por email.
+    Job legado. La API B2B ahora cotiza en vivo contra FedEx y guarda el log
+    en PostgreSQL, así que ya no actualiza la hoja COTI de Google Sheets.
     """
-    print("[job] Iniciando actualización semanal de precios FedEx...")
-    combinaciones = obtener_todas_las_combinaciones_coti()
-    margen_minimo = obtener_margen_minimo_ars()
-
-    alertas = []
-
-    for fila in combinaciones:
-        cliente_id = str(fila.get("CLIENTE_ID", "")).strip()
-        producto_id = str(fila.get("PRODUCTO_ID", "")).strip()
-        destino_pais = str(fila.get("DESTINO_PAIS", "")).strip()
-        precio_ars = float(str(fila.get("PRECIO_ARS", 0)).replace(",", ".") or 0)
-
-        if not all([cliente_id, producto_id, destino_pais]):
-            continue
-
-        # Origen: Buenos Aires por defecto
-        origen = {
-            "street": "Av. Corrientes 1234",
-            "city": "BUENOS AIRES",
-            "state": "B",
-            "postal_code": "1043",
-            "country": "AR",
-        }
-
-        destino = {
-            "city": "",
-            "state": "",
-            "postal_code": str(fila.get("DESTINO_CP", "10001")),
-            "country": destino_pais,
-        }
-
-        paquete = {
-            "peso_kg": float(str(fila.get("PESO_KG", 0.5)).replace(",", ".") or 0.5),
-            "largo": float(str(fila.get("LARGO", 30)).replace(",", ".") or 30),
-            "ancho": float(str(fila.get("ANCHO", 20)).replace(",", ".") or 20),
-            "alto": float(str(fila.get("ALTO", 10)).replace(",", ".") or 10),
-            "valor_declarado_usd": float(str(fila.get("VALOR_USD", 100)).replace(",", ".") or 100),
-            "descripcion_en": str(fila.get("NOMBRE_EN", "Merchandise")),
-            "hs_code": str(fila.get("HS_CODE", "")),
-            "unidades": int(fila.get("UNIDADES", 1)),
-        }
-
-        resultado = fedex.get_rates(origen, destino, paquete)
-
-        if resultado.get("encontrado"):
-            # Producción AR devuelve ARS, sandbox devuelve USD → convertimos
-            dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
-            if resultado.get("moneda", "USD") == "USD":
-                nuevo_costo = round(resultado["costo"] * dolar)
-            else:
-                nuevo_costo = round(resultado["costo"])
-            actualizar_costo_fedex_en_coti(cliente_id, producto_id, destino_pais, nuevo_costo)
-
-            margen = precio_ars - nuevo_costo
-            if margen < margen_minimo:
-                alertas.append({
-                    "cliente_id": cliente_id,
-                    "producto_id": producto_id,
-                    "destino_pais": destino_pais,
-                    "precio_ars": precio_ars,
-                    "costo_fedex_ars": nuevo_costo,
-                    "margen_ars": margen,
-                    "margen_minimo_ars": margen_minimo,
-                })
-        else:
-            print(f"[job] No se pudo obtener tarifa: {cliente_id}/{producto_id}/{destino_pais}")
-
-    if alertas:
-        enviar_alerta_margen(alertas)
-
-    print(f"[job] Actualización completada. {len(alertas)} alertas de margen enviadas.")
+    print("[job] Saltado: cotización en vivo con PostgreSQL activa.")
 
 
 # ─────────────────────────────────────────────

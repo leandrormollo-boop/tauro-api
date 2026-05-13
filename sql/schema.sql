@@ -102,6 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_envios_cliente ON envios(cliente_id);
 -- ── Log de cotizaciones (ex COTI) ───────────────────────────
 CREATE TABLE IF NOT EXISTS cotizaciones (
     id               SERIAL PRIMARY KEY,
+    coti_id          TEXT,
     cliente_id       TEXT NOT NULL,
     ruta_id          TEXT NOT NULL,
     peso_kg          REAL NOT NULL,
@@ -115,6 +116,10 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     valida_hasta     TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS coti_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cotizaciones_coti_id
+    ON cotizaciones(coti_id)
+    WHERE coti_id IS NOT NULL;
 
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (

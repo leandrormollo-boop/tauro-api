@@ -37,7 +37,7 @@ from core.email_sender import enviar_link_magico
 router = APIRouter(prefix="/portal", tags=["portal"])
 templates = Jinja2Templates(directory="templates")
 
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("BASE_URL")
 COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
 
 
@@ -71,7 +71,8 @@ def login_send(request: Request, email: str = Form(...)):
         )
 
     token = generar_token(email, cliente)
-    link = link_magico_url(BASE_URL, token)
+    base_url = BASE_URL or str(request.base_url).rstrip("/")
+    link = link_magico_url(base_url, token)
 
     # Enviar email real — siempre logueamos el link en consola para debug
     print(f"\n[LOGIN MÁGICO] {email} → {cliente}")
