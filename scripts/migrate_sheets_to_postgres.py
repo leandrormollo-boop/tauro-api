@@ -35,12 +35,16 @@ sys.path.insert(0, str(ROOT))
 import psycopg2
 import psycopg2.extras
 import gspread
+from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 
+load_dotenv(ROOT / ".env")
+
 # ── Config ────────────────────────────────────────────────────
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DATABASE_PUBLIC_URL", "")
 if not DATABASE_URL:
     print("ERROR: DATABASE_URL no está configurada.")
+    print("También podés usar DATABASE_PUBLIC_URL si vas a correr la migración desde tu Mac.")
     sys.exit(1)
 
 if DATABASE_URL.startswith("postgres://"):
