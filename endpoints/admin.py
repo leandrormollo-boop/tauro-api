@@ -7,7 +7,11 @@
 
 import os
 import secrets
+import subprocess
+import sys
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Request, Form, Cookie, Depends
@@ -36,6 +40,15 @@ COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
 
 # Token en memoria (se regenera en cada restart — suficiente para un solo admin)
 _ADMIN_TOKEN: str = secrets.token_urlsafe(32)
+
+_MIGRATION_LOCK = threading.Lock()
+_MIGRATION_STATUS = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "returncode": None,
+    "output": "",
+}
 
 
 # ── Auth ────────────────────────────────────────────────────
@@ -77,6 +90,44 @@ def _redirect_login():
 
 def _is_auth(admin_token: Optional[str]) -> bool:
     return admin_token == _ADMIN_TOKEN
+
+
+def _migration_snapshot() -> dict:
+    with _MIGRATION_LOCK:
+        return dict(_MIGRATION_STATUS)
+
+
+def _run_sheets_migration():
+    root = Path(__file__).resolve().parent.parent
+    script = root / "scripts" / "migrate_sheets_to_postgres.py"
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=str(root),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15 * 60,
+        )
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+        with _MIGRATION_LOCK:
+            _MIGRATION_STATUS.update({
+                "running": False,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "returncode": result.returncode,
+                "output": output[-40000:],
+            })
+    except Exception as e:
+        with _MIGRATION_LOCK:
+            _MIGRATION_STATUS.update({
+                "running": False,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "returncode": -1,
+                "output": f"Error ejecutando migración: {e}",
+            })
 
 
 # ── Login ───────────────────────────────────────────────────
@@ -635,3 +686,60 @@ async def admin_config_save(
                 )
 
     return RedirectResponse(url="/admin/config?ok=1", status_code=303)
+
+
+# ── Migración Sheets → PostgreSQL ─────────────────────────────
+
+@router.get("/migracion", response_class=HTMLResponse)
+def admin_migracion(
+    request: Request,
+    error: Optional[str] = None,
+    started: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    flash_error = None
+    if error == "running":
+        flash_error = "La migración ya está corriendo."
+    elif error == "confirm":
+        flash_error = 'Para ejecutar la migración escribí "MIGRAR".'
+
+    return templates.TemplateResponse(
+        request=request, name="admin/migracion.html",
+        context={
+            "seccion": "migracion",
+            "status": _migration_snapshot(),
+            "flash_ok": "Migración iniciada." if started else None,
+            "flash_error": flash_error,
+        },
+    )
+
+
+@router.post("/migracion/run")
+def admin_migracion_run(
+    confirmacion: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    if confirmacion.strip().upper() != "MIGRAR":
+        return RedirectResponse(url="/admin/migracion?error=confirm", status_code=303)
+
+    with _MIGRATION_LOCK:
+        if _MIGRATION_STATUS["running"]:
+            return RedirectResponse(url="/admin/migracion?error=running", status_code=303)
+        _MIGRATION_STATUS.update({
+            "running": True,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "returncode": None,
+            "output": "Migración iniciada. Actualizá esta pantalla en unos segundos.",
+        })
+
+    thread = threading.Thread(target=_run_sheets_migration, daemon=True)
+    thread.start()
+
+    return RedirectResponse(url="/admin/migracion?started=1", status_code=303)

@@ -250,18 +250,27 @@ def main():
             if not fecha:
                 print(f"  ! Pago con fecha inválida: {fecha_raw}")
                 continue
+            metodo = str(r.get("METODO", "transferencia")).strip() or "transferencia"
+            referencia = str(r.get("REFERENCIA", "")).strip() or None
+            nota = str(r.get("NOTA", "")).strip() or None
             try:
+                cur.execute(
+                    """
+                    SELECT 1 FROM pagos
+                    WHERE cliente_id=%s AND fecha=%s AND monto_ars=%s AND metodo=%s
+                      AND COALESCE(referencia, '')=%s AND COALESCE(nota, '')=%s
+                    LIMIT 1
+                    """,
+                    (cliente_id, fecha, monto, metodo, referencia or "", nota or ""),
+                )
+                if cur.fetchone():
+                    continue
                 cur.execute(
                     """
                     INSERT INTO pagos (cliente_id, fecha, monto_ars, metodo, referencia, nota)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (
-                        cliente_id, fecha, monto,
-                        str(r.get("METODO", "transferencia")).strip() or "transferencia",
-                        str(r.get("REFERENCIA", "")).strip() or None,
-                        str(r.get("NOTA", "")).strip() or None,
-                    ),
+                    (cliente_id, fecha, monto, metodo, referencia, nota),
                 )
                 migrados += 1
             except Exception as e:
@@ -340,6 +349,17 @@ def main():
                     continue
 
                 try:
+                    cur.execute(
+                        """
+                        SELECT 1 FROM envios
+                        WHERE cliente_id=%s AND fecha=%s AND COALESCE(nro_fc, '')=%s
+                          AND monto_ars=%s AND estado=%s
+                        LIMIT 1
+                        """,
+                        (cliente_id, fecha, nro_fc or "", monto, estado),
+                    )
+                    if cur.fetchone():
+                        continue
                     cur.execute(
                         """
                         INSERT INTO envios (cliente_id, fecha, nro_fc, monto_ars, estado)

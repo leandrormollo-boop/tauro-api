@@ -1,0 +1,56 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Migración{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Sistema</div>
+  <h1>Migración Sheets → PostgreSQL</h1>
+</div>
+
+{% if status.running %}
+<meta http-equiv="refresh" content="5">
+{% endif %}
+
+<div class="card" style="max-width:760px;">
+  <p style="color:var(--fg-3);font-size:14px;line-height:1.6;margin-top:0;">
+    Ejecuta la migración desde Railway usando la conexión interna a PostgreSQL.
+    Usalo una sola vez para pasar clientes, rutas, productos, pagos, envíos, configuración y sesiones desde Google Sheets.
+  </p>
+
+  <div class="stats-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin:20px 0;">
+    <div class="stat-card">
+      <div class="stat-label">Estado</div>
+      <div class="stat-value" style="font-size:20px;">
+        {% if status.running %}Corriendo{% elif status.returncode == 0 %}OK{% elif status.returncode is not none %}Error{% else %}Pendiente{% endif %}
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Inicio</div>
+      <div class="stat-value" style="font-size:13px;">{{ status.started_at or "-" }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Fin</div>
+      <div class="stat-value" style="font-size:13px;">{{ status.finished_at or "-" }}</div>
+    </div>
+  </div>
+
+  {% if not status.running %}
+  <form method="POST" action="/admin/migracion/run">
+    <div class="form-group">
+      <label>Confirmación</label>
+      <input type="text" name="confirmacion" placeholder="Escribí MIGRAR para ejecutar">
+    </div>
+    <button type="submit" class="btn btn-primary">Ejecutar migración</button>
+  </form>
+  {% else %}
+  <p style="font-family:var(--font-mono);font-size:12px;color:var(--accent);">
+    Migración en curso. Esta pantalla se actualiza cada 5 segundos.
+  </p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:980px;margin-top:20px;">
+  <h2 style="font-size:18px;margin-top:0;">Salida</h2>
+  <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.22);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:16px;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;">{{ status.output or "Todavía no se ejecutó ninguna migración." }}</pre>
+</div>
+{% endblock %}
