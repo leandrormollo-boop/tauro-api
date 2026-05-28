@@ -220,6 +220,9 @@ def cotizar(body: CotizarRequest, x_api_key: str = Header(default=None)):
         "precio_ars": resultado["precio_ars"],
         "precio_usd": resultado["precio_usd"],
         "tipo_cambio_usado": resultado["tipo_cambio_usado"],
+        "markup_tipo": resultado["markup_tipo"],
+        "markup_valor": resultado["markup_valor"],
+        "markup_pct_equivalente": resultado["markup_pct_equivalente"],
         "dias_estimados": resultado["dias_estimados"],
         "valida_hasta": resultado["valida_hasta"],
     }

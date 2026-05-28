@@ -12,7 +12,11 @@
 </div>
 
 <!-- Saldo rápido -->
-<div class="card-grid" style="grid-template-columns: repeat(3, 1fr); margin-bottom:24px;">
+<div class="card-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:24px;">
+  <div class="stat-card">
+    <div class="label">Pricing</div>
+    <div class="value" style="font-size:22px;">{{ cliente.pricing_desc }}</div>
+  </div>
   <div class="stat-card">
     <div class="label">Facturado ARS</div>
     <div class="value">$ {{ "{:,.0f}".format(saldo.facturado_ars) }}</div>

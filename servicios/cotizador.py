@@ -11,6 +11,7 @@ from core.fedex_client import FedExClient
 from modelos.cotizacion import (
     CotizacionInput, CotizacionOutput, calcular_peso_volumetrico,
 )
+from servicios.pricing import aplicar_pricing, get_pricing_config
 from servicios.rutas import get_ruta, pais_a_iso2, ciudad_a_state
 
 
@@ -91,9 +92,17 @@ def cotizar(
         costo_ars = costo
         costo_fedex_usd = round(costo_ars / dolar, 2) if dolar else 0.0
 
-    # 5. Aplicar markup
-    precio_final_usd = round(costo_fedex_usd * (1 + markup_pct / 100), 2)
-    precio_final_ars = round(precio_final_usd * dolar, 0)
+    # 5. Aplicar regla de pricing del cliente.
+    pricing = get_pricing_config(cliente, fallback_pct=markup_pct)
+    precio = aplicar_pricing(
+        costo_usd=costo_fedex_usd,
+        costo_ars=costo_ars,
+        dolar=dolar,
+        pricing=pricing,
+    )
+    precio_final_usd = precio["precio_final_usd"]
+    precio_final_ars = precio["precio_final_ars"]
+    markup_pct_equivalente = precio["markup_pct_equivalente"]
 
     # 6. UUID + validez
     coti_id = uuid.uuid4().hex[:16]
@@ -110,13 +119,14 @@ def cotizar(
                     """
                     INSERT INTO cotizaciones
                         (coti_id, cliente_id, ruta_id, peso_kg, dimensiones, peso_usado_kg,
-                         costo_fedex_usd, markup_pct, precio_final_usd, precio_final_ars,
+                         costo_fedex_usd, markup_pct, markup_tipo, markup_valor, precio_final_usd, precio_final_ars,
                          dias_estimados, valida_hasta)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         coti_id, cliente, ruta.ruta_id, input_data.peso_kg, dimensiones,
-                        peso_usado, costo_fedex_usd, markup_pct,
+                        peso_usado, costo_fedex_usd, markup_pct_equivalente,
+                        precio["markup_tipo"], precio["markup_valor"],
                         precio_final_usd, precio_final_ars,
                         ruta.dias_estimados, valida_hasta,
                     ),
@@ -131,7 +141,9 @@ def cotizar(
         peso_volumetrico_kg=peso_volumetrico,
         peso_usado_kg=peso_usado,
         costo_fedex_usd=costo_fedex_usd,
-        markup_pct=markup_pct,
+        markup_pct=markup_pct_equivalente,
+        markup_tipo=precio["markup_tipo"],
+        markup_valor=precio["markup_valor"],
         precio_final_usd=precio_final_usd,
         precio_final_ars=precio_final_ars,
         dias_estimados=ruta.dias_estimados,

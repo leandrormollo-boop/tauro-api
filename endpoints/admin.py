@@ -29,6 +29,7 @@ from servicios.catalogo import (
     aprobar_producto, rechazar_producto,
 )
 from servicios.rutas import get_todas_las_rutas, upsert_ruta, toggle_ruta
+from servicios.pricing import PRICING_MODES, describir_pricing, parse_pricing_value
 from servicios.solicitudes_guia import (
     ESTADOS_SOLICITUD,
     actualizar_solicitud_guia,
@@ -80,7 +81,10 @@ def _get_clientes_lista():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM clientes ORDER BY cliente_id")
-            return [dict(r) for r in cur.fetchall()]
+            clientes = [dict(r) for r in cur.fetchall()]
+    for cliente in clientes:
+        cliente["pricing_desc"] = describir_pricing(cliente)
+    return clientes
 
 
 def _get_config():
@@ -241,7 +245,7 @@ def admin_cliente_nuevo_form(request: Request, admin_token: Optional[str] = Cook
         return _redirect_login()
     return templates.TemplateResponse(
         request=request, name="admin/cliente_form.html",
-        context={"seccion": "cliente_nuevo", "cliente": None},
+        context={"seccion": "cliente_nuevo", "cliente": None, "pricing_modes": PRICING_MODES},
     )
 
 
@@ -258,6 +262,8 @@ def admin_cliente_nuevo(
     pais: str = Form("AR"),
     telefono: str = Form(""),
     markup_pct: float = Form(25.0),
+    markup_tipo: str = Form("PCT"),
+    markup_valor: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -267,16 +273,19 @@ def admin_cliente_nuevo(
 
     cliente_id = cliente_id.strip().upper()
     try:
+        pricing = parse_pricing_value(markup_valor, markup_tipo, fallback_pct=markup_pct)
+        markup_pct_db = pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO clientes
-                        (cliente_id, email, markup_pct, activo, nombre, cuit, direccion, cp, ciudad, pais, telefono, notas)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (cliente_id, email, markup_pct, markup_tipo, markup_valor, activo, nombre, cuit, direccion, cp, ciudad, pais, telefono, notas)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        cliente_id, email.strip().lower(), markup_pct,
+                        cliente_id, email.strip().lower(), markup_pct_db,
+                        pricing["tipo"], pricing["valor"],
                         activo.lower() == "true",
                         nombre or None, cuit or None, direccion or None,
                         cp or None, ciudad or None, pais or "AR",
@@ -287,7 +296,7 @@ def admin_cliente_nuevo(
     except Exception as e:
         return templates.TemplateResponse(
             request=request, name="admin/cliente_form.html",
-            context={"seccion": "cliente_nuevo", "cliente": None, "flash_error": str(e)},
+            context={"seccion": "cliente_nuevo", "cliente": None, "pricing_modes": PRICING_MODES, "flash_error": str(e)},
         )
 
 
@@ -310,6 +319,7 @@ def admin_cliente_detail(
         return RedirectResponse(url="/admin/clientes", status_code=303)
 
     cliente = dict(row)
+    cliente["pricing_desc"] = describir_pricing(cliente)
     facturado = get_facturado_real(cliente_id)
     saldo_data = saldo(cliente_id, facturado)
 
@@ -353,7 +363,7 @@ def admin_cliente_editar_form(
 
     return templates.TemplateResponse(
         request=request, name="admin/cliente_form.html",
-        context={"seccion": "clientes", "cliente": dict(row)},
+        context={"seccion": "clientes", "cliente": dict(row), "pricing_modes": PRICING_MODES},
     )
 
 
@@ -370,6 +380,8 @@ def admin_cliente_editar(
     pais: str = Form("AR"),
     telefono: str = Form(""),
     markup_pct: float = Form(25.0),
+    markup_tipo: str = Form("PCT"),
+    markup_valor: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -377,23 +389,55 @@ def admin_cliente_editar(
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE clientes SET
-                    email=%s, markup_pct=%s, activo=%s, nombre=%s, cuit=%s,
-                    direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s
-                WHERE cliente_id=%s
-                """,
-                (
-                    email.strip().lower(), markup_pct, activo.lower() == "true",
-                    nombre or None, cuit or None, direccion or None,
-                    cp or None, ciudad or None, pais or "AR",
-                    telefono or None, notas or None,
-                    cliente_id.strip().upper(),
-                ),
-            )
+    try:
+        pricing = parse_pricing_value(markup_valor, markup_tipo, fallback_pct=markup_pct)
+        markup_pct_db = pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE clientes SET
+                        email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
+                        direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s
+                    WHERE cliente_id=%s
+                    """,
+                    (
+                        email.strip().lower(), markup_pct_db,
+                        pricing["tipo"], pricing["valor"],
+                        activo.lower() == "true",
+                        nombre or None, cuit or None, direccion or None,
+                        cp or None, ciudad or None, pais or "AR",
+                        telefono or None, notas or None,
+                        cliente_id.strip().upper(),
+                    ),
+                )
+    except Exception as e:
+        cliente_form = {
+            "cliente_id": cliente_id.strip().upper(),
+            "email": email,
+            "nombre": nombre,
+            "cuit": cuit,
+            "direccion": direccion,
+            "cp": cp,
+            "ciudad": ciudad,
+            "pais": pais,
+            "telefono": telefono,
+            "markup_pct": markup_pct,
+            "markup_tipo": markup_tipo,
+            "markup_valor": markup_valor,
+            "notas": notas,
+            "activo": activo.lower() == "true",
+        }
+        return templates.TemplateResponse(
+            request=request, name="admin/cliente_form.html",
+            context={
+                "seccion": "clientes",
+                "cliente": cliente_form,
+                "pricing_modes": PRICING_MODES,
+                "flash_error": str(e),
+            },
+        )
     return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
 
 

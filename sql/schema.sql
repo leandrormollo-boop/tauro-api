@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS clientes (
     email        TEXT UNIQUE NOT NULL,
     api_key      TEXT,
     markup_pct   REAL    NOT NULL DEFAULT 25.0,
+    markup_tipo  TEXT    NOT NULL DEFAULT 'PCT', -- PCT | FIJO_ARS | MULTIPLICADOR
+    markup_valor REAL,
     activo       BOOLEAN NOT NULL DEFAULT TRUE,
     nombre       TEXT,
     cuit         TEXT,
@@ -30,6 +32,8 @@ CREATE TABLE IF NOT EXISTS clientes (
     notas        TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_tipo TEXT NOT NULL DEFAULT 'PCT';
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_valor REAL;
 
 -- ── Sesiones (ex SESSIONS) ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS sessions (
@@ -111,6 +115,8 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     peso_usado_kg    REAL NOT NULL,
     costo_fedex_usd  REAL,
     markup_pct       REAL,
+    markup_tipo      TEXT,
+    markup_valor     REAL,
     precio_final_usd REAL,
     precio_final_ars REAL,
     dias_estimados   INTEGER,
@@ -118,6 +124,8 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS coti_id TEXT;
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS markup_tipo TEXT;
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS markup_valor REAL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cotizaciones_coti_id
     ON cotizaciones(coti_id)
     WHERE coti_id IS NOT NULL;

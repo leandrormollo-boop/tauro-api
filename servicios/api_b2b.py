@@ -20,7 +20,7 @@ def obtener_cliente_por_api_key(api_key: str) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT cliente_id, email, api_key, markup_pct, activo, nombre, cuit,
+                SELECT cliente_id, email, api_key, markup_pct, markup_tipo, markup_valor, activo, nombre, cuit,
                        direccion, cp, ciudad, pais, telefono, notas
                 FROM clientes
                 WHERE api_key = %s AND activo = TRUE
@@ -46,6 +46,8 @@ def obtener_cliente_por_api_key(api_key: str) -> dict:
         "telefono": row.get("telefono") or "",
         "email": row.get("email") or "",
         "markup_pct": float(row.get("markup_pct") or 25.0),
+        "markup_tipo": row.get("markup_tipo") or "PCT",
+        "markup_valor": row.get("markup_valor"),
     }
 
 
@@ -122,6 +124,9 @@ def obtener_precio_envio(cliente_id: str, producto_id: str, destino_pais: str) -
         "costo_fedex_usd": resultado.costo_fedex_usd,
         "costo_fedex_ars": costo_fedex_ars,
         "margen_ars": round(resultado.precio_final_ars - costo_fedex_ars, 2),
+        "markup_tipo": resultado.markup_tipo,
+        "markup_valor": resultado.markup_valor,
+        "markup_pct_equivalente": resultado.markup_pct,
         "dias_estimados": resultado.dias_estimados,
         "coti_id": resultado.coti_id,
         "valida_hasta": resultado.valida_hasta,

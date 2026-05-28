@@ -18,7 +18,7 @@
           <th>ID</th>
           <th>Nombre</th>
           <th>Email</th>
-          <th>Markup %</th>
+          <th>Pricing</th>
           <th>Estado</th>
           <th></th>
         </tr>
@@ -29,7 +29,7 @@
           <td class="mono">{{ c.cliente_id }}</td>
           <td>{{ c.nombre or "—" }}</td>
           <td style="color:var(--fg-3)">{{ c.email }}</td>
-          <td class="mono">{{ c.markup_pct }}%</td>
+          <td class="mono">{{ c.pricing_desc }}</td>
           <td>
             <span class="badge {% if c.activo %}ok{% else %}muted{% endif %}">
               {{ "Activo" if c.activo else "Inactivo" }}

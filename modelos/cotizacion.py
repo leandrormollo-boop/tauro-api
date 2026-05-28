@@ -45,6 +45,8 @@ class CotizacionOutput(BaseModel):
     peso_usado_kg: float = Field(..., description="El mayor entre real y volumétrico")
     costo_fedex_usd: float = Field(..., description="Costo crudo FedEx, sin markup")
     markup_pct: float
+    markup_tipo: str = "PCT"
+    markup_valor: Optional[float] = None
     precio_final_usd: float
     precio_final_ars: float
     dias_estimados: int
