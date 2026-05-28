@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Envíos{% endblock %}
+
+{% block content %}
+<div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+    <div>
+        <div class="eyebrow">Operación</div>
+        <h1>Mis solicitudes de guía</h1>
+        <p>Pedidos cargados desde el portal para que Tauro gestione la guía.</p>
+    </div>
+    <a href="/portal/envios/nuevo" class="btn btn-primary btn-sm">Nueva solicitud</a>
+</div>
+
+{% if flash_ok %}
+    <div class="msg ok">{{ flash_ok }}</div>
+{% endif %}
+
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Producto</th>
+                    <th>Destino</th>
+                    <th>Destinatario</th>
+                    <th>Precio Tauro</th>
+                    <th>Precio final</th>
+                    <th>Estado</th>
+                    <th>Tracking</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for s in solicitudes %}
+                <tr>
+                    <td class="mono">{{ s.created_at.strftime("%d/%m/%Y %H:%M") if s.created_at else "—" }}</td>
+                    <td>
+                        <strong>{{ s.producto_alias }}</strong>
+                        <br><small style="color:var(--fg-4)">x{{ s.cantidad }}</small>
+                    </td>
+                    <td class="mono">{{ s.destino_pais }}<br><small>{{ s.dest_zip }}</small></td>
+                    <td>
+                        {{ s.dest_nombre }}
+                        <br><small style="color:var(--fg-4)">{{ s.dest_email or s.dest_telefono or "—" }}</small>
+                    </td>
+                    <td class="mono">$ {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }}</td>
+                    <td class="mono">
+                        {% if s.precio_cliente_final_ars %}
+                            $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if s.estado in ['SOLICITADO', 'EN_PROCESO'] %}warn{% elif s.estado in ['GUIA_LISTA', 'DESPACHADO'] %}ok{% else %}muted{% endif %}">
+                            {{ s.estado.replace("_", " ") }}
+                        </span>
+                    </td>
+                    <td class="mono" style="font-size:11px">
+                        {% if s.tracking %}
+                            {{ s.tracking }}
+                            {% if s.guia_url %}<br><a href="{{ s.guia_url }}" target="_blank" style="color:var(--accent);">Guía</a>{% endif %}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="8" style="color:var(--fg-4);text-align:center;padding:24px;">
+                        Todavía no hay solicitudes.
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

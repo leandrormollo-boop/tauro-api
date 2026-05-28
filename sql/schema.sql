@@ -10,6 +10,7 @@
 --   ENVIOS 2026      → envios
 --   CONFIG           → config
 --   COTI             → cotizaciones (log)
+--   SOLICITUDES_GUIA → pedidos de guía desde portal/API
 -- ============================================================
 
 -- ── Clientes (ex PERFILES) ──────────────────────────────────
@@ -120,6 +121,43 @@ ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS coti_id TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cotizaciones_coti_id
     ON cotizaciones(coti_id)
     WHERE coti_id IS NOT NULL;
+
+-- ── Solicitudes de guía desde portal ────────────────────────
+CREATE TABLE IF NOT EXISTS solicitudes_guia (
+    id                       SERIAL PRIMARY KEY,
+    cliente_id               TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    estado                   TEXT NOT NULL DEFAULT 'SOLICITADO',
+    producto_alias           TEXT NOT NULL,
+    cantidad                 INTEGER NOT NULL DEFAULT 1,
+    destino_pais             TEXT NOT NULL,
+    dest_nombre              TEXT NOT NULL,
+    dest_documento           TEXT,
+    dest_email               TEXT,
+    dest_telefono            TEXT,
+    dest_direccion           TEXT NOT NULL,
+    dest_ciudad              TEXT NOT NULL,
+    dest_estado              TEXT,
+    dest_zip                 TEXT NOT NULL,
+    observaciones            TEXT,
+    peso_kg                  REAL,
+    largo_cm                 REAL,
+    ancho_cm                 REAL,
+    alto_cm                  REAL,
+    valor_declarado_usd      REAL,
+    ruta_id                  TEXT,
+    coti_id                  TEXT,
+    precio_tauro_ars         REAL,
+    precio_tauro_usd         REAL,
+    precio_cliente_final_ars REAL,
+    tracking                 TEXT,
+    guia_url                 TEXT,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_cliente
+    ON solicitudes_guia(cliente_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_estado
+    ON solicitudes_guia(estado, created_at DESC);
 
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (

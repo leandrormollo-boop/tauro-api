@@ -26,6 +26,12 @@
       {{ stats.productos_pendientes }}
     </div>
   </div>
+  <div class="stat-card">
+    <div class="label">Guías pendientes</div>
+    <div class="value {% if stats.solicitudes_pendientes > 0 %}warn{% endif %}">
+      {{ stats.solicitudes_pendientes }}
+    </div>
+  </div>
 </div>
 
 <!-- Resumen por cliente -->

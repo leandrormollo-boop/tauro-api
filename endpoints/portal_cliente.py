@@ -7,6 +7,7 @@
 # /portal/logout          - Cierra sesión
 # /portal/home            - Saldo + últimos envíos (requiere auth)
 # /portal/cotizar         - Form de cotización (GET) + ejecuta (POST)
+# /portal/envios          - Solicitudes de guía del cliente
 # /portal/catalogo        - Productos del cliente (GET) + agregar (POST)
 # ============================================================
 
@@ -24,9 +25,11 @@ from servicios.rutas import (
     get_rutas_activas, get_ruta,
     get_paises_origen, get_paises_destino, find_ruta_por_paises,
 )
-from servicios.catalogo import get_productos, agregar_producto
+from servicios.catalogo import get_productos, get_producto, agregar_producto
 from servicios.cotizador import cotizar
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
+from servicios.api_b2b import obtener_precio_envio
+from servicios.solicitudes_guia import crear_solicitud_guia, listar_solicitudes_cliente
 from modelos.cotizacion import CotizacionInput
 from modelos.producto import ProductoNuevo
 
@@ -200,6 +203,131 @@ def cotizar_post(
             "error": error,
         },
     )
+
+
+# ── Envíos / solicitudes de guía ───────────────────────────
+@router.get("/envios", response_class=HTMLResponse)
+def envios_view(
+    request: Request,
+    ok: Optional[str] = None,
+    cliente: str = Depends(cliente_actual),
+):
+    solicitudes = listar_solicitudes_cliente(cliente)
+    return templates.TemplateResponse(
+        request=request, name="portal/envios.html",
+        context={
+            "cliente": cliente,
+            "solicitudes": solicitudes,
+            "flash_ok": "Solicitud creada. Tauro ya la ve en el admin." if ok == "solicitado" else None,
+        },
+    )
+
+
+@router.get("/envios/nuevo", response_class=HTMLResponse)
+def envio_nuevo_form(request: Request, cliente: str = Depends(cliente_actual)):
+    return templates.TemplateResponse(
+        request=request, name="portal/envio_nuevo.html",
+        context={
+            "cliente": cliente,
+            "productos": get_productos(cliente),
+            "paises_destino": get_paises_destino(),
+            "form": {},
+            "error": None,
+        },
+    )
+
+
+@router.post("/envios/nuevo", response_class=HTMLResponse)
+def envio_nuevo_post(
+    request: Request,
+    producto_alias: str = Form(...),
+    destino_pais: str = Form(...),
+    cantidad: int = Form(1),
+    dest_nombre: str = Form(...),
+    dest_documento: str = Form(""),
+    dest_email: str = Form(""),
+    dest_telefono: str = Form(""),
+    dest_direccion: str = Form(...),
+    dest_ciudad: str = Form(...),
+    dest_estado: str = Form(""),
+    dest_zip: str = Form(...),
+    precio_cliente_final_ars: str = Form(""),
+    observaciones: str = Form(""),
+    cliente: str = Depends(cliente_actual),
+):
+    productos = get_productos(cliente)
+    paises_destino = get_paises_destino()
+    form = {
+        "producto_alias": producto_alias,
+        "destino_pais": destino_pais,
+        "cantidad": cantidad,
+        "dest_nombre": dest_nombre,
+        "dest_documento": dest_documento,
+        "dest_email": dest_email,
+        "dest_telefono": dest_telefono,
+        "dest_direccion": dest_direccion,
+        "dest_ciudad": dest_ciudad,
+        "dest_estado": dest_estado,
+        "dest_zip": dest_zip,
+        "precio_cliente_final_ars": precio_cliente_final_ars,
+        "observaciones": observaciones,
+    }
+
+    try:
+        producto = get_producto(cliente, producto_alias)
+        if not producto or not producto.activo:
+            raise ValueError("Ese producto no está activo en tu catálogo.")
+
+        precio = obtener_precio_envio(cliente, producto_alias, destino_pais)
+        if not precio.get("encontrado"):
+            motivo = precio.get("motivo") or "sin_precio"
+            raise ValueError(f"No se pudo cotizar ese producto/destino ({motivo}).")
+
+        precio_final = None
+        if precio_cliente_final_ars.strip():
+            precio_raw = precio_cliente_final_ars.strip()
+            if "," in precio_raw:
+                precio_raw = precio_raw.replace(".", "").replace(",", ".")
+            precio_final = float(precio_raw)
+
+        crear_solicitud_guia(
+            cliente_id=cliente,
+            producto_alias=producto.alias_interno,
+            cantidad=cantidad,
+            destino_pais=destino_pais,
+            dest_nombre=dest_nombre,
+            dest_documento=dest_documento,
+            dest_email=dest_email,
+            dest_telefono=dest_telefono,
+            dest_direccion=dest_direccion,
+            dest_ciudad=dest_ciudad,
+            dest_estado=dest_estado,
+            dest_zip=dest_zip,
+            observaciones=observaciones,
+            peso_kg=producto.peso_kg,
+            largo_cm=producto.largo_cm,
+            ancho_cm=producto.ancho_cm,
+            alto_cm=producto.alto_cm,
+            valor_declarado_usd=producto.valor_usd_default,
+            ruta_id=precio["ruta_id"],
+            coti_id=precio["coti_id"],
+            precio_tauro_ars=precio["precio_ars"],
+            precio_tauro_usd=precio["precio_usd"],
+            precio_cliente_final_ars=precio_final,
+        )
+    except Exception as e:
+        return templates.TemplateResponse(
+            request=request, name="portal/envio_nuevo.html",
+            context={
+                "cliente": cliente,
+                "productos": productos,
+                "paises_destino": paises_destino,
+                "form": form,
+                "error": str(e),
+            },
+        )
+
+    return RedirectResponse(url="/portal/envios?ok=solicitado", status_code=303)
 
 
 # ── Catálogo ────────────────────────────────────────────────

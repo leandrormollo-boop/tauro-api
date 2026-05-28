@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Nueva solicitud{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div class="eyebrow">Nueva guía</div>
+    <h1>Crear solicitud de envío</h1>
+    <p>El producto se toma del catálogo aprobado y la tarifa se cotiza con el markup del cliente.</p>
+</div>
+
+{% if error %}
+    <div class="msg error">{{ error }}</div>
+{% endif %}
+
+{% if not productos %}
+    <div class="msg warn">
+        No hay productos activos para crear solicitudes. Primero cargá un producto en el catálogo y esperá la validación de Tauro.
+    </div>
+{% endif %}
+
+<form method="POST" action="/portal/envios/nuevo" class="form">
+    <div class="card">
+        <h3>Producto y destino</h3>
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Producto</label>
+                <select name="producto_alias" required>
+                    <option value="">Seleccionar</option>
+                    {% for p in productos %}
+                        <option value="{{ p.alias_interno }}" {% if form.producto_alias == p.alias_interno %}selected{% endif %}>
+                            {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Destino país</label>
+                <select name="destino_pais" required>
+                    <option value="">Seleccionar</option>
+                    {% for p in paises_destino %}
+                        <option value="{{ p }}" {% if form.destino_pais == p %}selected{% endif %}>{{ p }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Cantidad</label>
+                <input type="number" name="cantidad" min="1" step="1" value="{{ form.cantidad or 1 }}" required>
+            </div>
+            <div class="form-group">
+                <label>Precio final para tu cliente ARS</label>
+                <input type="text" name="precio_cliente_final_ars" inputmode="decimal" placeholder="Opcional" value="{{ form.precio_cliente_final_ars or '' }}">
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Destinatario</h3>
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Nombre / razón social</label>
+                <input type="text" name="dest_nombre" required value="{{ form.dest_nombre or '' }}">
+            </div>
+            <div class="form-group">
+                <label>Documento / Tax ID</label>
+                <input type="text" name="dest_documento" value="{{ form.dest_documento or '' }}">
+            </div>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="dest_email" value="{{ form.dest_email or '' }}">
+            </div>
+            <div class="form-group">
+                <label>Teléfono</label>
+                <input type="text" name="dest_telefono" value="{{ form.dest_telefono or '' }}">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Dirección</label>
+            <input type="text" name="dest_direccion" required value="{{ form.dest_direccion or '' }}">
+        </div>
+
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label>Ciudad</label>
+                <input type="text" name="dest_ciudad" required value="{{ form.dest_ciudad or '' }}">
+            </div>
+            <div class="form-group">
+                <label>Estado / provincia</label>
+                <input type="text" name="dest_estado" value="{{ form.dest_estado or '' }}">
+            </div>
+            <div class="form-group">
+                <label>Código postal</label>
+                <input type="text" name="dest_zip" required value="{{ form.dest_zip or '' }}">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Observaciones</label>
+            <textarea name="observaciones" rows="3">{{ form.observaciones or '' }}</textarea>
+        </div>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+        <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
+        <button type="submit" class="btn btn-primary" {% if not productos %}disabled{% endif %}>Crear solicitud</button>
+    </div>
+</form>
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Solicitudes de guía{% endblock %}
+
+{% block content %}
+<div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+  <div>
+    <div class="eyebrow">Operaciones</div>
+    <h1>Solicitudes de guía</h1>
+    <p>Bandeja de pedidos creados por clientes desde el portal.</p>
+  </div>
+  <a href="/admin/pedidos" class="btn btn-ghost btn-sm">Actualizar</a>
+</div>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+  <a href="/admin/pedidos" class="btn btn-sm {% if not estado_filtro %}btn-primary{% else %}btn-ghost{% endif %}">Todos</a>
+  {% for e in estados %}
+    <a href="/admin/pedidos?estado={{ e }}" class="btn btn-sm {% if estado_filtro == e %}btn-primary{% else %}btn-ghost{% endif %}">
+      {{ e.replace("_", " ") }}
+    </a>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Pedido</th>
+          <th>Cliente</th>
+          <th>Producto</th>
+          <th>Destinatario</th>
+          <th>Dirección</th>
+          <th>Precio</th>
+          <th>Operación</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for s in solicitudes %}
+        <tr>
+          <td class="mono">
+            #{{ s.id }}<br>
+            <small style="color:var(--fg-4)">{{ s.created_at.strftime("%d/%m %H:%M") if s.created_at else "—" }}</small>
+          </td>
+          <td>
+            <strong>{{ s.cliente_id }}</strong>
+            <br><small style="color:var(--fg-4)">{{ s.cliente_nombre or s.cliente_email }}</small>
+          </td>
+          <td>
+            <strong>{{ s.producto_alias }}</strong>
+            <br><small style="color:var(--fg-4)">x{{ s.cantidad }} · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+            {% if s.coti_id %}<br><small class="mono" style="color:var(--fg-4)">{{ s.coti_id }}</small>{% endif %}
+          </td>
+          <td>
+            {{ s.dest_nombre }}
+            <br><small style="color:var(--fg-4)">{{ s.dest_documento or "Sin doc." }}</small>
+            <br><small style="color:var(--fg-4)">{{ s.dest_email or s.dest_telefono or "Sin contacto" }}</small>
+          </td>
+          <td>
+            {{ s.dest_direccion }}
+            <br><small style="color:var(--fg-4)">{{ s.dest_ciudad }}{% if s.dest_estado %}, {{ s.dest_estado }}{% endif %} · {{ s.dest_zip }} · {{ s.destino_pais }}</small>
+            {% if s.observaciones %}<br><small style="color:var(--warn)">Obs: {{ s.observaciones }}</small>{% endif %}
+          </td>
+          <td class="mono">
+            Tauro<br>
+            <strong>$ {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }}</strong>
+            {% if s.precio_cliente_final_ars %}
+              <br><small style="color:var(--fg-4)">Cliente $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
+            {% endif %}
+          </td>
+          <td style="min-width:250px;">
+            <form method="POST" action="/admin/pedidos/{{ s.id }}/estado" class="form" style="display:grid;gap:8px;">
+              <select name="estado">
+                {% for e in estados %}
+                  <option value="{{ e }}" {% if s.estado == e %}selected{% endif %}>{{ e.replace("_", " ") }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="tracking" placeholder="Tracking" value="{{ s.tracking or '' }}">
+              <input type="text" name="guia_url" placeholder="URL guía / PDF" value="{{ s.guia_url or '' }}">
+              <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="7" style="color:var(--fg-4);text-align:center;padding:24px;">
+            Sin solicitudes para este filtro.
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -29,6 +29,12 @@ from servicios.catalogo import (
     aprobar_producto, rechazar_producto,
 )
 from servicios.rutas import get_todas_las_rutas, upsert_ruta, toggle_ruta
+from servicios.solicitudes_guia import (
+    ESTADOS_SOLICITUD,
+    actualizar_solicitud_guia,
+    contar_solicitudes_pendientes,
+    listar_solicitudes_admin,
+)
 from modelos.ruta import Ruta
 
 
@@ -182,6 +188,7 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
             total_pagos = cur.fetchone()["n"]
             cur.execute("SELECT COUNT(*) AS n FROM productos WHERE activo=FALSE")
             productos_pendientes = cur.fetchone()["n"]
+            solicitudes_pendientes = contar_solicitudes_pendientes()
 
     # Resumen por cliente
     resumen = []
@@ -208,6 +215,7 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
                 "total_envios": total_envios,
                 "total_pagos": total_pagos,
                 "productos_pendientes": productos_pendientes,
+                "solicitudes_pendientes": solicitudes_pendientes,
             },
             "resumen_clientes": resumen,
         },
@@ -471,6 +479,55 @@ def admin_envio_cancelar(
     cancelar_envio(envio_id)
     cliente_id = row["cliente_id"] if row else ""
     return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
+
+
+# ── Solicitudes de guía ─────────────────────────────────────
+
+@router.get("/pedidos", response_class=HTMLResponse)
+def admin_pedidos(
+    request: Request,
+    estado: str = "",
+    ok: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    estado = (estado or "").strip().upper()
+    if estado and estado not in ESTADOS_SOLICITUD:
+        estado = ""
+
+    solicitudes = listar_solicitudes_admin(estado=estado)
+    return templates.TemplateResponse(
+        request=request, name="admin/pedidos.html",
+        context={
+            "seccion": "pedidos",
+            "solicitudes": solicitudes,
+            "estados": ESTADOS_SOLICITUD,
+            "estado_filtro": estado,
+            "flash_ok": "Solicitud actualizada." if ok == "actualizado" else None,
+        },
+    )
+
+
+@router.post("/pedidos/{solicitud_id}/estado")
+def admin_pedido_estado(
+    solicitud_id: int,
+    estado: str = Form(...),
+    tracking: str = Form(""),
+    guia_url: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    actualizar_solicitud_guia(
+        solicitud_id,
+        estado=estado,
+        tracking=tracking,
+        guia_url=guia_url,
+    )
+    return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
 
 
 # ── Pagos ────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
 from dotenv import load_dotenv
+from typing import Optional
 
 from core.fedex_client import FedExClient
 from core.email_sender import enviar_email_pedido
@@ -17,6 +18,7 @@ from servicios.api_b2b import (
     obtener_precio_envio,
     obtener_datos_producto,
 )
+from servicios.solicitudes_guia import crear_solicitud_guia
 
 load_dotenv()
 
@@ -88,6 +90,7 @@ class PedidoRequest(BaseModel):
     pais: str
     telefono: str
     email_comprador: str
+    precio_cliente_final_ars: Optional[float] = None
 
 
 class CotizarWebRequest(BaseModel):
@@ -300,10 +303,37 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
     if not ok:
         raise HTTPException(status_code=500, detail="Error al generar o enviar el PDF de pedido.")
 
+    solicitud = crear_solicitud_guia(
+        cliente_id=cliente_id,
+        producto_alias=producto["nombre_es"],
+        cantidad=int(producto["unidades"] or 1),
+        destino_pais=body.destino_pais,
+        dest_nombre=body.nombre_comprador,
+        dest_documento="",
+        dest_email=body.email_comprador,
+        dest_telefono=body.telefono,
+        dest_direccion=body.direccion_exacta,
+        dest_ciudad=body.ciudad,
+        dest_estado=body.estado,
+        dest_zip=body.zip_code,
+        observaciones=f"Pedido API {referencia}",
+        peso_kg=producto["peso_kg"],
+        largo_cm=producto["largo"],
+        ancho_cm=producto["ancho"],
+        alto_cm=producto["alto"],
+        valor_declarado_usd=producto["valor_usd"],
+        ruta_id=precio["ruta_id"],
+        coti_id=precio["coti_id"],
+        precio_tauro_ars=precio["precio_ars"],
+        precio_tauro_usd=precio["precio_usd"],
+        precio_cliente_final_ars=body.precio_cliente_final_ars,
+    )
+
     return {
         "status": "success",
-        "mensaje": "Pedido recibido. PDF enviado a logística.",
+        "mensaje": "Pedido recibido. PDF enviado a logística y solicitud creada.",
         "referencia": referencia,
+        "solicitud_id": solicitud["id"],
     }
 
 
