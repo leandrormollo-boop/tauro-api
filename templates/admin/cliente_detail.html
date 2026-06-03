@@ -34,14 +34,42 @@
 </div>
 
 <!-- Acciones rápidas -->
-<div style="display:flex;gap:12px;margin-bottom:28px;">
+<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
   <a href="/admin/envios/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-primary btn-sm">+ Cargar factura</a>
   <a href="/admin/pagos/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">+ Registrar pago</a>
+  <button type="button" onclick="document.getElementById('reset-pwd-form').style.display='block';this.style.display='none';"
+          class="btn btn-ghost btn-sm">🔑 Resetear contraseña del portal</button>
 </div>
+
+<!-- Reset password form (oculto por defecto) -->
+<div id="reset-pwd-form" style="display:none;margin-bottom:28px;padding:16px;background:var(--bg-2,#1a1a1a);border-radius:8px;border:1px solid var(--border,#333);">
+  <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/password" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
+    <div class="form-group" style="flex:1;min-width:240px;margin-bottom:0;">
+      <label>Nueva contraseña para {{ cliente.email }}</label>
+      <input type="text" name="new_password" required minlength="6"
+             placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+      <small style="color:var(--fg-4);">Pasásela al cliente por WhatsApp / llamada.</small>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Guardar contraseña</button>
+    <button type="button" onclick="document.getElementById('reset-pwd-form').style.display='none';this.parentElement.parentElement.previousElementSibling.querySelector('button').style.display='inline-block';"
+            class="btn btn-ghost btn-sm">Cancelar</button>
+  </form>
+</div>
+
+{% if flash_ok %}
+<div class="msg ok" style="margin-bottom:16px;">{{ flash_ok }}</div>
+{% endif %}
 
 <!-- Facturas -->
 <div class="card" style="margin-bottom:16px;">
-  <h3>Facturas / envíos</h3>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <h3 style="margin:0;">Facturas / envíos</h3>
+    {% if pagination %}
+    <small style="color:var(--fg-4);">
+      {{ pagination.total_envios }} en total · página {{ pagination.page }} de {{ pagination.total_pages }}
+    </small>
+    {% endif %}
+  </div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -82,6 +110,22 @@
       </tbody>
     </table>
   </div>
+
+  {% if pagination and pagination.total_pages > 1 %}
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:8px;">
+    {% if pagination.has_prev %}
+    <a href="{{ pagination.prev_url }}" class="btn btn-sm btn-ghost">← Anterior</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+    <small style="color:var(--fg-4);">Página {{ pagination.page }} / {{ pagination.total_pages }}</small>
+    {% if pagination.has_next %}
+    <a href="{{ pagination.next_url }}" class="btn btn-sm btn-ghost">Siguiente →</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 
 <!-- Pagos -->

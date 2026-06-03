@@ -239,7 +239,7 @@ function Footer() {
       <div className="container">
         <div className="footer-grid">
           <div>
-            <a href="#" className="logo" style={{ marginBottom: 18 }}>
+            <a href="/web" className="logo" style={{ marginBottom: 18 }}>
               <span className="logo-mark"><TauroLogo size={28} color="#fff"/></span>
               <span>Tauro<span style={{ color: "var(--fg-3)", fontWeight: 400, marginLeft: 4 }}>solutions</span></span>
             </a>

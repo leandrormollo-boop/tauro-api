@@ -23,6 +23,7 @@ from servicios.cuenta_corriente import (
     registrar_pago, registrar_envio, cancelar_envio,
     get_envios_cliente, get_pagos,
     get_facturado_real, total_pagado, saldo,
+    get_resumen_clientes_bulk,
 )
 from servicios.catalogo import (
     get_productos_pendientes, get_todos_productos,
@@ -179,36 +180,25 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    clientes = _get_clientes_lista()
-
-    # Stats generales
+    # Stats generales — 4 COUNT en una sola conexión
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS n FROM clientes WHERE activo=TRUE")
-            clientes_activos = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(*) AS n FROM envios")
-            total_envios = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(*) AS n FROM pagos")
-            total_pagos = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(*) AS n FROM productos WHERE activo=FALSE")
-            productos_pendientes = cur.fetchone()["n"]
-            solicitudes_pendientes = contar_solicitudes_pendientes()
+            cur.execute("""
+                SELECT
+                    (SELECT COUNT(*) FROM clientes WHERE activo=TRUE) AS clientes_activos,
+                    (SELECT COUNT(*) FROM envios)                     AS total_envios,
+                    (SELECT COUNT(*) FROM pagos)                      AS total_pagos,
+                    (SELECT COUNT(*) FROM productos WHERE activo=FALSE) AS productos_pendientes
+            """)
+            stats_row = cur.fetchone()
+            clientes_activos     = stats_row["clientes_activos"]
+            total_envios         = stats_row["total_envios"]
+            total_pagos          = stats_row["total_pagos"]
+            productos_pendientes = stats_row["productos_pendientes"]
+    solicitudes_pendientes = contar_solicitudes_pendientes()
 
-    # Resumen por cliente
-    resumen = []
-    for c in clientes:
-        if not c["activo"]:
-            continue
-        facturado = get_facturado_real(c["cliente_id"])
-        pagado = total_pagado(c["cliente_id"])
-        resumen.append({
-            "cliente_id": c["cliente_id"],
-            "email": c["email"],
-            "nombre": c.get("nombre") or "",
-            "facturado": facturado,
-            "pagado": pagado,
-            "saldo": round(facturado - pagado, 2),
-        })
+    # Resumen por cliente — bulk query (reemplaza N+1)
+    resumen = get_resumen_clientes_bulk(solo_activos=True)
 
     return templates.TemplateResponse(
         request=request, name="admin/home.html",
@@ -254,6 +244,7 @@ def admin_cliente_nuevo(
     request: Request,
     cliente_id: str = Form(...),
     email: str = Form(...),
+    password: str = Form(""),
     nombre: str = Form(""),
     cuit: str = Form(""),
     direccion: str = Form(""),
@@ -275,16 +266,20 @@ def admin_cliente_nuevo(
     try:
         pricing = parse_pricing_value(markup_valor, markup_tipo, fallback_pct=markup_pct)
         markup_pct_db = pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct
+        # Hashear password si vino una
+        from servicios.auth import hash_password
+        password_hash_db = hash_password(password.strip()) if password.strip() else None
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO clientes
-                        (cliente_id, email, markup_pct, markup_tipo, markup_valor, activo, nombre, cuit, direccion, cp, ciudad, pais, telefono, notas)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        (cliente_id, email, password_hash, markup_pct, markup_tipo, markup_valor, activo,
+                         nombre, cuit, direccion, cp, ciudad, pais, telefono, notas)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        cliente_id, email.strip().lower(), markup_pct_db,
+                        cliente_id, email.strip().lower(), password_hash_db, markup_pct_db,
                         pricing["tipo"], pricing["valor"],
                         activo.lower() == "true",
                         nombre or None, cuit or None, direccion or None,
@@ -300,37 +295,101 @@ def admin_cliente_nuevo(
         )
 
 
+@router.post("/clientes/{cliente_id}/password")
+def admin_cliente_set_password(
+    request: Request,
+    cliente_id: str,
+    new_password: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Resetea/setea la contraseña del cliente desde el admin."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    cliente_id = cliente_id.strip().upper()
+    new_password = new_password.strip()
+    if len(new_password) < 6:
+        return RedirectResponse(
+            url=f"/admin/clientes/{cliente_id}?pwd_error=corta", status_code=303,
+        )
+    from servicios.auth import set_cliente_password
+    set_cliente_password(cliente_id, new_password)
+    return RedirectResponse(
+        url=f"/admin/clientes/{cliente_id}?ok=pwd_actualizada", status_code=303,
+    )
+
+
 @router.get("/clientes/{cliente_id}", response_class=HTMLResponse)
 def admin_cliente_detail(
     request: Request, cliente_id: str,
     ok: Optional[str] = None,
+    pwd_error: Optional[str] = None,
+    page: int = 1,
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
 
     cliente_id = cliente_id.strip().upper()
+    # Paginación: 50 envíos por página
+    PAGE_SIZE = 50
+    page = max(1, page)
+    offset = (page - 1) * PAGE_SIZE
+
+    # Todo en UNA sola conexión (1 round trip al pool en vez de 3)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM clientes WHERE cliente_id = %s", (cliente_id,))
             row = cur.fetchone()
+            if not row:
+                return RedirectResponse(url="/admin/clientes", status_code=303)
 
-    if not row:
-        return RedirectResponse(url="/admin/clientes", status_code=303)
+            # Total envíos del cliente (para pagination meta)
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM envios WHERE cliente_id = %s",
+                (cliente_id,),
+            )
+            total_envios = cur.fetchone()["n"]
+
+            # Envíos paginados
+            cur.execute(
+                "SELECT * FROM envios WHERE cliente_id = %s "
+                "ORDER BY fecha DESC, id DESC LIMIT %s OFFSET %s",
+                (cliente_id, PAGE_SIZE, offset),
+            )
+            envios = [dict(r) for r in cur.fetchall()]
+
+            # Pagos (suelen ser pocos, no paginamos)
+            cur.execute(
+                "SELECT * FROM pagos WHERE cliente_id = %s ORDER BY fecha DESC LIMIT 200",
+                (cliente_id,),
+            )
+            pagos = [dict(r) for r in cur.fetchall()]
 
     cliente = dict(row)
     cliente["pricing_desc"] = describir_pricing(cliente)
     facturado = get_facturado_real(cliente_id)
     saldo_data = saldo(cliente_id, facturado)
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT * FROM envios WHERE cliente_id = %s ORDER BY fecha DESC", (cliente_id,))
-            envios = [dict(r) for r in cur.fetchall()]
-            cur.execute("SELECT * FROM pagos WHERE cliente_id = %s ORDER BY fecha DESC", (cliente_id,))
-            pagos = [dict(r) for r in cur.fetchall()]
+    flash_ok = None
+    if ok == "creado":
+        flash_ok = "Cliente creado."
+    elif ok == "pwd_actualizada":
+        flash_ok = "Contraseña actualizada. Pasala al cliente."
+    if pwd_error == "corta":
+        flash_ok = None  # priorizar error
+        # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
 
-    flash_ok = "Cliente creado." if ok == "creado" else None
+    total_pages = max(1, (total_envios + PAGE_SIZE - 1) // PAGE_SIZE)
+    pagination = {
+        "page": page,
+        "total_pages": total_pages,
+        "total_envios": total_envios,
+        "page_size": PAGE_SIZE,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "prev_url": f"/admin/clientes/{cliente_id}?page={page - 1}" if page > 1 else None,
+        "next_url": f"/admin/clientes/{cliente_id}?page={page + 1}" if page < total_pages else None,
+    }
 
     return templates.TemplateResponse(
         request=request, name="admin/cliente_detail.html",
@@ -340,6 +399,7 @@ def admin_cliente_detail(
             "saldo": saldo_data,
             "envios": envios,
             "pagos": pagos,
+            "pagination": pagination,
             "flash_ok": flash_ok,
         },
     )

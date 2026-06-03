@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from servicios.auth import (
     buscar_cliente_por_email, generar_token, validar_token,
     revocar_token, link_magico_url, get_markup_pct,
+    autenticar_cliente,
 )
 from servicios.rutas import (
     get_rutas_activas, get_ruta,
@@ -42,6 +43,7 @@ templates = Jinja2Templates(directory="templates")
 
 BASE_URL = os.getenv("BASE_URL")
 COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
+SESSION_DAYS_INT = 7  # idéntico a SESSION_DAYS en servicios.auth
 
 
 # ── Dependency: cliente actual ──────────────────────────────
@@ -64,8 +66,39 @@ def login_form(request: Request):
     )
 
 
+@router.post("/login", response_class=HTMLResponse)
+def login_submit(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+):
+    """Login clásico con email + password. Setea cookie y redirige a /portal/home."""
+    cliente = autenticar_cliente(email, password)
+    if not cliente:
+        return templates.TemplateResponse(
+            request=request, name="portal/login.html",
+            context={
+                "mensaje": "Email o contraseña incorrectos.",
+                "tipo_msg": "error",
+                "email_prefill": email,
+            },
+            status_code=401,
+        )
+
+    token = generar_token(email, cliente)
+    response = RedirectResponse(url="/portal/home", status_code=303)
+    response.set_cookie(
+        key="token", value=token,
+        httponly=True, max_age=60 * 60 * 24 * SESSION_DAYS_INT,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+    )
+    return response
+
+
 @router.post("/login/send", response_class=HTMLResponse)
 def login_send(request: Request, email: str = Form(...)):
+    """Magic link — para recuperación de contraseña / clientes sin password seteado."""
     cliente = buscar_cliente_por_email(email)
     if not cliente:
         return templates.TemplateResponse(

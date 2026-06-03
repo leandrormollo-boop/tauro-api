@@ -34,7 +34,7 @@ function Nav({ onCotizarClick }) {
   return (
     <nav className={`nav ${scrolled ? "scrolled" : ""}`}>
       <div className="container nav-inner">
-        <a href="#" className="logo">
+        <a href="/web" className="logo">
           <span className="logo-mark"><TauroLogo size={28} color="#fff" /></span>
           <span>Tauro<span style={{ color: "var(--fg-3)", fontWeight: 400, marginLeft: 4 }}>solutions</span></span>
         </a>
@@ -46,7 +46,7 @@ function Nav({ onCotizarClick }) {
           <li><a href="#contacto">Contacto</a></li>
         </ul>
         <div className="nav-cta">
-          <a href="#" className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 16px" }}>
+          <a href="/portal/login" className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 16px" }}>
             Iniciar sesión
           </a>
           <button className="btn btn-primary" onClick={onCotizarClick} style={{ fontSize: 13, padding: "10px 18px" }}>

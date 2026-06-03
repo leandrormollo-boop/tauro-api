@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS clientes (
 );
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_tipo TEXT NOT NULL DEFAULT 'PCT';
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_valor REAL;
+-- Password hasheado con bcrypt (login email + password)
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
 -- ── Sesiones (ex SESSIONS) ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS sessions (
@@ -103,6 +105,11 @@ CREATE TABLE IF NOT EXISTS envios (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_envios_cliente ON envios(cliente_id);
+-- Índice compuesto para queries de facturación (cliente + filtro de estado)
+CREATE INDEX IF NOT EXISTS idx_envios_cliente_estado ON envios(cliente_id, estado);
+-- Índice por fecha para listados ordenados
+CREATE INDEX IF NOT EXISTS idx_envios_fecha_desc ON envios(fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_pagos_fecha_desc ON pagos(fecha DESC);
 
 -- ── Log de cotizaciones (ex COTI) ───────────────────────────
 CREATE TABLE IF NOT EXISTS cotizaciones (

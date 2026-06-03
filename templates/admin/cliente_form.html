@@ -26,6 +26,18 @@
       </div>
     </div>
 
+    {% if not cliente %}
+    <div class="form-group">
+      <label>Contraseña inicial</label>
+      <input type="text" name="password"
+             placeholder="Mínimo 6 caracteres (opcional)"
+             autocomplete="new-password">
+      <small style="color:var(--fg-4);">
+        Si la dejás vacía, el cliente podrá entrar solo por link mágico al email. Después podés resetearla desde el detalle del cliente.
+      </small>
+    </div>
+    {% endif %}
+
     <div class="form-grid-2">
       <div class="form-group">
         <label>Nombre / Razón social</label>

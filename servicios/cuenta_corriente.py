@@ -109,6 +109,62 @@ def total_pagado(cliente: str) -> float:
     return round(float(row["total"]) if row else 0.0, 2)
 
 
+def get_resumen_clientes_bulk(solo_activos: bool = True) -> List[Dict[str, Any]]:
+    """
+    Devuelve facturado y pagado de TODOS los clientes en UNA sola query.
+    Reemplaza el patrón N+1 de iterar y llamar get_facturado_real + total_pagado.
+
+    Uso típico (admin_home):
+        resumen = get_resumen_clientes_bulk(solo_activos=True)
+        # cada item: {cliente_id, email, nombre, facturado, pagado, saldo}
+    """
+    where_activos = "WHERE c.activo = TRUE" if solo_activos else ""
+    sql = f"""
+        WITH fact AS (
+            SELECT cliente_id, COALESCE(SUM(monto_ars), 0) AS facturado
+            FROM envios
+            WHERE estado NOT IN ('CANCELADO', 'NC')
+            GROUP BY cliente_id
+        ),
+        pag AS (
+            SELECT cliente_id, COALESCE(SUM(monto_ars), 0) AS pagado
+            FROM pagos
+            GROUP BY cliente_id
+        )
+        SELECT
+            c.cliente_id,
+            c.email,
+            c.nombre,
+            c.activo,
+            COALESCE(fact.facturado, 0) AS facturado,
+            COALESCE(pag.pagado, 0)    AS pagado
+        FROM clientes c
+        LEFT JOIN fact ON fact.cliente_id = c.cliente_id
+        LEFT JOIN pag  ON pag.cliente_id  = c.cliente_id
+        {where_activos}
+        ORDER BY c.cliente_id
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+
+    resumen = []
+    for r in rows:
+        facturado = round(float(r["facturado"] or 0), 2)
+        pagado = round(float(r["pagado"] or 0), 2)
+        resumen.append({
+            "cliente_id": r["cliente_id"],
+            "email": r["email"] or "",
+            "nombre": r["nombre"] or "",
+            "activo": bool(r["activo"]),
+            "facturado": facturado,
+            "pagado": pagado,
+            "saldo": round(facturado - pagado, 2),
+        })
+    return resumen
+
+
 def saldo(cliente: str, total_facturado_ars: float) -> Dict[str, float]:
     pagado = total_pagado(cliente)
     return {
