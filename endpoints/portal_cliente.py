@@ -12,6 +12,7 @@
 # ============================================================
 
 import os
+from urllib.parse import quote
 from typing import Optional
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -31,6 +32,15 @@ from servicios.cotizador import cotizar
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
 from servicios.api_b2b import obtener_precio_envio
 from servicios.solicitudes_guia import crear_solicitud_guia, listar_solicitudes_cliente
+from servicios.direcciones import (
+    TIPO_DESTINATARIO,
+    TIPO_REMITENTE,
+    contar_direcciones,
+    crear_direccion,
+    listar_direcciones,
+    obtener_direccion,
+    obtener_remitente_para_envio,
+)
 from modelos.cotizacion import CotizacionInput
 from modelos.producto import ProductoNuevo
 
@@ -44,6 +54,16 @@ templates = Jinja2Templates(directory="templates")
 BASE_URL = os.getenv("BASE_URL")
 COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
 SESSION_DAYS_INT = 7  # idéntico a SESSION_DAYS en servicios.auth
+
+
+def _id_opt(value: str) -> Optional[int]:
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 # ── Dependency: cliente actual ──────────────────────────────
@@ -169,6 +189,8 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
     saldo_data = saldo(cliente, total_facturado_ars=facturado)
     pagos_recientes = get_pagos(cliente)[-5:][::-1]
     facturas_recientes = get_facturas_recientes(cliente, limite=5)
+    solicitudes = listar_solicitudes_cliente(cliente, limite=5)
+    direcciones_count = contar_direcciones(cliente)
 
     return templates.TemplateResponse(
         request=request, name="portal/home.html",
@@ -177,6 +199,8 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
             "saldo": saldo_data,
             "pagos_recientes": pagos_recientes,
             "facturas_recientes": facturas_recientes,
+            "solicitudes": solicitudes,
+            "direcciones_count": direcciones_count,
         },
     )
 
@@ -264,6 +288,9 @@ def envio_nuevo_form(request: Request, cliente: str = Depends(cliente_actual)):
             "cliente": cliente,
             "productos": get_productos(cliente),
             "paises_destino": get_paises_destino(),
+            "remitente": obtener_remitente_para_envio(cliente),
+            "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
+            "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
             "form": {},
             "error": None,
         },
@@ -276,6 +303,8 @@ def envio_nuevo_post(
     producto_alias: str = Form(...),
     destino_pais: str = Form(...),
     cantidad: int = Form(1),
+    remitente_id: str = Form(""),
+    destinatario_id: str = Form(""),
     dest_nombre: str = Form(...),
     dest_documento: str = Form(""),
     dest_email: str = Form(""),
@@ -284,16 +313,23 @@ def envio_nuevo_post(
     dest_ciudad: str = Form(...),
     dest_estado: str = Form(""),
     dest_zip: str = Form(...),
+    dest_pais: str = Form(""),
+    dest_alias: str = Form(""),
+    guardar_destinatario: Optional[str] = Form(None),
     precio_cliente_final_ars: str = Form(""),
     observaciones: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
     productos = get_productos(cliente)
     paises_destino = get_paises_destino()
+    remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
+    destinatarios = listar_direcciones(cliente, TIPO_DESTINATARIO)
     form = {
         "producto_alias": producto_alias,
         "destino_pais": destino_pais,
         "cantidad": cantidad,
+        "remitente_id": remitente_id,
+        "destinatario_id": destinatario_id,
         "dest_nombre": dest_nombre,
         "dest_documento": dest_documento,
         "dest_email": dest_email,
@@ -302,11 +338,33 @@ def envio_nuevo_post(
         "dest_ciudad": dest_ciudad,
         "dest_estado": dest_estado,
         "dest_zip": dest_zip,
+        "dest_pais": dest_pais,
+        "dest_alias": dest_alias,
+        "guardar_destinatario": guardar_destinatario,
         "precio_cliente_final_ars": precio_cliente_final_ars,
         "observaciones": observaciones,
     }
 
     try:
+        remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id))
+        if not remitente:
+            raise ValueError(
+                "No hay remitente cargado. Agregá uno en Direcciones o completá los datos del cliente en el admin."
+            )
+
+        if destinatario_id:
+            destinatario = obtener_direccion(cliente, _id_opt(destinatario_id) or 0)
+            if destinatario and destinatario["tipo"] == TIPO_DESTINATARIO:
+                dest_nombre = destinatario["nombre"]
+                dest_documento = destinatario.get("documento") or ""
+                dest_email = destinatario.get("email") or ""
+                dest_telefono = destinatario.get("telefono") or ""
+                dest_direccion = destinatario["direccion"]
+                dest_ciudad = destinatario["ciudad"]
+                dest_estado = destinatario.get("estado") or ""
+                dest_zip = destinatario["cp"]
+                dest_pais = destinatario["pais"]
+
         producto = get_producto(cliente, producto_alias)
         if not producto or not producto.activo:
             raise ValueError("Ese producto no está activo en tu catálogo.")
@@ -323,11 +381,39 @@ def envio_nuevo_post(
                 precio_raw = precio_raw.replace(".", "").replace(",", ".")
             precio_final = float(precio_raw)
 
+        if guardar_destinatario:
+            crear_direccion(
+                cliente_id=cliente,
+                tipo=TIPO_DESTINATARIO,
+                alias=dest_alias or dest_nombre,
+                nombre=dest_nombre,
+                documento=dest_documento,
+                email=dest_email,
+                telefono=dest_telefono,
+                direccion=dest_direccion,
+                ciudad=dest_ciudad,
+                estado=dest_estado,
+                cp=dest_zip,
+                pais=dest_pais or destino_pais,
+                predeterminada=False,
+                notas="Guardado desde creación de envío.",
+            )
+
         crear_solicitud_guia(
             cliente_id=cliente,
             producto_alias=producto.alias_interno,
             cantidad=cantidad,
             destino_pais=destino_pais,
+            remitente_alias=remitente.get("alias") or remitente.get("label") or "",
+            remitente_nombre=remitente.get("nombre") or "",
+            remitente_documento=remitente.get("documento") or "",
+            remitente_email=remitente.get("email") or "",
+            remitente_telefono=remitente.get("telefono") or "",
+            remitente_direccion=remitente.get("direccion") or "",
+            remitente_ciudad=remitente.get("ciudad") or "",
+            remitente_estado=remitente.get("estado") or "",
+            remitente_zip=remitente.get("cp") or "",
+            remitente_pais=remitente.get("pais") or "AR",
             dest_nombre=dest_nombre,
             dest_documento=dest_documento,
             dest_email=dest_email,
@@ -355,12 +441,75 @@ def envio_nuevo_post(
                 "cliente": cliente,
                 "productos": productos,
                 "paises_destino": paises_destino,
+                "remitente": obtener_remitente_para_envio(cliente, _id_opt(remitente_id)),
+                "remitentes": remitentes,
+                "destinatarios": destinatarios,
                 "form": form,
                 "error": str(e),
             },
         )
 
     return RedirectResponse(url="/portal/envios?ok=solicitado", status_code=303)
+
+
+# ── Direcciones ─────────────────────────────────────────────
+@router.get("/direcciones", response_class=HTMLResponse)
+def direcciones_view(
+    request: Request,
+    ok: Optional[str] = None,
+    error: Optional[str] = None,
+    cliente: str = Depends(cliente_actual),
+):
+    return templates.TemplateResponse(
+        request=request, name="portal/direcciones.html",
+        context={
+            "cliente": cliente,
+            "remitente": obtener_remitente_para_envio(cliente),
+            "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
+            "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+            "flash_ok": "Dirección guardada." if ok == "1" else None,
+            "error": error,
+        },
+    )
+
+
+@router.post("/direcciones")
+def direcciones_add(
+    tipo: str = Form(...),
+    alias: str = Form(""),
+    nombre: str = Form(...),
+    documento: str = Form(""),
+    email: str = Form(""),
+    telefono: str = Form(""),
+    direccion: str = Form(...),
+    ciudad: str = Form(...),
+    estado: str = Form(""),
+    cp: str = Form(...),
+    pais: str = Form("AR"),
+    predeterminada: Optional[str] = Form(None),
+    notas: str = Form(""),
+    cliente: str = Depends(cliente_actual),
+):
+    try:
+        crear_direccion(
+            cliente_id=cliente,
+            tipo=tipo,
+            alias=alias,
+            nombre=nombre,
+            documento=documento,
+            email=email,
+            telefono=telefono,
+            direccion=direccion,
+            ciudad=ciudad,
+            estado=estado,
+            cp=cp,
+            pais=pais,
+            predeterminada=bool(predeterminada),
+            notas=notas,
+        )
+    except Exception as e:
+        return RedirectResponse(url=f"/portal/direcciones?error={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/portal/direcciones?ok=1", status_code=303)
 
 
 # ── Catálogo ────────────────────────────────────────────────

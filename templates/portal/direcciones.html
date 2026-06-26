@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Direcciones{% endblock %}
+
+{% block content %}
+<div class="page-title page-title-row">
+    <div>
+        <div class="eyebrow">Libreta</div>
+        <h1>Direcciones</h1>
+        <p>Guardá remitentes y destinatarios frecuentes para crear envíos más rápido.</p>
+    </div>
+    <a href="/portal/envios/nuevo" class="btn btn-primary btn-sm">Crear envío</a>
+</div>
+
+{% if flash_ok %}
+    <div class="msg ok">{{ flash_ok }}</div>
+{% endif %}
+{% if error %}
+    <div class="msg error">{{ error }}</div>
+{% endif %}
+
+<div class="grid-2">
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h3>Remitentes</h3>
+                <p>Direcciones de origen disponibles para armar guías.</p>
+            </div>
+            <span class="badge muted">{{ remitentes|length + (1 if remitente and remitentes|length == 0 else 0) }}</span>
+        </div>
+
+        {% if remitentes %}
+            <div class="address-list">
+                {% for r in remitentes %}
+                    <div class="address-item">
+                        <strong>{{ r.label }}</strong>
+                        <span>{{ r.nombre }}</span>
+                        <small>{{ r.direccion }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}</small>
+                        {% if r.predeterminada %}<em>Predeterminada</em>{% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% elif remitente %}
+            <div class="address-item">
+                <strong>{{ remitente.label }}</strong>
+                <span>{{ remitente.nombre }}</span>
+                <small>{{ remitente.direccion }} · {{ remitente.ciudad }} {{ remitente.cp }} · {{ remitente.pais }}</small>
+                <em>Desde perfil del cliente</em>
+            </div>
+        {% else %}
+            <p class="empty">No hay remitentes cargados.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h3>Destinatarios</h3>
+                <p>Contactos y direcciones de entrega recurrentes.</p>
+            </div>
+            <span class="badge muted">{{ destinatarios|length }}</span>
+        </div>
+
+        {% if destinatarios %}
+            <div class="address-list">
+                {% for d in destinatarios %}
+                    <div class="address-item">
+                        <strong>{{ d.label }}</strong>
+                        <span>{{ d.nombre }}</span>
+                        <small>{{ d.direccion }} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}</small>
+                        <small>{{ d.email or "Sin email" }} · {{ d.telefono or "Sin teléfono" }}</small>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="empty">Todavía no guardaste destinatarios.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <div>
+            <h3>Agregar dirección</h3>
+            <p>Marcá una dirección como remitente si la vas a usar como origen de envíos.</p>
+        </div>
+    </div>
+
+    <form method="POST" action="/portal/direcciones" class="form">
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label>Tipo</label>
+                <select name="tipo" required>
+                    <option value="DESTINATARIO">Destinatario</option>
+                    <option value="REMITENTE">Remitente</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Alias</label>
+                <input type="text" name="alias" placeholder="Ej: Depósito CABA / Cliente Miami">
+            </div>
+            <div class="form-group">
+                <label>País</label>
+                <input type="text" name="pais" value="AR" maxlength="2" required>
+            </div>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Nombre / razón social</label>
+                <input type="text" name="nombre" required>
+            </div>
+            <div class="form-group">
+                <label>Documento / CUIT / Tax ID</label>
+                <input type="text" name="documento">
+            </div>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="email">
+            </div>
+            <div class="form-group">
+                <label>Teléfono</label>
+                <input type="text" name="telefono">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Dirección</label>
+            <input type="text" name="direccion" required>
+        </div>
+
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label>Ciudad</label>
+                <input type="text" name="ciudad" required>
+            </div>
+            <div class="form-group">
+                <label>Estado / provincia</label>
+                <input type="text" name="estado">
+            </div>
+            <div class="form-group">
+                <label>Código postal</label>
+                <input type="text" name="cp" required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Notas</label>
+            <textarea name="notas" rows="2"></textarea>
+        </div>
+
+        <label class="check-row">
+            <input type="checkbox" name="predeterminada" value="1">
+            <span>Usar como predeterminada para este tipo</span>
+        </label>
+
+        <div class="split-actions">
+            <a href="/portal/home" class="btn btn-ghost">Volver</a>
+            <button type="submit" class="btn btn-primary">Guardar dirección</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -11,6 +11,7 @@
 --   CONFIG           → config
 --   COTI             → cotizaciones (log)
 --   SOLICITUDES_GUIA → pedidos de guía desde portal/API
+--   DIRECCIONES      → remitentes/destinatarios guardados
 -- ============================================================
 
 -- ── Clientes (ex PERFILES) ──────────────────────────────────
@@ -36,6 +37,29 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_tipo TEXT NOT NUL
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_valor REAL;
 -- Password hasheado con bcrypt (login email + password)
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+-- ── Libreta de direcciones del portal ──────────────────────
+CREATE TABLE IF NOT EXISTS direcciones (
+    id             SERIAL PRIMARY KEY,
+    cliente_id     TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    tipo           TEXT NOT NULL DEFAULT 'DESTINATARIO', -- REMITENTE | DESTINATARIO
+    alias          TEXT,
+    nombre         TEXT NOT NULL,
+    documento      TEXT,
+    email          TEXT,
+    telefono       TEXT,
+    direccion      TEXT NOT NULL,
+    ciudad         TEXT NOT NULL,
+    estado         TEXT,
+    cp             TEXT NOT NULL,
+    pais           TEXT NOT NULL DEFAULT 'AR',
+    predeterminada BOOLEAN NOT NULL DEFAULT FALSE,
+    notas          TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_direcciones_cliente_tipo
+    ON direcciones(cliente_id, tipo, predeterminada DESC, updated_at DESC);
 
 -- ── Sesiones (ex SESSIONS) ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS sessions (
@@ -144,6 +168,16 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     estado                   TEXT NOT NULL DEFAULT 'SOLICITADO',
     producto_alias           TEXT NOT NULL,
     cantidad                 INTEGER NOT NULL DEFAULT 1,
+    remitente_alias          TEXT,
+    remitente_nombre         TEXT,
+    remitente_documento      TEXT,
+    remitente_email          TEXT,
+    remitente_telefono       TEXT,
+    remitente_direccion      TEXT,
+    remitente_ciudad         TEXT,
+    remitente_estado         TEXT,
+    remitente_zip            TEXT,
+    remitente_pais           TEXT,
     destino_pais             TEXT NOT NULL,
     dest_nombre              TEXT NOT NULL,
     dest_documento           TEXT,
@@ -173,6 +207,16 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_cliente
     ON solicitudes_guia(cliente_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_estado
     ON solicitudes_guia(estado, created_at DESC);
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_alias TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_nombre TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_documento TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_email TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_telefono TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_direccion TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_ciudad TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_estado TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_zip TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_pais TEXT;
 
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (

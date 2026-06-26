@@ -45,6 +45,16 @@ def crear_solicitud_guia(
     coti_id: str,
     precio_tauro_ars: float,
     precio_tauro_usd: float,
+    remitente_alias: str = "",
+    remitente_nombre: str = "",
+    remitente_documento: str = "",
+    remitente_email: str = "",
+    remitente_telefono: str = "",
+    remitente_direccion: str = "",
+    remitente_ciudad: str = "",
+    remitente_estado: str = "",
+    remitente_zip: str = "",
+    remitente_pais: str = "",
     precio_cliente_final_ars: Optional[float] = None,
 ) -> dict:
     """Crea una solicitud de guía pendiente para gestión operativa."""
@@ -57,6 +67,9 @@ def crear_solicitud_guia(
                 """
                 INSERT INTO solicitudes_guia (
                     cliente_id, producto_alias, cantidad, destino_pais,
+                    remitente_alias, remitente_nombre, remitente_documento,
+                    remitente_email, remitente_telefono, remitente_direccion,
+                    remitente_ciudad, remitente_estado, remitente_zip, remitente_pais,
                     dest_nombre, dest_documento, dest_email, dest_telefono,
                     dest_direccion, dest_ciudad, dest_estado, dest_zip,
                     observaciones, peso_kg, largo_cm, ancho_cm, alto_cm,
@@ -65,6 +78,7 @@ def crear_solicitud_guia(
                 )
                 VALUES (
                     %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
@@ -78,6 +92,16 @@ def crear_solicitud_guia(
                     producto_alias.strip(),
                     cantidad,
                     destino_pais.strip().upper(),
+                    _clean(remitente_alias),
+                    _clean(remitente_nombre),
+                    _clean(remitente_documento),
+                    _clean(remitente_email),
+                    _clean(remitente_telefono),
+                    _clean(remitente_direccion),
+                    _clean(remitente_ciudad),
+                    _clean(remitente_estado),
+                    _clean(remitente_zip),
+                    _clean(remitente_pais) or "AR",
                     dest_nombre.strip(),
                     _clean(dest_documento),
                     _clean(dest_email),

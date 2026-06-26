@@ -1,11 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Nueva solicitud{% endblock %}
+{% block title %}Crear envío{% endblock %}
 
 {% block content %}
-<div class="page-title">
-    <div class="eyebrow">Nueva guía</div>
-    <h1>Crear solicitud de envío</h1>
-    <p>El producto se toma del catálogo aprobado y la tarifa usa la regla comercial asignada por Tauro.</p>
+<div class="page-title page-title-row">
+    <div>
+        <div class="eyebrow">Nuevo envío</div>
+        <h1>Crear envío</h1>
+        <p>Armá la operación con remitente, destinatario, producto e invoice. Por ahora queda como solicitud para gestión Tauro.</p>
+    </div>
+    <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Libreta de direcciones</a>
 </div>
 
 {% if error %}
@@ -18,97 +21,252 @@
     </div>
 {% endif %}
 
-<form method="POST" action="/portal/envios/nuevo" class="form">
-    <div class="card">
-        <h3>Producto y destino</h3>
-        <div class="form-grid-2">
-            <div class="form-group">
-                <label>Producto</label>
-                <select name="producto_alias" required>
-                    <option value="">Seleccionar</option>
-                    {% for p in productos %}
-                        <option value="{{ p.alias_interno }}" {% if form.producto_alias == p.alias_interno %}selected{% endif %}>
-                            {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
-                        </option>
-                    {% endfor %}
-                </select>
+<form method="POST" action="/portal/envios/nuevo" class="shipment-shell">
+    <aside class="wizard-rail">
+        <div class="wizard-step active">
+            <span>1</span>
+            <div>
+                <strong>Remitente</strong>
+                <small>Origen guardado</small>
             </div>
+        </div>
+        <div class="wizard-step">
+            <span>2</span>
+            <div>
+                <strong>Destinatario</strong>
+                <small>Datos de entrega</small>
+            </div>
+        </div>
+        <div class="wizard-step">
+            <span>3</span>
+            <div>
+                <strong>Contenido</strong>
+                <small>Producto e invoice</small>
+            </div>
+        </div>
+        <div class="wizard-step">
+            <span>4</span>
+            <div>
+                <strong>Confirmación</strong>
+                <small>Solicitud operativa</small>
+            </div>
+        </div>
+    </aside>
+
+    <section class="shipment-main">
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <h3>Remitente</h3>
+                    <p>Usamos esta dirección como origen de la guía y de los documentos.</p>
+                </div>
+                <span class="badge muted">Origen</span>
+            </div>
+
+            {% if remitentes %}
+                <div class="form-group">
+                    <label>Elegir remitente</label>
+                    <select name="remitente_id">
+                        {% for r in remitentes %}
+                            <option value="{{ r.id }}" {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada) %}selected{% endif %}>
+                                {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            {% elif remitente %}
+                <input type="hidden" name="remitente_id" value="">
+                <div class="address-preview">
+                    <strong>{{ remitente.nombre }}</strong>
+                    <span>{{ remitente.direccion }} · {{ remitente.ciudad }} {{ remitente.cp }} · {{ remitente.pais }}</span>
+                    <small>{{ remitente.email or "Sin email" }} · {{ remitente.telefono or "Sin teléfono" }}</small>
+                </div>
+            {% else %}
+                <div class="msg warn" style="margin-bottom:0;">
+                    No hay remitente cargado. Agregalo desde Direcciones o completá el perfil del cliente en el admin.
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <h3>Destinatario</h3>
+                    <p>Podés cargarlo una vez o reutilizar uno frecuente.</p>
+                </div>
+                <span class="badge warn">Entrega</span>
+            </div>
+
+            {% if destinatarios %}
+                <div class="form-group">
+                    <label>Destinatario guardado</label>
+                    <select name="destinatario_id" id="destinatario_id">
+                        <option value="">Cargar destinatario nuevo</option>
+                        {% for d in destinatarios %}
+                            <option value="{{ d.id }}"
+                                    data-nombre="{{ d.nombre }}"
+                                    data-documento="{{ d.documento or '' }}"
+                                    data-email="{{ d.email or '' }}"
+                                    data-telefono="{{ d.telefono or '' }}"
+                                    data-direccion="{{ d.direccion }}"
+                                    data-ciudad="{{ d.ciudad }}"
+                                    data-estado="{{ d.estado or '' }}"
+                                    data-cp="{{ d.cp }}"
+                                    data-pais="{{ d.pais }}"
+                                    {% if form.destinatario_id|string == d.id|string %}selected{% endif %}>
+                                {{ d.label }} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            {% endif %}
+
+            <div class="form-grid-2">
+                <div class="form-group">
+                    <label>Nombre / razón social</label>
+                    <input type="text" name="dest_nombre" id="dest_nombre" required value="{{ form.dest_nombre or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Documento / Tax ID</label>
+                    <input type="text" name="dest_documento" id="dest_documento" value="{{ form.dest_documento or '' }}">
+                </div>
+            </div>
+
+            <div class="form-grid-2">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="dest_email" id="dest_email" value="{{ form.dest_email or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Teléfono</label>
+                    <input type="text" name="dest_telefono" id="dest_telefono" value="{{ form.dest_telefono or '' }}">
+                </div>
+            </div>
+
             <div class="form-group">
-                <label>Destino país</label>
-                <select name="destino_pais" required>
-                    <option value="">Seleccionar</option>
-                    {% for p in paises_destino %}
-                        <option value="{{ p }}" {% if form.destino_pais == p %}selected{% endif %}>{{ p }}</option>
-                    {% endfor %}
-                </select>
+                <label>Dirección</label>
+                <input type="text" name="dest_direccion" id="dest_direccion" required value="{{ form.dest_direccion or '' }}">
+            </div>
+
+            <div class="form-grid-4">
+                <div class="form-group">
+                    <label>País</label>
+                    <select name="destino_pais" id="destino_pais" required>
+                        <option value="">Seleccionar</option>
+                        {% for p in paises_destino %}
+                            <option value="{{ p }}" {% if form.destino_pais == p %}selected{% endif %}>{{ p }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="hidden" name="dest_pais" id="dest_pais" value="{{ form.dest_pais or form.destino_pais or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Ciudad</label>
+                    <input type="text" name="dest_ciudad" id="dest_ciudad" required value="{{ form.dest_ciudad or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Estado / provincia</label>
+                    <input type="text" name="dest_estado" id="dest_estado" value="{{ form.dest_estado or '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Código postal</label>
+                    <input type="text" name="dest_zip" id="dest_zip" required value="{{ form.dest_zip or '' }}">
+                </div>
+            </div>
+
+            <label class="check-row">
+                <input type="checkbox" name="guardar_destinatario" value="1" {% if form.guardar_destinatario %}checked{% endif %}>
+                <span>Guardar este destinatario para próximos envíos</span>
+            </label>
+
+            <div class="form-group compact-field">
+                <label>Alias para guardar</label>
+                <input type="text" name="dest_alias" placeholder="Ej: Miami depósito / Cliente Pérez" value="{{ form.dest_alias or '' }}">
             </div>
         </div>
 
-        <div class="form-grid-2">
-            <div class="form-group">
-                <label>Cantidad</label>
-                <input type="number" name="cantidad" min="1" step="1" value="{{ form.cantidad or 1 }}" required>
+        <div class="card">
+            <div class="card-head">
+                <div>
+                    <h3>Contenido e invoice</h3>
+                    <p>El producto sale del catálogo aprobado para mantener HS code, medidas y valor declarado consistentes.</p>
+                </div>
+                <span class="badge ok">Catálogo</span>
             </div>
-            <div class="form-group">
-                <label>Precio final para tu cliente ARS</label>
-                <input type="text" name="precio_cliente_final_ars" inputmode="decimal" placeholder="Opcional" value="{{ form.precio_cliente_final_ars or '' }}">
-            </div>
-        </div>
-    </div>
 
-    <div class="card">
-        <h3>Destinatario</h3>
-        <div class="form-grid-2">
-            <div class="form-group">
-                <label>Nombre / razón social</label>
-                <input type="text" name="dest_nombre" required value="{{ form.dest_nombre or '' }}">
+            <div class="form-grid-3">
+                <div class="form-group wide-field">
+                    <label>Producto</label>
+                    <select name="producto_alias" required>
+                        <option value="">Seleccionar</option>
+                        {% for p in productos %}
+                            <option value="{{ p.alias_interno }}" {% if form.producto_alias == p.alias_interno %}selected{% endif %}>
+                                {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Cantidad</label>
+                    <input type="number" name="cantidad" min="1" step="1" value="{{ form.cantidad or 1 }}" required>
+                </div>
+                <div class="form-group">
+                    <label>Precio final a tu cliente ARS</label>
+                    <input type="text" name="precio_cliente_final_ars" inputmode="decimal" placeholder="Opcional" value="{{ form.precio_cliente_final_ars or '' }}">
+                </div>
             </div>
-            <div class="form-group">
-                <label>Documento / Tax ID</label>
-                <input type="text" name="dest_documento" value="{{ form.dest_documento or '' }}">
-            </div>
-        </div>
 
-        <div class="form-grid-2">
             <div class="form-group">
-                <label>Email</label>
-                <input type="email" name="dest_email" value="{{ form.dest_email or '' }}">
-            </div>
-            <div class="form-group">
-                <label>Teléfono</label>
-                <input type="text" name="dest_telefono" value="{{ form.dest_telefono or '' }}">
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label>Dirección</label>
-            <input type="text" name="dest_direccion" required value="{{ form.dest_direccion or '' }}">
-        </div>
-
-        <div class="form-grid-3">
-            <div class="form-group">
-                <label>Ciudad</label>
-                <input type="text" name="dest_ciudad" required value="{{ form.dest_ciudad or '' }}">
-            </div>
-            <div class="form-group">
-                <label>Estado / provincia</label>
-                <input type="text" name="dest_estado" value="{{ form.dest_estado or '' }}">
-            </div>
-            <div class="form-group">
-                <label>Código postal</label>
-                <input type="text" name="dest_zip" required value="{{ form.dest_zip or '' }}">
+                <label>Observaciones</label>
+                <textarea name="observaciones" rows="3" placeholder="Instrucciones para Tauro, referencia interna, nota comercial...">{{ form.observaciones or '' }}</textarea>
             </div>
         </div>
 
-        <div class="form-group">
-            <label>Observaciones</label>
-            <textarea name="observaciones" rows="3">{{ form.observaciones or '' }}</textarea>
+        <div class="submit-bar">
+            <div>
+                <strong>Queda como solicitud operativa</strong>
+                <span>Tauro revisa, genera la guía y carga tracking/PDF cuando corresponda.</span>
+            </div>
+            <div class="submit-actions">
+                <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
+                <button type="submit" class="btn btn-primary" {% if not productos or not remitente %}disabled{% endif %}>
+                    Crear solicitud
+                </button>
+            </div>
         </div>
-    </div>
-
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
-        <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
-        <button type="submit" class="btn btn-primary" {% if not productos %}disabled{% endif %}>Crear solicitud</button>
-    </div>
+    </section>
 </form>
+
+<script>
+  const savedSelect = document.getElementById("destinatario_id");
+  const fieldMap = {
+    nombre: "dest_nombre",
+    documento: "dest_documento",
+    email: "dest_email",
+    telefono: "dest_telefono",
+    direccion: "dest_direccion",
+    ciudad: "dest_ciudad",
+    estado: "dest_estado",
+    cp: "dest_zip",
+  };
+
+  function setField(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value || "";
+  }
+
+  if (savedSelect) {
+    savedSelect.addEventListener("change", () => {
+      const option = savedSelect.options[savedSelect.selectedIndex];
+      if (!option || !option.value) return;
+      Object.entries(fieldMap).forEach(([dataKey, inputId]) => setField(inputId, option.dataset[dataKey]));
+      setField("destino_pais", option.dataset.pais);
+      setField("dest_pais", option.dataset.pais);
+    });
+  }
+
+  const countrySelect = document.getElementById("destino_pais");
+  if (countrySelect) {
+    countrySelect.addEventListener("change", () => setField("dest_pais", countrySelect.value));
+  }
+</script>
 {% endblock %}
