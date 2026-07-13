@@ -1,8 +1,25 @@
+from __future__ import annotations
+
 import os
 import time
 import requests
 from abc import ABC, abstractmethod
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    def load_dotenv(path: str | None = None):
+        env_path = path or ".env"
+        if not os.path.exists(env_path):
+            return False
+        with open(env_path, "r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        return True
 
 load_dotenv()
 
@@ -62,8 +79,14 @@ class FedExClient(CarrierBase):
 
         resp = self._request_with_retry("POST", url, data=payload, headers=headers, auth_call=True)
         data = resp.json()
+        access_token = data.get("access_token")
+        if not access_token:
+            raise RuntimeError(
+                f"[fedex] No se pudo obtener token OAuth en ambiente {self.environment}. "
+                f"Status {resp.status_code}: {resp.text[:500]}"
+            )
 
-        self._token = data["access_token"]
+        self._token = access_token
         self._token_expires_at = time.time() + data.get("expires_in", 3600)
         return self._token
 
@@ -229,14 +252,21 @@ class FedExClient(CarrierBase):
                 return {"encontrado": False, "error": resp.text}
 
             data = resp.json()
-            rate_detail = (
-                data.get("output", {})
-                .get("rateReplyDetails", [{}])[0]
-                .get("ratedShipmentDetails", [{}])[0]
-            )
-
-            if not rate_detail:
+            reply_details = data.get("output", {}).get("rateReplyDetails", [])
+            if not reply_details:
                 return {"encontrado": False, "error": "Sin tarifas en respuesta FedEx"}
+
+            rated = reply_details[0].get("ratedShipmentDetails", []) or []
+            if not rated:
+                return {"encontrado": False, "error": "Sin tarifas en respuesta FedEx"}
+
+            # FedEx devuelve tarifa LIST (precio de lista) y ACCOUNT (tu tarifa
+            # negociada) en el mismo array, sin orden garantizado. Hay que elegir
+            # ACCOUNT: es el costo real de Tauro y la base correcta del markup.
+            rate_detail = next(
+                (d for d in rated if "ACCOUNT" in (d.get("rateType") or "").upper()),
+                rated[0],
+            )
 
             total_net_charge = rate_detail.get("totalNetCharge")
             if total_net_charge is None:
@@ -276,8 +306,69 @@ class FedExClient(CarrierBase):
             "En el MVP las guías se generan manualmente desde el portal FedEx."
         )
 
+    def track_many(self, tracking_numbers: list[str]) -> dict:
+        """
+        Consulta el estado FedEx de varios trackings.
+
+        Retorna un diccionario por tracking con el primer trackResult crudo de FedEx.
+        La normalización del estado de negocio la hace servicios/tracking_fedex_tauro.py.
+        """
+        clean_numbers = []
+        for number in tracking_numbers:
+            text = str(number or "").strip()
+            if text and text not in clean_numbers:
+                clean_numbers.append(text)
+
+        if not clean_numbers:
+            return {}
+
+        url = f"{self.base_url}/track/v1/trackingnumbers"
+        payload = {
+            "includeDetailedScans": True,
+            "trackingInfo": [
+                {"trackingNumberInfo": {"trackingNumber": number}}
+                for number in clean_numbers
+            ],
+        }
+
+        resp = self._request_with_retry(
+            "POST",
+            url,
+            json=payload,
+            headers={"Accept": "application/json", "X-locale": "es_AR"},
+        )
+
+        if resp.status_code != 200:
+            raise RuntimeError(f"[fedex] track error {resp.status_code}: {resp.text[:500]}")
+
+        data = resp.json()
+        output: dict[str, dict] = {}
+        complete_results = data.get("output", {}).get("completeTrackResults", [])
+
+        for complete in complete_results:
+            tracking = str(complete.get("trackingNumber") or "").strip()
+            track_results = complete.get("trackResults") or []
+            if not tracking and track_results:
+                tracking_info = track_results[0].get("trackingNumberInfo") or {}
+                tracking = str(tracking_info.get("trackingNumber") or "").strip()
+            if tracking:
+                output[tracking] = track_results[0] if track_results else {
+                    "error": {"message": "FedEx no devolvió trackResults"},
+                }
+
+        for tracking in clean_numbers:
+            output.setdefault(
+                tracking,
+                {"error": {"message": "FedEx no devolvió resultado para este tracking"}},
+            )
+
+        return output
+
     def track(self, tracking_number: str) -> dict:
         """
-        FASE 2 — No activo en MVP.
+        Consulta un único tracking FedEx.
         """
-        raise NotImplementedError("track está reservado para Fase 2.")
+        tracking_number = str(tracking_number or "").strip()
+        if not tracking_number:
+            return {"error": "tracking_number vacío"}
+        return self.track_many([tracking_number]).get(tracking_number, {})

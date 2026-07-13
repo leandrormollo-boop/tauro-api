@@ -12,6 +12,12 @@ class CotizacionInput(BaseModel):
     largo_cm: float = Field(..., gt=0, description="Largo del paquete")
     ancho_cm: float = Field(..., gt=0, description="Ancho del paquete")
     alto_cm: float = Field(..., gt=0, description="Alto del paquete")
+    # Datos para la valuación aduanera de FedEx (declaredValue / commodity).
+    # Opcionales: si no vienen, FedEx usa el default histórico de USD 100.
+    valor_declarado_usd: Optional[float] = Field(None, ge=0, description="Valor declarado por unidad (USD)")
+    hs_code: Optional[str] = Field(None, description="Código HS del producto")
+    descripcion_en: Optional[str] = Field(None, description="Descripción en inglés para el commodity")
+    unidades: int = Field(1, ge=1, description="Cantidad de piezas")
 
     @validator("alto_cm")
     def suma_dimensiones(cls, v, values):

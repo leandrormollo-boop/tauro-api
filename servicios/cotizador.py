@@ -84,6 +84,12 @@ def cotizar(
             "largo": input_data.largo_cm,
             "ancho": input_data.ancho_cm,
             "alto": input_data.alto_cm,
+            # Valuación aduanera: usa el valor real del producto si vino;
+            # si no, cae al default histórico (evita subdeclarar envíos caros).
+            "valor_declarado_usd": input_data.valor_declarado_usd or 100,
+            "hs_code": input_data.hs_code or "",
+            "descripcion_en": input_data.descripcion_en or "Merchandise",
+            "unidades": input_data.unidades or 1,
         },
     )
 

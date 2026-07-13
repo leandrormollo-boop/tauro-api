@@ -109,6 +109,9 @@ def obtener_precio_envio(cliente_id: str, producto_id: str, destino_pais: str) -
             largo_cm=producto.largo_cm,
             ancho_cm=producto.ancho_cm,
             alto_cm=producto.alto_cm,
+            valor_declarado_usd=producto.valor_usd_default,
+            hs_code=producto.hs_code,
+            descripcion_en=producto.nombre_invoice,
         ),
     )
 
