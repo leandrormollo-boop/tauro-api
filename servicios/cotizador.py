@@ -11,7 +11,7 @@ from core.fedex_client import FedExClient
 from modelos.cotizacion import (
     CotizacionInput, CotizacionOutput, calcular_peso_volumetrico,
 )
-from servicios.pricing import aplicar_pricing, get_pricing_config
+from servicios.pricing import aplicar_pricing, get_pricing_config, parse_monto_ars
 from servicios.rutas import get_ruta, pais_a_iso2, ciudad_a_state
 
 
@@ -19,7 +19,13 @@ COTIZACION_VALIDA_HORAS = 24
 
 
 def _get_dolar_ars() -> float:
-    """Lee el tipo de cambio de la tabla config."""
+    """
+    Lee el tipo de cambio de config, tolerando formato argentino (1.450 -> 1450)
+    y con guarda de rango: un dólar ARS realista no baja de 100 ni supera 100.000.
+    Si el valor guardado es basura (0, mal tipeado, fuera de rango), usa el fallback
+    y deja una alerta en el log en vez de romper todos los precios en silencio.
+    """
+    fallback = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -27,12 +33,17 @@ def _get_dolar_ars() -> float:
                     "SELECT valor FROM config WHERE parametro = 'COTIZACION_DOLAR_ARS'",
                 )
                 row = cur.fetchone()
-        if row:
-            return float(row["valor"])
+        if row and row["valor"] is not None:
+            valor = parse_monto_ars(row["valor"])
+            if valor is not None and 100 <= valor <= 100_000:
+                return valor
+            print(
+                f"[cotizador] ALERTA: COTIZACION_DOLAR_ARS fuera de rango "
+                f"({row['valor']!r} -> {valor}); usando fallback {fallback}"
+            )
     except Exception as e:
         print(f"[cotizador] Error leyendo tipo de cambio: {e}")
-    # fallback al env var
-    return float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+    return fallback
 
 
 def cotizar(

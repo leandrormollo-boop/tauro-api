@@ -32,6 +32,7 @@ from servicios.cotizador import cotizar
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
 from servicios.api_b2b import obtener_precio_envio
 from servicios.solicitudes_guia import crear_solicitud_guia, listar_solicitudes_cliente
+from servicios.pricing import parse_monto_ars
 from servicios.direcciones import (
     TIPO_DESTINATARIO,
     TIPO_REMITENTE,
@@ -374,12 +375,7 @@ def envio_nuevo_post(
             motivo = precio.get("motivo") or "sin_precio"
             raise ValueError(f"No se pudo cotizar ese producto/destino ({motivo}).")
 
-        precio_final = None
-        if precio_cliente_final_ars.strip():
-            precio_raw = precio_cliente_final_ars.strip()
-            if "," in precio_raw:
-                precio_raw = precio_raw.replace(".", "").replace(",", ".")
-            precio_final = float(precio_raw)
+        precio_final = parse_monto_ars(precio_cliente_final_ars)
 
         if guardar_destinatario:
             crear_direccion(
