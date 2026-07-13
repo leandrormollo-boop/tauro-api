@@ -5,6 +5,8 @@
 # Cookie httponly "admin_token" durante 8hs.
 # ============================================================
 
+from __future__ import annotations
+
 import os
 import secrets
 import subprocess
@@ -37,14 +39,33 @@ from servicios.solicitudes_guia import (
     contar_solicitudes_pendientes,
     listar_solicitudes_admin,
 )
+from servicios.tracking_fedex_tauro import (
+    fedex_environment,
+    get_tracking_summary,
+    load_state as load_tracking_state,
+    reset_tracking_checkpoint,
+    run_tracking,
+)
 from modelos.ruta import Ruta
+from servicios.rate_limit import check_rate, reset_rate, client_ip
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "tauro2026")
-COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+if not ADMIN_PASSWORD:
+    # Nunca un default público. Si no hay contraseña configurada, generamos una
+    # aleatoria efímera y la dejamos en el log (visible en Railway) para que el
+    # dueño la vea una vez y configure ADMIN_PASSWORD en las variables de entorno.
+    ADMIN_PASSWORD = secrets.token_urlsafe(12)
+    print("[admin] ⚠️  ADMIN_PASSWORD no está configurada en el entorno.")
+    print(f"[admin] ⚠️  Contraseña temporal (cambia en cada restart): {ADMIN_PASSWORD}")
+    print("[admin] ⚠️  Configurá ADMIN_PASSWORD en Railway → Variables cuanto antes.")
+
+# En producción (HTTPS) las cookies deben ir con Secure. Default seguro: activado
+# salvo que se apague explícitamente para desarrollo local por HTTP.
+COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") != "0"
 
 # Token en memoria (se regenera en cada restart — suficiente para un solo admin)
 _ADMIN_TOKEN: str = secrets.token_urlsafe(32)
@@ -56,6 +77,16 @@ _MIGRATION_STATUS = {
     "finished_at": None,
     "returncode": None,
     "output": "",
+}
+
+_TRACKING_LOCK = threading.Lock()
+_TRACKING_STATUS = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "returncode": None,
+    "output": "",
+    "result": None,
 }
 
 
@@ -141,6 +172,39 @@ def _run_sheets_migration():
             })
 
 
+def _tracking_snapshot() -> dict:
+    with _TRACKING_LOCK:
+        return dict(_TRACKING_STATUS)
+
+
+def _run_tracking_fedex_job(mode: str, limit: int | None, dry_run: bool, target: str):
+    try:
+        result = run_tracking(mode=mode, limit=limit, dry_run=dry_run, target=target)
+        output = json_dumps_pretty(result)
+        with _TRACKING_LOCK:
+            _TRACKING_STATUS.update({
+                "running": False,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "returncode": 0,
+                "output": output[-40000:],
+                "result": result,
+            })
+    except Exception as e:
+        with _TRACKING_LOCK:
+            _TRACKING_STATUS.update({
+                "running": False,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "returncode": -1,
+                "output": f"Error ejecutando tracking FedEx: {e}",
+                "result": None,
+            })
+
+
+def json_dumps_pretty(value: dict) -> str:
+    import json
+    return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
 # ── Login ───────────────────────────────────────────────────
 
 @router.get("/login", response_class=HTMLResponse)
@@ -152,12 +216,22 @@ def admin_login_form(request: Request):
 
 @router.post("/login", response_class=HTMLResponse)
 def admin_login(request: Request, password: str = Form(...)):
-    if password != ADMIN_PASSWORD:
+    ip = client_ip(request)
+    if not check_rate(f"admin_login:{ip}", max_attempts=5, window_seconds=300):
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "Demasiados intentos. Esperá unos minutos e intentá de nuevo."},
+            status_code=429,
+        )
+    # Comparación de tiempo constante para no filtrar la contraseña por timing.
+    if not secrets.compare_digest(password, ADMIN_PASSWORD):
         return templates.TemplateResponse(
             request=request, name="admin/login.html",
             context={"error": "Contraseña incorrecta."},
+            status_code=401,
         )
-    response = RedirectResponse(url="/admin/home", status_code=303)
+    reset_rate(f"admin_login:{ip}")
+    response = RedirectResponse(url="/admin/tracking-fedex", status_code=303)
     response.set_cookie(
         key="admin_token", value=_ADMIN_TOKEN,
         httponly=True, max_age=60 * 60 * 8,
@@ -632,6 +706,106 @@ def admin_pedido_estado(
         guia_url=guia_url,
     )
     return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
+
+
+# ── Tracking FedEx TAURO 2026 ───────────────────────────────
+
+@router.get("/tracking-fedex", response_class=HTMLResponse)
+def admin_tracking_fedex(
+    request: Request,
+    started: Optional[str] = None,
+    reset: Optional[str] = None,
+    error: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    summary = None
+    summary_error = None
+    try:
+        summary = get_tracking_summary()
+    except Exception as e:
+        summary_error = str(e)
+
+    return templates.TemplateResponse(
+        request=request, name="admin/tracking_fedex.html",
+        context={
+            "seccion": "tracking_fedex",
+            "summary": summary,
+            "state": load_tracking_state(),
+            "status": _tracking_snapshot(),
+            "summary_error": summary_error,
+            "flash_ok": (
+                "Corrida iniciada. Esta pantalla se actualiza mientras trabaja."
+                if started else
+                "Checkpoint reiniciado."
+                if reset else None
+            ),
+            "flash_error": (
+                "Ya hay una corrida en curso."
+                if error == "running" else
+                "No se puede reiniciar el checkpoint mientras hay una corrida en curso."
+                if error == "reset_running" else
+                "FedEx está en sandbox: podés simular, pero no escribir ESTADO hasta pasar a production/prod."
+                if error == "sandbox_requires_dry_run" else None
+            ),
+        },
+    )
+
+
+@router.post("/tracking-fedex/run")
+def admin_tracking_fedex_run(
+    mode: str = Form("resume"),
+    limit: str = Form(""),
+    target: str = Form("test"),
+    dry_run: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    mode = mode if mode in {"initial", "resume"} else "resume"
+    target = target if target in {"source", "test"} else "test"
+    try:
+        parsed_limit = int(limit) if str(limit).strip() else 0
+    except ValueError:
+        parsed_limit = 0
+    parsed_limit = parsed_limit if parsed_limit > 0 else None
+    dry_run_bool = dry_run == "1"
+    if target == "source" and not dry_run_bool and fedex_environment() == "sandbox":
+        return RedirectResponse(url="/admin/tracking-fedex?error=sandbox_requires_dry_run", status_code=303)
+
+    with _TRACKING_LOCK:
+        if _TRACKING_STATUS["running"]:
+            return RedirectResponse(url="/admin/tracking-fedex?error=running", status_code=303)
+        _TRACKING_STATUS.update({
+            "running": True,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "finished_at": None,
+            "returncode": None,
+            "output": "Tracking FedEx en curso...",
+            "result": None,
+        })
+
+    thread = threading.Thread(
+        target=_run_tracking_fedex_job,
+        args=(mode, parsed_limit, dry_run_bool, target),
+        daemon=True,
+    )
+    thread.start()
+    return RedirectResponse(url="/admin/tracking-fedex?started=1", status_code=303)
+
+
+@router.post("/tracking-fedex/reset")
+def admin_tracking_fedex_reset(admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    with _TRACKING_LOCK:
+        if _TRACKING_STATUS["running"]:
+            return RedirectResponse(url="/admin/tracking-fedex?error=reset_running", status_code=303)
+    reset_tracking_checkpoint()
+    return RedirectResponse(url="/admin/tracking-fedex?reset=1", status_code=303)
 
 
 # ── Pagos ────────────────────────────────────────────────────

@@ -135,6 +135,35 @@ def validar_token(token: str) -> Optional[str]:
     return str(row["cliente_id"]).strip().upper() if row else None
 
 
+def consumir_magic_token(token: str) -> Optional[dict]:
+    """
+    Canjea un token de magic link: lo valida y lo marca usado en una sola
+    operación atómica (one-shot). Devuelve {cliente_id, email} o None si es
+    inválido, expirado o ya usado. Evita que el link del email quede válido
+    para siempre o se pueda reusar.
+    """
+    if not token or len(token) < 20:
+        return None
+    ahora = _now()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE sessions SET usado = TRUE
+                WHERE token = %s AND usado = FALSE AND expira_at > %s
+                RETURNING cliente_id, email
+                """,
+                (token, ahora),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "cliente_id": str(row["cliente_id"]).strip().upper(),
+        "email": row["email"],
+    }
+
+
 def revocar_token(token: str) -> bool:
     """Marca un token como usado (logout)."""
     with get_conn() as conn:

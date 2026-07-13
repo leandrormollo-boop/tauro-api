@@ -21,8 +21,9 @@ from fastapi.templating import Jinja2Templates
 from servicios.auth import (
     buscar_cliente_por_email, generar_token, validar_token,
     revocar_token, link_magico_url, get_markup_pct,
-    autenticar_cliente,
+    autenticar_cliente, consumir_magic_token,
 )
+from servicios.rate_limit import check_rate, reset_rate, client_ip
 from servicios.rutas import (
     get_rutas_activas, get_ruta,
     get_paises_origen, get_paises_destino, find_ruta_por_paises,
@@ -53,7 +54,9 @@ router = APIRouter(prefix="/portal", tags=["portal"])
 templates = Jinja2Templates(directory="templates")
 
 BASE_URL = os.getenv("BASE_URL")
-COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "0") == "1"
+# Cookies con Secure por defecto (Railway sirve por HTTPS). Apagar solo para
+# desarrollo local por HTTP con SESSION_COOKIE_SECURE=0.
+COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") != "0"
 SESSION_DAYS_INT = 7  # idéntico a SESSION_DAYS en servicios.auth
 
 
@@ -94,6 +97,17 @@ def login_submit(
     password: str = Form(...),
 ):
     """Login clásico con email + password. Setea cookie y redirige a /portal/home."""
+    ip = client_ip(request)
+    if not check_rate(f"portal_login:{ip}", max_attempts=8, window_seconds=300):
+        return templates.TemplateResponse(
+            request=request, name="portal/login.html",
+            context={
+                "mensaje": "Demasiados intentos. Esperá unos minutos e intentá de nuevo.",
+                "tipo_msg": "error",
+                "email_prefill": email,
+            },
+            status_code=429,
+        )
     cliente = autenticar_cliente(email, password)
     if not cliente:
         return templates.TemplateResponse(
@@ -106,6 +120,7 @@ def login_submit(
             status_code=401,
         )
 
+    reset_rate(f"portal_login:{ip}")
     token = generar_token(email, cliente)
     response = RedirectResponse(url="/portal/home", status_code=303)
     response.set_cookie(
@@ -120,6 +135,14 @@ def login_submit(
 @router.post("/login/send", response_class=HTMLResponse)
 def login_send(request: Request, email: str = Form(...)):
     """Magic link — para recuperación de contraseña / clientes sin password seteado."""
+    ip = client_ip(request)
+    if not check_rate(f"magic:{ip}", max_attempts=5, window_seconds=900):
+        return templates.TemplateResponse(
+            request=request, name="portal/login.html",
+            context={"mensaje": "Demasiados pedidos de link. Esperá unos minutos.", "tipo_msg": "error"},
+            status_code=429,
+        )
+
     cliente = buscar_cliente_por_email(email)
     if not cliente:
         return templates.TemplateResponse(
@@ -131,17 +154,19 @@ def login_send(request: Request, email: str = Form(...)):
     base_url = BASE_URL or str(request.base_url).rstrip("/")
     link = link_magico_url(base_url, token)
 
-    # Enviar email real — siempre logueamos el link en consola para debug
-    print(f"\n[LOGIN MÁGICO] {email} → {cliente}")
-    print(f"  Link: {link}\n")
-    enviado = False
+    # DEV explícito: mostrar el link en pantalla para poder entrar sin SMTP.
+    # El default (ENV no seteada) trata como producción: nunca expone el token.
+    es_dev = os.getenv("ENV", "").strip().upper() == "DEV"
+    if es_dev:
+        print(f"[login] magic link DEV para {email} → {cliente}")
+    else:
+        # Nunca imprimir el token de sesión en logs de producción.
+        print(f"[login] magic link solicitado para {cliente}")
+
     try:
-        enviado = enviar_link_magico(email, link, cliente)
+        enviar_link_magico(email, link, cliente)
     except Exception as e:
         print(f"[login] Error enviando email: {e}")
-
-    # En DEV mostramos el link en pantalla (no hay SMTP configurado todavía)
-    es_dev = os.getenv("ENV", "DEV").upper() != "PROD"
 
     return templates.TemplateResponse(
         request=request, name="portal/login.html",
@@ -157,16 +182,20 @@ def login_send(request: Request, email: str = Form(...)):
 
 @router.get("/auth")
 def auth_callback(token: str):
-    cliente = validar_token(token)
-    if not cliente:
+    # El token del email es de un solo uso: se valida y se marca usado de forma
+    # atómica, y se canjea por una sesión nueva (el link nunca se convierte en
+    # la cookie de larga duración).
+    datos = consumir_magic_token(token)
+    if not datos:
         return RedirectResponse(url="/portal/login?error=token_invalido", status_code=303)
 
+    nueva_sesion = generar_token(datos["email"], datos["cliente_id"])
     response = RedirectResponse(url="/portal/home", status_code=303)
     response.set_cookie(
-        key="token", value=token,
-        httponly=True, max_age=60 * 60 * 24 * 7,
+        key="token", value=nueva_sesion,
+        httponly=True, max_age=60 * 60 * 24 * SESSION_DAYS_INT,
         samesite="lax",
-        secure=COOKIE_SECURE,  # True en PROD (HTTPS), False en DEV
+        secure=COOKIE_SECURE,
     )
     return response
 
