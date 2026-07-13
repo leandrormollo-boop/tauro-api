@@ -231,7 +231,7 @@ def admin_login(request: Request, password: str = Form(...)):
             status_code=401,
         )
     reset_rate(f"admin_login:{ip}")
-    response = RedirectResponse(url="/admin/tracking-fedex", status_code=303)
+    response = RedirectResponse(url="/admin/home", status_code=303)
     response.set_cookie(
         key="admin_token", value=_ADMIN_TOKEN,
         httponly=True, max_age=60 * 60 * 8,

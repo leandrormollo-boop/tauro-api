@@ -1,0 +1,167 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Tracking FedEx{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Operaciones</div>
+  <h1>Tracking FedEx · TAURO 2026</h1>
+  <p>Rastrea `ENVIOS 2026`, ordena por `FECHA`, actualiza solo la columna `ESTADO` y guarda un checkpoint cronológico.</p>
+</div>
+
+{% if status.running %}
+<meta http-equiv="refresh" content="5">
+{% endif %}
+
+{% if summary_error %}
+<div class="flash-msg error">{{ summary_error }}</div>
+{% endif %}
+
+<div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 20px;">
+  <div class="stat-card">
+    <div class="label">Filas con tracking</div>
+    <div class="value">{{ summary.rows_with_tracking if summary else "-" }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Trackings únicos</div>
+    <div class="value">{{ summary.unique_trackings if summary else "-" }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Sin ESTADO</div>
+    <div class="value warn">{{ summary.blank_estado_rows if summary else "-" }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Checkpoint fila</div>
+    <div class="value">{{ state.last_processed_row or 1 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Checkpoint fecha</div>
+    <div class="value" style="font-size:18px;">{{ state.last_processed_date or "-" }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">FedEx env</div>
+    <div class="value" style="font-size:18px;">{{ summary.fedex_environment if summary else "-" }}</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Ejecutar rastreo</h3>
+    <p class="subtitle">
+      La corrida inicial empieza desde la fecha más antigua. Continuar usa el checkpoint de fecha y fila, sin releer lo anterior.
+    </p>
+    {% if summary and summary.fedex_environment == 'sandbox' %}
+      <p class="subtitle" style="color:#fbbf24;">
+        Aviso: FedEx está en sandbox. Sirve para probar el flujo, pero no confirma estados reales históricos; la hoja madre queda protegida hasta pasar `FEDEX_ENVIRONMENT` a production/prod.
+      </p>
+    {% endif %}
+
+    {% if status.running %}
+      <p style="font-family:var(--font-mono);font-size:12px;color:var(--accent);">
+        Tracking en curso desde {{ status.started_at }}. Esta pantalla se actualiza cada 5 segundos.
+      </p>
+    {% else %}
+      <form method="POST" action="/admin/tracking-fedex/run">
+        <div class="form-group">
+          <label>Modo</label>
+          <select name="mode">
+            <option value="resume">Continuar desde checkpoint</option>
+            <option value="initial">Corrida inicial / reprocesar desde el inicio</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Destino</label>
+          <select name="target">
+            <option value="test">Hoja de prueba: PRUEBA TRACKING FEDEX</option>
+            <option value="source">Hoja madre: ENVIOS 2026</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Límite de trackings únicos</label>
+          <input type="number" name="limit" min="1" placeholder="Vacío = todos">
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;color:var(--fg-3);font-size:13px;margin:12px 0 18px;">
+          <input type="checkbox" name="dry_run" value="1" style="width:auto;">
+          Simular sin escribir en Sheets
+        </label>
+        <div class="actions">
+          <button type="submit" class="btn btn-primary">Iniciar rastreo</button>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>Checkpoint</h3>
+    <div class="kpi-row">
+      <div class="stat-card">
+        <div class="label">Última fecha/fila</div>
+        <div class="value" style="font-size:15px;">{{ state.last_processed_date or "-" }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Última fila</div>
+        <div class="value">{{ state.last_processed_row or 1 }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Último tracking</div>
+        <div class="value" style="font-size:15px;">{{ state.last_tracking or "-" }}</div>
+      </div>
+    </div>
+    <p class="subtitle">
+      Reiniciar checkpoint hace que la próxima corrida pueda volver a empezar desde la fecha más antigua. No borra datos de TAURO.
+    </p>
+    {% if not status.running %}
+    <form method="POST" action="/admin/tracking-fedex/reset">
+      <button type="submit" class="btn btn-ghost">Reiniciar checkpoint</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:20px;">
+  <h3>Estados actuales</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Estado</th><th class="num">Filas</th></tr>
+      </thead>
+      <tbody>
+        {% if summary %}
+          {% for estado, cantidad in summary.estado_counts.items() %}
+          <tr>
+            <td>
+              <span class="badge {% if 'ENTREGADO' in estado %}ok{% elif 'RETENIDO' in estado or 'CANCELADO' in estado %}error{% elif 'PROCESO' in estado %}warn{% else %}muted{% endif %}">
+                {{ estado }}
+              </span>
+            </td>
+            <td class="num">{{ cantidad }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="2" class="empty">Sin resumen disponible.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:20px;">
+  <h3>Última corrida</h3>
+  {% set run = state.last_run %}
+  {% if run %}
+    <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px;">
+      <div class="stat-card"><div class="stat-label">Modo</div><div class="stat-value" style="font-size:16px;">{{ run.mode }}</div></div>
+      <div class="stat-card"><div class="stat-label">Destino</div><div class="stat-value" style="font-size:16px;">{{ run.target_tab or run.target }}</div></div>
+      <div class="stat-card"><div class="stat-label">Dry run</div><div class="stat-value" style="font-size:16px;">{{ "Sí" if run.dry_run else "No" }}</div></div>
+      <div class="stat-card"><div class="stat-label">Trackings consultados</div><div class="stat-value" style="font-size:16px;">{{ run.requested_unique_trackings }}</div></div>
+      <div class="stat-card"><div class="stat-label">Filas escritas</div><div class="stat-value" style="font-size:16px;">{{ run.sheet_rows_written }}</div></div>
+      <div class="stat-card"><div class="stat-label">Orden</div><div class="stat-value" style="font-size:16px;">{{ run.order_by or "FECHA, FILA TAURO" }}</div></div>
+    </div>
+    {% if run.test_tab_url %}
+      <p class="subtitle">Resultado de prueba: <a href="{{ run.test_tab_url }}" target="_blank" rel="noopener">abrir PRUEBA TRACKING FEDEX</a></p>
+    {% endif %}
+    <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.22);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:16px;max-height:420px;overflow:auto;font-size:12px;line-height:1.5;">{{ status.output or "Sin salida de esta sesión. Último resultado guardado en checkpoint." }}</pre>
+  {% else %}
+    <p class="empty">Todavía no se ejecutó ninguna corrida.</p>
+  {% endif %}
+</div>
+{% endblock %}
