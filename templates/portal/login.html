@@ -2,8 +2,19 @@
 {% block title %}Ingresar{% endblock %}
 
 {% block content %}
-<div style="min-height:calc(100vh - 56px);display:flex;align-items:center;justify-content:center;padding:40px 24px;">
+<div class="login-wrap">
   <div class="login-card fade-up">
+
+    <div class="side-logo" style="padding:0 0 18px;">
+      <span class="mark">
+        <svg width="20" height="20" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+          <path d="M18 22 C13 18 10 18 8 12 M46 22 C51 18 54 18 56 12" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+          <path d="M17 24 L47 24 L47 30 L36 30 L36 50 L28 50 L28 30 L17 30 Z" fill="#fff"/>
+        </svg>
+      </span>
+      Tauro<span class="dim">solutions</span>
+    </div>
+
     <h1>Ingresar al portal</h1>
     <p class="sub">Iniciá sesión con tu email y contraseña.</p>
 
@@ -34,7 +45,7 @@
     </form>
 
     <details style="margin-top:20px;">
-      <summary style="cursor:pointer;color:var(--fg-3,#888);font-size:13px;">
+      <summary style="cursor:pointer;color:var(--fg-3);font-size:13px;">
         ¿Olvidaste tu contraseña?
       </summary>
       <form method="POST" action="/portal/login/send" style="margin-top:12px;">
@@ -51,5 +62,5 @@
 
     <p class="login-hint">¿No tenés acceso? Contactá a Tauro para crear tu cuenta.</p>
   </div>
-</div><!-- end centering wrap -->
+</div>
 {% endblock %}

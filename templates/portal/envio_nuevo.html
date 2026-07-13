@@ -5,8 +5,8 @@
 <div class="page-title page-title-row">
     <div>
         <div class="eyebrow">Nuevo envío</div>
-        <h1>Crear envío</h1>
-        <p>Armá la operación con remitente, destinatario, producto e invoice. Por ahora queda como solicitud para gestión Tauro.</p>
+        <h1>Crear solicitud</h1>
+        <p>Completá remitente, destinatario y paquete. Tauro revisa la solicitud y genera la guía.</p>
     </div>
     <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Libreta de direcciones</a>
 </div>
@@ -17,51 +17,33 @@
 
 {% if not productos %}
     <div class="msg warn">
-        No hay productos activos para crear solicitudes. Primero cargá un producto en el catálogo y esperá la validación de Tauro.
+        No tenés productos activos para crear solicitudes. Primero cargá un producto en el catálogo y esperá la validación de Tauro.
     </div>
 {% endif %}
 
-<form method="POST" action="/portal/envios/nuevo" class="shipment-shell">
-    <aside class="wizard-rail">
-        <div class="wizard-step active">
-            <span>1</span>
-            <div>
-                <strong>Remitente</strong>
-                <small>Origen guardado</small>
-            </div>
-        </div>
-        <div class="wizard-step">
-            <span>2</span>
-            <div>
-                <strong>Destinatario</strong>
-                <small>Datos de entrega</small>
-            </div>
-        </div>
-        <div class="wizard-step">
-            <span>3</span>
-            <div>
-                <strong>Contenido</strong>
-                <small>Producto e invoice</small>
-            </div>
-        </div>
-        <div class="wizard-step">
-            <span>4</span>
-            <div>
-                <strong>Confirmación</strong>
-                <small>Solicitud operativa</small>
-            </div>
-        </div>
-    </aside>
+<div class="stepper">
+    <div class="step active">
+        <span>1</span>
+        <label>Remitente</label>
+    </div>
+    <div class="step">
+        <span>2</span>
+        <label>Destinatario</label>
+    </div>
+    <div class="step">
+        <span>3</span>
+        <label>Paquete</label>
+    </div>
+    <div class="step">
+        <span>4</span>
+        <label>Confirmar</label>
+    </div>
+</div>
 
-    <section class="shipment-main">
-        <div class="card">
-            <div class="card-head">
-                <div>
-                    <h3>Remitente</h3>
-                    <p>Usamos esta dirección como origen de la guía y de los documentos.</p>
-                </div>
-                <span class="badge muted">Origen</span>
-            </div>
+<form method="POST" action="/portal/envios/nuevo">
+    <div class="card">
+        <div class="form-section">
+            <h4><span class="n">1</span> Remitente <span class="badge muted">Origen</span></h4>
 
             {% if remitentes %}
                 <div class="form-group">
@@ -83,19 +65,13 @@
                 </div>
             {% else %}
                 <div class="msg warn" style="margin-bottom:0;">
-                    No hay remitente cargado. Agregalo desde Direcciones o completá el perfil del cliente en el admin.
+                    No hay remitente cargado. Agregalo desde la libreta de direcciones o completá el perfil en el admin.
                 </div>
             {% endif %}
         </div>
 
-        <div class="card">
-            <div class="card-head">
-                <div>
-                    <h3>Destinatario</h3>
-                    <p>Podés cargarlo una vez o reutilizar uno frecuente.</p>
-                </div>
-                <span class="badge warn">Entrega</span>
-            </div>
+        <div class="form-section">
+            <h4><span class="n">2</span> Destinatario <span class="badge warn">Entrega</span></h4>
 
             {% if destinatarios %}
                 <div class="form-group">
@@ -184,14 +160,8 @@
             </div>
         </div>
 
-        <div class="card">
-            <div class="card-head">
-                <div>
-                    <h3>Contenido e invoice</h3>
-                    <p>El producto sale del catálogo aprobado para mantener HS code, medidas y valor declarado consistentes.</p>
-                </div>
-                <span class="badge ok">Catálogo</span>
-            </div>
+        <div class="form-section" style="margin-bottom:0;">
+            <h4><span class="n">3</span> Paquete e invoice <span class="badge ok">Catálogo</span></h4>
 
             <div class="form-grid-3">
                 <div class="form-group wide-field">
@@ -220,20 +190,20 @@
                 <textarea name="observaciones" rows="3" placeholder="Instrucciones para Tauro, referencia interna, nota comercial...">{{ form.observaciones or '' }}</textarea>
             </div>
         </div>
+    </div>
 
-        <div class="submit-bar">
-            <div>
-                <strong>Queda como solicitud operativa</strong>
-                <span>Tauro revisa, genera la guía y carga tracking/PDF cuando corresponda.</span>
-            </div>
-            <div class="submit-actions">
-                <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
-                <button type="submit" class="btn btn-primary" {% if not productos or not remitente %}disabled{% endif %}>
-                    Crear solicitud
-                </button>
-            </div>
+    <div class="submit-bar">
+        <div>
+            <strong>Queda como solicitud operativa</strong>
+            <span>Tauro revisa, genera la guía y te carga tracking y PDF cuando corresponda.</span>
         </div>
-    </section>
+        <div class="submit-actions">
+            <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
+            <button type="submit" class="btn btn-primary" {% if not productos or not remitente %}disabled{% endif %}>
+                Crear solicitud
+            </button>
+        </div>
+    </div>
 </form>
 
 <script>

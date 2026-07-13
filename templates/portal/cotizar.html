@@ -2,76 +2,111 @@
 {% block title %}Cotizar{% endblock %}
 
 {% block content %}
-<h1>Cotizar envío</h1>
+<div class="page-title">
+    <span class="eyebrow">Cotizador</span>
+    <h1>Cotizá tu envío</h1>
+    <p>Precio cerrado al instante, sin compromiso. Si te sirve, lo convertís en envío con un click.</p>
+</div>
 
 {% if error %}
-    <div class="alert alert-error">{{ error }}</div>
+    <div class="msg error" style="max-width:760px;">
+        <strong>No pudimos cotizar ese envío.</strong> {{ error }}
+    </div>
 {% endif %}
 
-<div class="grid-2">
-    <div class="card">
-        <h2>Datos del envío</h2>
-        <form method="POST" action="/portal/cotizar" class="form">
-            <div class="grid-2">
-                <label>
-                    Origen (país)
-                    <select name="origen_pais" required>
+<div class="card" style="max-width:760px;">
+    <form id="form-cotizar" method="POST" action="/portal/cotizar">
+        <div class="form-section">
+            <h4><span class="n">1</span> Ruta</h4>
+            <div class="form-grid-2">
+                <div class="form-group">
+                    <label for="origen_pais">Origen (país)</label>
+                    <select name="origen_pais" id="origen_pais" required>
                         {% for p in paises_origen %}
                             <option value="{{ p }}">{{ p }}</option>
                         {% endfor %}
                     </select>
-                </label>
-
-                <label>
-                    Destino (país)
-                    <select name="destino_pais" required>
+                </div>
+                <div class="form-group">
+                    <label for="destino_pais">Destino (país)</label>
+                    <select name="destino_pais" id="destino_pais" required>
                         {% for p in paises_destino %}
                             <option value="{{ p }}">{{ p }}</option>
                         {% endfor %}
                     </select>
-                </label>
+                </div>
             </div>
-
-            <p class="help" style="margin:-4px 0 8px;font-size:.85rem;color:#888">
-                Tauro asume ciudad y código postal por defecto según la ruta.
+            <p style="font-size:12.5px;color:var(--fg-4);margin:-4px 0 0;">
+                Tauro asume ciudad y código postal por defecto según la ruta. No tenés que cargar nada más.
             </p>
+        </div>
 
-            <label>
-                Peso (kg)
-                <input type="number" name="peso_kg" min="0.1" max="70" step="0.1" required placeholder="2.5">
-            </label>
-
-            <div class="grid-3">
-                <label>Largo (cm)<input type="number" name="largo_cm" min="1" step="0.5" required></label>
-                <label>Ancho (cm)<input type="number" name="ancho_cm" min="1" step="0.5" required></label>
-                <label>Alto (cm)<input type="number" name="alto_cm" min="1" step="0.5" required></label>
+        <div class="form-section" style="margin-bottom:20px;">
+            <h4><span class="n">2</span> Paquete</h4>
+            <div class="form-group">
+                <label for="peso_kg">Peso (kg)</label>
+                <input type="number" name="peso_kg" id="peso_kg" min="0.1" max="70" step="0.1" required placeholder="2.5">
             </div>
+            <div class="form-grid-3">
+                <div class="form-group">
+                    <label for="largo_cm">Largo (cm)</label>
+                    <input type="number" name="largo_cm" id="largo_cm" min="1" step="0.5" required placeholder="30">
+                </div>
+                <div class="form-group">
+                    <label for="ancho_cm">Ancho (cm)</label>
+                    <input type="number" name="ancho_cm" id="ancho_cm" min="1" step="0.5" required placeholder="20">
+                </div>
+                <div class="form-group">
+                    <label for="alto_cm">Alto (cm)</label>
+                    <input type="number" name="alto_cm" id="alto_cm" min="1" step="0.5" required placeholder="15">
+                </div>
+            </div>
+        </div>
 
-            <button type="submit" class="btn-primary">Cotizar</button>
-        </form>
+        <button type="submit" class="btn btn-primary btn-full">Cotizar envío</button>
+    </form>
+
+    <div id="toro-loading" class="toro-loader" style="display:none;">
+        <div class="dots">
+            <svg class="toro" width="36" height="24" viewBox="0 0 72 48" fill="none" aria-hidden="true">
+                <path d="M49 9 C46 6 45 4 45 1 M59 9 C62 6 63 4 63 1" stroke="var(--accent)" stroke-width="3.5" stroke-linecap="round"/>
+                <path d="M6 20 C4 14 10 10 16 11 L42 11 C46 8 52 6 58 9 C64 12 66 17 63 21 L60 24 L58 22 C56 24 53 25 50 24 L48 30 L49 40 L43 40 L41 31 L38 26 L20 26 L18 32 L16 40 L10 40 L12 30 L10 25 C7 24 7 22 6 20 Z" fill="var(--accent)"/>
+                <path d="M6 19 C3 17 2 14 2 11" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p>Consultando tarifas de la ruta…</p>
     </div>
 
-    <div class="card">
-        <h2>Resultado</h2>
-        {% if resultado %}
-            <div class="kpi">
-                <span class="kpi-label">Precio final</span>
-                <span class="kpi-value">USD {{ resultado.precio_final_usd }}</span>
-            </div>
-            <p class="kpi-sub">≈ ARS {{ "{:,.0f}".format(resultado.precio_final_ars).replace(",", ".") }}</p>
+    {% if resultado %}
+    <div id="resultado" class="result-box fade-up">
+        <div style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-4);margin-bottom:6px;">
+            Precio final puerta a puerta
+        </div>
+        <div class="price-hero">
+            {{ "{:,.0f}".format(resultado.precio_final_ars).replace(",", ".") }}<span class="currency">ARS</span>
+        </div>
 
-            <hr>
-            <dl class="detail">
-                <dt>Ruta</dt><dd>{{ resultado.ruta }}</dd>
-                <dt>Peso real</dt><dd>{{ resultado.peso_real_kg }} kg</dd>
-                <dt>Peso volumétrico</dt><dd>{{ resultado.peso_volumetrico_kg }} kg</dd>
-                <dt>Peso usado</dt><dd>{{ resultado.peso_usado_kg }} kg</dd>
-                <dt>Días estimados</dt><dd>{{ resultado.dias_estimados }}</dd>
-                <dt>Válida hasta</dt><dd>{{ resultado.valida_hasta }}</dd>
-            </dl>
-        {% else %}
-            <p class="empty">Completá el formulario para cotizar.</p>
-        {% endif %}
+        <hr class="divider" style="margin:16px 0;">
+
+        <div class="mini-row"><span>Precio en dólares</span><strong>USD {{ resultado.precio_final_usd }}</strong></div>
+        <div class="mini-row"><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
+        <div class="mini-row"><span>Peso facturable</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
+        <div class="mini-row"><span>Peso real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
+        <div class="mini-row"><span>Tiempo estimado</span><strong>{{ resultado.dias_estimados }} días</strong></div>
+        <div class="mini-row"><span>Cotización válida hasta</span><strong>{{ resultado.valida_hasta }}</strong></div>
+
+        <a href="/portal/envios/nuevo" class="btn btn-primary btn-full" style="margin-top:18px;">Crear envío con este precio</a>
     </div>
+    {% endif %}
 </div>
+
+<script>
+document.getElementById('form-cotizar').addEventListener('submit', function () {
+    this.style.display = 'none';
+    var res = document.getElementById('resultado');
+    if (res) res.style.display = 'none';
+    document.getElementById('toro-loading').style.display = 'block';
+});
+</script>
 {% endblock %}

@@ -85,7 +85,7 @@
       letter-spacing: 0.1em;
       background: var(--accent-glow);
       color: var(--accent);
-      border: 1px solid rgba(167,139,250,.3);
+      border: 1px solid rgba(255,45,107,.3);
       padding: 2px 8px;
       border-radius: var(--radius-pill);
     }
@@ -124,6 +124,7 @@
 
       <div class="sidebar-label">Operaciones</div>
       <a href="/admin/pedidos" {% if seccion == 'pedidos' %}class="active"{% endif %}>Solicitudes de guía</a>
+      <a href="/admin/tracking-fedex" {% if seccion == 'tracking_fedex' %}class="active"{% endif %}>Tracking FedEx</a>
       <a href="/admin/productos" {% if seccion == 'productos' %}class="active"{% endif %}>Catálogo / Validar</a>
       <a href="/admin/rutas" {% if seccion == 'rutas' %}class="active"{% endif %}>Rutas</a>
       <a href="/admin/config" {% if seccion == 'config' %}class="active"{% endif %}>Configuración</a>

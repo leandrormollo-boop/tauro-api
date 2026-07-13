@@ -4,30 +4,110 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Portal{% endblock %} · Tauro Solutions</title>
+    <meta name="robots" content="noindex">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="/static/css/tauro.css">
+    <link rel="icon" type="image/svg+xml"
+          href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23ff2d6b'/%3E%3Cpath d='M18 22 C13 18 10 18 8 12 M46 22 C51 18 54 18 56 12' stroke='%23fff' stroke-width='4' stroke-linecap='round' fill='none'/%3E%3Cpath d='M17 24 L47 24 L47 30 L36 30 L36 50 L28 50 L28 30 L17 30 Z' fill='%23fff'/%3E%3C/svg%3E">
 </head>
 <body>
-    <header class="topbar">
-        <a href="/portal/home" class="logo">TAURO</a>
-        {% if cliente %}
-        <nav class="nav">
-            <a href="/portal/home">Inicio</a>
-            <a href="/portal/cotizar">Cotizar</a>
-            <a href="/portal/envios">Envíos</a>
-            <a href="/portal/direcciones">Direcciones</a>
-            <a href="/portal/catalogo">Catálogo</a>
-            <span class="user">{{ cliente }}</span>
-            <a href="/portal/logout" class="logout">Salir</a>
+{% if cliente %}
+<input type="checkbox" id="side-toggle" aria-hidden="true">
+<div class="shell">
+    <label for="side-toggle" class="side-overlay" aria-hidden="true"></label>
+
+    <!-- ── SIDEBAR ─────────────────────────────────────── -->
+    <aside class="sidebar">
+        <a href="/portal/home" class="side-logo">
+            <span class="mark">
+                <svg width="20" height="20" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                    <path d="M18 22 C13 18 10 18 8 12 M46 22 C51 18 54 18 56 12" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+                    <path d="M17 24 L47 24 L47 30 L36 30 L36 50 L28 50 L28 30 L17 30 Z" fill="#fff"/>
+                </svg>
+            </span>
+            Tauro<span class="dim">solutions</span>
+        </a>
+
+        <div class="side-user">
+            <div class="hola">Bienvenido</div>
+            <div class="nombre">{{ cliente }}</div>
+            <span class="estado">Cuenta activa</span>
+        </div>
+
+        {% set path = request.url.path if request else "" %}
+        <nav class="side-nav">
+            <a href="/portal/home" class="side-item {% if path.endswith('/home') %}active{% endif %}">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
+                Escritorio
+            </a>
+
+            <a href="/portal/envios/nuevo" class="side-item cta">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                Nuevo envío
+            </a>
+
+            <a href="/portal/cotizar" class="side-item {% if '/cotizar' in path %}active{% endif %}">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
+                Cotizar
+            </a>
+
+            <a href="/portal/envios" class="side-item {% if path.endswith('/envios') %}active{% endif %}">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8.5 12 3 3 8.5v7L12 21l9-5.5z"/><path d="M3.3 8.7 12 14l8.7-5.3M12 21v-7"/></svg>
+                Mis envíos
+            </a>
+
+            <a href="/portal/direcciones" class="side-item {% if '/direcciones' in path %}active{% endif %}">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>
+                Libreta
+            </a>
+
+            <a href="/portal/catalogo" class="side-item {% if '/catalogo' in path %}active{% endif %}">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-2.5"/></svg>
+                Mis productos
+            </a>
         </nav>
-        {% endif %}
-    </header>
 
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
+        <div class="side-foot">
+            <a href="/portal/logout" class="side-item">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
+                Salir
+            </a>
+        </div>
+    </aside>
 
-    <footer class="footer">
-        Tauro Solutions · Logística internacional · 2026
-    </footer>
+    <!-- ── MAIN ────────────────────────────────────────── -->
+    <div class="main">
+        <div class="mobile-bar">
+            <label for="side-toggle" class="burger" aria-label="Abrir menú">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+            </label>
+            <a href="/portal/home" class="side-logo" style="padding:0;font-size:15px;">
+                <span class="mark" style="width:28px;height:28px;">
+                    <svg width="16" height="16" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                        <path d="M18 22 C13 18 10 18 8 12 M46 22 C51 18 54 18 56 12" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+                        <path d="M17 24 L47 24 L47 30 L36 30 L36 50 L28 50 L28 30 L17 30 Z" fill="#fff"/>
+                    </svg>
+                </span>
+                Tauro
+            </a>
+            <span style="width:40px;"></span>
+        </div>
+
+        <main class="main-inner">
+{% else %}
+<main>
+{% endif %}
+            {% block content %}{% endblock %}
+{% if cliente %}
+        </main>
+        <footer class="footer">
+            Tauro Solutions · Logística internacional · 2026
+        </footer>
+    </div>
+</div>
+{% else %}
+</main>
+{% endif %}
 </body>
 </html>

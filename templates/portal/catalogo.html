@@ -1,70 +1,124 @@
 {% extends "base.html" %}
-{% block title %}Catálogo{% endblock %}
+{% block title %}Mis productos{% endblock %}
 
 {% block content %}
-<h1>Mi catálogo</h1>
-<p class="subtitle">Productos pre-cargados para usar al armar guías. Cuando agregás uno nuevo, queda pendiente de revisión por Tauro antes de activarse.</p>
+<div class="page-title page-title-row">
+    <div>
+        <div class="eyebrow">Catálogo</div>
+        <h1>Mis productos</h1>
+        <p>Productos pre-cargados para armar guías más rápido: alias, descripción de invoice, HS code y medidas listos para usar.</p>
+    </div>
+    <a href="/portal/envios/nuevo" class="btn btn-primary btn-sm">Crear envío</a>
+</div>
+
+{% set qp = request.query_params|default({}) %}
+{% if qp.get('ok') %}
+    <div class="msg ok">Producto agregado al catálogo. Queda en revisión hasta que Tauro lo apruebe.</div>
+{% endif %}
+{% if qp.get('error') %}
+    <div class="msg error">No pudimos agregar el producto: {{ qp.get('error') }}</div>
+{% endif %}
 
 <div class="card">
-    <h2>Productos</h2>
+    <div class="card-head">
+        <div>
+            <h3>Productos</h3>
+            <p>Los aprobados ya se pueden elegir al crear un envío.</p>
+        </div>
+        <span class="badge muted">{{ productos|length }}</span>
+    </div>
+
     {% if productos %}
-    <table class="tabla">
-        <thead>
-            <tr>
-                <th>Alias</th><th>Invoice</th><th>HS Code</th>
-                <th>Medidas (cm)</th><th>Peso</th><th>Valor USD</th><th>Estado</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for p in productos %}
-            <tr>
-                <td><strong>{{ p.alias_interno }}</strong></td>
-                <td>{{ p.nombre_invoice }}</td>
-                <td><code>{{ p.hs_code }}</code></td>
-                <td>{{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }}</td>
-                <td>{{ p.peso_kg }} kg</td>
-                <td>${{ p.valor_usd_default }}</td>
-                <td>
-                    {% if p.activo %}
-                        <span class="badge badge-ok">Activo</span>
-                    {% else %}
-                        <span class="badge badge-pending">Pendiente</span>
-                    {% endif %}
-                </td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Alias</th>
+                    <th>Invoice (EN)</th>
+                    <th>HS code</th>
+                    <th>Medidas y peso</th>
+                    <th class="num">Valor USD</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for p in productos %}
+                <tr>
+                    <td><strong>{{ p.alias_interno }}</strong></td>
+                    <td>{{ p.nombre_invoice }}</td>
+                    <td class="mono">{{ p.hs_code }}</td>
+                    <td class="mono">{{ '%g'|format(p.largo_cm) }}×{{ '%g'|format(p.ancho_cm) }}×{{ '%g'|format(p.alto_cm) }} cm · {{ '%g'|format(p.peso_kg) }} kg</td>
+                    <td class="num">$ {{ '%g'|format(p.valor_usd_default) }}</td>
+                    <td>
+                        {% if p.activo %}
+                            <span class="badge ok">Aprobado</span>
+                        {% else %}
+                            <span class="badge warn">En revisión</span>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
     {% else %}
-        <p class="empty">Todavía no agregaste productos. Empezá agregando el primero abajo.</p>
+        <p class="empty">Todavía no tenés productos cargados. Agregá el primero acá abajo y lo validamos.</p>
     {% endif %}
 </div>
 
 <div class="card">
-    <h2>Agregar producto</h2>
-    <form method="POST" action="/portal/catalogo/add" class="form">
-        <label>Alias interno (cómo lo llamás)
-            <input type="text" name="alias_interno" required placeholder="Mini bag">
-        </label>
-        <label>Descripción para invoice (en inglés, formal)
-            <input type="text" name="nombre_invoice" required placeholder="Leather handbag 100%">
-        </label>
-        <label>Código HS (formato XXXX.XX.XX)
-            <input type="text" name="hs_code" required pattern="\d{4}\.\d{2}\.\d{2}" placeholder="4202.21.00">
-        </label>
+    <div class="card-head">
+        <div>
+            <h3>Agregar producto</h3>
+            <p>Completá los datos como van en la invoice: descripción en inglés y HS code de la mercadería.</p>
+        </div>
+    </div>
 
-        <div class="grid-3">
-            <label>Largo (cm)<input type="number" name="largo_cm" step="0.5" required></label>
-            <label>Ancho (cm)<input type="number" name="ancho_cm" step="0.5" required></label>
-            <label>Alto (cm)<input type="number" name="alto_cm" step="0.5" required></label>
+    <div class="msg warn">Los productos nuevos los valida Tauro antes de que puedas usarlos en tus envíos. Hasta la aprobación figuran como "En revisión".</div>
+
+    <form method="POST" action="/portal/catalogo/add">
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label>Alias interno (cómo lo llamás vos)</label>
+                <input type="text" name="alias_interno" required placeholder="Mini bag">
+            </div>
+            <div class="form-group">
+                <label>Descripción para invoice (inglés)</label>
+                <input type="text" name="nombre_invoice" required placeholder="Leather handbag 100%">
+            </div>
+            <div class="form-group">
+                <label>HS code (XXXX.XX.XX)</label>
+                <input type="text" name="hs_code" required pattern="\d{4}\.\d{2}\.\d{2}" placeholder="4202.21.00">
+            </div>
         </div>
 
-        <div class="grid-2">
-            <label>Peso (kg)<input type="number" name="peso_kg" step="0.1" required></label>
-            <label>Valor declarado USD<input type="number" name="valor_usd_default" step="1" required></label>
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label>Largo (cm)</label>
+                <input type="number" name="largo_cm" step="0.5" min="0" required placeholder="30">
+            </div>
+            <div class="form-group">
+                <label>Ancho (cm)</label>
+                <input type="number" name="ancho_cm" step="0.5" min="0" required placeholder="20">
+            </div>
+            <div class="form-group">
+                <label>Alto (cm)</label>
+                <input type="number" name="alto_cm" step="0.5" min="0" required placeholder="10">
+            </div>
         </div>
 
-        <button type="submit" class="btn-primary">Agregar al catálogo</button>
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label>Peso (kg)</label>
+                <input type="number" name="peso_kg" step="0.1" min="0" required placeholder="2">
+            </div>
+            <div class="form-group">
+                <label>Valor declarado (USD)</label>
+                <input type="number" name="valor_usd_default" step="1" min="0" required placeholder="120">
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Agregar al catálogo</button>
     </form>
 </div>
 {% endblock %}

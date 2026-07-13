@@ -1,59 +1,83 @@
 {% extends "base.html" %}
-{% block title %}Inicio{% endblock %}
+{% block title %}Escritorio{% endblock %}
 
 {% block content %}
 <div class="page-title page-title-row">
     <div>
-        <div class="eyebrow">Dashboard</div>
+        <div class="eyebrow">Escritorio</div>
         <h1>Hola, {{ cliente }}</h1>
-        <p>Resumen de cuenta, solicitudes y herramientas para operar envíos.</p>
+        <p>Tu cuenta, tus envíos y las herramientas para operar, todo en un solo lugar.</p>
     </div>
     <a href="/portal/envios/nuevo" class="btn btn-primary">Crear envío</a>
 </div>
 
-<div class="dashboard-stats">
+<!-- ── Stats ───────────────────────────────────────────── -->
+<div class="grid-3" style="margin-bottom:16px;">
     <div class="stat-card">
         <div class="label">Saldo pendiente</div>
-        <div class="value">ARS {{ "{:,.0f}".format(saldo.saldo_pendiente_ars).replace(",", ".") }}</div>
+        <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% else %}ok{% endif %}">
+            ARS {{ "{:,.0f}".format(saldo.saldo_pendiente_ars).replace(",", ".") }}
+        </div>
+        <div class="foot">
+            <div class="mini-row">
+                <span>Facturado</span>
+                <strong>ARS {{ "{:,.0f}".format(saldo.facturado_ars).replace(",", ".") }}</strong>
+            </div>
+            <div class="mini-row">
+                <span>Pagado</span>
+                <strong>ARS {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</strong>
+            </div>
+        </div>
     </div>
+
     <div class="stat-card">
         <div class="label">Solicitudes recientes</div>
         <div class="value">{{ solicitudes|length }}</div>
+        <div class="foot">
+            <div class="mini-row">
+                <span>Historial completo de envíos</span>
+                <a href="/portal/envios" style="color:var(--accent-soft);font-size:12px;white-space:nowrap;">Ver todas →</a>
+            </div>
+        </div>
     </div>
+
     <div class="stat-card">
-        <div class="label">Destinatarios guardados</div>
-        <div class="value">{{ direcciones_count.DESTINATARIO }}</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">Remitentes</div>
-        <div class="value">{{ direcciones_count.REMITENTE }}</div>
+        <div class="label">Direcciones guardadas</div>
+        <div class="value">{{ direcciones_count.get('REMITENTE', 0) + direcciones_count.get('DESTINATARIO', 0) }}</div>
+        <div class="foot">
+            <div class="mini-row">
+                <span>{{ direcciones_count.get('REMITENTE', 0) }} remitente{{ 's' if direcciones_count.get('REMITENTE', 0) != 1 else '' }} · {{ direcciones_count.get('DESTINATARIO', 0) }} destinatario{{ 's' if direcciones_count.get('DESTINATARIO', 0) != 1 else '' }}</span>
+                <a href="/portal/direcciones" style="color:var(--accent-soft);font-size:12px;white-space:nowrap;">Libreta →</a>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="grid-2">
+<!-- ── Acciones rápidas + Seguimiento ──────────────────── -->
+<div class="grid-2" style="margin-bottom:16px;">
     <div class="card">
         <div class="card-head">
             <div>
                 <h3>Acciones rápidas</h3>
-                <p>Operación diaria desde el portal.</p>
+                <p>Lo que hacés todos los días, a un clic.</p>
             </div>
         </div>
         <div class="action-grid">
             <a href="/portal/envios/nuevo" class="action-tile">
                 <strong>Crear envío</strong>
-                <span>Solicitud con remitente, destinatario e invoice.</span>
+                <span>Armá la solicitud con remitente, destinatario e invoice.</span>
             </a>
             <a href="/portal/cotizar" class="action-tile">
                 <strong>Cotizar</strong>
-                <span>Calcular tarifa internacional antes de confirmar.</span>
-            </a>
-            <a href="/portal/direcciones" class="action-tile">
-                <strong>Direcciones</strong>
-                <span>Guardar remitentes y destinatarios frecuentes.</span>
+                <span>Calculá la tarifa internacional antes de confirmar.</span>
             </a>
             <a href="/portal/catalogo" class="action-tile">
-                <strong>Catálogo</strong>
-                <span>Productos aprobados para invoice comercial.</span>
+                <strong>Mi catálogo</strong>
+                <span>Productos aprobados para el invoice comercial.</span>
+            </a>
+            <a href="/portal/direcciones" class="action-tile">
+                <strong>Libreta</strong>
+                <span>Remitentes y destinatarios frecuentes, siempre a mano.</span>
             </a>
         </div>
     </div>
@@ -61,74 +85,112 @@
     <div class="card">
         <div class="card-head">
             <div>
-                <h3>Cuenta corriente</h3>
-                <p>Facturación y pagos registrados por Tauro.</p>
+                <h3>Seguimiento</h3>
+                <p>Pegá el número de tracking y velo en FedEx al instante.</p>
             </div>
         </div>
-        <div class="kpi-row">
-            <div>
-                <span class="kpi-label">Facturado</span>
-                <span class="kpi-sub">ARS {{ "{:,.0f}".format(saldo.facturado_ars).replace(",", ".") }}</span>
-            </div>
-            <div>
-                <span class="kpi-label">Pagado</span>
-                <span class="kpi-sub">ARS {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</span>
-            </div>
+        <div class="track-box">
+            <input type="text" id="track-input" placeholder="Ej: 771234567890" autocomplete="off">
+            <button type="button" class="btn btn-primary"
+                onclick="var v=document.getElementById('track-input').value.trim(); if(v) window.open('https://www.fedex.com/fedextrack/?trknbr='+encodeURIComponent(v),'_blank')">
+                Rastrear
+            </button>
         </div>
-        <div class="divider"></div>
-        {% if pagos_recientes %}
-            {% for p in pagos_recientes[:3] %}
-                <div class="mini-row">
-                    <span>{{ p.fecha }} · {{ p.metodo }}</span>
-                    <strong>ARS {{ "{:,.0f}".format(p.monto_ars).replace(",", ".") }}</strong>
-                </div>
-            {% endfor %}
-        {% else %}
-            <p class="empty">No hay pagos registrados todavía.</p>
-        {% endif %}
+        <p style="color:var(--fg-4);font-size:12px;margin-top:12px;">
+            Se abre el seguimiento oficial de FedEx en una pestaña nueva. El tracking de cada envío figura en la tabla de acá abajo.
+        </p>
     </div>
 </div>
 
-<div class="card">
+<!-- ── Últimos envíos ──────────────────────────────────── -->
+<div class="card" style="margin-bottom:16px;">
     <div class="card-head">
         <div>
-            <h3>Últimas solicitudes</h3>
-            <p>Estado operativo de los envíos creados desde el portal.</p>
+            <h3>Últimos envíos</h3>
+            <p>Estado operativo de las solicitudes creadas desde el portal.</p>
         </div>
-        <a href="/portal/envios" class="btn btn-ghost btn-sm">Ver todo</a>
+        <a href="/portal/envios" class="btn btn-ghost btn-sm">Ver todos</a>
     </div>
 
+    {% if solicitudes %}
     <div class="table-wrap">
         <table>
             <thead>
                 <tr>
                     <th>Fecha</th>
+                    <th>Producto</th>
                     <th>Destino</th>
-                    <th>Destinatario</th>
                     <th>Estado</th>
                     <th>Tracking</th>
+                    <th>Guía</th>
                 </tr>
             </thead>
             <tbody>
             {% for s in solicitudes %}
                 <tr>
                     <td class="mono">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</td>
-                    <td>{{ s.destino_pais }} · {{ s.dest_zip }}</td>
-                    <td>{{ s.dest_nombre }}</td>
+                    <td>{{ s.producto_alias or "—" }}</td>
+                    <td>{{ s.destino_pais }}{% if s.dest_ciudad %} · {{ s.dest_ciudad }}{% endif %}</td>
                     <td>
                         <span class="badge {% if s.estado in ['SOLICITADO', 'EN_PROCESO'] %}warn{% elif s.estado in ['GUIA_LISTA', 'DESPACHADO'] %}ok{% else %}muted{% endif %}">
                             {{ s.estado.replace("_", " ") }}
                         </span>
                     </td>
                     <td class="mono">{{ s.tracking or "—" }}</td>
-                </tr>
-            {% else %}
-                <tr>
-                    <td colspan="5" class="empty">Todavía no hay solicitudes.</td>
+                    <td>
+                        {% if s.tiene_label %}
+                            <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-ghost btn-sm" target="_blank">Descargar PDF</a>
+                        {% else %}
+                            <span style="color:var(--fg-4);font-size:12px;">Pendiente</span>
+                        {% endif %}
+                    </td>
                 </tr>
             {% endfor %}
             </tbody>
         </table>
     </div>
+    {% else %}
+    <div class="empty">
+        <p style="margin-bottom:14px;">Todavía no tenés envíos. Creá el primero en un par de minutos.</p>
+        <a href="/portal/envios/nuevo" class="btn btn-primary btn-sm">Crear mi primer envío</a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ── Últimos pagos ───────────────────────────────────── -->
+<div class="card">
+    <div class="card-head">
+        <div>
+            <h3>Últimos pagos</h3>
+            <p>Pagos registrados por Tauro en tu cuenta corriente.</p>
+        </div>
+    </div>
+
+    {% if pagos_recientes %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Método</th>
+                    <th>Referencia</th>
+                    <th class="num">Monto</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for p in pagos_recientes %}
+                <tr>
+                    <td class="mono">{{ p.fecha or "—" }}</td>
+                    <td>{{ p.metodo or "—" }}</td>
+                    <td class="mono">{{ p.referencia or "—" }}</td>
+                    <td class="num">ARS {{ "{:,.0f}".format(p.monto_ars).replace(",", ".") }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty">No hay pagos registrados todavía.</div>
+    {% endif %}
 </div>
 {% endblock %}
