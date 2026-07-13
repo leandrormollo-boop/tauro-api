@@ -4,6 +4,8 @@
 
 from typing import Optional
 
+import psycopg2
+
 from core.database import get_conn
 
 
@@ -19,6 +21,14 @@ ESTADOS_SOLICITUD = [
 def _clean(value: Optional[str]) -> Optional[str]:
     value = (value or "").strip()
     return value or None
+
+
+def _sin_label(row: dict) -> dict:
+    """Reemplaza el PDF (bytea) por un booleano en los listados, para no cargar
+    los bytes del label en cada fila de la tabla."""
+    row["tiene_label"] = bool(row.get("label_pdf"))
+    row.pop("label_pdf", None)
+    return row
 
 
 def crear_solicitud_guia(
@@ -140,7 +150,7 @@ def listar_solicitudes_cliente(cliente_id: str, limite: int = 100) -> list[dict]
                 """,
                 (cliente_id.strip().upper(), limite),
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [_sin_label(dict(r)) for r in cur.fetchall()]
 
 
 def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:
@@ -174,7 +184,7 @@ def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:
                 """,
                 params,
             )
-            return [dict(r) for r in cur.fetchall()]
+            return [_sin_label(dict(r)) for r in cur.fetchall()]
 
 
 def actualizar_solicitud_guia(
@@ -213,3 +223,147 @@ def contar_solicitudes_pendientes() -> int:
             )
             row = cur.fetchone()
     return int(row["n"] if row else 0)
+
+
+# ── Emisión de guía real (FedEx Ship API) ───────────────────
+
+def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
+    """Una solicitud con los datos del cliente (para el remitente por defecto)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.*,
+                       c.nombre AS cliente_nombre, c.telefono AS cliente_telefono,
+                       c.direccion AS cliente_direccion, c.ciudad AS cliente_ciudad,
+                       c.cp AS cliente_cp, c.pais AS cliente_pais
+                FROM solicitudes_guia s
+                JOIN clientes c ON c.cliente_id = s.cliente_id
+                WHERE s.id = %s
+                """,
+                (solicitud_id,),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[bytes],
+                          courier: str = "FEDEX") -> None:
+    """Persiste la guía emitida: tracking, label PDF y estado GUIA_LISTA."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE solicitudes_guia
+                SET estado='GUIA_LISTA', tracking=%s, label_pdf=%s, courier=%s,
+                    guia_generada_at=NOW(), updated_at=NOW()
+                WHERE id=%s
+                """,
+                (tracking, psycopg2.Binary(label_pdf) if label_pdf else None, courier, solicitud_id),
+            )
+
+
+def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Optional[bytes]:
+    """
+    Devuelve los bytes del label PDF de una solicitud, o None si no existe.
+    Si se pasa cliente_id, verifica que la solicitud le pertenezca (para el portal).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if cliente_id:
+                cur.execute(
+                    "SELECT label_pdf FROM solicitudes_guia WHERE id=%s AND cliente_id=%s",
+                    (solicitud_id, cliente_id.strip().upper()),
+                )
+            else:
+                cur.execute(
+                    "SELECT label_pdf FROM solicitudes_guia WHERE id=%s",
+                    (solicitud_id,),
+                )
+            row = cur.fetchone()
+    if not row or not row["label_pdf"]:
+        return None
+    return bytes(row["label_pdf"])
+
+
+def generar_guia_fedex(solicitud_id: int) -> dict:
+    """
+    Emite la guía real en FedEx para una solicitud y guarda tracking + label PDF.
+    Devuelve {ok, tracking, tiene_label} o {ok: False, error}.
+    """
+    sol = obtener_solicitud(solicitud_id)
+    if not sol:
+        return {"ok": False, "error": "Solicitud no encontrada."}
+    if sol.get("estado") == "CANCELADO":
+        return {"ok": False, "error": "La solicitud está cancelada."}
+    if sol.get("tracking") and sol.get("label_pdf"):
+        return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
+
+    # Producto del catálogo → HS code y descripción en inglés para la aduana.
+    hs_code, descripcion_en = "", "Merchandise"
+    try:
+        from servicios.catalogo import get_producto
+        prod = get_producto(sol["cliente_id"], sol.get("producto_alias") or "")
+        if prod:
+            hs_code = prod.hs_code or ""
+            descripcion_en = prod.nombre_invoice or "Merchandise"
+    except Exception as e:
+        print(f"[guia] no se pudo leer el producto: {e}")
+
+    from servicios.rutas import pais_a_iso2
+
+    shipper = {
+        "nombre": sol.get("remitente_nombre") or sol.get("cliente_nombre") or sol["cliente_id"],
+        "empresa": sol.get("cliente_nombre") or "",
+        "telefono": sol.get("remitente_telefono") or sol.get("cliente_telefono") or "",
+        "calle": sol.get("remitente_direccion") or sol.get("cliente_direccion") or "",
+        "ciudad": sol.get("remitente_ciudad") or sol.get("cliente_ciudad") or "Buenos Aires",
+        "estado": sol.get("remitente_estado") or "",
+        "zip": sol.get("remitente_zip") or sol.get("cliente_cp") or "",
+        "pais": pais_a_iso2(sol.get("remitente_pais") or sol.get("cliente_pais") or "AR"),
+    }
+    recipient = {
+        "nombre": sol.get("dest_nombre") or "",
+        "telefono": sol.get("dest_telefono") or "",
+        "calle": sol.get("dest_direccion") or "",
+        "ciudad": sol.get("dest_ciudad") or "",
+        "estado": sol.get("dest_estado") or "",
+        "zip": sol.get("dest_zip") or "",
+        "pais": pais_a_iso2(sol.get("destino_pais") or "US"),
+    }
+    package = {
+        "peso_kg": sol.get("peso_kg") or 0.5,
+        "largo": sol.get("largo_cm") or 30,
+        "ancho": sol.get("ancho_cm") or 20,
+        "alto": sol.get("alto_cm") or 10,
+    }
+    commodity = {
+        "descripcion": descripcion_en,
+        "hs_code": hs_code,
+        "cantidad": sol.get("cantidad") or 1,
+        "valor_unitario_usd": sol.get("valor_declarado_usd") or 100,
+        "pais_origen": "AR",
+    }
+
+    from core.fedex_client import FedExClient
+    resultado = FedExClient().create_shipment({
+        "shipper": shipper,
+        "recipient": recipient,
+        "package": package,
+        "commodity": commodity,
+    })
+
+    if not resultado.get("encontrado"):
+        return {"ok": False, "error": resultado.get("error", "FedEx no emitió la guía.")}
+
+    guardar_guia_generada(
+        solicitud_id,
+        resultado["tracking"],
+        resultado.get("label_pdf"),
+        courier="FEDEX",
+    )
+    return {
+        "ok": True,
+        "tracking": resultado["tracking"],
+        "tiene_label": bool(resultado.get("label_pdf")),
+    }

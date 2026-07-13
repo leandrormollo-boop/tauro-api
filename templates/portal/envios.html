@@ -62,7 +62,11 @@
                     <td class="mono" style="font-size:11px">
                         {% if s.tracking %}
                             {{ s.tracking }}
-                            {% if s.guia_url %}<br><a href="{{ s.guia_url }}" target="_blank" style="color:var(--accent);">Guía</a>{% endif %}
+                            {% if s.tiene_label %}
+                                <br><a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" style="color:var(--accent);font-weight:600;">⬇ Descargar guía PDF</a>
+                            {% elif s.guia_url %}
+                                <br><a href="{{ s.guia_url }}" target="_blank" style="color:var(--accent);">Guía</a>
+                            {% endif %}
                         {% else %}
                             —
                         {% endif %}

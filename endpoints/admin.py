@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Request, Form, Cookie, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from core.database import get_conn
@@ -38,6 +38,8 @@ from servicios.solicitudes_guia import (
     actualizar_solicitud_guia,
     contar_solicitudes_pendientes,
     listar_solicitudes_admin,
+    generar_guia_fedex,
+    obtener_label_pdf,
 )
 from servicios.tracking_fedex_tauro import (
     fedex_environment,
@@ -666,6 +668,7 @@ def admin_pedidos(
     request: Request,
     estado: str = "",
     ok: Optional[str] = None,
+    guia_error: Optional[str] = None,
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -675,6 +678,12 @@ def admin_pedidos(
     if estado and estado not in ESTADOS_SOLICITUD:
         estado = ""
 
+    flash_ok = None
+    if ok == "actualizado":
+        flash_ok = "Solicitud actualizada."
+    elif ok == "guia_generada":
+        flash_ok = "✅ Guía generada en FedEx. Ya podés descargar el PDF."
+
     solicitudes = listar_solicitudes_admin(estado=estado)
     return templates.TemplateResponse(
         request=request, name="admin/pedidos.html",
@@ -683,7 +692,8 @@ def admin_pedidos(
             "solicitudes": solicitudes,
             "estados": ESTADOS_SOLICITUD,
             "estado_filtro": estado,
-            "flash_ok": "Solicitud actualizada." if ok == "actualizado" else None,
+            "flash_ok": flash_ok,
+            "flash_error": guia_error,
         },
     )
 
@@ -706,6 +716,45 @@ def admin_pedido_estado(
         guia_url=guia_url,
     )
     return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
+
+
+@router.post("/pedidos/{solicitud_id}/generar-guia")
+def admin_pedido_generar_guia(
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Emite la guía real en FedEx para esta solicitud y guarda el label PDF."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    resultado = generar_guia_fedex(solicitud_id)
+    if resultado.get("ok"):
+        return RedirectResponse(url="/admin/pedidos?ok=guia_generada", status_code=303)
+
+    from urllib.parse import quote
+    return RedirectResponse(
+        url=f"/admin/pedidos?guia_error={quote(resultado.get('error', 'error') [:200])}",
+        status_code=303,
+    )
+
+
+@router.get("/pedidos/{solicitud_id}/guia.pdf")
+def admin_pedido_guia_pdf(
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Descarga el label PDF de la guía emitida (visible en el admin)."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    pdf = obtener_label_pdf(solicitud_id)
+    if not pdf:
+        return RedirectResponse(url="/admin/pedidos?guia_error=Esta+solicitud+no+tiene+guia", status_code=303)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="guia-{solicitud_id}.pdf"'},
+    )
 
 
 # ── Tracking FedEx TAURO 2026 ───────────────────────────────

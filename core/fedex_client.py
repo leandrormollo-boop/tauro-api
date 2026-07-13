@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import os
 import time
+from datetime import date
 import requests
 from abc import ABC, abstractmethod
 
@@ -298,13 +300,154 @@ class FedExClient(CarrierBase):
 
     def create_shipment(self, datos: dict) -> dict:
         """
-        FASE 2 — No se usa en el MVP.
-        En el MVP Tauro genera las guías manualmente con el PDF de pedido.
+        Emite una guía real en FedEx (Ship API) y devuelve el tracking + el label
+        en PDF (base64 y bytes). En sandbox el label sale con marca de agua TEST.
+
+        datos esperado:
+          {
+            "shipper":   {nombre, empresa, telefono, calle, ciudad, estado, zip, pais},
+            "recipient": {nombre, telefono, calle, ciudad, estado, zip, pais},
+            "package":   {peso_kg, largo, ancho, alto},
+            "commodity": {descripcion, hs_code, cantidad, valor_unitario_usd, pais_origen},
+            "servicio":  "INTERNATIONAL_PRIORITY"   # opcional
+          }
+
+        Retorna {encontrado, tracking, servicio, label_pdf(bytes), label_b64, error}.
         """
-        raise NotImplementedError(
-            "create_shipment está reservado para Fase 2. "
-            "En el MVP las guías se generan manualmente desde el portal FedEx."
-        )
+        shipper = datos.get("shipper", {}) or {}
+        recipient = datos.get("recipient", {}) or {}
+        package = datos.get("package", {}) or {}
+        commodity = datos.get("commodity", {}) or {}
+        servicio = datos.get("servicio") or "INTERNATIONAL_PRIORITY"
+
+        cantidad = max(int(commodity.get("cantidad", 1) or 1), 1)
+        valor_unitario = float(commodity.get("valor_unitario_usd", 100) or 100)
+        valor_total = round(valor_unitario * cantidad, 2)
+        peso = float(package.get("peso_kg", 0.5) or 0.5)
+
+        def _tel(v):
+            return (str(v or "").strip() or "0000000000")
+
+        payload = {
+            "labelResponseOptions": "LABEL",
+            "accountNumber": {"value": self.account_number},
+            "requestedShipment": {
+                "shipper": {
+                    "contact": {
+                        "personName": shipper.get("nombre", ""),
+                        "phoneNumber": _tel(shipper.get("telefono")),
+                        "companyName": shipper.get("empresa") or shipper.get("nombre", ""),
+                    },
+                    "address": {
+                        "streetLines": [shipper.get("calle", "")],
+                        "city": shipper.get("ciudad", ""),
+                        "stateOrProvinceCode": shipper.get("estado", ""),
+                        "postalCode": shipper.get("zip", ""),
+                        "countryCode": shipper.get("pais", "AR"),
+                    },
+                },
+                "recipients": [{
+                    "contact": {
+                        "personName": recipient.get("nombre", ""),
+                        "phoneNumber": _tel(recipient.get("telefono")),
+                    },
+                    "address": {
+                        "streetLines": [recipient.get("calle", "")],
+                        "city": recipient.get("ciudad", ""),
+                        "stateOrProvinceCode": recipient.get("estado", ""),
+                        "postalCode": recipient.get("zip", ""),
+                        "countryCode": recipient.get("pais", "US"),
+                    },
+                }],
+                "shipDatestamp": date.today().isoformat(),
+                "serviceType": servicio,
+                "packagingType": "YOUR_PACKAGING",
+                "pickupType": "DROPOFF_AT_FEDEX_LOCATION",
+                "blockInsightVisibility": False,
+                "shippingChargesPayment": {
+                    "paymentType": "SENDER",
+                    "payor": {"responsibleParty": {"accountNumber": {"value": self.account_number}}},
+                },
+                "labelSpecification": {
+                    "imageType": "PDF",
+                    "labelStockType": "PAPER_4X6",
+                },
+                "customsClearanceDetail": {
+                    "dutiesPayment": {
+                        "paymentType": "SENDER",
+                        "payor": {"responsibleParty": {"accountNumber": {"value": self.account_number}}},
+                    },
+                    "commodities": [{
+                        "description": commodity.get("descripcion", "Merchandise"),
+                        "countryOfManufacture": commodity.get("pais_origen", "AR"),
+                        "quantity": cantidad,
+                        "quantityUnits": "PCS",
+                        "unitPrice": {"amount": valor_unitario, "currency": "USD"},
+                        "customsValue": {"amount": valor_total, "currency": "USD"},
+                        "weight": {"units": "KG", "value": peso},
+                        "harmonizedCode": commodity.get("hs_code", ""),
+                    }],
+                },
+                "requestedPackageLineItems": [{
+                    "weight": {"units": "KG", "value": peso},
+                    "dimensions": {
+                        "length": int(package.get("largo", 30)),
+                        "width": int(package.get("ancho", 20)),
+                        "height": int(package.get("alto", 10)),
+                        "units": "CM",
+                    },
+                    "declaredValue": {"amount": valor_total, "currency": "USD"},
+                }],
+            },
+        }
+
+        url = f"{self.base_url}/ship/v1/shipments"
+        try:
+            resp = self._request_with_retry("POST", url, json=payload)
+            data = resp.json() if resp.content else {}
+
+            if resp.status_code not in (200, 201):
+                msg = self._extraer_errores_fedex(data) or resp.text[:400]
+                print(f"[fedex] create_shipment error {resp.status_code}: {msg}")
+                return {"encontrado": False, "error": msg}
+
+            transaction = (data.get("output", {}).get("transactionShipments") or [{}])[0]
+            tracking = transaction.get("masterTrackingNumber", "")
+
+            label_b64 = None
+            for piece in transaction.get("pieceResponses", []) or []:
+                for doc in piece.get("packageDocuments", []) or []:
+                    if doc.get("encodedLabel"):
+                        label_b64 = doc["encodedLabel"]
+                        break
+                if label_b64:
+                    break
+
+            if not tracking:
+                return {"encontrado": False, "error": "FedEx no devolvió número de guía"}
+
+            return {
+                "encontrado": True,
+                "tracking": tracking,
+                "servicio": transaction.get("serviceName", servicio),
+                "label_pdf": base64.b64decode(label_b64) if label_b64 else None,
+                "label_b64": label_b64,
+            }
+
+        except Exception as e:
+            print(f"[fedex] Excepción en create_shipment: {e}")
+            return {"encontrado": False, "error": str(e)}
+
+    @staticmethod
+    def _extraer_errores_fedex(data: dict) -> str:
+        """Junta los mensajes de error que devuelve la API de FedEx."""
+        errores = (data or {}).get("errors") or []
+        partes = []
+        for err in errores:
+            code = err.get("code", "")
+            message = err.get("message", "")
+            partes.append(f"{code}: {message}".strip(": "))
+        return " | ".join(p for p in partes if p)
 
     def track_many(self, tracking_numbers: list[str]) -> dict:
         """

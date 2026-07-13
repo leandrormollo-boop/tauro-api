@@ -15,7 +15,7 @@ import os
 from urllib.parse import quote
 from typing import Optional
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from servicios.auth import (
@@ -32,7 +32,9 @@ from servicios.catalogo import get_productos, get_producto, agregar_producto
 from servicios.cotizador import cotizar
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
 from servicios.api_b2b import obtener_precio_envio
-from servicios.solicitudes_guia import crear_solicitud_guia, listar_solicitudes_cliente
+from servicios.solicitudes_guia import (
+    crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
+)
 from servicios.pricing import parse_monto_ars
 from servicios.direcciones import (
     TIPO_DESTINATARIO,
@@ -307,6 +309,19 @@ def envios_view(
             "solicitudes": solicitudes,
             "flash_ok": "Solicitud creada. Tauro ya la ve en el admin." if ok == "solicitado" else None,
         },
+    )
+
+
+@router.get("/envios/{solicitud_id}/guia.pdf")
+def descargar_guia(solicitud_id: int, cliente: str = Depends(cliente_actual)):
+    """Descarga el label PDF de la guía. Solo si la solicitud es del cliente logueado."""
+    pdf = obtener_label_pdf(solicitud_id, cliente_id=cliente)
+    if not pdf:
+        return RedirectResponse(url="/portal/envios", status_code=303)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="guia-tauro-{solicitud_id}.pdf"'},
     )
 
 

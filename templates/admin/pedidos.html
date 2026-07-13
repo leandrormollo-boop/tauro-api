@@ -20,6 +20,9 @@
   {% endfor %}
 </div>
 
+{% if flash_ok %}<div class="msg ok" style="margin-bottom:16px;">{{ flash_ok }}</div>{% endif %}
+{% if flash_error %}<div class="msg error" style="margin-bottom:16px;">No se pudo generar la guía: {{ flash_error }}</div>{% endif %}
+
 <div class="card">
   <div class="table-wrap">
     <table>
@@ -31,6 +34,7 @@
           <th>Destinatario</th>
           <th>Dirección</th>
           <th>Precio</th>
+          <th>Guía FedEx</th>
           <th>Operación</th>
         </tr>
       </thead>
@@ -67,6 +71,21 @@
               <br><small style="color:var(--fg-4)">Cliente $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
             {% endif %}
           </td>
+          <td style="min-width:170px;">
+            {% if s.tracking and s.tiene_label %}
+              <span class="badge ok">Guía lista</span>
+              <div class="mono" style="font-size:11px;margin:6px 0;">{{ s.tracking }}</div>
+              <a href="/admin/pedidos/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-sm btn-primary">⬇ Descargar PDF</a>
+            {% elif s.tracking %}
+              <span class="badge">Con tracking</span>
+              <div class="mono" style="font-size:11px;margin-top:6px;">{{ s.tracking }}</div>
+            {% else %}
+              <form method="POST" action="/admin/pedidos/{{ s.id }}/generar-guia"
+                    onsubmit="return confirm('¿Generar la guía real en FedEx para el pedido #{{ s.id }}? Esto emite una guía y consume la cuenta.');">
+                <button type="submit" class="btn btn-sm btn-primary">Generar guía en FedEx</button>
+              </form>
+            {% endif %}
+          </td>
           <td style="min-width:250px;">
             <form method="POST" action="/admin/pedidos/{{ s.id }}/estado" class="form" style="display:grid;gap:8px;">
               <select name="estado">
@@ -82,7 +101,7 @@
         </tr>
       {% else %}
         <tr>
-          <td colspan="7" style="color:var(--fg-4);text-align:center;padding:24px;">
+          <td colspan="8" style="color:var(--fg-4);text-align:center;padding:24px;">
             Sin solicitudes para este filtro.
           </td>
         </tr>

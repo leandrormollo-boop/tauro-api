@@ -207,6 +207,12 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_cliente
     ON solicitudes_guia(cliente_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_estado
     ON solicitudes_guia(estado, created_at DESC);
+
+-- Guía emitida (FedEx Ship API): número, label PDF y courier.
+-- El label se guarda como BYTEA en Postgres (el filesystem de Railway es efímero).
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS courier TEXT NOT NULL DEFAULT 'FEDEX';
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS label_pdf BYTEA;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS guia_generada_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_alias TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_nombre TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_documento TEXT;
