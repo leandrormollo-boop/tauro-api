@@ -15,23 +15,17 @@ function WhyUs() {
               Pensado <span style={{ color: "var(--accent)", fontStyle: "italic", fontWeight: 500 }}>global</span>.
             </h2>
             <p style={{ color: "var(--fg-2)", fontSize: 17, lineHeight: 1.65, marginBottom: 32 }}>
-              Somos un equipo de operadores logísticos, despachantes de aduana e ingenieros
-              de software. Combinamos décadas de experiencia operativa con tecnología que
-              elimina la fricción del comercio exterior.
+              Somos un equipo argentino de logística y tecnología. Operamos tus
+              envíos internacionales vía FedEx con atención directa y una
+              plataforma propia que elimina la fricción del comercio exterior.
             </p>
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-              <div className="chip"><span className="chip-dot"></span>Habilitados AFIP</div>
-              <div className="chip"><span className="chip-dot"></span>IATA accredited</div>
-              <div className="chip"><span className="chip-dot"></span>Miembros FIATA</div>
-              <div className="chip"><span className="chip-dot"></span>ISO 9001</div>
-            </div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <BigStat n="12k+" l="Embarques al año" />
-            <BigStat n="98.4%" l="Entregas on-time" accent />
-            <BigStat n="47" l="Países atendidos" />
-            <BigStat n="< 60s" l="Cotización promedio" />
+            <BigStat n="200+" l="Destinos vía red FedEx" />
+            <BigStat n="B2B" l="Tarifas corporativas" accent />
+            <BigStat n="1:1" l="Atención directa, sin call center" />
+            <BigStat n="Online" l="Cotización al instante" />
           </div>
         </div>
       </div>
@@ -117,63 +111,6 @@ function Industries() {
 }
 
 /* ============================================================
-   TESTIMONIAL / QUOTE
-   ============================================================ */
-function Testimonial() {
-  return (
-    <section style={{ paddingTop: 60, paddingBottom: 60 }} data-screen-label="Testimonio">
-      <div className="container">
-        <div style={{
-          padding: "80px 64px",
-          background: "var(--bg-elev)",
-          border: "1px solid var(--line-soft)",
-          borderRadius: 24,
-          position: "relative",
-          overflow: "hidden",
-        }}>
-          <div style={{
-            position: "absolute", top: 24, left: 64,
-            fontFamily: "var(--font-display)",
-            fontSize: 120, lineHeight: 0.5,
-            color: "var(--accent)", opacity: 0.25,
-            fontWeight: 700,
-          }}>"</div>
-          <blockquote style={{
-            margin: 0,
-            fontFamily: "var(--font-display)",
-            fontSize: "clamp(22px, 2.6vw, 34px)",
-            fontWeight: 500,
-            lineHeight: 1.3,
-            letterSpacing: "-0.015em",
-            maxWidth: 880,
-            position: "relative",
-            zIndex: 1,
-            textWrap: "balance",
-          }}>
-            Pasamos de coordinar con cuatro proveedores y tres planillas a tener
-            un solo dashboard. Lo que antes nos tomaba dos días, ahora resolvemos
-            en una mañana.
-          </blockquote>
-          <div style={{ marginTop: 40, display: "flex", alignItems: "center", gap: 16 }}>
-            <div style={{
-              width: 48, height: 48, borderRadius: "50%",
-              background: "linear-gradient(135deg, var(--accent), var(--accent-deep))",
-              display: "grid", placeItems: "center",
-              fontFamily: "var(--font-display)", fontWeight: 600,
-              color: "#fff",
-            }}>MR</div>
-            <div>
-              <div style={{ fontWeight: 500 }}>Martín Reyes</div>
-              <div style={{ fontSize: 13, color: "var(--fg-3)", fontFamily: "var(--font-mono)" }}>Head of Operations · Vendimia Export S.A.</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ============================================================
    CTA / CONTACT
    ============================================================ */
 function ContactCTA({ onCotizarClick }) {
@@ -214,14 +151,13 @@ function ContactCTA({ onCotizarClick }) {
               <button className="btn btn-primary btn-lg" onClick={onCotizarClick}>
                 Cotizar ahora <ArrowRight size={16}/>
               </button>
-              <a href="#" className="btn btn-ghost btn-lg">
+              <a href="mailto:taurosolutionsar@gmail.com" className="btn btn-ghost btn-lg">
                 Hablar con un experto
               </a>
             </div>
             <div style={{ marginTop: 56, display: "flex", justifyContent: "center", gap: 48, flexWrap: "wrap", fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-3)" }}>
-              <span>+54 11 4000 0000</span>
-              <span>hola@taurosolutions.ar</span>
-              <span>Av. Corrientes 1234, CABA</span>
+              <span>taurosolutionsar@gmail.com</span>
+              <span>Buenos Aires, Argentina</span>
             </div>
           </div>
         </div>
@@ -261,23 +197,18 @@ function Footer() {
             <h4>Empresa</h4>
             <ul>
               <li><a href="#nosotros">Nosotros</a></li>
-              <li><a href="#">Trabajá con nosotros</a></li>
-              <li><a href="#">Casos de éxito</a></li>
-              <li><a href="#">Blog</a></li>
             </ul>
           </div>
           <div>
             <h4>Soporte</h4>
             <ul>
               <li><a href="#tracking">Trackear envío</a></li>
-              <li><a href="#">Centro de ayuda</a></li>
-              <li><a href="#">API docs</a></li>
               <li><a href="#contacto">Contacto</a></li>
             </ul>
           </div>
         </div>
         <div className="footer-bottom">
-          <span>© 2026 Tauro Solutions S.A. · CUIT 30-71234567-8</span>
+          <span>© 2026 Tauro Solutions</span>
           <span>Buenos Aires · Argentina</span>
         </div>
       </div>
@@ -287,6 +218,5 @@ function Footer() {
 
 window.WhyUs = WhyUs;
 window.Industries = Industries;
-window.Testimonial = Testimonial;
 window.ContactCTA = ContactCTA;
 window.Footer = Footer;

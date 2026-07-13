@@ -38,7 +38,7 @@ const SERVICES = [
     tagline: "Sin sorpresas en frontera.",
     desc: "Despachantes propios habilitados para gestionar exportaciones e importaciones sin demoras.",
     bullets: ["Clasificación arancelaria", "Régimen general y simplificado", "Asesoría en tratados de libre comercio"],
-    span: "On-site en EZE, BUE, ROS",
+    span: "Con despachantes asociados",
   },
   {
     id: "almacen",
@@ -47,7 +47,7 @@ const SERVICES = [
     tagline: "Tu stock listo para mover.",
     desc: "Depósitos fiscales y de uso público en zonas estratégicas. Picking, packing y distribución última milla.",
     bullets: ["Depósito fiscal", "Pick & pack", "Distribución última milla"],
-    span: "12.000 m² de capacidad",
+    span: "Consultá disponibilidad",
   },
 ];
 
@@ -163,15 +163,14 @@ function Tracking() {
               Sabés exactamente<br/>dónde está tu carga.
             </h2>
             <p style={{ color: "var(--fg-2)", fontSize: 17, lineHeight: 1.6, marginBottom: 28 }}>
-              Conectamos directamente con navieras, aerolíneas y aduanas. Sin
-              "esperá y te aviso", sin llamadas — todo el estado en tu pantalla,
-              actualizado al minuto.
+              Así se ve el seguimiento de tu envío: cada hito del recorrido,
+              desde la retirada hasta la entrega, en un solo lugar — sin
+              llamadas ni "esperá y te aviso".
             </p>
             <div style={{ display: "flex", gap: 28, marginBottom: 32 }}>
-              <Stat n="< 90s" l="Latencia de update"/>
-              <Stat n="API" l="Webhooks + REST"/>
+              <Stat n="FedEx" l="Red de seguimiento"/>
+              <Stat n="Portal" l="Acceso para clientes"/>
             </div>
-            <button className="btn btn-ghost">Ver documentación API <ArrowRight size={14}/></button>
           </div>
 
           <div className="card" style={{ padding: 0, overflow: "hidden", background: "var(--bg)" }}>
@@ -185,7 +184,7 @@ function Tracking() {
               <div style={{ marginLeft: 12, color: "var(--fg-3)" }}>tauro://tracking/TRO-2026-04812</div>
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: "var(--ok)" }}>
                 <span style={{ width: 6, height: 6, background: "var(--ok)", borderRadius: "50%" }} className="pulse"/>
-                LIVE
+                DEMO
               </div>
             </div>
 
@@ -291,7 +290,7 @@ function Stat({ n, l }) {
    ============================================================ */
 const STEPS = [
   { n: "01", t: "Cotizá online", d: "Origen, destino, peso. Tarifa real en menos de 60 segundos, sin formularios eternos." },
-  { n: "02", t: "Reservá y documentá", d: "Subís la documentación una vez. Generamos BL, AWB y factura proforma automáticamente." },
+  { n: "02", t: "Reservá y documentá", d: "Cargás los datos una vez y armamos con vos la documentación del envío." },
   { n: "03", t: "Nosotros movemos", d: "Recogida, consolidación, transporte internacional, despacho aduanero. Vos seguís en tu negocio." },
   { n: "04", t: "Trackeás en vivo", d: "Status del envío, alertas en cada hito y entrega confirmada con prueba digital." },
 ];

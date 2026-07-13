@@ -144,7 +144,7 @@ function HeroSplit({ onCotizarClick }) {
           <div>
             <div className="chip fade-up" style={{ marginBottom: 28 }}>
               <span className="chip-dot pulse"></span>
-              Operando en 47 países
+              Envíos a todo el mundo vía FedEx
             </div>
             <h1 className="fade-up d1">
               Logística sin <span className="accent">fronteras</span>,<br/>
@@ -166,16 +166,16 @@ function HeroSplit({ onCotizarClick }) {
             </div>
             <div className="hero-meta fade-up d4">
               <div className="hero-meta-item">
-                <div className="num">12k+</div>
-                <div className="lbl">Embarques / año</div>
+                <div className="num">FedEx</div>
+                <div className="lbl">Partner de envíos</div>
               </div>
               <div className="hero-meta-item">
-                <div className="num">47</div>
-                <div className="lbl">Países</div>
+                <div className="num">200+</div>
+                <div className="lbl">Destinos</div>
               </div>
               <div className="hero-meta-item">
-                <div className="num">98.4%</div>
-                <div className="lbl">On-time</div>
+                <div className="num">24hs</div>
+                <div className="lbl">Respuesta</div>
               </div>
             </div>
           </div>
@@ -194,7 +194,7 @@ function HeroCentered({ onCotizarClick }) {
       <div className="hero-bg"><div className="grid-lines"></div><div className="glow" style={{ left: "50%", marginLeft: -300, right: "auto" }}></div></div>
       <div className="container" style={{ maxWidth: 980 }}>
         <div className="chip fade-up" style={{ marginBottom: 28 }}>
-          <span className="chip-dot pulse"></span> Operando en 47 países
+          <span className="chip-dot pulse"></span> Envíos a todo el mundo vía FedEx
         </div>
         <h1 className="fade-up d1" style={{ fontSize: "clamp(56px, 9vw, 120px)" }}>
           Tu carga,<br/>
