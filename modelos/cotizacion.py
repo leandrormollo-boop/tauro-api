@@ -55,6 +55,9 @@ class CotizacionOutput(BaseModel):
     markup_valor: Optional[float] = None
     precio_final_usd: float
     precio_final_ars: float
+    tarifa_lista_ars: Optional[float] = Field(
+        None, description="Tarifa pública FedEx (LIST) en ARS, solo si es mayor al precio final — para mostrar el ahorro"
+    )
     dias_estimados: int
     valida_hasta: str = Field(..., description="ISO timestamp")
 

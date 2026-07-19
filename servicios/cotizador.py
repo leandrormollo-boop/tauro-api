@@ -109,6 +109,14 @@ def cotizar(
         costo_ars = costo
         costo_fedex_usd = round(costo_ars / dolar, 2) if dolar else 0.0
 
+    # 4b. Tarifa pública (LIST) de FedEx en ARS — para mostrar el ahorro real.
+    # Solo se expone si supera el precio final (si no, no hay ahorro que mostrar).
+    tarifa_lista_ars = None
+    costo_lista = rate_resp.get("costo_lista")
+    if costo_lista:
+        lista = float(costo_lista)
+        tarifa_lista_ars = round(lista * dolar, 2) if moneda == "USD" else round(lista, 2)
+
     # 5. Aplicar regla de pricing del cliente.
     pricing = get_pricing_config(cliente, fallback_pct=markup_pct)
     precio = aplicar_pricing(
@@ -163,6 +171,11 @@ def cotizar(
         markup_valor=precio["markup_valor"],
         precio_final_usd=precio_final_usd,
         precio_final_ars=precio_final_ars,
+        tarifa_lista_ars=(
+            tarifa_lista_ars
+            if tarifa_lista_ars and tarifa_lista_ars > precio_final_ars
+            else None
+        ),
         dias_estimados=ruta.dias_estimados,
         valida_hasta=valida_hasta,
     )

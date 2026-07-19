@@ -79,24 +79,43 @@
     </div>
 
     {% if resultado %}
-    <div id="resultado" class="result-box fade-up">
-        <div style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--fg-4);margin-bottom:6px;">
-            Precio final puerta a puerta
+    <div id="resultado" class="fade-up">
+        <div class="price-card">
+            <div class="pc-badge">Tu precio Tauro</div>
+
+            {% if resultado.tarifa_lista_ars %}
+            <div class="was">
+                Tarifa pública FedEx
+                <s>$ {{ "{:,.0f}".format(resultado.tarifa_lista_ars).replace(",", ".") }}</s>
+            </div>
+            {% else %}
+            <div class="was">Precio final puerta a puerta</div>
+            {% endif %}
+
+            <div class="big">
+                $ {{ "{:,.0f}".format(resultado.precio_final_ars).replace(",", ".") }}<span class="cur">ARS</span>
+            </div>
+
+            {% if resultado.tarifa_lista_ars %}
+            {% set ahorro = ((resultado.tarifa_lista_ars - resultado.precio_final_ars) / resultado.tarifa_lista_ars * 100) | round(0) | int %}
+            {% if ahorro >= 1 %}
+            <div class="save">↓ Ahorrás {{ ahorro }}% vs tarifa pública</div>
+            {% endif %}
+            {% endif %}
+
+            <div class="pc-meta">
+                USD {{ resultado.precio_final_usd }} · {{ resultado.dias_estimados }} días · puerta a puerta
+            </div>
         </div>
-        <div class="price-hero">
-            {{ "{:,.0f}".format(resultado.precio_final_ars).replace(",", ".") }}<span class="currency">ARS</span>
+
+        <div class="result-box" style="margin-top:14px;">
+            <div class="mini-row"><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
+            <div class="mini-row"><span>Peso facturable</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
+            <div class="mini-row"><span>Peso real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
+            <div class="mini-row"><span>Cotización válida hasta</span><strong>{{ resultado.valida_hasta }}</strong></div>
+
+            <a href="/portal/envios/nuevo" class="btn btn-primary btn-full" style="margin-top:18px;">Crear envío con este precio</a>
         </div>
-
-        <hr class="divider" style="margin:16px 0;">
-
-        <div class="mini-row"><span>Precio en dólares</span><strong>USD {{ resultado.precio_final_usd }}</strong></div>
-        <div class="mini-row"><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
-        <div class="mini-row"><span>Peso facturable</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
-        <div class="mini-row"><span>Peso real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
-        <div class="mini-row"><span>Tiempo estimado</span><strong>{{ resultado.dias_estimados }} días</strong></div>
-        <div class="mini-row"><span>Cotización válida hasta</span><strong>{{ resultado.valida_hasta }}</strong></div>
-
-        <a href="/portal/envios/nuevo" class="btn btn-primary btn-full" style="margin-top:18px;">Crear envío con este precio</a>
     </div>
     {% endif %}
 </div>

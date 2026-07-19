@@ -269,6 +269,13 @@ class FedExClient(CarrierBase):
                 (d for d in rated if "ACCOUNT" in (d.get("rateType") or "").upper()),
                 rated[0],
             )
+            # LIST = lo que pagaría un particular sin cuenta. Sirve para mostrarle
+            # al cliente el ahorro real vs la tarifa pública de FedEx.
+            list_detail = next(
+                (d for d in rated if "LIST" in (d.get("rateType") or "").upper()
+                 and d is not rate_detail),
+                None,
+            )
 
             total_net_charge = rate_detail.get("totalNetCharge")
             if total_net_charge is None:
@@ -277,6 +284,12 @@ class FedExClient(CarrierBase):
             # totalNetCharge es un float directo (USD en sandbox, ARS en producción AR)
             costo = float(total_net_charge)
             moneda = rate_detail.get("currency", "USD")
+
+            costo_lista = None
+            if list_detail and list_detail.get("totalNetCharge") is not None:
+                lista = float(list_detail["totalNetCharge"])
+                if lista > 0:
+                    costo_lista = lista
 
             transit = (
                 data.get("output", {})
@@ -289,6 +302,7 @@ class FedExClient(CarrierBase):
             return {
                 "encontrado": True,
                 "costo": costo,
+                "costo_lista": costo_lista,
                 "moneda": moneda,
                 "servicio": "INTERNATIONAL_PRIORITY",
                 "dias_estimados": transit,

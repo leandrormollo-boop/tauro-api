@@ -990,6 +990,88 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   padding: 24px;
   margin-top: 24px;
 }
+
+/* ══════════════════════════════════════════════════════════
+   PRICE CARD — precio protagonista con glow (estilo pricing
+   de campaña: tarifa pública tachada → tu precio en grande)
+   uso: <div class="price-card">
+          <div class="pc-badge">Tu precio Tauro</div>
+          <div class="was">Tarifa pública FedEx <s>$ 98.000</s></div>
+          <div class="big">$ 82.450 <span class="cur">ARS</span></div>
+          <div class="save">Ahorrás 16%</div>
+        </div>
+   ══════════════════════════════════════════════════════════ */
+.quote-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-top: 24px;
+}
+.price-card {
+  position: relative;
+  text-align: center;
+  padding: 34px 28px 30px;
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 45, 107, .35);
+  background:
+    radial-gradient(120% 90% at 50% -10%, rgba(255, 45, 107, .16), transparent 55%),
+    linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev));
+  box-shadow: 0 10px 44px rgba(255, 45, 107, .10), inset 0 1px 0 rgba(255,255,255,.04);
+  overflow: hidden;
+}
+.price-card .pc-badge {
+  position: absolute;
+  top: 14px; left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: #fff;
+  background: var(--accent);
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 16px var(--accent-glow);
+  white-space: nowrap;
+}
+.price-card .was {
+  margin-top: 18px;
+  font-size: 13px;
+  color: var(--fg-4);
+}
+.price-card .was s { color: var(--fg-3); font-family: var(--font-mono); }
+.price-card .big {
+  font-family: var(--font-display);
+  font-size: clamp(40px, 7vw, 58px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 34px rgba(255, 45, 107, .35);
+}
+.price-card .big .cur { font-size: 17px; color: var(--fg-3); font-weight: 400; margin-left: 4px; text-shadow: none; }
+.price-card .save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ok);
+  background: var(--ok-glow);
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+}
+.price-card .pc-meta {
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: var(--fg-3);
+}
 .price-hero,
 .result-price {
   font-family: var(--font-display);
