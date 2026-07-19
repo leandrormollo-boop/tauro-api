@@ -1007,16 +1007,19 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   gap: 14px;
   margin-top: 24px;
 }
+/* Paleta violeta premium — fiel a la referencia del usuario (upcomers ad):
+   fondo púrpura profundo, glow violeta, precio blanco, acentos lavanda. */
 .price-card {
   position: relative;
   text-align: center;
   padding: 34px 28px 30px;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(255, 45, 107, .35);
+  border: 1px solid rgba(167, 139, 250, .38);
   background:
-    radial-gradient(120% 90% at 50% -10%, rgba(255, 45, 107, .16), transparent 55%),
-    linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev));
-  box-shadow: 0 10px 44px rgba(255, 45, 107, .10), inset 0 1px 0 rgba(255,255,255,.04);
+    radial-gradient(120% 100% at 50% -10%, rgba(124, 92, 246, .38), transparent 58%),
+    radial-gradient(90% 70% at 85% 110%, rgba(124, 92, 246, .18), transparent 60%),
+    linear-gradient(180deg, #221238, #150b24);
+  box-shadow: 0 12px 50px rgba(124, 92, 246, .22), inset 0 1px 0 rgba(255,255,255,.06);
   overflow: hidden;
 }
 .price-card .pc-badge {
@@ -1029,18 +1032,18 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   letter-spacing: .14em;
   text-transform: uppercase;
   color: #fff;
-  background: var(--accent);
+  background: #7c5cf6;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
-  box-shadow: 0 0 16px var(--accent-glow);
+  box-shadow: 0 0 18px rgba(124, 92, 246, .55);
   white-space: nowrap;
 }
 .price-card .was {
   margin-top: 18px;
   font-size: 13px;
-  color: var(--fg-4);
+  color: #8d84a8;
 }
-.price-card .was s { color: var(--fg-3); font-family: var(--font-mono); }
+.price-card .was s { color: #a99fc4; font-family: var(--font-mono); }
 .price-card .big {
   font-family: var(--font-display);
   font-size: clamp(40px, 7vw, 58px);
@@ -1048,10 +1051,11 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   letter-spacing: -0.035em;
   line-height: 1.05;
   margin-top: 6px;
+  color: #fff;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 34px rgba(255, 45, 107, .35);
+  text-shadow: 0 0 38px rgba(167, 139, 250, .55);
 }
-.price-card .big .cur { font-size: 17px; color: var(--fg-3); font-weight: 400; margin-left: 4px; text-shadow: none; }
+.price-card .big .cur { font-size: 17px; color: #a99fc4; font-weight: 400; margin-left: 4px; text-shadow: none; }
 .price-card .save {
   display: inline-flex;
   align-items: center;
@@ -1062,15 +1066,16 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   font-weight: 600;
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--ok);
-  background: var(--ok-glow);
+  color: #c9b4ff;
+  background: rgba(124, 92, 246, .20);
+  border: 1px solid rgba(167, 139, 250, .35);
   padding: 5px 12px;
   border-radius: var(--radius-pill);
 }
 .price-card .pc-meta {
   margin-top: 16px;
   font-size: 12.5px;
-  color: var(--fg-3);
+  color: #8d84a8;
 }
 .price-hero,
 .result-price {
