@@ -78,34 +78,40 @@
         <p>Consultando tarifas de la ruta…</p>
     </div>
 
-    {% if resultado %}
+    {% if opciones %}
     <div id="resultado" class="fade-up">
-        <div class="price-card">
-            <div class="pc-badge">Tu precio Tauro</div>
+        <div class="quote-options">
+            {% for op in opciones %}
+            <div class="price-card">
+                <div class="pc-badge">
+                    {% if loop.first and opciones|length > 1 %}⭐ Recomendado · {% endif %}{{ op.servicio_nombre }}
+                </div>
 
-            {% if resultado.tarifa_lista_ars %}
-            <div class="was">
-                Tarifa pública FedEx
-                <s>$ {{ "{:,.0f}".format(resultado.tarifa_lista_ars).replace(",", ".") }}</s>
+                {% if op.tarifa_lista_ars %}
+                <div class="was">
+                    Tarifa pública FedEx
+                    <s>$ {{ "{:,.0f}".format(op.tarifa_lista_ars).replace(",", ".") }}</s>
+                </div>
+                {% else %}
+                <div class="was">Precio final puerta a puerta</div>
+                {% endif %}
+
+                <div class="big">
+                    $ {{ "{:,.0f}".format(op.precio_final_ars).replace(",", ".") }}<span class="cur">ARS</span>
+                </div>
+
+                {% if op.tarifa_lista_ars %}
+                {% set ahorro = ((op.tarifa_lista_ars - op.precio_final_ars) / op.tarifa_lista_ars * 100) | round(0) | int %}
+                {% if ahorro >= 1 %}
+                <div class="save">↓ Ahorrás {{ ahorro }}%</div>
+                {% endif %}
+                {% endif %}
+
+                <div class="pc-meta">
+                    USD {{ op.precio_final_usd }} · {{ op.dias_estimados }} días
+                </div>
             </div>
-            {% else %}
-            <div class="was">Precio final puerta a puerta</div>
-            {% endif %}
-
-            <div class="big">
-                $ {{ "{:,.0f}".format(resultado.precio_final_ars).replace(",", ".") }}<span class="cur">ARS</span>
-            </div>
-
-            {% if resultado.tarifa_lista_ars %}
-            {% set ahorro = ((resultado.tarifa_lista_ars - resultado.precio_final_ars) / resultado.tarifa_lista_ars * 100) | round(0) | int %}
-            {% if ahorro >= 1 %}
-            <div class="save">↓ Ahorrás {{ ahorro }}% vs tarifa pública</div>
-            {% endif %}
-            {% endif %}
-
-            <div class="pc-meta">
-                USD {{ resultado.precio_final_usd }} · {{ resultado.dias_estimados }} días · puerta a puerta
-            </div>
+            {% endfor %}
         </div>
 
         <div class="result-box" style="margin-top:14px;">

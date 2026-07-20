@@ -29,7 +29,7 @@ from servicios.rutas import (
     get_paises_origen, get_paises_destino, find_ruta_por_paises,
 )
 from servicios.catalogo import get_productos, get_producto, agregar_producto
-from servicios.cotizador import cotizar
+from servicios.cotizador import cotizar, cotizar_opciones
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
 from servicios.api_b2b import obtener_precio_envio
 from servicios.solicitudes_guia import (
@@ -263,7 +263,7 @@ def cotizar_post(
     cliente: str = Depends(cliente_actual),
 ):
     error = None
-    resultado = None
+    opciones = None
 
     try:
         ruta = find_ruta_por_paises(origen_pais, destino_pais)
@@ -278,7 +278,10 @@ def cotizar_post(
             largo_cm=largo_cm, ancho_cm=ancho_cm, alto_cm=alto_cm,
         )
         markup = get_markup_pct(cliente)
-        resultado = cotizar(cliente, markup_pct=markup, input_data=input_data)
+        # Todas las opciones de servicio (Priority, Economy...) en una llamada
+        opciones = cotizar_opciones(cliente, markup_pct=markup, input_data=input_data)
+        if not opciones:
+            raise ValueError("FedEx no devolvió opciones para esa ruta.")
     except Exception as e:
         error = str(e)
 
@@ -288,7 +291,8 @@ def cotizar_post(
             "cliente": cliente,
             "paises_origen": get_paises_origen(),
             "paises_destino": get_paises_destino(),
-            "resultado": resultado,
+            "opciones": opciones,
+            "resultado": opciones[0] if opciones else None,
             "error": error,
         },
     )

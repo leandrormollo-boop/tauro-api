@@ -130,9 +130,17 @@ class FedExClient(CarrierBase):
 
         raise RuntimeError(f"[fedex] Máximo de reintentos alcanzado para {url}")
 
-    def get_rates(self, origen: dict, destino: dict, paquete: dict) -> dict:
+    def get_rates(
+        self, origen: dict, destino: dict, paquete: dict,
+        todos_los_servicios: bool = False,
+    ) -> dict:
         """
         Consulta las tarifas de FedEx International Priority.
+        Con todos_los_servicios=True omite el serviceType y FedEx devuelve
+        TODAS las opciones disponibles para la ruta (Priority, Economy, etc.)
+        en la clave extra "opciones": [{servicio, servicio_nombre, costo,
+        costo_lista, moneda, dias_estimados}, ...]. Las claves de siempre
+        (costo, moneda, ...) traen la opción más barata para retrocompat.
 
         origen: {
             "street": "Av. Corrientes 1234",
@@ -189,7 +197,6 @@ class FedExClient(CarrierBase):
                     }
                 },
                 "pickupType": "DROPOFF_AT_FEDEX_LOCATION",
-                "serviceType": "INTERNATIONAL_PRIORITY",
                 "packagingType": "YOUR_PACKAGING",
                 "shippingChargesPayment": {
                     "paymentType": "SENDER",
@@ -255,6 +262,8 @@ class FedExClient(CarrierBase):
                 "rateRequestType": ["LIST", "ACCOUNT"],
             },
         }
+        if not todos_los_servicios:
+            payload["requestedShipment"]["serviceType"] = "INTERNATIONAL_PRIORITY"
 
         try:
             resp = self._request_with_retry("POST", url, json=payload)
@@ -268,55 +277,58 @@ class FedExClient(CarrierBase):
             if not reply_details:
                 return {"encontrado": False, "error": "Sin tarifas en respuesta FedEx"}
 
-            rated = reply_details[0].get("ratedShipmentDetails", []) or []
-            if not rated:
+            def _parse_reply(detail: dict):
+                """Extrae costo ACCOUNT + LIST de un rateReplyDetail. None si no sirve."""
+                rated = detail.get("ratedShipmentDetails", []) or []
+                if not rated:
+                    return None
+                # FedEx devuelve LIST (precio de lista) y ACCOUNT (tarifa negociada)
+                # sin orden garantizado: ACCOUNT es el costo real de Tauro.
+                rate_detail = next(
+                    (d for d in rated if "ACCOUNT" in (d.get("rateType") or "").upper()),
+                    rated[0],
+                )
+                list_detail = next(
+                    (d for d in rated if "LIST" in (d.get("rateType") or "").upper()
+                     and d is not rate_detail),
+                    None,
+                )
+                total = rate_detail.get("totalNetCharge")
+                if total is None:
+                    return None
+                costo_lista = None
+                if list_detail and list_detail.get("totalNetCharge") is not None:
+                    lista = float(list_detail["totalNetCharge"])
+                    if lista > 0:
+                        costo_lista = lista
+                transit = (detail.get("commit", {}) or {}).get("transitDays", {}).get("value", "3-5")
+                return {
+                    "servicio": detail.get("serviceType", "INTERNATIONAL_PRIORITY"),
+                    "servicio_nombre": detail.get("serviceName")
+                        or str(detail.get("serviceType", "")).replace("_", " ").title(),
+                    "costo": float(total),
+                    "costo_lista": costo_lista,
+                    "moneda": rate_detail.get("currency", "USD"),
+                    "dias_estimados": transit,
+                }
+
+            opciones = [o for o in (_parse_reply(d) for d in reply_details) if o]
+            if not opciones:
                 return {"encontrado": False, "error": "Sin tarifas en respuesta FedEx"}
+            opciones.sort(key=lambda o: o["costo"])
+            mejor = opciones[0]
 
-            # FedEx devuelve tarifa LIST (precio de lista) y ACCOUNT (tu tarifa
-            # negociada) en el mismo array, sin orden garantizado. Hay que elegir
-            # ACCOUNT: es el costo real de Tauro y la base correcta del markup.
-            rate_detail = next(
-                (d for d in rated if "ACCOUNT" in (d.get("rateType") or "").upper()),
-                rated[0],
-            )
-            # LIST = lo que pagaría un particular sin cuenta. Sirve para mostrarle
-            # al cliente el ahorro real vs la tarifa pública de FedEx.
-            list_detail = next(
-                (d for d in rated if "LIST" in (d.get("rateType") or "").upper()
-                 and d is not rate_detail),
-                None,
-            )
-
-            total_net_charge = rate_detail.get("totalNetCharge")
-            if total_net_charge is None:
-                return {"encontrado": False, "error": "Sin tarifas en respuesta FedEx"}
-
-            # totalNetCharge es un float directo (USD en sandbox, ARS en producción AR)
-            costo = float(total_net_charge)
-            moneda = rate_detail.get("currency", "USD")
-
-            costo_lista = None
-            if list_detail and list_detail.get("totalNetCharge") is not None:
-                lista = float(list_detail["totalNetCharge"])
-                if lista > 0:
-                    costo_lista = lista
-
-            transit = (
-                data.get("output", {})
-                .get("rateReplyDetails", [{}])[0]
-                .get("commit", {})
-                .get("transitDays", {})
-                .get("value", "3-5")
-            )
-
-            return {
+            resultado = {
                 "encontrado": True,
-                "costo": costo,
-                "costo_lista": costo_lista,
-                "moneda": moneda,
-                "servicio": "INTERNATIONAL_PRIORITY",
-                "dias_estimados": transit,
+                "costo": mejor["costo"],
+                "costo_lista": mejor["costo_lista"],
+                "moneda": mejor["moneda"],
+                "servicio": mejor["servicio"],
+                "dias_estimados": mejor["dias_estimados"],
             }
+            if todos_los_servicios:
+                resultado["opciones"] = opciones
+            return resultado
 
         except Exception as e:
             print(f"[fedex] Excepción en get_rates: {e}")
