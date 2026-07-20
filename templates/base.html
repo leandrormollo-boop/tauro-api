@@ -7,7 +7,7 @@
     <meta name="robots" content="noindex">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" href="/static/css/tauro.css">
+    <link rel="stylesheet" href="/static/css/tauro.css?v=3">
     <link rel="icon" type="image/svg+xml"
           href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23a78bfa'/%3E%3Cpath d='M18 22 C13 18 10 18 8 12 M46 22 C51 18 54 18 56 12' stroke='%23fff' stroke-width='4' stroke-linecap='round' fill='none'/%3E%3Cpath d='M17 24 L47 24 L47 30 L36 30 L36 50 L28 50 L28 30 L17 30 Z' fill='%23fff'/%3E%3C/svg%3E">
 </head>
@@ -109,5 +109,24 @@
 {% else %}
 </main>
 {% endif %}
+<script>
+// Prefetch al hover: cuando el mouse pasa por un link interno, pre-carga
+// esa página — al click ya está en caché y la navegación se siente
+// instantánea (mismo truco que usan las SPA, sin serlo).
+(function () {
+  var hechos = {};
+  document.addEventListener("mouseover", function (e) {
+    var a = e.target.closest && e.target.closest("a[href^='/']");
+    if (!a) return;
+    var href = a.getAttribute("href");
+    if (!href || hechos[href] || href.indexOf("/logout") !== -1 || href.indexOf(".pdf") !== -1) return;
+    hechos[href] = true;
+    var l = document.createElement("link");
+    l.rel = "prefetch";
+    l.href = href;
+    document.head.appendChild(l);
+  }, { passive: true });
+})();
+</script>
 </body>
 </html>

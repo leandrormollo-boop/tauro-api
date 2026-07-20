@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Admin{% endblock %} · Tauro Admin</title>
-  <link rel="stylesheet" href="/static/css/tauro.css">
+  <link rel="stylesheet" href="/static/css/tauro.css?v=3">
   <style>
     /* Admin sidebar layout */
     .admin-layout {
@@ -142,5 +142,22 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+<script>
+// Prefetch al hover — misma técnica que el portal: navegación casi instantánea.
+(function () {
+  var hechos = {};
+  document.addEventListener("mouseover", function (e) {
+    var a = e.target.closest && e.target.closest("a[href^='/']");
+    if (!a) return;
+    var href = a.getAttribute("href");
+    if (!href || hechos[href] || href.indexOf("/logout") !== -1 || href.indexOf(".pdf") !== -1) return;
+    hechos[href] = true;
+    var l = document.createElement("link");
+    l.rel = "prefetch";
+    l.href = href;
+    document.head.appendChild(l);
+  }, { passive: true });
+})();
+</script>
 </body>
 </html>

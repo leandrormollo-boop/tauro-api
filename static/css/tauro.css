@@ -65,6 +65,52 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ══════════════════════════════════════════════════════════
+   FLUIDEZ — transiciones entre páginas y desplegables suaves
+   ══════════════════════════════════════════════════════════ */
+
+/* Fundido entre páginas (View Transitions API — cross-document).
+   En navegadores sin soporte simplemente no pasa nada. */
+@view-transition { navigation: auto; }
+::view-transition-old(root) {
+  animation: vt-out .14s ease both;
+}
+::view-transition-new(root) {
+  animation: vt-in .18s ease both;
+}
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in  { from { opacity: 0; transform: translateY(4px); } }
+
+/* Desplegables <details>: el contenido entra con fade+slide en vez
+   del golpe seco, y la flechita del summary rota suave. */
+details > summary { transition: color .15s; }
+details > summary::marker { content: ""; }
+details > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 7px;
+  transition: transform .22s cubic-bezier(.2,.7,.3,1);
+  color: var(--fg-4);
+}
+details[open] > summary::before { transform: rotate(90deg); }
+details[open] > *:not(summary) {
+  animation: fadeUp .25s cubic-bezier(.2,.7,.3,1) both;
+}
+
+/* Entrada suave del contenido de cada página */
+.main-inner > * { animation: fadeUp .28s cubic-bezier(.2,.7,.3,1) both; }
+.main-inner > *:nth-child(2) { animation-delay: .04s; }
+.main-inner > *:nth-child(3) { animation-delay: .08s; }
+.main-inner > *:nth-child(n+4) { animation-delay: .11s; }
+
+/* Micro-transiciones globales en lo interactivo */
+a, button, .btn, .side-item, .tab, .action-tile, .address-item,
+input, select, textarea, summary {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity;
+  transition-duration: .15s;
+  transition-timing-function: ease;
+}
+
 html { scroll-behavior: smooth; }
 html, body {
   background: var(--bg);
