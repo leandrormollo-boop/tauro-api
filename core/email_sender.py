@@ -311,3 +311,94 @@ def enviar_link_magico(email_destino: str, link: str, cliente: str) -> bool:
     except Exception as e:
         print(f"[email] Error enviando link mágico: {e}")
         return False
+
+
+# ─────────────────────────────────────────────
+# EMAIL NOTIFICACIÓN DE ESTADO — al cliente
+# ─────────────────────────────────────────────
+
+_ESTADO_COPY = {
+    "EN_PROCESO": (
+        "Tu envío está en proceso",
+        "Ya estamos trabajando en tu solicitud. Te avisamos apenas la guía esté lista.",
+    ),
+    "GUIA_LISTA": (
+        "¡Tu guía está lista! 🎉",
+        "Ya podés descargar la guía en PDF desde tu portal, en la sección <b>Mis envíos</b>.",
+    ),
+    "DESPACHADO": (
+        "Tu envío fue despachado 🚀",
+        "El paquete ya está en manos del courier. Podés seguirlo con el número de tracking.",
+    ),
+    "CANCELADO": (
+        "Tu solicitud fue cancelada",
+        "Si no lo esperabas o querés más detalles, escribinos y lo revisamos juntos.",
+    ),
+}
+
+
+def enviar_notificacion_estado(
+    email_destino: str,
+    cliente: str,
+    solicitud_id: int,
+    estado: str,
+    tracking: str = "",
+    portal_url: str = "https://tauro-api-production.up.railway.app/portal/envios",
+) -> bool:
+    """
+    Avisa al cliente que su solicitud cambió de estado. Best-effort:
+    nunca lanza excepción (el flujo operativo no debe romperse por el mail).
+    """
+    copy = _ESTADO_COPY.get((estado or "").strip().upper())
+    if not copy:
+        return False  # estados sin comunicación (ej. SOLICITADO)
+    titulo, detalle = copy
+
+    tracking_html = ""
+    if tracking:
+        tracking_html = f"""
+  <p style="margin:18px 0 6px; color:#555; font-size:13px;">Número de seguimiento</p>
+  <p style="font-family: monospace; font-size: 18px; margin:0; color:#111;"><b>{tracking}</b></p>"""
+
+    asunto = f"Tauro · Envío #{solicitud_id}: {titulo}"
+    cuerpo = f"""<html><body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+<div style="background:#0a0e12; padding: 22px; text-align: center; border-radius: 0 0 12px 12px;">
+  <h1 style="color:#ff2d6b; margin: 0; letter-spacing: 1px;">TAURO</h1>
+  <p style="color:#7a828c; margin: 4px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">Solutions</p>
+</div>
+<div style="padding: 30px 20px;">
+  <h2 style="color:#111; margin-top:0;">{titulo}</h2>
+  <p>Hola {cliente},</p>
+  <p>{detalle}</p>{tracking_html}
+  <p style="text-align: center; margin: 30px 0;">
+    <a href="{portal_url}" style="background:#ff2d6b; color:#fff; padding: 13px 26px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">Ver mi envío en el portal</a>
+  </p>
+</div>
+<div style="background:#f5f5f5; padding: 12px; text-align: center; font-size: 11px; color: #999; border-radius: 12px;">
+  Tauro Solutions — Logística internacional
+</div>
+</body></html>"""
+
+    remitente = os.getenv("EMAIL_REMITENTE")
+    password = os.getenv("EMAIL_PASSWORD")
+    if not remitente or not password or not email_destino:
+        print(f"[email] Notificación de estado no enviada (SMTP o destino faltante) — solicitud {solicitud_id}")
+        return False
+
+    msg = MIMEMultipart("mixed")
+    msg["From"] = remitente
+    msg["To"] = email_destino
+    msg["Subject"] = asunto
+    msg.attach(MIMEText(cuerpo, "html", "utf-8"))
+
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=15)
+        server.starttls()
+        server.login(remitente, password)
+        server.sendmail(remitente, email_destino, msg.as_string())
+        server.quit()
+        print(f"[email] Notificación '{estado}' enviada a {email_destino} (solicitud {solicitud_id})")
+        return True
+    except Exception as e:
+        print(f"[email] Error enviando notificación de estado: {e}")
+        return False

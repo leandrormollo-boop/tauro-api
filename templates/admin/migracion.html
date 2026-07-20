@@ -49,6 +49,31 @@
   {% endif %}
 </div>
 
+<div class="card" style="max-width:760px;margin-top:20px;">
+  <h2 style="font-size:18px;margin-top:0;">Dinero: REAL → NUMERIC</h2>
+  <p style="color:var(--fg-3);font-size:14px;line-height:1.6;">
+    Cambia las columnas de montos a decimal exacto (NUMERIC 14,2) para que la
+    contabilidad cierre al centavo. Es idempotente: si ya se aplicó, no hace nada.
+    Conviene correrla <b>antes</b> de cargar movimientos en serio.
+  </p>
+  {% if request.query_params.get("numeric_ok") %}
+  <div class="flash-msg ok">Migración NUMERIC aplicada. Las columnas de dinero ya son decimales exactos.</div>
+  {% endif %}
+  {% if request.query_params.get("error") == "numeric_fail" %}
+  <div class="flash-msg error">Falló la migración NUMERIC: {{ request.query_params.get("det") or "ver logs" }}</div>
+  {% endif %}
+  {% if request.query_params.get("error") == "confirm_numeric" %}
+  <div class="flash-msg error">Escribí NUMERIC en el campo de confirmación para ejecutarla.</div>
+  {% endif %}
+  <form method="POST" action="/admin/migracion/numeric" onsubmit="return confirm('¿Aplicar la migración de dinero a NUMERIC? Hacé un backup/snapshot de la DB antes si tenés datos cargados.');">
+    <div class="form-group">
+      <label>Confirmación</label>
+      <input type="text" name="confirmacion" placeholder="Escribí NUMERIC para ejecutar">
+    </div>
+    <button type="submit" class="btn btn-primary">Aplicar migración NUMERIC</button>
+  </form>
+</div>
+
 <div class="card" style="max-width:980px;margin-top:20px;">
   <h2 style="font-size:18px;margin-top:0;">Salida</h2>
   <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.22);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:16px;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;">{{ status.output or "Todavía no se ejecutó ninguna migración." }}</pre>

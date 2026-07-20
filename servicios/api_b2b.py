@@ -90,8 +90,14 @@ def obtener_datos_producto(cliente_id: str, producto_id: str) -> dict:
     }
 
 
-def obtener_precio_envio(cliente_id: str, producto_id: str, destino_pais: str) -> dict:
-    """Cotiza producto + destino en vivo con FedEx y markup del cliente."""
+def obtener_precio_envio(
+    cliente_id: str, producto_id: str, destino_pais: str, cantidad: int = 1
+) -> dict:
+    """
+    Cotiza producto + destino en vivo con FedEx y markup del cliente.
+    cantidad multiplica peso y valor declarado (todo viaja como un solo bulto
+    hasta que soportemos multi-pieza). FedEx IP admite hasta 70kg por pieza.
+    """
     producto = get_producto(cliente_id, producto_id)
     if not producto or not producto.activo:
         return {"encontrado": False, "motivo": "producto_no_encontrado"}
@@ -100,18 +106,27 @@ def obtener_precio_envio(cliente_id: str, producto_id: str, destino_pais: str) -
     if not ruta:
         return {"encontrado": False, "motivo": "ruta_no_encontrada"}
 
+    cantidad = max(int(cantidad or 1), 1)
+    peso_total = round(producto.peso_kg * cantidad, 2)
+    if peso_total > 70:
+        return {
+            "encontrado": False,
+            "motivo": f"peso_excedido: {cantidad} unidades pesan {peso_total}kg y el máximo por envío es 70kg. Dividí en envíos más chicos.",
+        }
+
     resultado = cotizar(
         cliente=cliente_id.strip().upper(),
         markup_pct=get_markup_pct(cliente_id),
         input_data=CotizacionInput(
             ruta_id=ruta.ruta_id,
-            peso_kg=producto.peso_kg,
+            peso_kg=peso_total,
             largo_cm=producto.largo_cm,
             ancho_cm=producto.ancho_cm,
             alto_cm=producto.alto_cm,
             valor_declarado_usd=producto.valor_usd_default,
             hs_code=producto.hs_code,
             descripcion_en=producto.nombre_invoice,
+            unidades=cantidad,
         ),
     )
 
@@ -121,6 +136,9 @@ def obtener_precio_envio(cliente_id: str, producto_id: str, destino_pais: str) -
     return {
         "encontrado": True,
         "ruta_id": ruta.ruta_id,
+        "cantidad": cantidad,
+        "peso_total_kg": peso_total,
+        "tarifa_lista_ars": resultado.tarifa_lista_ars,
         "precio_ars": resultado.precio_final_ars,
         "precio_usd": resultado.precio_final_usd,
         "tipo_cambio_usado": dolar,

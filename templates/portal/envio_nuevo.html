@@ -21,6 +21,20 @@
     </div>
 {% endif %}
 
+<!-- ⚡ Pegar pedido: mata el data-entry — pega el mail del cliente y se precarga el form -->
+<details class="card" style="margin-bottom:18px;padding:18px 22px;border-color:rgba(255,45,107,.35);">
+    <summary style="cursor:pointer;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:10px;">
+        ⚡ ¿Te llegó el pedido por mail? Pegalo acá y te lleno el formulario
+    </summary>
+    <div style="margin-top:14px;">
+        <textarea id="pedido-pegado" rows="7" placeholder="Pegá el texto del pedido tal como te llegó (cajas, medidas, quien envía, quien recibe...)"></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+            <button type="button" id="btn-parsear" class="btn btn-primary btn-sm">Leer pedido y precargar</button>
+            <span id="parse-status" style="font-size:12.5px;color:var(--fg-3);"></span>
+        </div>
+    </div>
+</details>
+
 <div class="stepper">
     <div class="step active">
         <span>1</span>
@@ -166,7 +180,7 @@
             <div class="form-grid-3">
                 <div class="form-group wide-field">
                     <label>Producto</label>
-                    <select name="producto_alias" required>
+                    <select name="producto_alias" id="producto_alias" required>
                         <option value="">Seleccionar</option>
                         {% for p in productos %}
                             <option value="{{ p.alias_interno }}" {% if form.producto_alias == p.alias_interno %}selected{% endif %}>
@@ -177,7 +191,7 @@
                 </div>
                 <div class="form-group">
                     <label>Cantidad</label>
-                    <input type="number" name="cantidad" min="1" step="1" value="{{ form.cantidad or 1 }}" required>
+                    <input type="number" name="cantidad" id="cantidad" min="1" step="1" value="{{ form.cantidad or 1 }}" required>
                 </div>
                 <div class="form-group">
                     <label>Precio final a tu cliente ARS</label>
@@ -193,9 +207,9 @@
     </div>
 
     <div class="submit-bar">
-        <div>
-            <strong>Queda como solicitud operativa</strong>
-            <span>Tauro revisa, genera la guía y te carga tracking y PDF cuando corresponda.</span>
+        <div id="live-price" style="min-width:170px;">
+            <strong>Elegí producto y destino</strong>
+            <span>El precio aparece acá al instante.</span>
         </div>
         <div class="submit-actions">
             <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
@@ -237,6 +251,138 @@
   const countrySelect = document.getElementById("destino_pais");
   if (countrySelect) {
     countrySelect.addEventListener("change", () => setField("dest_pais", countrySelect.value));
+  }
+
+  // ── Precio en vivo ────────────────────────────────────────
+  // Al elegir producto + destino (+cantidad) consulta /portal/api/precio
+  // y muestra el precio con el markup del cliente antes de confirmar.
+  const liveBox = document.getElementById("live-price");
+  const prodSel = document.getElementById("producto_alias");
+  const cantInp = document.getElementById("cantidad");
+  let priceTimer = null;
+  let priceSeq = 0;
+
+  function fmtARS(n) {
+    return "$ " + Math.round(n).toLocaleString("es-AR");
+  }
+
+  function renderLivePrice(state, data) {
+    if (!liveBox) return;
+    if (state === "idle") {
+      liveBox.innerHTML = "<strong>Elegí producto y destino</strong><span>El precio aparece acá al instante.</span>";
+    } else if (state === "loading") {
+      liveBox.innerHTML = "<strong style='color:var(--fg-3)'>Cotizando…</strong><span>Consultando tarifa en vivo.</span>";
+    } else if (state === "ok") {
+      var lista = data.tarifa_lista_ars
+        ? "<span style='text-decoration:line-through;color:var(--fg-4)'>" + fmtARS(data.tarifa_lista_ars) + "</span> "
+        : "";
+      var detalle = "USD " + data.precio_usd + " · " + (data.peso_total_kg || "") + " kg";
+      if (data.dias_estimados) detalle += " · " + data.dias_estimados + " días";
+      liveBox.innerHTML =
+        "<strong style='font-size:19px;'>" + lista +
+        "<span style='color:var(--accent-soft)'>" + fmtARS(data.precio_ars) + "</span>" +
+        " <span style='font-size:11px;color:var(--fg-3)'>ARS</span></strong>" +
+        "<span>" + detalle + "</span>";
+    } else {
+      var motivo = (data && data.motivo) || "";
+      var msg = motivo.indexOf("peso_excedido") === 0
+        ? motivo.replace("peso_excedido: ", "")
+        : "No pudimos cotizar esa combinación todavía.";
+      liveBox.innerHTML = "<strong style='color:var(--warn)'>Sin precio</strong><span>" + msg + "</span>";
+    }
+  }
+
+  function refreshLivePrice() {
+    if (!liveBox || !prodSel || !countrySelect) return;
+    var producto = prodSel.value;
+    var destino = countrySelect.value;
+    var cantidad = Math.max(parseInt((cantInp && cantInp.value) || "1", 10) || 1, 1);
+    if (!producto || !destino) { renderLivePrice("idle"); return; }
+
+    clearTimeout(priceTimer);
+    priceTimer = setTimeout(function () {
+      var seq = ++priceSeq;
+      renderLivePrice("loading");
+      fetch("/portal/api/precio?producto=" + encodeURIComponent(producto) +
+            "&destino=" + encodeURIComponent(destino) + "&cantidad=" + cantidad)
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (seq !== priceSeq) return; // respuesta vieja, ignorar
+          renderLivePrice(data.ok ? "ok" : "err", data);
+        })
+        .catch(function () { if (seq === priceSeq) renderLivePrice("err"); });
+    }, 350);
+  }
+
+  if (prodSel) prodSel.addEventListener("change", refreshLivePrice);
+  if (cantInp) cantInp.addEventListener("input", refreshLivePrice);
+  if (countrySelect) countrySelect.addEventListener("change", refreshLivePrice);
+  refreshLivePrice();
+
+  // ── Pegar pedido → precargar form ─────────────────────────
+  const btnParsear = document.getElementById("btn-parsear");
+  const parseStatus = document.getElementById("parse-status");
+
+  function setIf(id, value) {
+    if (value === null || value === undefined || value === "") return false;
+    const el = document.getElementById(id);
+    if (!el) return false;
+    el.value = value;
+    return true;
+  }
+
+  if (btnParsear) {
+    btnParsear.addEventListener("click", function () {
+      var texto = (document.getElementById("pedido-pegado") || {}).value || "";
+      if (!texto.trim()) { parseStatus.textContent = "Pegá el texto del pedido primero."; return; }
+      parseStatus.textContent = "Leyendo…";
+
+      fetch("/portal/api/parsear-pedido", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto: texto }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) { parseStatus.textContent = "No pude leer ese texto. Cargalo a mano, perdón."; return; }
+          var llenados = 0;
+          var d = data.destinatario || {};
+          [["dest_nombre", d.nombre], ["dest_direccion", d.direccion], ["dest_ciudad", d.ciudad],
+           ["dest_estado", d.estado], ["dest_zip", d.cp], ["dest_email", d.email],
+           ["dest_telefono", d.telefono], ["dest_documento", d.documento]].forEach(function (par) {
+            if (setIf(par[0], par[1])) llenados++;
+          });
+          if (d.pais_iso && countrySelect) {
+            for (var i = 0; i < countrySelect.options.length; i++) {
+              if (countrySelect.options[i].value === d.pais_iso) {
+                countrySelect.value = d.pais_iso;
+                setField("dest_pais", d.pais_iso);
+                llenados++;
+                break;
+              }
+            }
+          }
+          var paquetes = data.paquetes || [];
+          if (paquetes.length && paquetes[0].cantidad && cantInp) {
+            cantInp.value = paquetes[0].cantidad;
+            llenados++;
+          }
+          var aviso = "Listo: " + llenados + " campos precargados.";
+          if (paquetes.length > 1) {
+            aviso += " OJO: el pedido trae " + paquetes.length + " bultos distintos — esta solicitud es para el primero (" +
+              (paquetes[0].largo_cm || "?") + "×" + (paquetes[0].ancho_cm || "?") + "×" + (paquetes[0].alto_cm || "?") +
+              " cm); creá otra para el resto.";
+          }
+          if (paquetes.length) {
+            var p = paquetes[0];
+            aviso += " Elegí el producto del catálogo que corresponda" +
+              (p.peso_kg ? " (el mail dice " + p.peso_kg + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
+          }
+          parseStatus.textContent = aviso;
+          refreshLivePrice();
+        })
+        .catch(function () { parseStatus.textContent = "Error de conexión al leer el pedido."; });
+    });
   }
 </script>
 {% endblock %}

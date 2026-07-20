@@ -698,6 +698,42 @@ def admin_pedidos(
     )
 
 
+def _notificar_estado_async(solicitud_id: int, estado: str):
+    """
+    Avisa por email al cliente dueño de la solicitud, en un thread aparte:
+    el flujo del admin no espera al SMTP y un fallo de mail nunca lo rompe.
+    """
+    def _job():
+        try:
+            from servicios.solicitudes_guia import obtener_solicitud
+            from core.email_sender import enviar_notificacion_estado
+            sol = obtener_solicitud(solicitud_id)
+            if not sol:
+                return
+            email = sol.get("dest_email_cliente")
+            if not email:
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT email FROM clientes WHERE cliente_id = %s",
+                            (sol["cliente_id"],),
+                        )
+                        row = cur.fetchone()
+                email = row["email"] if row else None
+            if email:
+                enviar_notificacion_estado(
+                    email_destino=email,
+                    cliente=sol["cliente_id"],
+                    solicitud_id=solicitud_id,
+                    estado=estado,
+                    tracking=sol.get("tracking") or "",
+                )
+        except Exception as e:
+            print(f"[admin] Error notificando estado de solicitud {solicitud_id}: {e}")
+
+    threading.Thread(target=_job, daemon=True).start()
+
+
 @router.post("/pedidos/{solicitud_id}/estado")
 def admin_pedido_estado(
     solicitud_id: int,
@@ -715,6 +751,7 @@ def admin_pedido_estado(
         tracking=tracking,
         guia_url=guia_url,
     )
+    _notificar_estado_async(solicitud_id, estado)
     return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
 
 
@@ -729,6 +766,7 @@ def admin_pedido_generar_guia(
 
     resultado = generar_guia_fedex(solicitud_id)
     if resultado.get("ok"):
+        _notificar_estado_async(solicitud_id, "GUIA_LISTA")
         return RedirectResponse(url="/admin/pedidos?ok=guia_generada", status_code=303)
 
     from urllib.parse import quote
@@ -1127,3 +1165,39 @@ def admin_migracion_run(
     thread.start()
 
     return RedirectResponse(url="/admin/migracion?started=1", status_code=303)
+
+
+@router.post("/migracion/numeric")
+def admin_migracion_numeric(
+    confirmacion: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """
+    Aplica la migración de columnas de dinero REAL → NUMERIC(14,2).
+    Idempotente (solo migra columnas que siguen siendo 'real'); aun así
+    pide confirmación explícita porque reescribe tablas.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    if confirmacion.strip().upper() != "NUMERIC":
+        return RedirectResponse(url="/admin/migracion?error=confirm_numeric", status_code=303)
+
+    sql_path = Path(__file__).resolve().parent.parent / "scripts" / "migrar_dinero_numeric.sql"
+    if not sql_path.exists():
+        return RedirectResponse(url="/admin/migracion?error=numeric_script_missing", status_code=303)
+
+    try:
+        sql = sql_path.read_text(encoding="utf-8")
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+        print("[admin] Migración NUMERIC aplicada OK.")
+        return RedirectResponse(url="/admin/migracion?numeric_ok=1", status_code=303)
+    except Exception as e:
+        print(f"[admin] Error en migración NUMERIC: {e}")
+        from urllib.parse import quote
+        return RedirectResponse(
+            url=f"/admin/migracion?error=numeric_fail&det={quote(str(e)[:150])}",
+            status_code=303,
+        )

@@ -212,7 +212,12 @@ class FedExClient(CarrierBase):
                             "units": "CM",
                         },
                         "declaredValue": {
-                            "amount": paquete.get("valor_declarado_usd", 100),
+                            # Total del bulto: unitario × cantidad
+                            "amount": round(
+                                float(paquete.get("valor_declarado_usd", 100) or 100)
+                                * max(int(paquete.get("unidades", 1) or 1), 1),
+                                2,
+                            ),
                             "currency": "USD",
                         },
                     }
@@ -235,7 +240,12 @@ class FedExClient(CarrierBase):
                                 "currency": "USD",
                             },
                             "customsValue": {
-                                "amount": paquete.get("valor_declarado_usd", 100),
+                                # Valor aduanero total: unitario × cantidad
+                                "amount": round(
+                                    float(paquete.get("valor_declarado_usd", 100) or 100)
+                                    * max(int(paquete.get("unidades", 1) or 1), 1),
+                                    2,
+                                ),
                                 "currency": "USD",
                             },
                             "weight": {"units": "KG", "value": paquete.get("peso_kg", 0.5)},

@@ -15,7 +15,7 @@ import os
 from urllib.parse import quote
 from typing import Optional
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from servicios.auth import (
@@ -294,6 +294,67 @@ def cotizar_post(
     )
 
 
+# ── API JSON: precio en vivo para el wizard ─────────────────
+@router.get("/api/precio")
+def api_precio_envio(
+    producto: str,
+    destino: str,
+    cantidad: int = 1,
+    cliente: str = Depends(cliente_actual),
+):
+    """
+    Precio en vivo para el form de nuevo envío: producto del catálogo +
+    destino + cantidad → precio final con el markup del cliente.
+    Lo consume el JS del wizard; responde rápido y nunca lanza 500.
+    """
+    try:
+        precio = obtener_precio_envio(cliente, producto, destino, cantidad=cantidad)
+    except Exception as e:
+        print(f"[portal] api_precio error: {e}")
+        return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
+
+    if not precio.get("encontrado"):
+        return JSONResponse(
+            {"ok": False, "motivo": precio.get("motivo") or "sin_precio"},
+            status_code=200,
+        )
+
+    return JSONResponse({
+        "ok": True,
+        "precio_ars": precio["precio_ars"],
+        "precio_usd": precio["precio_usd"],
+        "tarifa_lista_ars": precio.get("tarifa_lista_ars"),
+        "peso_total_kg": precio.get("peso_total_kg"),
+        "cantidad": precio.get("cantidad", cantidad),
+        "dias_estimados": precio.get("dias_estimados"),
+        "coti_id": precio.get("coti_id"),
+    })
+
+
+# ── API JSON: parsear pedido pegado (mail del cliente) ──────
+@router.post("/api/parsear-pedido")
+async def api_parsear_pedido(
+    request: Request,
+    cliente: str = Depends(cliente_actual),
+):
+    """
+    Recibe el texto de un pedido tal como llega por mail y devuelve los
+    campos detectados para precargar el form de nuevo envío.
+    """
+    from servicios.parser_pedidos import parsear_pedido
+    try:
+        body = await request.json()
+        texto = str(body.get("texto") or "")[:20000]
+    except Exception:
+        return JSONResponse({"ok": False, "motivo": "body_invalido"}, status_code=200)
+
+    if not texto.strip():
+        return JSONResponse({"ok": False, "motivo": "texto_vacio"}, status_code=200)
+
+    resultado = parsear_pedido(texto)
+    return JSONResponse({"ok": True, **resultado})
+
+
 # ── Envíos / solicitudes de guía ───────────────────────────
 @router.get("/envios", response_class=HTMLResponse)
 def envios_view(
@@ -414,7 +475,7 @@ def envio_nuevo_post(
         if not producto or not producto.activo:
             raise ValueError("Ese producto no está activo en tu catálogo.")
 
-        precio = obtener_precio_envio(cliente, producto_alias, destino_pais)
+        precio = obtener_precio_envio(cliente, producto_alias, destino_pais, cantidad=cantidad)
         if not precio.get("encontrado"):
             motivo = precio.get("motivo") or "sin_precio"
             raise ValueError(f"No se pudo cotizar ese producto/destino ({motivo}).")
@@ -463,11 +524,12 @@ def envio_nuevo_post(
             dest_estado=dest_estado,
             dest_zip=dest_zip,
             observaciones=observaciones,
-            peso_kg=producto.peso_kg,
+            # Totales del bulto (unitario × cantidad) — lo que se cotizó y declara
+            peso_kg=precio.get("peso_total_kg") or round(producto.peso_kg * max(cantidad, 1), 2),
             largo_cm=producto.largo_cm,
             ancho_cm=producto.ancho_cm,
             alto_cm=producto.alto_cm,
-            valor_declarado_usd=producto.valor_usd_default,
+            valor_declarado_usd=round(producto.valor_usd_default * max(cantidad, 1), 2),
             ruta_id=precio["ruta_id"],
             coti_id=precio["coti_id"],
             precio_tauro_ars=precio["precio_ars"],
