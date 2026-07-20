@@ -164,10 +164,13 @@ function QuoteWidget({ compact = false }) {
             <div style={{ height: 1, background: "linear-gradient(to right, var(--accent), transparent)" }}/>
           </div>
 
-          <button className="btn btn-primary" style={{ width: "100%" }}
-            onClick={() => window.location.href = "mailto:info@taurosolutions.ar?subject=Cotización de envío"}>
-            Contactar para reservar <ArrowRight size={14}/>
-          </button>
+          <a className="btn btn-primary" style={{ width: "100%" }} href="/portal/login">
+            Crear este envío en el portal <ArrowRight size={14}/>
+          </a>
+          <a className="btn btn-ghost" style={{ width: "100%", marginTop: 10 }}
+             href="mailto:taurosolutionsar@gmail.com?subject=Quiero%20una%20cuenta%20en%20el%20portal%20Tauro">
+            Todavía no tengo cuenta
+          </a>
         </div>
       )}
     </div>

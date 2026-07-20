@@ -202,6 +202,7 @@ function Footer() {
           <div>
             <h4>Soporte</h4>
             <ul>
+              <li><a href="/portal/login">Portal de clientes</a></li>
               <li><a href="#tracking">Trackear envío</a></li>
               <li><a href="#contacto">Contacto</a></li>
             </ul>

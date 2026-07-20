@@ -85,7 +85,11 @@ def cliente_actual(token: Optional[str] = Cookie(None)) -> str:
 
 # ── Login ───────────────────────────────────────────────────
 @router.get("/login", response_class=HTMLResponse)
-def login_form(request: Request):
+def login_form(request: Request, token: Optional[str] = Cookie(None)):
+    # Si ya hay sesión activa, directo al portal — así el botón
+    # "Iniciar sesión" de la web abre el escritorio sin fricción.
+    if token and validar_token(token):
+        return RedirectResponse(url="/portal/home", status_code=303)
     return templates.TemplateResponse(
         request=request, name="portal/login.html",
         context={"mensaje": None},
