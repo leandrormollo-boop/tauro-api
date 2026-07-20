@@ -1,8 +1,10 @@
 /* ==========================================================
    TAURO SOLUTIONS — Design System v2 (portal + admin)
    ----------------------------------------------------------
-   Identidad: negro azulado profundo + magenta (igual que la
-   web pública). Layout del portal: sidebar fija tipo app.
+   Identidad: negro violáceo #0c0a14 + violeta #a78bfa — la paleta
+   que la web pública aplica EN VIVO (TWEAK_DEFAULTS en 05-app.jsx).
+   Si esa paleta cambia, cambiar estos tokens a la par.
+   Layout del portal: sidebar fija tipo app.
    Retrocompatible: las clases v1 (.topbar, .card, .btn, etc.)
    se mantienen — el admin sigue funcionando sin cambios.
    ==========================================================
@@ -28,20 +30,21 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  /* paleta de marca — la misma de la web pública */
-  --bg:           #0a0e12;
-  --bg-elev:      #11161c;
-  --bg-elev-2:    #181f27;
-  --line:         #232c36;
-  --line-soft:    #1a2129;
+  /* paleta de marca — la que la web pública aplica EN VIVO
+     (violeta #a78bfa sobre negro violáceo #0c0a14) */
+  --bg:           #0c0a14;
+  --bg-elev:      #13101e;
+  --bg-elev-2:    #1a1628;
+  --line:         #2a2440;
+  --line-soft:    #1f1a30;
   --fg:           #f4f5f7;
   --fg-2:         #b9bfc7;
   --fg-3:         #7a828c;
   --fg-4:         #4a525c;
-  --accent:       #ff2d6b;
-  --accent-soft:  #ff6b97;
-  --accent-deep:  #c81653;
-  --accent-glow:  rgba(255, 45, 107, 0.18);
+  --accent:       #a78bfa;
+  --accent-soft:  #c4b0fc;
+  --accent-deep:  #7c5cf6;
+  --accent-glow:  rgba(167, 139, 250, 0.18);
   --ok:           #2ec27e;
   --ok-glow:      rgba(46,194,126,0.15);
   --warn:         #f5b800;
@@ -235,7 +238,7 @@ h1, h2, h3, h4 {
   justify-content: space-between;
   padding: 0 28px;
   height: 56px;
-  background: rgba(10, 14, 18, 0.85);
+  background: rgba(12, 10, 20, 0.85);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line-soft);
@@ -911,7 +914,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   gap: 16px;
   margin-top: 16px;
   padding: 14px 16px;
-  background: rgba(10, 14, 18, .92);
+  background: rgba(12, 10, 20, .92);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-lg);
   backdrop-filter: blur(14px);
@@ -1012,11 +1015,11 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   text-align: center;
   padding: 34px 28px 30px;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(255, 45, 107, .35);
+  border: 1px solid rgba(167, 139, 250, .38);
   background:
-    radial-gradient(120% 90% at 50% -10%, rgba(255, 45, 107, .16), transparent 55%),
+    radial-gradient(120% 90% at 50% -10%, rgba(167, 139, 250, .16), transparent 55%),
     linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev));
-  box-shadow: 0 10px 44px rgba(255, 45, 107, .10), inset 0 1px 0 rgba(255,255,255,.04);
+  box-shadow: 0 10px 44px rgba(167, 139, 250, .12), inset 0 1px 0 rgba(255,255,255,.04);
   overflow: hidden;
 }
 .price-card .pc-badge {
@@ -1049,7 +1052,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   line-height: 1.05;
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 34px rgba(255, 45, 107, .35);
+  text-shadow: 0 0 34px rgba(167, 139, 250, .38);
 }
 .price-card .big .cur { font-size: 17px; color: var(--fg-3); font-weight: 400; margin-left: 4px; text-shadow: none; }
 .price-card .save {
@@ -1109,7 +1112,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
     z-index: 60;
     height: 54px;
     padding: 0 16px;
-    background: rgba(10, 14, 18, .9);
+    background: rgba(12, 10, 20, .9);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--line-soft);
