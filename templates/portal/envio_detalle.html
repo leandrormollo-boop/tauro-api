@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Envío #{{ s.id }}{% endblock %}
+
+{% block content %}
+{% set estados_orden = ["SOLICITADO", "EN_PROCESO", "GUIA_LISTA", "DESPACHADO"] %}
+{% set estados_labels = {"SOLICITADO": "Solicitado", "EN_PROCESO": "En proceso", "GUIA_LISTA": "Guía lista", "DESPACHADO": "Despachado"} %}
+{% set idx_actual = estados_orden.index(s.estado) if s.estado in estados_orden else -1 %}
+
+<div class="page-title page-title-row">
+    <div>
+        <div class="eyebrow">Envío #{{ s.id }}</div>
+        <h1>{{ s.dest_nombre }} · {{ s.dest_ciudad or s.destino_pais }}</h1>
+        <p>Creado el {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "—" }}.</p>
+    </div>
+    <a href="/portal/envios" class="btn btn-ghost btn-sm">← Mis envíos</a>
+</div>
+
+{% if s.estado == "CANCELADO" %}
+    <div class="msg error">Este envío fue cancelado. Si fue un error, escribinos y lo revisamos.</div>
+{% else %}
+<!-- ── Timeline de estado (stepper del design system) ───── -->
+<div class="card" style="margin-bottom:16px;">
+    <div class="stepper" style="margin:6px 0 8px;">
+        {% for e in estados_orden %}
+        <div class="step {% if loop.index0 < idx_actual %}done{% elif loop.index0 == idx_actual %}active{% endif %}">
+            <span>{% if loop.index0 < idx_actual %}✓{% else %}{{ loop.index }}{% endif %}</span>
+            <label>{{ estados_labels[e] }}</label>
+        </div>
+        {% endfor %}
+    </div>
+    <p style="text-align:center;color:var(--fg-3);font-size:13px;margin-top:4px;">
+        {% if s.estado == "SOLICITADO" %}
+            Recibimos tu solicitud. Tauro la está revisando para generar la guía.
+        {% elif s.estado == "EN_PROCESO" %}
+            Estamos preparando tu guía con FedEx. Te avisamos apenas esté lista.
+        {% elif s.estado == "GUIA_LISTA" %}
+            ¡Tu guía está lista! Descargá el PDF, imprimí las etiquetas y prepará las cajas.
+        {% elif s.estado == "DESPACHADO" %}
+            Tu envío ya está en la red FedEx. Seguilo con el tracking de abajo.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+<!-- ── Guía y tracking ─────────────────────────────────────── -->
+<div class="grid-2" style="margin-bottom:16px;">
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h3>Guía FedEx</h3>
+                <p>Etiquetas para imprimir y pegar en cada caja.</p>
+            </div>
+        </div>
+        {% if s.tiene_label %}
+            <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-full">⬇ Descargar guía PDF</a>
+            <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
+                {% if s.bultos and s.bultos|length %}El PDF trae una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}Imprimí la etiqueta y pegala en la caja.{% endif %}
+            </p>
+        {% else %}
+            <div class="empty" style="padding:14px;">Todavía no hay guía emitida. Aparece acá apenas Tauro la genera.</div>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h3>Tracking</h3>
+                <p>Seguimiento oficial en la red FedEx.</p>
+            </div>
+        </div>
+        {% if s.tracking %}
+            <div class="mono" style="font-size:17px;margin-bottom:12px;">
+                <a href="https://www.fedex.com/fedextrack/?trknbr={{ s.tracking }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
+            </div>
+            <a href="https://www.fedex.com/fedextrack/?trknbr={{ s.tracking }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Ver en FedEx →</a>
+        {% else %}
+            <div class="empty" style="padding:14px;">El tracking aparece acá cuando se emite la guía.</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ── Composición del envío ───────────────────────────────── -->
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-head">
+        <div>
+            <h3>Cajas del envío</h3>
+            <p>Lo que declara la guía, caja por caja.</p>
+        </div>
+        <span class="badge accent">{{ s.cantidad }} caja{{ "s" if s.cantidad != 1 else "" }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th>Cajas</th>
+                    <th>Medidas por caja</th>
+                    <th>Peso por caja</th>
+                    <th class="num">Valor declarado</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% if s.bultos and s.bultos|length %}
+                {% for b in s.bultos %}
+                <tr>
+                    <td><strong>{{ b.producto_alias }}</strong>{% if b.hs_code %}<br><small class="mono" style="color:var(--fg-3)">HS {{ b.hs_code }}</small>{% endif %}</td>
+                    <td class="mono">x{{ b.cantidad }}</td>
+                    <td class="mono">{{ b.largo_cm }}×{{ b.ancho_cm }}×{{ b.alto_cm }} cm</td>
+                    <td class="mono">{{ b.peso_kg }} kg</td>
+                    <td class="num">USD {{ b.valor_unitario_usd }} c/u</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td><strong>{{ s.producto_alias }}</strong></td>
+                    <td class="mono">x{{ s.cantidad }}</td>
+                    <td class="mono">{{ s.largo_cm }}×{{ s.ancho_cm }}×{{ s.alto_cm }} cm</td>
+                    <td class="mono">{{ s.peso_kg }} kg</td>
+                    <td class="num">USD {{ s.valor_declarado_usd }}</td>
+                </tr>
+            {% endif %}
+            </tbody>
+        </table>
+    </div>
+    <div class="mini-row" style="margin-top:10px;">
+        <span>Peso total del envío</span>
+        <strong>{{ s.peso_kg }} kg</strong>
+    </div>
+    <div class="mini-row">
+        <span>Valor declarado total</span>
+        <strong>USD {{ s.valor_declarado_usd }}</strong>
+    </div>
+</div>
+
+<!-- ── Ruta y precios ──────────────────────────────────────── -->
+<div class="grid-2" style="margin-bottom:16px;">
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h3>Remitente → Destinatario</h3>
+                <p>Direcciones de la guía.</p>
+            </div>
+        </div>
+        <div class="address-preview" style="margin-bottom:10px;">
+            <strong>{{ s.remitente_nombre or "Remitente" }}</strong>
+            <span>{{ s.remitente_direccion }} · {{ s.remitente_ciudad }}{% if s.remitente_zip %} {{ s.remitente_zip }}{% endif %} · {{ s.remitente_pais }}</span>
+            <small>{{ s.remitente_email or "" }}{% if s.remitente_telefono %} · {{ s.remitente_telefono }}{% endif %}</small>
+        </div>
+        <div class="address-preview">
+            <strong>{{ s.dest_nombre }}</strong>
+            <span>{{ s.dest_direccion }} · {{ s.dest_ciudad }}{% if s.dest_estado %}, {{ s.dest_estado }}{% endif %} {{ s.dest_zip }} · {{ s.destino_pais }}</span>
+            <small>{{ s.dest_email or "" }}{% if s.dest_telefono %} · {{ s.dest_telefono }}{% endif %}</small>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h3>Precios</h3>
+                <p>Lo que pagás a Tauro y lo que le cobrás a tu cliente.</p>
+            </div>
+        </div>
+        <div class="mini-row">
+            <span>Tu costo Tauro</span>
+            <strong>$ {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }} ARS</strong>
+        </div>
+        {% if s.precio_tauro_usd %}
+        <div class="mini-row">
+            <span>Equivalente</span>
+            <strong>USD {{ s.precio_tauro_usd }}</strong>
+        </div>
+        {% endif %}
+        {% if s.precio_cliente_final_ars %}
+        <div class="mini-row">
+            <span>Precio a tu cliente</span>
+            <strong>$ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }} ARS</strong>
+        </div>
+        <div class="mini-row">
+            <span>Tu margen</span>
+            <strong class="{% if s.precio_cliente_final_ars > (s.precio_tauro_ars or 0) %}ok{% endif %}" style="color:var(--ok);">
+                $ {{ "{:,.0f}".format(s.precio_cliente_final_ars - (s.precio_tauro_ars or 0)).replace(",", ".") }} ARS
+            </strong>
+        </div>
+        {% endif %}
+        {% if s.observaciones %}
+        <hr class="divider">
+        <p style="font-size:13px;color:var(--fg-3);"><span style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;">Observaciones</span><br>{{ s.observaciones }}</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

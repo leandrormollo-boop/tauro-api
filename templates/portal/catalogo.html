@@ -12,11 +12,13 @@
 </div>
 
 {% set qp = request.query_params|default({}) %}
-{% if qp.get('ok') %}
-    <div class="msg ok">Producto agregado al catálogo. Queda en revisión hasta que Tauro lo apruebe.</div>
+{% if qp.get('ok') == '2' %}
+    <div class="msg ok">Producto eliminado del catálogo.</div>
+{% elif qp.get('ok') %}
+    <div class="msg ok">Producto guardado. Queda en revisión hasta que Tauro lo apruebe.</div>
 {% endif %}
 {% if qp.get('error') %}
-    <div class="msg error">No pudimos agregar el producto: {{ qp.get('error') }}</div>
+    <div class="msg error">No pudimos guardar el producto: {{ qp.get('error') }}</div>
 {% endif %}
 
 <div class="card">
@@ -43,11 +45,15 @@
                     <th>Medidas y peso</th>
                     <th class="num">Valor USD</th>
                     <th>Estado</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
             {% for p in productos %}
-                <tr>
+                <tr data-alias="{{ p.alias_interno }}" data-invoice="{{ p.nombre_invoice }}"
+                    data-hs="{{ p.hs_code }}" data-largo="{{ '%g'|format(p.largo_cm) }}"
+                    data-ancho="{{ '%g'|format(p.ancho_cm) }}" data-alto="{{ '%g'|format(p.alto_cm) }}"
+                    data-peso="{{ '%g'|format(p.peso_kg) }}" data-valor="{{ '%g'|format(p.valor_usd_default) }}">
                     <td><strong>{{ p.alias_interno }}</strong></td>
                     <td>{{ p.nombre_invoice }}</td>
                     <td class="mono">{{ p.hs_code }}</td>
@@ -60,6 +66,16 @@
                             <span class="badge warn">En revisión</span>
                         {% endif %}
                     </td>
+                    <td>
+                        <div class="row-actions">
+                            <button type="button" class="btn btn-ghost btn-sm prod-editar">Editar</button>
+                            <form method="POST" action="/portal/catalogo/eliminar"
+                                  onsubmit="return confirm('¿Borrar {{ p.alias_interno }} del catálogo? Los envíos ya hechos no se tocan.')">
+                                <input type="hidden" name="alias_interno" value="{{ p.alias_interno }}">
+                                <button type="submit" class="btn btn-ghost btn-sm">Eliminar</button>
+                            </form>
+                        </div>
+                    </td>
                 </tr>
             {% endfor %}
             </tbody>
@@ -70,17 +86,19 @@
     {% endif %}
 </div>
 
-<div class="card">
+<div class="card" id="form-producto">
     <div class="card-head">
         <div>
-            <h3>Agregar producto</h3>
+            <h3 id="form-prod-titulo">Agregar producto</h3>
             <p>Completá los datos como van en la invoice: descripción en inglés y HS code de la mercadería.</p>
         </div>
+        <a href="/portal/catalogo" id="form-prod-cancelar" class="btn btn-ghost btn-sm" hidden>Cancelar edición</a>
     </div>
 
-    <div class="msg warn">Los productos nuevos los valida Tauro antes de que puedas usarlos en tus envíos. Hasta la aprobación figuran como "En revisión".</div>
+    <div class="msg warn">Los productos nuevos (y los editados) los valida Tauro antes de que puedas usarlos en tus envíos. Hasta la aprobación figuran como "En revisión".</div>
 
     <form method="POST" action="/portal/catalogo/add">
+        <input type="hidden" name="alias_original" id="alias_original" value="">
         <div class="form-grid-3">
             <div class="form-group">
                 <label for="cat-alias">Alias interno (cómo lo llamás vos)</label>
@@ -124,7 +142,33 @@
             </div>
         </div>
 
-        <button type="submit" class="btn btn-primary">Agregar al catálogo</button>
+        <button type="submit" class="btn btn-primary" id="btn-guardar-prod">Agregar al catálogo</button>
     </form>
 </div>
+
+<script>
+// Editar producto: precarga el form con la fila elegida. Al guardar,
+// vuelve a revisión de Tauro (cambian datos que van a la aduana).
+document.querySelectorAll(".prod-editar").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+        var tr = btn.closest("tr");
+        if (!tr) return;
+        var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v || ""; };
+        document.getElementById("alias_original").value = tr.dataset.alias;
+        set("cat-alias", tr.dataset.alias);
+        set("cat-invoice", tr.dataset.invoice);
+        set("cat-hs", tr.dataset.hs);
+        set("cat-largo", tr.dataset.largo);
+        set("cat-ancho", tr.dataset.ancho);
+        set("cat-alto", tr.dataset.alto);
+        set("cat-peso", tr.dataset.peso);
+        set("cat-valor", tr.dataset.valor);
+        document.getElementById("form-prod-titulo").textContent = "Editar producto";
+        document.getElementById("btn-guardar-prod").textContent = "Guardar cambios";
+        document.getElementById("form-prod-cancelar").hidden = false;
+        document.getElementById("form-producto").scrollIntoView({ behavior: "smooth" });
+        document.getElementById("cat-alias").focus({ preventScroll: true });
+    });
+});
+</script>
 {% endblock %}

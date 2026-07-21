@@ -28,19 +28,25 @@ from servicios.rutas import (
     get_rutas_activas, get_ruta,
     get_paises_origen, get_paises_destino, find_ruta_por_paises,
 )
-from servicios.catalogo import get_productos, get_producto, agregar_producto
+from servicios.catalogo import (
+    get_productos, get_producto, agregar_producto,
+    actualizar_producto_cliente, eliminar_producto_cliente,
+)
 from servicios.cotizador import cotizar, cotizar_opciones
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
 from servicios.api_b2b import obtener_precio_envio, obtener_precio_envio_multi
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
+    obtener_solicitud_de_cliente,
 )
 from servicios.pricing import parse_monto_ars
 from servicios.direcciones import (
     TIPO_DESTINATARIO,
     TIPO_REMITENTE,
+    actualizar_direccion,
     contar_direcciones,
     crear_direccion,
+    eliminar_direccion,
     listar_direcciones,
     obtener_direccion,
     obtener_remitente_para_envio,
@@ -667,6 +673,24 @@ def envio_nuevo_post(
     return RedirectResponse(url="/portal/envios?ok=solicitado", status_code=303)
 
 
+# ── Detalle de envío ────────────────────────────────────────
+# OJO: declarado DESPUÉS de /envios/nuevo para que "nuevo" no matchee
+# como {solicitud_id}.
+@router.get("/envios/{solicitud_id}", response_class=HTMLResponse)
+def envio_detalle(
+    request: Request,
+    solicitud_id: int,
+    cliente: str = Depends(cliente_actual),
+):
+    s = obtener_solicitud_de_cliente(solicitud_id, cliente)
+    if not s:
+        return RedirectResponse(url="/portal/envios", status_code=303)
+    return templates.TemplateResponse(
+        request=request, name="portal/envio_detalle.html",
+        context={"cliente": cliente, "s": s},
+    )
+
+
 # ── Direcciones ─────────────────────────────────────────────
 @router.get("/direcciones", response_class=HTMLResponse)
 def direcciones_view(
@@ -675,6 +699,11 @@ def direcciones_view(
     error: Optional[str] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    flash_ok = None
+    if ok == "1":
+        flash_ok = "Dirección guardada."
+    elif ok == "2":
+        flash_ok = "Dirección eliminada."
     return templates.TemplateResponse(
         request=request, name="portal/direcciones.html",
         context={
@@ -682,7 +711,7 @@ def direcciones_view(
             "remitente": obtener_remitente_para_envio(cliente),
             "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
             "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
-            "flash_ok": "Dirección guardada." if ok == "1" else None,
+            "flash_ok": flash_ok,
             "error": error,
         },
     )
@@ -703,28 +732,49 @@ def direcciones_add(
     pais: str = Form("AR"),
     predeterminada: Optional[str] = Form(None),
     notas: str = Form(""),
+    direccion_id: str = Form(""),  # presente = editar en vez de crear
     cliente: str = Depends(cliente_actual),
 ):
+    campos = dict(
+        cliente_id=cliente,
+        tipo=tipo,
+        alias=alias,
+        nombre=nombre,
+        documento=documento,
+        email=email,
+        telefono=telefono,
+        direccion=direccion,
+        ciudad=ciudad,
+        estado=estado,
+        cp=cp,
+        pais=pais,
+        predeterminada=bool(predeterminada),
+        notas=notas,
+    )
     try:
-        crear_direccion(
-            cliente_id=cliente,
-            tipo=tipo,
-            alias=alias,
-            nombre=nombre,
-            documento=documento,
-            email=email,
-            telefono=telefono,
-            direccion=direccion,
-            ciudad=ciudad,
-            estado=estado,
-            cp=cp,
-            pais=pais,
-            predeterminada=bool(predeterminada),
-            notas=notas,
-        )
+        dir_id = _id_opt(direccion_id)
+        if dir_id:
+            actualizado = actualizar_direccion(dir_id, **campos)
+            if not actualizado:
+                raise ValueError("Esa dirección no existe o no es tuya.")
+        else:
+            crear_direccion(**campos)
     except Exception as e:
         return RedirectResponse(url=f"/portal/direcciones?error={quote(str(e))}", status_code=303)
     return RedirectResponse(url="/portal/direcciones?ok=1", status_code=303)
+
+
+@router.post("/direcciones/{direccion_id}/eliminar")
+def direcciones_delete(
+    direccion_id: int,
+    cliente: str = Depends(cliente_actual),
+):
+    try:
+        if not eliminar_direccion(cliente, direccion_id):
+            raise ValueError("Esa dirección no existe o no es tuya.")
+    except Exception as e:
+        return RedirectResponse(url=f"/portal/direcciones?error={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/portal/direcciones?ok=2", status_code=303)
 
 
 # ── Catálogo ────────────────────────────────────────────────
@@ -747,6 +797,7 @@ def catalogo_add(
     alto_cm: float = Form(...),
     peso_kg: float = Form(...),
     valor_usd_default: float = Form(...),
+    alias_original: str = Form(""),  # presente = editar en vez de crear
     cliente: str = Depends(cliente_actual),
 ):
     try:
@@ -755,7 +806,24 @@ def catalogo_add(
             hs_code=hs_code, largo_cm=largo_cm, ancho_cm=ancho_cm,
             alto_cm=alto_cm, peso_kg=peso_kg, valor_usd_default=valor_usd_default,
         )
-        agregar_producto(cliente, nuevo)
+        if alias_original.strip():
+            if not actualizar_producto_cliente(cliente, alias_original, nuevo):
+                raise ValueError("Ese producto no existe en tu catálogo.")
+        else:
+            agregar_producto(cliente, nuevo)
     except Exception as e:
         return RedirectResponse(url=f"/portal/catalogo?error={e}", status_code=303)
     return RedirectResponse(url="/portal/catalogo?ok=1", status_code=303)
+
+
+@router.post("/catalogo/eliminar")
+def catalogo_delete(
+    alias_interno: str = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    try:
+        if not eliminar_producto_cliente(cliente, alias_interno):
+            raise ValueError("Ese producto no existe en tu catálogo.")
+    except Exception as e:
+        return RedirectResponse(url=f"/portal/catalogo?error={e}", status_code=303)
+    return RedirectResponse(url="/portal/catalogo?ok=2", status_code=303)

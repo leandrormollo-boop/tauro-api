@@ -184,6 +184,74 @@ def crear_direccion(
             return _normalizar_row(cur.fetchone())
 
 
+def actualizar_direccion(
+    direccion_id: int,
+    *,
+    cliente_id: str,
+    tipo: str,
+    alias: str = "",
+    nombre: str,
+    documento: str = "",
+    email: str = "",
+    telefono: str = "",
+    direccion: str,
+    ciudad: str,
+    estado: str = "",
+    cp: str,
+    pais: str = "AR",
+    predeterminada: bool = False,
+    notas: str = "",
+) -> Optional[dict]:
+    """Actualiza una dirección del cliente. El WHERE por cliente_id garantiza
+    que nadie edite direcciones ajenas. Devuelve la fila o None si no existe."""
+    cliente_id = _cliente(cliente_id)
+    tipo = _tipo(tipo)
+    pais = (pais or "AR").strip().upper()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if predeterminada:
+                cur.execute(
+                    """
+                    UPDATE direcciones
+                    SET predeterminada = FALSE, updated_at = NOW()
+                    WHERE cliente_id = %s AND tipo = %s AND id <> %s
+                    """,
+                    (cliente_id, tipo, direccion_id),
+                )
+            cur.execute(
+                """
+                UPDATE direcciones
+                SET tipo=%s, alias=%s, nombre=%s, documento=%s, email=%s,
+                    telefono=%s, direccion=%s, ciudad=%s, estado=%s, cp=%s,
+                    pais=%s, predeterminada=%s, notas=%s, updated_at=NOW()
+                WHERE id = %s AND cliente_id = %s
+                RETURNING *
+                """,
+                (
+                    tipo, _clean(alias), nombre.strip(), _clean(documento),
+                    _clean(email), _clean(telefono), direccion.strip(),
+                    ciudad.strip(), _clean(estado), cp.strip(), pais,
+                    bool(predeterminada), _clean(notas),
+                    direccion_id, cliente_id,
+                ),
+            )
+            row = cur.fetchone()
+    return _normalizar_row(row) if row else None
+
+
+def eliminar_direccion(cliente_id: str, direccion_id: int) -> bool:
+    """Borra una dirección del cliente (solo las propias). True si borró algo."""
+    cliente_id = _cliente(cliente_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM direcciones WHERE id = %s AND cliente_id = %s",
+                (direccion_id, cliente_id),
+            )
+            return cur.rowcount > 0
+
+
 def contar_direcciones(cliente_id: str) -> dict:
     cliente_id = _cliente(cliente_id)
     with get_conn() as conn:

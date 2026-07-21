@@ -99,9 +99,8 @@
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-sm">⬇ Guía PDF</a>
                             {% elif s.guia_url %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>
-                            {% elif s.estado in ['SOLICITADO', 'EN_PROCESO'] %}
-                                <span style="color:var(--fg-3);font-size:12px;">Preparando guía…</span>
                             {% endif %}
+                            <a href="/portal/envios/{{ s.id }}" class="btn btn-ghost btn-sm">Detalle</a>
                         </div>
                     </td>
                 </tr>

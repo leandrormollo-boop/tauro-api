@@ -233,6 +233,23 @@ def contar_solicitudes_pendientes() -> int:
     return int(row["n"] if row else 0)
 
 
+def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[dict]:
+    """Una solicitud del cliente logueado (para la página de detalle del
+    portal). Chequea pertenencia y no carga los bytes del label."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM solicitudes_guia
+                WHERE id = %s AND cliente_id = %s
+                """,
+                (solicitud_id, cliente_id.strip().upper()),
+            )
+            row = cur.fetchone()
+    return _sin_label(dict(row)) if row else None
+
+
 # ── Emisión de guía real (FedEx Ship API) ───────────────────
 
 def obtener_solicitud(solicitud_id: int) -> Optional[dict]:

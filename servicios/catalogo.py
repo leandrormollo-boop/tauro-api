@@ -132,6 +132,51 @@ def agregar_producto(cliente: str, nuevo: ProductoNuevo) -> Producto:
     return producto
 
 
+def actualizar_producto_cliente(cliente: str, alias_original: str, nuevo: ProductoNuevo) -> bool:
+    """
+    El cliente edita un producto propio. Como cambian datos que van a la
+    aduana (medidas, peso, valor, HS), el producto VUELVE A REVISIÓN
+    (activo=FALSE) hasta que Tauro lo apruebe de nuevo.
+    True si actualizó algo.
+    """
+    cliente = cliente.strip().upper()
+    alias_original = (alias_original or "").strip()
+
+    if nuevo.alias_interno != alias_original and get_producto(cliente, nuevo.alias_interno):
+        raise ValueError(f"Ya existe un producto con alias '{nuevo.alias_interno}'")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE productos
+                SET alias_interno=%s, nombre_invoice=%s, hs_code=%s,
+                    largo_cm=%s, ancho_cm=%s, alto_cm=%s, peso_kg=%s,
+                    valor_usd_default=%s, activo=FALSE
+                WHERE cliente_id = %s AND alias_interno = %s
+                """,
+                (
+                    nuevo.alias_interno, nuevo.nombre_invoice, nuevo.hs_code,
+                    nuevo.largo_cm, nuevo.ancho_cm, nuevo.alto_cm, nuevo.peso_kg,
+                    nuevo.valor_usd_default, cliente, alias_original,
+                ),
+            )
+            return cur.rowcount > 0
+
+
+def eliminar_producto_cliente(cliente: str, alias_interno: str) -> bool:
+    """El cliente borra un producto propio del catálogo. Las solicitudes
+    viejas guardan el alias como texto, así que no se rompen. True si borró."""
+    cliente = cliente.strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM productos WHERE cliente_id = %s AND alias_interno = %s",
+                (cliente, (alias_interno or "").strip()),
+            )
+            return cur.rowcount > 0
+
+
 def aprobar_producto(producto_id: int) -> None:
     """Admin: aprueba un producto (activo=TRUE)."""
     with get_conn() as conn:
