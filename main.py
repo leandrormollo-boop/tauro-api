@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -123,10 +123,70 @@ def autenticar(api_key: str) -> dict:
 @app.get("/health", include_in_schema=True, tags=["health"])
 def health_check():
     """
-    Endpoint público para que Render / monitores externos verifiquen que la app está viva.
-    No requiere auth. Devuelve siempre 200 si el proceso responde.
+    Chequeo LIVIANO: ¿el proceso responde? Lo usa el healthcheck de Railway
+    para gatear deploys (un deploy que no bootea nunca reemplaza al sano).
+    A propósito NO toca la DB: un parpadeo de Postgres no debe hacer que
+    Railway reinicie la app en loop.
     """
     return {"status": "ok", "service": "tauro-api", "version": "1.0.0"}
+
+
+@app.get("/salud", include_in_schema=True, tags=["health"])
+def salud_check():
+    """
+    Chequeo PROFUNDO para monitores externos (UptimeRobot, etc.):
+    app viva + base de datos respondiendo. 503 si la DB no contesta,
+    para que el monitor avise aunque la web siga sirviendo HTML.
+    """
+    from core.database import get_conn
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS ok")
+                cur.fetchone()
+        return {"status": "ok", "db": "ok", "service": "tauro-api"}
+    except Exception as e:
+        return JSONResponse(
+            {"status": "degraded", "db": f"error: {type(e).__name__}", "service": "tauro-api"},
+            status_code=503,
+        )
+
+
+# ── Red de seguridad global: un error inesperado nunca muestra un 500
+# pelado al cliente. Página con la marca para las superficies HTML,
+# JSON para las APIs. El traceback queda en los logs de Railway.
+_HTML_ERROR_500 = """<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>Ups · Tauro Solutions</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#0c0a14;color:#f4f5f7;font-family:'Helvetica Neue',system-ui,sans-serif;text-align:center;}
+.box{max-width:440px;padding:40px 28px;}
+h1{font-size:44px;margin:0 0 10px;}p{color:#b9bfc7;line-height:1.6;margin:0 0 26px;}
+a{display:inline-block;padding:12px 26px;background:#a78bfa;color:#fff;border-radius:8px;
+text-decoration:none;font-weight:600;}
+small{display:block;margin-top:22px;color:#7a828c;font-size:12px;}
+</style></head><body><div class="box">
+<h1>Ups, algo salió mal</h1>
+<p>Tuvimos un problema procesando tu pedido. Ya quedó registrado
+y lo estamos mirando. Probá de nuevo en un momento.</p>
+<a href="/portal/home">Volver al portal</a>
+<small>Tauro Solutions · si sigue pasando, escribinos.</small>
+</div></body></html>"""
+
+
+@app.exception_handler(Exception)
+async def error_global(request: Request, exc: Exception):
+    import traceback
+    print(f"[500] {request.method} {request.url.path} → {type(exc).__name__}: {exc}")
+    traceback.print_exc()
+    acepta_html = "text/html" in (request.headers.get("accept") or "")
+    if acepta_html and request.url.path.startswith(("/portal", "/admin", "/web")):
+        return HTMLResponse(_HTML_ERROR_500, status_code=500)
+    return JSONResponse(
+        {"ok": False, "error": "Error interno. Ya quedó registrado, probá de nuevo."},
+        status_code=500,
+    )
 
 
 @app.post("/cotizar-web", tags=["public"])

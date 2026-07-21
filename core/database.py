@@ -12,6 +12,8 @@
 #           rows = cur.fetchall()
 # ============================================================
 
+from __future__ import annotations
+
 import os
 import psycopg2
 import psycopg2.extras
@@ -32,6 +34,14 @@ def _init_pool() -> pool.ThreadedConnectionPool:
         maxconn=10,
         dsn=url,
         cursor_factory=psycopg2.extras.RealDictCursor,
+        # No colgarse minutos si la DB no responde al conectar
+        connect_timeout=10,
+        # TCP keepalive: detecta conexiones muertas (reinicio de Postgres,
+        # corte de red) en segundos en vez de esperar al próximo error
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=3,
     )
 
 
@@ -43,20 +53,55 @@ def get_pool() -> pool.ThreadedConnectionPool:
 
 
 class _ConnContext:
-    """Context manager que toma/devuelve una conexión del pool y hace commit/rollback."""
+    """Context manager que toma/devuelve una conexión del pool y hace
+    commit/rollback.
+
+    AUTO-REPARACIÓN: si Postgres se reinició, las conexiones del pool quedan
+    muertas. Antes esto dejaba la app rota hasta un restart manual. Ahora cada
+    checkout hace un ping (SELECT 1); las conexiones muertas se descartan y se
+    abre una fresca. Y si commit/rollback fallan, la conexión rota se saca del
+    pool en vez de filtrarse (10 filtradas = pool agotado = app muerta)."""
 
     def __init__(self):
         self._conn = None
 
     def __enter__(self):
-        self._conn = get_pool().getconn()
-        return self._conn
+        p = get_pool()
+        ultimo_error = None
+        for _ in range(3):
+            conn = p.getconn()
+            try:
+                if not conn.closed:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                    conn.rollback()  # limpiar la transacción del ping
+                    self._conn = conn
+                    return conn
+            except psycopg2.Error as e:
+                ultimo_error = e
+            # Conexión muerta: descartarla del pool y probar con otra
+            try:
+                p.putconn(conn, close=True)
+            except Exception:
+                pass
+        raise RuntimeError(f"Sin conexión viva a la base de datos: {ultimo_error}")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self._conn.commit()
-        else:
-            self._conn.rollback()
+        try:
+            if exc_type is None:
+                self._conn.commit()
+            else:
+                self._conn.rollback()
+        except psycopg2.Error:
+            # La conexión murió a mitad de camino: descartarla, no filtrarla.
+            try:
+                get_pool().putconn(self._conn, close=True)
+            except Exception:
+                pass
+            self._conn = None
+            if exc_type is None:
+                raise  # el commit falló: el caller TIENE que enterarse
+            return False  # ya había una excepción original; que propague esa
         get_pool().putconn(self._conn)
         return False  # no suprimir la excepción
 
