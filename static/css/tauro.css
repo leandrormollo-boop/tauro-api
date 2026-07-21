@@ -27,6 +27,9 @@
    .price-hero             precio grande de cotización
    ========================================================== */
 
+/* Las fuentes se cargan con <link> desde los templates base (paraleliza
+   la descarga y aprovecha el preconnect). Fallback por si un template
+   viejo no tiene el <link>: */
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
@@ -97,11 +100,17 @@ details[open] > *:not(summary) {
   animation: fadeUp .25s cubic-bezier(.2,.7,.3,1) both;
 }
 
-/* Entrada suave del contenido de cada página */
+/* Entrada suave del contenido de cada página.
+   En navegadores CON View Transitions (Chrome/Edge) el crossfade de VT
+   ya anima la navegación — la cascada encima duplicaba el movimiento y
+   se sentía "lenta". Ahí se apaga; queda como fallback (Safari/Firefox). */
 .main-inner > * { animation: fadeUp .28s cubic-bezier(.2,.7,.3,1) both; }
 .main-inner > *:nth-child(2) { animation-delay: .04s; }
 .main-inner > *:nth-child(3) { animation-delay: .08s; }
 .main-inner > *:nth-child(n+4) { animation-delay: .11s; }
+@supports (view-transition-name: none) {
+  .main-inner > * { animation: none; }
+}
 
 /* Micro-transiciones globales en lo interactivo */
 a, button, .btn, .side-item, .tab, .action-tile, .address-item,
@@ -110,6 +119,17 @@ input, select, textarea, summary {
   transition-duration: .15s;
   transition-timing-function: ease;
 }
+
+/* Anillo de foco de marca: navegación por teclado visible en TODO lo
+   interactivo (los inputs ya tienen su box-shadow propio). */
+a:focus-visible, button:focus-visible, .btn:focus-visible,
+.side-item:focus-visible, .action-tile:focus-visible, .tab:focus-visible,
+.track-link:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
 
 html { scroll-behavior: smooth; }
 html, body {
@@ -420,7 +440,7 @@ h1, h2, h3, h4 {
 .action-tile strong { font-size: 14px; color: var(--fg); }
 .action-tile span { color: var(--fg-3); font-size: 12px; line-height: 1.45; }
 .subtitle { color: var(--fg-3); font-size: 14px; margin: 6px 0 20px; }
-.empty { color: var(--fg-4); text-align: center; padding: 20px; }
+.empty { color: var(--fg-3); text-align: center; padding: 20px; }
 .num { text-align: right; font-family: var(--font-mono); }
 .kpi { margin: 14px 0; }
 .kpi-row {
@@ -435,7 +455,7 @@ h1, h2, h3, h4 {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--fg-4);
+  color: var(--fg-3);
   margin-bottom: 6px;
 }
 .kpi-value {
@@ -461,8 +481,8 @@ h1, h2, h3, h4 {
   gap: 16px;
   margin-bottom: 18px;
 }
-.card-head h3 { margin-bottom: 4px; }
-.card-head p { color: var(--fg-4); font-size: 12px; line-height: 1.45; }
+.card-head > div h3 { margin-bottom: 4px; }
+.card-head p { color: var(--fg-3); font-size: 12px; line-height: 1.45; }
 .card h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--fg-2); }
 
 .card-grid {
@@ -478,6 +498,9 @@ h1, h2, h3, h4 {
   border-radius: var(--radius);
   padding: 20px 24px;
   transition: border-color .15s;
+  /* pie pinneado abajo: las 3 cards del grid alinean su base */
+  display: flex;
+  flex-direction: column;
 }
 .stat-card:hover { border-color: var(--line); }
 .stat-card .label {
@@ -485,7 +508,7 @@ h1, h2, h3, h4 {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--fg-4);
+  color: var(--fg-3);
   margin-bottom: 8px;
 }
 .stat-card .value {
@@ -498,7 +521,7 @@ h1, h2, h3, h4 {
 .stat-card .value.ok   { color: var(--ok); }
 .stat-card .value.warn { color: var(--warn); }
 .stat-card .value.err  { color: var(--error); }
-.stat-card .foot { margin-top: 10px; }
+.stat-card .foot { margin-top: auto; padding-top: 10px; }
 .mini-row {
   display: flex;
   justify-content: space-between;
@@ -709,7 +732,7 @@ h1, h2, h3, h4 {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--fg-4);
+  color: var(--fg-3);
   margin-bottom: 6px;
 }
 .form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -741,7 +764,7 @@ input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
-input::placeholder { color: var(--fg-4); }
+input::placeholder, textarea::placeholder { color: var(--fg-3); opacity: .75; }
 
 select {
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237a828c' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
@@ -804,6 +827,23 @@ select {
   box-shadow: none;
 }
 
+/* Estado de carga: el botón sigue legible (no el 45% de disabled)
+   uso: btn.classList.add('is-loading') + disabled para evitar doble submit */
+.btn.is-loading, .btn.is-loading:disabled {
+  opacity: 1;
+  pointer-events: none;
+  cursor: wait;
+}
+.btn .spin {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-spin .7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+
 .btn-full { width: 100%; }
 .btn-sm   { padding: 7px 16px; font-size: 13px; }
 
@@ -838,7 +878,7 @@ thead th {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--fg-4);
+  color: var(--fg-3);
   padding: 0 16px 12px;
   text-align: left;
   border-bottom: 1px solid var(--line-soft);
@@ -849,6 +889,15 @@ tbody tr:last-child { border-bottom: none; }
 tbody td { padding: 13px 16px; color: var(--fg-2); }
 td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .row-actions { display: flex; gap: 8px; align-items: center; }
+
+/* tracking clickeable (abre seguimiento FedEx) */
+.track-link { color: var(--accent-soft); border-bottom: 1px dashed transparent; }
+.track-link:hover { border-bottom-color: var(--accent-soft); }
+
+/* tags de dirección (alias / predeterminada) */
+.addr-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.addr-tags .is-default { background: var(--ok-glow); color: var(--ok); }
+.tab .tab-count { color: var(--fg-3); font-weight: 400; margin-left: 4px; }
 
 /* ── Badge ───────────────────────────────────────────────── */
 .badge {
@@ -1012,10 +1061,10 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .login-card .sub { color: var(--fg-3); font-size: 13px; margin-bottom: 28px; }
 .login-hint {
   margin-top: 20px;
-  font-size: 12px;
-  color: var(--fg-4);
+  font-size: 12.5px;
+  color: var(--fg-3);
   text-align: center;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
 }
 .dev-link-box {
   margin-top: 20px;
@@ -1068,6 +1117,11 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   box-shadow: 0 10px 44px rgba(167, 139, 250, .12), inset 0 1px 0 rgba(255,255,255,.04);
   overflow: hidden;
 }
+/* la opción recomendada resalta sobre las demás */
+.price-card.featured {
+  border-color: var(--accent);
+  box-shadow: 0 14px 54px rgba(167, 139, 250, .22), inset 0 1px 0 rgba(255,255,255,.06);
+}
 .price-card .pc-badge {
   position: absolute;
   top: 14px; left: 50%;
@@ -1092,13 +1146,14 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .price-card .was s { color: var(--fg-3); font-family: var(--font-mono); }
 .price-card .big {
   font-family: var(--font-display);
-  font-size: clamp(40px, 7vw, 58px);
+  font-size: clamp(34px, 4vw, 48px);
   font-weight: 700;
   letter-spacing: -0.035em;
   line-height: 1.05;
   margin-top: 6px;
   font-variant-numeric: tabular-nums;
   text-shadow: 0 0 34px rgba(167, 139, 250, .38);
+  white-space: nowrap;
 }
 .price-card .big .cur { font-size: 17px; color: var(--fg-3); font-weight: 400; margin-left: 4px; text-shadow: none; }
 .price-card .save {
@@ -1211,4 +1266,27 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   .user, .logout { display: none; }
   .container { padding: 24px 16px 60px; }
   .card { padding: 18px; }
+  .login-card { padding: 26px 22px; }
+  .login-wrap { padding: 24px 16px; }
+
+  /* Tablas de envíos: cada fila se vuelve una mini-card apilada
+     (nada de scroll horizontal en el teléfono) */
+  .envios-table thead { display: none; }
+  .envios-table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px 14px;
+    padding: 14px 4px;
+  }
+  .envios-table td { padding: 2px 0; border: none; }
+  .envios-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--fg-3);
+  }
+  .envios-table td:last-child { grid-column: 1 / -1; }
 }

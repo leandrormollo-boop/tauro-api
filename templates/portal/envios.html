@@ -18,15 +18,33 @@
 {% endif %}
 
 {% if solicitudes %}
+{# resumen arriba: densidad útil, no una tabla pelada #}
+{% set en_proceso = solicitudes | selectattr('estado', 'in', ['SOLICITADO', 'EN_PROCESO']) | list | length %}
+{% set total_ars = solicitudes | map(attribute='precio_tauro_ars') | select | sum %}
+<div class="grid-3" style="margin-bottom:16px;">
+    <div class="stat-card">
+        <div class="label">Envíos totales</div>
+        <div class="value">{{ solicitudes|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">En proceso</div>
+        <div class="value {% if en_proceso %}warn{% endif %}">{{ en_proceso }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Total operado ARS</div>
+        <div class="value">$ {{ "{:,.0f}".format(total_ars).replace(",", ".") }}</div>
+    </div>
+</div>
+
 <div class="card">
     <div class="table-wrap">
-        <table>
+        <table class="envios-table">
             <thead>
                 <tr>
                     <th>Fecha</th>
                     <th>Producto</th>
                     <th>Destinatario</th>
-                    <th>Precio ARS</th>
+                    <th>Tu costo ARS</th>
                     <th>Estado</th>
                     <th>Tracking</th>
                     <th></th>
@@ -43,33 +61,39 @@
             {% for s in solicitudes %}
                 {% set b = estados.get(s.estado, ("muted", (s.estado or "—").replace("_", " ").capitalize())) %}
                 <tr>
-                    <td class="mono">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</td>
-                    <td>
+                    <td class="mono" data-label="Fecha">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</td>
+                    <td data-label="Producto">
                         <strong>{{ s.producto_alias }}</strong>
-                        <br><small style="color:var(--fg-4)">x{{ s.cantidad }}</small>
+                        <br><small style="color:var(--fg-3)">x{{ s.cantidad }}</small>
                     </td>
-                    <td>
+                    <td data-label="Destinatario">
                         {{ s.dest_nombre }}
-                        <br><small style="color:var(--fg-4)">{{ s.dest_ciudad or "—" }}, {{ s.destino_pais }}</small>
+                        <br><small style="color:var(--fg-3)">{{ s.dest_ciudad or "—" }}, {{ s.destino_pais }}</small>
                     </td>
-                    <td class="mono">
+                    <td class="mono" data-label="Tu costo">
                         {% if s.precio_tauro_ars %}
                             $ {{ "{:,.0f}".format(s.precio_tauro_ars).replace(",", ".") }}
                         {% else %}
                             —
                         {% endif %}
                         {% if s.precio_cliente_final_ars %}
-                            <br><small style="color:var(--fg-4)">final $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
+                            <br><small style="color:var(--fg-3)"><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;">a tu cliente</span> $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
                         {% endif %}
                     </td>
-                    <td><span class="badge {{ b[0] }}">{{ b[1] }}</span></td>
-                    <td class="mono" style="font-size:11px">{{ s.tracking or "—" }}</td>
+                    <td data-label="Estado"><span class="badge {{ b[0] }}">{{ b[1] }}</span></td>
+                    <td class="mono" style="font-size:11px" data-label="Tracking">
+                        {% if s.tracking %}
+                            <a href="https://www.fedex.com/fedextrack/?trknbr={{ s.tracking }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
+                        {% else %}—{% endif %}
+                    </td>
                     <td>
                         <div class="row-actions">
                             {% if s.tiene_label %}
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-sm">⬇ Guía PDF</a>
                             {% elif s.guia_url %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>
+                            {% elif s.estado in ['SOLICITADO', 'EN_PROCESO'] %}
+                                <span style="color:var(--fg-3);font-size:12px;">Preparando guía…</span>
                             {% endif %}
                         </div>
                     </td>

@@ -18,12 +18,19 @@
     <div class="msg error">{{ error }}</div>
 {% endif %}
 
-<div class="tabs">
-    <a class="tab active" href="#remitentes">Remitentes <span style="color: var(--fg-4);">({{ remitentes|length if remitentes else (1 if remitente else 0) }})</span></a>
-    <a class="tab" href="#destinatarios">Destinatarios <span style="color: var(--fg-4);">({{ destinatarios|length }})</span></a>
+{% set paises_nombres = {'AR':'Argentina','US':'Estados Unidos','ES':'España','BR':'Brasil','CL':'Chile','UY':'Uruguay','MX':'México','PE':'Perú','CO':'Colombia','PY':'Paraguay','BO':'Bolivia','EC':'Ecuador','GB':'Reino Unido','DE':'Alemania','FR':'Francia','IT':'Italia','CA':'Canadá','CN':'China'} %}
+
+{# tabs REALES: muestran un panel por vez (no anclas decorativas) #}
+<div class="tabs" role="tablist">
+    <button type="button" class="tab active" role="tab" aria-selected="true" data-target="remitentes">
+        Remitentes <span class="tab-count">({{ remitentes|length if remitentes else (1 if remitente else 0) }})</span>
+    </button>
+    <button type="button" class="tab" role="tab" aria-selected="false" data-target="destinatarios">
+        Destinatarios <span class="tab-count">({{ destinatarios|length }})</span>
+    </button>
 </div>
 
-<div class="card" id="remitentes">
+<div class="card" id="remitentes" data-panel="remitentes">
     <div class="card-head">
         <div>
             <h3>Remitentes</h3>
@@ -37,12 +44,14 @@
             {% for r in remitentes %}
                 <div class="address-item">
                     <strong>{{ r.nombre }}</strong>
-                    <span>{{ r.direccion }} · {{ r.ciudad }}{% if r.cp %} {{ r.cp }}{% endif %} · {{ r.pais }}</span>
+                    <span>{{ r.direccion }} · {{ r.ciudad }}{% if r.cp %} {{ r.cp }}{% endif %} · {{ paises_nombres.get(r.pais, r.pais) }}</span>
                     <small>{{ r.email or "Sin email" }} · {{ r.telefono or "Sin teléfono" }}</small>
-                    <div style="display: flex; gap: 6px;">
+                    {% if r.alias or r.predeterminada %}
+                    <div class="addr-tags">
                         {% if r.alias %}<em>{{ r.alias }}</em>{% endif %}
-                        {% if r.predeterminada %}<em>Predeterminada</em>{% endif %}
+                        {% if r.predeterminada %}<em class="is-default">★ Predeterminada</em>{% endif %}
                     </div>
+                    {% endif %}
                 </div>
             {% endfor %}
         </div>
@@ -50,17 +59,23 @@
         <div class="address-list">
             <div class="address-item">
                 <strong>{{ remitente.nombre }}</strong>
-                <span>{{ remitente.direccion }} · {{ remitente.ciudad }}{% if remitente.cp %} {{ remitente.cp }}{% endif %} · {{ remitente.pais }}</span>
+                <span>{{ remitente.direccion }} · {{ remitente.ciudad }}{% if remitente.cp %} {{ remitente.cp }}{% endif %} · {{ paises_nombres.get(remitente.pais, remitente.pais) }}</span>
                 <small>{{ remitente.email or "Sin email" }} · {{ remitente.telefono or "Sin teléfono" }}</small>
                 <em>Desde tu perfil</em>
             </div>
         </div>
     {% else %}
-        <p class="empty">Todavía no cargaste remitentes. Agregá uno con el formulario de abajo eligiendo tipo "Remitente".</p>
+        <div class="empty">
+            <p style="margin-bottom:12px;">Todavía no cargaste remitentes.</p>
+            <button type="button" class="btn btn-primary btn-sm"
+                onclick="document.querySelector('[name=tipo]').value='REMITENTE';document.querySelector('#form-direccion').scrollIntoView({behavior:'smooth'});document.querySelector('[name=nombre]').focus({preventScroll:true})">
+                Agregar remitente
+            </button>
+        </div>
     {% endif %}
 </div>
 
-<div class="card" id="destinatarios">
+<div class="card" id="destinatarios" data-panel="destinatarios" hidden>
     <div class="card-head">
         <div>
             <h3>Destinatarios</h3>
@@ -74,21 +89,29 @@
             {% for d in destinatarios %}
                 <div class="address-item">
                     <strong>{{ d.nombre }}</strong>
-                    <span>{{ d.direccion }} · {{ d.ciudad }}{% if d.cp %} {{ d.cp }}{% endif %} · {{ d.pais }}</span>
+                    <span>{{ d.direccion }} · {{ d.ciudad }}{% if d.cp %} {{ d.cp }}{% endif %} · {{ paises_nombres.get(d.pais, d.pais) }}</span>
                     <small>{{ d.email or "Sin email" }} · {{ d.telefono or "Sin teléfono" }}</small>
-                    <div style="display: flex; gap: 6px;">
+                    {% if d.alias or d.predeterminada %}
+                    <div class="addr-tags">
                         {% if d.alias %}<em>{{ d.alias }}</em>{% endif %}
-                        {% if d.predeterminada %}<em>Predeterminada</em>{% endif %}
+                        {% if d.predeterminada %}<em class="is-default">★ Predeterminada</em>{% endif %}
                     </div>
+                    {% endif %}
                 </div>
             {% endfor %}
         </div>
     {% else %}
-        <p class="empty">Todavía no guardaste destinatarios. El primero que cargues te queda listo para el próximo envío.</p>
+        <div class="empty">
+            <p style="margin-bottom:12px;">Todavía no guardaste destinatarios. El primero que cargues te queda listo para el próximo envío.</p>
+            <button type="button" class="btn btn-primary btn-sm"
+                onclick="document.querySelector('[name=tipo]').value='DESTINATARIO';document.querySelector('#form-direccion').scrollIntoView({behavior:'smooth'});document.querySelector('[name=nombre]').focus({preventScroll:true})">
+                Agregar destinatario
+            </button>
+        </div>
     {% endif %}
 </div>
 
-<div class="card">
+<div class="card" id="form-direccion">
     <div class="card-head">
         <div>
             <h3>Agregar dirección</h3>
@@ -99,70 +122,74 @@
     <form method="POST" action="/portal/direcciones" class="form">
         <div class="form-grid-2">
             <div class="form-group">
-                <label>Tipo</label>
-                <select name="tipo" required>
+                <label for="dir-tipo">Tipo</label>
+                <select name="tipo" id="dir-tipo" required>
                     <option value="DESTINATARIO">Destinatario (recibe el envío)</option>
                     <option value="REMITENTE">Remitente (origen del envío)</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>Alias</label>
-                <input type="text" name="alias" placeholder="Ej: Depósito CABA / Cliente Miami">
+                <label for="dir-alias">Alias</label>
+                <input type="text" name="alias" id="dir-alias" placeholder="Ej: Depósito CABA / Cliente Miami">
             </div>
         </div>
 
         <div class="form-grid-2">
             <div class="form-group">
-                <label>Nombre / razón social</label>
-                <input type="text" name="nombre" required>
+                <label for="dir-nombre">Nombre / razón social</label>
+                <input type="text" name="nombre" id="dir-nombre" required>
             </div>
             <div class="form-group">
-                <label>Documento / CUIT / Tax ID</label>
-                <input type="text" name="documento">
+                <label for="dir-documento">Documento / CUIT / Tax ID</label>
+                <input type="text" name="documento" id="dir-documento">
             </div>
         </div>
 
         <div class="form-grid-2">
             <div class="form-group">
-                <label>Email</label>
-                <input type="email" name="email" placeholder="contacto@empresa.com">
+                <label for="dir-email">Email</label>
+                <input type="email" name="email" id="dir-email" placeholder="contacto@empresa.com">
             </div>
             <div class="form-group">
-                <label>Teléfono</label>
-                <input type="text" name="telefono" placeholder="+54 9 11 ...">
+                <label for="dir-telefono">Teléfono</label>
+                <input type="text" name="telefono" id="dir-telefono" placeholder="+54 9 11 ...">
             </div>
         </div>
 
         <div class="form-group">
-            <label>Dirección</label>
-            <input type="text" name="direccion" placeholder="Calle, número, piso / depto" required>
+            <label for="dir-direccion">Dirección</label>
+            <input type="text" name="direccion" id="dir-direccion" placeholder="Calle, número, piso / depto" required>
         </div>
 
         <div class="form-grid-2">
             <div class="form-group">
-                <label>Ciudad</label>
-                <input type="text" name="ciudad" required>
+                <label for="dir-ciudad">Ciudad</label>
+                <input type="text" name="ciudad" id="dir-ciudad" required>
             </div>
             <div class="form-group">
-                <label>Estado / provincia</label>
-                <input type="text" name="estado">
+                <label for="dir-estado">Estado / provincia</label>
+                <input type="text" name="estado" id="dir-estado">
             </div>
         </div>
 
         <div class="form-grid-2">
             <div class="form-group">
-                <label>Código postal</label>
-                <input type="text" name="cp" required>
+                <label for="dir-cp">Código postal</label>
+                <input type="text" name="cp" id="dir-cp" required>
             </div>
             <div class="form-group">
-                <label>País (código de 2 letras)</label>
-                <input type="text" name="pais" value="AR" maxlength="2" required>
+                <label for="dir-pais">País</label>
+                <select name="pais" id="dir-pais" required>
+                    {% for cod, nombre in paises_nombres.items() %}
+                        <option value="{{ cod }}" {% if cod == 'AR' %}selected{% endif %}>{{ nombre }} ({{ cod }})</option>
+                    {% endfor %}
+                </select>
             </div>
         </div>
 
         <div class="form-group">
-            <label>Notas</label>
-            <textarea name="notas" rows="2" placeholder="Horario de entrega, referencias, piso sin ascensor..."></textarea>
+            <label for="dir-notas">Notas</label>
+            <textarea name="notas" id="dir-notas" rows="2" placeholder="Horario de entrega, referencias, piso sin ascensor..."></textarea>
         </div>
 
         <label class="check-row">
@@ -176,4 +203,19 @@
         </div>
     </form>
 </div>
+
+<script>
+// Tabs reales: un panel visible por vez, estado activo de verdad.
+document.querySelectorAll(".tab[data-target]").forEach(function (t) {
+    t.addEventListener("click", function () {
+        document.querySelectorAll(".tab[data-target]").forEach(function (x) {
+            x.classList.toggle("active", x === t);
+            x.setAttribute("aria-selected", x === t ? "true" : "false");
+        });
+        document.querySelectorAll("[data-panel]").forEach(function (p) {
+            p.hidden = p.dataset.panel !== t.dataset.target;
+        });
+    });
+});
+</script>
 {% endblock %}

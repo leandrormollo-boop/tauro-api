@@ -23,7 +23,11 @@
     <div class="card-head">
         <div>
             <h3>Productos</h3>
+            {% if productos %}
             <p>Los aprobados ya se pueden elegir al crear un envío.</p>
+            {% else %}
+            <p>Cargá tu primer producto acá abajo y lo validamos.</p>
+            {% endif %}
         </div>
         <span class="badge muted">{{ productos|length }}</span>
     </div>
@@ -79,42 +83,44 @@
     <form method="POST" action="/portal/catalogo/add">
         <div class="form-grid-3">
             <div class="form-group">
-                <label>Alias interno (cómo lo llamás vos)</label>
-                <input type="text" name="alias_interno" required placeholder="Mini bag">
+                <label for="cat-alias">Alias interno (cómo lo llamás vos)</label>
+                <input type="text" name="alias_interno" id="cat-alias" required placeholder="Mini bag">
             </div>
             <div class="form-group">
-                <label>Descripción para invoice (inglés)</label>
-                <input type="text" name="nombre_invoice" required placeholder="Leather handbag 100%">
+                <label for="cat-invoice">Descripción para invoice (inglés)</label>
+                <input type="text" name="nombre_invoice" id="cat-invoice" required placeholder="Leather handbag 100%">
             </div>
             <div class="form-group">
-                <label>HS code (XXXX.XX.XX)</label>
-                <input type="text" name="hs_code" required pattern="\d{4}\.\d{2}\.\d{2}" placeholder="4202.21.00">
-            </div>
-        </div>
-
-        <div class="form-grid-3">
-            <div class="form-group">
-                <label>Largo (cm)</label>
-                <input type="number" name="largo_cm" step="0.5" min="0" required placeholder="30">
-            </div>
-            <div class="form-group">
-                <label>Ancho (cm)</label>
-                <input type="number" name="ancho_cm" step="0.5" min="0" required placeholder="20">
-            </div>
-            <div class="form-group">
-                <label>Alto (cm)</label>
-                <input type="number" name="alto_cm" step="0.5" min="0" required placeholder="10">
+                <label for="cat-hs">HS code (XXXX.XX.XX)</label>
+                <input type="text" name="hs_code" id="cat-hs" required pattern="\d{4}\.\d{2}\.\d{2}"
+                       placeholder="4202.21.00" inputmode="numeric"
+                       title="Formato: 4 dígitos, punto, 2 dígitos, punto, 2 dígitos — ej: 4202.21.00">
             </div>
         </div>
 
         <div class="form-grid-3">
             <div class="form-group">
-                <label>Peso (kg)</label>
-                <input type="number" name="peso_kg" step="0.1" min="0" required placeholder="2">
+                <label for="cat-largo">Largo (cm)</label>
+                <input type="number" name="largo_cm" id="cat-largo" step="0.5" min="0" required placeholder="30">
             </div>
             <div class="form-group">
-                <label>Valor declarado (USD)</label>
-                <input type="number" name="valor_usd_default" step="1" min="0" required placeholder="120">
+                <label for="cat-ancho">Ancho (cm)</label>
+                <input type="number" name="ancho_cm" id="cat-ancho" step="0.5" min="0" required placeholder="20">
+            </div>
+            <div class="form-group">
+                <label for="cat-alto">Alto (cm)</label>
+                <input type="number" name="alto_cm" id="cat-alto" step="0.5" min="0" required placeholder="10">
+            </div>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label for="cat-peso">Peso (kg)</label>
+                <input type="number" name="peso_kg" id="cat-peso" step="0.1" min="0" required placeholder="2">
+            </div>
+            <div class="form-group">
+                <label for="cat-valor">Valor declarado (USD)</label>
+                <input type="number" name="valor_usd_default" id="cat-valor" step="1" min="0" required placeholder="120">
             </div>
         </div>
 

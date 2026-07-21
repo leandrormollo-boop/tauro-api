@@ -14,8 +14,10 @@
     </div>
 {% endif %}
 
-<div class="card" style="max-width:760px;">
+{# con resultados el card se ensancha para que las opciones entren lado a lado #}
+<div class="card" style="max-width:{{ '1020px' if opciones else '760px' }};">
     <form id="form-cotizar" method="POST" action="/portal/cotizar">
+        {% set paises_nombres = {'AR':'Argentina','US':'Estados Unidos','ES':'España','BR':'Brasil','CL':'Chile','UY':'Uruguay','MX':'México','PE':'Perú','CO':'Colombia','PY':'Paraguay','BO':'Bolivia','EC':'Ecuador','GB':'Reino Unido','DE':'Alemania','FR':'Francia','IT':'Italia','CA':'Canadá','CN':'China'} %}
         <div class="form-section">
             <h4><span class="n">1</span> Ruta</h4>
             <div class="form-grid-2">
@@ -23,7 +25,7 @@
                     <label for="origen_pais">Origen (país)</label>
                     <select name="origen_pais" id="origen_pais" required>
                         {% for p in paises_origen %}
-                            <option value="{{ p }}">{{ p }}</option>
+                            <option value="{{ p }}">{{ paises_nombres.get(p, p) }} ({{ p }})</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -31,7 +33,7 @@
                     <label for="destino_pais">Destino (país)</label>
                     <select name="destino_pais" id="destino_pais" required>
                         {% for p in paises_destino %}
-                            <option value="{{ p }}">{{ p }}</option>
+                            <option value="{{ p }}">{{ paises_nombres.get(p, p) }} ({{ p }})</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -82,7 +84,7 @@
     <div id="resultado" class="fade-up">
         <div class="quote-options">
             {% for op in opciones %}
-            <div class="price-card">
+            <div class="price-card{% if loop.first and opciones|length > 1 %} featured{% endif %}">
                 <div class="pc-badge">
                     {% if loop.first and opciones|length > 1 %}⭐ Recomendado · {% endif %}{{ op.servicio_nombre }}
                 </div>

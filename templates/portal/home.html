@@ -8,14 +8,15 @@
         <h1>Hola, {{ cliente }}</h1>
         <p>Tu cuenta, tus envíos y las herramientas para operar, todo en un solo lugar.</p>
     </div>
-    <a href="/portal/envios/nuevo" class="btn btn-primary">Crear envío</a>
+    <a href="/portal/envios/nuevo" class="btn btn-primary">Nuevo envío</a>
 </div>
 
 <!-- ── Stats ───────────────────────────────────────────── -->
 <div class="grid-3" style="margin-bottom:16px;">
     <div class="stat-card">
         <div class="label">Saldo pendiente</div>
-        <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% else %}ok{% endif %}">
+        {# neutro si hay pendiente (cuenta corriente normal, no alarma); verde si está al día #}
+        <div class="value {% if saldo.saldo_pendiente_ars <= 0 %}ok{% endif %}">
             ARS {{ "{:,.0f}".format(saldo.saldo_pendiente_ars).replace(",", ".") }}
         </div>
         <div class="foot">
@@ -26,6 +27,10 @@
             <div class="mini-row">
                 <span>Pagado</span>
                 <strong>ARS {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</strong>
+            </div>
+            <div class="mini-row">
+                <span>Detalle de tus pagos</span>
+                <a href="#pagos" style="color:var(--accent-soft);font-size:12px;white-space:nowrap;">Ver movimientos ↓</a>
             </div>
         </div>
     </div>
@@ -64,7 +69,7 @@
         </div>
         <div class="action-grid">
             <a href="/portal/envios/nuevo" class="action-tile">
-                <strong>Crear envío</strong>
+                <strong>Nuevo envío</strong>
                 <span>Armá la solicitud con remitente, destinatario e invoice.</span>
             </a>
             <a href="/portal/cotizar" class="action-tile">
@@ -90,7 +95,9 @@
             </div>
         </div>
         <div class="track-box">
-            <input type="text" id="track-input" placeholder="Ej: 771234567890" autocomplete="off">
+            <input type="text" id="track-input" placeholder="Ej: 771234567890" autocomplete="off"
+                   aria-label="Número de tracking de FedEx"
+                   onkeydown="if(event.key==='Enter'){this.nextElementSibling.click()}">
             <button type="button" class="btn btn-primary"
                 onclick="var v=document.getElementById('track-input').value.trim(); if(v) window.open('https://www.fedex.com/fedextrack/?trknbr='+encodeURIComponent(v),'_blank')">
                 Rastrear
@@ -136,7 +143,11 @@
                             {{ s.estado.replace("_", " ") }}
                         </span>
                     </td>
-                    <td class="mono">{{ s.tracking or "—" }}</td>
+                    <td class="mono">
+                        {% if s.tracking %}
+                            <a href="https://www.fedex.com/fedextrack/?trknbr={{ s.tracking }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
+                        {% else %}—{% endif %}
+                    </td>
                     <td>
                         {% if s.tiene_label %}
                             <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-ghost btn-sm" target="_blank">Descargar PDF</a>
@@ -158,7 +169,7 @@
 </div>
 
 <!-- ── Últimos pagos ───────────────────────────────────── -->
-<div class="card">
+<div class="card" id="pagos">
     <div class="card-head">
         <div>
             <h3>Últimos pagos</h3>

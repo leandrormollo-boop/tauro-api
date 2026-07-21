@@ -4,8 +4,8 @@
 {% block content %}
 <div class="page-title page-title-row">
     <div>
-        <div class="eyebrow">Nuevo envío</div>
-        <h1>Crear solicitud</h1>
+        <div class="eyebrow">Operaciones</div>
+        <h1>Nuevo envío</h1>
         <p>Completá remitente, destinatario y paquete. Tauro revisa la solicitud y genera la guía.</p>
     </div>
     <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Libreta de direcciones</a>
@@ -21,8 +21,9 @@
     </div>
 {% endif %}
 
-<!-- ⚡ Pegar pedido: mata el data-entry — pega el mail del cliente y se precarga el form -->
-<details class="card" style="margin-bottom:18px;padding:18px 22px;border-color:rgba(167,139,250,.35);">
+<!-- ⚡ Pegar pedido: mata el data-entry — pega el mail del cliente y se precarga el form.
+     Arranca ABIERTO: es la feature diferencial, no se esconde. -->
+<details class="card" open style="margin-bottom:18px;padding:18px 22px;border-color:rgba(167,139,250,.35);">
     <summary style="cursor:pointer;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:10px;">
         ⚡ ¿Te llegó el pedido por mail? Pegalo acá y te lleno el formulario
     </summary>
@@ -35,7 +36,8 @@
     </div>
 </details>
 
-<div class="stepper">
+<!-- Stepper REAL: 3 pasos = 3 secciones del form, se actualiza con el scroll -->
+<div class="stepper" id="stepper-envio">
     <div class="step active">
         <span>1</span>
         <label>Remitente</label>
@@ -47,10 +49,6 @@
     <div class="step">
         <span>3</span>
         <label>Paquete</label>
-    </div>
-    <div class="step">
-        <span>4</span>
-        <label>Confirmar</label>
     </div>
 </div>
 
@@ -113,52 +111,53 @@
 
             <div class="form-grid-2">
                 <div class="form-group">
-                    <label>Nombre / razón social</label>
+                    <label for="dest_nombre">Nombre / razón social</label>
                     <input type="text" name="dest_nombre" id="dest_nombre" required value="{{ form.dest_nombre or '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Documento / Tax ID</label>
+                    <label for="dest_documento">Documento / Tax ID</label>
                     <input type="text" name="dest_documento" id="dest_documento" value="{{ form.dest_documento or '' }}">
                 </div>
             </div>
 
             <div class="form-grid-2">
                 <div class="form-group">
-                    <label>Email</label>
+                    <label for="dest_email">Email</label>
                     <input type="email" name="dest_email" id="dest_email" value="{{ form.dest_email or '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Teléfono</label>
+                    <label for="dest_telefono">Teléfono</label>
                     <input type="text" name="dest_telefono" id="dest_telefono" value="{{ form.dest_telefono or '' }}">
                 </div>
             </div>
 
             <div class="form-group">
-                <label>Dirección</label>
+                <label for="dest_direccion">Dirección</label>
                 <input type="text" name="dest_direccion" id="dest_direccion" required value="{{ form.dest_direccion or '' }}">
             </div>
 
+            {% set paises_nombres = {'AR':'Argentina','US':'Estados Unidos','ES':'España','BR':'Brasil','CL':'Chile','UY':'Uruguay','MX':'México','PE':'Perú','CO':'Colombia','PY':'Paraguay','BO':'Bolivia','EC':'Ecuador','GB':'Reino Unido','DE':'Alemania','FR':'Francia','IT':'Italia','CA':'Canadá','CN':'China'} %}
             <div class="form-grid-4">
                 <div class="form-group">
-                    <label>País</label>
+                    <label for="destino_pais">País</label>
                     <select name="destino_pais" id="destino_pais" required>
                         <option value="">Seleccionar</option>
                         {% for p in paises_destino %}
-                            <option value="{{ p }}" {% if form.destino_pais == p %}selected{% endif %}>{{ p }}</option>
+                            <option value="{{ p }}" {% if form.destino_pais == p %}selected{% endif %}>{{ paises_nombres.get(p, p) }} ({{ p }})</option>
                         {% endfor %}
                     </select>
                     <input type="hidden" name="dest_pais" id="dest_pais" value="{{ form.dest_pais or form.destino_pais or '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Ciudad</label>
+                    <label for="dest_ciudad">Ciudad</label>
                     <input type="text" name="dest_ciudad" id="dest_ciudad" required value="{{ form.dest_ciudad or '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Estado / provincia</label>
+                    <label for="dest_estado">Estado / provincia</label>
                     <input type="text" name="dest_estado" id="dest_estado" value="{{ form.dest_estado or '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Código postal</label>
+                    <label for="dest_zip">Código postal</label>
                     <input type="text" name="dest_zip" id="dest_zip" required value="{{ form.dest_zip or '' }}">
                 </div>
             </div>
@@ -169,8 +168,8 @@
             </label>
 
             <div class="form-group compact-field">
-                <label>Alias para guardar</label>
-                <input type="text" name="dest_alias" placeholder="Ej: Miami depósito / Cliente Pérez" value="{{ form.dest_alias or '' }}">
+                <label for="dest_alias">Alias para guardar</label>
+                <input type="text" name="dest_alias" id="dest_alias" placeholder="Ej: Miami depósito / Cliente Pérez" value="{{ form.dest_alias or '' }}">
             </div>
         </div>
 
@@ -179,7 +178,7 @@
 
             <div class="form-grid-3">
                 <div class="form-group wide-field">
-                    <label>Producto</label>
+                    <label for="producto_alias">Producto</label>
                     <select name="producto_alias" id="producto_alias" required>
                         <option value="">Seleccionar</option>
                         {% for p in productos %}
@@ -190,18 +189,18 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Cantidad</label>
+                    <label for="cantidad">Cantidad</label>
                     <input type="number" name="cantidad" id="cantidad" min="1" step="1" value="{{ form.cantidad or 1 }}" required>
                 </div>
                 <div class="form-group">
-                    <label>Precio final a tu cliente ARS</label>
-                    <input type="text" name="precio_cliente_final_ars" inputmode="decimal" placeholder="Opcional" value="{{ form.precio_cliente_final_ars or '' }}">
+                    <label for="precio_cliente_final_ars">Precio final a tu cliente ARS</label>
+                    <input type="text" name="precio_cliente_final_ars" id="precio_cliente_final_ars" inputmode="decimal" placeholder="Opcional" value="{{ form.precio_cliente_final_ars or '' }}">
                 </div>
             </div>
 
             <div class="form-group">
-                <label>Observaciones</label>
-                <textarea name="observaciones" rows="3" placeholder="Instrucciones para Tauro, referencia interna, nota comercial...">{{ form.observaciones or '' }}</textarea>
+                <label for="observaciones">Observaciones</label>
+                <textarea name="observaciones" id="observaciones" rows="3" placeholder="Instrucciones para Tauro, referencia interna, nota comercial...">{{ form.observaciones or '' }}</textarea>
             </div>
         </div>
     </div>
@@ -245,6 +244,9 @@
       Object.entries(fieldMap).forEach(([dataKey, inputId]) => setField(inputId, option.dataset[dataKey]));
       setField("destino_pais", option.dataset.pais);
       setField("dest_pais", option.dataset.pais);
+      // setear .value no dispara "change": recotizamos a mano para que
+      // el precio en vivo refleje el nuevo destino al instante.
+      refreshLivePrice();
     });
   }
 
@@ -271,16 +273,18 @@
     if (state === "idle") {
       liveBox.innerHTML = "<strong>Elegí producto y destino</strong><span>El precio aparece acá al instante.</span>";
     } else if (state === "loading") {
-      liveBox.innerHTML = "<strong style='color:var(--fg-3)'>Cotizando…</strong><span>Consultando tarifa en vivo.</span>";
+      liveBox.innerHTML = "<div class='skeleton' style='height:22px;width:150px;margin-bottom:5px;'></div><span>Consultando tarifa en vivo…</span>";
     } else if (state === "ok") {
+      // números siempre en mono tabular: no "saltan" de ancho al recotizar
+      var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
       var lista = data.tarifa_lista_ars
-        ? "<span style='text-decoration:line-through;color:var(--fg-4)'>" + fmtARS(data.tarifa_lista_ars) + "</span> "
+        ? "<span style='text-decoration:line-through;color:var(--fg-4);" + monoStyle + "'>" + fmtARS(data.tarifa_lista_ars) + "</span> "
         : "";
       var detalle = "USD " + data.precio_usd + " · " + (data.peso_total_kg || "") + " kg";
       if (data.dias_estimados) detalle += " · " + data.dias_estimados + " días";
       liveBox.innerHTML =
         "<strong style='font-size:19px;'>" + lista +
-        "<span style='color:var(--accent-soft)'>" + fmtARS(data.precio_ars) + "</span>" +
+        "<span style='color:var(--accent-soft);" + monoStyle + "'>" + fmtARS(data.precio_ars) + "</span>" +
         " <span style='font-size:11px;color:var(--fg-3)'>ARS</span></strong>" +
         "<span>" + detalle + "</span>";
     } else {
@@ -384,5 +388,28 @@
         .catch(function () { parseStatus.textContent = "Error de conexión al leer el pedido."; });
     });
   }
+
+  // ── Stepper vivo ──────────────────────────────────────────
+  // Los 3 pasos siguen el scroll: la sección visible marca su paso
+  // como activo y los anteriores quedan tildados. Nada decorativo.
+  (function () {
+    var steps = document.querySelectorAll("#stepper-envio .step");
+    var secs = document.querySelectorAll(".form-section");
+    if (!steps.length || steps.length > secs.length || !("IntersectionObserver" in window)) return;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        var i = Array.prototype.indexOf.call(secs, e.target);
+        if (i < 0 || i >= steps.length) return;
+        steps.forEach(function (s, k) {
+          s.classList.toggle("active", k === i);
+          s.classList.toggle("done", k < i);
+          if (k < i) s.querySelector("span").textContent = "✓";
+          else s.querySelector("span").textContent = String(k + 1);
+        });
+      });
+    }, { rootMargin: "-40% 0px -50% 0px" });
+    secs.forEach(function (s) { io.observe(s); });
+  })();
 </script>
 {% endblock %}

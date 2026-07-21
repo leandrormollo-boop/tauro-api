@@ -20,7 +20,8 @@
     <p class="sub">Iniciá sesión con tu email y contraseña.</p>
 
     {% if mensaje %}
-      <div class="msg {{ tipo_msg or 'ok' }}">{{ mensaje }}</div>
+      {# fail-safe: si el handler no aclara el tipo, pintamos error (nunca un fallo en verde) #}
+      <div class="msg {{ tipo_msg or 'error' }}">{{ mensaje }}</div>
     {% endif %}
 
     {% if dev_link %}
@@ -44,7 +45,7 @@
                  placeholder="••••••••" autocomplete="current-password"
                  style="padding-right:44px;">
           <button type="button" id="toggle-pass" aria-label="Mostrar contraseña"
-                  style="position:absolute;right:6px;top:50%;transform:translateY(-50%);padding:8px;color:var(--fg-4);">
+                  style="position:absolute;right:6px;top:50%;transform:translateY(-50%);padding:8px;color:var(--fg-3);">
             <svg id="eye-open" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7"/><circle cx="12" cy="12" r="3"/></svg>
             <svg id="eye-closed" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="m2 2 20 20M6.7 6.7C3.6 8.7 2 12 2 12s3.5 7 10 7c1.9 0 3.5-.5 4.9-1.2M10.6 5.1c.5-.1.9-.1 1.4-.1 6.5 0 10 7 10 7s-.8 1.6-2.4 3.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
           </button>
@@ -75,7 +76,7 @@
          style="color:var(--accent-soft);text-decoration:underline;">Escribinos y te creamos tu cuenta</a>.
     </p>
     <p style="text-align:center;margin-top:14px;">
-      <a href="/web" style="font-size:12.5px;color:var(--fg-4);">← Volver a taurosolutions</a>
+      <a href="/web" style="font-size:12.5px;color:var(--fg-3);">← Volver a taurosolutions</a>
     </p>
   </div>
 </div>
@@ -100,7 +101,18 @@
     formLogin.addEventListener("submit", function () {
       var btn = document.getElementById("btn-ingresar");
       btn.disabled = true;
-      btn.textContent = "Ingresando…";
+      btn.classList.add("is-loading");
+      btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Ingresando…';
+    });
+  }
+  // Si el usuario ya tipeó su email y abre "¿Olvidaste tu contraseña?",
+  // se lo precargamos para que no lo escriba dos veces.
+  var detOlvido = document.querySelector("details");
+  if (detOlvido) {
+    detOlvido.addEventListener("toggle", function () {
+      var principal = document.getElementById("email");
+      var magic = document.getElementById("email_magic");
+      if (this.open && magic && principal && !magic.value) magic.value = principal.value;
     });
   }
 </script>
