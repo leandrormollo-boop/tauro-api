@@ -605,6 +605,37 @@ h1, h2, h3, h4 {
 .step.active label { color: var(--fg); }
 .step.done label { color: var(--fg-3); }
 
+/* ══════════════════════════════════════════════════════════
+   MULTI-BULTO — filas de cajas del envío (estilo "+ Añadir paquete")
+   ══════════════════════════════════════════════════════════ */
+.bulto-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 46px;
+  gap: 12px;
+  align-items: end;
+}
+.bulto-row .form-group { margin-bottom: 10px; }
+.bulto-quitar {
+  width: 100%;
+  padding: 10px 0;
+  color: var(--fg-4);
+}
+.bulto-quitar:hover { color: var(--error); border-color: var(--error); background: var(--error-glow); }
+.btn-add-bulto {
+  display: block;
+  width: 100%;
+  padding: 11px;
+  margin-top: 2px;
+  border: 1px dashed rgba(167, 139, 250, .45);
+  border-radius: var(--radius-sm);
+  color: var(--accent-soft);
+  font-size: 13.5px;
+  font-weight: 500;
+  background: transparent;
+  cursor: pointer;
+}
+.btn-add-bulto:hover { background: var(--accent-glow); border-color: var(--accent); }
+
 /* secciones numeradas dentro del form largo */
 .form-section { margin-bottom: 28px; }
 .form-section > h4 {
@@ -1252,6 +1283,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 
   .main-inner { padding: 22px 16px 70px; }
   .quickquote { grid-template-columns: 1fr; }
+  .bulto-row { grid-template-columns: minmax(0, 1fr) 84px 42px; }
   .track-box { flex-direction: column; }
   .stepper { flex-wrap: wrap; row-gap: 14px; }
   .step { min-width: 33%; }

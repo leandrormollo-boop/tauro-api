@@ -31,7 +31,7 @@ from servicios.rutas import (
 from servicios.catalogo import get_productos, get_producto, agregar_producto
 from servicios.cotizador import cotizar, cotizar_opciones
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
-from servicios.api_b2b import obtener_precio_envio
+from servicios.api_b2b import obtener_precio_envio, obtener_precio_envio_multi
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
 )
@@ -339,6 +339,58 @@ def api_precio_envio(
     })
 
 
+# ── API JSON: precio en vivo MULTI-BULTO ────────────────────
+@router.post("/api/precio-multi")
+async def api_precio_envio_multi(
+    request: Request,
+    cliente: str = Depends(cliente_actual),
+):
+    """
+    Precio en vivo para el wizard multi-bulto.
+    Body JSON: {"destino": "US", "bultos": [{"producto": alias, "cantidad": n}, ...]}
+    Cada caja viaja como pieza propia; FedEx tarifa el conjunto.
+    """
+    try:
+        body = await request.json()
+        destino = str(body.get("destino") or "").strip()
+        bultos = body.get("bultos") or []
+        # Sin truncar en silencio: si hay de más, obtener_precio_envio_multi
+        # lo rechaza con motivo y el preview muestra lo MISMO que diría el submit.
+        bultos = [
+            {"producto": str(b.get("producto") or ""), "cantidad": int(b.get("cantidad") or 1)}
+            for b in bultos
+            if str(b.get("producto") or "").strip()
+        ]
+    except Exception:
+        return JSONResponse({"ok": False, "motivo": "body_invalido"}, status_code=200)
+
+    if not destino or not bultos:
+        return JSONResponse({"ok": False, "motivo": "faltan_datos"}, status_code=200)
+
+    try:
+        precio = obtener_precio_envio_multi(cliente, destino, bultos)
+    except Exception as e:
+        print(f"[portal] api_precio_multi error: {e}")
+        return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
+
+    if not precio.get("encontrado"):
+        return JSONResponse(
+            {"ok": False, "motivo": precio.get("motivo") or "sin_precio"},
+            status_code=200,
+        )
+
+    return JSONResponse({
+        "ok": True,
+        "precio_ars": precio["precio_ars"],
+        "precio_usd": precio["precio_usd"],
+        "tarifa_lista_ars": precio.get("tarifa_lista_ars"),
+        "peso_total_kg": precio.get("peso_total_kg"),
+        "piezas_total": precio.get("piezas_total"),
+        "dias_estimados": precio.get("dias_estimados"),
+        "coti_id": precio.get("coti_id"),
+    })
+
+
 # ── API JSON: parsear pedido pegado (mail del cliente) ──────
 @router.post("/api/parsear-pedido")
 async def api_parsear_pedido(
@@ -414,8 +466,14 @@ def envio_nuevo_form(request: Request, cliente: str = Depends(cliente_actual)):
 @router.post("/envios/nuevo", response_class=HTMLResponse)
 def envio_nuevo_post(
     request: Request,
-    producto_alias: str = Form(...),
     destino_pais: str = Form(...),
+    # Multi-bulto: arrays paralelos, una entrada por fila de caja del form.
+    # cantidad como str: un valor basura no debe tirar un 422 pelado, se
+    # normaliza a 1 más abajo.
+    bulto_producto: list[str] = Form([]),
+    bulto_cantidad: list[str] = Form([]),
+    # Legacy (por si queda un form viejo cacheado): un solo producto.
+    producto_alias: str = Form(""),
     cantidad: int = Form(1),
     remitente_id: str = Form(""),
     destinatario_id: str = Form(""),
@@ -438,7 +496,29 @@ def envio_nuevo_post(
     paises_destino = get_paises_destino()
     remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
     destinatarios = listar_direcciones(cliente, TIPO_DESTINATARIO)
+
+    # Normalizar filas de bultos: pares (producto, cantidad) sin filas vacías.
+    # Fallback legacy: producto_alias + cantidad sueltos = una sola fila.
+    filas = []
+    for i, alias in enumerate(bulto_producto or []):
+        alias = (alias or "").strip()
+        if not alias:
+            continue
+        try:
+            cant = int(bulto_cantidad[i]) if i < len(bulto_cantidad or []) else 1
+        except (TypeError, ValueError):
+            cant = 1
+        filas.append({"producto": alias, "cantidad": max(cant, 1)})
+    # Form viejo cacheado (pre multi-bulto): ahí "cantidad" significaba
+    # unidades dentro de UNA caja — se respeta esa semántica para que el
+    # precio cobrado sea el mismo que ese form mostró.
+    legacy_single = False
+    if not filas and (producto_alias or "").strip():
+        legacy_single = True
+        filas = [{"producto": producto_alias.strip(), "cantidad": max(int(cantidad or 1), 1)}]
+
     form = {
+        "bultos": filas,
         "producto_alias": producto_alias,
         "destino_pais": destino_pais,
         "cantidad": cantidad,
@@ -479,14 +559,25 @@ def envio_nuevo_post(
                 dest_zip = destinatario["cp"]
                 dest_pais = destinatario["pais"]
 
-        producto = get_producto(cliente, producto_alias)
-        if not producto or not producto.activo:
-            raise ValueError("Ese producto no está activo en tu catálogo.")
+        if not filas:
+            raise ValueError("Agregá al menos una caja al envío.")
 
-        precio = obtener_precio_envio(cliente, producto_alias, destino_pais, cantidad=cantidad)
+        for fila in filas:
+            producto = get_producto(cliente, fila["producto"])
+            if not producto or not producto.activo:
+                raise ValueError(f"El producto \"{fila['producto']}\" no está activo en tu catálogo.")
+
+        if legacy_single:
+            precio = obtener_precio_envio(
+                cliente, filas[0]["producto"], destino_pais, cantidad=filas[0]["cantidad"]
+            )
+            bultos_detalle = None
+        else:
+            precio = obtener_precio_envio_multi(cliente, destino_pais, filas)
+            bultos_detalle = precio.get("bultos")
         if not precio.get("encontrado"):
             motivo = precio.get("motivo") or "sin_precio"
-            raise ValueError(f"No se pudo cotizar ese producto/destino ({motivo}).")
+            raise ValueError(f"No se pudo cotizar ese envío ({motivo}).")
 
         precio_final = parse_monto_ars(precio_cliente_final_ars)
 
@@ -508,10 +599,23 @@ def envio_nuevo_post(
                 notas="Guardado desde creación de envío.",
             )
 
+        # Campos legacy: primer bulto + totales (los listados y el admin los usan).
+        if legacy_single:
+            prod0 = get_producto(cliente, filas[0]["producto"])
+            alias_display = prod0.alias_interno
+            total_cajas = filas[0]["cantidad"]
+            dims0 = (prod0.largo_cm, prod0.ancho_cm, prod0.alto_cm)
+            valor_declarado = round(prod0.valor_usd_default * total_cajas, 2)
+        else:
+            primero = bultos_detalle[0]
+            alias_display = primero["producto_alias"]
+            total_cajas = sum(b["cantidad"] for b in bultos_detalle)
+            dims0 = (primero["largo_cm"], primero["ancho_cm"], primero["alto_cm"])
+            valor_declarado = precio.get("valor_total_usd") or 100
         crear_solicitud_guia(
             cliente_id=cliente,
-            producto_alias=producto.alias_interno,
-            cantidad=cantidad,
+            producto_alias=alias_display,
+            cantidad=total_cajas,
             destino_pais=destino_pais,
             remitente_alias=remitente.get("alias") or remitente.get("label") or "",
             remitente_nombre=remitente.get("nombre") or "",
@@ -532,17 +636,18 @@ def envio_nuevo_post(
             dest_estado=dest_estado,
             dest_zip=dest_zip,
             observaciones=observaciones,
-            # Totales del bulto (unitario × cantidad) — lo que se cotizó y declara
-            peso_kg=precio.get("peso_total_kg") or round(producto.peso_kg * max(cantidad, 1), 2),
-            largo_cm=producto.largo_cm,
-            ancho_cm=producto.ancho_cm,
-            alto_cm=producto.alto_cm,
-            valor_declarado_usd=round(producto.valor_usd_default * max(cantidad, 1), 2),
+            # Totales del envío completo (lo que se cotizó y se declara).
+            peso_kg=precio.get("peso_total_kg") or 0.5,
+            largo_cm=dims0[0],
+            ancho_cm=dims0[1],
+            alto_cm=dims0[2],
+            valor_declarado_usd=valor_declarado,
             ruta_id=precio["ruta_id"],
             coti_id=precio["coti_id"],
             precio_tauro_ars=precio["precio_ars"],
             precio_tauro_usd=precio["precio_usd"],
             precio_cliente_final_ars=precio_final,
+            bultos=bultos_detalle,
         )
     except Exception as e:
         return templates.TemplateResponse(

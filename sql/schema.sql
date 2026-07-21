@@ -224,6 +224,14 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_estado
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_zip TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_pais TEXT;
 
+-- Multi-bulto: lista JSON de cajas del envío. Cada elemento:
+--   {producto_alias, cantidad, peso_kg, largo_cm, ancho_cm, alto_cm,
+--    valor_unitario_usd, hs_code, descripcion_en}
+-- cantidad = cajas IDÉNTICAS de ese producto (cada caja viaja como pieza
+-- con su propio label). Los campos legacy (producto_alias, cantidad,
+-- peso_kg, ...) guardan el primer bulto + totales para retrocompat.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS bultos JSONB;
+
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (
     parametro TEXT PRIMARY KEY,

@@ -2,6 +2,7 @@
 # Servicio de solicitudes de guía — PostgreSQL
 # ============================================================
 
+import json
 from typing import Optional
 
 import psycopg2
@@ -66,8 +67,14 @@ def crear_solicitud_guia(
     remitente_zip: str = "",
     remitente_pais: str = "",
     precio_cliente_final_ars: Optional[float] = None,
+    bultos: Optional[list] = None,
 ) -> dict:
-    """Crea una solicitud de guía pendiente para gestión operativa."""
+    """Crea una solicitud de guía pendiente para gestión operativa.
+
+    bultos (multi-bulto): lista [{producto_alias, cantidad, peso_kg, largo_cm,
+    ancho_cm, alto_cm, valor_unitario_usd, hs_code, descripcion_en}, ...].
+    Los campos legacy (producto_alias, cantidad, peso/dims/valor) guardan el
+    primer bulto + totales para que listados y admin sigan andando."""
     cliente_id = cliente_id.strip().upper()
     cantidad = max(int(cantidad or 1), 1)
 
@@ -84,7 +91,7 @@ def crear_solicitud_guia(
                     dest_direccion, dest_ciudad, dest_estado, dest_zip,
                     observaciones, peso_kg, largo_cm, ancho_cm, alto_cm,
                     valor_declarado_usd, ruta_id, coti_id, precio_tauro_ars,
-                    precio_tauro_usd, precio_cliente_final_ars
+                    precio_tauro_usd, precio_cliente_final_ars, bultos
                 )
                 VALUES (
                     %s, %s, %s, %s,
@@ -93,7 +100,7 @@ def crear_solicitud_guia(
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s
+                    %s, %s, %s
                 )
                 RETURNING *
                 """,
@@ -131,6 +138,7 @@ def crear_solicitud_guia(
                     precio_tauro_ars,
                     precio_tauro_usd,
                     precio_cliente_final_ars,
+                    json.dumps(bultos) if bultos else None,
                 ),
             )
             return dict(cur.fetchone())
@@ -299,6 +307,16 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
     if sol.get("tracking") and sol.get("label_pdf"):
         return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
 
+    # Bultos de la solicitud (multi-bulto). Si no hay, cae al camino legacy
+    # de un solo bulto con los campos históricos.
+    bultos = sol.get("bultos") or []
+    if isinstance(bultos, str):
+        try:
+            import json as _json
+            bultos = _json.loads(bultos)
+        except Exception:
+            bultos = []
+
     # Producto del catálogo → HS code y descripción en inglés para la aduana.
     hs_code, descripcion_en = "", "Merchandise"
     try:
@@ -331,27 +349,48 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
         "zip": sol.get("dest_zip") or "",
         "pais": pais_a_iso2(sol.get("destino_pais") or "US"),
     }
-    package = {
-        "peso_kg": sol.get("peso_kg") or 0.5,
-        "largo": sol.get("largo_cm") or 30,
-        "ancho": sol.get("ancho_cm") or 20,
-        "alto": sol.get("alto_cm") or 10,
-    }
-    commodity = {
-        "descripcion": descripcion_en,
-        "hs_code": hs_code,
-        "cantidad": sol.get("cantidad") or 1,
-        "valor_unitario_usd": sol.get("valor_declarado_usd") or 100,
-        "pais_origen": "AR",
-    }
-
-    from core.fedex_client import FedExClient
-    resultado = FedExClient().create_shipment({
+    datos_envio = {
         "shipper": shipper,
         "recipient": recipient,
-        "package": package,
-        "commodity": commodity,
-    })
+    }
+    if bultos:
+        # Multi-bulto: cada caja del envío como pieza propia, con su label.
+        datos_envio["bultos"] = [
+            {
+                "peso_kg": b.get("peso_kg") or 0.5,
+                "largo": b.get("largo_cm") or 30,
+                "ancho": b.get("ancho_cm") or 20,
+                "alto": b.get("alto_cm") or 10,
+                "valor_unitario_usd": b.get("valor_unitario_usd") or 100,
+                "unidades": max(int(b.get("cantidad") or 1), 1),
+                "hs_code": b.get("hs_code") or "",
+                "descripcion_en": b.get("descripcion_en") or "Merchandise",
+                "pais_origen": "AR",
+            }
+            for b in bultos
+        ]
+    else:
+        # OJO: valor_declarado_usd viene TOTALIZADO (unitario × cantidad) desde
+        # el portal. create_shipment vuelve a multiplicar unitario × cantidad,
+        # así que acá se pasa el UNITARIO real para no declarar de más en aduana.
+        cantidad_sol = max(int(sol.get("cantidad") or 1), 1)
+        valor_total_sol = float(sol.get("valor_declarado_usd") or 100)
+        datos_envio["package"] = {
+            "peso_kg": sol.get("peso_kg") or 0.5,
+            "largo": sol.get("largo_cm") or 30,
+            "ancho": sol.get("ancho_cm") or 20,
+            "alto": sol.get("alto_cm") or 10,
+        }
+        datos_envio["commodity"] = {
+            "descripcion": descripcion_en,
+            "hs_code": hs_code,
+            "cantidad": cantidad_sol,
+            "valor_unitario_usd": round(valor_total_sol / cantidad_sol, 2),
+            "pais_origen": "AR",
+        }
+
+    from core.fedex_client import FedExClient
+    resultado = FedExClient().create_shipment(datos_envio)
 
     if not resultado.get("encontrado"):
         return {"ok": False, "error": resultado.get("error", "FedEx no emitió la guía.")}

@@ -6,8 +6,13 @@ from core.database import get_conn
 from modelos.cotizacion import CotizacionInput
 from servicios.auth import get_markup_pct
 from servicios.catalogo import get_producto
-from servicios.cotizador import cotizar, _get_dolar_ars
+from servicios.cotizador import cotizar, cotizar_bultos, _get_dolar_ars
 from servicios.rutas import get_rutas_activas, pais_a_iso2
+
+# Límites multi-bulto: FedEx IP admite hasta 70 kg por pieza; el tope de
+# cajas por envío es una guarda operativa nuestra (no de FedEx).
+MAX_KG_POR_CAJA = 70
+MAX_CAJAS_POR_ENVIO = 20
 
 
 def obtener_cliente_por_api_key(api_key: str) -> dict:
@@ -87,6 +92,112 @@ def obtener_datos_producto(cliente_id: str, producto_id: str) -> dict:
         "largo": producto.largo_cm,
         "ancho": producto.ancho_cm,
         "alto": producto.alto_cm,
+    }
+
+
+def obtener_precio_envio_multi(
+    cliente_id: str, destino_pais: str, bultos: list
+) -> dict:
+    """
+    Cotiza un envío MULTI-BULTO en vivo: lista de cajas del catálogo
+    [{producto (alias), cantidad (cajas idénticas)}, ...] + destino.
+    Cada caja viaja como pieza con su propio label. El peso facturable se
+    calcula por caja; FedEx tarifa el conjunto y se aplica el pricing del
+    cliente al total.
+    """
+    if not bultos:
+        return {"encontrado": False, "motivo": "sin_bultos"}
+    # Guarda temprana: cada fila es al menos una caja, así que más filas que
+    # el tope de cajas nunca puede cotizar (y evita N lookups al pedo).
+    if len(bultos) > MAX_CAJAS_POR_ENVIO:
+        return {
+            "encontrado": False,
+            "motivo": f"peso_excedido: máximo {MAX_CAJAS_POR_ENVIO} cajas por envío. Dividí en dos envíos.",
+        }
+
+    ruta = buscar_ruta_para_destino(destino_pais)
+    if not ruta:
+        return {"encontrado": False, "motivo": "ruta_no_encontrada"}
+
+    piezas, detalle = [], []
+    total_cajas = 0
+    valor_total_usd = 0.0
+    for b in bultos:
+        alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
+        cantidad = max(int(b.get("cantidad") or 1), 1)
+        producto = get_producto(cliente_id, alias)
+        if not producto or not producto.activo:
+            return {"encontrado": False, "motivo": f"producto_no_encontrado: {alias}"}
+        if producto.peso_kg > MAX_KG_POR_CAJA:
+            return {
+                "encontrado": False,
+                "motivo": f"peso_excedido: cada caja de {alias} pesa {producto.peso_kg}kg y el máximo por caja es {MAX_KG_POR_CAJA}kg.",
+            }
+        total_cajas += cantidad
+        valor_total_usd += producto.valor_usd_default * cantidad
+        piezas.append({
+            "peso_kg": producto.peso_kg,
+            "largo_cm": producto.largo_cm,
+            "ancho_cm": producto.ancho_cm,
+            "alto_cm": producto.alto_cm,
+            "valor_unitario_usd": producto.valor_usd_default,
+            "unidades": cantidad,
+            "hs_code": producto.hs_code,
+            "descripcion_en": producto.nombre_invoice,
+        })
+        detalle.append({
+            "producto_alias": producto.alias_interno,
+            "cantidad": cantidad,
+            "peso_kg": producto.peso_kg,
+            "largo_cm": producto.largo_cm,
+            "ancho_cm": producto.ancho_cm,
+            "alto_cm": producto.alto_cm,
+            "valor_unitario_usd": producto.valor_usd_default,
+            "hs_code": producto.hs_code,
+            "descripcion_en": producto.nombre_invoice,
+        })
+
+    if total_cajas > MAX_CAJAS_POR_ENVIO:
+        return {
+            "encontrado": False,
+            "motivo": f"peso_excedido: {total_cajas} cajas superan el máximo de {MAX_CAJAS_POR_ENVIO} por envío. Dividí en dos envíos.",
+        }
+
+    try:
+        resultado = cotizar_bultos(
+            cliente=cliente_id.strip().upper(),
+            markup_pct=get_markup_pct(cliente_id),
+            ruta_id=ruta.ruta_id,
+            bultos=piezas,
+        )
+    except ValueError as e:
+        return {"encontrado": False, "motivo": str(e)}
+
+    dolar = _get_dolar_ars()
+    costo_fedex_ars = round(resultado["costo_fedex_usd"] * dolar, 2)
+
+    return {
+        "encontrado": True,
+        "ruta_id": ruta.ruta_id,
+        "bultos": detalle,
+        "piezas_total": resultado["piezas_total"],
+        "cantidad": resultado["piezas_total"],
+        "peso_total_kg": resultado["peso_total_kg"],
+        "peso_facturable_kg": resultado["peso_facturable_kg"],
+        "valor_total_usd": round(valor_total_usd, 2),
+        "tarifa_lista_ars": resultado["tarifa_lista_ars"],
+        "precio_ars": resultado["precio_final_ars"],
+        "precio_usd": resultado["precio_final_usd"],
+        "tipo_cambio_usado": dolar,
+        "costo_fedex_usd": resultado["costo_fedex_usd"],
+        "costo_fedex_ars": costo_fedex_ars,
+        "margen_ars": round(resultado["precio_final_ars"] - costo_fedex_ars, 2),
+        "markup_tipo": resultado["markup_tipo"],
+        "markup_valor": resultado["markup_valor"],
+        "markup_pct_equivalente": resultado["markup_pct"],
+        "dias_estimados": resultado["dias_estimados"],
+        "coti_id": resultado["coti_id"],
+        "valida_hasta": resultado["valida_hasta"],
     }
 
 

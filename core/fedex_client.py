@@ -130,9 +130,56 @@ class FedExClient(CarrierBase):
 
         raise RuntimeError(f"[fedex] Máximo de reintentos alcanzado para {url}")
 
+    @staticmethod
+    def _piezas_fedex(paquetes: list[dict]) -> tuple[list[dict], list[dict], int]:
+        """
+        Convierte la lista de bultos en (requestedPackageLineItems, commodities,
+        totalPackageCount) para Rate y Ship API.
+
+        Cada bulto: {peso_kg (por caja), largo, ancho, alto,
+                     valor_unitario_usd (por caja), unidades (cajas idénticas),
+                     hs_code, descripcion_en, pais_origen}
+        Una fila con unidades=N viaja como N piezas idénticas
+        (groupPackageCount) — cada caja con su propio label.
+        """
+        line_items, commodities, total = [], [], 0
+        for p in paquetes:
+            unidades = max(int(p.get("unidades", 1) or 1), 1)
+            peso = float(p.get("peso_kg", 0.5) or 0.5)
+            valor_unitario = round(float(p.get("valor_unitario_usd", p.get("valor_declarado_usd", 100)) or 100), 2)
+            total += unidades
+            line_items.append({
+                "groupPackageCount": unidades,
+                "weight": {"units": "KG", "value": peso},
+                "dimensions": {
+                    "length": int(p.get("largo", 30)),
+                    "width": int(p.get("ancho", 20)),
+                    "height": int(p.get("alto", 10)),
+                    "units": "CM",
+                },
+                # declaredValue es POR PIEZA (FedEx lo aplica a cada caja del grupo)
+                "declaredValue": {"amount": valor_unitario, "currency": "USD"},
+            })
+            commodities.append({
+                "numberOfPieces": unidades,
+                "description": p.get("descripcion_en") or p.get("descripcion") or "Merchandise",
+                "countryOfManufacture": p.get("pais_origen", "AR"),
+                "harmonizedCode": p.get("hs_code", ""),
+                "quantity": unidades,
+                "quantityUnits": "PCS",
+                "unitPrice": {"amount": valor_unitario, "currency": "USD"},
+                "customsValue": {
+                    "amount": round(valor_unitario * unidades, 2),
+                    "currency": "USD",
+                },
+                "weight": {"units": "KG", "value": round(peso * unidades, 2)},
+            })
+        return line_items, commodities, total
+
     def get_rates(
-        self, origen: dict, destino: dict, paquete: dict,
+        self, origen: dict, destino: dict, paquete: dict | None = None,
         todos_los_servicios: bool = False,
+        paquetes: list[dict] | None = None,
     ) -> dict:
         """
         Consulta las tarifas de FedEx International Priority.
@@ -141,6 +188,10 @@ class FedExClient(CarrierBase):
         en la clave extra "opciones": [{servicio, servicio_nombre, costo,
         costo_lista, moneda, dias_estimados}, ...]. Las claves de siempre
         (costo, moneda, ...) traen la opción más barata para retrocompat.
+
+        Con paquetes=[{...}, ...] (multi-bulto) cotiza N piezas en un solo
+        envío — ver _piezas_fedex para el formato de cada bulto. `paquete`
+        (singular) mantiene el comportamiento histórico de un solo bulto.
 
         origen: {
             "street": "Av. Corrientes 1234",
@@ -175,6 +226,43 @@ class FedExClient(CarrierBase):
         """
         url = f"{self.base_url}/rate/v1/rates/quotes"
 
+        if paquetes:
+            # Multi-bulto: N piezas en un solo envío.
+            line_items, commodities, _total = self._piezas_fedex(paquetes)
+        else:
+            # Retrocompat: un solo bulto que contiene `unidades` unidades
+            # (peso y valor ya vienen totalizados por el caller).
+            paquete = paquete or {}
+            valor_total = round(
+                float(paquete.get("valor_declarado_usd", 100) or 100)
+                * max(int(paquete.get("unidades", 1) or 1), 1),
+                2,
+            )
+            line_items = [{
+                "weight": {"units": "KG", "value": paquete.get("peso_kg", 0.5)},
+                "dimensions": {
+                    "length": int(paquete.get("largo", 30)),
+                    "width": int(paquete.get("ancho", 20)),
+                    "height": int(paquete.get("alto", 10)),
+                    "units": "CM",
+                },
+                "declaredValue": {"amount": valor_total, "currency": "USD"},
+            }]
+            commodities = [{
+                "numberOfPieces": 1,
+                "description": paquete.get("descripcion_en", "Merchandise"),
+                "countryOfManufacture": "AR",
+                "harmonizedCode": paquete.get("hs_code", ""),
+                "quantity": paquete.get("unidades", 1),
+                "quantityUnits": "PCS",
+                "unitPrice": {
+                    "amount": paquete.get("valor_declarado_usd", 100),
+                    "currency": "USD",
+                },
+                "customsValue": {"amount": valor_total, "currency": "USD"},
+                "weight": {"units": "KG", "value": paquete.get("peso_kg", 0.5)},
+            }]
+
         payload = {
             "accountNumber": {"value": self.account_number},
             "requestedShipment": {
@@ -206,58 +294,13 @@ class FedExClient(CarrierBase):
                         }
                     },
                 },
-                "requestedPackageLineItems": [
-                    {
-                        "weight": {
-                            "units": "KG",
-                            "value": paquete.get("peso_kg", 0.5),
-                        },
-                        "dimensions": {
-                            "length": int(paquete.get("largo", 30)),
-                            "width": int(paquete.get("ancho", 20)),
-                            "height": int(paquete.get("alto", 10)),
-                            "units": "CM",
-                        },
-                        "declaredValue": {
-                            # Total del bulto: unitario × cantidad
-                            "amount": round(
-                                float(paquete.get("valor_declarado_usd", 100) or 100)
-                                * max(int(paquete.get("unidades", 1) or 1), 1),
-                                2,
-                            ),
-                            "currency": "USD",
-                        },
-                    }
-                ],
+                "requestedPackageLineItems": line_items,
                 "customsClearanceDetail": {
                     "dutiesPayment": {
                         "paymentType": "SENDER",
                         "payor": {"responsibleParty": {"accountNumber": {"value": self.account_number}}},
                     },
-                    "commodities": [
-                        {
-                            "numberOfPieces": 1,
-                            "description": paquete.get("descripcion_en", "Merchandise"),
-                            "countryOfManufacture": "AR",
-                            "harmonizedCode": paquete.get("hs_code", ""),
-                            "quantity": paquete.get("unidades", 1),
-                            "quantityUnits": "PCS",
-                            "unitPrice": {
-                                "amount": paquete.get("valor_declarado_usd", 100),
-                                "currency": "USD",
-                            },
-                            "customsValue": {
-                                # Valor aduanero total: unitario × cantidad
-                                "amount": round(
-                                    float(paquete.get("valor_declarado_usd", 100) or 100)
-                                    * max(int(paquete.get("unidades", 1) or 1), 1),
-                                    2,
-                                ),
-                                "currency": "USD",
-                            },
-                            "weight": {"units": "KG", "value": paquete.get("peso_kg", 0.5)},
-                        }
-                    ],
+                    "commodities": commodities,
                 },
                 "rateRequestType": ["LIST", "ACCOUNT"],
             },
@@ -348,18 +391,48 @@ class FedExClient(CarrierBase):
             "servicio":  "INTERNATIONAL_PRIORITY"   # opcional
           }
 
+        MULTI-BULTO: en vez de package+commodity se puede pasar
+            "bultos": [{peso_kg, largo, ancho, alto, valor_unitario_usd,
+                        unidades, hs_code, descripcion_en, pais_origen}, ...]
+        y el envío sale con N piezas (una caja por unidad, cada una con su
+        label). El PDF devuelto une los labels de todas las piezas.
+
         Retorna {encontrado, tracking, servicio, label_pdf(bytes), label_b64, error}.
         """
         shipper = datos.get("shipper", {}) or {}
         recipient = datos.get("recipient", {}) or {}
+        bultos = datos.get("bultos") or []
         package = datos.get("package", {}) or {}
         commodity = datos.get("commodity", {}) or {}
         servicio = datos.get("servicio") or "INTERNATIONAL_PRIORITY"
 
-        cantidad = max(int(commodity.get("cantidad", 1) or 1), 1)
-        valor_unitario = float(commodity.get("valor_unitario_usd", 100) or 100)
-        valor_total = round(valor_unitario * cantidad, 2)
-        peso = float(package.get("peso_kg", 0.5) or 0.5)
+        if bultos:
+            line_items, commodities, _total = self._piezas_fedex(bultos)
+        else:
+            cantidad = max(int(commodity.get("cantidad", 1) or 1), 1)
+            valor_unitario = float(commodity.get("valor_unitario_usd", 100) or 100)
+            valor_total = round(valor_unitario * cantidad, 2)
+            peso = float(package.get("peso_kg", 0.5) or 0.5)
+            line_items = [{
+                "weight": {"units": "KG", "value": peso},
+                "dimensions": {
+                    "length": int(package.get("largo", 30)),
+                    "width": int(package.get("ancho", 20)),
+                    "height": int(package.get("alto", 10)),
+                    "units": "CM",
+                },
+                "declaredValue": {"amount": valor_total, "currency": "USD"},
+            }]
+            commodities = [{
+                "description": commodity.get("descripcion", "Merchandise"),
+                "countryOfManufacture": commodity.get("pais_origen", "AR"),
+                "quantity": cantidad,
+                "quantityUnits": "PCS",
+                "unitPrice": {"amount": valor_unitario, "currency": "USD"},
+                "customsValue": {"amount": valor_total, "currency": "USD"},
+                "weight": {"units": "KG", "value": peso},
+                "harmonizedCode": commodity.get("hs_code", ""),
+            }]
 
         def _tel(v):
             return (str(v or "").strip() or "0000000000")
@@ -413,27 +486,9 @@ class FedExClient(CarrierBase):
                         "paymentType": "SENDER",
                         "payor": {"responsibleParty": {"accountNumber": {"value": self.account_number}}},
                     },
-                    "commodities": [{
-                        "description": commodity.get("descripcion", "Merchandise"),
-                        "countryOfManufacture": commodity.get("pais_origen", "AR"),
-                        "quantity": cantidad,
-                        "quantityUnits": "PCS",
-                        "unitPrice": {"amount": valor_unitario, "currency": "USD"},
-                        "customsValue": {"amount": valor_total, "currency": "USD"},
-                        "weight": {"units": "KG", "value": peso},
-                        "harmonizedCode": commodity.get("hs_code", ""),
-                    }],
+                    "commodities": commodities,
                 },
-                "requestedPackageLineItems": [{
-                    "weight": {"units": "KG", "value": peso},
-                    "dimensions": {
-                        "length": int(package.get("largo", 30)),
-                        "width": int(package.get("ancho", 20)),
-                        "height": int(package.get("alto", 10)),
-                        "units": "CM",
-                    },
-                    "declaredValue": {"amount": valor_total, "currency": "USD"},
-                }],
+                "requestedPackageLineItems": line_items,
             },
         }
 
@@ -450,29 +505,58 @@ class FedExClient(CarrierBase):
             transaction = (data.get("output", {}).get("transactionShipments") or [{}])[0]
             tracking = transaction.get("masterTrackingNumber", "")
 
-            label_b64 = None
+            # Un label por pieza: los juntamos todos en un solo PDF
+            # (multi-bulto → una hoja por caja para imprimir de una).
+            labels_pdf = []
             for piece in transaction.get("pieceResponses", []) or []:
                 for doc in piece.get("packageDocuments", []) or []:
                     if doc.get("encodedLabel"):
-                        label_b64 = doc["encodedLabel"]
+                        try:
+                            labels_pdf.append(base64.b64decode(doc["encodedLabel"]))
+                        except Exception:
+                            pass
                         break
-                if label_b64:
-                    break
 
             if not tracking:
                 return {"encontrado": False, "error": "FedEx no devolvió número de guía"}
 
+            label_pdf = self._merge_pdfs(labels_pdf)
             return {
                 "encontrado": True,
                 "tracking": tracking,
                 "servicio": transaction.get("serviceName", servicio),
-                "label_pdf": base64.b64decode(label_b64) if label_b64 else None,
-                "label_b64": label_b64,
+                "label_pdf": label_pdf,
+                "label_b64": base64.b64encode(label_pdf).decode() if label_pdf else None,
+                "piezas": len(labels_pdf),
             }
 
         except Exception as e:
             print(f"[fedex] Excepción en create_shipment: {e}")
             return {"encontrado": False, "error": str(e)}
+
+    @staticmethod
+    def _merge_pdfs(pdfs: list[bytes]) -> bytes | None:
+        """Une varios PDFs (un label por pieza) en uno solo. Con un solo PDF
+        lo devuelve tal cual; si pypdf no está disponible, devuelve el primero
+        para no romper la emisión (mejor un label que ninguno)."""
+        pdfs = [p for p in pdfs if p]
+        if not pdfs:
+            return None
+        if len(pdfs) == 1:
+            return pdfs[0]
+        try:
+            import io
+            from pypdf import PdfReader, PdfWriter
+            writer = PdfWriter()
+            for blob in pdfs:
+                for page in PdfReader(io.BytesIO(blob)).pages:
+                    writer.add_page(page)
+            out = io.BytesIO()
+            writer.write(out)
+            return out.getvalue()
+        except Exception as e:
+            print(f"[fedex] No se pudieron unir los labels ({e}); guardo el primero.")
+            return pdfs[0]
 
     @staticmethod
     def _extraer_errores_fedex(data: dict) -> str:

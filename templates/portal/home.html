@@ -136,7 +136,12 @@
             {% for s in solicitudes %}
                 <tr>
                     <td class="mono">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</td>
-                    <td>{{ s.producto_alias or "—" }}</td>
+                    <td>
+                        {{ s.producto_alias or "—" }}
+                        {% if s.bultos and s.bultos|length > 1 %}
+                            <span class="badge accent" style="margin-left:6px;">+{{ s.bultos|length - 1 }}</span>
+                        {% endif %}
+                    </td>
                     <td>{{ s.destino_pais }}{% if s.dest_ciudad %} · {{ s.dest_ciudad }}{% endif %}</td>
                     <td>
                         <span class="badge {% if s.estado in ['SOLICITADO', 'EN_PROCESO'] %}warn{% elif s.estado in ['GUIA_LISTA', 'DESPACHADO'] %}ok{% else %}muted{% endif %}">

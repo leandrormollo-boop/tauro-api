@@ -63,8 +63,15 @@
                 <tr>
                     <td class="mono" data-label="Fecha">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</td>
                     <td data-label="Producto">
-                        <strong>{{ s.producto_alias }}</strong>
-                        <br><small style="color:var(--fg-3)">x{{ s.cantidad }}</small>
+                        {% if s.bultos and s.bultos|length > 1 %}
+                            {% for b in s.bultos %}
+                                <strong>{{ b.producto_alias }}</strong> <small style="color:var(--fg-3)">x{{ b.cantidad }}</small>{% if not loop.last %}<br>{% endif %}
+                            {% endfor %}
+                            <br><small style="color:var(--fg-3)">{{ s.cantidad }} cajas en total</small>
+                        {% else %}
+                            <strong>{{ s.producto_alias }}</strong>
+                            <br><small style="color:var(--fg-3)">x{{ s.cantidad }}</small>
+                        {% endif %}
                     </td>
                     <td data-label="Destinatario">
                         {{ s.dest_nombre }}

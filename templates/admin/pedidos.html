@@ -50,8 +50,16 @@
             <br><small style="color:var(--fg-4)">{{ s.cliente_nombre or s.cliente_email }}</small>
           </td>
           <td>
-            <strong>{{ s.producto_alias }}</strong>
-            <br><small style="color:var(--fg-4)">x{{ s.cantidad }} · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+            {% if s.bultos and s.bultos|length > 1 %}
+              {# multi-bulto: composición REAL del envío, no "primer producto × total" #}
+              {% for b in s.bultos %}
+                <strong>{{ b.producto_alias }}</strong> <small style="color:var(--fg-3)">x{{ b.cantidad }}</small>{% if not loop.last %}<br>{% endif %}
+              {% endfor %}
+              <br><small style="color:var(--fg-3)">{{ s.cantidad }} cajas · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+            {% else %}
+              <strong>{{ s.producto_alias }}</strong>
+              <br><small style="color:var(--fg-3)">x{{ s.cantidad }} · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+            {% endif %}
             {% if s.coti_id %}<br><small class="mono" style="color:var(--fg-4)">{{ s.coti_id }}</small>{% endif %}
           </td>
           <td>

@@ -170,6 +170,146 @@ def cotizar_opciones(
     return opciones
 
 
+def cotizar_bultos(
+    cliente: str,
+    markup_pct: float,
+    ruta_id: str,
+    bultos: list,
+) -> dict:
+    """
+    Cotiza un envío MULTI-BULTO: N cajas (posiblemente de productos distintos)
+    en una sola guía FedEx. Cada bulto:
+      {peso_kg (por caja), largo_cm, ancho_cm, alto_cm,
+       valor_unitario_usd, unidades (cajas idénticas), hs_code, descripcion_en}
+
+    El peso facturable se calcula POR CAJA (máx entre real y volumétrico de
+    cada una) y FedEx tarifa el conjunto. Devuelve un dict estilo
+    CotizacionOutput + piezas_total/peso_total_kg. Lanza ValueError si la
+    ruta no existe o FedEx no tarifa.
+    """
+    ruta = get_ruta(ruta_id)
+    if not ruta:
+        raise ValueError(f"Ruta '{ruta_id}' no existe o está inactiva")
+
+    piezas_fedex = []
+    peso_real_total = 0.0
+    peso_facturable_total = 0.0
+    piezas_total = 0
+    for b in bultos:
+        unidades = max(int(b.get("unidades", 1) or 1), 1)
+        peso_caja = float(b.get("peso_kg", 0.5) or 0.5)
+        vol = calcular_peso_volumetrico(
+            b.get("largo_cm", 30), b.get("ancho_cm", 20), b.get("alto_cm", 10)
+        )
+        peso_usado_caja = max(peso_caja, vol)
+        piezas_total += unidades
+        peso_real_total += peso_caja * unidades
+        peso_facturable_total += peso_usado_caja * unidades
+        piezas_fedex.append({
+            "peso_kg": peso_usado_caja,
+            "largo": b.get("largo_cm", 30),
+            "ancho": b.get("ancho_cm", 20),
+            "alto": b.get("alto_cm", 10),
+            "valor_unitario_usd": b.get("valor_unitario_usd", 100),
+            "unidades": unidades,
+            "hs_code": b.get("hs_code", ""),
+            "descripcion_en": b.get("descripcion_en", "Merchandise"),
+        })
+
+    fedex = FedExClient()
+    rate_resp = fedex.get_rates(
+        origen={
+            "city": ruta.origen_ciudad,
+            "state": ciudad_a_state(ruta.origen_ciudad),
+            "postal_code": ruta.origen_zip,
+            "country": pais_a_iso2(ruta.origen_pais),
+        },
+        destino={
+            "city": ruta.destino_ciudad,
+            "state": ciudad_a_state(ruta.destino_ciudad),
+            "postal_code": ruta.destino_zip,
+            "country": pais_a_iso2(ruta.destino_pais),
+        },
+        paquetes=piezas_fedex,
+    )
+    if not rate_resp.get("encontrado"):
+        raise ValueError(
+            f"FedEx no devolvió tarifa: {rate_resp.get('error', 'sin detalles')}"
+        )
+
+    dolar = _get_dolar_ars()
+    costo = float(rate_resp.get("costo", 0))
+    moneda = str(rate_resp.get("moneda", "USD")).upper()
+    if moneda == "USD":
+        costo_fedex_usd = round(costo, 2)
+        costo_ars = round(costo * dolar, 2)
+    else:
+        costo_ars = costo
+        costo_fedex_usd = round(costo_ars / dolar, 2) if dolar else 0.0
+
+    tarifa_lista_ars = None
+    if rate_resp.get("costo_lista"):
+        lista = float(rate_resp["costo_lista"])
+        tarifa_lista_ars = round(lista * dolar, 2) if moneda == "USD" else round(lista, 2)
+
+    pricing = get_pricing_config(cliente, fallback_pct=markup_pct)
+    precio = aplicar_pricing(
+        costo_usd=costo_fedex_usd, costo_ars=costo_ars, dolar=dolar, pricing=pricing,
+    )
+
+    coti_id = uuid.uuid4().hex[:16]
+    valida_hasta = (
+        datetime.now(tz=timezone.utc) + timedelta(hours=COTIZACION_VALIDA_HORAS)
+    ).isoformat(timespec="seconds")
+
+    try:
+        dimensiones = " + ".join(
+            f"{b.get('unidades', 1)}x({b.get('largo_cm')}x{b.get('ancho_cm')}x{b.get('alto_cm')})"
+            for b in bultos
+        )
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO cotizaciones
+                        (coti_id, cliente_id, ruta_id, peso_kg, dimensiones, peso_usado_kg,
+                         costo_fedex_usd, markup_pct, markup_tipo, markup_valor,
+                         precio_final_usd, precio_final_ars, dias_estimados, valida_hasta)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        coti_id, cliente, ruta.ruta_id, round(peso_real_total, 2),
+                        dimensiones[:200], round(peso_facturable_total, 2),
+                        costo_fedex_usd, precio["markup_pct_equivalente"],
+                        precio["markup_tipo"], precio["markup_valor"],
+                        precio["precio_final_usd"], precio["precio_final_ars"],
+                        ruta.dias_estimados, valida_hasta,
+                    ),
+                )
+    except Exception as e:
+        print(f"[cotizador] No se pudo loguear cotización multi-bulto: {e}")
+
+    if tarifa_lista_ars and tarifa_lista_ars <= precio["precio_final_ars"]:
+        tarifa_lista_ars = None
+
+    return {
+        "coti_id": coti_id,
+        "ruta_id": ruta.ruta_id,
+        "piezas_total": piezas_total,
+        "peso_total_kg": round(peso_real_total, 2),
+        "peso_facturable_kg": round(peso_facturable_total, 2),
+        "costo_fedex_usd": costo_fedex_usd,
+        "precio_final_usd": precio["precio_final_usd"],
+        "precio_final_ars": precio["precio_final_ars"],
+        "tarifa_lista_ars": tarifa_lista_ars,
+        "markup_tipo": precio["markup_tipo"],
+        "markup_valor": precio["markup_valor"],
+        "markup_pct": precio["markup_pct_equivalente"],
+        "dias_estimados": ruta.dias_estimados,
+        "valida_hasta": valida_hasta,
+    }
+
+
 def cotizar(
     cliente: str,
     markup_pct: float,

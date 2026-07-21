@@ -174,24 +174,42 @@
         </div>
 
         <div class="form-section" style="margin-bottom:0;">
-            <h4><span class="n">3</span> Paquete e invoice <span class="badge ok">Catálogo</span></h4>
+            <h4><span class="n">3</span> Cajas del envío <span class="badge ok">Catálogo</span></h4>
 
-            <div class="form-grid-3">
-                <div class="form-group wide-field">
-                    <label for="producto_alias">Producto</label>
-                    <select name="producto_alias" id="producto_alias" required>
-                        <option value="">Seleccionar</option>
-                        {% for p in productos %}
-                            <option value="{{ p.alias_interno }}" {% if form.producto_alias == p.alias_interno %}selected{% endif %}>
-                                {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
-                            </option>
-                        {% endfor %}
-                    </select>
+            <!-- Multi-bulto: una fila por producto; "Cajas" = cajas IGUALES de
+                 ese producto. Cada caja viaja como pieza con su propio label. -->
+            <div id="bultos-list">
+                {% set filas = form.bultos if form.bultos else [{"producto": form.producto_alias, "cantidad": form.cantidad or 1}] %}
+                {% for f in filas %}
+                <div class="bulto-row" data-bulto>
+                    <div class="form-group">
+                        <label>Producto</label>
+                        <select name="bulto_producto" class="bulto-producto" required>
+                            <option value="">Seleccionar</option>
+                            {% for p in productos %}
+                                <option value="{{ p.alias_interno }}" {% if f.producto == p.alias_interno %}selected{% endif %}>
+                                    {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Cajas</label>
+                        <input type="number" name="bulto_cantidad" class="bulto-cantidad" min="1" max="20" step="1" value="{{ f.cantidad or 1 }}" required>
+                    </div>
+                    <div class="form-group bulto-quitar-wrap">
+                        <label aria-hidden="true">&nbsp;</label>
+                        <button type="button" class="btn btn-ghost btn-sm bulto-quitar" aria-label="Quitar esta caja">✕</button>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="cantidad">Cantidad</label>
-                    <input type="number" name="cantidad" id="cantidad" min="1" step="1" value="{{ form.cantidad or 1 }}" required>
-                </div>
+                {% endfor %}
+            </div>
+            <button type="button" id="btn-add-bulto" class="btn-add-bulto">+ Añadir otra caja</button>
+            <p style="font-size:12.5px;color:var(--fg-3);margin:8px 0 18px;">
+                "Cajas" = cuántas cajas iguales de ese producto. Cada caja sale con su propia etiqueta, todas bajo el mismo tracking.
+            </p>
+
+            <div class="form-grid-2">
                 <div class="form-group">
                     <label for="precio_cliente_final_ars">Precio final a tu cliente ARS</label>
                     <input type="text" name="precio_cliente_final_ars" id="precio_cliente_final_ars" inputmode="decimal" placeholder="Opcional" value="{{ form.precio_cliente_final_ars or '' }}">
@@ -255,12 +273,63 @@
     countrySelect.addEventListener("change", () => setField("dest_pais", countrySelect.value));
   }
 
+  // ── Filas de cajas (multi-bulto) ──────────────────────────
+  const bultosList = document.getElementById("bultos-list");
+  const btnAddBulto = document.getElementById("btn-add-bulto");
+
+  function bultoRows() {
+    return Array.prototype.slice.call(bultosList.querySelectorAll("[data-bulto]"));
+  }
+
+  function leerBultos() {
+    // Filas completas → [{producto, cantidad}]
+    return bultoRows().map(function (row) {
+      return {
+        producto: (row.querySelector(".bulto-producto") || {}).value || "",
+        cantidad: Math.max(parseInt((row.querySelector(".bulto-cantidad") || {}).value || "1", 10) || 1, 1),
+      };
+    }).filter(function (b) { return b.producto; });
+  }
+
+  function wireBultoRow(row) {
+    var sel = row.querySelector(".bulto-producto");
+    var cant = row.querySelector(".bulto-cantidad");
+    var quitar = row.querySelector(".bulto-quitar");
+    if (sel) sel.addEventListener("change", refreshLivePrice);
+    if (cant) cant.addEventListener("input", refreshLivePrice);
+    if (quitar) quitar.addEventListener("click", function () {
+      if (bultoRows().length <= 1) {
+        // última fila: no se quita, se limpia
+        if (sel) sel.value = "";
+        if (cant) cant.value = 1;
+      } else {
+        row.remove();
+      }
+      refreshLivePrice();
+    });
+  }
+
+  function agregarBulto(producto, cantidad) {
+    var base = bultoRows()[0];
+    var nueva = base.cloneNode(true);
+    var sel = nueva.querySelector(".bulto-producto");
+    var cant = nueva.querySelector(".bulto-cantidad");
+    if (sel) sel.value = producto || "";
+    if (cant) cant.value = cantidad || 1;
+    bultosList.appendChild(nueva);
+    wireBultoRow(nueva);
+    return nueva;
+  }
+
+  bultoRows().forEach(wireBultoRow);
+  if (btnAddBulto) btnAddBulto.addEventListener("click", function () {
+    agregarBulto("", 1);
+  });
+
   // ── Precio en vivo ────────────────────────────────────────
-  // Al elegir producto + destino (+cantidad) consulta /portal/api/precio
-  // y muestra el precio con el markup del cliente antes de confirmar.
+  // Suma TODAS las cajas del envío: POST /portal/api/precio-multi
+  // con [{producto, cantidad}, ...] + destino.
   const liveBox = document.getElementById("live-price");
-  const prodSel = document.getElementById("producto_alias");
-  const cantInp = document.getElementById("cantidad");
   let priceTimer = null;
   let priceSeq = 0;
 
@@ -280,7 +349,9 @@
       var lista = data.tarifa_lista_ars
         ? "<span style='text-decoration:line-through;color:var(--fg-4);" + monoStyle + "'>" + fmtARS(data.tarifa_lista_ars) + "</span> "
         : "";
-      var detalle = "USD " + data.precio_usd + " · " + (data.peso_total_kg || "") + " kg";
+      var detalle = "USD " + data.precio_usd;
+      if (data.piezas_total > 1) detalle += " · " + data.piezas_total + " cajas";
+      if (data.peso_total_kg) detalle += " · " + data.peso_total_kg + " kg";
       if (data.dias_estimados) detalle += " · " + data.dias_estimados + " días";
       liveBox.innerHTML =
         "<strong style='font-size:19px;'>" + lista +
@@ -297,18 +368,23 @@
   }
 
   function refreshLivePrice() {
-    if (!liveBox || !prodSel || !countrySelect) return;
-    var producto = prodSel.value;
+    if (!liveBox || !countrySelect) return;
+    var bultos = leerBultos();
     var destino = countrySelect.value;
-    var cantidad = Math.max(parseInt((cantInp && cantInp.value) || "1", 10) || 1, 1);
-    if (!producto || !destino) { renderLivePrice("idle"); return; }
-
+    // Cancelar SIEMPRE el timer pendiente antes de decidir: si el usuario
+    // vació el form, un timer viejo no puede pintar un precio fantasma
+    // encima del estado "idle" (y priceSeq++ invalida respuestas en vuelo).
     clearTimeout(priceTimer);
+    if (!bultos.length || !destino) { priceSeq++; renderLivePrice("idle"); return; }
+
     priceTimer = setTimeout(function () {
       var seq = ++priceSeq;
       renderLivePrice("loading");
-      fetch("/portal/api/precio?producto=" + encodeURIComponent(producto) +
-            "&destino=" + encodeURIComponent(destino) + "&cantidad=" + cantidad)
+      fetch("/portal/api/precio-multi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destino: destino, bultos: bultos }),
+      })
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (seq !== priceSeq) return; // respuesta vieja, ignorar
@@ -318,8 +394,6 @@
     }, 350);
   }
 
-  if (prodSel) prodSel.addEventListener("change", refreshLivePrice);
-  if (cantInp) cantInp.addEventListener("input", refreshLivePrice);
   if (countrySelect) countrySelect.addEventListener("change", refreshLivePrice);
   refreshLivePrice();
 
@@ -366,18 +440,23 @@
               }
             }
           }
+          // Bultos del mail → una fila de caja por cada uno.
           var paquetes = data.paquetes || [];
-          if (paquetes.length && paquetes[0].cantidad && cantInp) {
-            cantInp.value = paquetes[0].cantidad;
-            llenados++;
+          if (paquetes.length) {
+            // Re-parse: sacar las filas que sobran de un pegado anterior,
+            // para que el form quede EXACTAMENTE como el pedido nuevo.
+            bultoRows().slice(Math.max(paquetes.length, 1)).forEach(function (r) { r.remove(); });
+            var rows = bultoRows();
+            paquetes.slice(0, 20).forEach(function (p, i) {
+              var row = rows[i] || agregarBulto("", 1);
+              var cant = row.querySelector(".bulto-cantidad");
+              if (cant && p.cantidad) { cant.value = p.cantidad; llenados++; }
+            });
           }
           var aviso = "Listo: " + llenados + " campos precargados.";
           if (paquetes.length > 1) {
-            aviso += " OJO: el pedido trae " + paquetes.length + " bultos distintos — esta solicitud es para el primero (" +
-              (paquetes[0].largo_cm || "?") + "×" + (paquetes[0].ancho_cm || "?") + "×" + (paquetes[0].alto_cm || "?") +
-              " cm); creá otra para el resto.";
-          }
-          if (paquetes.length) {
+            aviso += " El pedido trae " + paquetes.length + " bultos distintos — te armé una fila por cada uno; elegí el producto del catálogo en cada fila.";
+          } else if (paquetes.length) {
             var p = paquetes[0];
             aviso += " Elegí el producto del catálogo que corresponda" +
               (p.peso_kg ? " (el mail dice " + p.peso_kg + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
