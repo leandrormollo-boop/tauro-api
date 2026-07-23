@@ -68,11 +68,13 @@
                 <p>Seguimiento oficial en la red FedEx.</p>
             </div>
         </div>
+        {% set es_nacional = (s.courier or 'FEDEX')|upper == 'ENVIA' %}
+        {% set track_url = 'https://envia.com/es-AR/rastreo?label=' ~ s.tracking if es_nacional else 'https://www.fedex.com/fedextrack/?trknbr=' ~ s.tracking %}
         {% if s.tracking %}
             <div class="mono" style="font-size:17px;margin-bottom:12px;">
-                <a href="https://www.fedex.com/fedextrack/?trknbr={{ s.tracking }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
+                <a href="{{ track_url }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
             </div>
-            <a href="https://www.fedex.com/fedextrack/?trknbr={{ s.tracking }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Ver en FedEx →</a>
+            <a href="{{ track_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Seguir envío →</a>
         {% else %}
             <div class="empty" style="padding:14px;">El tracking aparece acá cuando se emite la guía.</div>
         {% endif %}

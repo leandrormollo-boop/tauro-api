@@ -150,7 +150,8 @@
                     </td>
                     <td class="mono">
                         {% if s.tracking %}
-                            <a href="https://www.fedex.com/fedextrack/?trknbr={{ s.tracking }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
+                            {% set turl = 'https://envia.com/es-AR/rastreo?label=' ~ s.tracking if (s.courier or 'FEDEX')|upper == 'ENVIA' else 'https://www.fedex.com/fedextrack/?trknbr=' ~ s.tracking %}
+                            <a href="{{ turl }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
                         {% else %}—{% endif %}
                     </td>
                     <td>

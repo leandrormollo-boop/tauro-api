@@ -38,7 +38,7 @@ from servicios.solicitudes_guia import (
     actualizar_solicitud_guia,
     contar_solicitudes_pendientes,
     listar_solicitudes_admin,
-    generar_guia_fedex,
+    generar_guia,
     obtener_label_pdf,
 )
 from servicios.tracking_fedex_tauro import (
@@ -760,11 +760,12 @@ def admin_pedido_generar_guia(
     solicitud_id: int,
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Emite la guía real en FedEx para esta solicitud y guarda el label PDF."""
+    """Emite la guía real (FedEx internacional o envia.com nacional según
+    el courier de la solicitud) y guarda el label PDF."""
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    resultado = generar_guia_fedex(solicitud_id)
+    resultado = generar_guia(solicitud_id)
     if resultado.get("ok"):
         _notificar_estado_async(solicitud_id, "GUIA_LISTA")
         return RedirectResponse(url="/admin/pedidos?ok=guia_generada", status_code=303)

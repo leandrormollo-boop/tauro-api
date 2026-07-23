@@ -35,6 +35,7 @@ from servicios.catalogo import (
 from servicios.cotizador import cotizar, cotizar_opciones
 from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
 from servicios.api_b2b import obtener_precio_envio, obtener_precio_envio_multi
+from servicios.nacional import cotizar_nacional_cliente, nacional_activo
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
     obtener_solicitud_de_cliente,
@@ -397,6 +398,79 @@ async def api_precio_envio_multi(
     })
 
 
+# ── API JSON: precio en vivo NACIONAL (AR→AR vía envia.com) ─
+@router.post("/api/precio-nacional")
+async def api_precio_nacional(
+    request: Request,
+    cliente: str = Depends(cliente_actual),
+):
+    """
+    Cotización nacional en vivo para el wizard: destino {cp, ciudad,
+    provincia} + bultos del catálogo → opciones de todos los couriers
+    nacionales con el markup del cliente aplicado.
+    """
+    if not nacional_activo():
+        return JSONResponse({"ok": False, "motivo": "nacional_inactivo"}, status_code=200)
+    try:
+        body = await request.json()
+        destino = {
+            "cp": str(body.get("cp") or "").strip(),
+            "ciudad": str(body.get("ciudad") or "").strip(),
+            "provincia": str(body.get("provincia") or "").strip(),
+        }
+        bultos = [
+            {"producto": str(b.get("producto") or ""), "cantidad": int(b.get("cantidad") or 1)}
+            for b in (body.get("bultos") or [])
+            if str(b.get("producto") or "").strip()
+        ]
+    except Exception:
+        return JSONResponse({"ok": False, "motivo": "body_invalido"}, status_code=200)
+
+    if not destino["cp"] or not destino["ciudad"] or not bultos:
+        return JSONResponse({"ok": False, "motivo": "faltan_datos"}, status_code=200)
+
+    remitente = obtener_remitente_para_envio(cliente)
+    if not remitente:
+        return JSONResponse({"ok": False, "motivo": "sin_remitente"}, status_code=200)
+    origen = {
+        "nombre": remitente.get("nombre"),
+        "email": remitente.get("email"),
+        "telefono": remitente.get("telefono"),
+        "direccion": remitente.get("direccion"),
+        "ciudad": remitente.get("ciudad"),
+        "provincia": remitente.get("estado") or "CABA",
+        "cp": remitente.get("cp"),
+    }
+
+    try:
+        precio = cotizar_nacional_cliente(cliente, origen, destino, bultos)
+    except Exception as e:
+        print(f"[portal] api_precio_nacional error: {e}")
+        return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
+
+    if not precio.get("encontrado"):
+        return JSONResponse(
+            {"ok": False, "motivo": precio.get("motivo") or "sin_cobertura"},
+            status_code=200,
+        )
+    return JSONResponse({
+        "ok": True,
+        "opciones": [
+            {
+                "carrier": o["carrier"],
+                "servicio": o["servicio"],
+                "nombre": f"{o['carrier_nombre']} · {o['servicio_nombre']}",
+                "precio_ars": o["precio_final_ars"],
+                "dias": o["dias_estimados"],
+            }
+            for o in precio["opciones"]
+        ],
+        "piezas_total": precio["piezas_total"],
+        "peso_total_kg": precio["peso_total_kg"],
+        "coti_id": precio["coti_id"],
+    })
+
+
 # ── API JSON: parsear pedido pegado (mail del cliente) ──────
 @router.post("/api/parsear-pedido")
 async def api_parsear_pedido(
@@ -452,6 +526,15 @@ def descargar_guia(solicitud_id: int, cliente: str = Depends(cliente_actual)):
     )
 
 
+def _paises_con_nacional() -> list:
+    """Países destino: las rutas internacionales + Argentina si la pata
+    nacional (envia.com) está habilitada."""
+    paises = list(get_paises_destino())
+    if nacional_activo() and "AR" not in paises:
+        paises.insert(0, "AR")
+    return paises
+
+
 @router.get("/envios/nuevo", response_class=HTMLResponse)
 def envio_nuevo_form(request: Request, cliente: str = Depends(cliente_actual)):
     return templates.TemplateResponse(
@@ -459,7 +542,7 @@ def envio_nuevo_form(request: Request, cliente: str = Depends(cliente_actual)):
         context={
             "cliente": cliente,
             "productos": get_productos(cliente),
-            "paises_destino": get_paises_destino(),
+            "paises_destino": _paises_con_nacional(),
             "remitente": obtener_remitente_para_envio(cliente),
             "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
             "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
@@ -481,6 +564,9 @@ def envio_nuevo_post(
     # Legacy (por si queda un form viejo cacheado): un solo producto.
     producto_alias: str = Form(""),
     cantidad: int = Form(1),
+    # Nacional: carrier/servicio elegido en el comparador en vivo.
+    nac_carrier: str = Form(""),
+    nac_servicio: str = Form(""),
     remitente_id: str = Form(""),
     destinatario_id: str = Form(""),
     dest_nombre: str = Form(...),
@@ -499,7 +585,7 @@ def envio_nuevo_post(
     cliente: str = Depends(cliente_actual),
 ):
     productos = get_productos(cliente)
-    paises_destino = get_paises_destino()
+    paises_destino = _paises_con_nacional()
     remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
     destinatarios = listar_direcciones(cliente, TIPO_DESTINATARIO)
 
@@ -573,7 +659,48 @@ def envio_nuevo_post(
             if not producto or not producto.activo:
                 raise ValueError(f"El producto \"{fila['producto']}\" no está activo en tu catálogo.")
 
-        if legacy_single:
+        courier_extra = {}
+        es_nacional = destino_pais.strip().upper() == "AR"
+        if es_nacional:
+            # ── Envío NACIONAL (AR→AR vía envia.com) ─────────
+            if not nacional_activo():
+                raise ValueError("Los envíos nacionales todavía no están habilitados.")
+            origen_nac = {
+                "nombre": remitente.get("nombre"),
+                "email": remitente.get("email"),
+                "telefono": remitente.get("telefono"),
+                "direccion": remitente.get("direccion"),
+                "ciudad": remitente.get("ciudad"),
+                "provincia": remitente.get("estado") or "CABA",
+                "cp": remitente.get("cp"),
+            }
+            destino_nac = {"cp": dest_zip, "ciudad": dest_ciudad, "provincia": dest_estado}
+            precio_n = cotizar_nacional_cliente(cliente, origen_nac, destino_nac, filas)
+            if not precio_n.get("encontrado"):
+                raise ValueError(f"No se pudo cotizar ese envío nacional ({precio_n.get('motivo')}).")
+            opciones_n = precio_n["opciones"]
+            elegido = next(
+                (o for o in opciones_n
+                 if o["carrier"] == nac_carrier.strip() and o["servicio"] == nac_servicio.strip()),
+                opciones_n[0],
+            )
+            bultos_detalle = precio_n["bultos"]
+            precio = {
+                "encontrado": True,
+                "ruta_id": "NACIONAL",
+                "coti_id": precio_n["coti_id"],
+                "peso_total_kg": precio_n["peso_total_kg"],
+                "valor_total_usd": round(
+                    sum(b["valor_unitario_usd"] * b["cantidad"] for b in bultos_detalle), 2
+                ),
+                "precio_ars": elegido["precio_final_ars"],
+                "precio_usd": elegido["precio_final_usd"],
+            }
+            courier_extra = {
+                "courier": "ENVIA",
+                "servicio_courier": f"{elegido['carrier']}/{elegido['servicio']}",
+            }
+        elif legacy_single:
             precio = obtener_precio_envio(
                 cliente, filas[0]["producto"], destino_pais, cantidad=filas[0]["cantidad"]
             )
@@ -654,6 +781,7 @@ def envio_nuevo_post(
             precio_tauro_usd=precio["precio_usd"],
             precio_cliente_final_ars=precio_final,
             bultos=bultos_detalle,
+            **courier_extra,
         )
     except Exception as e:
         return templates.TemplateResponse(

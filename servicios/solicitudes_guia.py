@@ -68,6 +68,8 @@ def crear_solicitud_guia(
     remitente_pais: str = "",
     precio_cliente_final_ars: Optional[float] = None,
     bultos: Optional[list] = None,
+    courier: str = "FEDEX",
+    servicio_courier: Optional[str] = None,
 ) -> dict:
     """Crea una solicitud de guía pendiente para gestión operativa.
 
@@ -91,7 +93,8 @@ def crear_solicitud_guia(
                     dest_direccion, dest_ciudad, dest_estado, dest_zip,
                     observaciones, peso_kg, largo_cm, ancho_cm, alto_cm,
                     valor_declarado_usd, ruta_id, coti_id, precio_tauro_ars,
-                    precio_tauro_usd, precio_cliente_final_ars, bultos
+                    precio_tauro_usd, precio_cliente_final_ars, bultos,
+                    courier, servicio_courier
                 )
                 VALUES (
                     %s, %s, %s, %s,
@@ -100,7 +103,8 @@ def crear_solicitud_guia(
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s
+                    %s, %s, %s,
+                    %s, %s
                 )
                 RETURNING *
                 """,
@@ -139,6 +143,8 @@ def crear_solicitud_guia(
                     precio_tauro_usd,
                     precio_cliente_final_ars,
                     json.dumps(bultos) if bultos else None,
+                    (courier or "FEDEX").strip().upper(),
+                    _clean(servicio_courier),
                 ),
             )
             return dict(cur.fetchone())
@@ -309,6 +315,114 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
     if not row or not row["label_pdf"]:
         return None
     return bytes(row["label_pdf"])
+
+
+def generar_guia(solicitud_id: int) -> dict:
+    """
+    Despachador de emisión: mira el courier de la solicitud y emite por
+    el canal que corresponde. FEDEX = cuenta propia (internacional);
+    ENVIA = envia.com (nacionales AR, debita el wallet prepago).
+    """
+    sol = obtener_solicitud(solicitud_id)
+    if not sol:
+        return {"ok": False, "error": "Solicitud no encontrada."}
+    if (sol.get("courier") or "FEDEX").upper() == "ENVIA":
+        return generar_guia_envia(sol)
+    return generar_guia_fedex(solicitud_id)
+
+
+def generar_guia_envia(sol: dict) -> dict:
+    """
+    Emite una guía NACIONAL vía envia.com con el carrier/servicio que
+    eligió el cliente al crear la solicitud. Cuidado: debita el wallet
+    prepago de envia — si no hay saldo, envia rechaza y lo informamos.
+    """
+    if sol.get("estado") == "CANCELADO":
+        return {"ok": False, "error": "La solicitud está cancelada."}
+    if sol.get("tracking") and sol.get("label_pdf"):
+        return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
+
+    servicio_courier = (sol.get("servicio_courier") or "").strip()
+    if "/" not in servicio_courier:
+        return {"ok": False, "error": "La solicitud no tiene carrier/servicio nacional elegido."}
+    carrier, servicio = servicio_courier.split("/", 1)
+
+    bultos = sol.get("bultos") or []
+    if isinstance(bultos, str):
+        try:
+            import json as _json
+            bultos = _json.loads(bultos)
+        except Exception:
+            bultos = []
+
+    origen = {
+        "nombre": sol.get("remitente_nombre") or sol.get("cliente_nombre") or sol["cliente_id"],
+        "empresa": sol.get("cliente_nombre") or "",
+        "email": sol.get("remitente_email") or "",
+        "telefono": sol.get("remitente_telefono") or sol.get("cliente_telefono") or "",
+        "direccion": sol.get("remitente_direccion") or sol.get("cliente_direccion") or "",
+        "ciudad": sol.get("remitente_ciudad") or sol.get("cliente_ciudad") or "Buenos Aires",
+        "provincia": sol.get("remitente_estado") or "CABA",
+        "cp": sol.get("remitente_zip") or sol.get("cliente_cp") or "",
+    }
+    destino = {
+        "nombre": sol.get("dest_nombre") or "",
+        "email": sol.get("dest_email") or "",
+        "telefono": sol.get("dest_telefono") or "",
+        "direccion": sol.get("dest_direccion") or "",
+        "ciudad": sol.get("dest_ciudad") or "",
+        "provincia": sol.get("dest_estado") or "",
+        "cp": sol.get("dest_zip") or "",
+    }
+
+    from servicios.cotizador import _get_dolar_ars
+    dolar = _get_dolar_ars()
+    piezas = [
+        {
+            "descripcion": b.get("descripcion_en") or b.get("producto_alias") or "Merchandise",
+            "cantidad": max(int(b.get("cantidad") or 1), 1),
+            "largo_cm": b.get("largo_cm") or 30,
+            "ancho_cm": b.get("ancho_cm") or 20,
+            "alto_cm": b.get("alto_cm") or 10,
+            "peso_kg": b.get("peso_kg") or 0.5,
+            "valor_declarado_ars": round(float(b.get("valor_unitario_usd") or 0) * dolar, 2),
+        }
+        for b in bultos
+    ] or [{
+        "descripcion": sol.get("producto_alias") or "Merchandise",
+        "cantidad": sol.get("cantidad") or 1,
+        "largo_cm": sol.get("largo_cm") or 30,
+        "ancho_cm": sol.get("ancho_cm") or 20,
+        "alto_cm": sol.get("alto_cm") or 10,
+        "peso_kg": sol.get("peso_kg") or 0.5,
+        "valor_declarado_ars": round(float(sol.get("valor_declarado_usd") or 0) * dolar, 2),
+    }]
+
+    from core.envia_client import EnviaClient
+    resultado = EnviaClient().create_shipment_nacional(
+        origen=origen, destino=destino, bultos=piezas,
+        carrier=carrier, servicio=servicio,
+    )
+    if not resultado.get("encontrado"):
+        return {"ok": False, "error": resultado.get("error", "envia.com no emitió la guía.")}
+
+    guardar_guia_generada(
+        sol["id"],
+        resultado["tracking"],
+        resultado.get("label_pdf"),
+        courier="ENVIA",
+    )
+    # Si el PDF no se pudo bajar, al menos dejamos el link de envia.
+    if not resultado.get("label_pdf") and resultado.get("label_url"):
+        actualizar_solicitud_guia(
+            sol["id"], estado="GUIA_LISTA",
+            tracking=resultado["tracking"], guia_url=resultado["label_url"],
+        )
+    return {
+        "ok": True,
+        "tracking": resultado["tracking"],
+        "tiene_label": bool(resultado.get("label_pdf")),
+    }
 
 
 def generar_guia_fedex(solicitud_id: int) -> dict:

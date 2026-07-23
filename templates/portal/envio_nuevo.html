@@ -53,6 +53,9 @@
 </div>
 
 <form method="POST" action="/portal/envios/nuevo">
+    <!-- Nacional: carrier/servicio elegido en el comparador del precio en vivo -->
+    <input type="hidden" name="nac_carrier" id="nac_carrier" value="">
+    <input type="hidden" name="nac_servicio" id="nac_servicio" value="">
     <div class="card">
         <div class="form-section">
             <h4><span class="n">1</span> Remitente <span class="badge muted">Origen</span></h4>
@@ -367,6 +370,40 @@
     }
   }
 
+  // ── Nacional: comparador de couriers en el precio en vivo ─
+  var nacCarrier = document.getElementById("nac_carrier");
+  var nacServicio = document.getElementById("nac_servicio");
+  var nacOpciones = [];
+
+  function aplicarNacSel(i) {
+    var o = nacOpciones[i];
+    if (!o) return;
+    nacCarrier.value = o.carrier;
+    nacServicio.value = o.servicio;
+    var p = document.getElementById("nac-precio");
+    if (p) p.textContent = fmtARS(o.precio_ars);
+    var d = document.getElementById("nac-dias");
+    if (d) d.textContent = o.dias || "";
+  }
+
+  function renderNacional(data) {
+    nacOpciones = data.opciones || [];
+    if (!nacOpciones.length) { renderLivePrice("err", { motivo: "sin_cobertura" }); return; }
+    var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
+    var sel = "<select id='nac-opcion' style='margin-top:6px;font-size:12.5px;padding:7px 28px 7px 10px;'>" +
+      nacOpciones.map(function (o, i) {
+        return "<option value='" + i + "'>" + o.nombre + " — " + fmtARS(o.precio_ars) + "</option>";
+      }).join("") + "</select>";
+    liveBox.innerHTML =
+      "<strong style='font-size:19px;'><span id='nac-precio' style='color:var(--accent-soft);" + monoStyle + "'>" +
+      fmtARS(nacOpciones[0].precio_ars) + "</span> <span style='font-size:11px;color:var(--fg-3)'>ARS</span>" +
+      " <span id='nac-dias' style='font-size:11px;color:var(--fg-3)'>" + (nacOpciones[0].dias || "") + "</span></strong>" + sel;
+    aplicarNacSel(0);
+    document.getElementById("nac-opcion").addEventListener("change", function () {
+      aplicarNacSel(parseInt(this.value, 10) || 0);
+    });
+  }
+
   function refreshLivePrice() {
     if (!liveBox || !countrySelect) return;
     var bultos = leerBultos();
@@ -375,7 +412,36 @@
     // vació el form, un timer viejo no puede pintar un precio fantasma
     // encima del estado "idle" (y priceSeq++ invalida respuestas en vuelo).
     clearTimeout(priceTimer);
+    if (destino !== "AR") { nacCarrier.value = ""; nacServicio.value = ""; }
     if (!bultos.length || !destino) { priceSeq++; renderLivePrice("idle"); return; }
+
+    if (destino === "AR") {
+      // Nacional: necesita CP + ciudad del destinatario para cotizar
+      var cp = (document.getElementById("dest_zip") || {}).value || "";
+      var ciudad = (document.getElementById("dest_ciudad") || {}).value || "";
+      var prov = (document.getElementById("dest_estado") || {}).value || "";
+      if (!cp.trim() || !ciudad.trim()) {
+        priceSeq++;
+        liveBox.innerHTML = "<strong>Completá ciudad y CP del destino</strong><span>Ahí comparo los couriers nacionales.</span>";
+        return;
+      }
+      priceTimer = setTimeout(function () {
+        var seq = ++priceSeq;
+        renderLivePrice("loading");
+        fetch("/portal/api/precio-nacional", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cp: cp, ciudad: ciudad, provincia: prov, bultos: bultos }),
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (seq !== priceSeq) return;
+            if (data.ok) renderNacional(data); else renderLivePrice("err", data);
+          })
+          .catch(function () { if (seq === priceSeq) renderLivePrice("err"); });
+      }, 450);
+      return;
+    }
 
     priceTimer = setTimeout(function () {
       var seq = ++priceSeq;
@@ -395,6 +461,12 @@
   }
 
   if (countrySelect) countrySelect.addEventListener("change", refreshLivePrice);
+  ["dest_zip", "dest_ciudad", "dest_estado"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("input", function () {
+      if (countrySelect.value === "AR") refreshLivePrice();
+    });
+  });
   refreshLivePrice();
 
   // ── Pegar pedido → precargar form ─────────────────────────

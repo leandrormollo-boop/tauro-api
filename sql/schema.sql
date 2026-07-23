@@ -224,6 +224,10 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_estado
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_zip TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_pais TEXT;
 
+-- Envíos NACIONALES vía envia.com: courier='ENVIA' y acá se guarda
+-- qué carrier/servicio eligió el cliente (ej: "oca/oca_SP").
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS servicio_courier TEXT;
+
 -- Multi-bulto: lista JSON de cajas del envío. Cada elemento:
 --   {producto_alias, cantidad, peso_kg, largo_cm, ancho_cm, alto_cm,
 --    valor_unitario_usd, hs_code, descripcion_en}
