@@ -251,24 +251,13 @@ function ResultStat({ label, value }) {
   );
 }
 
+/* Loader "Ultracode": la matriz de puntitos violeta que se va cargando
+   (el formato del slider de esfuerzo de Claude). Sin animalitos. */
 function TauroQuoteLoader() {
   return (
     <span className="tauro-quote-loader" role="status" aria-live="polite">
       <span className="tauro-loader-track" aria-hidden="true">
         <span className="tauro-loader-flame" />
-        <span className="tauro-loader-bull">
-          <svg viewBox="0 0 44 28" focusable="false">
-            <path className="bull-body" d="M12.5 12.4c2-5.1 7.5-7.7 14.4-6.8 5.2.7 8.6 3.6 9.5 7.7l3.4 1.1c1.6.5 2.4 1.7 2 3.1-.3 1.1-1.3 1.8-2.5 1.8h-3.1c-1.5 3.3-4.8 5.2-9.4 5.2H16.2c-5.3 0-8.4-2.5-8.4-6.4 0-2.4 1.4-4.3 4.7-5.7Z"/>
-            <path className="bull-hump" d="M13.3 12.7c.7-4.6 4-7.3 8.7-7.6-1.2 1.7-1.8 3.4-1.9 5.2-2.7.2-4.7 1-6.8 2.4Z"/>
-            <path className="bull-horn" d="M32.2 7.9c3.4-2.3 6.5-2.7 8.9-1-2.8.3-5 1.8-6.7 4.4"/>
-            <path className="bull-horn" d="M35.6 9.3c2.2-.8 4.2-.5 5.7.9-2.1-.1-3.7.5-5 1.9"/>
-            <path className="bull-tail" d="M8.8 14.4C5.6 12.8 3.4 10.8 2.4 8.3c3.1 1 5.7 2.5 7.9 4.7"/>
-            <path className="bull-leg" d="M15.2 23.3v3.2"/>
-            <path className="bull-leg" d="M22.7 23.8v3"/>
-            <path className="bull-leg" d="M30.1 23.2v3.4"/>
-            <circle className="bull-eye" cx="34.7" cy="15.4" r="1"/>
-          </svg>
-        </span>
       </span>
       <span className="tauro-loader-label">Consultando FedEx...</span>
     </span>

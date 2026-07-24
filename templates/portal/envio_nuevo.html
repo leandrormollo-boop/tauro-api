@@ -345,7 +345,7 @@
     if (state === "idle") {
       liveBox.innerHTML = "<strong>Elegí producto y destino</strong><span>El precio aparece acá al instante.</span>";
     } else if (state === "loading") {
-      liveBox.innerHTML = "<div class='matrix matrix-sm'></div><span>Consultando tarifa en vivo…</span>";
+      liveBox.innerHTML = "<div class='matrix-pill matrix-sm'><div class='matrix'></div></div><span>Consultando tarifa en vivo…</span>";
     } else if (state === "ok") {
       // números siempre en mono tabular: no "saltan" de ancho al recotizar
       var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
