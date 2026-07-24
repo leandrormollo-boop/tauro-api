@@ -140,7 +140,7 @@ function HeroSplit({ onCotizarClick }) {
           <div>
             <div className="chip fade-up" style={{ marginBottom: 28 }}>
               <span className="chip-dot pulse"></span>
-              Envíos a todo el mundo vía FedEx
+              Envíos a todo el mundo
             </div>
             <h1 className="fade-up d1">
               Logística sin <span className="accent">fronteras</span>,<br/>
@@ -190,7 +190,7 @@ function HeroCentered({ onCotizarClick }) {
       <div className="hero-bg"><div className="grid-lines"></div><div className="glow" style={{ left: "50%", marginLeft: -300, right: "auto" }}></div></div>
       <div className="container" style={{ maxWidth: 980 }}>
         <div className="chip fade-up" style={{ marginBottom: 28 }}>
-          <span className="chip-dot pulse"></span> Envíos a todo el mundo vía FedEx
+          <span className="chip-dot pulse"></span> Envíos a todo el mundo
         </div>
         <h1 className="fade-up d1" style={{ fontSize: "clamp(56px, 9vw, 120px)" }}>
           Tu carga,<br/>

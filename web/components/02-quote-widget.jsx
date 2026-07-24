@@ -335,7 +335,24 @@ function CarrierCard({ carrier, recomendado }) {
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{carrier.nombre}</div>
+        <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {carrier.nombre}
+          {/* "Operativo" + luz verde: solo cuando el sistema confirmó que el
+              carrier devolvió tarifa en vivo (estado "cotizado"). */}
+          {cotizado && (
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              fontSize: 9.5, fontFamily: "var(--font-mono)", fontWeight: 600,
+              letterSpacing: ".08em", textTransform: "uppercase", color: "#2ec27e",
+            }}>
+              <span className="pulse" style={{
+                width: 6, height: 6, borderRadius: 99, background: "#2ec27e",
+                boxShadow: "0 0 8px rgba(46,194,126,.8)", flexShrink: 0,
+              }}/>
+              Operativo
+            </span>
+          )}
+        </div>
         <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {cotizado ? `${carrier.servicio} · ${carrier.dias_estimados} días` : carrier.servicio}
         </div>
