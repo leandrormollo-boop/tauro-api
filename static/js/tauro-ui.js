@@ -76,7 +76,12 @@
         item.dataset.idx = String(i);
         item.innerHTML = "<span class='tselect-check'>✓</span><span>" + opt.text.replace(/</g, "&lt;") + "</span>";
         if (!opt.disabled) {
-          item.addEventListener("click", function (e) {
+          // mousedown, NO click: el click llega DESPUÉS del blur del select
+          // (que cierra el panel), así que con click la selección se perdía
+          // — el bug de "elijo de la libreta y no carga nada".
+          // preventDefault evita robarle el foco al select (no hay blur).
+          item.addEventListener("mousedown", function (e) {
+            e.preventDefault();
             e.stopPropagation();
             elegir(i);
             cerrar();

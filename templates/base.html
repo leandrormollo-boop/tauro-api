@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
     <link rel="stylesheet" href="/static/css/tauro.css?v=9">
-    <script src="/static/js/tauro-ui.js?v=2" defer></script>
+    <script src="/static/js/tauro-ui.js?v=3" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
 </head>
 <body>
@@ -104,7 +104,7 @@
 {% else %}
 </main>
 {% endif %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Prefetch al hover: cuando el mouse pasa por un link interno, pre-carga
 // esa página — al click ya está en caché y la navegación se siente
 // instantánea (mismo truco que usan las SPA, sin serlo).
@@ -133,6 +133,38 @@
       e.preventDefault();
       toggle.checked = !toggle.checked;
       burger.setAttribute("aria-expanded", toggle.checked ? "true" : "false");
+    }
+  });
+})();
+
+// Confirmaciones sin JavaScript inline en los formularios.
+document.querySelectorAll("[data-confirm]").forEach(function (form) {
+  form.addEventListener("submit", function (event) {
+    if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+  });
+});
+
+// Tracking desde el escritorio.
+(function () {
+  var input = document.getElementById("track-input");
+  var button = document.getElementById("track-submit");
+  if (!input || !button) return;
+  var openTracking = function () {
+    var value = input.value.trim();
+    if (value) {
+      window.open(
+        "https://www.fedex.com/fedextrack/?trknbr=" +
+          encodeURIComponent(value),
+        "_blank",
+        "noopener,noreferrer"
+      );
+    }
+  };
+  button.addEventListener("click", openTracking);
+  input.addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      openTracking();
     }
   });
 })();
