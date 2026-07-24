@@ -336,16 +336,9 @@ function CarrierCard({ carrier, recomendado }) {
         {cotizado ? (
           <>
             <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
-              {/* Violeta metálico — paleta del ad de referencia (95f1d64):
-                  gradiente lavanda→violeta con banda especular + glow */}
-              <span style={{
-                background: "linear-gradient(105deg, #cdb6ff 0%, #a78bfa 25%, #8b6bf7 45%, #e9ddff 57%, #a78bfa 70%, #7c5cf6 100%)",
-                WebkitBackgroundClip: "text",
-                backgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                color: "transparent",
-                filter: "drop-shadow(0 0 12px rgba(124,92,246,.45))",
-              }}>
+              {/* Violeta metálico con brillo en movimiento — paleta del ad de
+                  referencia (95f1d64); animación en .tweb-price-metal (styles.css) */}
+              <span className="tweb-price-metal">
                 ${carrier.precio_usd.toLocaleString("es-AR")}
               </span>
               {" "}<span style={{ fontSize: 11, color: "var(--fg-3)", fontWeight: 400 }}>USD</span>

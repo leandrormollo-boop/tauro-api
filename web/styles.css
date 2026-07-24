@@ -507,3 +507,25 @@ button, .btn, a[class*="btn"], [role="button"], .tweb-select-btn {
 button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
 .tweb-select-btn:active { transform: scale(.97); }
 .btn-primary:active { box-shadow: 0 0 0 3px var(--accent-glow), 0 6px 22px var(--accent-glow); filter: brightness(1.06); }
+
+/* Precio violeta metálico con brillo en movimiento (comparador de couriers).
+   El gradiente mide 200% del ancho del número y el barrido de background-position
+   hace viajar el destello DENTRO de los dígitos (background-clip: text lo recorta).
+   Arranca y termina en el mismo violeta para que el loop sea invisible. */
+.tweb-price-metal {
+  background: linear-gradient(105deg,
+    #8b6bf7 0%, #a78bfa 34%, #e9ddff 47%, #f6f0ff 50%, #e9ddff 53%, #a78bfa 66%, #8b6bf7 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 12px rgba(124, 92, 246, .45));
+  animation: tweb-metal-sweep 2.6s linear infinite;
+}
+@keyframes tweb-metal-sweep {
+  to { background-position-x: -200%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tweb-price-metal { animation: none; }
+}
