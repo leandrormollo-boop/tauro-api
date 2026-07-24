@@ -3,7 +3,9 @@
    ========================================================== */
 
 :root {
-  /* paleta base — negro azulado profundo + magenta */
+  /* paleta base — negro violáceo + VIOLETA TAURO (#a78bfa).
+     IDENTIDAD OFICIAL: violeta, NUNCA magenta. Debe coincidir con
+     TWEAK_DEFAULTS en components/05-app.jsx y con static/css/tauro.css. */
   --bg: #0a0e12;
   --bg-elev: #11161c;
   --bg-elev-2: #181f27;
@@ -13,10 +15,10 @@
   --fg-2: #b9bfc7;
   --fg-3: #7a828c;
   --fg-4: #4a525c;
-  --accent: #ff2d6b;       /* magenta vivo, ligeramente menos saturado que el original */
-  --accent-soft: #ff6b97;
-  --accent-deep: #c81653;
-  --accent-glow: rgba(255, 45, 107, 0.18);
+  --accent: #a78bfa;       /* violeta TAURO */
+  --accent-soft: #c9b4ff;  /* lavanda */
+  --accent-deep: #7c5cf6;  /* violeta profundo */
+  --accent-glow: rgba(167, 139, 250, 0.18);
   --warn: #f5b800;
   --ok: #2ec27e;
 
@@ -174,10 +176,10 @@ h1, h2, h3, h4 {
 .btn-primary.btn-loading:hover {
   min-height: 84px;
   background: #0d1117;
-  border-color: rgba(255, 45, 107, 0.34);
+  border-color: rgba(167, 139, 250, 0.34);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.03),
-    0 18px 46px rgba(255, 45, 107, 0.14);
+    0 18px 46px rgba(124, 92, 246, 0.14);
   cursor: wait;
 }
 .btn-ghost {
@@ -528,4 +530,43 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
 }
 @media (prefers-reduced-motion: reduce) {
   .tweb-price-metal { animation: none; }
+}
+
+/* Neón violeta — marco de la opción recomendada y botones primarios.
+   Mismo tempo (2.6s) que el barrido del precio: todo respira en sincronía.
+   El halo vive en un ::before y se anima SU OPACIDAD (composita en GPU);
+   animar box-shadow directo repinta la página entera en cada frame. */
+.tweb-neon-ring,
+.btn-primary:not(.btn-loading) { position: relative; }
+.tweb-neon-ring::before,
+.btn-primary:not(.btn-loading)::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(201, 180, 255, .45),
+              0 0 22px rgba(124, 92, 246, .55),
+              0 0 58px rgba(124, 92, 246, .28);
+  opacity: .45;
+  pointer-events: none;
+  animation: tweb-neon-pulse 2.6s ease-in-out infinite;
+}
+@keyframes tweb-neon-pulse { 50% { opacity: 1; } }
+
+/* Botones primarios: destello que barre la superficie (mismo barrido del precio).
+   :not(.btn-loading) porque la pastilla del loader es oscura y no debe brillar.
+   El :hover va incluido porque su "background" shorthand pisaría el destello. */
+.btn-primary:not(.btn-loading),
+.btn-primary:not(.btn-loading):hover {
+  background-image: linear-gradient(105deg,
+    rgba(255, 255, 255, 0) 42%, rgba(246, 240, 255, .5) 50%, rgba(255, 255, 255, 0) 58%);
+  background-size: 200% 100%;
+  animation: tweb-metal-sweep 2.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tweb-neon-ring::before,
+  .btn-primary:not(.btn-loading)::before { animation: none; opacity: .6; }
+  .btn-primary:not(.btn-loading),
+  .btn-primary:not(.btn-loading):hover { animation: none; }
 }

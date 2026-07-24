@@ -293,12 +293,12 @@ function SelectField({ label, value, onChange, options }) {
 function CarrierCard({ carrier, recomendado }) {
   const cotizado = carrier.estado === "cotizado";
   return (
-    <div style={{
+    <div className={recomendado ? "tweb-neon-ring" : undefined} style={{
       display: "flex", alignItems: "center", gap: 14,
       padding: "14px 16px",
       background: cotizado ? "var(--bg)" : "rgba(255,255,255,0.02)",
       border: `1px solid ${recomendado ? "var(--accent)" : "var(--line-soft)"}`,
-      boxShadow: recomendado ? "0 0 0 3px var(--accent-glow)" : "none",
+      // el glow de la recomendada lo pone .tweb-neon-ring (neón respirando)
       borderRadius: 12,
       opacity: cotizado ? 1 : 0.72,
       position: "relative",
