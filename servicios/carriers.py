@@ -51,16 +51,35 @@ def carrier_activo(carrier: dict) -> bool:
     return all(os.getenv(v) for v in carrier["requisitos"])
 
 
-def _precios(resultado: dict, dolar: float, markup_pct: float) -> dict:
-    """Convierte el costo crudo del carrier a precio final (ARS + USD) con markup web."""
-    if resultado.get("moneda", "USD") == "USD":
-        costo_usd = resultado["costo"]
-        costo_ars = round(costo_usd * dolar)
-    else:
-        costo_ars = resultado["costo"]
-        costo_usd = round(costo_ars / dolar, 2)
+def _precios(resultado: dict, dolar: float, markup_pct: float,
+             descuento_pct: float = 0.0) -> dict:
+    """
+    Convierte el costo crudo del carrier a precio final (ARS + USD).
 
-    precio_ars = round(costo_ars * (1 + markup_pct / 100))
+    Sin descuento: precio = tarifa × (1 + markup web).
+    Con descuento (pedido de Leandro para FedEx): el precio final es la tarifa
+    del carrier CON el descuento aplicado (sin markup encima), y se devuelve
+    también la tarifa de lista para mostrarla tachada en la web.
+    """
+    if resultado.get("moneda", "USD") == "USD":
+        lista_usd = resultado["costo"]
+        lista_ars = round(lista_usd * dolar)
+    else:
+        lista_ars = resultado["costo"]
+        lista_usd = round(lista_ars / dolar, 2)
+
+    if descuento_pct > 0:
+        precio_ars = round(lista_ars * (1 - descuento_pct / 100))
+        precio_usd = round(precio_ars / dolar, 2)
+        return {
+            "precio_ars": precio_ars,
+            "precio_usd": precio_usd,
+            "precio_lista_ars": lista_ars,
+            "precio_lista_usd": round(lista_usd, 2),
+            "descuento_pct": round(descuento_pct),
+        }
+
+    precio_ars = round(lista_ars * (1 + markup_pct / 100))
     precio_usd = round(precio_ars / dolar, 2)
     return {"precio_ars": precio_ars, "precio_usd": precio_usd}
 
@@ -102,12 +121,16 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         # "INTERNATIONAL_PRIORITY" → "International Priority" (prolijo para la web)
         servicio = (resultado.get("servicio") or c["servicio"]).replace("_", " ").title()
 
+        # FedEx sale con descuento sobre su tarifa de lista (WEB_DESC_FEDEX_PCT,
+        # tunable en Railway → Variables sin tocar código; 0 = sin descuento).
+        descuento = float(os.getenv("WEB_DESC_FEDEX_PCT", "95")) if c["id"] == "fedex" else 0.0
+
         salida.append({
             **base,
             "estado": "cotizado",
             "servicio": servicio,
             "dias_estimados": str(resultado.get("dias_estimados", "3-5")),
-            **_precios(resultado, dolar, markup_pct),
+            **_precios(resultado, dolar, markup_pct, descuento_pct=descuento),
         })
 
     return salida

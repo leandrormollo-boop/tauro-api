@@ -52,6 +52,12 @@ function QuoteWidget({ compact = false }) {
   const reset = () => { setStep("form"); setResult(null); setError(null); };
 
   return (
+    <div style={{ position: "relative" }}>
+      {/* Chip de marca 3D — flota sobre el borde superior derecho del cotizador,
+          en el mismo lenguaje metálico+neón de los precios. */}
+      <div className="tweb-brand-tag" aria-hidden="true">
+        <span className="tweb-price-metal">Tauro Solutions</span>
+      </div>
     <div style={{
       background: "var(--bg-elev)",
       border: "1px solid var(--line)",
@@ -159,6 +165,7 @@ function QuoteWidget({ compact = false }) {
           </a>
         </div>
       )}
+    </div>
     </div>
   );
 }
@@ -335,6 +342,11 @@ function CarrierCard({ carrier, recomendado }) {
       <div style={{ textAlign: "right", flexShrink: 0 }}>
         {cotizado ? (
           <>
+            {carrier.precio_lista_usd && (
+              <div style={{ fontSize: 10.5, color: "var(--fg-4)", fontFamily: "var(--font-mono)", textDecoration: "line-through" }}>
+                ${carrier.precio_lista_usd.toLocaleString("es-AR")} USD
+              </div>
+            )}
             <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
               {/* Violeta metálico con brillo en movimiento — paleta del ad de
                   referencia (95f1d64); animación en .tweb-price-metal (styles.css).
@@ -349,6 +361,11 @@ function CarrierCard({ carrier, recomendado }) {
                 ARS ${carrier.precio_ars.toLocaleString("es-AR")}
               </span>
             </div>
+            {carrier.descuento_pct > 0 && (
+              <div style={{ fontSize: 10, color: "var(--accent-soft)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                −{carrier.descuento_pct}% vs tarifa FedEx
+              </div>
+            )}
           </>
         ) : (
           <div style={{
