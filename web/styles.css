@@ -590,11 +590,11 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
    El :hover va incluido porque su "background" shorthand pisaría todo. */
 .btn-primary:not(.btn-loading),
 .btn-primary:not(.btn-loading):hover {
-  background-color: #170d2b;
+  background-color: #231245;
   background-image:
     linear-gradient(105deg,
       rgba(255, 255, 255, 0) 42%, rgba(233, 221, 255, .30) 50%, rgba(255, 255, 255, 0) 58%),
-    linear-gradient(180deg, #241540 0%, #170d2b 55%, #10091c 100%);
+    linear-gradient(180deg, #35206b 0%, #231245 55%, #180c33 100%);
   background-size: 200% 100%, 100% 100%;
   background-position: 0 0, 0 0;
   border: 1px solid rgba(167, 139, 250, .5);
