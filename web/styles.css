@@ -562,6 +562,9 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
   top: -15px;
   right: 20px;
   z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 16px;
   border-radius: 999px;
   background: linear-gradient(180deg, #2a1a4a 0%, #1a0f30 55%, #120a20 100%);

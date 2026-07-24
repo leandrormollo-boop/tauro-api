@@ -56,6 +56,8 @@ function QuoteWidget({ compact = false }) {
       {/* Chip de marca 3D — flota sobre el borde superior derecho del cotizador,
           en el mismo lenguaje metálico+neón de los precios. */}
       <div className="tweb-brand-tag" aria-hidden="true">
+        <img src="/static/img/logo-mark-white.png" alt=""
+             style={{ height: 14, width: "auto", display: "block" }} />
         <span className="tweb-price-metal">Tauro Solutions</span>
       </div>
     <div style={{
