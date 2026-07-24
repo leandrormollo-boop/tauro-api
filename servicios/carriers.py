@@ -123,7 +123,9 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
 
         # FedEx sale con descuento sobre su tarifa de lista (WEB_DESC_FEDEX_PCT,
         # tunable en Railway → Variables sin tocar código; 0 = sin descuento).
-        descuento = float(os.getenv("WEB_DESC_FEDEX_PCT", "95")) if c["id"] == "fedex" else 0.0
+        # 90% deja el paquete tipo (1.2kg a US) en ~USD 40, el precio que
+        # definió Leandro (24/07).
+        descuento = float(os.getenv("WEB_DESC_FEDEX_PCT", "90")) if c["id"] == "fedex" else 0.0
 
         salida.append({
             **base,
