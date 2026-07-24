@@ -337,14 +337,17 @@ function CarrierCard({ carrier, recomendado }) {
           <>
             <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
               {/* Violeta metálico con brillo en movimiento — paleta del ad de
-                  referencia (95f1d64); animación en .tweb-price-metal (styles.css) */}
+                  referencia (95f1d64); animación en .tweb-price-metal (styles.css).
+                  El brillo cubre el monto COMPLETO: número + moneda, USD y ARS. */}
               <span className="tweb-price-metal">
                 ${carrier.precio_usd.toLocaleString("es-AR")}
+                {" "}<span style={{ fontSize: 11, fontWeight: 400 }}>USD</span>
               </span>
-              {" "}<span style={{ fontSize: 11, color: "var(--fg-3)", fontWeight: 400 }}>USD</span>
             </div>
-            <div style={{ fontSize: 11, color: "#a99fc4", fontFamily: "var(--font-mono)" }}>
-              ARS ${carrier.precio_ars.toLocaleString("es-AR")}
+            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>
+              <span className="tweb-price-metal" style={{ filter: "drop-shadow(0 0 8px rgba(124, 92, 246, .35))" }}>
+                ARS ${carrier.precio_ars.toLocaleString("es-AR")}
+              </span>
             </div>
           </>
         ) : (
