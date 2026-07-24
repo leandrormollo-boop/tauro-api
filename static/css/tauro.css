@@ -606,6 +606,211 @@ h1, h2, h3, h4 {
 .step.done label { color: var(--fg-3); }
 
 /* ══════════════════════════════════════════════════════════
+   TSELECT — desplegable propio (adiós picker nativo del browser)
+   El <select> real queda invisible ocupando el mismo lugar:
+   conserva foco, tab, validación required y eventos.
+   ══════════════════════════════════════════════════════════ */
+.tselect { position: relative; }
+.tselect select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+  background-image: none;
+}
+.tselect-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  overflow: hidden;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.tselect-btn:hover { border-color: var(--fg-4); }
+.tselect:focus-within .tselect-btn {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.tselect-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tselect-caret {
+  color: var(--fg-3);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: transform .22s cubic-bezier(.2,.7,.3,1), color .15s;
+}
+.tselect.open .tselect-caret { transform: rotate(180deg); color: var(--accent-soft); }
+.tselect-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 80;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .55), 0 0 0 1px rgba(167, 139, 250, .06);
+  opacity: 0;
+  transform: translateY(-6px) scale(.985);
+  pointer-events: none;
+  transition: opacity .16s ease, transform .18s cubic-bezier(.2,.7,.3,1);
+}
+.tselect.open .tselect-panel {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.tselect-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  color: var(--fg-2);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: background .12s, color .12s;
+}
+.tselect-option:hover { background: var(--bg-elev); color: var(--fg); }
+.tselect-option.selected { color: var(--fg); background: var(--accent-glow); }
+.tselect-option.disabled { opacity: .4; cursor: default; }
+.tselect-check {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--accent-soft);
+  font-size: 11px;
+  opacity: 0;
+  transform: scale(.6);
+  transition: opacity .15s, transform .18s cubic-bezier(.2,.7,.3,1);
+}
+.tselect-option.selected .tselect-check { opacity: 1; transform: scale(1); }
+
+/* ══════════════════════════════════════════════════════════
+   QTYSTEP — contador − n + (adiós flechitas nativas del number)
+   ══════════════════════════════════════════════════════════ */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+.qtystep {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+  transition: border-color .15s, box-shadow .15s;
+}
+.qtystep:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.qtystep input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  text-align: center;
+  background: transparent;
+  font-family: var(--font-mono);
+}
+.qtystep input[type="number"]:focus { box-shadow: none; border: none; }
+.qty-btn {
+  width: 34px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  color: var(--fg-3);
+  background: var(--bg-elev-2);
+  position: relative;
+  overflow: hidden;
+  transition: color .12s, background .12s;
+}
+.qty-btn:hover { color: var(--accent-soft); background: var(--bg-elev); }
+.qty-btn:active { color: #fff; background: var(--accent); }
+
+/* ══════════════════════════════════════════════════════════
+   RIPPLE — cada click responde con una onda violeta
+   ══════════════════════════════════════════════════════════ */
+.btn, .side-item, .action-tile, .tab, .btn-add-bulto, .bulto-quitar {
+  position: relative;
+  overflow: hidden;
+}
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(167, 139, 250, .38) 0%, rgba(167, 139, 250, .12) 45%, transparent 70%);
+  transform: scale(0);
+  animation: ripple-out .6s cubic-bezier(.2,.7,.3,1) forwards;
+  pointer-events: none;
+}
+@keyframes ripple-out {
+  to { transform: scale(1); opacity: 0; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   CHECKBOX propio — tilde violeta con "pop"
+   ══════════════════════════════════════════════════════════ */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  transition: border-color .15s, background .18s, box-shadow .15s;
+}
+input[type="checkbox"]:hover { border-color: var(--accent-soft); }
+input[type="checkbox"]::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: #fff;
+  transform: scale(0);
+  transition: transform .18s cubic-bezier(.34, 1.6, .5, 1);
+}
+input[type="checkbox"]:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+input[type="checkbox"]:checked::before { transform: scale(1); }
+
+/* Pulido fino de inputs: hover perceptible + fondo que "levanta" al foco */
+input[type="text"]:hover, input[type="email"]:hover, input[type="number"]:hover,
+input[type="password"]:hover, textarea:hover { border-color: var(--fg-4); }
+input[type="text"]:focus, input[type="email"]:focus, input[type="number"]:focus,
+input[type="password"]:focus, textarea:focus { background: #0f0c1a; }
+
+/* ══════════════════════════════════════════════════════════
    MULTI-BULTO — filas de cajas del envío (estilo "+ Añadir paquete")
    ══════════════════════════════════════════════════════════ */
 .bulto-row {
@@ -673,51 +878,35 @@ h1, h2, h3, h4 {
 .track-box input { flex: 1; }
 
 /* ══════════════════════════════════════════════════════════
-   TORO LOADER — torito galopando + barra de puntos
-   uso: <div class="toro-loader"><svg .../><div class="dots">
-        <i></i>×10</div><p>Consultando FedEx…</p></div>
+   DOTS LOADER — matriz de puntitos violeta que se va cargando
+   (el formato del slider de esfuerzo de Claude, pedido por
+   Leandro). Puro CSS: degradé animado detrás de una máscara
+   de puntos.
+   uso: <div class="dots-loader"><div class="matrix"></div>
+        <p>Consultando tarifas…</p></div>
    ══════════════════════════════════════════════════════════ */
-.toro-loader { text-align: center; padding: 26px 0 10px; }
-.toro-loader .dots {
-  display: flex;
-  justify-content: center;
-  gap: 7px;
-  position: relative;
-  height: 40px;
-  align-items: center;
+.dots-loader { text-align: center; padding: 26px 0 10px; }
+.matrix {
+  width: 252px;
+  height: 27px;
+  margin: 0 auto;
+  background: linear-gradient(90deg,
+    #221c38 0%, #372a5e 22%, var(--accent-deep) 45%,
+    var(--accent) 66%, var(--accent-soft) 84%, #efeaff 100%);
+  background-size: 220% 100%;
+  animation: matrix-charge 1.5s ease-in-out infinite;
+  -webkit-mask-image: radial-gradient(circle at 3.25px 3.4px, #000 1.7px, transparent 2.25px);
+          mask-image: radial-gradient(circle at 3.25px 3.4px, #000 1.7px, transparent 2.25px);
+  -webkit-mask-size: 6.5px 6.75px;
+          mask-size: 6.5px 6.75px;
 }
-.toro-loader .dots i {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--line);
-  animation: toro-fill 2s infinite;
+.matrix-sm { width: 156px; height: 20px; margin: 0 0 5px; }
+@keyframes matrix-charge {
+  0%   { background-position: 115% 0; }
+  100% { background-position: -115% 0; }
 }
-.toro-loader .dots i:nth-child(1) { animation-delay: 0s; }
-.toro-loader .dots i:nth-child(2) { animation-delay: .15s; }
-.toro-loader .dots i:nth-child(3) { animation-delay: .3s; }
-.toro-loader .dots i:nth-child(4) { animation-delay: .45s; }
-.toro-loader .dots i:nth-child(5) { animation-delay: .6s; }
-.toro-loader .dots i:nth-child(6) { animation-delay: .75s; }
-.toro-loader .dots i:nth-child(7) { animation-delay: .9s; }
-.toro-loader .dots i:nth-child(8) { animation-delay: 1.05s; }
-.toro-loader .dots i:nth-child(9) { animation-delay: 1.2s; }
-.toro-loader .dots i:nth-child(10){ animation-delay: 1.35s; }
-@keyframes toro-fill {
-  0%, 55% { background: var(--line); }
-  26% { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
-}
-.toro-loader .toro {
-  position: absolute;
-  top: 50%;
-  animation: toro-run 2s linear infinite;
-}
-@keyframes toro-run {
-  0%   { left: 8%;  transform: translate(-50%,-58%); }
-  50%  { left: 50%; transform: translate(-50%,-64%); }
-  100% { left: 92%; transform: translate(-50%,-58%); }
-}
-.toro-loader p {
-  margin-top: 10px;
+.dots-loader p {
+  margin-top: 12px;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--fg-3);

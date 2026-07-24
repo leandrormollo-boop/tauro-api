@@ -607,3 +607,8 @@ body.density-spacious .card { padding: 36px; }
 .muted { color: var(--fg-3); }
 .mono { font-family: var(--font-mono); }
 .divider { height: 1px; background: var(--line-soft); margin: 0; border: 0; }
+
+/* Sin flechitas nativas en los inputs numéricos (cotizador) */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }

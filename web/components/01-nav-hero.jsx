@@ -2,22 +2,17 @@
 const { useState, useEffect, useRef } = React;
 
 /* ============================================================
-   LOGO — Original mark for Tauro Solutions (bull horns / arrow)
+   LOGO — Marca OFICIAL de Tauro Solutions
+   Extraída de la papelería real (guía aérea / proforma).
+   PNG blanco con transparencia: static/img/logo-mark-white.png
    ============================================================ */
-function TauroLogo({ size = 32, color = "currentColor" }) {
+function TauroLogo({ size = 32 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" fill="none" aria-label="Tauro Solutions">
-      {/* Stylized "T" with horn-like arms — original interpretation */}
-      <path
-        d="M6 8 L20 8 L20 32 L16 32 L16 12 L10 12 L10 18 L6 18 Z"
-        fill={color}
-      />
-      <path
-        d="M22 8 L36 8 L36 18 L32 18 L32 12 L26 12 L26 16 L30 16 L30 20 L22 20 Z"
-        fill={color}
-      />
-      <circle cx="33" cy="32" r="2.5" fill={color} />
-    </svg>
+    <img
+      src="/static/img/logo-mark-white.png"
+      alt="Tauro Solutions"
+      style={{ height: size, width: "auto", display: "block" }}
+    />
   );
 }
 
