@@ -19,11 +19,35 @@
     <form method="POST" action="/admin/login">
       <div class="form-group">
         <label for="password">Contraseña</label>
-        <input type="password" id="password" name="password" required autofocus placeholder="••••••••">
+        <div style="position:relative;">
+          <input type="password" id="password" name="password" required autofocus
+                 placeholder="••••••••" autocomplete="current-password"
+                 style="padding-right:44px;">
+          <button type="button" id="toggle-pass" aria-label="Mostrar contraseña"
+                  style="position:absolute;right:6px;top:50%;transform:translateY(-50%);padding:8px;color:var(--fg-3);background:none;border:none;cursor:pointer;">
+            <svg id="eye-open" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg id="eye-closed" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><path d="m2 2 20 20M6.7 6.7C3.6 8.7 2 12 2 12s3.5 7 10 7c1.9 0 3.5-.5 4.9-1.2M10.6 5.1c.5-.1.9-.1 1.4-.1 6.5 0 10 7 10 7s-.8 1.6-2.4 3.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+          </button>
+        </div>
       </div>
       <button type="submit" class="btn btn-primary btn-full">Entrar</button>
     </form>
   </div>
 </div>
+<script>
+  // Ojito mostrar/ocultar contraseña (mismo patrón que el login del portal)
+  var toggle = document.getElementById("toggle-pass");
+  if (toggle) {
+    toggle.addEventListener("click", function () {
+      var inp = document.getElementById("password");
+      var abierto = inp.type === "password";
+      inp.type = abierto ? "text" : "password";
+      document.getElementById("eye-open").style.display = abierto ? "none" : "block";
+      document.getElementById("eye-closed").style.display = abierto ? "block" : "none";
+      this.setAttribute("aria-label", abierto ? "Ocultar contraseña" : "Mostrar contraseña");
+      inp.focus();
+    });
+  }
+</script>
 </body>
 </html>
