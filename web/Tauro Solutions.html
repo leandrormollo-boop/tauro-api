@@ -39,28 +39,5 @@
   <script type="text/babel" src="components/03-services-tracking.jsx"></script>
   <script type="text/babel" src="components/04-stats-contact-footer.jsx"></script>
   <script type="text/babel" src="components/05-app.jsx"></script>
-
-  <!-- Ripple violeta al click: mismo feedback que el portal, en toda la web pública -->
-  <script>
-  (function () {
-    var SEL = "button, .btn, a[class*='btn'], [role='button']";
-    document.addEventListener("pointerdown", function (e) {
-      var t = e.target.closest ? e.target.closest(SEL) : null;
-      if (!t) return;
-      var cs = getComputedStyle(t);
-      if (cs.position === "static") t.style.position = "relative";
-      if (cs.overflow !== "hidden") t.style.overflow = "hidden";
-      var rect = t.getBoundingClientRect();
-      var d = Math.max(rect.width, rect.height) * 2;
-      var r = document.createElement("span");
-      r.className = "tw-ripple";
-      r.style.width = r.style.height = d + "px";
-      r.style.left = (e.clientX - rect.left - d / 2) + "px";
-      r.style.top = (e.clientY - rect.top - d / 2) + "px";
-      t.appendChild(r);
-      setTimeout(function () { r.remove(); }, 620);
-    }, { passive: true });
-  })();
-  </script>
 </body>
 </html>

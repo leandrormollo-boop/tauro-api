@@ -752,23 +752,26 @@ input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .qty-btn:active { color: #fff; background: var(--accent); }
 
 /* ══════════════════════════════════════════════════════════
-   RIPPLE — cada click responde con una onda violeta
+   FEEDBACK DE CLICK — press + destello violeta (sin ondas que
+   desborden: se hunde un toque y da un glow al apretar)
    ══════════════════════════════════════════════════════════ */
-.btn, .side-item, .action-tile, .tab, .btn-add-bulto, .bulto-quitar {
-  position: relative;
-  overflow: hidden;
+.btn, .side-item, .action-tile, .tab, .tselect-btn, .qty-btn,
+.btn-add-bulto, .bulto-quitar, .track-link {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity, filter;
+  transition-duration: .13s;
+  transition-timing-function: ease;
 }
-.ripple {
-  position: absolute;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(167, 139, 250, .38) 0%, rgba(167, 139, 250, .12) 45%, transparent 70%);
-  transform: scale(0);
-  animation: ripple-out .6s cubic-bezier(.2,.7,.3,1) forwards;
-  pointer-events: none;
+.btn:active, .side-item:active, .action-tile:active, .tab:active,
+.tselect-btn:active, .qty-btn:active, .btn-add-bulto:active,
+.bulto-quitar:active, .track-link:active {
+  transform: scale(.97);
 }
-@keyframes ripple-out {
-  to { transform: scale(1); opacity: 0; }
+.btn-primary:active {
+  box-shadow: 0 0 0 3px var(--accent-glow), 0 6px 22px var(--accent-glow);
+  filter: brightness(1.06);
 }
+.side-item:active, .action-tile:active, .tab:active,
+.tselect-btn:active, .qty-btn:active { background: var(--accent-glow); }
 
 /* ══════════════════════════════════════════════════════════
    CHECKBOX propio — tilde violeta con "pop"

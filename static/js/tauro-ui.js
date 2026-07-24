@@ -8,8 +8,7 @@
       existente (precio en vivo, prefills, parser) sigue andando.
    2. QtyStep: contadores −/+ para cantidades (chau flechitas
       nativas del input number).
-   3. Ripple: cada click en algo interactivo responde con una
-      onda violeta — feedback visual en TODA la web.
+   3. (El feedback de click es CSS puro vía :active — ver tauro.css)
    4. Los componentes sobreviven al clonado de filas (multi-bulto):
       un MutationObserver re-construye lo que llegue clonado.
    ========================================================== */
@@ -202,26 +201,11 @@
     mas.addEventListener("click", function () { paso(1); });
   }
 
-  /* ── 3. Ripple violeta en cada click ────────────────────── */
+  /* El feedback de click ahora es 100% CSS (:active): press + destello.
+     Se sacó el ripple JS porque en botones anchos la onda desbordaba
+     y parecía un error. */
 
-  var RIPPLE_SEL = ".btn, .side-item, .action-tile, .tab, .tselect-btn, " +
-    ".tselect-option, .qty-btn, .btn-add-bulto, .bulto-quitar, .track-link, .step span";
-
-  document.addEventListener("pointerdown", function (e) {
-    var t = e.target.closest ? e.target.closest(RIPPLE_SEL) : null;
-    if (!t) return;
-    var rect = t.getBoundingClientRect();
-    var d = Math.max(rect.width, rect.height) * 2;
-    var r = document.createElement("span");
-    r.className = "ripple";
-    r.style.width = r.style.height = d + "px";
-    r.style.left = (e.clientX - rect.left - d / 2) + "px";
-    r.style.top = (e.clientY - rect.top - d / 2) + "px";
-    t.appendChild(r);
-    setTimeout(function () { r.remove(); }, 650);
-  }, { passive: true });
-
-  /* ── 4. Init + supervivencia al clonado ─────────────────── */
+  /* ── Init + supervivencia al clonado ────────────────────── */
 
   function mejorarTodo(raiz) {
     (raiz.querySelectorAll ? raiz : document)
