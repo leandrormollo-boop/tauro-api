@@ -31,7 +31,8 @@ function Nav({ onCotizarClick }) {
       <div className="container nav-inner">
         <a href="/web" className="logo">
           <span className="logo-mark"><TauroLogo size={28} color="#fff" /></span>
-          <span>Tauro<span style={{ color: "var(--fg-3)", fontWeight: 400, marginLeft: 4 }}>solutions</span></span>
+          {/* "solutions" en violeta metálico — eco sutil del chip y los precios */}
+          <span>Tauro<span className="tweb-price-metal" style={{ fontWeight: 400, marginLeft: 4 }}>solutions</span></span>
         </a>
         <ul className="nav-links">
           <li><a href="#servicios">Servicios</a></li>

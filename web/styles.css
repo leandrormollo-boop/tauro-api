@@ -554,6 +554,11 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
 }
 @keyframes tweb-neon-pulse { 50% { opacity: 1; } }
 
+/* Logo del nav: la T levanta un glow violeta suave al pasar el mouse
+   (eco del lenguaje neón, sin recargar el header) */
+.logo img { transition: filter .25s ease; }
+.logo:hover img { filter: drop-shadow(0 0 10px rgba(167, 139, 250, .55)); }
+
 /* Chip de marca "Tauro Solutions" — botón 3D flotando sobre el borde superior
    derecho del cotizador: relieve (luz arriba, sombra abajo), texto metálico
    (.tweb-price-metal adentro) y halo neón (comparte el ::before de arriba). */
