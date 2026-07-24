@@ -48,6 +48,26 @@ app.include_router(admin_router)
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
 
+
+@app.middleware("http")
+async def revalidar_assets_web(request: Request, call_next):
+    """
+    Los assets de la web pública (HTML, styles.css, los .jsx) NO tienen
+    versión en la URL, así que el browser los cacheaba de más y la gente
+    seguía viendo la versión vieja tras un deploy. Con `no-cache` el
+    navegador revalida cada vez: el ETag hace que si no cambió devuelva
+    304 (barato), y si cambió trae lo nuevo al instante. Nunca más una
+    versión pegada.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if (path in ("/web", "/styles.css", "/tweaks-panel.jsx")
+            or path.startswith("/components")
+            or path.endswith(".jsx")):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 @app.get("/web", include_in_schema=False)
 def servir_web():
     return FileResponse(os.path.join(WEB_DIR, "Tauro Solutions.html"))
