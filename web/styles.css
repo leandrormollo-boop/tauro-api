@@ -582,15 +582,31 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
   white-space: nowrap;
 }
 
-/* Botones primarios: destello que barre la superficie (mismo barrido del precio).
-   :not(.btn-loading) porque la pastilla del loader es oscura y no debe brillar.
-   El :hover va incluido porque su "background" shorthand pisaría el destello. */
+/* Botones primarios: mismo lenguaje que el chip Tauro Solutions pero un tono
+   más oscuro — vidrio púrpura 3D (luz arriba, sombra abajo), borde violeta,
+   texto lavanda y destello que barre la superficie (capa 1 del background;
+   la capa 2 es el gradiente oscuro, que queda quieto en el keyframe).
+   :not(.btn-loading) porque la pastilla del loader tiene su propio estilo.
+   El :hover va incluido porque su "background" shorthand pisaría todo. */
 .btn-primary:not(.btn-loading),
 .btn-primary:not(.btn-loading):hover {
-  background-image: linear-gradient(105deg,
-    rgba(255, 255, 255, 0) 42%, rgba(246, 240, 255, .5) 50%, rgba(255, 255, 255, 0) 58%);
-  background-size: 200% 100%;
-  animation: tweb-metal-sweep 2.6s linear infinite;
+  background-color: #170d2b;
+  background-image:
+    linear-gradient(105deg,
+      rgba(255, 255, 255, 0) 42%, rgba(233, 221, 255, .30) 50%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, #241540 0%, #170d2b 55%, #10091c 100%);
+  background-size: 200% 100%, 100% 100%;
+  background-position: 0 0, 0 0;
+  border: 1px solid rgba(167, 139, 250, .5);
+  color: #efe9ff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .14),
+    inset 0 -3px 8px rgba(0, 0, 0, .55);
+  animation: tweb-metal-sweep-dark 2.6s linear infinite;
+}
+.btn-primary:not(.btn-loading):hover { filter: brightness(1.18); }
+@keyframes tweb-metal-sweep-dark {
+  to { background-position: -200% 0, 0 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
