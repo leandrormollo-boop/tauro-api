@@ -363,7 +363,7 @@ function CarrierCard({ carrier, recomendado }) {
             </div>
             {carrier.descuento_pct > 0 && (
               <div style={{ fontSize: 10, color: "var(--accent-soft)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
-                −{carrier.descuento_pct}% vs tarifa FedEx
+                −{carrier.descuento_pct}% de mejora en tu precio
               </div>
             )}
           </>
