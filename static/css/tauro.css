@@ -1541,3 +1541,114 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   }
   .envios-table td:last-child { grid-column: 1 / -1; }
 }
+
+/* ============================================================
+   LENGUAJE PREMIUM (24/07) — espejo de la web pública en portal+admin:
+   texto metálico violeta con brillo en movimiento, halo neón y
+   botones primarios en vidrio púrpura oscuro 3D.
+   ============================================================ */
+
+/* Texto metálico violeta con destello que barre (precios, marca) */
+.t-metal {
+  background: linear-gradient(105deg,
+    #8b6bf7 0%, #a78bfa 34%, #e9ddff 47%, #f6f0ff 50%, #e9ddff 53%, #a78bfa 66%, #8b6bf7 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 12px rgba(124, 92, 246, .40));
+  animation: t-metal-sweep 2.6s linear infinite;
+}
+@keyframes t-metal-sweep { to { background-position-x: -200%; } }
+
+/* "solutions" del logo lateral en metálico (eco de la web pública) */
+.side-logo .dim {
+  background: linear-gradient(105deg,
+    #8b6bf7 0%, #a78bfa 34%, #e9ddff 47%, #f6f0ff 50%, #e9ddff 53%, #a78bfa 66%, #8b6bf7 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: t-metal-sweep 2.6s linear infinite;
+}
+
+/* Precios protagonistas en metálico: card de cotización y precio en vivo.
+   El sufijo de moneda (.cur) vuelve a color plano para no perder lectura. */
+.price-card .big,
+.price-hero,
+.result-price {
+  background: linear-gradient(105deg,
+    #8b6bf7 0%, #a78bfa 34%, #e9ddff 47%, #f6f0ff 50%, #e9ddff 53%, #a78bfa 66%, #8b6bf7 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 16px rgba(124, 92, 246, .35));
+  animation: t-metal-sweep 2.6s linear infinite;
+  text-shadow: none;
+}
+.price-card .big .cur { -webkit-text-fill-color: var(--fg-3); color: var(--fg-3); }
+
+/* Números de las stat-cards en metálico — salvo los semánticos (ok/warn/err),
+   que conservan su color de estado. */
+.stat-card .value:not(.ok):not(.warn):not(.err) {
+  background: linear-gradient(105deg,
+    #8b6bf7 0%, #a78bfa 34%, #e9ddff 47%, #f6f0ff 50%, #e9ddff 53%, #a78bfa 66%, #8b6bf7 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: t-metal-sweep 2.6s linear infinite;
+}
+
+/* Botones primarios: vidrio púrpura oscuro 3D (idéntico a la web pública).
+   El destello va en la capa 1 del background; el gradiente base queda quieto.
+   El halo neón vive en un ::before con opacidad animada (GPU) — nunca
+   animar box-shadow directo. is-loading conserva su estado propio. */
+.btn-primary:not(.is-loading) { position: relative; }
+.btn-primary:not(.is-loading)::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(201, 180, 255, .45),
+              0 0 22px rgba(124, 92, 246, .55),
+              0 0 58px rgba(124, 92, 246, .28);
+  opacity: .45;
+  pointer-events: none;
+  animation: t-neon-pulse 2.6s ease-in-out infinite;
+}
+@keyframes t-neon-pulse { 50% { opacity: 1; } }
+
+.btn-primary:not(.is-loading),
+.btn-primary:not(.is-loading):hover {
+  background-color: #231245;
+  background-image:
+    linear-gradient(105deg,
+      rgba(255, 255, 255, 0) 42%, rgba(233, 221, 255, .30) 50%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, #35206b 0%, #231245 55%, #180c33 100%);
+  background-size: 200% 100%, 100% 100%;
+  background-position: 0 0, 0 0;
+  border: 1px solid rgba(167, 139, 250, .5);
+  color: #efe9ff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .14),
+    inset 0 -3px 8px rgba(0, 0, 0, .55);
+  animation: t-metal-sweep-dark 2.6s linear infinite;
+}
+.btn-primary:not(.is-loading):hover { filter: brightness(1.18); }
+@keyframes t-metal-sweep-dark {
+  to { background-position: -200% 0, 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-metal, .side-logo .dim, .price-card .big, .price-hero, .result-price,
+  .stat-card .value:not(.ok):not(.warn):not(.err),
+  .btn-primary:not(.is-loading),
+  .btn-primary:not(.is-loading):hover { animation: none; }
+  .btn-primary:not(.is-loading)::before { animation: none; opacity: .6; }
+}
