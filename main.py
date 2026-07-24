@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 from typing import Optional
 
-from core.fedex_client import FedExClient
+from servicios.carriers import cotizar_carriers
 from core.email_sender import enviar_email_pedido
 from core.database import init_db
 from endpoints.portal_cliente import router as portal_router
@@ -87,8 +87,6 @@ def servir_tweaks():
 def root():
     """Redirige el root a la web pública."""
     return RedirectResponse(url="/web")
-
-fedex = FedExClient()
 
 # ─────────────────────────────────────────────
 # MODELOS
@@ -245,32 +243,30 @@ def cotizar_web(body: CotizarWebRequest):
         "descripcion_en": "Merchandise",
     }
 
-    resultado = fedex.get_rates(origen, destino, paquete)
-    if not resultado.get("encontrado"):
-        raise HTTPException(status_code=502, detail="No se pudo obtener tarifa FedEx en este momento.")
-
     dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
     markup_pct = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
-    # FedEx sandbox devuelve USD; producción AR devuelve ARS
-    if resultado.get("moneda", "USD") == "USD":
-        costo_usd = resultado["costo"]
-        costo_ars = round(costo_usd * dolar)
-    else:
-        costo_ars = resultado["costo"]
-        costo_usd = round(costo_ars / dolar, 2)
+    # Compara FedEx, UPS y DHL. Cada carrier cotiza si tiene credenciales;
+    # si no, sale con su logo en "próximamente". Ver servicios/carriers.py.
+    carriers = cotizar_carriers(origen, destino, paquete, dolar, markup_pct)
 
-    precio_ars = round(costo_ars * (1 + markup_pct / 100))
-    precio_usd = round(precio_ars / dolar, 2)
+    cotizados = [c for c in carriers if c["estado"] == "cotizado"]
+    if not cotizados:
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudo obtener tarifas en este momento. Probá de nuevo en un momento.",
+        )
+
+    # Recomendado = el más barato de los que cotizaron.
+    recomendado = min(cotizados, key=lambda c: c["precio_usd"])["id"]
 
     return {
         "status": "success",
-        "precio_ars": precio_ars,
-        "precio_usd": precio_usd,
-        "dias_estimados": resultado.get("dias_estimados", "3-5"),
-        "servicio": "FedEx International Priority",
         "origen": "Buenos Aires, AR",
         "destino": body.destino_pais.upper(),
+        "peso_kg": body.peso_kg,
+        "recomendado": recomendado,
+        "carriers": carriers,
     }
 
 

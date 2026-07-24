@@ -4,6 +4,7 @@ credenciales.json
 
 # Python
 venv/
+.venv-codex/
 __pycache__/
 *.pyc
 *.pyo
@@ -27,3 +28,7 @@ web/uploads/
 
 # Logs
 *.log
+var/
+
+# Shim local de dotenv para .venv-codex (NO subir: pisaría python-dotenv real en Railway)
+dotenv.py

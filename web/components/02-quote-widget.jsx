@@ -130,38 +130,24 @@ function QuoteWidget({ compact = false }) {
           </button>
 
           <div style={{ marginTop: 14, fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textAlign: "center" }}>
-            Precio real FedEx · sin compromiso · respuesta en segundos
+            Comparamos FedEx, UPS y DHL · sin compromiso · respuesta en segundos
           </div>
         </>
       )}
 
       {step === "result" && result && (
         <div className="fade-up">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 48, fontWeight: 600, letterSpacing: "-0.03em", lineHeight: 1 }}>
-              ${result.precio_usd.toLocaleString("es-AR")}
-            </div>
-            <div style={{ fontSize: 14, color: "var(--fg-3)" }}>USD</div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600, marginBottom: 2 }}>
+            Tus opciones de envío
           </div>
-          <div style={{ color: "var(--fg-2)", marginBottom: 6, fontSize: 14 }}>
-            ARS ${result.precio_ars.toLocaleString("es-AR")} · {peso}kg
-          </div>
-          <div style={{ color: "var(--fg-3)", marginBottom: 24, fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            {result.servicio}
+          <div style={{ color: "var(--fg-3)", marginBottom: 18, fontSize: 12, fontFamily: "var(--font-mono)" }}>
+            {peso}kg · Buenos Aires → {DESTINOS.find(d => d.value === destino)?.label || destino} · comparamos FedEx, UPS y DHL
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-            <ResultStat label="Tránsito" value={`${result.dias_estimados} días`} />
-            <ResultStat label="Destino" value={DESTINOS.find(d => d.value === destino)?.label || destino} />
-          </div>
-
-          <div style={{ background: "var(--bg)", border: "1px solid var(--line-soft)", borderRadius: 10, padding: 14, fontSize: 13, fontFamily: "var(--font-mono)", color: "var(--fg-2)", marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span>Buenos Aires</span>
-              <span style={{ color: "var(--accent)" }}>→</span>
-              <span>{DESTINOS.find(d => d.value === destino)?.label || destino}</span>
-            </div>
-            <div style={{ height: 1, background: "linear-gradient(to right, var(--accent), transparent)" }}/>
+          <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
+            {result.carriers.map((c) => (
+              <CarrierCard key={c.id} carrier={c} recomendado={c.id === result.recomendado} />
+            ))}
           </div>
 
           <a className="btn btn-primary" style={{ width: "100%" }} href="/portal/login">
@@ -301,6 +287,77 @@ function SelectField({ label, value, onChange, options }) {
   );
 }
 
+/* Tarjeta de courier del comparador: logo real de la empresa + precio.
+   estados: "cotizado" (precio en vivo) · "proximamente" (acuerdo en cierre,
+   se muestra igual con su logo) · "sin_tarifa" (sin cobertura en la ruta). */
+function CarrierCard({ carrier, recomendado }) {
+  const cotizado = carrier.estado === "cotizado";
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 14,
+      padding: "14px 16px",
+      background: cotizado ? "var(--bg)" : "rgba(255,255,255,0.02)",
+      border: `1px solid ${recomendado ? "var(--accent)" : "var(--line-soft)"}`,
+      boxShadow: recomendado ? "0 0 0 3px var(--accent-glow)" : "none",
+      borderRadius: 12,
+      opacity: cotizado ? 1 : 0.72,
+      position: "relative",
+    }}>
+      {recomendado && (
+        <div style={{
+          position: "absolute", top: -9, right: 12,
+          background: "var(--accent)", color: "#fff",
+          fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600,
+          letterSpacing: "0.06em", textTransform: "uppercase",
+          padding: "2px 8px", borderRadius: 99,
+        }}>
+          Mejor precio
+        </div>
+      )}
+
+      <div style={{
+        width: 74, height: 40, flexShrink: 0,
+        background: "#fff", borderRadius: 8,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "5px 8px", boxSizing: "border-box",
+      }}>
+        <img src={carrier.logo} alt={carrier.nombre}
+             style={{ maxWidth: "100%", maxHeight: "100%", display: "block" }} />
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>{carrier.nombre}</div>
+        <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {cotizado ? `${carrier.servicio} · ${carrier.dias_estimados} días` : carrier.servicio}
+        </div>
+      </div>
+
+      <div style={{ textAlign: "right", flexShrink: 0 }}>
+        {cotizado ? (
+          <>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600, lineHeight: 1.1 }}>
+              ${carrier.precio_usd.toLocaleString("es-AR")} <span style={{ fontSize: 11, color: "var(--fg-3)", fontWeight: 400 }}>USD</span>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)" }}>
+              ARS ${carrier.precio_ars.toLocaleString("es-AR")}
+            </div>
+          </>
+        ) : (
+          <div style={{
+            fontSize: 10.5, fontFamily: "var(--font-mono)", fontWeight: 600,
+            letterSpacing: "0.05em", textTransform: "uppercase",
+            color: "var(--accent-soft)",
+            border: "1px solid var(--line)", borderRadius: 99,
+            padding: "4px 10px", whiteSpace: "nowrap",
+          }}>
+            {carrier.estado === "proximamente" ? "Próximamente" : "Sin tarifa"}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ResultStat({ label, value }) {
   return (
     <div style={{ background: "var(--bg)", border: "1px solid var(--line-soft)", borderRadius: 10, padding: "12px 14px" }}>
@@ -320,7 +377,7 @@ function TauroQuoteLoader() {
       <span className="tauro-loader-track" aria-hidden="true">
         <span className="tauro-loader-flame" />
       </span>
-      <span className="tauro-loader-label">Consultando FedEx...</span>
+      <span className="tauro-loader-label">Comparando couriers...</span>
     </span>
   );
 }
