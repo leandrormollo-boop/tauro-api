@@ -1,5 +1,5 @@
 /* global React */
-const { useState: useStateQ } = React;
+const { useState: useStateQ, useRef: useRefQ, useEffect: useEffectQ } = React;
 
 const API_URL = window.TAURO_API_URL ?? "http://localhost:8000";
 
@@ -206,36 +206,97 @@ function Field({ label, value, onChange, type = "text" }) {
   );
 }
 
+/* Desplegable propio de TAURO — mismo lenguaje visual que el portal:
+   botón con caret animado + panel flotante oscuro con tilde violeta.
+   Nada del picker nativo del navegador. */
 function SelectField({ label, value, onChange, options }) {
+  const [open, setOpen] = useStateQ(false);
+  const boxRef = useRefQ(null);
+  const seleccionada = options.find((o) => o.value === value) || options[0];
+
+  useEffectQ(() => {
+    if (!open) return;
+    const cerrar = (e) => {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", cerrar);
+    return () => document.removeEventListener("mousedown", cerrar);
+  }, [open]);
+
+  const onKey = (e) => {
+    const i = options.findIndex((o) => o.value === value);
+    if (e.key === "ArrowDown") { e.preventDefault(); onChange(options[Math.min(i + 1, options.length - 1)].value); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); onChange(options[Math.max(i - 1, 0)].value); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); }
+    else if (e.key === "Escape") setOpen(false);
+  };
+
   return (
     <label style={{ display: "block" }}>
       <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
         {label}
       </div>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          padding: "11px 12px",
-          background: "var(--bg)",
-          border: "1px solid var(--line-soft)",
-          borderRadius: 8,
-          color: "var(--fg)",
-          fontSize: 14,
-          outline: "none",
-          appearance: "none",
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237a828c' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-          backgroundRepeat: "no-repeat",
-          backgroundPosition: "right 12px center",
-          paddingRight: 32,
-          boxSizing: "border-box",
-        }}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
+      <div ref={boxRef} style={{ position: "relative" }}>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          onKeyDown={onKey}
+          className="tweb-select-btn"
+          style={{
+            width: "100%",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+            padding: "11px 12px",
+            background: "var(--bg)",
+            border: `1px solid ${open ? "var(--accent)" : "var(--line-soft)"}`,
+            boxShadow: open ? "0 0 0 3px var(--accent-glow)" : "none",
+            borderRadius: 8,
+            color: "var(--fg)",
+            fontSize: 14,
+            cursor: "pointer",
+            textAlign: "left",
+            transition: "border-color .15s, box-shadow .15s",
+          }}
+        >
+          <span>{seleccionada ? seleccionada.label : "Seleccionar"}</span>
+          <svg width="11" height="7" viewBox="0 0 10 6" fill="none" aria-hidden="true"
+               style={{ color: open ? "var(--accent-soft)" : "var(--fg-3)", transform: open ? "rotate(180deg)" : "none", transition: "transform .22s cubic-bezier(.2,.7,.3,1), color .15s", flexShrink: 0 }}>
+            <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 40,
+          padding: 6,
+          background: "var(--bg-elev-2)",
+          border: "1px solid var(--line)",
+          borderRadius: 12,
+          boxShadow: "0 18px 50px rgba(0,0,0,.55)",
+          opacity: open ? 1 : 0,
+          transform: open ? "translateY(0) scale(1)" : "translateY(-6px) scale(.985)",
+          pointerEvents: open ? "auto" : "none",
+          transition: "opacity .16s ease, transform .18s cubic-bezier(.2,.7,.3,1)",
+        }}>
+          {options.map((o) => {
+            const sel = o.value === value;
+            return (
+              <div
+                key={o.value}
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className="tweb-select-opt"
+                style={{
+                  display: "flex", alignItems: "center", gap: 9,
+                  padding: "9px 11px", borderRadius: 8, fontSize: 13.5, cursor: "pointer",
+                  color: sel ? "var(--fg)" : "var(--fg-2)",
+                  background: sel ? "var(--accent-glow)" : "transparent",
+                }}
+              >
+                <span style={{ width: 14, flexShrink: 0, color: "var(--accent-soft)", fontSize: 11, opacity: sel ? 1 : 0 }}>✓</span>
+                <span>{o.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </label>
   );
 }
