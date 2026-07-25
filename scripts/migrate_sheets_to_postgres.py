@@ -25,8 +25,11 @@ Qué migra:
 import os
 import sys
 import json
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
+
+from servicios.rutas import pais_a_iso2
 
 # Asegurar que el path raíz del proyecto está en sys.path
 ROOT = Path(__file__).parent.parent
@@ -123,14 +126,22 @@ def main():
             except (ValueError, TypeError):
                 markup_pct = 25.0
 
+            raw_api_key = str(r.get("API_KEY", "")).strip()
+            api_key_hash = (
+                hashlib.sha256(raw_api_key.encode("utf-8")).hexdigest()
+                if raw_api_key
+                else None
+            )
             cur.execute(
                 """
                 INSERT INTO clientes
-                    (cliente_id, email, api_key, markup_pct, activo,
+                    (cliente_id, email, api_key_hash, markup_pct, activo,
                      nombre, cuit, direccion, cp, ciudad, pais, telefono, notas)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (cliente_id) DO UPDATE SET
                     email=EXCLUDED.email, markup_pct=EXCLUDED.markup_pct,
+                    api_key_hash=COALESCE(EXCLUDED.api_key_hash, clientes.api_key_hash),
+                    api_key=NULL,
                     activo=EXCLUDED.activo, nombre=EXCLUDED.nombre,
                     cuit=EXCLUDED.cuit, direccion=EXCLUDED.direccion,
                     cp=EXCLUDED.cp, ciudad=EXCLUDED.ciudad,
@@ -138,7 +149,7 @@ def main():
                 """,
                 (
                     cliente_id, email,
-                    str(r.get("API_KEY", "")).strip() or None,
+                    api_key_hash,
                     markup_pct, activo,
                     str(r.get("NOMBRE", "")).strip() or None,
                     str(r.get("CUIT", "")).strip() or None,
@@ -177,10 +188,11 @@ def main():
                     """,
                     (
                         ruta_id,
-                        str(r.get("ORIGEN_PAIS", "")).strip().upper(),
+                        # pais_a_iso2: el Sheet trae "ESTADOS UNIDOS"; la DB guarda ISO ("US")
+                        pais_a_iso2(str(r.get("ORIGEN_PAIS", ""))),
                         str(r.get("ORIGEN_CITY", "")).strip().upper(),
                         str(r.get("ORIGEN_ZIP", "")).strip(),
-                        str(r.get("DESTINO_PAIS", "")).strip().upper(),
+                        pais_a_iso2(str(r.get("DESTINO_PAIS", ""))),
                         str(r.get("DESTINO_CITY", "")).strip().upper(),
                         str(r.get("DESTINO_ZIP", "")).strip(),
                         int(r.get("DIAS_ESTIMADOS", 5) or 5),
