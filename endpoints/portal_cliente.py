@@ -898,7 +898,11 @@ def tienda_view(
     error: Optional[str] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    # Detrás del proxy de Railway, request.base_url viene en http:// —
+    # y una URL de webhook en http no sirve: Shopify exige https.
     base_url = (BASE_URL or str(request.base_url)).rstrip("/")
+    if base_url.startswith("http://") and "localhost" not in base_url and "127.0.0.1" not in base_url:
+        base_url = "https://" + base_url[len("http://"):]
     tiendas = [t for t in listar_tiendas(cliente) if t["activa"]]
     # Tiendas que instalaron la app pero quedaron sin dueño (p. ej. porque
     # el comerciante instaló sin la sesión del portal abierta).
