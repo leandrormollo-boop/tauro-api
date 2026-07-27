@@ -145,6 +145,26 @@
 </div>
 {% endif %}
 
+{# ── Instaladas sin vincular ────────────────────────── #}
+{% if huerfanas %}
+<div class="card" style="margin-bottom:24px;border-color:rgba(245,184,0,.45);">
+    <h3 style="margin:0 0 4px;">Tiendas que instalaron la app</h3>
+    <p class="sub" style="margin:0 0 16px;">
+        Instalaron TAURO desde Shopify pero todavía no están atadas a una cuenta.
+        Si alguna es tuya, vinculala y sus ventas empiezan a caer acá.
+    </p>
+    {% for h in huerfanas %}
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--line-soft);">
+        <b>{{ h.dominio }}</b>
+        <form method="POST" action="/portal/tienda/reclamar">
+            <input type="hidden" name="dominio" value="{{ h.dominio }}">
+            <button type="submit" class="btn btn-primary btn-sm">Es mi tienda — vincular</button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 {# ── Tiendas conectadas ─────────────────────────────── #}
 <div class="card" style="margin-bottom:24px;">
     <h3 style="margin:0 0 14px;">Tiendas conectadas</h3>

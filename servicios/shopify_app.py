@@ -149,8 +149,18 @@ def instalacion(dominio: str) -> Optional[dict]:
 
 
 def vincular_cliente(dominio: str, cliente_id: str) -> None:
-    """Ata la tienda instalada a la cuenta TAURO del comerciante."""
+    """
+    Ata la tienda instalada a la cuenta TAURO del comerciante.
+
+    Además la registra en `tiendas_conectadas`, que es la tabla que usa
+    todo el resto del portal (pedidos pendientes, lista de tiendas,
+    política de flete). Así la app y el modo manual conviven sin que
+    nada más tenga que saber por dónde entró cada tienda. El "secreto"
+    guardado es el API secret de la app, porque con eso firma Shopify
+    los webhooks de las apps.
+    """
     _ensure_tabla()
+    dominio = (dominio or "").strip().lower()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -158,6 +168,28 @@ def vincular_cliente(dominio: str, cliente_id: str) -> None:
                 (cliente_id, dominio),
             )
         conn.commit()
+
+    secreto = os.getenv("SHOPIFY_API_SECRET", "").strip()
+    if not secreto:
+        return
+    try:
+        from servicios.integraciones_tienda import conectar_tienda
+        conectar_tienda(cliente_id, "shopify", dominio, secreto)
+    except Exception as e:
+        print(f"[shopify] no pude registrar {dominio} en tiendas_conectadas: {e}")
+
+
+def instalaciones_sin_dueno() -> list[dict]:
+    """Tiendas que instalaron la app pero todavía no se ataron a una cuenta."""
+    _ensure_tabla()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT dominio, instalada_en FROM shopify_instalaciones
+                WHERE cliente_id IS NULL OR cliente_id = ''
+                ORDER BY instalada_en DESC
+            """)
+            return [dict(r) for r in cur.fetchall()]
 
 
 def desinstalar(dominio: str) -> None:

@@ -900,6 +900,14 @@ def tienda_view(
 ):
     base_url = (BASE_URL or str(request.base_url)).rstrip("/")
     tiendas = [t for t in listar_tiendas(cliente) if t["activa"]]
+    # Tiendas que instalaron la app pero quedaron sin dueño (p. ej. porque
+    # el comerciante instaló sin la sesión del portal abierta).
+    try:
+        from servicios.shopify_app import instalaciones_sin_dueno
+        huerfanas = instalaciones_sin_dueno()
+    except Exception as e:
+        print(f"[portal] no pude listar instalaciones sin dueño: {e}")
+        huerfanas = []
     # La política de flete se configura por tienda; hoy mostramos la de la
     # primera (el caso normal es una tienda por cuenta).
     dominio_cfg = tiendas[0]["dominio"] if tiendas else ""
@@ -913,10 +921,28 @@ def tienda_view(
             "webhook_url": f"{base_url}/integraciones/shopify/webhook",
             "dominio_cfg": dominio_cfg,
             "cfg": obtener_config(dominio_cfg),
+            "huerfanas": huerfanas,
             "flash_ok": ok,
             "flash_error": error,
         },
     )
+
+
+@router.post("/tienda/reclamar")
+def tienda_reclamar(
+    dominio: str = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    """El comerciante dice 'esta tienda instalada es mía' y la ata a su cuenta."""
+    from servicios.shopify_app import instalaciones_sin_dueno, vincular_cliente
+    dominio = dominio.strip().lower()
+    if dominio not in {h["dominio"] for h in instalaciones_sin_dueno()}:
+        return RedirectResponse(
+            url="/portal/tienda?error=Esa+tienda+ya+esta+vinculada+a+una+cuenta.",
+            status_code=303,
+        )
+    vincular_cliente(dominio, cliente)
+    return RedirectResponse(url="/portal/tienda?ok=conectada", status_code=303)
 
 
 @router.post("/tienda/politica")

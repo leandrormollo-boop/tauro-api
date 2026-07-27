@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from servicios.shopify_app import (
     app_configurada, url_instalacion, validar_hmac_query, dominio_valido,
-    canjear_token, guardar_instalacion, registrar_webhooks,
+    canjear_token, guardar_instalacion, registrar_webhooks, vincular_cliente,
     registrar_carrier_service, cotizar_para_checkout, desinstalar, nuevo_state,
 )
 
@@ -94,7 +94,20 @@ def callback(request: Request):
     topics = registrar_webhooks(shop, data["access_token"])
     carrier = registrar_carrier_service(shop, data["access_token"])
 
-    print(f"[shopify] instalada {shop} · webhooks {topics} · carrier {carrier or 'no disponible'}")
+    # Si el comerciante instaló con su sesión del portal abierta (el caso
+    # normal), la tienda queda atada a su cuenta acá mismo. Si no, la
+    # reclama después desde /portal/tienda.
+    dueno = None
+    try:
+        from servicios.auth import validar_token
+        dueno = validar_token(request.cookies.get("token") or "")
+        if dueno:
+            vincular_cliente(shop, dueno)
+    except Exception as e:
+        print(f"[shopify] no pude vincular {shop} al instalar: {e}")
+
+    print(f"[shopify] instalada {shop} · webhooks {topics} · "
+          f"carrier {carrier or 'no disponible'} · cliente {dueno or 'sin vincular'}")
 
     extra = ("Además vas a poder mostrar la tarifa TAURO en tu checkout."
              if carrier else
