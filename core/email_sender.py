@@ -262,28 +262,50 @@ def enviar_alerta_margen(alertas: list[dict]) -> bool:
 # EMAIL LINK MÁGICO — login del portal
 # ─────────────────────────────────────────────
 
-def enviar_link_magico(email_destino: str, link: str, cliente: str) -> bool:
+def enviar_link_magico(email_destino: str, link: str, cliente: str,
+                       vence_en: str = "7 días") -> bool:
     """
-    Envía el link mágico de login al cliente.
-    A diferencia de _enviar_mail, esta usa el email del cliente como destinatario
-    (no el EMAIL_DESTINO global, que es para alertas internas).
+    Envía el link mágico de login. Sirve para el portal del cliente y para
+    recuperar el acceso al admin (de ahí el `vence_en` parametrizable).
+
+    A diferencia de _enviar_mail, usa el email del destinatario y no el
+    EMAIL_DESTINO global, que es para alertas internas.
     """
     asunto = "Acceso al portal Tauro Solutions"
-    cuerpo = f"""<html><body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
-<div style="background:#1a1a1a; padding: 20px; text-align: center;">
-  <h1 style="color:#d4af37; margin: 0;">TAURO SOLUTIONS</h1>
-</div>
-<div style="padding: 30px 20px;">
-  <h2 style="color:#1a1a1a;">Hola {cliente}</h2>
-  <p>Pediste acceso al portal de Tauro Solutions. Para entrar, hacé click acá:</p>
-  <p style="text-align: center; margin: 30px 0;">
-    <a href="{link}" style="background:#d4af37; color:#1a1a1a; padding: 14px 28px; text-decoration: none; font-weight: bold; border-radius: 4px; display: inline-block;">Entrar al portal</a>
-  </p>
-  <p style="color:#666; font-size: 13px;">Si no fuiste vos, ignorá este mail. El link expira en 7 días.</p>
-  <p style="color:#888; font-size: 11px; word-break: break-all;">{link}</p>
-</div>
-<div style="background:#f5f5f5; padding: 12px; text-align: center; font-size: 11px; color: #999;">
-  Tauro Solutions — Envíos internacionales vía FedEx
+    # Identidad TAURO: violeta #a78bfa sobre negro violáceo. Los clientes de
+    # mail no soportan CSS moderno, así que todo va en estilos inline.
+    cuerpo = f"""<html><body style="margin:0;padding:0;background:#f4f4f6;">
+<div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#2a2a33;max-width:560px;margin:0 auto;background:#ffffff;">
+
+  <div style="background:#0c0a14;padding:34px 24px;text-align:center;">
+    <div style="font-size:24px;font-weight:700;letter-spacing:0.08em;color:#ffffff;">
+      TAURO <span style="color:#a78bfa;">SOLUTIONS</span>
+    </div>
+    <div style="margin-top:6px;font-size:11px;letter-spacing:0.14em;color:#8b86a0;text-transform:uppercase;">
+      Logística internacional
+    </div>
+  </div>
+
+  <div style="padding:34px 30px;">
+    <h2 style="color:#0c0a14;margin:0 0 14px;font-size:21px;">Hola {cliente}</h2>
+    <p style="line-height:1.7;color:#4a4a58;margin:0 0 26px;">
+      Pediste acceso al portal de Tauro Solutions. Entrá con este botón:
+    </p>
+    <p style="text-align:center;margin:0 0 26px;">
+      <a href="{link}" style="background:#7c5cf6;color:#ffffff;padding:15px 34px;
+         text-decoration:none;font-weight:600;border-radius:999px;display:inline-block;
+         font-size:15px;">Entrar al portal</a>
+    </p>
+    <p style="color:#7a7a88;font-size:13px;line-height:1.6;margin:0 0 18px;">
+      Si no fuiste vos, ignorá este mail. El link vence en {vence_en} y se usa una sola vez.
+    </p>
+    <p style="color:#a0a0ad;font-size:11px;word-break:break-all;margin:0;">{link}</p>
+  </div>
+
+  <div style="background:#0c0a14;padding:18px;text-align:center;font-size:11px;color:#8b86a0;">
+    Tauro Solutions · taurosolutions.ar<br>
+    <span style="color:#5f5b70;">Envíos internacionales puerta a puerta</span>
+  </div>
 </div>
 </body></html>"""
 

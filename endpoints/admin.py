@@ -12,6 +12,7 @@ import secrets
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -222,9 +223,12 @@ def json_dumps_pretty(value: dict) -> str:
 # ── Login ───────────────────────────────────────────────────
 
 @router.get("/login", response_class=HTMLResponse)
-def admin_login_form(request: Request):
+def admin_login_form(request: Request, error: Optional[str] = None):
+    ctx = {}
+    if error == "link_vencido":
+        ctx["error"] = "Ese link ya se usó o venció. Pedí uno nuevo."
     return templates.TemplateResponse(
-        request=request, name="admin/login.html", context={}
+        request=request, name="admin/login.html", context=ctx
     )
 
 
@@ -251,6 +255,171 @@ def admin_login(request: Request, password: str = Form(...)):
         httponly=True, max_age=60 * 60 * 8,
         samesite="lax", secure=COOKIE_SECURE,
     )
+    return response
+
+
+# ── Recuperar acceso al admin ───────────────────────────────
+# Si el dueño olvidó ADMIN_PASSWORD, se manda un link de un solo uso al
+# email oficial de TAURO (no a uno que escriba quien pide: así el link
+# sólo le llega a quien controla esa casilla). Dura 15 minutos.
+#
+# Los tokens van a la BASE DE DATOS, no a memoria: un deploy o un
+# reinicio de Railway invalidaría todos los links en vuelo, y el momento
+# en que más se necesita esto es justamente cuando algo se reinició.
+_RECUPERO_MINUTOS = 15
+
+
+def _ensure_tabla_recupero() -> None:
+    from core.database import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS admin_recupero (
+                    token   TEXT PRIMARY KEY,
+                    vence   TIMESTAMPTZ NOT NULL,
+                    usado   BOOLEAN NOT NULL DEFAULT FALSE,
+                    creado  TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+            """)
+        conn.commit()
+
+
+def _guardar_token_recupero(token: str) -> None:
+    from core.database import get_conn
+    _ensure_tabla_recupero()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO admin_recupero (token, vence) "
+                "VALUES (%s, now() + interval '%s minutes')",
+                (token, _RECUPERO_MINUTOS),
+            )
+            # Limpieza oportunista de los vencidos.
+            cur.execute("DELETE FROM admin_recupero WHERE vence < now() - interval '1 day'")
+        conn.commit()
+
+
+def _canjear_token_recupero(token: str) -> bool:
+    """True sólo la primera vez que se usa un token válido y vigente."""
+    from core.database import get_conn
+    _ensure_tabla_recupero()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE admin_recupero SET usado = TRUE
+                WHERE token = %s AND usado = FALSE AND vence > now()
+                RETURNING token
+            """, (token,))
+            ok = cur.fetchone() is not None
+        conn.commit()
+    return ok
+
+
+def _borrar_token_recupero(token: str) -> None:
+    from core.database import get_conn
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM admin_recupero WHERE token = %s", (token,))
+            conn.commit()
+    except Exception as e:
+        print(f"[admin] no pude borrar el token de recuperación: {e}")
+
+
+def _email_oficial() -> str:
+    return (os.getenv("ADMIN_RECOVERY_EMAIL")
+            or os.getenv("EMAIL_REMITENTE")
+            or "").strip()
+
+
+def _smtp_listo() -> bool:
+    return bool(os.getenv("EMAIL_REMITENTE") and os.getenv("EMAIL_PASSWORD"))
+
+
+templates.env.globals["smtp_listo"] = _smtp_listo
+templates.env.globals["email_recupero"] = _email_oficial
+
+
+@router.post("/recuperar", response_class=HTMLResponse)
+def admin_recuperar(request: Request):
+    """Manda un link de acceso temporal al email oficial de TAURO."""
+    ip = client_ip(request)
+    # Más restrictivo que el login: 3 pedidos por hora.
+    if not check_rate(f"admin_recuperar:{ip}", max_attempts=3, window_seconds=3600):
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "Ya pediste varios links. Esperá un rato."},
+            status_code=429,
+        )
+
+    destino = _email_oficial()
+    if not destino or not _smtp_listo():
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "El envío de mails todavía no está configurado. "
+                              "Cambiá ADMIN_PASSWORD en Railway → Variables."},
+            status_code=503,
+        )
+
+    token = secrets.token_urlsafe(32)
+    try:
+        _guardar_token_recupero(token)
+    except Exception as e:
+        print(f"[admin] no pude guardar el token de recuperación: {e}")
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "No pudimos generar el link. Cambiá ADMIN_PASSWORD "
+                              "en Railway → Variables."},
+            status_code=500,
+        )
+
+    base = (os.getenv("BASE_URL") or "https://taurosolutions.ar").rstrip("/")
+    link = f"{base}/admin/recuperar/{token}"
+    try:
+        from core.email_sender import enviar_link_magico
+        enviado = enviar_link_magico(destino, link, "equipo Tauro",
+                                     vence_en=f"{_RECUPERO_MINUTOS} minutos")
+    except Exception as e:
+        print(f"[admin] no pude mandar el link de recuperación: {e}")
+        enviado = False
+
+    if not enviado:
+        # El link ya no sirve si nadie lo recibió: lo quemamos.
+        _borrar_token_recupero(token)
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "No pudimos enviar el mail (revisá la config de SMTP). "
+                              "Mientras tanto, cambiá ADMIN_PASSWORD en Railway → Variables."},
+            status_code=502,
+        )
+
+    tapado = destino[:2] + "•••" + destino[destino.find("@"):] if "@" in destino else "tu email"
+    return templates.TemplateResponse(
+        request=request, name="admin/login.html",
+        context={"aviso": f"Listo — te mandamos un link de acceso a {tapado}. "
+                          f"Vence en {_RECUPERO_MINUTOS} minutos."},
+    )
+
+
+@router.get("/recuperar/{token}")
+def admin_recuperar_usar(token: str):
+    """Canjea el link por una sesión de admin. Un solo uso."""
+    try:
+        valido = _canjear_token_recupero(token)
+    except Exception as e:
+        print(f"[admin] error canjeando token: {e}")
+        valido = False
+    if not valido:
+        return RedirectResponse(
+            url="/admin/login?error=link_vencido", status_code=303
+        )
+    response = RedirectResponse(url="/admin/home", status_code=303)
+    response.set_cookie(
+        key="admin_token", value=_ADMIN_TOKEN,
+        httponly=True, max_age=60 * 60 * 8,
+        samesite="lax", secure=COOKIE_SECURE,
+    )
+    print("[admin] acceso recuperado por link de email")
     return response
 
 

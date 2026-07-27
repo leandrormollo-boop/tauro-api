@@ -15,6 +15,9 @@
     {% if error %}
       <div class="msg error">{{ error }}</div>
     {% endif %}
+    {% if aviso %}
+      <div class="msg ok">{{ aviso }}</div>
+    {% endif %}
 
     <form method="POST" action="/admin/login">
       <div class="form-group">
@@ -32,6 +35,37 @@
       </div>
       <button type="submit" class="btn btn-primary btn-full">Entrar</button>
     </form>
+
+    <details style="margin-top:22px;">
+      <summary style="cursor:pointer;color:var(--fg-3);font-size:13px;">
+        ¿Olvidaste la contraseña?
+      </summary>
+
+      {% if smtp_listo() and email_recupero() %}
+        <p class="sub" style="margin:12px 0 10px;font-size:13px;">
+          Te mandamos un link de acceso al email oficial de Tauro. Vence en 15 minutos.
+        </p>
+        <form method="POST" action="/admin/recuperar">
+          <button type="submit" class="btn btn-ghost btn-full">Enviarme un link de acceso</button>
+        </form>
+        <p style="margin:14px 0 0;font-size:12px;color:var(--fg-3);">
+          ¿No llega? Cambiala a mano: Railway → tu proyecto → servicio <b>tauro-api</b> →
+          pestaña <b>Variables</b> → <b>ADMIN_PASSWORD</b> → Edit → guardá y aplicá el deploy.
+        </p>
+      {% else %}
+        <p class="sub" style="margin:12px 0 0;font-size:13px;line-height:1.8;">
+          Todavía no está configurado el envío de mails, así que se cambia a mano
+          (2 minutos):
+        </p>
+        <ol style="margin:10px 0 0;padding-left:20px;font-size:13px;color:var(--fg-2);line-height:1.9;">
+          <li>Entrá a <b>railway.app</b> → tu proyecto</li>
+          <li>Click en el servicio <b>tauro-api</b> → pestaña <b>Variables</b></li>
+          <li>Buscá <b>ADMIN_PASSWORD</b> → <b>Edit</b> → poné una nueva</li>
+          <li>Guardá y apretá el botón de <b>Deploy</b> que aparece arriba</li>
+          <li>Esperá un minuto y entrá con la nueva</li>
+        </ol>
+      {% endif %}
+    </details>
   </div>
 </div>
 <script>
