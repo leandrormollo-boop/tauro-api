@@ -784,7 +784,7 @@ def envio_nuevo_post(
             total_cajas = sum(b["cantidad"] for b in bultos_detalle)
             dims0 = (primero["largo_cm"], primero["ancho_cm"], primero["alto_cm"])
             valor_declarado = precio.get("valor_total_usd") or 100
-        crear_solicitud_guia(
+        solicitud_creada = crear_solicitud_guia(
             cliente_id=cliente,
             producto_alias=alias_display,
             cantidad=total_cajas,
@@ -839,7 +839,8 @@ def envio_nuevo_post(
 
     if pedido_tienda_id.strip().isdigit():
         try:
-            marcar_convertido(cliente, int(pedido_tienda_id))
+            marcar_convertido(cliente, int(pedido_tienda_id),
+                              solicitud_id=solicitud_creada.get("id"))
         except Exception as e:
             print(f"[integraciones] no pude marcar convertido el pedido {pedido_tienda_id}: {e}")
 

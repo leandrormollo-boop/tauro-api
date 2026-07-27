@@ -292,6 +292,40 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                 """,
                 (tracking, psycopg2.Binary(label_pdf) if label_pdf else None, courier, solicitud_id),
             )
+    # Si el envío nació de una venta de Shopify, avisamos a la tienda:
+    # el pedido queda "Enviado" con su tracking y el comprador recibe el
+    # mail solo. Nunca dejamos que un fallo acá tumbe la emisión de la
+    # guía — la guía ya está hecha y es lo que importa.
+    try:
+        _avisar_tienda_origen(solicitud_id, tracking, courier)
+    except Exception as e:
+        print(f"[integraciones] no pude avisar a la tienda de la solicitud {solicitud_id}: {e}")
+
+
+def _avisar_tienda_origen(solicitud_id: int, tracking: str, courier: str) -> None:
+    """Marca como enviado en Shopify el pedido que originó esta solicitud."""
+    from servicios.shopify_app import marcar_enviado, instalacion
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.pedido_externo_id, t.dominio, t.plataforma
+                FROM pedidos_tienda p
+                JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                WHERE p.solicitud_id = %s
+                LIMIT 1
+            """, (solicitud_id,))
+            row = cur.fetchone()
+
+    if not row or row["plataforma"] != "shopify":
+        return
+    if not instalacion(row["dominio"]):
+        # Tienda conectada en modo manual (sin app instalada): no tenemos
+        # token para escribirle. El comerciante marca el envío él mismo.
+        return
+
+    marcar_enviado(row["dominio"], row["pedido_externo_id"], tracking,
+                   "FedEx" if courier.upper() == "FEDEX" else courier.title())
 
 
 def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Optional[bytes]:

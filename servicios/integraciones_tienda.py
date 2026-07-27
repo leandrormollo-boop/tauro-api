@@ -269,14 +269,20 @@ def obtener_pedido(cliente_id: str, pedido_id: int) -> Optional[dict]:
             return dict(row) if row else None
 
 
-def marcar_convertido(cliente_id: str, pedido_id: int) -> None:
+def marcar_convertido(cliente_id: str, pedido_id: int, solicitud_id: Optional[int] = None) -> None:
+    """
+    El pedido pasó a ser un envío. Guardamos con qué solicitud quedó atado:
+    ese vínculo es el que después permite avisarle a la tienda el tracking
+    cuando se emite la guía.
+    """
     _ensure_tablas()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                UPDATE pedidos_tienda SET estado = 'CONVERTIDO'
+                UPDATE pedidos_tienda
+                SET estado = 'CONVERTIDO', solicitud_id = COALESCE(%s, solicitud_id)
                 WHERE id = %s AND cliente_id = %s AND estado = 'PENDIENTE'
-            """, (pedido_id, cliente_id))
+            """, (solicitud_id, pedido_id, cliente_id))
         conn.commit()
 
 

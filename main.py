@@ -14,6 +14,7 @@ from core.database import init_db
 from endpoints.portal_cliente import router as portal_router
 from endpoints.admin import router as admin_router
 from endpoints.integraciones import router as integraciones_router
+from endpoints.shopify import router as shopify_router
 from servicios.api_b2b import (
     obtener_cliente_por_api_key,
     obtener_precio_envio,
@@ -47,6 +48,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(integraciones_router)
+app.include_router(shopify_router)
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
 
