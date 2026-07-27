@@ -41,6 +41,11 @@ from servicios.solicitudes_guia import (
     obtener_solicitud_de_cliente,
 )
 from servicios.pricing import parse_monto_ars
+from servicios.integraciones_tienda import (
+    conectar_tienda, listar_tiendas, desconectar_tienda,
+    listar_pedidos, contar_pendientes, obtener_pedido,
+    marcar_convertido, descartar_pedido,
+)
 from servicios.direcciones import (
     TIPO_DESTINATARIO,
     TIPO_REMITENTE,
@@ -536,7 +541,37 @@ def _paises_con_nacional() -> list:
 
 
 @router.get("/envios/nuevo", response_class=HTMLResponse)
-def envio_nuevo_form(request: Request, cliente: str = Depends(cliente_actual)):
+def envio_nuevo_form(
+    request: Request,
+    pedido_tienda: Optional[int] = None,
+    cliente: str = Depends(cliente_actual),
+):
+    # Si viene de un pedido de la tienda (Shopify/Tiendanube), prellenamos
+    # el destinatario con lo que el comprador completó en el checkout.
+    form: dict = {}
+    pedido_info = None
+    if pedido_tienda:
+        p = obtener_pedido(cliente, pedido_tienda)
+        if p and p["estado"] == "PENDIENTE":
+            d = p.get("destinatario") or {}
+            items = p.get("items") or []
+            resumen = " · ".join(
+                f"{it.get('cantidad', 1)}x {it.get('titulo', '')}".strip() for it in items
+            )[:400]
+            form = {
+                "dest_nombre": d.get("nombre", ""),
+                "dest_email": d.get("email", ""),
+                "dest_telefono": d.get("telefono", ""),
+                "dest_direccion": d.get("direccion", ""),
+                "dest_ciudad": d.get("ciudad", ""),
+                "dest_estado": d.get("estado", ""),
+                "dest_zip": d.get("cp", ""),
+                "destino_pais": d.get("pais", ""),
+                "dest_pais": d.get("pais", ""),
+                "observaciones": f"Pedido {p.get('numero') or p.get('pedido_externo_id')} de la tienda: {resumen}",
+                "pedido_tienda_id": p["id"],
+            }
+            pedido_info = p
     return templates.TemplateResponse(
         request=request, name="portal/envio_nuevo.html",
         context={
@@ -546,7 +581,8 @@ def envio_nuevo_form(request: Request, cliente: str = Depends(cliente_actual)):
             "remitente": obtener_remitente_para_envio(cliente),
             "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
             "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
-            "form": {},
+            "form": form,
+            "pedido_tienda": pedido_info,
             "error": None,
         },
     )
@@ -582,6 +618,9 @@ def envio_nuevo_post(
     guardar_destinatario: Optional[str] = Form(None),
     precio_cliente_final_ars: str = Form(""),
     observaciones: str = Form(""),
+    # Si el envío nació de un pedido de la tienda, al crearse la solicitud
+    # el pedido pasa de PENDIENTE a CONVERTIDO.
+    pedido_tienda_id: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
     productos = get_productos(cliente)
@@ -798,6 +837,12 @@ def envio_nuevo_post(
             },
         )
 
+    if pedido_tienda_id.strip().isdigit():
+        try:
+            marcar_convertido(cliente, int(pedido_tienda_id))
+        except Exception as e:
+            print(f"[integraciones] no pude marcar convertido el pedido {pedido_tienda_id}: {e}")
+
     return RedirectResponse(url="/portal/envios?ok=solicitado", status_code=303)
 
 
@@ -817,6 +862,61 @@ def envio_detalle(
         request=request, name="portal/envio_detalle.html",
         context={"cliente": cliente, "s": s},
     )
+
+
+# ── Mi tienda (Shopify / Tiendanube) ────────────────────────
+
+@router.get("/tienda", response_class=HTMLResponse)
+def tienda_view(
+    request: Request,
+    ok: Optional[str] = None,
+    error: Optional[str] = None,
+    cliente: str = Depends(cliente_actual),
+):
+    base_url = (BASE_URL or str(request.base_url)).rstrip("/")
+    return templates.TemplateResponse(
+        request=request, name="portal/tienda.html",
+        context={
+            "cliente": cliente,
+            "tiendas": [t for t in listar_tiendas(cliente) if t["activa"]],
+            "pedidos": listar_pedidos(cliente, "PENDIENTE"),
+            "convertidos": listar_pedidos(cliente, "CONVERTIDO", limite=10),
+            "webhook_url": f"{base_url}/integraciones/shopify/webhook",
+            "flash_ok": ok,
+            "flash_error": error,
+        },
+    )
+
+
+@router.post("/tienda/conectar")
+def tienda_conectar(
+    plataforma: str = Form(...),
+    dominio: str = Form(...),
+    secreto: str = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    r = conectar_tienda(cliente, plataforma, dominio, secreto)
+    if not r.get("ok"):
+        return RedirectResponse(url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo conectar.'))}", status_code=303)
+    return RedirectResponse(url="/portal/tienda?ok=conectada", status_code=303)
+
+
+@router.post("/tienda/desconectar")
+def tienda_desconectar(
+    tienda_id: int = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    desconectar_tienda(cliente, tienda_id)
+    return RedirectResponse(url="/portal/tienda?ok=desconectada", status_code=303)
+
+
+@router.post("/tienda/pedidos/descartar")
+def tienda_pedido_descartar(
+    pedido_id: int = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    descartar_pedido(cliente, pedido_id)
+    return RedirectResponse(url="/portal/tienda?ok=descartado", status_code=303)
 
 
 # ── Direcciones ─────────────────────────────────────────────

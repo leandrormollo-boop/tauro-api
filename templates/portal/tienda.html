@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Mi tienda{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div>
+        <div class="eyebrow">Integraciones</div>
+        <h1>Mi tienda</h1>
+        <p class="sub">Conectá tu Shopify o Tiendanube: cada venta con envío aparece acá,
+        lista para convertirse en guía con un click.</p>
+    </div>
+</div>
+
+{% if flash_ok %}<div class="msg ok">
+    {% if flash_ok == 'conectada' %}Tienda conectada. Las próximas ventas van a aparecer abajo.
+    {% elif flash_ok == 'descartado' %}Pedido descartado.
+    {% elif flash_ok == 'desconectada' %}Tienda desconectada.
+    {% else %}Listo.{% endif %}
+</div>{% endif %}
+{% if flash_error %}<div class="msg error">{{ flash_error }}</div>{% endif %}
+
+{# ── Pedidos pendientes ─────────────────────────────── #}
+<div class="card" style="margin-bottom:24px;">
+    <h3 style="margin:0 0 4px;">Pedidos pendientes de envío
+        {% if pedidos %}<span class="badge warn" style="margin-left:8px;">{{ pedidos|length }}</span>{% endif %}
+    </h3>
+    <p class="sub" style="margin:0 0 18px;">Ventas que entraron en tu tienda y todavía no tienen guía.</p>
+
+    {% if pedidos %}
+    <div style="overflow-x:auto;">
+    <table class="envios-table">
+        <thead>
+            <tr><th>Pedido</th><th>Comprador</th><th>Destino</th><th>Productos</th><th>Total</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for p in pedidos %}
+            {% set d = p.destinatario or {} %}
+            <tr>
+                <td class="mono">{{ p.numero or p.pedido_externo_id }}<br>
+                    <span style="font-size:11px;color:var(--fg-3);">{{ p.plataforma }}</span></td>
+                <td>{{ d.nombre or '—' }}</td>
+                <td>{{ d.ciudad or '' }}{% if d.pais %} · {{ d.pais }}{% endif %}<br>
+                    <span style="font-size:12px;color:var(--fg-3);">{{ d.cp or '' }}</span></td>
+                <td style="max-width:260px;">
+                    {% for it in (p['items'] or [])[:3] %}
+                        <div style="font-size:13px;">{{ it.cantidad }}x {{ it.titulo }}</div>
+                    {% endfor %}
+                    {% if (p['items'] or [])|length > 3 %}<div style="font-size:12px;color:var(--fg-3);">+{{ (p['items'] or [])|length - 3 }} más</div>{% endif %}
+                </td>
+                <td class="mono">{% if p.valor_total %}{{ p.moneda or '' }} {{ p.valor_total }}{% else %}—{% endif %}</td>
+                <td style="white-space:nowrap;">
+                    <a class="btn btn-primary btn-sm" href="/portal/envios/nuevo?pedido_tienda={{ p.id }}">Preparar envío →</a>
+                    <form method="POST" action="/portal/tienda/pedidos/descartar" style="display:inline;"
+                          onsubmit="return confirm('¿Descartar este pedido? No se va a enviar por TAURO.');">
+                        <input type="hidden" name="pedido_id" value="{{ p.id }}">
+                        <button type="submit" class="btn btn-ghost btn-sm">Descartar</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <div style="padding:22px 0;color:var(--fg-3);">
+            {% if tiendas %}Sin pedidos pendientes por ahora — cuando entre una venta con envío, aparece acá sola.
+            {% else %}Conectá tu tienda abajo y las ventas van a empezar a aparecer acá.{% endif %}
+        </div>
+    {% endif %}
+
+    {% if convertidos %}
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--fg-3);">
+            Últimos convertidos en envío:
+            {% for c in convertidos %}<span class="mono">{{ c.numero or c.pedido_externo_id }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+        </div>
+    {% endif %}
+</div>
+
+{# ── Tiendas conectadas ─────────────────────────────── #}
+<div class="card" style="margin-bottom:24px;">
+    <h3 style="margin:0 0 14px;">Tiendas conectadas</h3>
+    {% if tiendas %}
+        {% for t in tiendas %}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--line-soft);">
+            <div>
+                <b>{{ t.dominio }}</b>
+                <span class="badge" style="margin-left:8px;">{{ t.plataforma }}</span>
+            </div>
+            <form method="POST" action="/portal/tienda/desconectar"
+                  onsubmit="return confirm('¿Desconectar {{ t.dominio }}? Dejan de entrar sus pedidos.');">
+                <input type="hidden" name="tienda_id" value="{{ t.id }}">
+                <button type="submit" class="btn btn-ghost btn-sm">Desconectar</button>
+            </form>
+        </div>
+        {% endfor %}
+    {% else %}
+        <p class="sub" style="margin:0;">Todavía no conectaste ninguna tienda.</p>
+    {% endif %}
+</div>
+
+{# ── Conectar nueva ─────────────────────────────────── #}
+<div class="card">
+    <h3 style="margin:0 0 4px;">Conectar una tienda</h3>
+    <p class="sub" style="margin:0 0 18px;">Cinco minutos, sin programar.</p>
+
+    <form method="POST" action="/portal/tienda/conectar">
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label for="plataforma">Plataforma</label>
+                <select name="plataforma" id="plataforma" required>
+                    <option value="shopify">Shopify</option>
+                    <option value="tiendanube">Tiendanube (próximamente)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="dominio">Dominio de tu tienda</label>
+                <input type="text" name="dominio" id="dominio" required placeholder="mitienda.myshopify.com">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="secreto">Secreto de firma de webhooks</label>
+            <input type="text" name="secreto" id="secreto" required
+                   placeholder="Lo copiás de Shopify al crear el webhook (paso 4 de la guía)">
+        </div>
+        <button type="submit" class="btn btn-primary">Conectar tienda</button>
+    </form>
+
+    <div style="margin-top:26px;padding-top:20px;border-top:1px solid var(--line-soft);">
+        <h4 style="margin:0 0 12px;">Guía rápida — Shopify</h4>
+        <ol style="margin:0;padding-left:20px;line-height:2;color:var(--fg-2);font-size:14px;">
+            <li>En tu admin de Shopify: <b>Configuración → Notificaciones → Webhooks</b></li>
+            <li><b>Crear webhook</b> → Evento: <b>Creación de pedidos</b> · Formato: <b>JSON</b></li>
+            <li>URL: <span class="mono" style="user-select:all;background:var(--bg);padding:3px 8px;border-radius:6px;">{{ webhook_url }}</span></li>
+            <li>Al pie de esa pantalla Shopify muestra la clave con la que <i>"se firmarán tus webhooks"</i> — <b>copiala</b> y pegala arriba como secreto</li>
+            <li>Guardá acá con <b>Conectar tienda</b> — y hacé un pedido de prueba en tu tienda para verlo aparecer</li>
+        </ol>
+        <p style="margin:14px 0 0;font-size:12.5px;color:var(--fg-3);">
+            Tiendanube: la app oficial de TAURO está en trámite — apenas esté aprobada se conecta con un botón, sin pasos manuales.
+        </p>
+    </div>
+</div>
+{% endblock %}

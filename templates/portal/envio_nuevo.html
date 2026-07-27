@@ -52,7 +52,14 @@
     </div>
 </div>
 
+{% if pedido_tienda %}
+<div class="msg ok" style="margin-bottom:16px;">
+    🛍 Estás preparando el envío del pedido <b>{{ pedido_tienda.numero or pedido_tienda.pedido_externo_id }}</b>
+    de tu tienda ({{ pedido_tienda.plataforma }}) — el destinatario ya viene cargado con los datos del comprador.
+</div>
+{% endif %}
 <form method="POST" action="/portal/envios/nuevo">
+    <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
     <!-- Nacional: carrier/servicio elegido en el comparador del precio en vivo -->
     <input type="hidden" name="nac_carrier" id="nac_carrier" value="">
     <input type="hidden" name="nac_servicio" id="nac_servicio" value="">
