@@ -480,6 +480,31 @@ scheduler.add_job(
 
 scheduler.start()
 
+
+def _tarifas_al_arrancar():
+    """
+    Auto-sanación: si la tabla de tarifas está vacía (primer deploy, base
+    nueva, o alguien la borró), la llena sola en segundo plano en vez de
+    esperar al job de las 4am. Sin esto, el checkout depende de cotizar en
+    vivo — que es justo lo que queremos evitar.
+    """
+    try:
+        from servicios.tarifas_cache import estado_cache, refrescar_cache
+        estado = estado_cache()
+        if estado.get("tarifas", 0) > 0:
+            print(f"[startup] tarifas del checkout: {estado['tarifas']} cargadas")
+            return
+        print("[startup] tabla de tarifas vacía → llenando en segundo plano")
+        refrescar_cache()
+    except Exception as e:
+        print(f"[startup] no pude precargar tarifas: {e}")
+
+
+# En un hilo aparte: el arranque no puede esperar ~66 cotizaciones, y
+# Railway mata el deploy si el healthcheck no responde a tiempo.
+import threading
+threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
+
 print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
 print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
 print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
