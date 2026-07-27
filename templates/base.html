@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
-    <link rel="stylesheet" href="/static/css/tauro.css?v=9">
+    <link rel="stylesheet" href="/static/css/tauro.css?v=10">
     <script src="/static/js/tauro-ui.js?v=3" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
 </head>
@@ -34,6 +34,8 @@
         </div>
 
         {% set path = request.url.path if request else "" %}
+        {# Globos rojos estilo Mac: sólo lo que espera una acción del cliente #}
+        {% set pend = pendientes_menu(cliente) if cliente else {"envios": 0, "tienda": 0} %}
         <nav class="side-nav">
             <a href="/portal/home" class="side-item {% if path.endswith('/home') %}active{% endif %}">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
@@ -53,11 +55,13 @@
             <a href="/portal/envios" class="side-item {% if '/envios' in path and '/envios/nuevo' not in path %}active{% endif %}">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8.5 12 3 3 8.5v7L12 21l9-5.5z"/><path d="M3.3 8.7 12 14l8.7-5.3M12 21v-7"/></svg>
                 Mis envíos
+                {% if pend.envios %}<span class="side-badge" title="{{ pend.envios }} guía(s) lista(s) para descargar">{{ pend.envios }}</span>{% endif %}
             </a>
 
             <a href="/portal/tienda" class="side-item {% if '/tienda' in path %}active{% endif %}">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9"/><path d="M3 9h18v3a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M5 12v9h14v-9"/></svg>
                 Mi tienda
+                {% if pend.tienda %}<span class="side-badge" title="{{ pend.tienda }} venta(s) esperando envío">{{ pend.tienda }}</span>{% endif %}
             </a>
 
             <a href="/portal/direcciones" class="side-item {% if '/direcciones' in path %}active{% endif %}">

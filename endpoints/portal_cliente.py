@@ -38,7 +38,7 @@ from servicios.api_b2b import obtener_precio_envio, obtener_precio_envio_multi
 from servicios.nacional import cotizar_nacional_cliente, nacional_activo
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
-    obtener_solicitud_de_cliente,
+    obtener_solicitud_de_cliente, contar_guias_listas,
 )
 from servicios.pricing import parse_monto_ars
 from servicios.integraciones_tienda import (
@@ -66,6 +66,27 @@ from core.email_sender import enviar_link_magico
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 templates = Jinja2Templates(directory="templates")
+
+
+def _pendientes_menu(cliente_id: str) -> dict:
+    """
+    Globos rojos del menú lateral: sólo cuenta lo que espera una acción
+    DEL CLIENTE. Un fallo contando nunca puede tumbar la página, así que
+    ante cualquier error devuelve ceros (el menú sale sin globos).
+    """
+    if not cliente_id:
+        return {"envios": 0, "tienda": 0}
+    try:
+        return {
+            "envios": contar_guias_listas(cliente_id),
+            "tienda": contar_pendientes(cliente_id),
+        }
+    except Exception as e:
+        print(f"[portal] no pude contar pendientes de {cliente_id}: {e}")
+        return {"envios": 0, "tienda": 0}
+
+
+templates.env.globals["pendientes_menu"] = _pendientes_menu
 
 BASE_URL = os.getenv("BASE_URL")
 # Cookies con Secure por defecto (Railway sirve por HTTPS). Apagar solo para

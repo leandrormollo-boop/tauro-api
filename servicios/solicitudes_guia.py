@@ -167,6 +167,25 @@ def listar_solicitudes_cliente(cliente_id: str, limite: int = 100) -> list[dict]
             return [_sin_label(dict(r)) for r in cur.fetchall()]
 
 
+def contar_guias_listas(cliente_id: str) -> int:
+    """
+    Cuántas guías tiene el cliente listas para descargar. Es su tarea
+    pendiente real (las SOLICITADO esperan a Tauro, no a él), así que
+    es lo que alimenta el globo rojo del menú.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM solicitudes_guia
+                WHERE cliente_id = %s AND estado = 'GUIA_LISTA'
+                """,
+                (cliente_id.strip().upper(),),
+            )
+            return int(cur.fetchone()["n"])
+
+
 def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:
     """Solicitudes para la bandeja operativa del admin."""
     estado = (estado or "").strip().upper()
