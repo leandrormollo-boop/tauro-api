@@ -326,10 +326,14 @@ def _borrar_token_recupero(token: str) -> None:
         print(f"[admin] no pude borrar el token de recuperación: {e}")
 
 
+# La casilla oficial de TAURO. Es el ÚNICO destino posible del link de
+# recuperación: así no importa quién apriete el botón, el acceso sólo le
+# llega a quien controla este mail.
+EMAIL_OFICIAL_TAURO = "taurosolutionsar@gmail.com"
+
+
 def _email_oficial() -> str:
-    return (os.getenv("ADMIN_RECOVERY_EMAIL")
-            or os.getenv("EMAIL_REMITENTE")
-            or "").strip()
+    return (os.getenv("ADMIN_RECOVERY_EMAIL") or EMAIL_OFICIAL_TAURO).strip()
 
 
 def _smtp_listo() -> bool:

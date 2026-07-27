@@ -43,7 +43,8 @@
 
       {% if smtp_listo() and email_recupero() %}
         <p class="sub" style="margin:12px 0 10px;font-size:13px;">
-          Te mandamos un link de acceso al email oficial de Tauro. Vence en 15 minutos.
+          Te mandamos un link de acceso a <b>{{ email_recupero() }}</b>.
+          Vence en 15 minutos y se usa una sola vez.
         </p>
         <form method="POST" action="/admin/recuperar">
           <button type="submit" class="btn btn-ghost btn-full">Enviarme un link de acceso</button>
