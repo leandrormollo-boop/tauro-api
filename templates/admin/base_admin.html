@@ -123,6 +123,11 @@
       <a href="/admin/pagos/nuevo" {% if seccion == 'pago_nuevo' %}class="active"{% endif %}>+ Registrar pago</a>
 
       <div class="sidebar-label">Operaciones</div>
+      <a href="/admin/bandeja" {% if seccion == 'bandeja' %}class="active"{% endif %}
+         style="display:flex;align-items:center;gap:8px;">
+        Bandeja por cliente
+        {% if pendientes_admin() %}<span class="side-badge">{{ pendientes_admin() }}</span>{% endif %}
+      </a>
       <a href="/admin/pedidos" {% if seccion == 'pedidos' %}class="active"{% endif %}>Solicitudes de guía</a>
       <a href="/admin/tracking-fedex" {% if seccion == 'tracking_fedex' %}class="active"{% endif %}>Tracking FedEx</a>
       <a href="/admin/productos" {% if seccion == 'productos' %}class="active"{% endif %}>Catálogo / Validar</a>

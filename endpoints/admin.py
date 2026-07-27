@@ -55,6 +55,18 @@ from servicios.rate_limit import check_rate, reset_rate, client_ip
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
 
+
+def _pendientes_admin() -> int:
+    """Globo rojo del menú: guías esperando que Tauro las emita."""
+    try:
+        from servicios.bandeja_admin import total_pendiente_tauro
+        return total_pendiente_tauro()
+    except Exception:
+        return 0
+
+
+templates.env.globals["pendientes_admin"] = _pendientes_admin
+
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 if not ADMIN_PASSWORD:
     # Nunca un default público. Si no hay contraseña configurada, generamos una
@@ -302,6 +314,71 @@ def admin_clientes(request: Request, admin_token: Optional[str] = Cookie(None)):
     return templates.TemplateResponse(
         request=request, name="admin/clientes.html",
         context={"seccion": "clientes", "clientes": clientes},
+    )
+
+
+@router.get("/bandeja", response_class=HTMLResponse)
+def admin_bandeja(request: Request, admin_token: Optional[str] = Cookie(None)):
+    """Carga de trabajo por cliente: quién tiene qué esperando."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.bandeja_admin import resumen_por_cliente
+    from servicios.tarifas_cache import estado_cache
+    try:
+        filas = resumen_por_cliente()
+    except Exception as e:
+        print(f"[admin] bandeja falló: {e}")
+        filas = []
+    return templates.TemplateResponse(
+        request=request, name="admin/bandeja.html",
+        context={
+            "seccion": "bandeja",
+            "filas": filas,
+            "total_tauro": sum(f["pendiente_tauro"] for f in filas),
+            "total_cliente": sum(f["pendiente_cliente"] for f in filas),
+            "cache": estado_cache(),
+        },
+    )
+
+
+@router.post("/tarifas/refrescar")
+def admin_refrescar_tarifas(admin_token: Optional[str] = Cookie(None)):
+    """
+    Llena la tabla de tarifas del checkout a mano. Tarda (son ~66
+    cotizaciones), así que corre en segundo plano y la pantalla vuelve
+    enseguida: el resultado se ve en el estado del caché.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    import threading
+    from servicios.tarifas_cache import refrescar_cache
+    threading.Thread(target=refrescar_cache, daemon=True).start()
+    return RedirectResponse(url="/admin/bandeja?ok=tarifas", status_code=303)
+
+
+@router.get("/bandeja/{cliente_id}", response_class=HTMLResponse)
+def admin_bandeja_cliente(
+    request: Request,
+    cliente_id: str,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """La pestaña de un cliente: todo lo suyo que está esperando."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.bandeja_admin import detalle_cliente
+    try:
+        datos = detalle_cliente(cliente_id)
+    except Exception as e:
+        print(f"[admin] detalle de {cliente_id} falló: {e}")
+        datos = {"solicitudes": [], "pedidos_tienda": []}
+    return templates.TemplateResponse(
+        request=request, name="admin/bandeja_cliente.html",
+        context={
+            "seccion": "bandeja",
+            "cliente_id": cliente_id.upper(),
+            "solicitudes": datos["solicitudes"],
+            "pedidos_tienda": datos["pedidos_tienda"],
+        },
     )
 
 

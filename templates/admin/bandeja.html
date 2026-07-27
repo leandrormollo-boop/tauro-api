@@ -1,0 +1,103 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Bandeja por cliente{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div class="eyebrow">Operaciones</div>
+    <h1>Bandeja por cliente</h1>
+    <p>Quién tiene trabajo esperando y de qué lado está la pelota.</p>
+</div>
+
+<div class="stat-grid" style="margin-bottom:26px;">
+    <div class="stat-card">
+        <div class="label">Guías por emitir</div>
+        <div class="value {% if total_tauro %}warn{% endif %}">{{ total_tauro }}</div>
+        <div class="foot" style="font-size:12px;color:var(--fg-3);">Esperan a Tauro</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Ventas sin armar</div>
+        <div class="value">{{ total_cliente }}</div>
+        <div class="foot" style="font-size:12px;color:var(--fg-3);">Esperan al cliente · las podés gestionar vos</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Clientes</div>
+        <div class="value">{{ filas|length }}</div>
+    </div>
+</div>
+
+{# Tarifas del checkout: el corazón de que nunca se pierda una venta #}
+<div class="card" style="margin-bottom:24px;{% if not cache.tarifas %}border-color:rgba(245,184,0,.5);{% endif %}">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+            <h3 style="margin:0 0 4px;">Tarifas del checkout</h3>
+            <p class="sub" style="margin:0;">
+                {% if cache.tarifas %}
+                    <b>{{ cache.tarifas }}</b> tarifas guardadas en {{ cache.paises }} países ·
+                    última actualización {{ cache.ultima.strftime('%d/%m %H:%M') if cache.ultima else '—' }}.
+                    El checkout de tus clientes responde al instante, sin depender de FedEx en vivo.
+                {% else %}
+                    ⚠️ <b>Sin tarifas guardadas.</b> El checkout tiene que cotizar en vivo (lento y frágil).
+                    Refrescá para llenarlas.
+                {% endif %}
+            </p>
+        </div>
+        <form method="POST" action="/admin/tarifas/refrescar">
+            <button type="submit" class="btn btn-{% if cache.tarifas %}ghost{% else %}primary{% endif %} btn-sm">
+                Refrescar tarifas
+            </button>
+        </form>
+    </div>
+    <p style="margin:12px 0 0;font-size:12px;color:var(--fg-3);">
+        Se actualizan solas todas las noches a las 4:00. Tarda unos minutos: corre en segundo plano.
+    </p>
+</div>
+
+<div class="card">
+    {% if filas %}
+    <div style="overflow-x:auto;">
+    <table class="envios-table">
+        <thead>
+            <tr>
+                <th>Cliente</th>
+                <th>Guías por emitir</th>
+                <th>Ventas sin armar</th>
+                <th>En proceso</th>
+                <th>Guías listas</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for f in filas %}
+            <tr>
+                <td>
+                    <strong>{{ f.cliente_id }}</strong>
+                    {% if f.email %}<br><span style="font-size:12px;color:var(--fg-3);">{{ f.email }}</span>{% endif %}
+                </td>
+                <td>
+                    {% if f.pendiente_tauro %}
+                        <span class="badge warn">{{ f.pendiente_tauro }}</span>
+                    {% else %}<span style="color:var(--fg-4);">—</span>{% endif %}
+                </td>
+                <td>
+                    {% if f.pendiente_cliente %}
+                        <span class="badge">{{ f.pendiente_cliente }}</span>
+                    {% else %}<span style="color:var(--fg-4);">—</span>{% endif %}
+                </td>
+                <td class="mono">{{ f.en_proceso or 0 }}</td>
+                <td class="mono">{{ f.guias_listas or 0 }}</td>
+                <td>
+                    <a class="btn btn-{% if f.total_pendiente %}primary{% else %}ghost{% endif %} btn-sm"
+                       href="/admin/bandeja/{{ f.cliente_id }}">
+                        Ver pendientes →
+                    </a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p style="color:var(--fg-3);margin:0;padding:20px 0;">Todavía no hay clientes cargados.</p>
+    {% endif %}
+</div>
+{% endblock %}

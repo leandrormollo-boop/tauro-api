@@ -457,7 +457,29 @@ scheduler.add_job(
     minute=0,
 )
 
+
+def job_refrescar_tarifas():
+    """
+    Deja las tarifas del checkout frescas. Corre de madrugada porque
+    tarda (son ~66 cotizaciones) y ahí una demora no le cuesta una venta
+    a nadie: durante el día el checkout lee esta tabla en milisegundos.
+    """
+    try:
+        from servicios.tarifas_cache import refrescar_cache
+        refrescar_cache()
+    except Exception as e:
+        print(f"[scheduler] refresco de tarifas falló: {e}")
+
+
+scheduler.add_job(
+    job_refrescar_tarifas,
+    trigger="cron",
+    hour=4,
+    minute=0,
+)
+
 scheduler.start()
 
 print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
 print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
+print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")

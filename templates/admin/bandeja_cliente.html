@@ -1,0 +1,92 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}{{ cliente_id }} · pendientes{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div class="eyebrow"><a href="/admin/bandeja" style="color:var(--accent-soft);">← Bandeja</a></div>
+    <h1>{{ cliente_id }}</h1>
+    <p>Todo lo que este cliente tiene esperando.</p>
+</div>
+
+{# ── Guías por emitir (nos toca a nosotros) ────────── #}
+<div class="card" style="margin-bottom:24px;">
+    <h3 style="margin:0 0 4px;">
+        Guías por emitir
+        {% if solicitudes %}<span class="badge warn" style="margin-left:8px;">{{ solicitudes|length }}</span>{% endif %}
+    </h3>
+    <p class="sub" style="margin:0 0 16px;">Solicitudes que el cliente ya armó y esperan que Tauro genere la guía.</p>
+
+    {% if solicitudes %}
+    <div style="overflow-x:auto;">
+    <table class="envios-table">
+        <thead>
+            <tr><th>#</th><th>Destinatario</th><th>Destino</th><th>Producto</th><th>Precio Tauro</th><th>Estado</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for s in solicitudes %}
+            <tr>
+                <td class="mono">{{ s.id }}</td>
+                <td>{{ s.dest_nombre }}</td>
+                <td>{{ s.dest_ciudad }}{% if s.destino_pais %} · {{ s.destino_pais }}{% endif %}</td>
+                <td>{{ s.producto_alias }}{% if s.cantidad and s.cantidad > 1 %} ×{{ s.cantidad }}{% endif %}</td>
+                <td class="mono">{% if s.precio_tauro_ars %}ARS {{ '{:,.0f}'.format(s.precio_tauro_ars)|replace(',', '.') }}{% else %}—{% endif %}</td>
+                <td>
+                    {% if s.estado == 'SOLICITADO' %}<span class="badge warn">Solicitado</span>
+                    {% else %}<span class="badge">{{ s.estado }}</span>{% endif %}
+                </td>
+                <td><a class="btn btn-primary btn-sm" href="/admin/pedidos?estado=SOLICITADO">Gestionar →</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p style="color:var(--fg-3);margin:0;">Nada pendiente de nuestro lado.</p>
+    {% endif %}
+</div>
+
+{# ── Ventas que el cliente todavía no armó ─────────── #}
+<div class="card">
+    <h3 style="margin:0 0 4px;">
+        Ventas sin armar
+        {% if pedidos_tienda %}<span class="badge" style="margin-left:8px;">{{ pedidos_tienda|length }}</span>{% endif %}
+    </h3>
+    <p class="sub" style="margin:0 0 16px;">
+        Ventas que entraron de su tienda y todavía no convirtió en envío.
+        <b>La pelota está de su lado</b> — pero si preferís gestionarlas vos, armás
+        la solicitud desde <a href="/admin/envios/nuevo" style="color:var(--accent-soft);">cargar envío</a>
+        con estos datos y le avisás.
+    </p>
+
+    {% if pedidos_tienda %}
+    <div style="overflow-x:auto;">
+    <table class="envios-table">
+        <thead>
+            <tr><th>Pedido</th><th>Comprador</th><th>Destino</th><th>Productos</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+        {% for p in pedidos_tienda %}
+            {% set d = p.destinatario or {} %}
+            <tr>
+                <td class="mono">{{ p.numero or p.pedido_externo_id }}<br>
+                    <span style="font-size:11px;color:var(--fg-3);">{{ p.plataforma }}</span></td>
+                <td>{{ d.nombre or '—' }}<br>
+                    <span style="font-size:11.5px;color:var(--fg-3);">{{ d.email or '' }}</span></td>
+                <td>{{ d.ciudad or '' }}{% if d.pais %} · {{ d.pais }}{% endif %}<br>
+                    <span style="font-size:12px;color:var(--fg-3);">{{ d.direccion or '' }}</span></td>
+                <td style="max-width:240px;">
+                    {% for it in (p['items'] or [])[:3] %}
+                        <div style="font-size:13px;">{{ it.cantidad }}x {{ it.titulo }}</div>
+                    {% endfor %}
+                </td>
+                <td class="mono">{% if p.valor_total %}{{ p.moneda or '' }} {{ p.valor_total }}{% else %}—{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+        <p style="color:var(--fg-3);margin:0;">Sin ventas esperando.</p>
+    {% endif %}
+</div>
+{% endblock %}

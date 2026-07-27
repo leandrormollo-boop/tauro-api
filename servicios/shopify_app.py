@@ -368,11 +368,27 @@ def cotizar_para_checkout(payload: dict) -> dict:
     dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
     markup = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
+    # CASCADA DE RESILIENCIA — Shopify corta a los ~10s y un checkout sin
+    # opción de envío es una venta perdida. Por eso acá NUNCA se sale con
+    # las manos vacías y NUNCA se espera a un courier si se puede evitar.
+    from servicios.tarifas_cache import buscar_tarifas, tarifa_emergencia
+
+    opciones = []
     try:
-        opciones = cotizar_carriers(origen, dest, paquete, dolar, markup)
+        opciones = buscar_tarifas(pais, peso_kg)          # 1. instantáneo
     except Exception as e:
-        print(f"[shopify] error cotizando para checkout: {e}")
-        return {"rates": []}
+        print(f"[shopify] cache de tarifas falló: {e}")
+
+    if not opciones:
+        try:
+            opciones = cotizar_carriers(origen, dest, paquete, dolar, markup)  # 2. en vivo
+        except Exception as e:
+            print(f"[shopify] cotización en vivo falló: {e}")
+            opciones = []
+
+    if not [c for c in opciones if c.get("estado") == "cotizado"]:
+        print(f"[shopify] sin tarifas para {pais}/{peso_kg}kg → tarifa de emergencia")
+        opciones = tarifa_emergencia(pais, peso_kg, dolar)   # 3. nunca vacío
 
     # Qué ve el comprador lo decide el comerciante (política de flete):
     # tarifa real, +markup, precio fijo, o gratis. Y si quiere, con los
