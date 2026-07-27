@@ -15,6 +15,7 @@
     {% if flash_ok == 'conectada' %}Tienda conectada. Las próximas ventas van a aparecer abajo.
     {% elif flash_ok == 'descartado' %}Pedido descartado.
     {% elif flash_ok == 'desconectada' %}Tienda desconectada.
+    {% elif flash_ok == 'politica' %}Listo — así va a ver el envío tu comprador de ahora en más.
     {% else %}Listo.{% endif %}
 </div>{% endif %}
 {% if flash_error %}<div class="msg error">{{ flash_error }}</div>{% endif %}
@@ -75,6 +76,74 @@
         </div>
     {% endif %}
 </div>
+
+{# ── Qué paga el comprador ──────────────────────────── #}
+{% if dominio_cfg %}
+<div class="card" style="margin-bottom:24px;">
+    <h3 style="margin:0 0 4px;">Envío en tu checkout</h3>
+    <p class="sub" style="margin:0 0 18px;">
+        Vos decidís qué precio de envío ve tu comprador. Lo que le cobres no cambia
+        lo que TAURO te factura a vos: la diferencia la ganás o la absorbés.
+    </p>
+
+    <form method="POST" action="/portal/tienda/politica">
+        <input type="hidden" name="dominio" value="{{ dominio_cfg }}">
+
+        <div class="form-group">
+            <label for="politica">¿Cuánto le cobrás el envío?</label>
+            <select name="politica" id="politica">
+                <option value="real"   {% if cfg.politica == 'real' %}selected{% endif %}>Lo que cotiza TAURO (precio real)</option>
+                <option value="markup" {% if cfg.politica == 'markup' %}selected{% endif %}>Precio TAURO + un porcentaje</option>
+                <option value="fijo"   {% if cfg.politica == 'fijo' %}selected{% endif %}>Un precio fijo que yo defino</option>
+                <option value="gratis" {% if cfg.politica == 'gratis' %}selected{% endif %}>Envío gratis ($0 — lo absorbo yo)</option>
+            </select>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label for="markup_pct">Porcentaje a sumar (%)</label>
+                <input type="text" name="markup_pct" id="markup_pct" value="{{ cfg.markup_pct|round(2) }}"
+                       placeholder="Ej: 15">
+                <small style="color:var(--fg-3);font-size:12px;">Sólo si elegiste "TAURO + porcentaje".</small>
+            </div>
+            <div class="form-group">
+                <label for="precio_fijo_ars">Precio fijo (ARS)</label>
+                <input type="text" name="precio_fijo_ars" id="precio_fijo_ars" value="{{ cfg.precio_fijo_ars|round(0)|int }}"
+                       placeholder="Ej: 25000">
+                <small style="color:var(--fg-3);font-size:12px;">Sólo si elegiste "precio fijo".</small>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="etiqueta">Cómo se llama la opción en el checkout (opcional)</label>
+            <input type="text" name="etiqueta" id="etiqueta" value="{{ cfg.etiqueta }}"
+                   placeholder="Ej: Envío internacional puerta a puerta">
+            <small style="color:var(--fg-3);font-size:12px;">Vacío = se muestra el courier y el servicio (ej: "FedEx — International Priority").</small>
+        </div>
+
+        <div style="margin:22px 0 6px;padding-top:18px;border-top:1px solid var(--line-soft);">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                <input type="checkbox" name="mostrar_tax" value="1" {% if cfg.mostrar_tax %}checked{% endif %}>
+                <span><b>Mostrar impuestos de destino estimados</b> sumados al envío</span>
+            </label>
+            <p class="sub" style="margin:8px 0 0;">
+                Si lo activás, el comprador ve un precio que ya incluye los impuestos aproximados
+                de su país — y no se lleva sorpresas al recibir. El monto sale del impuesto que
+                cargues en cada producto de <a href="/portal/catalogo" style="color:var(--accent-soft);">Mis productos</a>;
+                para los que no tengan, se usa el porcentaje de abajo.
+            </p>
+        </div>
+
+        <div class="form-group" style="max-width:280px;">
+            <label for="tax_pct_default">Impuesto por defecto (% del valor)</label>
+            <input type="text" name="tax_pct_default" id="tax_pct_default" value="{{ cfg.tax_pct_default|round(2) }}"
+                   placeholder="Ej: 20">
+        </div>
+
+        <button type="submit" class="btn btn-primary">Guardar</button>
+    </form>
+</div>
+{% endif %}
 
 {# ── Tiendas conectadas ─────────────────────────────── #}
 <div class="card" style="margin-bottom:24px;">

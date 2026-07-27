@@ -53,7 +53,8 @@
                 <tr data-alias="{{ p.alias_interno }}" data-invoice="{{ p.nombre_invoice }}"
                     data-hs="{{ p.hs_code }}" data-largo="{{ '%g'|format(p.largo_cm) }}"
                     data-ancho="{{ '%g'|format(p.ancho_cm) }}" data-alto="{{ '%g'|format(p.alto_cm) }}"
-                    data-peso="{{ '%g'|format(p.peso_kg) }}" data-valor="{{ '%g'|format(p.valor_usd_default) }}">
+                    data-peso="{{ '%g'|format(p.peso_kg) }}" data-valor="{{ '%g'|format(p.valor_usd_default) }}"
+                    data-tax="{{ '%g'|format(taxes.get(p.alias_interno, 0)) }}">
                     <td><strong>{{ p.alias_interno }}</strong></td>
                     <td>{{ p.nombre_invoice }}</td>
                     <td class="mono">{{ p.hs_code }}</td>
@@ -142,6 +143,17 @@
             </div>
         </div>
 
+        <div class="form-group">
+            <label for="cat-tax">Impuestos de destino estimados (USD) <span style="color:var(--fg-3);font-weight:400;">— opcional</span></label>
+            <input type="number" name="tax_estimado_usd" id="cat-tax" step="0.01" min="0" placeholder="0">
+            <small style="color:var(--fg-3);font-size:12px;">
+                Lo que aproximadamente paga este producto de impuestos al entrar al país de destino.
+                Se usa sólo si activás "mostrar impuestos" en
+                <a href="/portal/tienda" style="color:var(--accent-soft);">Mi tienda</a>, para que tu
+                comprador vea el costo real y no se lleve sorpresas.
+            </small>
+        </div>
+
         <button type="submit" class="btn btn-primary" id="btn-guardar-prod">Agregar al catálogo</button>
     </form>
 </div>
@@ -163,6 +175,7 @@ document.querySelectorAll(".prod-editar").forEach(function (btn) {
         set("cat-alto", tr.dataset.alto);
         set("cat-peso", tr.dataset.peso);
         set("cat-valor", tr.dataset.valor);
+        set("cat-tax", tr.dataset.tax);
         document.getElementById("form-prod-titulo").textContent = "Editar producto";
         document.getElementById("btn-guardar-prod").textContent = "Guardar cambios";
         document.getElementById("form-prod-cancelar").hidden = false;

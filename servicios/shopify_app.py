@@ -299,10 +299,14 @@ def cotizar_para_checkout(payload: dict) -> dict:
     va en centavos y como string.
     """
     from servicios.carriers import cotizar_carriers
+    from servicios.politica_envio import (
+        obtener_config, aplicar_politica, calcular_tax_estimado,
+    )
 
     rate = payload.get("rate") or {}
     destino = rate.get("destination") or {}
     items = rate.get("items") or []
+    dominio = (payload.get("_dominio") or "").strip().lower()
 
     pais = (destino.get("country") or "").upper()
     if not pais or pais == "AR":
@@ -338,17 +342,46 @@ def cotizar_para_checkout(payload: dict) -> dict:
         print(f"[shopify] error cotizando para checkout: {e}")
         return {"rates": []}
 
+    # Qué ve el comprador lo decide el comerciante (política de flete):
+    # tarifa real, +markup, precio fijo, o gratis. Y si quiere, con los
+    # impuestos de destino estimados incluidos.
+    config = obtener_config(dominio) if dominio else None
+    if config is None:
+        from servicios.politica_envio import DEFAULTS
+        config = dict(DEFAULTS)
+
+    inst = instalacion(dominio) if dominio else None
+    cliente_id = (inst or {}).get("cliente_id") or ""
+    tax_ars = round(calcular_tax_estimado(cliente_id, items, config, dolar))
+
+    etiqueta = (config.get("etiqueta") or "").strip()
+
     rates = []
     for c in opciones:
         if c.get("estado") != "cotizado":
             continue
+        precio = aplicar_politica(float(c["precio_ars"]), config)
+        if precio is None:
+            continue
+
+        detalle = f"Entrega estimada {c.get('dias_estimados', '3-5')} días hábiles · vía TAURO Solutions"
+        if tax_ars:
+            precio += tax_ars
+            detalle += " · impuestos de destino estimados incluidos"
+
         rates.append({
-            "service_name": f"{c['nombre']} — {c['servicio']}",
+            "service_name": etiqueta or f"{c['nombre']} — {c['servicio']}",
             "service_code": f"TAURO_{c['id'].upper()}",
-            "total_price": str(int(round(float(c["precio_ars"]) * 100))),
+            "total_price": str(int(round(precio * 100))),
             "currency": "ARS",
-            "description": f"Entrega estimada {c.get('dias_estimados', '3-5')} días hábiles · vía TAURO Solutions",
+            "description": detalle,
         })
+
+        # Con precio fijo o gratis, todas las opciones costarían lo mismo:
+        # mostramos una sola para no confundir al comprador.
+        if config.get("politica") in ("fijo", "gratis"):
+            break
+
     return {"rates": rates}
 
 

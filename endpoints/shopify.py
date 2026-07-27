@@ -119,6 +119,9 @@ async def tarifas(request: Request):
         payload = await request.json()
     except Exception:
         return {"rates": []}
+    # Shopify no manda la tienda en el body: viene por header. La pasamos
+    # dentro del payload para saber qué política de flete aplicar.
+    payload["_dominio"] = request.headers.get("x-shopify-shop-domain", "")
     try:
         return cotizar_para_checkout(payload)
     except Exception as e:

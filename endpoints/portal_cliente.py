@@ -46,6 +46,9 @@ from servicios.integraciones_tienda import (
     listar_pedidos, contar_pendientes, obtener_pedido,
     marcar_convertido, descartar_pedido,
 )
+from servicios.politica_envio import (
+    obtener_config, guardar_config, guardar_tax_producto, tax_de_productos,
+)
 from servicios.direcciones import (
     TIPO_DESTINATARIO,
     TIPO_REMITENTE,
@@ -896,18 +899,57 @@ def tienda_view(
     cliente: str = Depends(cliente_actual),
 ):
     base_url = (BASE_URL or str(request.base_url)).rstrip("/")
+    tiendas = [t for t in listar_tiendas(cliente) if t["activa"]]
+    # La política de flete se configura por tienda; hoy mostramos la de la
+    # primera (el caso normal es una tienda por cuenta).
+    dominio_cfg = tiendas[0]["dominio"] if tiendas else ""
     return templates.TemplateResponse(
         request=request, name="portal/tienda.html",
         context={
             "cliente": cliente,
-            "tiendas": [t for t in listar_tiendas(cliente) if t["activa"]],
+            "tiendas": tiendas,
             "pedidos": listar_pedidos(cliente, "PENDIENTE"),
             "convertidos": listar_pedidos(cliente, "CONVERTIDO", limite=10),
             "webhook_url": f"{base_url}/integraciones/shopify/webhook",
+            "dominio_cfg": dominio_cfg,
+            "cfg": obtener_config(dominio_cfg),
             "flash_ok": ok,
             "flash_error": error,
         },
     )
+
+
+@router.post("/tienda/politica")
+def tienda_politica(
+    dominio: str = Form(...),
+    politica: str = Form("real"),
+    markup_pct: str = Form("0"),
+    precio_fijo_ars: str = Form("0"),
+    mostrar_tax: Optional[str] = Form(None),
+    tax_pct_default: str = Form("0"),
+    etiqueta: str = Form(""),
+    cliente: str = Depends(cliente_actual),
+):
+    """Guarda qué precio de envío ve el comprador en el checkout."""
+    # La tienda tiene que ser de este cliente: nadie configura la ajena.
+    if dominio.strip().lower() not in {t["dominio"] for t in listar_tiendas(cliente)}:
+        return RedirectResponse(url="/portal/tienda?error=Esa+tienda+no+es+tuya.", status_code=303)
+
+    def _num(v: str) -> float:
+        try:
+            return float(str(v).replace(",", ".").strip() or 0)
+        except ValueError:
+            return 0.0
+
+    r = guardar_config(
+        dominio=dominio, cliente_id=cliente, politica=politica,
+        markup_pct=_num(markup_pct), precio_fijo_ars=_num(precio_fijo_ars),
+        mostrar_tax=bool(mostrar_tax), tax_pct_default=_num(tax_pct_default),
+        etiqueta=etiqueta,
+    )
+    if not r.get("ok"):
+        return RedirectResponse(url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo guardar.'))}", status_code=303)
+    return RedirectResponse(url="/portal/tienda?ok=politica", status_code=303)
 
 
 @router.post("/tienda/conectar")
@@ -1031,9 +1073,14 @@ def direcciones_delete(
 @router.get("/catalogo", response_class=HTMLResponse)
 def catalogo_view(request: Request, cliente: str = Depends(cliente_actual)):
     productos = get_productos(cliente, solo_activos=False)
+    try:
+        taxes = tax_de_productos(cliente)
+    except Exception as e:
+        print(f"[catalogo] no pude leer los tax: {e}")
+        taxes = {}
     return templates.TemplateResponse(
         request=request, name="portal/catalogo.html",
-        context={"cliente": cliente, "productos": productos},
+        context={"cliente": cliente, "productos": productos, "taxes": taxes},
     )
 
 
@@ -1047,6 +1094,7 @@ def catalogo_add(
     alto_cm: float = Form(...),
     peso_kg: float = Form(...),
     valor_usd_default: float = Form(...),
+    tax_estimado_usd: str = Form("0"),
     alias_original: str = Form(""),  # presente = editar en vez de crear
     cliente: str = Depends(cliente_actual),
 ):
@@ -1061,6 +1109,12 @@ def catalogo_add(
                 raise ValueError("Ese producto no existe en tu catálogo.")
         else:
             agregar_producto(cliente, nuevo)
+        # Campo opcional, guardado aparte para no tocar el alta del catálogo.
+        try:
+            guardar_tax_producto(cliente, alias_interno,
+                                 float(str(tax_estimado_usd).replace(",", ".") or 0))
+        except Exception as e:
+            print(f"[catalogo] no pude guardar el tax de {alias_interno}: {e}")
     except Exception as e:
         return RedirectResponse(url=f"/portal/catalogo?error={e}", status_code=303)
     return RedirectResponse(url="/portal/catalogo?ok=1", status_code=303)
