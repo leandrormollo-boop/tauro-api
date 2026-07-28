@@ -478,6 +478,15 @@ scheduler.add_job(
     minute=0,
 )
 
+# Centinela: cada 15 min se pregunta si un comprador vería su opción de
+# envío en este momento. Dos fallos seguidos → mail de alerta a Tauro.
+from jobs.centinela_checkout import revisar_checkout
+scheduler.add_job(
+    revisar_checkout,
+    trigger="interval",
+    minutes=15,
+)
+
 scheduler.start()
 
 
@@ -508,3 +517,4 @@ threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
 print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
 print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
 print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
+print(f"[scheduler] Centinela del checkout: cada 15 min")

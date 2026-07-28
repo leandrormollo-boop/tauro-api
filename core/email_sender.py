@@ -262,6 +262,37 @@ def enviar_alerta_margen(alertas: list[dict]) -> bool:
 # EMAIL LINK MÁGICO — login del portal
 # ─────────────────────────────────────────────
 
+def _enviar_mail_a(email_destino: str, asunto: str, cuerpo_html: str) -> bool:
+    """
+    Manda un mail HTML a un destinatario puntual. A diferencia de
+    _enviar_mail (que va al EMAIL_DESTINO global de alertas), acá el
+    destino se elige — lo usa el centinela del checkout.
+    """
+    remitente = os.getenv("EMAIL_REMITENTE")
+    password = os.getenv("EMAIL_PASSWORD")
+    if not remitente or not password:
+        print("[email] SMTP no configurado, no se envía el aviso.")
+        return False
+
+    msg = MIMEMultipart("mixed")
+    msg["From"] = remitente
+    msg["To"] = email_destino
+    msg["Subject"] = asunto
+    msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(remitente, password)
+        server.sendmail(remitente, email_destino, msg.as_string())
+        server.quit()
+        print(f"[email] aviso enviado a {email_destino}")
+        return True
+    except Exception as e:
+        print(f"[email] error enviando aviso: {e}")
+        return False
+
+
 def enviar_link_magico(email_destino: str, link: str, cliente: str,
                        vence_en: str = "7 días") -> bool:
     """
