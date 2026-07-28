@@ -66,8 +66,102 @@ def install(request: Request, shop: str = ""):
             "/shopify/install?shop=tutienda.myshopify.com",
             status=400,
         )
-    destino = url_instalacion(shop.strip().lower(), nuevo_state())
+
+    shop = shop.strip().lower()
+
+    # Si la tienda YA instaló la app, Shopify abre esta misma URL cada vez
+    # que el comerciante hace click en TAURO desde su admin. Mandarlo de
+    # nuevo al OAuth sería absurdo: le mostramos su panel.
+    from servicios.shopify_app import instalacion
+    try:
+        inst = instalacion(shop)
+    except Exception as e:
+        print(f"[shopify] no pude leer la instalación de {shop}: {e}")
+        inst = None
+
+    if inst and inst.get("access_token"):
+        return _panel_tienda(shop, inst, request.query_params.get("host", ""))
+
+    destino = url_instalacion(shop, nuevo_state())
     return RedirectResponse(url=destino, status_code=303)
+
+
+def _panel_tienda(shop: str, inst: dict, host: str = "") -> HTMLResponse:
+    """
+    Lo que el comerciante ve al abrir TAURO desde su admin de Shopify:
+    su estado de un vistazo y el acceso al portal donde opera.
+    """
+    cliente = (inst or {}).get("cliente_id") or ""
+    pendientes = 0
+    if cliente:
+        try:
+            from servicios.integraciones_tienda import contar_pendientes
+            pendientes = contar_pendientes(cliente)
+        except Exception as e:
+            print(f"[shopify] no pude contar pendientes de {cliente}: {e}")
+
+    if not cliente:
+        estado = ("Tu tienda está conectada, pero todavía no la vinculaste a tu cuenta "
+                  "de TAURO. Entrá al portal, sección <b>Mi tienda</b>, y tocá "
+                  "«Es mi tienda — vincular».")
+        cta = "Vincular mi tienda"
+    elif pendientes:
+        estado = (f"Tenés <b>{pendientes} venta{'s' if pendientes != 1 else ''}</b> "
+                  f"esperando que generes el envío.")
+        cta = "Ver mis pedidos"
+    else:
+        estado = ("Todo al día: no hay ventas pendientes de envío. Cuando entre una "
+                  "nueva, aparece sola acá y en tu portal.")
+        cta = "Abrir mi portal"
+
+    # Para que la pantalla se vea DENTRO del admin de Shopify (y no en una
+    # ventana aparte) hacen falta tres cosas:
+    #   1. App Bridge, el puente oficial que Shopify espera en apps embebidas
+    #   2. frame-ancestors permitiendo a admin.shopify.com y a la tienda
+    #   3. NO mandar X-Frame-Options, que bloquearía el iframe
+    api_key = os.getenv("SHOPIFY_API_KEY", "")
+    headers = {
+        "Content-Security-Policy":
+            f"frame-ancestors https://{shop} https://admin.shopify.com;",
+    }
+
+    return HTMLResponse(headers=headers, content=f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAURO Solutions</title>
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+        data-api-key="{api_key}"></script>
+<style>
+  body {{ margin:0; padding:40px 24px; background:#0c0a14; color:#f4f5f7;
+         font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; }}
+  .box {{ max-width:560px; margin:0 auto; text-align:center; }}
+  .marca {{ font-size:22px; font-weight:700; letter-spacing:.08em; margin-bottom:6px; }}
+  .marca span {{ color:#a78bfa; }}
+  .sub {{ font-size:11px; letter-spacing:.14em; color:#8b86a0;
+          text-transform:uppercase; margin-bottom:34px; }}
+  .card {{ background:#151221; border:1px solid #2a2540; border-radius:16px;
+           padding:30px 26px; }}
+  .num {{ font-size:52px; font-weight:700; line-height:1;
+          color:#a78bfa; margin-bottom:10px; }}
+  p {{ color:#b9bfc7; line-height:1.7; margin:0 0 26px; font-size:15px; }}
+  a.btn {{ display:inline-block; background:#7c5cf6; color:#fff; padding:14px 32px;
+           border-radius:999px; text-decoration:none; font-weight:600; }}
+  .pie {{ margin-top:26px; font-size:12.5px; color:#6f6a85; line-height:1.7; }}
+  .pie b {{ color:#9a94b0; }}
+</style></head><body>
+<div class="box">
+  <div class="marca">TAURO <span>SOLUTIONS</span></div>
+  <div class="sub">Logística internacional</div>
+  <div class="card">
+    {f'<div class="num">{pendientes}</div>' if pendientes else ''}
+    <p>{estado}</p>
+    <a class="btn" href="https://taurosolutions.ar/portal/tienda" target="_blank">{cta} →</a>
+  </div>
+  <div class="pie">
+    Tienda conectada: <b>{shop}</b><br>
+    Cada venta con envío al exterior aparece en tu portal lista para generar la guía.
+  </div>
+</div></body></html>""")
 
 
 @router.get("/callback", response_class=HTMLResponse)
