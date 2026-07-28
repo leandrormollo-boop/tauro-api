@@ -87,6 +87,19 @@ def servir_tweaks():
     return FileResponse(os.path.join(WEB_DIR, "tweaks-panel.jsx"))
 
 
+@app.get("/privacidad", include_in_schema=False)
+def servir_privacidad():
+    """Política de privacidad — Shopify la exige para publicar la app."""
+    from servicios.paginas_legales import pagina_privacidad
+    return HTMLResponse(pagina_privacidad())
+
+
+@app.get("/terminos", include_in_schema=False)
+def servir_terminos():
+    from servicios.paginas_legales import pagina_terminos
+    return HTMLResponse(pagina_terminos())
+
+
 @app.get("/", include_in_schema=False)
 def root():
     """Redirige el root a la web pública."""
