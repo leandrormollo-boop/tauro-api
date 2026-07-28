@@ -61,15 +61,46 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
     del carrier CON el descuento aplicado (sin markup encima), y se devuelve
     también la tarifa de lista para mostrarla tachada en la web.
     """
-    if resultado.get("moneda", "USD") == "USD":
-        lista_usd = resultado["costo"]
+    # `costo` es lo que el carrier nos cobra a NOSOTROS (tarifa ACCOUNT en
+    # FedEx). `costo_lista` es el precio público (LIST) cuando el courier
+    # lo informa — es el correcto para mostrar tachado.
+    es_usd = resultado.get("moneda", "USD") == "USD"
+    costo_real_ars = round(resultado["costo"] * dolar) if es_usd else round(resultado["costo"])
+
+    base = resultado.get("costo_lista") or resultado["costo"]
+    if es_usd:
+        lista_usd = base
         lista_ars = round(lista_usd * dolar)
     else:
-        lista_ars = resultado["costo"]
+        lista_ars = round(base)
         lista_usd = round(lista_ars / dolar, 2)
 
     if descuento_pct > 0:
         precio_ars = round(lista_ars * (1 - descuento_pct / 100))
+
+        # ── PISO DE SEGURIDAD ──────────────────────────────────────────
+        # OJO con lo que representa `resultado["costo"]`: para FedEx es la
+        # tarifa ACCOUNT, o sea LO QUE TAURO LE PAGA al courier, no el
+        # precio público. Aplicarle un descuento grande vende POR DEBAJO
+        # DEL COSTO — hoy no se nota porque la cuenta está en sandbox y
+        # ACCOUNT ≈ LIST, pero el día que entre la tarifa negociada de
+        # producción cada envío pasaría a perder plata en silencio.
+        #
+        # El piso corre SÓLO con cuenta de producción: en sandbox FedEx
+        # devuelve tarifas ficticias infladas (USD 415 por 1,2 kg a Miami),
+        # así que aplicarlo ahí rompería el precio de vidriera sin proteger
+        # nada real. Se enciende solo el día que entre la cuenta productiva
+        # — que es exactamente cuando el costo pasa a ser plata de verdad.
+        en_produccion = os.getenv("FEDEX_ENVIRONMENT", "sandbox").lower() == "production"
+        margen_min = float(os.getenv("WEB_MARGEN_MINIMO_PCT", "15"))
+        if en_produccion and margen_min > 0:
+            piso_ars = round(costo_real_ars * (1 + margen_min / 100))
+            if precio_ars < piso_ars:
+                print(f"[carriers] PISO DE SEGURIDAD: el descuento daba ARS {precio_ars} "
+                      f"pero el costo es ARS {costo_real_ars} → se cobra ARS {piso_ars} "
+                      f"(costo + {margen_min:.0f}%). Revisá WEB_DESC_FEDEX_PCT.")
+                precio_ars = piso_ars
+
         precio_usd = round(precio_ars / dolar, 2)
         return {
             "precio_ars": precio_ars,
