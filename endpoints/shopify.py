@@ -387,6 +387,78 @@ def _tarifas_de_emergencia(payload: dict) -> dict:
         return {"rates": []}
 
 
+# ── Webhooks de privacidad (obligatorios para el App Store) ─────
+# Shopify exige estos tres endpoints a toda app publicada, y los prueba
+# durante la revisión. Todos verifican la firma con el API secret de la
+# app: sin eso, cualquiera podría pedir o borrar datos de un comercio.
+
+def _firma_valida_app(cuerpo: bytes, firma: str) -> bool:
+    from servicios.integraciones_tienda import verificar_hmac_shopify
+    secreto = os.getenv("SHOPIFY_API_SECRET", "")
+    return bool(secreto) and verificar_hmac_shopify(secreto, cuerpo, firma)
+
+
+@router.post("/webhook/customers/data_request")
+async def gdpr_data_request(request: Request):
+    """
+    Un comprador pidió ver los datos que la tienda tiene sobre él.
+    TAURO guarda datos de compradores sólo dentro del pedido que el
+    comercio nos manda, así que dejamos constancia y el comercio responde
+    con lo que le mostramos en su portal.
+    """
+    cuerpo = await request.body()
+    if not _firma_valida_app(cuerpo, request.headers.get("x-shopify-hmac-sha256", "")):
+        return JSONResponse({"ok": False}, status_code=401)
+    print(f"[gdpr] data_request de {request.headers.get('x-shopify-shop-domain', '?')}: "
+          f"{cuerpo[:400]!r}")
+    return {"ok": True}
+
+
+@router.post("/webhook/customers/redact")
+async def gdpr_customer_redact(request: Request):
+    """
+    Un comprador pidió que borren sus datos. Anonimizamos su información
+    personal en los pedidos que tengamos de esa tienda, conservando el
+    registro comercial (montos y fechas) que hace falta por contabilidad.
+    """
+    cuerpo = await request.body()
+    if not _firma_valida_app(cuerpo, request.headers.get("x-shopify-hmac-sha256", "")):
+        return JSONResponse({"ok": False}, status_code=401)
+
+    dominio = request.headers.get("x-shopify-shop-domain", "")
+    try:
+        import json as _json
+        datos = _json.loads(cuerpo.decode("utf-8"))
+        ids = [str(o) for o in (datos.get("orders_to_redact") or [])]
+        from servicios.integraciones_tienda import anonimizar_pedidos
+        n = anonimizar_pedidos(dominio, ids)
+        print(f"[gdpr] redact de comprador en {dominio}: {n} pedido(s) anonimizados")
+    except Exception as e:
+        print(f"[gdpr] error procesando customers/redact: {e}")
+    return {"ok": True}
+
+
+@router.post("/webhook/shop/redact")
+async def gdpr_shop_redact(request: Request):
+    """
+    Pasaron 48 hs desde que un comercio desinstaló la app: Shopify pide
+    que borremos todo lo suyo.
+    """
+    cuerpo = await request.body()
+    if not _firma_valida_app(cuerpo, request.headers.get("x-shopify-hmac-sha256", "")):
+        return JSONResponse({"ok": False}, status_code=401)
+
+    dominio = request.headers.get("x-shopify-shop-domain", "")
+    try:
+        from servicios.integraciones_tienda import borrar_datos_tienda
+        n = borrar_datos_tienda(dominio)
+        desinstalar(dominio)
+        print(f"[gdpr] shop_redact de {dominio}: {n} registro(s) borrados")
+    except Exception as e:
+        print(f"[gdpr] error procesando shop/redact: {e}")
+    return {"ok": True}
+
+
 @router.post("/webhook/desinstalada")
 async def desinstalada(request: Request):
     """El comerciante desinstaló la app: borramos su token."""

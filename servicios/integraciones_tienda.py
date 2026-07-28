@@ -339,6 +339,56 @@ def marcar_convertido(cliente_id: str, pedido_id: int, solicitud_id: Optional[in
         conn.commit()
 
 
+def anonimizar_pedidos(dominio: str, pedidos_externos: list[str]) -> int:
+    """
+    GDPR — "borrame mis datos" de un comprador: sacamos sus datos
+    personales de los pedidos, dejando el registro comercial (montos,
+    fechas) que hace falta conservar por contabilidad.
+    """
+    _ensure_tablas()
+    dominio = (dominio or "").strip().lower()
+    if not dominio:
+        return 0
+    anonimo = json.dumps({"nombre": "[dato eliminado a pedido del comprador]"},
+                         ensure_ascii=False)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if pedidos_externos:
+                cur.execute("""
+                    UPDATE pedidos_tienda p SET destinatario = %s::jsonb
+                    FROM tiendas_conectadas t
+                    WHERE p.tienda_id = t.id AND t.dominio = %s
+                      AND p.pedido_externo_id = ANY(%s)
+                """, (anonimo, dominio, [str(x) for x in pedidos_externos]))
+            else:
+                cur.execute("""
+                    UPDATE pedidos_tienda p SET destinatario = %s::jsonb
+                    FROM tiendas_conectadas t
+                    WHERE p.tienda_id = t.id AND t.dominio = %s
+                """, (anonimo, dominio))
+            n = cur.rowcount
+        conn.commit()
+    return n
+
+
+def borrar_datos_tienda(dominio: str) -> int:
+    """
+    GDPR — el comercio desinstaló y pasaron 48 hs: se borra todo lo suyo.
+    Los pedidos caen solos por la clave foránea de tiendas_conectadas.
+    """
+    _ensure_tablas()
+    dominio = (dominio or "").strip().lower()
+    if not dominio:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tiendas_conectadas WHERE dominio = %s", (dominio,))
+            n = cur.rowcount
+            cur.execute("DELETE FROM config_envio_tienda WHERE dominio = %s", (dominio,))
+        conn.commit()
+    return n
+
+
 def descartar_pedido(cliente_id: str, pedido_id: int) -> None:
     _ensure_tablas()
     with get_conn() as conn:
