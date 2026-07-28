@@ -75,14 +75,158 @@ async def shopify_webhook(request: Request):
     return {"ok": True, "nuevo": creado}
 
 
+@router.get("/tiendanube/callback")
+def tiendanube_callback(request: Request, code: str = ""):
+    """
+    Tiendanube vuelve acá con el `code` después de que el comerciante
+    aceptó los permisos. Lo canjeamos por el token permanente, damos de
+    alta los webhooks y, si tiene sesión del portal abierta, atamos la
+    tienda a su cuenta en el acto.
+    """
+    from fastapi.responses import HTMLResponse
+
+    from servicios.tiendanube_app import (
+        app_configurada, canjear_token, guardar_instalacion,
+        registrar_webhooks, datos_tienda, vincular_cliente,
+    )
+
+    def _pag(titulo: str, texto: str, boton: str = "", status: int = 200):
+        return HTMLResponse(
+            f"""<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{titulo} · TAURO Solutions</title><style>
+body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#0c0a14;color:#f4f5f7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
+text-align:center;padding:24px;}} .b{{max-width:480px;}}
+h1{{font-size:30px;margin:0 0 14px;}} p{{color:#b9bfc7;line-height:1.7;margin:0 0 26px;}}
+a{{display:inline-block;background:#7c5cf6;color:#fff;padding:14px 30px;
+border-radius:999px;text-decoration:none;font-weight:600;}}
+</style></head><body><div class="b"><h1>{titulo}</h1><p>{texto}</p>{boton}</div></body></html>""",
+            status_code=status,
+        )
+
+    if not app_configurada():
+        return _pag("App en preparación",
+                    "La integración con Tiendanube todavía no está habilitada.",
+                    '<a href="https://taurosolutions.ar/portal/tienda">Ir al portal</a>',
+                    status=503)
+    if not code:
+        return _pag("Instalación incompleta",
+                    "Tiendanube no nos devolvió el código de autorización. "
+                    "Probá instalar de nuevo desde tu panel.", status=400)
+
+    data = canjear_token(code)
+    if not data or not data.get("access_token") or not data.get("user_id"):
+        return _pag("No pudimos conectar",
+                    "Tiendanube no nos dio el permiso. Probá de nuevo.", status=502)
+
+    store_id = str(data["user_id"])
+    token = data["access_token"]
+
+    info = datos_tienda(store_id, token)
+    nombre = ""
+    if isinstance(info, dict):
+        n = info.get("name")
+        nombre = (n.get("es") or n.get("pt") or "") if isinstance(n, dict) else str(n or "")
+
+    guardar_instalacion(store_id, token, nombre)
+    eventos = registrar_webhooks(store_id, token)
+
+    dueno = None
+    try:
+        from servicios.auth import validar_token
+        dueno = validar_token(request.cookies.get("token") or "")
+        if dueno:
+            vincular_cliente(store_id, dueno)
+    except Exception as e:
+        print(f"[tiendanube] no pude vincular la tienda {store_id}: {e}")
+
+    print(f"[tiendanube] instalada tienda {store_id} ({nombre or 's/nombre'}) · "
+          f"webhooks {eventos} · cliente {dueno or 'sin vincular'}")
+
+    if dueno:
+        texto = ("Listo: desde ahora cada venta con envío aparece en tu portal "
+                 "lista para generar la guía con un click.")
+    else:
+        texto = ("Tu tienda quedó conectada. Entrá al portal, sección "
+                 "<b>Mi tienda</b>, y tocá «Es mi tienda — vincular» para "
+                 "empezar a recibir tus ventas.")
+    return _pag("¡Tienda conectada!", texto,
+                '<a href="https://taurosolutions.ar/portal/tienda">Ver mis pedidos</a>')
+
+
 @router.post("/tiendanube/webhook")
 async def tiendanube_webhook(request: Request):
     """
-    Tiendanube manda webhooks solo a través de una app registrada
-    (OAuth de Partner). El receptor queda listo; se activa cuando la
-    cuenta de Partner de TAURO esté aprobada y las credenciales
-    (TIENDANUBE_CLIENT_ID / TIENDANUBE_CLIENT_SECRET) estén en Railway.
+    Ventas de Tiendanube. El webhook trae sólo el id del pedido, así que
+    hay que ir a buscarlo a la API con el token de esa tienda.
+
+    Firma: HMAC-SHA256 en HEXADECIMAL (Shopify usa base64) con el
+    client_secret de la app.
     """
+    import json as _json
+    import os as _os
+
+    from servicios.integraciones_tienda import (
+        verificar_hmac_tiendanube, guardar_pedido, cancelar_pedido_externo,
+    )
+    from servicios.tiendanube_app import (
+        app_configurada, instalacion, parsear_pedido, _api, desinstalar,
+    )
+
     cuerpo = await request.body()
-    print(f"[integraciones] webhook tiendanube recibido ({len(cuerpo)} bytes) — app Partner pendiente")
-    return {"ok": True, "estado": "tiendanube_proximamente"}
+    if not app_configurada():
+        print("[tiendanube] webhook recibido pero la app no está configurada")
+        return {"ok": True, "estado": "app_no_configurada"}
+
+    secreto = _os.getenv("TIENDANUBE_CLIENT_SECRET", "")
+    firma = request.headers.get("x-linkedstore-hmac-sha256", "")
+    if not verificar_hmac_tiendanube(secreto, cuerpo, firma):
+        print("[tiendanube] firma INVÁLIDA")
+        return JSONResponse({"ok": False}, status_code=401)
+
+    try:
+        datos = _json.loads(cuerpo.decode("utf-8"))
+    except Exception:
+        return JSONResponse({"ok": False, "error": "JSON inválido"}, status_code=400)
+
+    store_id = str(datos.get("store_id") or "")
+    evento = datos.get("event") or ""
+    pedido_id = str(datos.get("id") or "")
+
+    if evento == "app/uninstalled":
+        desinstalar(store_id)
+        print(f"[tiendanube] tienda {store_id} desinstaló la app")
+        return {"ok": True}
+
+    inst = instalacion(store_id)
+    if not inst or not inst.get("cliente_id"):
+        print(f"[tiendanube] tienda {store_id} sin vincular a una cuenta TAURO")
+        return {"ok": True, "estado": "sin_vincular"}
+
+    # El webhook sólo trae el id: el pedido completo se pide a la API.
+    r = _api(store_id, inst["access_token"], "GET", f"orders/{pedido_id}")
+    if r is None or r.status_code != 200:
+        print(f"[tiendanube] no pude leer el pedido {pedido_id}: "
+              f"{r.status_code if r is not None else 'sin respuesta'}")
+        return {"ok": True, "estado": "pedido_no_leido"}
+
+    pedido = parsear_pedido(r.json())
+    if not pedido:
+        print(f"[tiendanube] pedido {pedido_id} sin dirección de envío, ignorado")
+        return {"ok": True, "ignorado": "sin_direccion_envio"}
+
+    from servicios.integraciones_tienda import tienda_por_dominio
+    tienda = tienda_por_dominio(f"{store_id}.tiendanube")
+    if not tienda:
+        return {"ok": True, "estado": "tienda_no_registrada"}
+
+    if evento == "order/cancelled" or pedido.get("cancelado"):
+        cancelar_pedido_externo(tienda["id"], pedido["pedido_externo_id"])
+        print(f"[tiendanube] pedido {pedido['numero']} cancelado → fuera de pendientes")
+        return {"ok": True, "cancelado": True}
+
+    creado = guardar_pedido(inst["cliente_id"], tienda["id"], "tiendanube", pedido)
+    print(f"[tiendanube] tienda {store_id} pedido {pedido['numero']} → "
+          f"{'guardado' if creado else 'actualizado'}")
+    return {"ok": True, "nuevo": creado}
