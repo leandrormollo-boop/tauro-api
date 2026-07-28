@@ -42,8 +42,18 @@ small{{display:block;margin-top:26px;color:#7a828c;font-size:13px}}
 </div></body></html>"""
 
 
-def _pagina(titulo: str, texto: str, boton: str = "", status: int = 200) -> HTMLResponse:
-    return HTMLResponse(_PAGINA.format(titulo=titulo, texto=texto, boton=boton), status_code=status)
+def _pagina(titulo: str, texto: str, boton: str = "", status: int = 200,
+            shop: str = "") -> HTMLResponse:
+    # frame-ancestors SIEMPRE: estas páginas se abren dentro del admin de
+    # Shopify. Sin este header el navegador bloquea el iframe y el
+    # comerciante ve una pantalla en blanco sin ninguna explicación.
+    permitido = f"https://{shop} " if shop else ""
+    return HTMLResponse(
+        _PAGINA.format(titulo=titulo, texto=texto, boton=boton),
+        status_code=status,
+        headers={"Content-Security-Policy":
+                 f"frame-ancestors {permitido}https://admin.shopify.com https://*.myshopify.com;"},
+    )
 
 
 @router.get("/install", response_class=HTMLResponse)
@@ -69,13 +79,19 @@ def install(request: Request, shop: str = ""):
         shop = _shop_desde_host(request.query_params.get("host", "")) or shop
 
     if not dominio_valido(shop):
+        # Última vía: dentro del admin, App Bridge sabe cuál es la tienda
+        # aunque Shopify no la haya puesto en la URL. Le pedimos el dato al
+        # navegador y recargamos con él. El flag `reintento` corta cualquier
+        # posibilidad de loop si App Bridge tampoco lo tiene.
+        if not request.query_params.get("reintento"):
+            return _pagina_autodeteccion()
         # 200 y no 400: un error acá hace que Shopify reintente sin parar.
         return _pagina(
             "Abrí TAURO desde tu tienda",
-            "Entrá desde el panel de Shopify (Apps → TAURO Solutions) o "
-            "agregá tu dominio a la dirección: "
-            "/shopify/install?shop=tutienda.myshopify.com",
-            '<a href="https://taurosolutions.ar/portal/tienda">Ir a mi portal</a>',
+            "No pudimos detectar tu tienda automáticamente. Entrá desde el "
+            "panel de Shopify (Apps → TAURO Solutions) o agregá tu dominio a "
+            "la dirección: /shopify/install?shop=tutienda.myshopify.com",
+            '<a href="https://taurosolutions.ar/portal/tienda" target="_top">Ir a mi portal</a>',
         )
 
     # Si la tienda YA instaló la app, Shopify abre esta misma URL cada vez
@@ -93,6 +109,51 @@ def install(request: Request, shop: str = ""):
 
     destino = url_instalacion(shop, nuevo_state())
     return RedirectResponse(url=destino, status_code=303)
+
+
+def _pagina_autodeteccion() -> HTMLResponse:
+    """
+    Pantalla puente: le pregunta a App Bridge cuál es la tienda y recarga
+    con ese dato. Dura un parpadeo y evita que el comerciante tenga que
+    escribir su dominio a mano.
+    """
+    api_key = os.getenv("SHOPIFY_API_KEY", "")
+    return HTMLResponse(
+        headers={"Content-Security-Policy":
+                 "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"},
+        content=f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<title>TAURO Solutions</title>
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+        data-api-key="{api_key}"></script>
+<style>
+  body {{ margin:0; min-height:100vh; display:flex; align-items:center;
+         justify-content:center; background:#0c0a14; color:#8b86a0;
+         font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:14px; }}
+</style></head>
+<body>
+  <div>Abriendo TAURO…</div>
+  <script>
+    (function () {{
+      // App Bridge expone la tienda en window.shopify.config.shop.
+      // Si no está, probamos con el host de la URL padre.
+      var shop = "";
+      try {{ shop = (window.shopify && window.shopify.config && window.shopify.config.shop) || ""; }} catch (e) {{}}
+      if (!shop) {{
+        try {{
+          var h = new URLSearchParams(location.search).get("host");
+          if (h) {{
+            var d = atob(h.replace(/-/g, "+").replace(/_/g, "/"));
+            var m = d.match(/\\/store\\/([^\\/?#]+)/);
+            if (m) shop = m[1] + ".myshopify.com";
+          }}
+        }} catch (e) {{}}
+      }}
+      var destino = "/shopify/install?reintento=1" + (shop ? "&shop=" + encodeURIComponent(shop) : "");
+      location.replace(destino);
+    }})();
+  </script>
+</body></html>""")
 
 
 def _shop_desde_host(host_b64: str) -> str:
