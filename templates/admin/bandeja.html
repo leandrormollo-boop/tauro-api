@@ -48,7 +48,24 @@
         </form>
     </div>
     <p style="margin:12px 0 0;font-size:12px;color:var(--fg-3);">
-        Se actualizan solas todas las noches a las 4:00. Tarda unos minutos: corre en segundo plano.
+        Se actualizan solas todas las noches a las 4:00 y al arrancar si la tabla está vacía.
+    </p>
+</div>
+
+{# Backup: red extra bajo control de Tauro, además del de Railway #}
+<div class="card" style="margin-bottom:24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+            <h3 style="margin:0 0 4px;">Backup de datos</h3>
+            <p class="sub" style="margin:0;">
+                Descargá un archivo con clientes, envíos, pagos, catálogo, direcciones e
+                integraciones. Guardalo donde quieras: es tu copia, aparte de la de Railway.
+            </p>
+        </div>
+        <a class="btn btn-ghost btn-sm" href="/admin/backup.json">Descargar backup</a>
+    </div>
+    <p style="margin:12px 0 0;font-size:12px;color:var(--fg-3);">
+        No incluye contraseñas ni tokens de tiendas — si el archivo se filtrara, no le sirve a nadie para entrar.
     </p>
 </div>
 

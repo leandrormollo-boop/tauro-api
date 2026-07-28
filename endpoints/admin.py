@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Request, Form, Cookie, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from core.database import get_conn
@@ -511,6 +511,27 @@ def admin_bandeja(request: Request, admin_token: Optional[str] = Cookie(None)):
             "total_cliente": sum(f["pendiente_cliente"] for f in filas),
             "cache": estado_cache(),
         },
+    )
+
+
+@router.get("/backup.json")
+def admin_backup(admin_token: Optional[str] = Cookie(None)):
+    """Descarga un snapshot de todos los datos del negocio."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from datetime import datetime as _dt
+    from servicios.backup import generar_backup_json
+    try:
+        contenido = generar_backup_json()
+    except Exception as e:
+        print(f"[admin] backup falló: {e}")
+        return JSONResponse({"ok": False, "error": "No se pudo generar el backup."},
+                            status_code=500)
+    nombre = f"tauro-backup-{_dt.now().strftime('%Y%m%d-%H%M')}.json"
+    return Response(
+        content=contenido,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
     )
 
 
