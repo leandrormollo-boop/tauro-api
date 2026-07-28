@@ -59,15 +59,24 @@ def install(request: Request, shop: str = ""):
             "Mientras tanto podés conectar tu tienda desde el portal con el modo manual.",
             '<a href="https://taurosolutions.ar/portal/tienda">Ir al portal</a>',
         )
-    if not dominio_valido(shop):
-        return _pagina(
-            "Falta tu tienda",
-            "Entrá desde el App Store de Shopify o agregá tu dominio: "
-            "/shopify/install?shop=tutienda.myshopify.com",
-            status=400,
-        )
+    shop = (shop or "").strip().lower()
 
-    shop = shop.strip().lower()
+    # Cuando Shopify abre la app YA INSTALADA dentro de su admin, no
+    # siempre manda `shop`: el contexto viaja en `host` (base64 de
+    # "admin.shopify.com/store/LA-TIENDA"). Sin esto devolvíamos 400 y
+    # Shopify reintentaba en loop → pantalla en blanco eterna.
+    if not dominio_valido(shop):
+        shop = _shop_desde_host(request.query_params.get("host", "")) or shop
+
+    if not dominio_valido(shop):
+        # 200 y no 400: un error acá hace que Shopify reintente sin parar.
+        return _pagina(
+            "Abrí TAURO desde tu tienda",
+            "Entrá desde el panel de Shopify (Apps → TAURO Solutions) o "
+            "agregá tu dominio a la dirección: "
+            "/shopify/install?shop=tutienda.myshopify.com",
+            '<a href="https://taurosolutions.ar/portal/tienda">Ir a mi portal</a>',
+        )
 
     # Si la tienda YA instaló la app, Shopify abre esta misma URL cada vez
     # que el comerciante hace click en TAURO desde su admin. Mandarlo de
@@ -84,6 +93,27 @@ def install(request: Request, shop: str = ""):
 
     destino = url_instalacion(shop, nuevo_state())
     return RedirectResponse(url=destino, status_code=303)
+
+
+def _shop_desde_host(host_b64: str) -> str:
+    """
+    Shopify manda `host` en base64: "admin.shopify.com/store/mitienda".
+    De ahí sacamos el dominio .myshopify.com que necesitamos.
+    """
+    if not host_b64:
+        return ""
+    try:
+        import base64
+        # base64 url-safe sin padding: se lo agregamos nosotros.
+        faltante = "=" * (-len(host_b64) % 4)
+        crudo = base64.urlsafe_b64decode(host_b64 + faltante).decode("utf-8", "ignore")
+    except Exception:
+        return ""
+    marca = "/store/"
+    if marca not in crudo:
+        return ""
+    tienda = crudo.split(marca, 1)[1].split("/")[0].split("?")[0].strip().lower()
+    return f"{tienda}.myshopify.com" if tienda else ""
 
 
 def _panel_tienda(shop: str, inst: dict, host: str = "") -> HTMLResponse:
