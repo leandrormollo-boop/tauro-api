@@ -413,7 +413,10 @@ def cotizar_para_checkout(payload: dict) -> dict:
             continue
 
         detalle = f"Entrega estimada {c.get('dias_estimados', '3-5')} días hábiles · vía TAURO Solutions"
-        if tax_ars:
+        # El impuesto NO se suma cuando el comerciante decidió el precio a
+        # mano: si eligió "gratis" el envío tiene que salir $0 (si no, deja
+        # de ser gratis), y si eligió un precio fijo tiene que ser ese.
+        if tax_ars and config.get("politica") not in ("gratis", "fijo"):
             precio += tax_ars
             detalle += " · impuestos de destino estimados incluidos"
 

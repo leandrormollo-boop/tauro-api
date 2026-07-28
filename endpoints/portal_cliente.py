@@ -582,11 +582,21 @@ def envio_nuevo_form(
             resumen = " · ".join(
                 f"{it.get('cantidad', 1)}x {it.get('titulo', '')}".strip() for it in items
             )[:400]
+            # La dirección va completa (calle + piso/depto): si el piso se
+            # pierde, el paquete llega al edificio pero no al departamento.
+            direccion_full = " - ".join(
+                x for x in [d.get("direccion", ""), d.get("direccion2", "")] if x
+            )
+            # En ventas B2B lo que figura en recepción es la razón social.
+            nombre_full = d.get("nombre", "")
+            if d.get("empresa"):
+                nombre_full = f"{nombre_full} ({d['empresa']})" if nombre_full else d["empresa"]
+
             form = {
-                "dest_nombre": d.get("nombre", ""),
+                "dest_nombre": nombre_full,
                 "dest_email": d.get("email", ""),
                 "dest_telefono": d.get("telefono", ""),
-                "dest_direccion": d.get("direccion", ""),
+                "dest_direccion": direccion_full,
                 "dest_ciudad": d.get("ciudad", ""),
                 "dest_estado": d.get("estado", ""),
                 "dest_zip": d.get("cp", ""),

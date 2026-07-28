@@ -55,11 +55,23 @@ async def shopify_webhook(request: Request):
     pedido = parsear_pedido_shopify(order)
     if not pedido:
         # Pedido sin dirección de envío (digital/retiro): no es un envío.
+        # Se loguea igual para no quedarnos sin rastro si alguien reclama.
+        print(f"[integraciones] shopify {dominio} pedido {order.get('name') or order.get('id')} "
+              f"ignorado: sin dirección de envío")
         return {"ok": True, "ignorado": "sin_direccion_envio"}
+
+    # Un pedido cancelado (o cuyo pago se anuló) no se despacha: se saca de
+    # pendientes para que nadie mande mercadería de una venta caída.
+    if pedido.get("cancelado") or pedido.get("estado_pago") in ("refunded", "voided"):
+        from servicios.integraciones_tienda import cancelar_pedido_externo
+        cambio = cancelar_pedido_externo(tienda["id"], pedido["pedido_externo_id"])
+        print(f"[integraciones] shopify {dominio} pedido {pedido['numero']} "
+              f"cancelado/anulado → {'sacado de pendientes' if cambio else 'no estaba pendiente'}")
+        return {"ok": True, "cancelado": True}
 
     creado = guardar_pedido(tienda["cliente_id"], tienda["id"], "shopify", pedido)
     print(f"[integraciones] shopify {dominio} pedido {pedido['numero']} → "
-          f"{'guardado' if creado else 'ya existia'}")
+          f"{'guardado' if creado else 'actualizado'}")
     return {"ok": True, "nuevo": creado}
 
 

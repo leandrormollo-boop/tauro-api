@@ -135,10 +135,70 @@ async def tarifas(request: Request):
     # Shopify no manda la tienda en el body: viene por header. La pasamos
     # dentro del payload para saber qué política de flete aplicar.
     payload["_dominio"] = request.headers.get("x-shopify-shop-domain", "")
+
+    # DOS PROTECCIONES QUE NO SON OPCIONALES ACÁ:
+    #
+    # 1. run_in_threadpool — cotizar_para_checkout es 100% síncrona (psycopg2,
+    #    requests). Llamarla derecho desde un handler async bloquea el event
+    #    loop: un checkout lento dejaría sin atender a TODOS los demás
+    #    compradores, de todas las tiendas, hasta que termine.
+    #
+    # 2. wait_for — Shopify corta cerca de los 10s. Sin deadline propio, un
+    #    courier colgado puede tardar minutos y el comprador se queda sin
+    #    opción de envío. Preferimos la tarifa de emergencia a tiempo antes
+    #    que la tarifa exacta tarde.
+    import asyncio
+    from starlette.concurrency import run_in_threadpool
+
     try:
-        return cotizar_para_checkout(payload)
+        return await asyncio.wait_for(
+            run_in_threadpool(cotizar_para_checkout, payload),
+            timeout=PRESUPUESTO_CHECKOUT_S,
+        )
+    except asyncio.TimeoutError:
+        print(f"[shopify] /tarifas superó {PRESUPUESTO_CHECKOUT_S}s → tarifa de emergencia")
+        return _tarifas_de_emergencia(payload)
     except Exception as e:
         print(f"[shopify] /tarifas error: {e}")
+        return _tarifas_de_emergencia(payload)
+
+
+# Presupuesto propio, con aire respecto del corte de Shopify (~10s).
+PRESUPUESTO_CHECKOUT_S = 6.0
+
+
+def _tarifas_de_emergencia(payload: dict) -> dict:
+    """
+    Última red: si el camino normal no llegó a tiempo o falló, el comprador
+    igual ve una opción de envío. Nunca devolvemos vacío desde acá.
+    """
+    try:
+        import os
+        from servicios.tarifas_cache import tarifa_emergencia
+
+        rate = (payload or {}).get("rate") or {}
+        destino = rate.get("destination") or {}
+        pais = (destino.get("country") or "").upper()
+        if not pais or pais == "AR":
+            return {"rates": []}
+
+        items = rate.get("items") or []
+        peso = sum((it.get("grams") or 0) * (it.get("quantity") or 1) for it in items) / 1000.0
+        peso = max(round(peso, 2), 0.5)
+        dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+
+        rates = []
+        for c in tarifa_emergencia(pais, peso, dolar):
+            rates.append({
+                "service_name": f"{c['nombre']} — {c['servicio']}",
+                "service_code": f"TAURO_{c['id'].upper()}",
+                "total_price": str(int(round(float(c["precio_ars"]) * 100))),
+                "currency": "ARS",
+                "description": f"Entrega estimada {c.get('dias_estimados', '5-9')} días hábiles · vía TAURO Solutions",
+            })
+        return {"rates": rates}
+    except Exception as e:
+        print(f"[shopify] ni la tarifa de emergencia salió: {e}")
         return {"rates": []}
 
 

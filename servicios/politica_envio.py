@@ -87,7 +87,8 @@ def guardar_config(dominio: str, cliente_id: str, politica: str,
                    markup_pct: float = 0, precio_fijo_ars: float = 0,
                    mostrar_tax: bool = False, tax_pct_default: float = 0,
                    etiqueta: str = "") -> dict:
-    _ensure_tabla()
+    # Validar ANTES de tocar la base: un formulario mal cargado no tiene
+    # por qué abrir una conexión.
     dominio = (dominio or "").strip().lower()
     if not dominio:
         return {"ok": False, "error": "Falta el dominio de la tienda."}
@@ -99,6 +100,19 @@ def guardar_config(dominio: str, cliente_id: str, politica: str,
     precio_fijo_ars = max(0.0, float(precio_fijo_ars or 0))
     tax_pct_default = max(0.0, min(float(tax_pct_default or 0), 100.0))
 
+    # "Precio fijo" en 0 es casi siempre un descuido (el campo quedó vacío),
+    # y regalaría todos los envíos internacionales sin que nadie lo note.
+    # Si de verdad quiere envío gratis, existe esa política.
+    if politica == "fijo" and precio_fijo_ars <= 0:
+        return {"ok": False,
+                "error": "Poné un precio fijo mayor a cero. "
+                         "Si querés que el envío salga $0, elegí la opción 'Envío gratis'."}
+    if politica == "markup" and markup_pct <= 0:
+        return {"ok": False,
+                "error": "El porcentaje a sumar tiene que ser mayor a cero. "
+                         "Si no querés sumar nada, elegí 'Lo que cotiza TAURO'."}
+
+    _ensure_tabla()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -160,12 +174,16 @@ def _tax_por_sku(cliente_id: str, skus: list[str]) -> dict:
     _ensure_tabla()
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Comparación en MAYÚSCULAS de los dos lados: el SKU viene de
+            # Shopify y el alias lo escribió el comerciante a mano. Exigir
+            # que coincidan letra por letra hacía que el tax por producto
+            # casi nunca matcheara ("RJ-5000" vs "rj-5000").
             cur.execute("""
                 SELECT alias_interno, tax_estimado_usd
                 FROM productos
-                WHERE cliente_id = %s AND alias_interno = ANY(%s)
+                WHERE cliente_id = %s AND UPPER(TRIM(alias_interno)) = ANY(%s)
             """, (cliente_id.strip().upper(), skus))
-            return {r["alias_interno"]: float(r["tax_estimado_usd"] or 0)
+            return {r["alias_interno"].strip().upper(): float(r["tax_estimado_usd"] or 0)
                     for r in cur.fetchall()}
 
 

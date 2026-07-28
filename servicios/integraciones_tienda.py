@@ -186,29 +186,55 @@ def parsear_pedido_shopify(order: dict) -> Optional[dict]:
     nombre = (ship.get("name")
               or f"{ship.get('first_name', '')} {ship.get('last_name', '')}".strip())
 
+    # province_code ANTES que province: los couriers piden el código de dos
+    # letras ("FL"), no el nombre ("Florida"). Mandar el nombre hace que
+    # FedEx rechace la guía y el envío quede trabado.
+    estado = (ship.get("province_code") or ship.get("province") or "")
+
+    # address2 (piso/depto) va aparte: fusionarla en una sola línea larga
+    # hace que el courier la trunque y el paquete llegue al edificio pero
+    # no al departamento.
+    direccion = (ship.get("address1") or "").strip()
+    direccion2 = (ship.get("address2") or "").strip()
+
     return {
         "pedido_externo_id": str(order.get("id") or ""),
         "numero": str(order.get("name") or order.get("order_number") or ""),
         "destinatario": {
             "nombre": nombre[:160],
+            # company: en ventas B2B la razón social es lo que figura en
+            # recepción; sin esto el paquete puede rebotar.
+            "empresa": (ship.get("company") or "")[:160],
             "email": (order.get("email") or order.get("contact_email") or "")[:160],
             "telefono": (ship.get("phone") or order.get("phone") or "")[:40],
-            "direccion": " ".join(x for x in [ship.get("address1"), ship.get("address2")] if x)[:300],
+            "direccion": direccion[:300],
+            "direccion2": direccion2[:150],
             "ciudad": (ship.get("city") or "")[:120],
-            "estado": (ship.get("province") or "")[:120],
+            "estado": estado[:120],
             "cp": (ship.get("zip") or "")[:24],
             "pais": (ship.get("country_code") or "")[:3],
         },
         "items": items,
         "valor_total": order.get("total_price"),
         "moneda": (order.get("currency") or "")[:6],
+        # Estado comercial: un pedido cancelado o sin pagar no se despacha.
+        "cancelado": bool(order.get("cancelled_at")),
+        "estado_pago": (order.get("financial_status") or "")[:30],
     }
 
 
 # ── Pedidos pendientes ──────────────────────────────────────
 
 def guardar_pedido(cliente_id: str, tienda_id: int, plataforma: str, pedido: dict) -> bool:
-    """Idempotente: si el webhook llega dos veces, la segunda no duplica."""
+    """
+    Guarda o ACTUALIZA un pedido de la tienda.
+
+    Idempotente por (tienda, pedido): un webhook repetido no duplica. Y si
+    llega un `orders/updated` —el comprador corrigió su dirección, cosa que
+    pasa seguido— los datos nuevos pisan a los viejos MIENTRAS el pedido
+    siga pendiente. Si ya se convirtió en envío no se toca: la guía se
+    emitió con los datos de ese momento y cambiarlos a mano confundiría.
+    """
     _ensure_tablas()
     if not pedido.get("pedido_externo_id"):
         return False
@@ -219,8 +245,14 @@ def guardar_pedido(cliente_id: str, tienda_id: int, plataforma: str, pedido: dic
                     (cliente_id, tienda_id, plataforma, pedido_externo_id, numero,
                      destinatario, items, valor_total, moneda)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (tienda_id, pedido_externo_id) DO NOTHING
-                RETURNING id
+                ON CONFLICT (tienda_id, pedido_externo_id) DO UPDATE SET
+                    destinatario = EXCLUDED.destinatario,
+                    items        = EXCLUDED.items,
+                    valor_total  = EXCLUDED.valor_total,
+                    moneda       = EXCLUDED.moneda,
+                    numero       = EXCLUDED.numero
+                WHERE pedidos_tienda.estado = 'PENDIENTE'
+                RETURNING (xmax = 0) AS es_nuevo
             """, (
                 cliente_id, tienda_id, plataforma,
                 pedido["pedido_externo_id"], pedido.get("numero"),
@@ -228,9 +260,30 @@ def guardar_pedido(cliente_id: str, tienda_id: int, plataforma: str, pedido: dic
                 json.dumps(pedido.get("items") or [], ensure_ascii=False),
                 pedido.get("valor_total"), pedido.get("moneda"),
             ))
-            creado = cur.fetchone() is not None
+            fila = cur.fetchone()
+            creado = bool(fila and fila.get("es_nuevo"))
         conn.commit()
     return creado
+
+
+def cancelar_pedido_externo(tienda_id: int, pedido_externo_id: str) -> bool:
+    """
+    El comprador canceló en la tienda: sacamos el pedido de los pendientes
+    para que nadie despache algo que ya no se vende. Sólo toca los que
+    todavía no se convirtieron en envío.
+    """
+    _ensure_tablas()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE pedidos_tienda SET estado = 'CANCELADO'
+                WHERE tienda_id = %s AND pedido_externo_id = %s
+                  AND estado = 'PENDIENTE'
+                RETURNING id
+            """, (tienda_id, str(pedido_externo_id)))
+            cambio = cur.fetchone() is not None
+        conn.commit()
+    return cambio
 
 
 def listar_pedidos(cliente_id: str, estado: str = "PENDIENTE", limite: int = 100) -> list[dict]:
