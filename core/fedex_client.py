@@ -494,7 +494,12 @@ class FedExClient(CarrierBase):
 
         url = f"{self.base_url}/ship/v1/shipments"
         try:
-            resp = self._request_with_retry("POST", url, json=payload)
+            # SIN REINTENTOS. Emitir una guía NO es idempotente: si FedEx
+            # ya creó el envío y la respuesta se pierde (timeout, 502),
+            # repetir el POST crea un SEGUNDO envío real, con su etiqueta
+            # y su declaración de aduana. Preferimos fallar y que un humano
+            # verifique en fedex.com antes que duplicar en silencio.
+            resp = self._request_with_retry("POST", url, json=payload, max_retries=1)
             data = resp.json() if resp.content else {}
 
             if resp.status_code not in (200, 201):

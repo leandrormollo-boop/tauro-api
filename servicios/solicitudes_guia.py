@@ -18,6 +18,13 @@ ESTADOS_SOLICITUD = [
     "CANCELADO",
 ]
 
+# Estado transitorio: dura los segundos que tarda el courier en emitir.
+# Es la reserva que impide que dos clicks generen dos guías reales, y por
+# eso no se ofrece en el desplegable del admin — lo pone y lo saca el
+# sistema solo.
+ESTADO_EMITIENDO = "EMITIENDO"
+ESTADOS_VALIDOS = ESTADOS_SOLICITUD + [ESTADO_EMITIENDO]
+
 
 def _clean(value: Optional[str]) -> Optional[str]:
     value = (value or "").strip()
@@ -227,7 +234,14 @@ def actualizar_solicitud_guia(
     tracking: str = "",
     guia_url: str = "",
 ) -> None:
-    """Actualiza estado operativo, tracking y URL/documento de guía."""
+    """
+    Actualiza estado operativo, tracking y URL/documento de guía.
+
+    Un campo vacío NO pisa lo que ya había: el form del admin manda todos
+    los campos siempre, así que cambiar sólo el estado borraba el tracking
+    de una guía ya emitida — y con el tracking en blanco la solicitud
+    volvía a quedar habilitada para emitir OTRA guía.
+    """
     estado = (estado or "").strip().upper()
     if estado not in ESTADOS_SOLICITUD:
         raise ValueError(f"Estado inválido: {estado}")
@@ -237,7 +251,10 @@ def actualizar_solicitud_guia(
             cur.execute(
                 """
                 UPDATE solicitudes_guia
-                SET estado=%s, tracking=%s, guia_url=%s, updated_at=NOW()
+                SET estado=%s,
+                    tracking = COALESCE(NULLIF(%s, ''), tracking),
+                    guia_url = COALESCE(NULLIF(%s, ''), guia_url),
+                    updated_at=NOW()
                 WHERE id=%s
                 """,
                 (estado, _clean(tracking), _clean(guia_url), solicitud_id),
@@ -315,36 +332,83 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
     # el pedido queda "Enviado" con su tracking y el comprador recibe el
     # mail solo. Nunca dejamos que un fallo acá tumbe la emisión de la
     # guía — la guía ya está hecha y es lo que importa.
-    try:
-        _avisar_tienda_origen(solicitud_id, tracking, courier)
-    except Exception as e:
-        print(f"[integraciones] no pude avisar a la tienda de la solicitud {solicitud_id}: {e}")
+    # En un hilo aparte: avisarle a la tienda puede tardar (API de un
+    # tercero, con timeout). El admin no puede quedarse colgado mirando
+    # una pantalla en blanco después de emitir — la guía ya está hecha.
+    import threading
+    threading.Thread(
+        target=_avisar_tienda_origen,
+        args=(solicitud_id, tracking, courier),
+        daemon=True,
+    ).start()
 
 
 def _avisar_tienda_origen(solicitud_id: int, tracking: str, courier: str) -> None:
-    """Marca como enviado en Shopify el pedido que originó esta solicitud."""
-    from servicios.shopify_app import marcar_enviado, instalacion
+    """
+    Marca el pedido como enviado en la tienda de origen (Shopify o
+    Tiendanube) para que el comprador reciba su seguimiento solo.
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT p.pedido_externo_id, t.dominio, t.plataforma
-                FROM pedidos_tienda p
-                JOIN tiendas_conectadas t ON t.id = p.tienda_id
-                WHERE p.solicitud_id = %s
-                LIMIT 1
-            """, (solicitud_id,))
-            row = cur.fetchone()
+    Reintenta: si se pierde, el comprador nunca se entera de que su
+    paquete salió y termina escribiéndole al comerciante. Si aun así
+    falla, queda anotado con el tracking para poder rehacerlo a mano.
+    """
+    import time as _t
 
-    if not row or row["plataforma"] != "shopify":
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT p.pedido_externo_id, t.dominio, t.plataforma
+                    FROM pedidos_tienda p
+                    JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                    WHERE p.solicitud_id = %s
+                    ORDER BY p.id DESC
+                    LIMIT 1
+                """, (solicitud_id,))
+                row = cur.fetchone()
+    except Exception as e:
+        print(f"[integraciones] no pude buscar el pedido de la solicitud {solicitud_id}: {e}")
         return
-    if not instalacion(row["dominio"]):
-        # Tienda conectada en modo manual (sin app instalada): no tenemos
-        # token para escribirle. El comerciante marca el envío él mismo.
-        return
 
-    marcar_enviado(row["dominio"], row["pedido_externo_id"], tracking,
-                   "FedEx" if courier.upper() == "FEDEX" else courier.title())
+    if not row:
+        return   # el envío no vino de una tienda: nada que avisar
+
+    plataforma = row["plataforma"]
+    dominio = row["dominio"]
+    pedido_ext = row["pedido_externo_id"]
+    courier_nombre = "FedEx" if courier.upper() == "FEDEX" else courier.title()
+
+    for intento in (1, 2, 3):
+        try:
+            if plataforma == "shopify":
+                from servicios.shopify_app import marcar_enviado, instalacion
+                if not instalacion(dominio):
+                    # Conectada en modo manual (sin app): no hay token para
+                    # escribirle. El comerciante marca el envío él mismo.
+                    return
+                ok = marcar_enviado(dominio, pedido_ext, tracking, courier_nombre)
+            elif plataforma == "tiendanube":
+                from servicios.tiendanube_app import marcar_enviado as tn_enviado
+                store_id = dominio.replace(".tiendanube", "")
+                ok = tn_enviado(store_id, pedido_ext, tracking)
+            else:
+                return
+
+            if ok:
+                print(f"[integraciones] pedido {pedido_ext} de {dominio} marcado "
+                      f"como enviado (tracking {tracking})")
+                return
+        except Exception as e:
+            print(f"[integraciones] intento {intento} avisando a {dominio}: {e}")
+
+        if intento < 3:
+            _t.sleep(intento * 3)
+
+    # Se agotaron los reintentos: que quede constancia con todo lo
+    # necesario para rehacerlo a mano desde el admin de la tienda.
+    print(f"[integraciones] ⚠️ NO PUDE avisar a {dominio} ({plataforma}) que el "
+          f"pedido {pedido_ext} salió con tracking {tracking}. El comprador NO "
+          f"recibió su seguimiento — cargalo a mano en la tienda.")
 
 
 def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Optional[bytes]:
@@ -478,6 +542,48 @@ def generar_guia_envia(sol: dict) -> dict:
     }
 
 
+def _reservar_para_emitir(solicitud_id: int) -> bool:
+    """
+    Marca la solicitud como EMITIENDO, pero sólo si nadie más lo hizo.
+
+    Es un UPDATE condicional: la base garantiza que de N intentos
+    simultáneos exactamente uno modifica la fila. El que obtiene la fila
+    puede llamar al courier; los demás se van con las manos vacías.
+
+    La ventana de 10 minutos es la red por si el proceso muere en el
+    medio (deploy, reinicio): pasado ese rato la solicitud vuelve a
+    quedar disponible en vez de bloquearse para siempre.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET estado = 'EMITIENDO', updated_at = NOW()
+                WHERE id = %s
+                  AND tracking IS NULL
+                  AND (estado <> 'EMITIENDO'
+                       OR updated_at < NOW() - INTERVAL '10 minutes')
+                RETURNING id
+            """, (solicitud_id,))
+            gano = cur.fetchone() is not None
+        conn.commit()
+    return gano
+
+
+def _liberar_reserva(solicitud_id: int, estado: str = "SOLICITADO") -> None:
+    """Devuelve la solicitud a su estado anterior si la emisión falló."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE solicitudes_guia SET estado = %s, updated_at = NOW()
+                    WHERE id = %s AND estado = 'EMITIENDO' AND tracking IS NULL
+                """, (estado, solicitud_id))
+            conn.commit()
+    except Exception as e:
+        print(f"[guia] no pude liberar la reserva de {solicitud_id}: {e}")
+
+
 def generar_guia_fedex(solicitud_id: int) -> dict:
     """
     Emite la guía real en FedEx para una solicitud y guarda tracking + label PDF.
@@ -488,8 +594,24 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
         return {"ok": False, "error": "Solicitud no encontrada."}
     if sol.get("estado") == "CANCELADO":
         return {"ok": False, "error": "La solicitud está cancelada."}
-    if sol.get("tracking") and sol.get("label_pdf"):
+    if sol.get("tracking"):
         return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
+
+    # RESERVA ATÓMICA antes de tocar FedEx.
+    #
+    # Emitir una guía es irreversible: crea un envío real en el courier.
+    # Sin esto, dos clicks (o dos admins, o el reintento del navegador)
+    # entran los dos al chequeo de arriba, los dos pasan, y salen DOS
+    # guías reales para el mismo paquete. La base guarda sólo la última,
+    # así que la otra queda huérfana: existe en FedEx, con su etiqueta y
+    # su declaración de aduana, y nadie sabe a qué envío corresponde.
+    #
+    # El UPDATE condicional lo resuelve de raíz: la base decide quién
+    # gana, y el que pierde ni llega a llamar al courier.
+    if not _reservar_para_emitir(solicitud_id):
+        return {"ok": False,
+                "error": "Ya hay una emisión en curso para esta solicitud. "
+                         "Esperá unos segundos y refrescá la pantalla."}
 
     # Bultos de la solicitud (multi-bulto). Si no hay, cae al camino legacy
     # de un solo bulto con los campos históricos.
@@ -574,19 +696,47 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
         }
 
     from core.fedex_client import FedExClient
-    resultado = FedExClient().create_shipment(datos_envio)
+    try:
+        resultado = FedExClient().create_shipment(datos_envio)
+    except Exception as e:
+        _liberar_reserva(solicitud_id)
+        print(f"[guia] excepción emitiendo la solicitud {solicitud_id}: {e}")
+        return {"ok": False, "error": f"No pudimos emitir la guía: {e}"}
 
     if not resultado.get("encontrado"):
+        _liberar_reserva(solicitud_id)
         return {"ok": False, "error": resultado.get("error", "FedEx no emitió la guía.")}
 
-    guardar_guia_generada(
-        solicitud_id,
-        resultado["tracking"],
-        resultado.get("label_pdf"),
-        courier="FEDEX",
-    )
+    # Desde acá el envío YA EXISTE en FedEx. Si el guardado local falla,
+    # el tracking no puede perderse: quedaría una guía real que TAURO no
+    # sabe que emitió, y el admin podría emitir otra encima. Por eso se
+    # reintenta y, en el peor caso, se grita en los logs con el número.
+    tracking = resultado["tracking"]
+    guardado = False
+    for intento in (1, 2, 3):
+        try:
+            guardar_guia_generada(
+                solicitud_id, tracking, resultado.get("label_pdf"), courier="FEDEX",
+            )
+            guardado = True
+            break
+        except Exception as e:
+            print(f"[guia] intento {intento} de guardar el tracking {tracking} "
+                  f"(solicitud {solicitud_id}) falló: {e}")
+            import time as _t
+            _t.sleep(1)
+
+    if not guardado:
+        print(f"[guia] ⛔ GUÍA EMITIDA SIN GUARDAR — solicitud {solicitud_id}, "
+              f"tracking {tracking}. Cargalo a mano antes de reintentar: el "
+              f"envío YA existe en FedEx.")
+        return {"ok": False,
+                "error": f"La guía se emitió en FedEx (tracking {tracking}) pero no "
+                         f"pudimos guardarla. Anotá ese número y avisá a soporte: "
+                         f"NO vuelvas a generar la guía o saldría duplicada."}
+
     return {
         "ok": True,
-        "tracking": resultado["tracking"],
+        "tracking": tracking,
         "tiene_label": bool(resultado.get("label_pdf")),
     }
