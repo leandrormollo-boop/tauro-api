@@ -233,14 +233,21 @@ def actualizar_solicitud_guia(
     estado: str,
     tracking: str = "",
     guia_url: str = "",
+    pisar: bool = False,
 ) -> None:
     """
     Actualiza estado operativo, tracking y URL/documento de guía.
 
-    Un campo vacío NO pisa lo que ya había: el form del admin manda todos
-    los campos siempre, así que cambiar sólo el estado borraba el tracking
-    de una guía ya emitida — y con el tracking en blanco la solicitud
-    volvía a quedar habilitada para emitir OTRA guía.
+    Por defecto un campo vacío NO pisa lo que ya había: el form del admin
+    manda todos los campos siempre, así que cambiar sólo el estado borraba
+    el tracking de una guía ya emitida — y con el tracking en blanco la
+    solicitud volvía a quedar habilitada para emitir OTRA guía.
+
+    `pisar=True` invierte esa protección A PROPÓSITO: es la salida para un
+    tracking mal tipeado, que antes sólo se arreglaba con SQL a mano. Ojo
+    con lo que implica dejar el tracking vacío: la solicitud vuelve a ser
+    emitible, y si la guía anterior existe en el courier, se puede terminar
+    con DOS guías facturadas. Por eso es un flag explícito y no el default.
     """
     estado = (estado or "").strip().upper()
     if estado not in ESTADOS_SOLICITUD:
@@ -248,17 +255,72 @@ def actualizar_solicitud_guia(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if pisar:
+                cur.execute(
+                    """
+                    UPDATE solicitudes_guia
+                    SET estado=%s, tracking=%s, guia_url=%s, updated_at=NOW()
+                    WHERE id=%s
+                    """,
+                    (estado, _clean(tracking), _clean(guia_url), solicitud_id),
+                )
+                print(f"[solicitudes] solicitud {solicitud_id}: valores PISADOS "
+                      f"por el admin (tracking={tracking!r})")
+            else:
+                cur.execute(
+                    """
+                    UPDATE solicitudes_guia
+                    SET estado=%s,
+                        tracking = COALESCE(NULLIF(%s, ''), tracking),
+                        guia_url = COALESCE(NULLIF(%s, ''), guia_url),
+                        updated_at=NOW()
+                    WHERE id=%s
+                    """,
+                    (estado, _clean(tracking), _clean(guia_url), solicitud_id),
+                )
+
+
+# Qué puede corregir el admin ANTES de emitir. destino_pais queda afuera a
+# propósito: cambiar el país invalida la ruta y el precio cotizado — eso no
+# es una corrección, es otra cotización.
+CAMPOS_EDITABLES_PRE_EMISION = [
+    "dest_nombre", "dest_documento", "dest_email", "dest_telefono",
+    "dest_direccion", "dest_ciudad", "dest_estado", "dest_zip",
+    "producto_alias", "cantidad", "peso_kg", "largo_cm", "ancho_cm",
+    "alto_cm", "valor_declarado_usd", "observaciones",
+]
+
+
+def editar_solicitud_pre_emision(solicitud_id: int, campos: dict) -> None:
+    """
+    Corrige los datos de una solicitud que TODAVÍA no se emitió (el caso
+    típico: el comprador puso mal el piso o el código postal y el
+    comerciante avisó tarde). Sobre una guía ya emitida no se toca nada:
+    los datos viajaron al courier y corregirlos acá sólo escondería la
+    diferencia.
+    """
+    limpios = {k: v for k, v in campos.items()
+               if k in CAMPOS_EDITABLES_PRE_EMISION and v is not None}
+    if not limpios:
+        raise ValueError("No hay campos editables para guardar.")
+
+    sets = ", ".join(f"{k}=%s" for k in limpios)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 UPDATE solicitudes_guia
-                SET estado=%s,
-                    tracking = COALESCE(NULLIF(%s, ''), tracking),
-                    guia_url = COALESCE(NULLIF(%s, ''), guia_url),
-                    updated_at=NOW()
-                WHERE id=%s
+                SET {sets}, updated_at=NOW()
+                WHERE id=%s AND tracking IS NULL AND estado <> %s
+                RETURNING id
                 """,
-                (estado, _clean(tracking), _clean(guia_url), solicitud_id),
+                (*limpios.values(), solicitud_id, ESTADO_EMITIENDO),
             )
+            if cur.fetchone() is None:
+                raise ValueError(
+                    "Esa solicitud ya tiene guía emitida (o se está emitiendo "
+                    "ahora): no se puede editar. Si los datos están mal, hay "
+                    "que anular con el courier y crear una solicitud nueva.")
 
 
 def contar_solicitudes_pendientes() -> int:

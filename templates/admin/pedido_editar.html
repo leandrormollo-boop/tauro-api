@@ -1,0 +1,115 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Editar solicitud #{{ s.id }}{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Operaciones</div>
+  <h1>Editar solicitud #{{ s.id }} · {{ s.cliente_id }}</h1>
+  <p>Corregí los datos ANTES de emitir. Una guía ya emitida no se edita: los datos ya viajaron al courier.</p>
+</div>
+
+{% if request.query_params.get('error') %}
+  <div class="msg error">{{ request.query_params.get('error') }}</div>
+{% endif %}
+
+{% if emitida %}
+<div class="msg warn">
+  Esta solicitud ya tiene guía emitida (tracking {{ s.tracking }}). No se puede editar:
+  si los datos están mal, anulá con el courier y creá una solicitud nueva.
+</div>
+<a href="/admin/pedidos" class="btn btn-ghost">← Volver</a>
+{% else %}
+<div class="card" style="max-width:720px;">
+  <form method="POST" action="/admin/pedidos/{{ s.id }}/editar">
+
+    <h3 style="margin:0 0 12px;">Destinatario</h3>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Nombre *</label>
+        <input type="text" name="dest_nombre" required value="{{ s.dest_nombre or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Documento</label>
+        <input type="text" name="dest_documento" value="{{ s.dest_documento or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="text" name="dest_email" value="{{ s.dest_email or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Teléfono</label>
+        <input type="text" name="dest_telefono" value="{{ s.dest_telefono or '' }}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Dirección *</label>
+      <input type="text" name="dest_direccion" required value="{{ s.dest_direccion or '' }}">
+    </div>
+    <div class="form-grid-3">
+      <div class="form-group">
+        <label>Ciudad *</label>
+        <input type="text" name="dest_ciudad" required value="{{ s.dest_ciudad or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Estado/Provincia</label>
+        <input type="text" name="dest_estado" value="{{ s.dest_estado or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Código postal *</label>
+        <input type="text" name="dest_zip" required value="{{ s.dest_zip or '' }}">
+      </div>
+    </div>
+    <p style="color:var(--fg-4);font-size:12px;margin:2px 0 18px;">
+      El país no se edita ({{ s.destino_pais }}): cambiarlo invalida la ruta y el precio.
+      Si el destino es otro país, cancelá esta solicitud y creá una nueva.
+    </p>
+
+    <h3 style="margin:0 0 12px;">Carga</h3>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Producto (alias)</label>
+        <input type="text" name="producto_alias" value="{{ s.producto_alias or '' }}">
+      </div>
+      <div class="form-group">
+        <label>Cajas</label>
+        <input type="number" name="cantidad" min="1" step="1" value="{{ s.cantidad or 1 }}">
+      </div>
+    </div>
+    <div class="form-grid-3">
+      <div class="form-group">
+        <label>Peso total (kg)</label>
+        <input type="text" name="peso_kg" inputmode="decimal" value="{{ '%g'|format(s.peso_kg or 0) }}">
+      </div>
+      <div class="form-group">
+        <label>Largo × Ancho × Alto (cm)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" name="largo_cm" inputmode="decimal" value="{{ '%g'|format(s.largo_cm or 0) }}">
+          <input type="text" name="ancho_cm" inputmode="decimal" value="{{ '%g'|format(s.ancho_cm or 0) }}">
+          <input type="text" name="alto_cm" inputmode="decimal" value="{{ '%g'|format(s.alto_cm or 0) }}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Valor declarado (USD)</label>
+        <input type="text" name="valor_declarado_usd" inputmode="decimal"
+               value="{{ '%g'|format(s.valor_declarado_usd or 0) }}">
+      </div>
+    </div>
+    <p style="color:var(--fg-4);font-size:12px;margin:2px 0 18px;">
+      Ojo: cambiar peso o medidas NO recotiza. El precio al cliente sigue siendo el
+      cotizado (ARS {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }});
+      si el cambio es grande, recotizá en vez de editar.
+    </p>
+
+    <div class="form-group">
+      <label>Observaciones</label>
+      <textarea name="observaciones" rows="2">{{ s.observaciones or '' }}</textarea>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:8px;">
+      <button type="submit" class="btn btn-primary">Guardar correcciones</button>
+      <a href="/admin/pedidos" class="btn btn-ghost">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

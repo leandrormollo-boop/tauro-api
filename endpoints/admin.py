@@ -1038,6 +1038,7 @@ def admin_pedido_estado(
     estado: str = Form(...),
     tracking: str = Form(""),
     guia_url: str = Form(""),
+    pisar: str = Form(""),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -1048,9 +1049,66 @@ def admin_pedido_estado(
         estado=estado,
         tracking=tracking,
         guia_url=guia_url,
+        # El checkbox "pisar valores" permite corregir (o vaciar) un tracking
+        # mal tipeado sin SQL a mano. Es opt-in por fila, nunca el default.
+        pisar=(pisar == "1"),
     )
     _notificar_estado_async(solicitud_id, estado)
     return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
+
+
+@router.get("/pedidos/{solicitud_id}/editar", response_class=HTMLResponse)
+def admin_pedido_editar_form(
+    request: Request,
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Corrección de datos ANTES de emitir (destinatario, medidas, valor)."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.solicitudes_guia import obtener_solicitud
+    sol = obtener_solicitud(solicitud_id)
+    if not sol:
+        return RedirectResponse(url="/admin/pedidos", status_code=303)
+    return templates.TemplateResponse(
+        request=request, name="admin/pedido_editar.html",
+        context={"seccion": "pedidos", "s": sol,
+                 "emitida": bool(sol.get("tracking"))},
+    )
+
+
+@router.post("/pedidos/{solicitud_id}/editar")
+async def admin_pedido_editar(
+    request: Request,
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.solicitudes_guia import (
+        CAMPOS_EDITABLES_PRE_EMISION, editar_solicitud_pre_emision,
+    )
+
+    form = await request.form()
+    campos = {}
+    for k in CAMPOS_EDITABLES_PRE_EMISION:
+        if k not in form:
+            continue
+        v = str(form.get(k) or "").strip()
+        if k in ("cantidad",):
+            campos[k] = max(int(v or 1), 1)
+        elif k in ("peso_kg", "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_usd"):
+            campos[k] = float((v or "0").replace(",", "."))
+        else:
+            campos[k] = v
+    try:
+        editar_solicitud_pre_emision(solicitud_id, campos)
+    except ValueError as e:
+        from urllib.parse import quote
+        return RedirectResponse(
+            url=f"/admin/pedidos/{solicitud_id}/editar?error={quote(str(e))}",
+            status_code=303)
+    return RedirectResponse(url="/admin/pedidos?ok=editado", status_code=303)
 
 
 @router.post("/pedidos/{solicitud_id}/generar-guia")

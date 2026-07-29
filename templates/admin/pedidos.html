@@ -92,6 +92,9 @@
                     onsubmit="return confirm('¿Generar la guía real en FedEx para el pedido #{{ s.id }}? Esto emite una guía y consume la cuenta.');">
                 <button type="submit" class="btn btn-sm btn-primary">Generar guía en FedEx</button>
               </form>
+              {# Editable sólo pre-emisión: después los datos ya viajaron. #}
+              <a href="/admin/pedidos/{{ s.id }}/editar" class="btn btn-sm btn-ghost"
+                 style="margin-top:6px;">✎ Editar datos</a>
             {% endif %}
           </td>
           <td style="min-width:250px;">
@@ -103,6 +106,13 @@
               </select>
               <input type="text" name="tracking" placeholder="Tracking" value="{{ s.tracking or '' }}">
               <input type="text" name="guia_url" placeholder="URL guía / PDF" value="{{ s.guia_url or '' }}">
+              {# Sin esto, un campo vacío no borra nada (protección anti-pisada).
+                 Tildarlo = lo que escribas (o dejes vacío) MANDA. #}
+              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg-3);cursor:pointer;">
+                <input type="checkbox" name="pisar" value="1"
+                       onchange="if(this.checked && !confirm('Con esto, lo que quede en los campos PISA lo guardado. Un tracking vacío vuelve a habilitar la emisión de otra guía. ¿Seguro?')) this.checked=false;">
+                Pisar valores (corregir tracking mal cargado)
+              </label>
               <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
             </form>
           </td>
