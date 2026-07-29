@@ -21,7 +21,7 @@ function WhyUs() {
             </p>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16 }}>
             <BigStat n="200+" l="Destinos vía red FedEx" />
             <BigStat n="B2B" l="Tarifas corporativas" accent />
             <BigStat n="1:1" l="Atención directa, sin call center" />
@@ -31,7 +31,7 @@ function WhyUs() {
       </div>
       <style>{`
         @media (max-width: 880px) {
-          .why-grid { grid-template-columns: 1fr !important; gap: 48px !important; }
+          .why-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 48px !important; }
         }
       `}</style>
     </section>

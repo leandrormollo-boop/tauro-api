@@ -624,3 +624,112 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
   .btn-primary:not(.btn-loading),
   .btn-primary:not(.btn-loading):hover { animation: none; }
 }
+
+/* ==========================================================
+   CELULAR — la web tiene que entrar en la pantalla, sin barra
+   horizontal y sin nada cortado.
+
+   La causa real del desborde no era el ancho de los bloques sino
+   `grid-template-columns: 1fr`: en CSS Grid, `1fr` equivale a
+   minmax(AUTO, 1fr), así que si el contenido tiene un mínimo ancho
+   (una fila de tabs, una tabla) la columna se estira más que la
+   pantalla. `minmax(0, 1fr)` le da permiso de achicarse; el
+   `min-width: 0` en los hijos hace lo propio con flex.
+   ========================================================== */
+@media (max-width: 880px) {
+  .hero-grid, .services-grid, .tracking-grid, .why-grid, .process-grid, .footer-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .hero-grid > *, .services-grid > *, .tracking-grid > *,
+  .why-grid > *, .process-grid > *, .footer-grid > * { min-width: 0; }
+}
+
+@media (max-width: 760px) {
+  :root { --section-y: 68px; }
+  .container { padding: 0 18px; }
+
+  /* Nav: entra completo achicando marca y botones (no escondemos
+     "Iniciar sesión": desde el celular es como entra el cliente).
+     El max-width es clave: la barra es `position: fixed`, así que se
+     dimensiona contra el ancho del documento y no contra el de la pantalla;
+     sin este tope se estiraba y dejaba "Cotizar envío" cortado afuera. */
+  .nav { padding: 12px 0; max-width: 100vw; }
+  .nav-inner { gap: 10px; }
+  .logo { font-size: 12.5px; gap: 8px; }
+  .logo-mark { width: 26px; height: 26px; }
+  .logo-mark img { height: 22px !important; }
+  .nav-cta { gap: 8px; flex-shrink: 0; }
+  .nav-cta .btn { padding: 8px 13px !important; font-size: 12px !important; }
+
+  /* Hero: alto natural (100vh en celular deja el CTA fuera de vista) */
+  .hero { min-height: 0; padding-top: 96px; padding-bottom: 56px; }
+  .hero h1 { font-size: clamp(34px, 9.5vw, 52px); }
+  .hero p.lead { font-size: 16px; margin: 20px 0 30px; }
+  .hero-actions { gap: 10px; }
+  .hero-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .hero-meta { gap: 22px; margin-top: 38px; padding-top: 24px; flex-wrap: wrap; }
+
+  .section-head { margin-bottom: 36px; gap: 12px; }
+  .section-head h2 { font-size: clamp(27px, 7.5vw, 38px); }
+  .section-head p { font-size: 16px; }
+  .card { padding: 20px; }
+}
+
+@media (max-width: 480px) {
+  /* En pantallas chicas la marca se reduce a la T + "Tauro": es lo único
+     que sobra para que los dos botones del nav entren enteros. */
+  .logo > span:last-child > span { display: none; }
+}
+
+@media (max-width: 420px) {
+  .container { padding: 0 15px; }
+  .logo { font-size: 11.5px; }
+  .nav-cta .btn { padding: 7px 11px !important; font-size: 11.5px !important; }
+  .nav-cta .btn svg { display: none; }        /* la flechita no entra */
+  .hero-actions { flex-direction: column; }
+  .hero-actions .btn { width: 100%; }
+  .hero-meta { gap: 16px; }
+}
+
+/* Pantallas muy chicas (iPhone SE y similares): sin este ajuste el botón
+   "Cotizar envío" quedaba cortado contra el borde derecho. */
+@media (max-width: 400px) {
+  .container { padding: 0 12px; }
+  .nav-inner { gap: 8px; }
+  .logo { font-size: 11px; gap: 6px; }
+  .logo-mark { width: 22px; height: 22px; }
+  .logo-mark img { height: 19px !important; }
+  .nav-cta { gap: 6px; }
+  .nav-cta .btn { padding: 6px 9px !important; font-size: 11px !important; }
+}
+
+/* --- Cotizador y botón flotante en celular --- */
+@media (max-width: 560px) {
+  /* "Peso" y "Valor declarado" en una columna: la etiqueta larga partía en
+     dos líneas y dejaba los dos campos desalineados. */
+  .tweb-campos-2 { grid-template-columns: minmax(0, 1fr) !important; }
+  /* El chip de marca no debe sobresalir del borde en pantallas chicas */
+  .tweb-brand-tag { right: 12px; font-size: 11px; padding: 7px 13px; }
+}
+
+@media (max-width: 760px) {
+  /* El botón de mail pasa a la derecha (donde hay menos texto) y se achica,
+     para que deje de taparle las palabras al contenido. */
+  .tweb-fab { left: auto !important; right: 16px !important; bottom: 16px !important;
+              width: 48px !important; height: 48px !important; }
+  .tweb-fab svg { width: 22px; height: 22px; }
+}
+
+/* --- Tarjetas de courier en celular ---
+   En una fila sola (logo + nombre + precio) el precio se salía de la pantalla,
+   justo el dato que el cliente vino a ver. Pasa a su propia línea, alineado
+   con el nombre y bien grande. */
+@media (max-width: 560px) {
+  .tweb-carrier { flex-wrap: wrap; row-gap: 2px; }
+  .tweb-carrier-precio {
+    flex: 1 0 100% !important;
+    text-align: left !important;
+    padding-left: 88px;                 /* alinea con el nombre, salteando el logo */
+    margin-top: 0;
+  }
+}

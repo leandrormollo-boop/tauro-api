@@ -123,7 +123,7 @@ function Services() {
                 ))}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 12, marginTop: 32 }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 32, flexWrap: "wrap" }}>
               <button className="btn btn-primary">Cotizar {current.name.toLowerCase()} <ArrowRight size={14}/></button>
               <button className="btn btn-ghost">Ver casos de éxito</button>
             </div>
@@ -132,7 +132,7 @@ function Services() {
       </div>
       <style>{`
         @media (max-width: 880px) {
-          .services-grid { grid-template-columns: 1fr !important; }
+          .services-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
       `}</style>
     </section>
@@ -269,7 +269,7 @@ function Tracking() {
       </div>
       <style>{`
         @media (max-width: 880px) {
-          .tracking-grid { grid-template-columns: 1fr !important; }
+          .tracking-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
       `}</style>
     </section>
@@ -339,7 +339,7 @@ function Process() {
       </div>
       <style>{`
         @media (max-width: 880px) {
-          .process-grid { grid-template-columns: 1fr 1fr !important; }
+          .process-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; }
           .process-grid > div:nth-child(2) { border-right: none !important; }
           .process-grid > div:nth-child(odd) { border-right: 1px solid var(--line-soft) !important; }
           .process-grid > div:nth-child(1), .process-grid > div:nth-child(2) { border-bottom: 1px solid var(--line-soft); }

@@ -75,7 +75,7 @@ function QuoteWidget({ compact = false }) {
         pointerEvents: "none",
       }}/>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+      <div className="tweb-cot-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 12, flexWrap: "wrap" }}>
         <div>
           <div className="eyebrow" style={{ marginBottom: 6 }}>Cotizador instantáneo</div>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600 }}>
@@ -104,7 +104,7 @@ function QuoteWidget({ compact = false }) {
             <SelectField label="Destino" value={destino} onChange={setDestino} options={DESTINOS} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+          <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
             <Field label="Peso (kg)" value={peso} onChange={setPeso} type="number" />
             <Field label="Valor declarado (USD)" value={valor} onChange={setValor} type="number" />
           </div>
@@ -112,7 +112,7 @@ function QuoteWidget({ compact = false }) {
           <div style={{ marginBottom: 6, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Dimensiones (cm)
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 20 }}>
+          <div className="tweb-campos-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginBottom: 20 }}>
             <Field label="Largo" value={largo} onChange={setLargo} type="number" />
             <Field label="Ancho" value={ancho} onChange={setAncho} type="number" />
             <Field label="Alto" value={alto} onChange={setAlto} type="number" />
@@ -302,7 +302,7 @@ function SelectField({ label, value, onChange, options }) {
 function CarrierCard({ carrier, recomendado }) {
   const cotizado = carrier.estado === "cotizado";
   return (
-    <div className={recomendado ? "tweb-neon-ring" : undefined} style={{
+    <div className={`tweb-carrier${recomendado ? " tweb-neon-ring" : ""}`} style={{
       display: "flex", alignItems: "center", gap: 14,
       padding: "14px 16px",
       background: cotizado ? "var(--bg)" : "rgba(255,255,255,0.02)",
@@ -358,7 +358,7 @@ function CarrierCard({ carrier, recomendado }) {
         </div>
       </div>
 
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
+      <div className="tweb-carrier-precio" style={{ textAlign: "right", flexShrink: 0 }}>
         {cotizado ? (
           <>
             {carrier.precio_lista_usd && (

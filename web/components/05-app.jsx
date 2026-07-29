@@ -66,6 +66,7 @@ function ContactFab() {
     <a href="mailto:taurosolutionsar@gmail.com"
        aria-label="Escribinos"
        title="Escribinos"
+       className="tweb-fab"
        style={{
          position: "fixed", bottom: 24, left: 24,
          width: 56, height: 56, borderRadius: "50%",
