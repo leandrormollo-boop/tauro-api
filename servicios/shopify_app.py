@@ -344,11 +344,29 @@ def cotizar_para_checkout(payload: dict) -> dict:
     if not pais or pais == "AR":
         return {"rates": []}   # nacional no va por esta vía
 
-    # Shopify manda gramos por unidad
-    peso_kg = sum((it.get("grams") or 0) * (it.get("quantity") or 1) for it in items) / 1000.0
-    peso_kg = max(round(peso_kg, 2), 0.5)
-    valor_usd = max(round(sum((it.get("price") or 0) * (it.get("quantity") or 1)
-                              for it in items) / 100.0, 2), 1.0)
+    dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+    markup = float(os.getenv("WEB_MARKUP_PCT", "20"))
+
+    # Quién es el comerciante: hace falta ANTES de pesar, porque las
+    # dimensiones de sus productos salen de SU catálogo.
+    inst = instalacion(dominio) if dominio else None
+    cliente_id = (inst or {}).get("cliente_id") or ""
+
+    # PESO FACTURABLE, no peso real: los couriers aéreos cobran
+    # max(real, L×A×H/5000). Shopify manda gramos pero no dimensiones, así
+    # que se cruzan los SKU contra el catálogo del cliente. Cotizar por
+    # peso real cobraba una fracción de la tarifa en productos voluminosos.
+    from servicios.peso_facturable import peso_facturable
+    medida = peso_facturable(cliente_id, items)
+    peso_kg = medida["peso_kg"]
+    largo, ancho, alto = medida["dimensiones"]
+
+    # Shopify manda `price` en subunidades de la moneda de la TIENDA (ARS),
+    # no en USD: hay que convertirlo o FedEx recibe un valor declarado
+    # inflado ~1450x y devuelve una tarifa que no es la del envío.
+    total_ars = sum((it.get("price") or 0) * (it.get("quantity") or 1)
+                    for it in items) / 100.0
+    valor_usd = max(round(total_ars / dolar, 2), 1.0) if dolar > 0 else 1.0
 
     origen = {
         "street": "Av. Corrientes 1234", "city": "BUENOS AIRES",
@@ -361,12 +379,9 @@ def cotizar_para_checkout(payload: dict) -> dict:
         "country": pais,
     }
     paquete = {
-        "peso_kg": peso_kg, "largo": 30, "ancho": 20, "alto": 15,
+        "peso_kg": peso_kg, "largo": largo, "ancho": ancho, "alto": alto,
         "valor_declarado_usd": valor_usd, "descripcion_en": "Merchandise",
     }
-
-    dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
-    markup = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
     # CASCADA DE RESILIENCIA — Shopify corta a los ~10s y un checkout sin
     # opción de envío es una venta perdida. Por eso acá NUNCA se sale con
@@ -398,8 +413,6 @@ def cotizar_para_checkout(payload: dict) -> dict:
         from servicios.politica_envio import DEFAULTS
         config = dict(DEFAULTS)
 
-    inst = instalacion(dominio) if dominio else None
-    cliente_id = (inst or {}).get("cliente_id") or ""
     tax_ars = round(calcular_tax_estimado(cliente_id, items, config, dolar))
 
     etiqueta = (config.get("etiqueta") or "").strip()
