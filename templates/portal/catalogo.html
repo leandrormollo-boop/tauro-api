@@ -35,6 +35,21 @@
     </div>
 
     {% if productos %}
+    {# Costo de envío por unidad con el descuento del cliente aplicado:
+       la feature comercial del portal según la spec. Cada fila cotiza en
+       vivo contra /portal/api/precio al elegir destino. #}
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap;">
+        <label for="cat-destino" style="font-size:13px;color:var(--fg-2);">
+            Ver costo de envío por unidad a:
+        </label>
+        <select id="cat-destino" class="input" style="max-width:220px;">
+            <option value="">— elegí un destino —</option>
+            {% for pais in paises_destino %}
+            <option value="{{ pais }}">{{ pais }}</option>
+            {% endfor %}
+        </select>
+        <span id="cat-destino-nota" style="font-size:12px;color:var(--fg-3);"></span>
+    </div>
     <div class="table-wrap">
         <table>
             <thead>
@@ -44,6 +59,7 @@
                     <th>HS code</th>
                     <th>Medidas y peso</th>
                     <th class="num">Valor USD</th>
+                    <th class="num">Envío / unidad</th>
                     <th>Estado</th>
                     <th></th>
                 </tr>
@@ -60,6 +76,10 @@
                     <td class="mono">{{ p.hs_code }}</td>
                     <td class="mono">{{ '%g'|format(p.largo_cm) }}×{{ '%g'|format(p.ancho_cm) }}×{{ '%g'|format(p.alto_cm) }} cm · {{ '%g'|format(p.peso_kg) }} kg</td>
                     <td class="num">$ {{ '%g'|format(p.valor_usd_default) }}</td>
+                    {# Se llena por JS al elegir destino. Sólo productos
+                       aprobados: los "en revisión" no se pueden cotizar. #}
+                    <td class="num precio-unidad" data-prod="{{ p.alias_interno }}"
+                        data-aprobado="{{ 1 if p.activo else 0 }}">—</td>
                     <td>
                         {% if p.activo %}
                             <span class="badge ok">Aprobado</span>
@@ -191,5 +211,55 @@ document.querySelectorAll(".prod-editar").forEach(function (btn) {
         document.getElementById("cat-alias").focus({ preventScroll: true });
     });
 });
+
+// Costo de envío POR UNIDAD con el descuento del cliente aplicado.
+// Al elegir destino se cotiza cada producto aprobado contra
+// /portal/api/precio (que ya aplica el pricing del cliente). Las filas se
+// van llenando a medida que responden — secuencial a propósito: cada
+// cotización pega en FedEx y dispararlas todas juntas es la clase de
+// ráfaga que hace que el courier te empiece a rebotar.
+(function () {
+    var sel = document.getElementById("cat-destino");
+    if (!sel) return;
+    var nota = document.getElementById("cat-destino-nota");
+    var fmt = function (n) {
+        return "$ " + Math.round(n).toLocaleString("es-AR");
+    };
+
+    sel.addEventListener("change", async function () {
+        var destino = sel.value;
+        var celdas = Array.from(document.querySelectorAll(".precio-unidad"));
+        if (!destino) {
+            celdas.forEach(function (c) { c.textContent = "—"; });
+            nota.textContent = "";
+            return;
+        }
+        nota.textContent = "cotizando…";
+        for (var i = 0; i < celdas.length; i++) {
+            var c = celdas[i];
+            if (c.dataset.aprobado !== "1") {
+                c.innerHTML = '<span style="color:var(--fg-3);font-size:12px;">en revisión</span>';
+                continue;
+            }
+            c.textContent = "…";
+            try {
+                var r = await fetch("/portal/api/precio?producto=" +
+                    encodeURIComponent(c.dataset.prod) +
+                    "&destino=" + encodeURIComponent(destino) + "&cantidad=1");
+                var d = await r.json();
+                if (d.ok) {
+                    c.innerHTML = "<strong>" + fmt(d.precio_ars) + "</strong>" +
+                        '<div style="font-size:11px;color:var(--fg-3);">USD ' +
+                        Number(d.precio_usd).toFixed(0) + "</div>";
+                } else {
+                    c.innerHTML = '<span style="color:var(--fg-3);font-size:12px;">sin tarifa</span>';
+                }
+            } catch (e) {
+                c.innerHTML = '<span style="color:var(--fg-3);font-size:12px;">error</span>';
+            }
+        }
+        nota.textContent = "precios finales con tu descuento, por unidad";
+    });
+})();
 </script>
 {% endblock %}

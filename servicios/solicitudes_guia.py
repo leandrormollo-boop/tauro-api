@@ -328,6 +328,18 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                 """,
                 (tracking, psycopg2.Binary(label_pdf) if label_pdf else None, courier, solicitud_id),
             )
+    # DÉBITO AUTOMÁTICO (decisión de Leandro 28/07): la guía emitida carga
+    # sola su costo a la cuenta corriente del cliente. Es idempotente (índice
+    # único por solicitud) y un fallo acá NO tumba la emisión: la guía ya
+    # existe en el courier y eso es lo que no se puede deshacer — el cargo,
+    # en el peor caso, se carga a mano y el log lo dice.
+    try:
+        from servicios.cuenta_corriente import cargar_guia_emitida
+        cargar_guia_emitida(solicitud_id)
+    except Exception as e:
+        print(f"[solicitudes] guía {tracking} emitida pero el cargo automático "
+              f"falló ({e}): FACTURAR A MANO la solicitud {solicitud_id}")
+
     # Si el envío nació de una venta de Shopify, avisamos a la tienda:
     # el pedido queda "Enviado" con su tracking y el comprador recibe el
     # mail solo. Nunca dejamos que un fallo acá tumbe la emisión de la

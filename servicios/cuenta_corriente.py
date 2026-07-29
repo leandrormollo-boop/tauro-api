@@ -47,7 +47,7 @@ def get_facturas_recientes(cliente: str, limite: int = 10) -> List[Dict[str, Any
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT fecha, nro_fc, monto_ars
+                SELECT fecha, nro_fc, monto_ars, descripcion
                 FROM envios
                 WHERE cliente_id = %s
                   AND estado NOT IN ('CANCELADO', 'NC')
@@ -63,7 +63,9 @@ def get_facturas_recientes(cliente: str, limite: int = 10) -> List[Dict[str, Any
     for r in rows:
         facturas.append({
             "fecha": r["fecha"].strftime("%d/%m/%Y") if r["fecha"] else "",
-            "nro_fc": str(r["nro_fc"] or ""),
+            # Los cargos automáticos de guías no tienen nro de factura: sin el
+            # fallback a la descripción, el timeline mostraría filas mudas.
+            "nro_fc": str(r["nro_fc"] or "") or str(r["descripcion"] or ""),
             "monto_ars": float(r["monto_ars"] or 0),
         })
     return facturas
@@ -248,6 +250,65 @@ def cancelar_envio(envio_id: int) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("UPDATE envios SET estado = 'CANCELADO' WHERE id = %s", (envio_id,))
+
+
+def cargar_guia_emitida(solicitud_id: int) -> bool:
+    """
+    Débito automático: al emitirse una guía, el cargo entra solo a la cuenta
+    corriente del cliente por `precio_tauro_ars` (lo que TAURO le cobra, con
+    su margen ya incluido — no confundir con `precio_cliente_final_ars`, que
+    es lo que el cliente le cobra a SU comprador).
+
+    Antes esto era doble carga manual: el admin emitía la guía y después
+    tenía que acordarse de facturarla a mano. Si se olvidaba, el saldo del
+    cliente mentía en silencio.
+
+    Idempotente por el índice único sobre solicitud_id: reintentos, doble
+    click o un reinicio a mitad de camino no pueden duplicar el cargo.
+    Devuelve True si el cargo se insertó, False si ya existía o no se pudo.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT cliente_id, precio_tauro_ars, tracking, courier,
+                       producto_alias, destino_pais
+                FROM solicitudes_guia WHERE id = %s
+            """, (solicitud_id,))
+            sol = cur.fetchone()
+
+            if not sol:
+                print(f"[cta_cte] solicitud {solicitud_id} no existe: sin cargo")
+                return False
+            monto = float(sol["precio_tauro_ars"] or 0)
+            if monto <= 0:
+                # Sin precio no se inventa un cargo: se avisa para que el
+                # admin lo facture a mano, que es mejor que un débito en 0
+                # que nadie revisaría jamás.
+                print(f"[cta_cte] ATENCIÓN: la solicitud {solicitud_id} no tiene "
+                      f"precio_tauro_ars — el cargo NO se generó, facturalo a mano")
+                return False
+
+            descripcion = (f"Guía {sol['tracking'] or 's/n'} · "
+                           f"{sol['producto_alias'] or 'envío'} → {sol['destino_pais'] or ''} · "
+                           f"{(sol['courier'] or 'FEDEX').upper()} · cargo automático")
+            cur.execute("""
+                INSERT INTO envios
+                    (cliente_id, fecha, nro_fc, monto_ars, estado, descripcion,
+                     tracking, solicitud_id)
+                VALUES (%s, CURRENT_DATE, '', %s, 'ACTIVO', %s, %s, %s)
+                ON CONFLICT (solicitud_id) WHERE solicitud_id IS NOT NULL
+                DO NOTHING
+                RETURNING id
+            """, (sol["cliente_id"].upper(), monto, descripcion,
+                  sol["tracking"] or "", solicitud_id))
+            fila = cur.fetchone()
+
+    if fila:
+        print(f"[cta_cte] cargo automático: solicitud {solicitud_id} → "
+              f"ARS {monto:,.0f} a {sol['cliente_id']}")
+        return True
+    print(f"[cta_cte] la solicitud {solicitud_id} ya tenía su cargo: no se duplica")
+    return False
 
 
 def get_envios_cliente(cliente: str) -> List[Dict[str, Any]]:

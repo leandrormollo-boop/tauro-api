@@ -129,6 +129,14 @@ CREATE TABLE IF NOT EXISTS envios (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_envios_cliente ON envios(cliente_id);
+-- Cargo automático: cuando se emite una guía, el débito entra solo a la
+-- cuenta corriente (decisión de Leandro 28/07 — antes era doble carga manual
+-- y el saldo mentía si el admin se olvidaba). solicitud_id ata el cargo a su
+-- guía, y el índice único garantiza que UNA guía debite UNA sola vez aunque
+-- el proceso se reinicie o la función se llame dos veces.
+ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS solicitud_id INTEGER;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_envios_solicitud
+    ON envios(solicitud_id) WHERE solicitud_id IS NOT NULL;
 -- Índice compuesto para queries de facturación (cliente + filtro de estado)
 CREATE INDEX IF NOT EXISTS idx_envios_cliente_estado ON envios(cliente_id, estado);
 -- Índice por fecha para listados ordenados

@@ -33,7 +33,10 @@ from servicios.catalogo import (
     actualizar_producto_cliente, eliminar_producto_cliente,
 )
 from servicios.cotizador import cotizar, cotizar_opciones
-from servicios.cuenta_corriente import saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes
+from servicios.cuenta_corriente import (
+    saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes,
+    movimientos,
+)
 from servicios.api_b2b import obtener_precio_envio, obtener_precio_envio_multi
 from servicios.nacional import cotizar_nacional_cliente, nacional_activo
 from servicios.solicitudes_guia import (
@@ -274,6 +277,26 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
             "solicitudes": solicitudes,
             "direcciones_count": direcciones_count,
         },
+    )
+
+
+# ── Cuenta corriente ────────────────────────────────────────
+@router.get("/cuenta", response_class=HTMLResponse)
+def cuenta_corriente(request: Request, cliente: str = Depends(cliente_actual)):
+    """
+    Timeline completo de facturas y pagos. La spec lo pide explícito: el
+    cliente administra su cuenta corriente con TAURO desde el portal, no
+    preguntando el saldo por WhatsApp.
+    """
+    facturado = get_facturado_real(cliente)
+    saldo_data = saldo(cliente, total_facturado_ars=facturado)
+    # Todas las facturas, no las últimas 5 del home: esto ES el historial.
+    facturas = get_facturas_recientes(cliente, limite=500)
+    movs = movimientos(cliente, facturas)
+
+    return templates.TemplateResponse(
+        request=request, name="portal/cuenta.html",
+        context={"cliente": cliente, "saldo": saldo_data, "movimientos": movs},
     )
 
 
@@ -1120,7 +1143,11 @@ def catalogo_view(request: Request, cliente: str = Depends(cliente_actual)):
         taxes = {}
     return templates.TemplateResponse(
         request=request, name="portal/catalogo.html",
-        context={"cliente": cliente, "productos": productos, "taxes": taxes},
+        context={"cliente": cliente, "productos": productos, "taxes": taxes,
+                 # Para la columna "costo de envío por unidad": el JS cotiza
+                 # cada producto contra el destino elegido, con el pricing
+                 # del cliente ya aplicado (/portal/api/precio).
+                 "paises_destino": get_paises_destino()},
     )
 
 

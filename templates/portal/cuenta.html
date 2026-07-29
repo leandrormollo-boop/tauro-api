@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Mi cuenta corriente{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div class="page-title-row">
+        <div>
+            <div class="eyebrow">Administración</div>
+            <h1>Mi cuenta corriente</h1>
+            <p>Todo lo facturado y pagado con Tauro, en un solo lugar.</p>
+        </div>
+    </div>
+</div>
+
+<div class="grid-3" style="margin-bottom:16px;">
+    <div class="stat-card">
+        <div class="label">Facturado</div>
+        <div class="value">$ {{ "{:,.0f}".format(saldo.facturado_ars).replace(",", ".") }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Pagado</div>
+        <div class="value">$ {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Saldo pendiente</div>
+        <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% endif %}">
+            $ {{ "{:,.0f}".format(saldo.saldo_pendiente_ars).replace(",", ".") }}
+        </div>
+    </div>
+</div>
+
+{% if movimientos %}
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Tipo</th>
+                    <th>Concepto</th>
+                    <th style="text-align:right;">Monto</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in movimientos %}
+                <tr>
+                    <td class="mono">{{ m.fecha or '—' }}</td>
+                    <td>
+                        {% if m.tipo == 'PAGO' %}
+                            <span class="badge ok">Pago</span>
+                        {% else %}
+                            <span class="badge">Factura</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ m.concepto or '—' }}</td>
+                    {# Los pagos vienen en negativo desde movimientos(): acá se
+                       muestran en verde y con el signo que el cliente espera. #}
+                    <td class="mono" style="text-align:right;{% if m.monto_ars < 0 %}color:var(--ok,#3ddc97);{% endif %}">
+                        {% if m.monto_ars < 0 %}−{% endif %}$ {{ "{:,.0f}".format(m.monto_ars|abs).replace(",", ".") }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:34px;">
+    <p style="color:var(--fg-3);margin:0;">Todavía no hay movimientos. Cuando emitas
+    tu primer envío, el cargo va a aparecer acá solo.</p>
+</div>
+{% endif %}
+{% endblock %}
