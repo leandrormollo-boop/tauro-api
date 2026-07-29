@@ -201,6 +201,9 @@ h1, h2, h3, h4 {
   font-size: 15px;
 }
 
+.tweb-txt-corto { display: none; }
+.tweb-txt-largo { display: inline; }
+
 /* ---------- chips / tags ---------- */
 .chip {
   display: inline-flex;
@@ -660,6 +663,10 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
   .logo-mark img { height: 22px !important; }
   .nav-cta { gap: 8px; flex-shrink: 0; }
   .nav-cta .btn { padding: 8px 13px !important; font-size: 12px !important; }
+  /* La marca NUNCA se recorta: lo que se acorta son las etiquetas de los
+     botones ("Iniciar sesión" → "Ingresar", "Cotizar envío" → "Cotizar"). */
+  .tweb-txt-largo { display: none; }
+  .tweb-txt-corto { display: inline; }
 
   /* Hero: alto natural (100vh en celular deja el CTA fuera de vista) */
   .hero { min-height: 0; padding-top: 96px; padding-bottom: 56px; }
@@ -673,12 +680,6 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
   .section-head h2 { font-size: clamp(27px, 7.5vw, 38px); }
   .section-head p { font-size: 16px; }
   .card { padding: 20px; }
-}
-
-@media (max-width: 480px) {
-  /* En pantallas chicas la marca se reduce a la T + "Tauro": es lo único
-     que sobra para que los dos botones del nav entren enteros. */
-  .logo > span:last-child > span { display: none; }
 }
 
 @media (max-width: 420px) {
@@ -696,11 +697,11 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
 @media (max-width: 400px) {
   .container { padding: 0 12px; }
   .nav-inner { gap: 8px; }
-  .logo { font-size: 11px; gap: 6px; }
+  .logo { font-size: 10.5px; gap: 6px; }
   .logo-mark { width: 22px; height: 22px; }
   .logo-mark img { height: 19px !important; }
   .nav-cta { gap: 6px; }
-  .nav-cta .btn { padding: 6px 9px !important; font-size: 11px !important; }
+  .nav-cta .btn { padding: 6px 9px !important; font-size: 10.5px !important; }
 }
 
 /* --- Cotizador y botón flotante en celular --- */

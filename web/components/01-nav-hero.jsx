@@ -43,10 +43,13 @@ function Nav({ onCotizarClick }) {
         </ul>
         <div className="nav-cta">
           <a href="/portal/login" className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 16px" }}>
-            Iniciar sesión
+            {/* En celular la etiqueta se acorta para que la marca entre entera */}
+            <span className="tweb-txt-largo">Iniciar sesión</span>
+            <span className="tweb-txt-corto">Ingresar</span>
           </a>
           <button className="btn btn-primary" onClick={onCotizarClick} style={{ fontSize: 13, padding: "10px 18px" }}>
-            Cotizar envío
+            <span className="tweb-txt-largo">Cotizar envío</span>
+            <span className="tweb-txt-corto">Cotizar</span>
             <ArrowRight size={14} />
           </button>
         </div>
