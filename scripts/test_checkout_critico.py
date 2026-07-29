@@ -90,11 +90,19 @@ for pais, gramos, qty, precio, nombre in CASOS:
     for r in rates:
         centavos = int(r.get("total_price", 0))
         check(centavos > 0, f"{nombre}: precio > 0", f"{centavos} centavos")
-        # Un envío internacional por debajo de ARS 1.000 o arriba de 50M es
-        # señal de que algo se calculó mal (moneda, escala o redondeo).
+
+        # ESCALA: esto FALLA, no avisa. Shopify espera el monto en SUBUNIDADES
+        # (centavos); si alguien saca el ×100 de shopify_app.py, el comprador
+        # ve el envío 100 veces más barato y la venta se despacha a pérdida.
+        # Con un simple `centavos > 0` ese error pasaba en verde.
         ars = centavos / 100
-        if not (1_000 < ars < 50_000_000):
-            avisos.append(f"{nombre}: precio fuera de escala razonable (ARS {ars:,.0f})")
+        check(20_000 < ars < 5_000_000,
+              f"{nombre}: precio en escala correcta (subunidades)",
+              f"ARS {ars:,.0f} — si es ~100x chico, falta el ×100 de total_price; "
+              f"si es ~100x grande, está duplicado")
+
+        check((r.get("currency") or "").upper() in ("ARS", "USD"),
+              f"{nombre}: moneda declarada", f"currency={r.get('currency')!r}")
 
 # ── 2. Destino nacional no va por esta vía ──
 print("\n[2] Reglas de negocio")

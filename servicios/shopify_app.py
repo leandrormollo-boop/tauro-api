@@ -390,7 +390,7 @@ def cotizar_para_checkout(payload: dict) -> dict:
 
     opciones = []
     try:
-        opciones = buscar_tarifas(pais, peso_kg)          # 1. instantáneo
+        opciones = buscar_tarifas(pais, peso_kg)          # 1. instantáneo (y fresco)
     except Exception as e:
         print(f"[shopify] cache de tarifas falló: {e}")
 
@@ -402,8 +402,16 @@ def cotizar_para_checkout(payload: dict) -> dict:
             opciones = []
 
     if not [c for c in opciones if c.get("estado") == "cotizado"]:
+        # 3. cache vencida: precio viejo de un courier real, mejor que una
+        # fórmula inventada. Sólo se llega acá si la cotización en vivo falló.
+        try:
+            opciones = buscar_tarifas(pais, peso_kg, incluir_vencidas=True)
+        except Exception:
+            opciones = []
+
+    if not [c for c in opciones if c.get("estado") == "cotizado"]:
         print(f"[shopify] sin tarifas para {pais}/{peso_kg}kg → tarifa de emergencia")
-        opciones = tarifa_emergencia(pais, peso_kg, dolar)   # 3. nunca vacío
+        opciones = tarifa_emergencia(pais, peso_kg, dolar)   # 4. nunca vacío
 
     # Qué ve el comprador lo decide el comerciante (política de flete):
     # tarifa real, +markup, precio fijo, o gratis. Y si quiere, con los
@@ -416,6 +424,23 @@ def cotizar_para_checkout(payload: dict) -> dict:
     tax_ars = round(calcular_tax_estimado(cliente_id, items, config, dolar))
 
     etiqueta = (config.get("etiqueta") or "").strip()
+
+    # MONEDA: todo el cálculo interno es en ARS, pero la tienda puede vender
+    # en otra. Devolver un monto en pesos etiquetado "USD" le mostraría al
+    # comprador un precio 1450 veces mayor, así que:
+    #   ARS  → tal cual
+    #   USD  → se convierte con el dólar del sistema
+    #   otra → se responde en ARS y la convierte Shopify con su propia tasa
+    moneda_tienda = (rate.get("currency") or "ARS").upper()
+    if moneda_tienda == "USD" and dolar > 0:
+        moneda, conversion = "USD", 1.0 / dolar
+    elif moneda_tienda == "ARS":
+        moneda, conversion = "ARS", 1.0
+    else:
+        moneda, conversion = "ARS", 1.0
+        if moneda_tienda:
+            print(f"[shopify] tienda en {moneda_tienda}: se cotiza en ARS y "
+                  f"Shopify hace la conversión")
 
     rates = []
     for c in opciones:
@@ -436,8 +461,10 @@ def cotizar_para_checkout(payload: dict) -> dict:
         rates.append({
             "service_name": etiqueta or f"{c['nombre']} — {c['servicio']}",
             "service_code": f"TAURO_{c['id'].upper()}",
-            "total_price": str(int(round(precio * 100))),
-            "currency": "ARS",
+            # Shopify espera SUBUNIDADES (centavos) y como string. Vale para
+            # toda moneda, incluso las que no usan decimales. NO sacar el ×100.
+            "total_price": str(int(round(precio * conversion * 100))),
+            "currency": moneda,
             "description": detalle,
         })
 

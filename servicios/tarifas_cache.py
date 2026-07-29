@@ -64,9 +64,18 @@ def _ensure_tabla() -> None:
                 );
                 CREATE INDEX IF NOT EXISTS ix_tarifas_cache_busqueda
                     ON tarifas_cache (pais, peso_hasta_kg);
+                -- `entorno` deja registrado con qué cuenta de FedEx se calculó
+                -- cada tarifa. Sin esto, el día que se pase a producción el
+                -- checkout seguiría sirviendo precios de sandbox (con el piso
+                -- de seguridad apagado) hasta el refresco de las 4am.
+                ALTER TABLE tarifas_cache ADD COLUMN IF NOT EXISTS entorno TEXT;
             """)
         conn.commit()
     _tabla_lista = True
+
+
+def _entorno() -> str:
+    return os.getenv("FEDEX_ENVIRONMENT", "sandbox").lower()
 
 
 def guardar_tarifa(carrier: str, nombre: str, logo: str, pais: str,
@@ -78,8 +87,8 @@ def guardar_tarifa(carrier: str, nombre: str, logo: str, pais: str,
             cur.execute("""
                 INSERT INTO tarifas_cache
                     (carrier, nombre, logo, pais, peso_hasta_kg, precio_ars,
-                     precio_usd, dias_estimados, servicio, actualizado)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                     precio_usd, dias_estimados, servicio, actualizado, entorno)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now(), %s)
                 ON CONFLICT (carrier, pais, peso_hasta_kg) DO UPDATE SET
                     nombre = EXCLUDED.nombre,
                     logo = EXCLUDED.logo,
@@ -87,9 +96,10 @@ def guardar_tarifa(carrier: str, nombre: str, logo: str, pais: str,
                     precio_usd = EXCLUDED.precio_usd,
                     dias_estimados = EXCLUDED.dias_estimados,
                     servicio = EXCLUDED.servicio,
-                    actualizado = now()
+                    actualizado = now(),
+                    entorno = EXCLUDED.entorno
             """, (carrier, nombre, logo, pais.upper(), peso_hasta_kg,
-                  precio_ars, precio_usd, dias_estimados, servicio))
+                  precio_ars, precio_usd, dias_estimados, servicio, _entorno()))
         conn.commit()
 
 
@@ -101,10 +111,21 @@ def escalon_para(peso_kg: float) -> float:
     return ESCALONES_KG[-1]
 
 
-def buscar_tarifas(pais: str, peso_kg: float) -> list[dict]:
+def buscar_tarifas(pais: str, peso_kg: float, incluir_vencidas: bool = False) -> list[dict]:
     """
     Tarifas guardadas para esa ruta. Devuelve [] si no hay nada —
     el que llama decide qué hacer (cotizar en vivo o emergencia).
+
+    Las tarifas VENCEN. Si el job de refresco muere, esta tabla sigue
+    contestando con precios de hace semanas y nadie se entera: el envío se
+    vende al precio de otro dólar y otra tarifa de FedEx. Por eso, pasado
+    `TARIFAS_CACHE_TTL_HORAS`, se devuelve [] para que el flujo intente
+    cotizar en vivo.
+
+    `incluir_vencidas=True` las devuelve igual, marcadas: es el último
+    recurso antes de la fórmula de emergencia, porque un precio viejo de un
+    courier real es mejor que un precio inventado. Nunca se deja al
+    comprador sin opción de envío.
     """
     _ensure_tabla()
     pais = (pais or "").upper()
@@ -114,15 +135,31 @@ def buscar_tarifas(pais: str, peso_kg: float) -> list[dict]:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT carrier, nombre, logo, precio_ars, precio_usd,
-                           dias_estimados, servicio, peso_hasta_kg, actualizado
+                           dias_estimados, servicio, peso_hasta_kg, actualizado,
+                           EXTRACT(EPOCH FROM (NOW() - actualizado)) / 3600 AS edad_horas
                     FROM tarifas_cache
                     WHERE pais = %s AND peso_hasta_kg = %s
+                      -- una tarifa calculada con la cuenta de sandbox no sirve
+                      -- en producción (ni al revés). Las filas viejas sin
+                      -- `entorno` se asumen de sandbox, que es lo que son.
+                      AND COALESCE(entorno, 'sandbox') = %s
                     ORDER BY precio_ars
-                """, (pais, escalon))
+                """, (pais, escalon, _entorno()))
                 filas = [dict(r) for r in cur.fetchall()]
     except Exception as e:
         print(f"[tarifas_cache] error leyendo {pais}/{peso_kg}kg: {e}")
         return []
+
+    ttl = float(os.getenv("TARIFAS_CACHE_TTL_HORAS", "48"))
+    edad = max((float(f["edad_horas"] or 0) for f in filas), default=0.0)
+    if filas and ttl > 0 and edad > ttl:
+        if not incluir_vencidas:
+            print(f"[tarifas_cache] VENCIDA {pais}/{escalon}kg: {edad:.0f}h de antigüedad "
+                  f"(máximo {ttl:.0f}h) → se intenta cotizar en vivo. "
+                  f"Si esto se repite, el job de refresco no está corriendo.")
+            return []
+        print(f"[tarifas_cache] usando tarifa VENCIDA de {edad:.0f}h para {pais}/{escalon}kg "
+              f"(no hubo cotización en vivo; mejor esto que la fórmula de emergencia)")
 
     # Si el envío pesa más que el escalón más alto, prorrateamos el último
     # (mejor un precio alto y coherente que ninguna opción de envío).
@@ -141,7 +178,8 @@ def buscar_tarifas(pais: str, peso_kg: float) -> list[dict]:
             "precio_ars": round(float(f["precio_ars"]) * factor, 2),
             "precio_usd": round(float(f["precio_usd"]) * factor, 2),
             "estado": "cotizado",
-            "origen_tarifa": "cache",
+            "origen_tarifa": "cache_vencida" if (ttl > 0 and edad > ttl) else "cache",
+            "edad_horas": round(float(f["edad_horas"] or 0), 1),
         })
     return salida
 
