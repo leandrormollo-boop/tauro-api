@@ -595,21 +595,25 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
    El :hover va incluido porque su "background" shorthand pisaría todo. */
 .btn-primary:not(.btn-loading),
 .btn-primary:not(.btn-loading):hover {
-  background-color: #231245;
+  /* Vidrio, no bloque: los violetas van en rgba y el fondo se ve a través
+     (sobre una foto se nota el paisaje; sobre negro simplemente se afina). */
+  background-color: rgba(41, 25, 82, .34);
   background-image:
     linear-gradient(105deg,
-      rgba(255, 255, 255, 0) 42%, rgba(233, 221, 255, .30) 50%, rgba(255, 255, 255, 0) 58%),
-    linear-gradient(180deg, #35206b 0%, #231245 55%, #180c33 100%);
+      rgba(255, 255, 255, 0) 42%, rgba(233, 221, 255, .22) 50%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, rgba(83, 52, 160, .50) 0%, rgba(41, 25, 82, .38) 55%, rgba(24, 12, 51, .42) 100%);
   background-size: 200% 100%, 100% 100%;
   background-position: 0 0, 0 0;
-  border: 1px solid rgba(167, 139, 250, .5);
+  backdrop-filter: blur(12px) saturate(1.15);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  border: 1px solid rgba(167, 139, 250, .45);
   color: #efe9ff;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .14),
-    inset 0 -3px 8px rgba(0, 0, 0, .55);
+    inset 0 1px 0 rgba(255, 255, 255, .16),
+    inset 0 -3px 8px rgba(0, 0, 0, .35);
   animation: tweb-metal-sweep-dark 2.6s linear infinite;
 }
-.btn-primary:not(.btn-loading):hover { filter: brightness(1.18); }
+.btn-primary:not(.btn-loading):hover { filter: brightness(1.14); background-color: rgba(41, 25, 82, .48); }
 @keyframes tweb-metal-sweep-dark {
   to { background-position: -200% 0, 0 0; }
 }
