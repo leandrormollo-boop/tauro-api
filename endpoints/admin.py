@@ -602,6 +602,8 @@ def admin_cliente_nuevo(
     markup_pct: float = Form(25.0),
     markup_tipo: str = Form("PCT"),
     markup_valor: str = Form(""),
+    markup_nac_tipo: str = Form(""),
+    markup_nac_valor: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -613,6 +615,12 @@ def admin_cliente_nuevo(
     try:
         pricing = parse_pricing_value(markup_valor, markup_tipo, fallback_pct=markup_pct)
         markup_pct_db = pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct
+        # Margen nacional aparte (opcional): vacío = usa la regla internacional.
+        nac_tipo, nac_valor = None, None
+        if markup_nac_tipo.strip():
+            nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
+                                      fallback_pct=markup_pct)
+            nac_tipo, nac_valor = nac["tipo"], nac["valor"]
         # Hashear password si vino una
         from servicios.auth import hash_password
         password_hash_db = hash_password(password.strip()) if password.strip() else None
@@ -622,8 +630,9 @@ def admin_cliente_nuevo(
                     """
                     INSERT INTO clientes
                         (cliente_id, email, password_hash, markup_pct, markup_tipo, markup_valor, activo,
-                         nombre, cuit, direccion, cp, ciudad, pais, telefono, notas)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         nombre, cuit, direccion, cp, ciudad, pais, telefono, notas,
+                         markup_nac_tipo, markup_nac_valor)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cliente_id, email.strip().lower(), password_hash_db, markup_pct_db,
@@ -632,6 +641,7 @@ def admin_cliente_nuevo(
                         nombre or None, cuit or None, direccion or None,
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
+                        nac_tipo, nac_valor,
                     ),
                 )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id}?ok=creado", status_code=303)
@@ -789,6 +799,8 @@ def admin_cliente_editar(
     markup_pct: float = Form(25.0),
     markup_tipo: str = Form("PCT"),
     markup_valor: str = Form(""),
+    markup_nac_tipo: str = Form(""),
+    markup_nac_valor: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -799,6 +811,14 @@ def admin_cliente_editar(
     try:
         pricing = parse_pricing_value(markup_valor, markup_tipo, fallback_pct=markup_pct)
         markup_pct_db = pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct
+        # Margen nacional (opcional). Elegir "Igual que internacional" en el
+        # form LIMPIA la regla nacional — sin esto no habría forma de volver
+        # atrás una vez cargada.
+        nac_tipo, nac_valor = None, None
+        if markup_nac_tipo.strip():
+            nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
+                                      fallback_pct=markup_pct)
+            nac_tipo, nac_valor = nac["tipo"], nac["valor"]
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -806,7 +826,8 @@ def admin_cliente_editar(
                     """
                     UPDATE clientes SET
                         email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
-                        direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s
+                        direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s,
+                        markup_nac_tipo=%s, markup_nac_valor=%s
                     WHERE cliente_id=%s
                     """,
                     (
@@ -816,6 +837,7 @@ def admin_cliente_editar(
                         nombre or None, cuit or None, direccion or None,
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
+                        nac_tipo, nac_valor,
                         cliente_id.strip().upper(),
                     ),
                 )

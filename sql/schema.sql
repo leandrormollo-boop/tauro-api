@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS clientes (
 );
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_tipo TEXT NOT NULL DEFAULT 'PCT';
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_valor REAL;
+-- Margen por ÁMBITO (decisión de Leandro 28/07): sumar el margen
+-- internacional (ej. +$14.500) a un envío nacional de $8.000 casi triplica
+-- el precio. Si estas columnas están vacías, el envío nacional usa la regla
+-- internacional de siempre — nada se rompe para los clientes ya cargados.
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_tipo TEXT;
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_valor REAL;
 -- Password hasheado con bcrypt (login email + password)
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
 

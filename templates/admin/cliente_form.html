@@ -111,6 +111,33 @@
       </p>
     </div>
 
+    {# Margen NACIONAL aparte: el +$14.500 que va bien en un FedEx a Miami
+       casi triplica un Andreani de $8.000. Vacío = usa la regla de arriba. #}
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Pricing NACIONAL (opcional)</label>
+        <select name="markup_nac_tipo">
+          <option value="" {% if not cliente or not cliente.markup_nac_tipo %}selected{% endif %}>
+            Igual que internacional
+          </option>
+          {% for value, label in pricing_modes.items() %}
+            <option value="{{ value }}" {% if cliente and cliente.markup_nac_tipo == value %}selected{% endif %}>
+              {{ label }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Valor nacional</label>
+        <input type="text" name="markup_nac_valor"
+               value="{% if cliente and cliente.markup_nac_valor is not none %}{{ cliente.markup_nac_valor }}{% endif %}"
+               placeholder="ej: 3500 para +ARS 3.500 por envío nacional">
+        <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
+          Sólo aplica a envíos dentro de Argentina. Si queda vacío, usa la regla internacional.
+        </p>
+      </div>
+    </div>
+
     <div class="form-group">
       <label>Notas internas</label>
       <textarea name="notas" rows="2" placeholder="Observaciones...">{{ cliente.notas if cliente else '' }}</textarea>

@@ -79,14 +79,25 @@ def parse_pricing_value(raw: str, markup_tipo: str, fallback_pct: float = 25.0) 
     return normalizar_pricing(markup_tipo, valor, fallback_pct=fallback_pct)
 
 
-def get_pricing_config(cliente: str, fallback_pct: float = 25.0) -> dict:
-    """Lee la regla de pricing del cliente. Compatible con clientes viejos."""
+def get_pricing_config(cliente: str, fallback_pct: float = 25.0,
+                       ambito: str = "internacional") -> dict:
+    """
+    Lee la regla de pricing del cliente. Compatible con clientes viejos.
+
+    `ambito` existe porque el margen es distinto por tipo de envío (decisión
+    de Leandro 28/07): el +$14.500 que tiene sentido sobre un FedEx a Miami
+    casi triplica un Andreani de $8.000. Con ambito="nacional" se usa la
+    regla nacional del cliente SI la tiene cargada; si no, cae a la regla
+    internacional de siempre — así los clientes existentes no cambian de
+    precio hasta que el admin les configure el margen nacional.
+    """
     cliente = cliente.strip().upper()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT markup_pct, markup_tipo, markup_valor
+                SELECT markup_pct, markup_tipo, markup_valor,
+                       markup_nac_tipo, markup_nac_valor
                 FROM clientes
                 WHERE cliente_id = %s AND activo = TRUE
                 """,
@@ -96,6 +107,13 @@ def get_pricing_config(cliente: str, fallback_pct: float = 25.0) -> dict:
 
     if not row:
         return normalizar_pricing("PCT", fallback_pct, fallback_pct=fallback_pct)
+
+    if ambito == "nacional" and (row.get("markup_nac_tipo") or "").strip():
+        return normalizar_pricing(
+            row["markup_nac_tipo"],
+            row.get("markup_nac_valor"),
+            fallback_pct=fallback_pct,
+        )
 
     legacy_pct = float(row.get("markup_pct") or fallback_pct)
     return normalizar_pricing(

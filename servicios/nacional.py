@@ -97,7 +97,11 @@ def cotizar_nacional_cliente(
     if not resultado.get("encontrado"):
         return {"encontrado": False, "motivo": resultado.get("error") or "sin_cobertura"}
 
-    pricing = get_pricing_config(cliente_id, fallback_pct=get_markup_pct(cliente_id))
+    # Margen NACIONAL del cliente (si lo tiene cargado; si no, cae al
+    # internacional de siempre). Sumar el margen internacional acá casi
+    # triplicaba el precio de un envío dentro del país.
+    pricing = get_pricing_config(cliente_id, fallback_pct=get_markup_pct(cliente_id),
+                                 ambito="nacional")
     valida_hasta = (
         datetime.now(tz=timezone.utc) + timedelta(hours=COTIZACION_VALIDA_HORAS)
     ).isoformat(timespec="seconds")
