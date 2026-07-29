@@ -78,29 +78,48 @@ def peso_facturable(cliente_id: str, items: list[dict]) -> dict:
     # Volumen total: se suman las cajas de cada unidad. Es la aproximación
     # estándar; apilar mejor sólo puede abaratar, nunca encarecer.
     volumen_cm3 = 0.0
+    largo_max = 0.0
     con_dims = 0
     total_items = 0
+    kg_sin_dims = 0.0
     for it in items:
+        # requires_shipping=False es un producto digital (un ebook, una gift
+        # card): no viaja, no pesa y no ocupa lugar en la caja.
+        if it.get("requires_shipping") is False:
+            continue
         cantidad = int(it.get("quantity") or 1)
         total_items += cantidad
         sku = str(it.get("sku") or "").strip().upper()
         if sku and sku in dims:
             l, a, h = dims[sku]
             volumen_cm3 += l * a * h * cantidad
+            largo_max = max(largo_max, l, a, h)
             con_dims += cantidad
+        else:
+            kg_sin_dims += ((it.get("grams") or 0) * cantidad) / 1000.0
 
     cobertura = (con_dims / total_items) if total_items else 0.0
+
+    # PESO FACTURABLE POR PARTES, no todo-o-nada: lo que tiene medidas aporta
+    # su volumétrico real, y lo que no, aporta su peso real × el factor de
+    # seguridad. Antes, un solo producto sin medidas anulaba el cálculo del
+    # carrito entero y se cotizaba todo por peso real.
+    factor = float(os.getenv("SHOPIFY_FACTOR_VOLUMEN", "1.0"))
     peso_volumetrico = round(volumen_cm3 / 5000.0, 2) if volumen_cm3 > 0 else 0.0
+    estimado = round(peso_volumetrico + kg_sin_dims * factor, 2)
 
     if volumen_cm3 > 0:
-        # Caja estimada: un cubo del volumen total. No es la caja real, pero
-        # da un L×A×H coherente con el volumétrico que se está cobrando.
-        lado = round(volumen_cm3 ** (1 / 3.0), 1)
-        dimensiones = (max(lado, 1.0), max(lado, 1.0), max(lado, 1.0))
+        # Caja estimada. NO un cubo de la raíz cúbica del volumen: 40 cañas de
+        # 100 cm darían un cubo de 117 cm, que FedEx rechaza por largo+contorno.
+        # Se respeta la dimensión más larga conocida y se reparte el resto.
+        largo = max(largo_max, 1.0)
+        seccion = (volumen_cm3 / largo) ** 0.5
+        lado = round(max(seccion, 1.0), 1)
+        dimensiones = (round(largo, 1), lado, lado)
     else:
         dimensiones = CAJA_FALLBACK
 
-    peso = max(peso_real, peso_volumetrico)
+    peso = max(peso_real, estimado)
 
     # CARRITO SIN PESO: si el comerciante no cargó los gramos en Shopify, el
     # carrito entero cotiza al escalón mínimo — un envío de 5 kg se cobra como
@@ -115,19 +134,17 @@ def peso_facturable(cliente_id: str, items: list[dict]) -> dict:
               f"{peso:.2f} kg. El comerciante tiene que cargar el peso de sus "
               f"productos en Shopify o todos sus envíos se venden al mínimo.")
 
-    if cobertura == 0.0:
-        # Nadie cargó dimensiones: sin esto se cotiza por peso real, que es
-        # justamente el caso que hace perder plata en productos voluminosos.
-        factor = float(os.getenv("SHOPIFY_FACTOR_VOLUMEN", "1.0"))
-        if factor > 1.0:
-            peso = round(peso * factor, 2)
-        print(f"[peso_facturable] carrito sin dimensiones en catálogo "
-              f"(peso real {peso_real:.2f} kg, factor {factor}) → cotiza {peso:.2f} kg. "
-              f"Cargá largo/ancho/alto en el catálogo para cotizar exacto.")
-    elif peso_volumetrico > peso_real:
+    # El factor ya entró en `estimado`; acá sólo se informa qué pasó, porque
+    # cobrar de menos por falta de datos no puede ser silencioso.
+    if cobertura < 1.0:
+        faltan = total_items - con_dims
+        print(f"[peso_facturable] {faltan} de {total_items} unidad/es SIN medidas en el "
+              f"catálogo (cobertura {cobertura:.0%}, factor {factor}) → se cotiza "
+              f"{peso:.2f} kg. Cargá largo/ancho/alto con el SKU EXACTO de la tienda: "
+              f"mientras falten, esos productos se cobran por peso real.")
+    if estimado > peso_real:
         print(f"[peso_facturable] volumétrico manda: real {peso_real:.2f} kg → "
-              f"facturable {peso_volumetrico:.2f} kg "
-              f"(cobertura de catálogo {cobertura:.0%})")
+              f"facturable {estimado:.2f} kg (cobertura {cobertura:.0%})")
 
     return {
         "peso_kg": max(round(peso, 2), PESO_MINIMO_KG),

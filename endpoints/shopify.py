@@ -105,6 +105,21 @@ def install(request: Request, shop: str = ""):
         inst = None
 
     if inst and inst.get("access_token"):
+        # PERMISOS DESACTUALIZADOS: el token guardado sirve sólo para los
+        # scopes con los que se autorizó. Si desde entonces la app pide más
+        # (pasó al arreglar los de fulfillment orders), el token viejo sigue
+        # funcionando para lo de antes y falla EN SILENCIO para lo nuevo —
+        # exactamente lo que hacía que no se pudiera marcar "enviado".
+        # La única salida es volver a pasar por el consentimiento.
+        from servicios.shopify_app import SCOPES
+        guardados = {s.strip() for s in (inst.get("scopes") or "").split(",") if s.strip()}
+        pedidos = {s.strip() for s in SCOPES.split(",") if s.strip()}
+        faltantes = pedidos - guardados
+        if faltantes:
+            print(f"[shopify] {shop} tiene permisos viejos, faltan {sorted(faltantes)} "
+                  f"→ se reenvía al consentimiento para actualizarlos")
+            return RedirectResponse(url=url_instalacion(shop, nuevo_state()),
+                                    status_code=303)
         return _panel_tienda(shop, inst, request.query_params.get("host", ""))
 
     destino = url_instalacion(shop, nuevo_state())

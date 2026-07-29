@@ -31,10 +31,34 @@ import requests
 
 from core.database import get_conn
 
-API_VERSION = "2025-01"
+# Versión estable vigente (Shopify saca una por trimestre y las soporta 12
+# meses). Estaba fijada en "2025-01", que ya salió de la tabla de versiones
+# soportadas: Shopify hace "fall forward" silencioso a otra, así que la app
+# corría contra una versión que nadie eligió.
+API_VERSION = "2026-07"
 
-# Permisos mínimos: leer/escribir envíos y leer pedidos. Nada más.
-SCOPES = "read_orders,write_orders,write_fulfillments,read_fulfillments,write_shipping"
+# Permisos mínimos REALES, uno por endpoint que la app usa:
+#   read_orders  ....................... recibir los webhooks orders/*
+#   write_shipping ..................... POST carrier_services.json (cotizar
+#                                        el envío dentro del checkout)
+#   *_merchant_managed_fulfillment_orders  GET orders/{id}/fulfillment_orders.json
+#                                        + POST fulfillments.json con
+#                                        line_items_by_fulfillment_order
+#
+# OJO: `write_fulfillments` NO alcanza para esto. Ese scope aplica al objeto
+# FulfillmentService (cuando sos el depósito), no a las fulfillment orders de
+# un pedido. Con los scopes viejos, Shopify devolvía la lista de fulfillment
+# orders VACÍA y marcar_enviado() cortaba en silencio: la guía se emitía pero
+# el comprador nunca recibía el mail con el tracking.
+#
+# Se sacaron `write_orders` y `read_fulfillments` porque ningún endpoint que
+# usamos los necesita — pedir permisos de más es motivo de rechazo en la
+# revisión de la App Store, y asusta al comerciante en la pantalla de
+# instalación.
+SCOPES = ("read_orders,"
+          "read_merchant_managed_fulfillment_orders,"
+          "write_merchant_managed_fulfillment_orders,"
+          "write_shipping")
 
 _tabla_lista = False
 

@@ -102,8 +102,16 @@
         <input type="hidden" name="alias_original" id="alias_original" value="">
         <div class="form-grid-3">
             <div class="form-group">
-                <label for="cat-alias">Alias interno (cómo lo llamás vos)</label>
-                <input type="text" name="alias_interno" id="cat-alias" required placeholder="Mini bag">
+                <!-- Este campo se cruza contra el SKU que manda la tienda para
+                     calcular el peso volumétrico y el impuesto por producto. Si
+                     no coincide letra por letra, el envío se cotiza sólo por
+                     peso real y se cobra de menos. Antes decía "cómo lo llamás
+                     vos" con ejemplo "Mini bag", así que nadie ponía el SKU. -->
+                <label for="cat-alias">SKU — igual al de tu tienda</label>
+                <input type="text" name="alias_interno" id="cat-alias" required placeholder="MB-001">
+                <small class="hint">Tiene que ser <strong>idéntico</strong> al SKU del producto
+                en Shopify o Tiendanube. Es lo que nos permite cotizar el envío con las medidas
+                reales; si no coincide, cobramos de menos.</small>
             </div>
             <div class="form-group">
                 <label for="cat-invoice">Descripción para invoice (inglés)</label>
