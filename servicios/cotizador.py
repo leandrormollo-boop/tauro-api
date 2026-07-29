@@ -46,6 +46,18 @@ def _get_dolar_ars() -> float:
     return fallback
 
 
+def dolar_ars() -> float:
+    """
+    Tipo de cambio vigente — ÚNICA fuente de verdad para todo el sistema.
+
+    Existe porque el checkout, la cache de tarifas y el cotizador público leían
+    el dólar directo de `os.getenv`, mientras el portal lo leía de la tabla
+    `config`. Resultado: Leandro actualizaba la cotización desde el admin y los
+    precios del checkout seguían con el valor viejo de Railway, sin ningún aviso.
+    """
+    return _get_dolar_ars()
+
+
 def cotizar_opciones(
     cliente: str,
     markup_pct: float,

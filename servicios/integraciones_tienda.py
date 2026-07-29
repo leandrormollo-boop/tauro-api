@@ -61,6 +61,14 @@ def _ensure_tablas() -> None:
                 );
                 CREATE INDEX IF NOT EXISTS ix_pedidos_tienda_cliente
                     ON pedidos_tienda (cliente_id, estado);
+                -- Lo que el comprador REALMENTE pagó de envío en el checkout.
+                -- Sin esto no hay forma de comparar lo cobrado contra lo que
+                -- termina costando la guía: si el precio se calcula mal, se
+                -- pierde plata en cada venta y no queda rastro para notarlo.
+                ALTER TABLE pedidos_tienda
+                    ADD COLUMN IF NOT EXISTS flete_cobrado NUMERIC(14,2);
+                ALTER TABLE pedidos_tienda
+                    ADD COLUMN IF NOT EXISTS flete_detalle JSONB;
             """)
         conn.commit()
     _tablas_listas = True
@@ -197,6 +205,28 @@ def parsear_pedido_shopify(order: dict) -> Optional[dict]:
     direccion = (ship.get("address1") or "").strip()
     direccion2 = (ship.get("address2") or "").strip()
 
+    # FLETE COBRADO: lo que el comprador pagó de envío. Es el único dato que
+    # permite después comparar lo cobrado contra lo que costó la guía real.
+    # Puede haber más de una línea (envío + seguro, por ejemplo), así que se
+    # suman todas y se guarda el detalle para poder auditar de dónde salió.
+    lineas_flete = order.get("shipping_lines") or []
+    flete_total = 0.0
+    detalle_flete = []
+    for ln in lineas_flete:
+        try:
+            monto = float(ln.get("price") or 0)
+        except (TypeError, ValueError):
+            monto = 0.0
+        flete_total += monto
+        detalle_flete.append({
+            "titulo": (ln.get("title") or "")[:120],
+            # `code` es el service_code que devolvió TAURO (TAURO_FEDEX, etc.):
+            # sirve para saber si el envío se cotizó con nuestra app o si el
+            # comerciante usó otra tarifa suya.
+            "codigo": (ln.get("code") or "")[:80],
+            "precio": monto,
+        })
+
     return {
         "pedido_externo_id": str(order.get("id") or ""),
         "numero": str(order.get("name") or order.get("order_number") or ""),
@@ -217,6 +247,8 @@ def parsear_pedido_shopify(order: dict) -> Optional[dict]:
         "items": items,
         "valor_total": order.get("total_price"),
         "moneda": (order.get("currency") or "")[:6],
+        "flete_cobrado": round(flete_total, 2),
+        "flete_detalle": detalle_flete,
         # Estado comercial: un pedido cancelado o sin pagar no se despacha.
         "cancelado": bool(order.get("cancelled_at")),
         "estado_pago": (order.get("financial_status") or "")[:30],
@@ -243,14 +275,17 @@ def guardar_pedido(cliente_id: str, tienda_id: int, plataforma: str, pedido: dic
             cur.execute("""
                 INSERT INTO pedidos_tienda
                     (cliente_id, tienda_id, plataforma, pedido_externo_id, numero,
-                     destinatario, items, valor_total, moneda)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     destinatario, items, valor_total, moneda,
+                     flete_cobrado, flete_detalle)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (tienda_id, pedido_externo_id) DO UPDATE SET
-                    destinatario = EXCLUDED.destinatario,
-                    items        = EXCLUDED.items,
-                    valor_total  = EXCLUDED.valor_total,
-                    moneda       = EXCLUDED.moneda,
-                    numero       = EXCLUDED.numero
+                    destinatario  = EXCLUDED.destinatario,
+                    items         = EXCLUDED.items,
+                    valor_total   = EXCLUDED.valor_total,
+                    moneda        = EXCLUDED.moneda,
+                    flete_cobrado = EXCLUDED.flete_cobrado,
+                    flete_detalle = EXCLUDED.flete_detalle,
+                    numero        = EXCLUDED.numero
                 WHERE pedidos_tienda.estado = 'PENDIENTE'
                 RETURNING (xmax = 0) AS es_nuevo
             """, (
@@ -259,6 +294,8 @@ def guardar_pedido(cliente_id: str, tienda_id: int, plataforma: str, pedido: dic
                 json.dumps(pedido.get("destinatario") or {}, ensure_ascii=False),
                 json.dumps(pedido.get("items") or [], ensure_ascii=False),
                 pedido.get("valor_total"), pedido.get("moneda"),
+                pedido.get("flete_cobrado"),
+                json.dumps(pedido.get("flete_detalle") or [], ensure_ascii=False),
             ))
             fila = cur.fetchone()
             creado = bool(fila and fila.get("es_nuevo"))

@@ -102,6 +102,19 @@ def peso_facturable(cliente_id: str, items: list[dict]) -> dict:
 
     peso = max(peso_real, peso_volumetrico)
 
+    # CARRITO SIN PESO: si el comerciante no cargó los gramos en Shopify, el
+    # carrito entero cotiza al escalón mínimo — un envío de 5 kg se cobra como
+    # uno de 0,5. No se puede adivinar cuánto pesa, así que se avisa fuerte y
+    # se deja una perilla para poner un piso más realista mientras se corrige
+    # el catálogo de la tienda.
+    if peso_real <= 0 and peso_volumetrico <= 0:
+        piso = float(os.getenv("SHOPIFY_PESO_DEFAULT_KG", str(PESO_MINIMO_KG)))
+        peso = max(peso, piso)
+        print(f"[peso_facturable] ATENCIÓN: el carrito llegó SIN PESO "
+              f"({total_items} unidad/es, ningún gramo declarado). Se cotiza "
+              f"{peso:.2f} kg. El comerciante tiene que cargar el peso de sus "
+              f"productos en Shopify o todos sus envíos se venden al mínimo.")
+
     if cobertura == 0.0:
         # Nadie cargó dimensiones: sin esto se cotiza por peso real, que es
         # justamente el caso que hace perder plata en productos voluminosos.

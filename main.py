@@ -260,7 +260,8 @@ def cotizar_web(body: CotizarWebRequest):
         "descripcion_en": "Merchandise",
     }
 
-    dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+    from servicios.cotizador import dolar_ars
+    dolar = dolar_ars()          # tabla `config`, la misma que usa el portal
     markup_pct = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
     # Compara FedEx, UPS y DHL. Cada carrier cotiza si tiene credenciales;

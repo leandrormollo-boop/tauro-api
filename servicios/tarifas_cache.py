@@ -214,7 +214,11 @@ def refrescar_cache(paises: Optional[list[str]] = None) -> dict:
 
     _ensure_tabla()
     paises = paises or PAISES
-    dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+    # Misma fuente que el resto del sistema: la tabla `config`, no el entorno.
+    # Estas tarifas quedan congeladas hasta el próximo refresco, así que
+    # tomarlas con un dólar viejo se arrastra durante horas.
+    from servicios.cotizador import dolar_ars
+    dolar = dolar_ars()
     markup = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
     destinos = {

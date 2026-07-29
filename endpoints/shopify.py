@@ -370,7 +370,13 @@ def _tarifas_de_emergencia(payload: dict) -> dict:
         items = rate.get("items") or []
         peso = sum((it.get("grams") or 0) * (it.get("quantity") or 1) for it in items) / 1000.0
         peso = max(round(peso, 2), 0.5)
-        dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+        try:
+            from servicios.cotizador import dolar_ars
+            dolar = dolar_ars()
+        except Exception:
+            # Este es el camino de ÚLTIMA instancia (ya falló todo lo demás):
+            # si hasta la base está caída, el entorno es lo único que queda.
+            dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
 
         rates = []
         for c in tarifa_emergencia(pais, peso, dolar):

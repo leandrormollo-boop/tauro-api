@@ -344,7 +344,10 @@ def cotizar_para_checkout(payload: dict) -> dict:
     if not pais or pais == "AR":
         return {"rates": []}   # nacional no va por esta vía
 
-    dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+    # El dólar sale de la tabla `config` (la que se edita en el admin), no de la
+    # variable de entorno: si no, actualizar la cotización no movía el checkout.
+    from servicios.cotizador import dolar_ars
+    dolar = dolar_ars()
     markup = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
     # Quién es el comerciante: hace falta ANTES de pesar, porque las
