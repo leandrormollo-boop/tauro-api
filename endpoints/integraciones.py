@@ -72,6 +72,23 @@ async def shopify_webhook(request: Request):
     creado = guardar_pedido(tienda["cliente_id"], tienda["id"], "shopify", pedido)
     print(f"[integraciones] shopify {dominio} pedido {pedido['numero']} → "
           f"{'guardado' if creado else 'actualizado'}")
+
+    # La solicitud de guía se arma SOLA: el comerciante no retipea nada, sólo
+    # revisa y genera. Va en un hilo porque cotizar tarda y la tienda espera
+    # un 200 rápido; demasiados timeouts hacen que Shopify dé de baja el
+    # webhook. La guía NO se emite sola: eso cuesta plata y no se deshace.
+    if creado:
+        try:
+            from servicios.integraciones_tienda import id_de_pedido
+            from servicios.solicitud_automatica import intentar_en_segundo_plano
+            pid = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
+            if pid:
+                intentar_en_segundo_plano(pid)
+        except Exception as e:
+            # Que falle el armado automático no puede tumbar el webhook: el
+            # pedido ya está guardado y el comerciante lo arma a mano.
+            print(f"[integraciones] no pude lanzar el armado automático: {e}")
+
     return {"ok": True, "nuevo": creado}
 
 
@@ -229,4 +246,15 @@ async def tiendanube_webhook(request: Request):
     creado = guardar_pedido(inst["cliente_id"], tienda["id"], "tiendanube", pedido)
     print(f"[tiendanube] tienda {store_id} pedido {pedido['numero']} → "
           f"{'guardado' if creado else 'actualizado'}")
+
+    if creado:
+        try:
+            from servicios.integraciones_tienda import id_de_pedido
+            from servicios.solicitud_automatica import intentar_en_segundo_plano
+            pid = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
+            if pid:
+                intentar_en_segundo_plano(pid)
+        except Exception as e:
+            print(f"[tiendanube] no pude lanzar el armado automático: {e}")
+
     return {"ok": True, "nuevo": creado}

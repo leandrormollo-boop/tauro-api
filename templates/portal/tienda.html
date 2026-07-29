@@ -47,6 +47,17 @@
                         <div style="font-size:13px;">{{ it.cantidad }}x {{ it.titulo }}</div>
                     {% endfor %}
                     {% if (p['items'] or [])|length > 3 %}<div style="font-size:12px;color:var(--fg-3);">+{{ (p['items'] or [])|length - 3 }} más</div>{% endif %}
+                    {# El envío se arma solo cuando entra la venta. Si no se pudo,
+                       acá va el porqué: sin esto el comerciante ve un pedido
+                       parado y no sabe qué corregir. #}
+                    {% if p.motivo_pendiente %}
+                    <div style="margin-top:8px;font-size:12px;line-height:1.5;
+                                background:rgba(167,139,250,.10);
+                                border-left:2px solid var(--brand,#a78bfa);
+                                padding:7px 9px;border-radius:0 6px 6px 0;color:var(--fg-2);">
+                        <strong>No se armó solo:</strong> {{ p.motivo_pendiente }}
+                    </div>
+                    {% endif %}
                 </td>
                 <td class="mono">{% if p.valor_total %}{{ p.moneda or '' }} {{ p.valor_total }}{% else %}—{% endif %}</td>
                 <td style="white-space:nowrap;">

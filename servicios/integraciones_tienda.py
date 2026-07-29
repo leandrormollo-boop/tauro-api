@@ -69,6 +69,12 @@ def _ensure_tablas() -> None:
                     ADD COLUMN IF NOT EXISTS flete_cobrado NUMERIC(14,2);
                 ALTER TABLE pedidos_tienda
                     ADD COLUMN IF NOT EXISTS flete_detalle JSONB;
+                -- Por qué este pedido no se convirtió solo en solicitud de
+                -- guía (SKU sin catálogo, sin remitente, país sin ruta). Se le
+                -- muestra al comerciante: "no se armó" a secas no le dice
+                -- qué tiene que corregir.
+                ALTER TABLE pedidos_tienda
+                    ADD COLUMN IF NOT EXISTS motivo_pendiente TEXT;
             """)
         conn.commit()
     _tablas_listas = True
@@ -301,6 +307,19 @@ def guardar_pedido(cliente_id: str, tienda_id: int, plataforma: str, pedido: dic
             creado = bool(fila and fila.get("es_nuevo"))
         conn.commit()
     return creado
+
+
+def id_de_pedido(tienda_id: int, pedido_externo_id: str) -> Optional[int]:
+    """Id interno de un pedido, para poder armarle la solicitud automática."""
+    _ensure_tablas()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM pedidos_tienda
+                WHERE tienda_id = %s AND pedido_externo_id = %s
+            """, (tienda_id, str(pedido_externo_id)))
+            row = cur.fetchone()
+            return int(row["id"]) if row else None
 
 
 def cancelar_pedido_externo(tienda_id: int, pedido_externo_id: str) -> bool:
