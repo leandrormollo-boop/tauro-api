@@ -33,7 +33,9 @@ from servicios.catalogo import (
     aprobar_producto, rechazar_producto,
 )
 from servicios.rutas import get_todas_las_rutas, upsert_ruta, toggle_ruta
-from servicios.pricing import PRICING_MODES, describir_pricing, parse_pricing_value
+from servicios.pricing import (
+    PRICING_MODES, describir_pricing, parse_monto_ars, parse_pricing_value,
+)
 from servicios.solicitudes_guia import (
     ESTADOS_SOLICITUD,
     actualizar_solicitud_guia,
@@ -604,6 +606,8 @@ def admin_cliente_nuevo(
     markup_valor: str = Form(""),
     markup_nac_tipo: str = Form(""),
     markup_nac_valor: str = Form(""),
+    puede_emitir: str = Form(""),
+    tope_deuda_ars: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -621,6 +625,7 @@ def admin_cliente_nuevo(
             nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
                                       fallback_pct=markup_pct)
             nac_tipo, nac_valor = nac["tipo"], nac["valor"]
+        tope_db = parse_monto_ars(tope_deuda_ars)
         # Hashear password si vino una
         from servicios.auth import hash_password
         password_hash_db = hash_password(password.strip()) if password.strip() else None
@@ -631,8 +636,8 @@ def admin_cliente_nuevo(
                     INSERT INTO clientes
                         (cliente_id, email, password_hash, markup_pct, markup_tipo, markup_valor, activo,
                          nombre, cuit, direccion, cp, ciudad, pais, telefono, notas,
-                         markup_nac_tipo, markup_nac_valor)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         markup_nac_tipo, markup_nac_valor, puede_emitir, tope_deuda_ars)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cliente_id, email.strip().lower(), password_hash_db, markup_pct_db,
@@ -642,6 +647,7 @@ def admin_cliente_nuevo(
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
                         nac_tipo, nac_valor,
+                        puede_emitir == "1", tope_db,
                     ),
                 )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id}?ok=creado", status_code=303)
@@ -801,6 +807,8 @@ def admin_cliente_editar(
     markup_valor: str = Form(""),
     markup_nac_tipo: str = Form(""),
     markup_nac_valor: str = Form(""),
+    puede_emitir: str = Form(""),
+    tope_deuda_ars: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -819,6 +827,7 @@ def admin_cliente_editar(
             nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
                                       fallback_pct=markup_pct)
             nac_tipo, nac_valor = nac["tipo"], nac["valor"]
+        tope_db = parse_monto_ars(tope_deuda_ars)
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -827,7 +836,8 @@ def admin_cliente_editar(
                     UPDATE clientes SET
                         email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
                         direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s,
-                        markup_nac_tipo=%s, markup_nac_valor=%s
+                        markup_nac_tipo=%s, markup_nac_valor=%s,
+                        puede_emitir=%s, tope_deuda_ars=%s
                     WHERE cliente_id=%s
                     """,
                     (
@@ -838,6 +848,7 @@ def admin_cliente_editar(
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
                         nac_tipo, nac_valor,
+                        puede_emitir == "1", tope_db,
                         cliente_id.strip().upper(),
                     ),
                 )

@@ -508,6 +508,58 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
     return bytes(row["label_pdf"])
 
 
+def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
+    """
+    Emisión desde el PORTAL, con las tres llaves que definió Leandro:
+
+      1. La solicitud es de ESE cliente y no tiene guía todavía.
+      2. El cliente tiene la emisión habilitada (flag por cliente, apagado
+         por defecto — emitir cuesta plata real y no se puede deshacer).
+      3. Si tiene tope de deuda, su saldo pendiente no lo supera: un
+         cliente moroso no puede seguir generando costo en el courier.
+
+    Pasadas las tres, delega en generar_guia(), que ya trae la reserva
+    atómica anti doble-emisión. El débito en cuenta corriente sale solo
+    (guardar_guia_generada), así que cada emisión del cliente queda
+    facturada en el acto — sin eso, esta función sería un agujero.
+    """
+    cliente_id = (cliente_id or "").strip().upper()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT s.cliente_id, s.tracking, s.estado,
+                       c.puede_emitir, c.tope_deuda_ars
+                FROM solicitudes_guia s
+                JOIN clientes c ON c.cliente_id = s.cliente_id
+                WHERE s.id = %s
+            """, (solicitud_id,))
+            fila = cur.fetchone()
+
+    if not fila or fila["cliente_id"] != cliente_id:
+        return {"ok": False, "error": "Esa solicitud no existe o no es tuya."}
+    if fila["tracking"]:
+        return {"ok": False, "error": "Esa solicitud ya tiene guía emitida."}
+    if not fila["puede_emitir"]:
+        return {"ok": False, "error": "Tu cuenta no tiene habilitada la emisión "
+                                      "directa. Reenviá la solicitud a Tauro y la "
+                                      "emitimos nosotros."}
+
+    tope = fila["tope_deuda_ars"]
+    if tope is not None and float(tope) >= 0:
+        from servicios.cuenta_corriente import get_facturado_real, saldo
+        deuda = saldo(cliente_id, get_facturado_real(cliente_id))["saldo_pendiente_ars"]
+        if deuda > float(tope):
+            return {"ok": False, "error":
+                    f"Tu saldo pendiente (ARS {deuda:,.0f}) supera el límite "
+                    f"de tu cuenta (ARS {float(tope):,.0f}). Registrá un pago "
+                    f"para seguir emitiendo, o reenviá la solicitud a Tauro."}
+
+    print(f"[solicitudes] emisión del CLIENTE {cliente_id} para la solicitud "
+          f"{solicitud_id} (autorizada: flag + tope OK)")
+    return generar_guia(solicitud_id)
+
+
 def generar_guia(solicitud_id: int) -> dict:
     """
     Despachador de emisión: mira el courier de la solicitud y emite por

@@ -138,6 +138,31 @@
       </div>
     </div>
 
+    {# Emisión directa: el cliente genera sus guías desde el portal sin pasar
+       por el admin. Emitir cuesta plata real, por eso es opt-in por cliente
+       y con tope de deuda opcional. #}
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" name="puede_emitir" value="1"
+                 {% if cliente and cliente.puede_emitir %}checked{% endif %}>
+          Puede emitir guías desde el portal
+        </label>
+        <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
+          Apagado: el cliente sólo reenvía la solicitud y emite Tauro.
+        </p>
+      </div>
+      <div class="form-group">
+        <label>Tope de deuda para emitir (ARS)</label>
+        <input type="text" name="tope_deuda_ars"
+               value="{% if cliente and cliente.tope_deuda_ars is not none %}{{ '%g'|format(cliente.tope_deuda_ars) }}{% endif %}"
+               placeholder="ej: 500.000 — vacío = sin tope">
+        <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
+          Si su saldo pendiente supera este monto, no puede emitir hasta ponerse al día.
+        </p>
+      </div>
+    </div>
+
     <div class="form-group">
       <label>Notas internas</label>
       <textarea name="notas" rows="2" placeholder="Observaciones...">{{ cliente.notas if cliente else '' }}</textarea>

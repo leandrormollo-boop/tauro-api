@@ -14,6 +14,8 @@
 import os
 from datetime import datetime
 from urllib.parse import quote
+
+from core.database import get_conn
 from typing import Optional
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -999,10 +1001,45 @@ def envio_detalle(
     s = obtener_solicitud_de_cliente(solicitud_id, cliente)
     if not s:
         return RedirectResponse(url="/portal/envios", status_code=303)
+
+    # ¿Este cliente puede emitir solo? Define si se muestra el botón.
+    puede_emitir = False
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT puede_emitir FROM clientes WHERE cliente_id = %s",
+                            (cliente,))
+                fila = cur.fetchone()
+                puede_emitir = bool(fila and fila["puede_emitir"])
+    except Exception as e:
+        print(f"[portal] no pude leer puede_emitir de {cliente}: {e}")
+
     return templates.TemplateResponse(
         request=request, name="portal/envio_detalle.html",
-        context={"cliente": cliente, "s": s},
+        context={"cliente": cliente, "s": s, "puede_emitir": puede_emitir},
     )
+
+
+@router.post("/envios/{solicitud_id}/emitir")
+def emitir_guia_portal(
+    solicitud_id: int,
+    cliente: str = Depends(cliente_actual),
+):
+    """
+    El cliente emite su propia guía (spec: "el cliente podrá generar las
+    guías ahí mismo o reenviar al admin"). Las tres llaves —es suya, tiene
+    el permiso, no supera su tope de deuda— viven en el servicio; acá sólo
+    se traduce el resultado a la pantalla.
+    """
+    from servicios.solicitudes_guia import emitir_guia_como_cliente
+
+    resultado = emitir_guia_como_cliente(solicitud_id, cliente)
+    if resultado.get("ok"):
+        return RedirectResponse(url=f"/portal/envios/{solicitud_id}?ok=guia",
+                                status_code=303)
+    return RedirectResponse(
+        url=f"/portal/envios/{solicitud_id}?error={quote(str(resultado.get('error') or 'No se pudo emitir'))}",
+        status_code=303)
 
 
 # ── Mi tienda (Shopify / Tiendanube) ────────────────────────

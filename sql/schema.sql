@@ -41,6 +41,13 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_valor REAL;
 -- internacional de siempre — nada se rompe para los clientes ya cargados.
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_tipo TEXT;
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_valor REAL;
+-- Emisión por el cliente (decisión de Leandro 28/07): apagada por defecto,
+-- se habilita POR CLIENTE. Emitir cuesta plata real e irreversible, y con
+-- tope_deuda_ars el cliente moroso no puede seguir generando costo: si su
+-- saldo pendiente supera el tope, emite TAURO o se pone al día. NULL = sin
+-- tope (sólo el flag manda).
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS puede_emitir BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tope_deuda_ars REAL;
 -- Password hasheado con bcrypt (login email + password)
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
 

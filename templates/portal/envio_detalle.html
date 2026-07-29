@@ -56,6 +56,21 @@
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
                 {% if s.bultos and s.bultos|length %}El PDF trae una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}Imprimí la etiqueta y pegala en la caja.{% endif %}
             </p>
+        {% elif not s.tracking and puede_emitir %}
+            {# Emisión habilitada para este cliente (flag + tope de deuda se
+               validan de nuevo en el servidor: el botón es sólo la puerta). #}
+            {% if request.query_params.get('error') %}
+                <div class="msg error" style="margin-bottom:10px;">{{ request.query_params.get('error') }}</div>
+            {% endif %}
+            <form method="POST" action="/portal/envios/{{ s.id }}/emitir"
+                  onsubmit="return confirm('¿Emitir la guía ahora? Se genera la guía real en el courier y el cargo entra a tu cuenta corriente. No se puede deshacer.');">
+                <button type="submit" class="btn btn-primary btn-full">Emitir guía ahora</button>
+            </form>
+            <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
+                Al emitir, el cargo de
+                <strong>$ {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }}</strong>
+                entra a tu cuenta corriente. Si preferís, Tauro la emite por vos.
+            </p>
         {% else %}
             <div class="empty" style="padding:14px;">Todavía no hay guía emitida. Aparece acá apenas Tauro la genera.</div>
         {% endif %}
