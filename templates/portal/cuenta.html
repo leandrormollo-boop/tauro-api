@@ -13,6 +13,13 @@
     </div>
 </div>
 
+{% if request.query_params.get('ok') %}
+    <div class="msg ok">Recibimos tu pago. Lo verificamos y se acredita en tu saldo — lo vas a ver marcado "en verificación" mientras tanto.</div>
+{% endif %}
+{% if request.query_params.get('error') %}
+    <div class="msg error">{{ request.query_params.get('error') }}</div>
+{% endif %}
+
 <div class="grid-3" style="margin-bottom:16px;">
     <div class="stat-card">
         <div class="label">Facturado</div>
@@ -49,6 +56,10 @@
                     <td>
                         {% if m.tipo == 'PAGO' %}
                             <span class="badge ok">Pago</span>
+                        {% elif m.tipo == 'PAGO_PENDIENTE' %}
+                            {# Informado con comprobante, esperando que TAURO lo
+                               verifique. Se ve pero NO está en el saldo. #}
+                            <span class="badge warn">Pago en verificación</span>
                         {% else %}
                             <span class="badge">Factura</span>
                         {% endif %}
@@ -71,4 +82,41 @@
     tu primer envío, el cargo va a aparecer acá solo.</p>
 </div>
 {% endif %}
+
+{# ── Informar un pago ─────────────────────────────────────
+   El cliente avisa que pagó y sube el comprobante. Queda "en verificación"
+   hasta que TAURO lo aprueba: recién ahí entra al saldo. #}
+<div class="card" id="informar-pago" style="margin-top:16px;">
+    <div class="card-head">
+        <div>
+            <h3>Informar un pago</h3>
+            <p>Subí el comprobante (foto o PDF) y lo acreditamos en tu cuenta.</p>
+        </div>
+    </div>
+    <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data">
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label for="pago-monto">Monto (ARS) *</label>
+                <input type="text" name="monto" id="pago-monto" required
+                       inputmode="decimal" placeholder="150.000">
+            </div>
+            <div class="form-group">
+                <label for="pago-metodo">Método</label>
+                <input type="text" name="metodo" id="pago-metodo"
+                       placeholder="Transferencia" value="Transferencia">
+            </div>
+            <div class="form-group">
+                <label for="pago-ref">Referencia / operación</label>
+                <input type="text" name="referencia" id="pago-ref"
+                       placeholder="Nº de operación del banco">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="pago-file">Comprobante (JPG, PNG o PDF · máx 8 MB) *</label>
+            <input type="file" name="comprobante" id="pago-file" required
+                   accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
+        </div>
+        <button type="submit" class="btn btn-primary">Enviar pago para verificación</button>
+    </form>
+</div>
 {% endblock %}

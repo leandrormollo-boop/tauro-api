@@ -8,7 +8,7 @@
 </div>
 
 <div class="card" style="max-width:560px;">
-  <form method="POST" action="/admin/envios/nuevo">
+  <form method="POST" action="/admin/envios/nuevo" enctype="multipart/form-data">
 
     <div class="form-group">
       <label>Cliente *</label>
@@ -55,6 +55,12 @@
         <option value="CANCELADO">Cancelado</option>
         <option value="NC">Nota de crédito (NC)</option>
       </select>
+    </div>
+
+    <div class="form-group">
+      <label>PDF de la factura (opcional)</label>
+      <input type="file" name="factura_pdf"
+             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
     </div>
 
     <div style="display:flex;gap:12px;margin-top:8px;">

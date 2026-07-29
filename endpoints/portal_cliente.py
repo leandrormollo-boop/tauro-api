@@ -322,6 +322,67 @@ def cuenta_corriente(request: Request, cliente: str = Depends(cliente_actual)):
     )
 
 
+# ── Informar un pago con comprobante ────────────────────────
+@router.post("/pagos/informar")
+async def informar_pago(
+    request: Request,
+    cliente: str = Depends(cliente_actual),
+):
+    """
+    El cliente avisa que pagó y adjunta el comprobante (JPG/PNG/PDF).
+    Queda PENDIENTE: no toca el saldo hasta que el admin lo verifica —
+    decisión de Leandro: nadie se acredita plata con un comprobante sin
+    revisar. El tamaño ya lo limitó el middleware (8 MB).
+    """
+    from servicios.cuenta_corriente import registrar_pago
+
+    form = await request.form()
+    try:
+        monto = parse_monto_ars(str(form.get("monto") or "")) or 0
+        if monto <= 0:
+            raise ValueError("El monto tiene que ser mayor a cero.")
+
+        archivo = form.get("comprobante")
+        contenido = await archivo.read() if archivo is not None and hasattr(archivo, "read") else b""
+        if not contenido:
+            raise ValueError("Falta el comprobante (foto o PDF).")
+
+        registrar_pago(
+            cliente_id=cliente,
+            fecha=datetime.now().strftime("%Y-%m-%d"),
+            monto_ars=monto,
+            metodo=str(form.get("metodo") or "transferencia")[:60],
+            referencia=str(form.get("referencia") or "")[:120],
+            nota="Informado por el cliente desde el portal",
+            estado="PENDIENTE",
+            comprobante=contenido,
+            comprobante_nombre=getattr(archivo, "filename", "") or "",
+        )
+    except ValueError as e:
+        return RedirectResponse(url=f"/portal/cuenta?error={quote(str(e))}", status_code=303)
+    except Exception as e:
+        print(f"[portal] informar_pago falló para {cliente}: {e}")
+        return RedirectResponse(
+            url=f"/portal/cuenta?error={quote('No pudimos guardar el pago. Probá de nuevo.')}",
+            status_code=303)
+    return RedirectResponse(url="/portal/cuenta?ok=1", status_code=303)
+
+
+@router.get("/pagos/{pago_id}/comprobante")
+def ver_comprobante_propio(pago_id: int, cliente: str = Depends(cliente_actual)):
+    """El cliente ve SUS comprobantes; los ajenos no existen para él (404)."""
+    from fastapi.responses import Response
+
+    from servicios.cuenta_corriente import get_comprobante
+
+    dato = get_comprobante(pago_id, cliente_id=cliente)
+    if not dato:
+        raise HTTPException(status_code=404, detail="Comprobante no encontrado")
+    contenido, tipo, nombre = dato
+    return Response(content=contenido, media_type=tipo,
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+
+
 # ── Cotizar ─────────────────────────────────────────────────
 @router.get("/cotizar", response_class=HTMLResponse)
 def cotizar_form(request: Request, cliente: str = Depends(cliente_actual)):

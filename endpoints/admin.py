@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Request, Form, Cookie, Depends
+from fastapi import APIRouter, Request, Form, Cookie, Depends, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -895,7 +895,7 @@ def admin_envio_form(
 
 
 @router.post("/envios/nuevo")
-def admin_envio_nuevo(
+async def admin_envio_nuevo(
     request: Request,
     cliente_id: str = Form(...),
     fecha: str = Form(...),
@@ -904,12 +904,14 @@ def admin_envio_nuevo(
     descripcion: str = Form(""),
     tracking: str = Form(""),
     estado: str = Form("ACTIVO"),
+    factura_pdf: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
 
     try:
+        contenido_fc = await factura_pdf.read() if factura_pdf is not None else b""
         registrar_envio(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
@@ -918,6 +920,8 @@ def admin_envio_nuevo(
             estado=estado,
             descripcion=descripcion,
             tracking=tracking,
+            factura_pdf=contenido_fc or None,
+            factura_nombre=(factura_pdf.filename if factura_pdf else "") or "",
         )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
     except Exception as e:
@@ -1214,7 +1218,7 @@ def admin_pago_form(
 
 
 @router.post("/pagos/nuevo")
-def admin_pago_nuevo(
+async def admin_pago_nuevo(
     request: Request,
     cliente_id: str = Form(...),
     fecha: str = Form(...),
@@ -1222,12 +1226,14 @@ def admin_pago_nuevo(
     metodo: str = Form("transferencia"),
     referencia: str = Form(""),
     nota: str = Form(""),
+    comprobante: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
 
     try:
+        contenido = await comprobante.read() if comprobante is not None else b""
         registrar_pago(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
@@ -1235,6 +1241,11 @@ def admin_pago_nuevo(
             metodo=metodo,
             referencia=referencia,
             nota=nota,
+            # El admin carga APROBADO: impacta el saldo al instante. El
+            # circuito PENDIENTE es sólo para pagos informados por clientes.
+            estado="APROBADO",
+            comprobante=contenido or None,
+            comprobante_nombre=(comprobante.filename if comprobante else "") or "",
         )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
     except Exception as e:
@@ -1250,6 +1261,52 @@ def admin_pago_nuevo(
                 "flash_error": str(e),
             },
         )
+
+
+# ── Verificación de pagos informados por clientes ───────────
+
+@router.get("/pagos/pendientes", response_class=HTMLResponse)
+def admin_pagos_pendientes(request: Request, admin_token: Optional[str] = Cookie(None)):
+    """Cola de pagos que los clientes informaron y esperan verificación."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.cuenta_corriente import pagos_pendientes
+    return templates.TemplateResponse(
+        request=request, name="admin/pagos_pendientes.html",
+        context={"seccion": "pagos_pendientes", "pagos": pagos_pendientes()},
+    )
+
+
+@router.get("/pagos/{pago_id}/comprobante")
+def admin_ver_comprobante(pago_id: int, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.cuenta_corriente import get_comprobante
+    dato = get_comprobante(pago_id)
+    if not dato:
+        return Response(content="Sin comprobante", status_code=404)
+    contenido, tipo, nombre = dato
+    return Response(content=contenido, media_type=tipo,
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+
+
+@router.post("/pagos/{pago_id}/resolver")
+def admin_resolver_pago(
+    pago_id: int,
+    decision: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """
+    Aprueba (entra al saldo) o rechaza (no cuenta, queda el registro) un
+    pago informado. Sólo resuelve PENDIENTES: un doble click no re-resuelve.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.cuenta_corriente import resolver_pago
+    cambio = resolver_pago(pago_id, aprobar=(decision == "aprobar"))
+    if not cambio:
+        print(f"[admin] pago {pago_id}: ya estaba resuelto, no se toca")
+    return RedirectResponse(url="/admin/pagos/pendientes", status_code=303)
 
 
 # ── Productos ────────────────────────────────────────────────

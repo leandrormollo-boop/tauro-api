@@ -1,0 +1,68 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Pagos por verificar{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Cuenta corriente</div>
+  <h1>Pagos por verificar</h1>
+  <p>Informados por los clientes desde el portal. No tocan el saldo hasta que los apruebes.</p>
+</div>
+
+{% if pagos %}
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Informado</th>
+          <th>Cliente</th>
+          <th class="num">Monto (ARS)</th>
+          <th>Método</th>
+          <th>Referencia</th>
+          <th>Comprobante</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pagos %}
+        <tr>
+          <td class="mono">{{ p.created_at.strftime('%d/%m/%Y %H:%M') if p.created_at else '—' }}</td>
+          <td><strong>{{ p.cliente_id }}</strong></td>
+          <td class="num mono">$ {{ "{:,.0f}".format(p.monto_ars).replace(",", ".") }}</td>
+          <td>{{ p.metodo }}</td>
+          <td class="mono">{{ p.referencia or '—' }}</td>
+          <td>
+            {% if p.tiene_comprobante %}
+              <a href="/admin/pagos/{{ p.id }}/comprobante" target="_blank"
+                 class="btn btn-ghost btn-sm">Ver comprobante</a>
+            {% else %}
+              <span style="color:var(--fg-3);">sin adjunto</span>
+            {% endif %}
+          </td>
+          {% set monto_fmt = "{:,.0f}".format(p.monto_ars).replace(",", ".") %}
+          <td style="white-space:nowrap;">
+            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;">
+              <input type="hidden" name="decision" value="aprobar">
+              <button type="submit" class="btn btn-primary btn-sm"
+                      onclick="return confirm('¿Aprobar el pago de {{ p.cliente_id }} por $ {{ monto_fmt }}? Entra al saldo al instante.')">
+                Aprobar</button>
+            </form>
+            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;">
+              <input type="hidden" name="decision" value="rechazar">
+              <button type="submit" class="btn btn-ghost btn-sm"
+                      onclick="return confirm('¿Rechazar este pago? No cuenta para el saldo; el registro queda.')">
+                Rechazar</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:34px;">
+  <p style="color:var(--fg-3);margin:0;">No hay pagos esperando verificación.</p>
+</div>
+{% endif %}
+{% endblock %}

@@ -121,6 +121,17 @@ CREATE TABLE IF NOT EXISTS pagos (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id);
+-- Pagos informados por el CLIENTE con comprobante (decisión de Leandro
+-- 28/07): entran como PENDIENTE y NO tocan el saldo hasta que el admin los
+-- aprueba. Los que carga el admin nacen APROBADO (las filas viejas, con
+-- estado NULL, cuentan como aprobadas — eran cargas del admin).
+ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'APROBADO';
+ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante BYTEA;
+ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT;
+ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT;
+-- Factura emitida con su PDF adjunto (cargada por el admin).
+ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_pdf BYTEA;
+ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_nombre TEXT;
 
 -- ── Envíos / Facturas (ex ENVIOS 2026) ─────────────────────
 CREATE TABLE IF NOT EXISTS envios (

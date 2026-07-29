@@ -6,7 +6,9 @@
 # ============================================================
 
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+import psycopg2
 
 from core.database import get_conn
 
@@ -78,9 +80,11 @@ def get_pagos(cliente: str) -> List[Dict[str, Any]]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT fecha, monto_ars, metodo, referencia, nota
+                SELECT id, fecha, monto_ars, metodo, referencia, nota, estado,
+                       (comprobante IS NOT NULL) AS tiene_comprobante
                 FROM pagos
                 WHERE cliente_id = %s
+                  AND COALESCE(estado, 'APROBADO') <> 'RECHAZADO'
                 ORDER BY fecha ASC
                 """,
                 (cliente,),
@@ -90,21 +94,36 @@ def get_pagos(cliente: str) -> List[Dict[str, Any]]:
     pagos = []
     for r in rows:
         pagos.append({
+            "id": r["id"],
             "fecha": r["fecha"].strftime("%d/%m/%Y") if r["fecha"] else "",
             "monto_ars": float(r["monto_ars"] or 0),
             "metodo": str(r["metodo"] or ""),
             "referencia": str(r["referencia"] or ""),
             "nota": str(r["nota"] or ""),
+            # NULL = pago viejo cargado por el admin antes de que existiera
+            # el estado: cuenta como aprobado.
+            "estado": str(r["estado"] or "APROBADO"),
+            "tiene_comprobante": bool(r["tiene_comprobante"]),
         })
     return pagos
 
 
 def total_pagado(cliente: str) -> float:
+    """
+    SOLO pagos aprobados: un pago informado por el cliente con comprobante
+    queda PENDIENTE y no toca el saldo hasta que el admin lo verifica
+    (decisión de Leandro 28/07 — nadie se acredita plata con un comprobante
+    sin revisar).
+    """
     cliente = cliente.strip().upper()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT COALESCE(SUM(monto_ars), 0) AS total FROM pagos WHERE cliente_id = %s",
+                """
+                SELECT COALESCE(SUM(monto_ars), 0) AS total FROM pagos
+                WHERE cliente_id = %s
+                  AND COALESCE(estado, 'APROBADO') = 'APROBADO'
+                """,
                 (cliente,),
             )
             row = cur.fetchone()
@@ -131,6 +150,7 @@ def get_resumen_clientes_bulk(solo_activos: bool = True) -> List[Dict[str, Any]]
         pag AS (
             SELECT cliente_id, COALESCE(SUM(monto_ars), 0) AS pagado
             FROM pagos
+            WHERE COALESCE(estado, 'APROBADO') = 'APROBADO'
             GROUP BY cliente_id
         )
         SELECT
@@ -187,10 +207,15 @@ def movimientos(cliente: str, facturas: List[Dict[str, Any]]) -> List[Dict[str, 
             "monto_ars": float(fc.get("monto_ars", 0)),
         })
     for p in get_pagos(cliente):
+        pendiente = p.get("estado") == "PENDIENTE"
         items.append({
             "fecha": p["fecha"],
-            "tipo": "PAGO",
-            "concepto": f"{p['metodo']} {p['referencia']}".strip(),
+            # Un pago informado y sin verificar se MUESTRA (el cliente tiene
+            # que ver que su aviso llegó) pero rotulado: no está en el saldo
+            # hasta que el admin lo apruebe.
+            "tipo": "PAGO_PENDIENTE" if pendiente else "PAGO",
+            "concepto": f"{p['metodo']} {p['referencia']}".strip()
+                        + (" · en verificación" if pendiente else ""),
             "monto_ars": -p["monto_ars"],
         })
 
@@ -206,6 +231,25 @@ def movimientos(cliente: str, facturas: List[Dict[str, Any]]) -> List[Dict[str, 
 
 # ── Funciones de escritura (para el admin) ───────────────────
 
+# Tipos de comprobante aceptados. La validación es por CONTENIDO (firma del
+# archivo), no por extensión: renombrar un .exe a .pdf no lo convierte en PDF.
+_FIRMAS_COMPROBANTE = {
+    b"%PDF": "application/pdf",
+    b"\xff\xd8\xff": "image/jpeg",
+    b"\x89PNG": "image/png",
+}
+
+
+def validar_comprobante(contenido: bytes) -> str:
+    """Devuelve el content-type real, o lanza ValueError si no es JPG/PNG/PDF."""
+    if not contenido:
+        raise ValueError("El archivo llegó vacío.")
+    for firma, tipo in _FIRMAS_COMPROBANTE.items():
+        if contenido.startswith(firma):
+            return tipo
+    raise ValueError("El comprobante tiene que ser una foto (JPG/PNG) o un PDF.")
+
+
 def registrar_pago(
     cliente_id: str,
     fecha: str,        # "YYYY-MM-DD"
@@ -213,16 +257,87 @@ def registrar_pago(
     metodo: str,
     referencia: str = "",
     nota: str = "",
-) -> None:
+    estado: str = "APROBADO",
+    comprobante: Optional[bytes] = None,
+    comprobante_nombre: str = "",
+) -> int:
+    """
+    Alta de pago. El admin carga APROBADO (impacta el saldo al instante);
+    el cliente informa PENDIENTE (no impacta hasta que el admin lo apruebe).
+    """
+    tipo = validar_comprobante(comprobante) if comprobante else None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO pagos (cliente_id, fecha, monto_ars, metodo, referencia, nota)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO pagos (cliente_id, fecha, monto_ars, metodo, referencia,
+                                   nota, estado, comprobante, comprobante_tipo,
+                                   comprobante_nombre)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
                 """,
-                (cliente_id.upper(), fecha, monto_ars, metodo, referencia, nota),
+                (cliente_id.upper(), fecha, monto_ars, metodo, referencia, nota,
+                 estado.upper(),
+                 psycopg2.Binary(comprobante) if comprobante else None,
+                 tipo, comprobante_nombre[:160] if comprobante_nombre else None),
             )
+            return int(cur.fetchone()["id"])
+
+
+def pagos_pendientes() -> List[Dict[str, Any]]:
+    """Cola de verificación del admin: pagos informados por clientes."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, cliente_id, fecha, monto_ars, metodo, referencia, nota,
+                       comprobante_nombre, (comprobante IS NOT NULL) AS tiene_comprobante,
+                       created_at
+                FROM pagos WHERE estado = 'PENDIENTE'
+                ORDER BY created_at ASC
+            """)
+            return [dict(r) for r in cur.fetchall()]
+
+
+def resolver_pago(pago_id: int, aprobar: bool) -> bool:
+    """
+    Aprueba o rechaza un pago informado. Sólo toca PENDIENTES: un pago ya
+    resuelto no se puede volver a resolver por accidente (doble click, dos
+    pestañas abiertas). Al aprobar, el saldo se actualiza solo, porque
+    total_pagado() suma por estado.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE pagos SET estado = %s
+                WHERE id = %s AND estado = 'PENDIENTE'
+                RETURNING id
+            """, ("APROBADO" if aprobar else "RECHAZADO", pago_id))
+            return cur.fetchone() is not None
+
+
+def get_comprobante(pago_id: int, cliente_id: Optional[str] = None):
+    """
+    (contenido, tipo, nombre) del comprobante, o None.
+    Con cliente_id se exige que el pago sea de ESE cliente: el portal sólo
+    muestra comprobantes propios; el admin (cliente_id=None) ve todos.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if cliente_id:
+                cur.execute("""
+                    SELECT comprobante, comprobante_tipo, comprobante_nombre
+                    FROM pagos WHERE id = %s AND cliente_id = %s
+                """, (pago_id, cliente_id.strip().upper()))
+            else:
+                cur.execute("""
+                    SELECT comprobante, comprobante_tipo, comprobante_nombre
+                    FROM pagos WHERE id = %s
+                """, (pago_id,))
+            row = cur.fetchone()
+    if not row or not row["comprobante"]:
+        return None
+    return (bytes(row["comprobante"]), row["comprobante_tipo"] or "application/octet-stream",
+            row["comprobante_nombre"] or f"comprobante_{pago_id}")
 
 
 def registrar_envio(
@@ -233,16 +348,26 @@ def registrar_envio(
     estado: str = "ACTIVO",
     descripcion: str = "",
     tracking: str = "",
+    factura_pdf: Optional[bytes] = None,
+    factura_nombre: str = "",
 ) -> None:
+    # La factura adjunta se valida por contenido igual que los comprobantes:
+    # acá sólo tiene sentido un PDF o una foto del documento.
+    if factura_pdf:
+        validar_comprobante(factura_pdf)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO envios
-                    (cliente_id, fecha, nro_fc, monto_ars, estado, descripcion, tracking)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (cliente_id, fecha, nro_fc, monto_ars, estado, descripcion,
+                     tracking, factura_pdf, factura_nombre)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (cliente_id.upper(), fecha, nro_fc, monto_ars, estado.upper(), descripcion, tracking),
+                (cliente_id.upper(), fecha, nro_fc, monto_ars, estado.upper(),
+                 descripcion, tracking,
+                 psycopg2.Binary(factura_pdf) if factura_pdf else None,
+                 factura_nombre[:160] if factura_nombre else None),
             )
 
 
