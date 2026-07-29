@@ -239,6 +239,23 @@ _FIRMAS_COMPROBANTE = {
     b"\x89PNG": "image/png",
 }
 
+# Tope de tamaño APLICADO EN EL HANDLER, no en un middleware: el middleware
+# de core/security.py no está montado en la app (es del paquete viejo que
+# quedó en stash), así que confiar en él era confiar en nada. Leer con tope
+# funciona siempre: se piden tope+1 bytes y si vino de más, se rechaza sin
+# cargar el resto en memoria (starlette ya lo tiene en un spool de disco).
+COMPROBANTE_MAX_BYTES = 8 * 1024 * 1024
+
+
+async def leer_comprobante_con_tope(archivo) -> bytes:
+    """Lee un UploadFile hasta 8 MB; más que eso es rechazo, no comprobante."""
+    if archivo is None or not hasattr(archivo, "read"):
+        return b""
+    contenido = await archivo.read(COMPROBANTE_MAX_BYTES + 1)
+    if len(contenido) > COMPROBANTE_MAX_BYTES:
+        raise ValueError("El archivo supera el máximo de 8 MB.")
+    return contenido
+
 
 def validar_comprobante(contenido: bytes) -> str:
     """Devuelve el content-type real, o lanza ValueError si no es JPG/PNG/PDF."""

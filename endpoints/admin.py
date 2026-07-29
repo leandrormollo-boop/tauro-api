@@ -911,7 +911,8 @@ async def admin_envio_nuevo(
         return _redirect_login()
 
     try:
-        contenido_fc = await factura_pdf.read() if factura_pdf is not None else b""
+        from servicios.cuenta_corriente import leer_comprobante_con_tope
+        contenido_fc = await leer_comprobante_con_tope(factura_pdf)
         registrar_envio(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
@@ -1233,7 +1234,8 @@ async def admin_pago_nuevo(
         return _redirect_login()
 
     try:
-        contenido = await comprobante.read() if comprobante is not None else b""
+        from servicios.cuenta_corriente import leer_comprobante_con_tope
+        contenido = await leer_comprobante_con_tope(comprobante)
         registrar_pago(
             cliente_id=cliente_id.upper(),
             fecha=fecha,

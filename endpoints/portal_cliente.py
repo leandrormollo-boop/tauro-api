@@ -334,7 +334,7 @@ async def informar_pago(
     decisión de Leandro: nadie se acredita plata con un comprobante sin
     revisar. El tamaño ya lo limitó el middleware (8 MB).
     """
-    from servicios.cuenta_corriente import registrar_pago
+    from servicios.cuenta_corriente import leer_comprobante_con_tope, registrar_pago
 
     form = await request.form()
     try:
@@ -343,7 +343,7 @@ async def informar_pago(
             raise ValueError("El monto tiene que ser mayor a cero.")
 
         archivo = form.get("comprobante")
-        contenido = await archivo.read() if archivo is not None and hasattr(archivo, "read") else b""
+        contenido = await leer_comprobante_con_tope(archivo)
         if not contenido:
             raise ValueError("Falta el comprobante (foto o PDF).")
 
