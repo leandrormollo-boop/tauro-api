@@ -9,11 +9,15 @@ producción y falla ruidosamente.
     python3 scripts/test_checkout_critico.py http://localhost:8123
 
 Qué garantiza:
-  1. El checkout SIEMPRE devuelve al menos una opción de envío.
-  2. Responde bien por debajo del corte de Shopify (~10s).
-  3. Los precios tienen escala razonable (nunca 0, nunca absurdos).
-  4. Los webhooks rechazan firmas inválidas.
-  5. Las superficies públicas están vivas.
+  1. El endpoint de tarifas —retirado el 28/07— responde 200 vacío y rápido,
+     para que una tienda con un carrier service colgado no se coma un timeout
+     en el checkout de su comprador.
+  2. Nada de lo que llegue por ahí tumba la app.
+  3. Los webhooks rechazan firmas inválidas.
+  4. Las superficies públicas están vivas.
+
+Lo que la app hace hoy es RECIBIR la venta y cargarla como solicitud; el
+precio del envío lo pone el comerciante con sus tarifas de Shopify.
 """
 from __future__ import annotations
 
@@ -64,15 +68,17 @@ def check(ok: bool, descripcion: str, detalle: str = "") -> None:
 
 print(f"\nCAMINO CRÍTICO DEL COMPRADOR · {BASE}\n" + "=" * 60)
 
-# ── 1. El checkout nunca deja al comprador sin opción de envío ──
-print("\n[1] Tarifas en el checkout")
+# ── 1. El endpoint de tarifas quedó retirado, pero tiene que responder ──
+# La app ya NO cotiza el envío en el checkout (28/07): el precio lo pone el
+# comerciante con sus tarifas de Shopify. El endpoint sigue vivo y devolviendo
+# lista vacía a propósito, para que una tienda con un carrier service colgado
+# reciba un 200 rápido en vez de un timeout que le trabe el checkout al
+# comprador.
+print("\n[1] Endpoint de tarifas (retirado, debe responder vacío y rápido)")
 CASOS = [
     ("US", 850, 1, 5_000_00, "Estados Unidos, 850g"),
     ("BR", 1200, 2, 8_000_00, "Brasil, 2 unidades"),
-    ("ES", 5000, 1, 25_000_00, "España, 5kg"),
-    ("MX", 15000, 1, 50_000_00, "México, 15kg"),
-    ("CL", 300, 1, 2_000_00, "Chile, liviano"),
-    ("US", 90000, 1, 90_000_00, "USA, 90kg (arriba del último escalón)"),
+    ("US", 90000, 1, 90_000_00, "USA, 90kg"),
 ]
 for pais, gramos, qty, precio, nombre in CASOS:
     payload = {"rate": {
@@ -80,29 +86,13 @@ for pais, gramos, qty, precio, nombre in CASOS:
         "items": [{"grams": gramos, "quantity": qty, "price": precio, "sku": "TEST-SKU"}],
     }}
     status, data, dur = _post("/shopify/tarifas", payload)
-    rates = (data or {}).get("rates", [])
-    check(status == 200 and len(rates) >= 1,
-          f"{nombre}: hay opción de envío",
-          f"HTTP {status}, {len(rates)} opciones")
+    check(status == 200, f"{nombre}: responde 200", f"HTTP {status}")
+    check((data or {}).get("rates") == [],
+          f"{nombre}: devuelve lista vacía",
+          f"devolvió {len((data or {}).get('rates', []))} tarifa(s) — "
+          f"la app no debería estar cotizando")
     check(dur < LIMITE_SEGUNDOS,
-          f"{nombre}: responde a tiempo",
-          f"{dur:.2f}s (límite {LIMITE_SEGUNDOS}s)")
-    for r in rates:
-        centavos = int(r.get("total_price", 0))
-        check(centavos > 0, f"{nombre}: precio > 0", f"{centavos} centavos")
-
-        # ESCALA: esto FALLA, no avisa. Shopify espera el monto en SUBUNIDADES
-        # (centavos); si alguien saca el ×100 de shopify_app.py, el comprador
-        # ve el envío 100 veces más barato y la venta se despacha a pérdida.
-        # Con un simple `centavos > 0` ese error pasaba en verde.
-        ars = centavos / 100
-        check(20_000 < ars < 5_000_000,
-              f"{nombre}: precio en escala correcta (subunidades)",
-              f"ARS {ars:,.0f} — si es ~100x chico, falta el ×100 de total_price; "
-              f"si es ~100x grande, está duplicado")
-
-        check((r.get("currency") or "").upper() in ("ARS", "USD"),
-              f"{nombre}: moneda declarada", f"currency={r.get('currency')!r}")
+          f"{nombre}: responde a tiempo", f"{dur:.2f}s")
 
 # ── 2. Destino nacional no va por esta vía ──
 print("\n[2] Reglas de negocio")
@@ -161,5 +151,6 @@ if fallos:
     print()
     sys.exit(1)
 
-print("\n✓ Camino crítico OK: el comprador siempre ve una opción de envío.\n")
+print("\n✓ Camino crítico OK: la app recibe ventas y nada le traba el checkout "
+      "al comprador.\n")
 sys.exit(0)

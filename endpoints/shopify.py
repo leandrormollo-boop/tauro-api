@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from servicios.shopify_app import (
     app_configurada, url_instalacion, validar_hmac_query, dominio_valido,
     canjear_token, guardar_instalacion, registrar_webhooks, vincular_cliente,
-    registrar_carrier_service, cotizar_para_checkout, desinstalar, nuevo_state,
+    desinstalar, nuevo_state,
 )
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
@@ -292,7 +292,17 @@ def callback(request: Request):
 
     guardar_instalacion(shop, data["access_token"], data.get("scope", ""))
     topics = registrar_webhooks(shop, data["access_token"])
-    carrier = registrar_carrier_service(shop, data["access_token"])
+
+    # La app YA NO cotiza el envío en el checkout (decisión del 28/07): su
+    # trabajo es recibir la venta y cargarla como solicitud en el portal. Si
+    # quedó un carrier service de la etapa anterior, se da de baja acá —
+    # dejarlo vivo haría que el comprador siga viendo una tarifa que ya no
+    # mantenemos.
+    from servicios.shopify_app import dar_de_baja_carrier_service
+    try:
+        dar_de_baja_carrier_service(shop, data["access_token"])
+    except Exception as e:
+        print(f"[shopify] no pude dar de baja el carrier service de {shop}: {e}")
 
     # Si el comerciante instaló con su sesión del portal abierta (el caso
     # normal), la tienda queda atada a su cuenta acá mismo. Si no, la
@@ -307,12 +317,11 @@ def callback(request: Request):
         print(f"[shopify] no pude vincular {shop} al instalar: {e}")
 
     print(f"[shopify] instalada {shop} · webhooks {topics} · "
-          f"carrier {carrier or 'no disponible'} · cliente {dueno or 'sin vincular'}")
+          f"cliente {dueno or 'sin vincular'}")
 
-    extra = ("Además vas a poder mostrar la tarifa TAURO en tu checkout."
-             if carrier else
-             "Tu plan de Shopify no permite tarifas de transportistas externos, "
-             "así que tus envíos siguen con la tarifa que ya tenés configurada.")
+    extra = ("El precio del envío en tu checkout lo seguís manejando vos con "
+             "tus tarifas de Shopify. Nosotros tomamos la venta apenas entra y "
+             "te la dejamos lista en el portal para generar la guía.")
     return _pagina(
         "¡Tienda conectada!",
         f"Listo: desde ahora cada venta con envío aparece en tu portal TAURO "
@@ -324,88 +333,29 @@ def callback(request: Request):
 @router.post("/tarifas")
 async def tarifas(request: Request):
     """
-    Shopify llama acá durante el checkout del comprador. Si algo falla,
-    devolvemos lista vacía: la tienda muestra sus otras opciones y la
-    venta nunca se traba por nosotros.
+    RETIRADO (28/07). La app ya no cotiza el envío dentro del checkout.
+
+    El precio que ve el comprador lo define el comerciante con sus propias
+    tarifas de Shopify; TAURO sólo toma la venta cuando entra y la carga como
+    solicitud en el portal. El endpoint sigue vivo, y devolviendo lista vacía
+    a propósito, por dos motivos:
+
+      1. Si a alguna tienda le quedó un carrier service colgado, Shopify va a
+         seguir llamando acá. Contestar 200 con [] hace que simplemente no
+         aparezca nuestra opción; devolver un error o 404 le mete un timeout
+         al checkout del comprador.
+      2. Deja registro en el log si alguna tienda todavía nos está llamando,
+         que es la señal de que hay un carrier service sin dar de baja.
+
+    Toda la maquinaria de cotización (cascada de resiliencia, cache de
+    tarifas, peso facturable) sigue en pie: la usa el portal y el cotizador
+    público de la web, que son los que sí cotizan.
     """
-    try:
-        payload = await request.json()
-    except Exception:
-        return {"rates": []}
-    # Shopify no manda la tienda en el body: viene por header. La pasamos
-    # dentro del payload para saber qué política de flete aplicar.
-    payload["_dominio"] = request.headers.get("x-shopify-shop-domain", "")
-
-    # DOS PROTECCIONES QUE NO SON OPCIONALES ACÁ:
-    #
-    # 1. run_in_threadpool — cotizar_para_checkout es 100% síncrona (psycopg2,
-    #    requests). Llamarla derecho desde un handler async bloquea el event
-    #    loop: un checkout lento dejaría sin atender a TODOS los demás
-    #    compradores, de todas las tiendas, hasta que termine.
-    #
-    # 2. wait_for — Shopify corta cerca de los 10s. Sin deadline propio, un
-    #    courier colgado puede tardar minutos y el comprador se queda sin
-    #    opción de envío. Preferimos la tarifa de emergencia a tiempo antes
-    #    que la tarifa exacta tarde.
-    import asyncio
-    from starlette.concurrency import run_in_threadpool
-
-    try:
-        return await asyncio.wait_for(
-            run_in_threadpool(cotizar_para_checkout, payload),
-            timeout=PRESUPUESTO_CHECKOUT_S,
-        )
-    except asyncio.TimeoutError:
-        print(f"[shopify] /tarifas superó {PRESUPUESTO_CHECKOUT_S}s → tarifa de emergencia")
-        return _tarifas_de_emergencia(payload)
-    except Exception as e:
-        print(f"[shopify] /tarifas error: {e}")
-        return _tarifas_de_emergencia(payload)
-
-
-# Presupuesto propio, con aire respecto del corte de Shopify (~10s).
-PRESUPUESTO_CHECKOUT_S = 6.0
-
-
-def _tarifas_de_emergencia(payload: dict) -> dict:
-    """
-    Última red: si el camino normal no llegó a tiempo o falló, el comprador
-    igual ve una opción de envío. Nunca devolvemos vacío desde acá.
-    """
-    try:
-        import os
-        from servicios.tarifas_cache import tarifa_emergencia
-
-        rate = (payload or {}).get("rate") or {}
-        destino = rate.get("destination") or {}
-        pais = (destino.get("country") or "").upper()
-        if not pais or pais == "AR":
-            return {"rates": []}
-
-        items = rate.get("items") or []
-        peso = sum((it.get("grams") or 0) * (it.get("quantity") or 1) for it in items) / 1000.0
-        peso = max(round(peso, 2), 0.5)
-        try:
-            from servicios.cotizador import dolar_ars
-            dolar = dolar_ars()
-        except Exception:
-            # Este es el camino de ÚLTIMA instancia (ya falló todo lo demás):
-            # si hasta la base está caída, el entorno es lo único que queda.
-            dolar = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
-
-        rates = []
-        for c in tarifa_emergencia(pais, peso, dolar):
-            rates.append({
-                "service_name": f"{c['nombre']} — {c['servicio']}",
-                "service_code": f"TAURO_{c['id'].upper()}",
-                "total_price": str(int(round(float(c["precio_ars"]) * 100))),
-                "currency": "ARS",
-                "description": f"Entrega estimada {c.get('dias_estimados', '5-9')} días hábiles · vía TAURO Solutions",
-            })
-        return {"rates": rates}
-    except Exception as e:
-        print(f"[shopify] ni la tarifa de emergencia salió: {e}")
-        return {"rates": []}
+    dominio = request.headers.get("x-shopify-shop-domain", "")
+    print(f"[shopify] /tarifas llamado por {dominio or 'tienda desconocida'} — "
+          f"la app ya no cotiza en el checkout; devolviendo lista vacía. "
+          f"Si esto se repite, esa tienda tiene un carrier service sin dar de baja.")
+    return {"rates": []}
 
 
 # ── Webhooks de privacidad (obligatorios para el App Store) ─────

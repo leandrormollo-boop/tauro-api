@@ -300,6 +300,65 @@ def registrar_carrier_service(dominio: str, token: str) -> Optional[str]:
     return None
 
 
+def dar_de_baja_carrier_service(dominio: str, token: str) -> bool:
+    """
+    Saca a TAURO como transportista de la tienda.
+
+    DECISIÓN DE PRODUCTO (28/07): la app NO cotiza más el envío dentro del
+    checkout. Su único trabajo es recibir la venta y cargarla como solicitud
+    en el portal; el precio que ve el comprador lo define el comerciante con
+    sus propias tarifas de Shopify.
+
+    OJO — el comerciante TIENE que tener sus zonas de envío configuradas
+    antes de esto: una tienda sin ningún método de envío para un destino no
+    deja completar la compra. Por eso se loguea fuerte.
+
+    Se borran todos los carrier services que apunten a nuestro callback, no
+    sólo el `carrier_id` guardado: una reinstalación puede haber dejado más
+    de uno colgado y cualquiera de ellos seguiría cotizando.
+    """
+    r = _api(dominio, token, "GET", "carrier_services.json")
+    if r is None or r.status_code != 200:
+        print(f"[shopify] no pude listar carrier services de {dominio}")
+        return False
+
+    try:
+        servicios = r.json().get("carrier_services", [])
+    except Exception:
+        return False
+
+    base = _base_url()
+    mios = [cs for cs in servicios
+            if base in (cs.get("callback_url") or "")
+            or (cs.get("name") or "").strip().lower() == "tauro solutions"]
+    if not mios:
+        return True   # ya no está: nada que hacer
+
+    ok = True
+    for cs in mios:
+        d = _api(dominio, token, "DELETE", f"carrier_services/{cs['id']}.json")
+        if d is not None and d.status_code in (200, 204):
+            print(f"[shopify] {dominio}: dado de baja el carrier service "
+                  f"{cs['id']} ({cs.get('name')}). El comprador ya NO ve la "
+                  f"tarifa de TAURO — la tienda tiene que tener sus propias "
+                  f"zonas de envío configuradas o el checkout se bloquea.")
+        else:
+            ok = False
+            print(f"[shopify] {dominio}: FALLÓ la baja del carrier service {cs['id']}")
+
+    if ok:
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE shopify_instalaciones SET carrier_id = NULL WHERE dominio = %s",
+                        (dominio,),
+                    )
+        except Exception as e:
+            print(f"[shopify] baja OK pero no pude limpiar carrier_id: {e}")
+    return ok
+
+
 def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
                    courier: str = "FedEx") -> bool:
     """
