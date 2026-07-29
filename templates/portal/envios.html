@@ -9,7 +9,12 @@
             <h1>Mis envíos</h1>
             <p>Todo lo que despachaste con Tauro: estado, tracking y guías.</p>
         </div>
-        <a href="/portal/envios/nuevo" class="btn btn-primary">Nuevo envío</a>
+        <div style="display:flex;gap:8px;align-items:center;">
+            {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para
+               controlarlo en su propia planilla. #}
+            <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Descargar Excel</a>
+            <a href="/portal/envios/nuevo" class="btn btn-primary">Nuevo envío</a>
+        </div>
     </div>
 </div>
 

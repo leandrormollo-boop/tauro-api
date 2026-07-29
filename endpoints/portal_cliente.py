@@ -12,6 +12,7 @@
 # ============================================================
 
 import os
+from datetime import datetime
 from urllib.parse import quote
 from typing import Optional
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
@@ -277,6 +278,27 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
             "solicitudes": solicitudes,
             "direcciones_count": direcciones_count,
         },
+    )
+
+
+# ── Backup en Excel del cliente ─────────────────────────────
+@router.get("/backup.xlsx")
+def backup_cliente(cliente: str = Depends(cliente_actual)):
+    """
+    SUS datos en un Excel para su PC: envíos, cuenta corriente y catálogo.
+    El pedido textual del dueño: "Melcior podrá tocar descargar backup para
+    extraer la info a un sheets y controlarlo en su pc".
+    """
+    from fastapi.responses import Response
+    from servicios.export_cliente import generar_excel_cliente
+
+    contenido = generar_excel_cliente(cliente)
+    fecha = datetime.now().strftime("%Y-%m-%d")
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition":
+                 f'attachment; filename="TAURO_{cliente}_{fecha}.xlsx"'},
     )
 
 

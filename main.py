@@ -501,6 +501,16 @@ scheduler.add_job(
     minutes=15,
 )
 
+# Espejo en el Google Sheet TAURO 2026 (pestaña PLATAFORMA, propiedad del
+# sistema — las pestañas manuales no se tocan). Sólo corre si
+# GOOGLE_CREDENTIALS_JSON está cargada; cada 30 min alcanza para control.
+from jobs.sync_sheet_tauro import sincronizar_seguro, configurado as _sheet_conf
+if _sheet_conf():
+    scheduler.add_job(sincronizar_seguro, trigger="interval", minutes=30)
+    print("[scheduler] Espejo en Google Sheet: cada 30 min (pestaña PLATAFORMA)")
+else:
+    print("[scheduler] Espejo en Google Sheet APAGADO (falta GOOGLE_CREDENTIALS_JSON)")
+
 scheduler.start()
 
 
