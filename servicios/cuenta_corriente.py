@@ -49,7 +49,8 @@ def get_facturas_recientes(cliente: str, limite: int = 10) -> List[Dict[str, Any
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT fecha, nro_fc, monto_ars, descripcion
+                SELECT id, fecha, nro_fc, monto_ars, descripcion,
+                       (factura_pdf IS NOT NULL) AS tiene_pdf
                 FROM envios
                 WHERE cliente_id = %s
                   AND estado NOT IN ('CANCELADO', 'NC')
@@ -64,13 +65,39 @@ def get_facturas_recientes(cliente: str, limite: int = 10) -> List[Dict[str, Any
     facturas = []
     for r in rows:
         facturas.append({
+            "id": r["id"],
             "fecha": r["fecha"].strftime("%d/%m/%Y") if r["fecha"] else "",
             # Los cargos automáticos de guías no tienen nro de factura: sin el
             # fallback a la descripción, el timeline mostraría filas mudas.
             "nro_fc": str(r["nro_fc"] or "") or str(r["descripcion"] or ""),
             "monto_ars": float(r["monto_ars"] or 0),
+            "tiene_pdf": bool(r["tiene_pdf"]),
         })
     return facturas
+
+
+def get_factura_pdf(envio_id: int, cliente_id: Optional[str] = None):
+    """
+    (contenido, nombre) del PDF de la factura, o None. Con cliente_id se
+    exige que la factura sea de ESE cliente (el portal sólo ve las propias).
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if cliente_id:
+                cur.execute("""
+                    SELECT factura_pdf, factura_nombre, nro_fc
+                    FROM envios WHERE id = %s AND cliente_id = %s
+                """, (envio_id, cliente_id.strip().upper()))
+            else:
+                cur.execute("""
+                    SELECT factura_pdf, factura_nombre, nro_fc
+                    FROM envios WHERE id = %s
+                """, (envio_id,))
+            row = cur.fetchone()
+    if not row or not row["factura_pdf"]:
+        return None
+    nombre = row["factura_nombre"] or f"factura_{row['nro_fc'] or envio_id}.pdf"
+    return (bytes(row["factura_pdf"]), nombre)
 
 
 def get_pagos(cliente: str) -> List[Dict[str, Any]]:
@@ -205,6 +232,9 @@ def movimientos(cliente: str, facturas: List[Dict[str, Any]]) -> List[Dict[str, 
             "tipo": "FC",
             "concepto": fc.get("nro_fc", ""),
             "monto_ars": float(fc.get("monto_ars", 0)),
+            # Para el link "ver factura" del portal, cuando el admin adjuntó el PDF.
+            "envio_id": fc.get("id"),
+            "tiene_pdf": bool(fc.get("tiene_pdf")),
         })
     for p in get_pagos(cliente):
         pendiente = p.get("estado") == "PENDIENTE"

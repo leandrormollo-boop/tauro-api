@@ -41,6 +41,13 @@
     </div>
 </div>
 
+{# División nacional / internacional (spec): mismo listado, filtrado. #}
+<div style="display:flex;gap:8px;margin-bottom:12px;">
+    <a href="/portal/envios" class="btn btn-sm {% if not tipo_filtro %}btn-primary{% else %}btn-ghost{% endif %}">Todos</a>
+    <a href="/portal/envios?tipo=internacional" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}">Internacionales</a>
+    <a href="/portal/envios?tipo=nacional" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}">Nacionales</a>
+</div>
+
 <div class="card">
     <div class="table-wrap">
         <table class="envios-table">
@@ -49,6 +56,7 @@
                     <th>Fecha</th>
                     <th>Producto</th>
                     <th>Destinatario</th>
+                    <th>Courier</th>
                     <th>Tu costo ARS</th>
                     <th>Estado</th>
                     <th>Tracking</th>
@@ -82,6 +90,10 @@
                         {{ s.dest_nombre }}
                         <br><small style="color:var(--fg-3)">{{ s.dest_ciudad or "—" }}, {{ s.destino_pais }}</small>
                     </td>
+                    <td data-label="Courier">
+                        <strong>{{ (s.courier or 'FEDEX')|upper }}</strong>
+                        <br><small style="color:var(--fg-3)">{{ 'Nacional' if es_nacional(s.courier) else 'Internacional' }}</small>
+                    </td>
                     <td class="mono" data-label="Tu costo">
                         {% if s.precio_tauro_ars %}
                             $ {{ "{:,.0f}".format(s.precio_tauro_ars).replace(",", ".") }}
@@ -95,7 +107,7 @@
                     <td data-label="Estado"><span class="badge {{ b[0] }}">{{ b[1] }}</span></td>
                     <td class="mono" style="font-size:11px" data-label="Tracking">
                         {% if s.tracking %}
-                            {% set turl = 'https://envia.com/es-AR/rastreo?label=' ~ s.tracking if (s.courier or 'FEDEX')|upper == 'ENVIA' else 'https://www.fedex.com/fedextrack/?trknbr=' ~ s.tracking %}
+                            {% set turl = url_tracking(s.courier, s.tracking) %}
                             <a href="{{ turl }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
                         {% else %}—{% endif %}
                     </td>

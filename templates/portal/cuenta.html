@@ -64,7 +64,13 @@
                             <span class="badge">Factura</span>
                         {% endif %}
                     </td>
-                    <td>{{ m.concepto or '—' }}</td>
+                    <td>
+                        {{ m.concepto or '—' }}
+                        {% if m.tipo == 'FC' and m.tiene_pdf %}
+                            <a href="/portal/facturas/{{ m.envio_id }}/pdf" target="_blank"
+                               style="font-size:12px;margin-left:6px;">ver factura ↗</a>
+                        {% endif %}
+                    </td>
                     {# Los pagos vienen en negativo desde movimientos(): acá se
                        muestran en verde y con el signo que el cliente espera. #}
                     <td class="mono" style="text-align:right;{% if m.monto_ars < 0 %}color:var(--ok,#3ddc97);{% endif %}">

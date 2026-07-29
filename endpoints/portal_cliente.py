@@ -76,6 +76,12 @@ from core.email_sender import enviar_link_magico
 router = APIRouter(prefix="/portal", tags=["portal"])
 templates = Jinja2Templates(directory="templates")
 
+# Helpers de courier disponibles en TODOS los templates del portal: la URL
+# de tracking y la división nacional/internacional salen de un solo lugar.
+from servicios.couriers_urls import es_nacional, url_tracking
+templates.env.globals["url_tracking"] = url_tracking
+templates.env.globals["es_nacional"] = es_nacional
+
 
 def _pendientes_menu(cliente_id: str) -> dict:
     """
@@ -283,6 +289,39 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
     )
 
 
+# ── Rastreo: resuelve el courier antes de mandar afuera ─────
+@router.get("/track")
+def track_redirect(nro: str = "", cliente: str = Depends(cliente_actual)):
+    """
+    El buscador del home estaba clavado a FedEx: un tracking de envia.com
+    pegado ahí abría FedEx y daba "no encontrado". Ahora se busca el número
+    entre los envíos DEL cliente para saber de qué courier es; si no está,
+    FedEx sigue siendo el default razonable (es el courier principal).
+    """
+    from servicios.couriers_urls import url_tracking
+
+    nro = (nro or "").strip()
+    if not nro:
+        return RedirectResponse(url="/portal/home", status_code=303)
+
+    courier = "FEDEX"
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT courier FROM solicitudes_guia
+                    WHERE cliente_id = %s AND tracking = %s
+                    LIMIT 1
+                """, (cliente, nro))
+                fila = cur.fetchone()
+                if fila and fila.get("courier"):
+                    courier = fila["courier"]
+    except Exception as e:
+        print(f"[portal] track lookup falló ({e}); default FedEx")
+
+    return RedirectResponse(url=url_tracking(courier, nro), status_code=303)
+
+
 # ── Backup en Excel del cliente ─────────────────────────────
 @router.get("/backup.xlsx")
 def backup_cliente(cliente: str = Depends(cliente_actual)):
@@ -368,6 +407,21 @@ async def informar_pago(
             url=f"/portal/cuenta?error={quote('No pudimos guardar el pago. Probá de nuevo.')}",
             status_code=303)
     return RedirectResponse(url="/portal/cuenta?ok=1", status_code=303)
+
+
+@router.get("/facturas/{envio_id}/pdf")
+def ver_factura_propia(envio_id: int, cliente: str = Depends(cliente_actual)):
+    """El cliente descarga SUS facturas; las ajenas no existen para él."""
+    from fastapi.responses import Response
+
+    from servicios.cuenta_corriente import get_factura_pdf
+
+    dato = get_factura_pdf(envio_id, cliente_id=cliente)
+    if not dato:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    contenido, nombre = dato
+    return Response(content=contenido, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
 
 
 @router.get("/pagos/{pago_id}/comprobante")
@@ -637,14 +691,27 @@ async def api_parsear_pedido(
 def envios_view(
     request: Request,
     ok: Optional[str] = None,
+    tipo: str = "",
     cliente: str = Depends(cliente_actual),
 ):
+    from servicios.couriers_urls import es_nacional as _es_nac
+
     solicitudes = listar_solicitudes_cliente(cliente)
+    # División nacional/internacional de la spec. El filtro es por courier
+    # (la regla vive en couriers_urls, no acá): se filtra en memoria porque
+    # el listado ya viene acotado por cliente.
+    tipo = (tipo or "").lower()
+    if tipo == "nacional":
+        solicitudes = [s for s in solicitudes if _es_nac(s.get("courier"))]
+    elif tipo == "internacional":
+        solicitudes = [s for s in solicitudes if not _es_nac(s.get("courier"))]
+
     return templates.TemplateResponse(
         request=request, name="portal/envios.html",
         context={
             "cliente": cliente,
             "solicitudes": solicitudes,
+            "tipo_filtro": tipo,
             "flash_ok": "Solicitud creada. Tauro ya la ve en el admin." if ok == "solicitado" else None,
         },
     )

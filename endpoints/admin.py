@@ -58,6 +58,10 @@ from servicios.rate_limit import check_rate, reset_rate, client_ip
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
 
+from servicios.couriers_urls import es_nacional, url_tracking
+templates.env.globals["url_tracking"] = url_tracking
+templates.env.globals["es_nacional"] = es_nacional
+
 
 def _pendientes_admin() -> int:
     """Globo rojo del menú: guías esperando que Tauro las emita."""
@@ -949,6 +953,19 @@ async def admin_envio_nuevo(
                 "flash_error": str(e),
             },
         )
+
+
+@router.get("/envios/{envio_id}/factura")
+def admin_ver_factura(envio_id: int, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.cuenta_corriente import get_factura_pdf
+    dato = get_factura_pdf(envio_id)
+    if not dato:
+        return Response(content="Sin PDF adjunto", status_code=404)
+    contenido, nombre = dato
+    return Response(content=contenido, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
 
 
 @router.post("/envios/{envio_id}/cancelar")
