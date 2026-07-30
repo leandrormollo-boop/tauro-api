@@ -105,11 +105,16 @@ def _pendientes_menu(cliente_id: str) -> dict:
 templates.env.globals["pendientes_menu"] = _pendientes_menu
 
 
-def _saldo_menu(cliente_id: str) -> Optional[dict]:
+def _saldo_menu(cliente_id: str, ya_calculado: Optional[dict] = None) -> Optional[dict]:
     """
     Saldo para la barra lateral: visible en TODAS las pantallas del portal,
     no sólo en el escritorio. Es el número que el cliente quiere chequear
     de reojo sin ir a buscarlo — hoy tenía que entrar a "Mi cuenta".
+
+    `ya_calculado` es el dict de saldo que la vista pudo haber calculado por
+    su cuenta (el escritorio y la cuenta corriente lo hacen para mostrar el
+    desglose facturado/pagado). Reusarlo evita repetir dos consultas por
+    render en las dos pantallas más visitadas del portal.
 
     Devuelve None ante cualquier problema y la barra sale sin el bloque:
     un saldo que no se puede calcular no se muestra en cero, porque un
@@ -118,8 +123,10 @@ def _saldo_menu(cliente_id: str) -> Optional[dict]:
     if not cliente_id:
         return None
     try:
-        facturado = get_facturado_real(cliente_id)
-        data = saldo(cliente_id, total_facturado_ars=facturado)
+        data = ya_calculado
+        if not data:
+            facturado = get_facturado_real(cliente_id)
+            data = saldo(cliente_id, total_facturado_ars=facturado)
         pendiente = float(data.get("saldo_pendiente_ars") or 0)
         return {
             "pendiente_ars": pendiente,
