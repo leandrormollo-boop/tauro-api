@@ -47,6 +47,7 @@ from servicios.solicitudes_guia import (
     obtener_solicitud_de_cliente, contar_guias_listas,
 )
 from servicios.pricing import parse_monto_ars
+from servicios.panel_cliente import checklist_arranque, embudo_envios
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
     listar_pedidos, contar_pendientes, obtener_pedido,
@@ -285,6 +286,9 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
             "facturas_recientes": facturas_recientes,
             "solicitudes": solicitudes,
             "direcciones_count": direcciones_count,
+            # Bloques "¿qué falta?" y "¿qué pasó?" — ver servicios/panel_cliente.py
+            "checklist": checklist_arranque(cliente),
+            "embudo": embudo_envios(cliente),
         },
     )
 

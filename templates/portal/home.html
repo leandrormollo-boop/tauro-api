@@ -11,6 +11,58 @@
     <a href="/portal/envios/nuevo" class="btn btn-primary">Nuevo envío</a>
 </div>
 
+<!-- ── Arranque: qué falta para dejar la cuenta lista ────
+     Sólo aparece mientras haya pasos obligatorios pendientes. Con todo
+     hecho desaparece solo: un checklist tildado es ruido. -->
+{% if checklist and not checklist.completo %}
+<div class="arranque">
+    <div class="arranque-head">
+        <div>
+            <div class="eyebrow">Primeros pasos</div>
+            <h2>Dejá tu cuenta lista para operar</h2>
+        </div>
+        <div class="arranque-pct">
+            <span class="t-metal">{{ checklist.pct }}%</span>
+            <small>{{ checklist.hechos }} de {{ checklist.total }}</small>
+        </div>
+    </div>
+    <div class="arranque-barra"><span style="width: {{ checklist.pct }}%;"></span></div>
+    <div class="arranque-pasos">
+        {% for paso in checklist.pasos %}
+        <a href="{{ paso.url }}" class="paso {% if paso.hecho %}hecho{% endif %}">
+            <span class="paso-tilde" aria-hidden="true">
+                {% if paso.hecho %}
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                {% endif %}
+            </span>
+            <span class="paso-txt">
+                <b>{{ paso.titulo }}{% if paso.opcional %} <i>opcional</i>{% endif %}</b>
+                <small>{{ paso.detalle }}</small>
+            </span>
+            {% if not paso.hecho %}<span class="paso-cta">{{ paso.cta }} →</span>{% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Embudo: en qué punto está cada envío ──────────────
+     Cada tarjeta aclara POR QUÉ el envío está ahí y es clickeable. -->
+{% if embudo %}
+<div class="embudo">
+    {% for paso in embudo %}
+    <a href="{{ paso.url }}" class="embudo-card {% if paso.cantidad and paso.accion_de == 'cliente' %}espera-vos{% endif %}">
+        <div class="embudo-n {% if paso.cantidad %}hay{% endif %}">{{ paso.cantidad }}</div>
+        <div class="embudo-t">{{ paso.titulo }}</div>
+        <div class="embudo-d">{{ paso.detalle }}</div>
+        {% if paso.cantidad and paso.accion_de == 'cliente' %}
+        <div class="embudo-flag">Te espera a vos</div>
+        {% endif %}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
 <!-- ── Stats ───────────────────────────────────────────── -->
 <div class="grid-3" style="margin-bottom:16px;">
     <div class="stat-card">

@@ -1682,3 +1682,112 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   .btn-primary:not(.is-loading):hover { animation: none; }
   .btn-primary:not(.is-loading)::before { animation: none; opacity: .6; }
 }
+
+/* ══════════════════════════════════════════════════════════
+   ESCRITORIO — "¿qué falta?" y "¿qué pasó?"
+   Inspirado en la claridad del portal de envia.com (auditado 29/07),
+   con nuestra estética: ellos son explícitos pero grises; nosotros
+   explícitos y con identidad. Ver servicios/panel_cliente.py.
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Checklist de arranque ── */
+.arranque {
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(124, 92, 246, .13), transparent 58%),
+    var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  margin-bottom: 16px;
+}
+.arranque-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.arranque-head h2 { font-size: 19px; margin: 4px 0 0; letter-spacing: -.02em; }
+.arranque-pct { text-align: right; flex-shrink: 0; }
+.arranque-pct span { font-family: var(--font-display); font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+.arranque-pct small { display: block; font-size: 11px; color: var(--fg-3); font-family: var(--font-mono); margin-top: 2px; }
+
+.arranque-barra { height: 5px; border-radius: 99px; background: var(--bg); overflow: hidden; margin-bottom: 16px; }
+.arranque-barra span {
+  display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, #7c5cf6, #a78bfa 60%, #c9b4ff);
+  box-shadow: 0 0 12px rgba(124, 92, 246, .55);
+  transition: width .5s cubic-bezier(.2, .7, .3, 1);
+}
+
+.arranque-pasos { display: grid; gap: 8px; }
+.paso {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  transition: border-color .15s, transform .12s, background .15s;
+}
+.paso:hover { border-color: rgba(167, 139, 250, .45); transform: translateX(2px); }
+.paso-tilde {
+  width: 22px; height: 22px; flex-shrink: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  display: grid; place-items: center;
+  color: #fff;
+}
+.paso.hecho .paso-tilde {
+  border-color: transparent;
+  background: linear-gradient(135deg, #2ec27e, #23a86a);
+  box-shadow: 0 0 12px rgba(46, 194, 126, .45);
+}
+.paso-txt { flex: 1; min-width: 0; }
+.paso-txt b { display: block; font-size: 14px; font-weight: 600; }
+.paso-txt b i { font-style: normal; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .1em;
+                text-transform: uppercase; color: var(--fg-4); border: 1px solid var(--line);
+                border-radius: 99px; padding: 1px 7px; margin-left: 6px; vertical-align: 1.5px; }
+.paso-txt small { display: block; font-size: 12.5px; color: var(--fg-3); margin-top: 2px; }
+.paso.hecho .paso-txt b { color: var(--fg-3); }
+.paso.hecho .paso-txt small { display: none; }
+.paso-cta { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--accent-soft); white-space: nowrap; }
+
+/* ── Embudo de envíos ── */
+.embudo { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+.embudo-card {
+  position: relative;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  padding: 14px 15px 13px;
+  transition: border-color .15s, transform .12s;
+}
+.embudo-card:hover { border-color: rgba(167, 139, 250, .45); transform: translateY(-2px); }
+.embudo-n { font-family: var(--font-display); font-size: 30px; font-weight: 700; letter-spacing: -.03em;
+            line-height: 1; color: var(--fg-4); }
+/* Sólo se pinta de violeta si hay algo: un cero apagado se lee de un vistazo */
+.embudo-n.hay {
+  background: linear-gradient(105deg, #8b6bf7 0%, #a78bfa 34%, #e9ddff 47%, #f6f0ff 50%, #e9ddff 53%, #a78bfa 66%, #8b6bf7 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  animation: t-metal-sweep 2.6s linear infinite;
+}
+.embudo-t { font-size: 13px; font-weight: 600; margin-top: 7px; }
+.embudo-d { font-size: 11.5px; color: var(--fg-3); margin-top: 2px; line-height: 1.4; }
+/* El aviso que envia no tiene: decirle al cliente cuál le toca a ÉL */
+.embudo-card.espera-vos { border-color: rgba(167, 139, 250, .5); }
+.embudo-flag {
+  margin-top: 9px; display: inline-block;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--accent-soft); border: 1px solid rgba(167, 139, 250, .35);
+  border-radius: 99px; padding: 2px 8px;
+}
+
+@media (max-width: 900px) {
+  .embudo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .arranque { padding: 16px 16px 18px; }
+  .arranque-head h2 { font-size: 17px; }
+  .paso { padding: 11px 12px; gap: 10px; }
+  /* En mobile no entra el texto del CTA, pero sin nada a la derecha el paso
+     no se lee como clickeable: dejamos sólo la flecha. */
+  .paso-cta { font-size: 0; }
+  .paso-cta::after { content: "→"; font-size: 16px; }
+  .embudo-n { font-size: 26px; }
+}
