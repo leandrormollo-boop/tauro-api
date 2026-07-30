@@ -22,32 +22,55 @@
     <div class="msg ok">{{ flash_ok }}</div>
 {% endif %}
 
+{% if solicitudes or paso_filtro %}
+{# ── Contadores del embudo, chicos y filtrantes ────────────────
+   Acá el protagonista es la tabla, no los contadores: van en una fila
+   fina arriba y cada uno FILTRA la lista (en el escritorio son grandes
+   porque ahí la pregunta es "¿qué hago ahora?"; acá ya sabés qué hacés
+   y venís a buscar un envío). El chip conserva el filtro nacional /
+   internacional para que los dos se puedan combinar. #}
+{% set solo_tipo = ("?tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
+{% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
+<div class="chips-embudo">
+    <a href="/portal/envios{{ solo_tipo }}" class="chip-e {% if not paso_filtro %}on{% endif %}">
+        <b>{{ total_sin_filtrar }}</b> Todos
+    </a>
+    {% for c in chips %}
+    <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}"
+       class="chip-e {% if paso_filtro == c.clave %}on{% endif %} {% if c.cantidad and c.accion_de == 'cliente' %}espera{% endif %}"
+       title="{{ c.detalle }}">
+        <b>{{ c.cantidad }}</b> {{ c.titulo }}
+    </a>
+    {% endfor %}
+</div>
+
+{# División nacional / internacional (spec): mismo listado, filtrado.
+   Conserva el paso elegido para que un filtro no borre el otro. #}
+{% set solo_paso = ("?paso=" ~ paso_filtro) if paso_filtro else "" %}
+{% set con_paso = ("&paso=" ~ paso_filtro) if paso_filtro else "" %}
+<div class="chips-tipo">
+    <a href="/portal/envios{{ solo_paso }}" class="btn btn-sm {% if not tipo_filtro %}btn-primary{% else %}btn-ghost{% endif %}">Todos</a>
+    <a href="/portal/envios?tipo=internacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}">Internacionales</a>
+    <a href="/portal/envios?tipo=nacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}">Nacionales</a>
+</div>
+
+{# Resumen de lo que estás viendo ahora — se recalcula con cada filtro, así
+   sirve para responder "¿cuánto llevo gastado en lo despachado?". #}
 {% if solicitudes %}
-{# resumen arriba: densidad útil, no una tabla pelada #}
-{% set en_proceso = solicitudes | selectattr('estado', 'in', ['SOLICITADO', 'EN_PROCESO']) | list | length %}
 {% set total_ars = solicitudes | map(attribute='precio_tauro_ars') | select | sum %}
-<div class="grid-3" style="margin-bottom:16px;">
-    <div class="stat-card">
-        <div class="label">Envíos totales</div>
-        <div class="value">{{ solicitudes|length }}</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">En proceso</div>
-        <div class="value {% if en_proceso %}warn{% endif %}">{{ en_proceso }}</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">Total operado ARS</div>
-        <div class="value">$ {{ "{:,.0f}".format(total_ars).replace(",", ".") }}</div>
-    </div>
-</div>
+<p class="envios-resumen">
+    {{ solicitudes|length }} envío{{ "s" if solicitudes|length != 1 }} ·
+    <b>$ {{ "{:,.0f}".format(total_ars).replace(",", ".") }}</b> operado
+</p>
+{% endif %}
 
-{# División nacional / internacional (spec): mismo listado, filtrado. #}
-<div style="display:flex;gap:8px;margin-bottom:12px;">
-    <a href="/portal/envios" class="btn btn-sm {% if not tipo_filtro %}btn-primary{% else %}btn-ghost{% endif %}">Todos</a>
-    <a href="/portal/envios?tipo=internacional" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}">Internacionales</a>
-    <a href="/portal/envios?tipo=nacional" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}">Nacionales</a>
-</div>
-
+{% if not solicitudes %}
+    {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
+       adentro, que parece rota. #}
+    <div class="msg">No hay envíos en este estado.
+        <a href="/portal/envios{{ '?tipo=' ~ tipo_filtro if tipo_filtro else '' }}">Ver todos</a>
+    </div>
+{% else %}
 <div class="card">
     <div class="table-wrap">
         <table class="envios-table">
@@ -57,7 +80,10 @@
                     <th>Producto</th>
                     <th>Destinatario</th>
                     <th>Courier</th>
-                    <th>Tu costo ARS</th>
+                    {# "Tu costo" y no "Costo": lo distingue de lo que el
+                       cliente le cobra a SU comprador. El ARS sobra, el
+                       valor ya lleva el $. #}
+                    <th>Tu costo</th>
                     <th>Estado</th>
                     <th>Tracking</th>
                     <th></th>
@@ -127,6 +153,7 @@
         </table>
     </div>
 </div>
+{% endif %}
 {% else %}
 <div class="card">
     <div class="empty" style="padding:48px 20px;">

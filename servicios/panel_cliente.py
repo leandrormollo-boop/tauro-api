@@ -58,6 +58,35 @@ PASOS_EMBUDO = [
 ]
 
 
+def paso_de_estado(estado: str) -> str | None:
+    """
+    Traduce un estado de solicitudes_guia al paso del embudo que le toca.
+
+    ES LA ÚNICA FUENTE de esa traducción: la usan el escritorio (para contar)
+    y los filtros de "Mis envíos" (para filtrar). Si los dos lugares mapearan
+    por su cuenta, el día que se agregue un estado uno contaría y el otro no,
+    y el cliente vería una tarjeta que dice 3 llevándolo a una lista de 2.
+
+    Devuelve None para lo que no va al embudo (CANCELADO) y loguea lo que no
+    reconoce, porque un estado sin mapear desaparece sin dar error.
+    """
+    estado = (estado or "").upper()
+    if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO"):
+        # Los tres significan lo mismo para el cliente: la pelota la tiene
+        # Tauro. Mismo criterio que usa la bandeja del admin.
+        return "esperando_guia"
+    if estado == "GUIA_LISTA":
+        return "guia_lista"
+    if estado in ("DESPACHADO", "ENTREGADO"):
+        # DESPACHADO es el estado terminal que la tabla tiene hoy; ENTREGADO
+        # queda contemplado para cuando el tracking escriba la entrega.
+        return "despachados"
+    if estado == "CANCELADO":
+        return None  # no espera acción de nadie
+    print(f"[panel] estado sin mapear en el embudo: {estado!r}")
+    return None
+
+
 def embudo_envios(cliente_id: str) -> list[dict]:
     """
     Cuenta en qué punto del recorrido está cada envío del cliente.
@@ -79,27 +108,9 @@ def embudo_envios(cliente_id: str) -> list[dict]:
                     (cliente_id,),
                 )
                 for fila in cur.fetchall():
-                    estado = (fila["estado"] or "").upper()
-                    n = int(fila["n"] or 0)
-                    if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO"):
-                        # Los tres significan lo mismo para el cliente: la
-                        # pelota la tiene Tauro. Mismo criterio que usa la
-                        # bandeja del admin.
-                        conteos["esperando_guia"] += n
-                    elif estado == "GUIA_LISTA":
-                        conteos["guia_lista"] += n
-                    elif estado in ("DESPACHADO", "ENTREGADO"):
-                        # DESPACHADO es el estado terminal que la tabla tiene
-                        # hoy; ENTREGADO queda contemplado para cuando el
-                        # tracking escriba la entrega confirmada.
-                        conteos["despachados"] += n
-                    elif estado == "CANCELADO":
-                        pass  # no espera acción de nadie
-                    else:
-                        # Si mañana alguien agrega un estado y no pasa por
-                        # acá, esos envíos desaparecerían del embudo sin que
-                        # nadie se entere. Que quede en el log.
-                        print(f"[panel] estado sin mapear en el embudo: {estado!r}")
+                    paso = paso_de_estado(fila["estado"])
+                    if paso:
+                        conteos[paso] += int(fila["n"] or 0)
 
                 # Ventas de tienda que todavía no se convirtieron en envío.
                 # La tabla puede no existir si el cliente nunca conectó una

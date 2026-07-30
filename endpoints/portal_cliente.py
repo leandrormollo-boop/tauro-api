@@ -104,6 +104,37 @@ def _pendientes_menu(cliente_id: str) -> dict:
 
 templates.env.globals["pendientes_menu"] = _pendientes_menu
 
+
+def _saldo_menu(cliente_id: str) -> Optional[dict]:
+    """
+    Saldo para la barra lateral: visible en TODAS las pantallas del portal,
+    no sólo en el escritorio. Es el número que el cliente quiere chequear
+    de reojo sin ir a buscarlo — hoy tenía que entrar a "Mi cuenta".
+
+    Devuelve None ante cualquier problema y la barra sale sin el bloque:
+    un saldo que no se puede calcular no se muestra en cero, porque un
+    cero falso es peor que no mostrar nada cuando hablamos de plata.
+    """
+    if not cliente_id:
+        return None
+    try:
+        facturado = get_facturado_real(cliente_id)
+        data = saldo(cliente_id, total_facturado_ars=facturado)
+        pendiente = float(data.get("saldo_pendiente_ars") or 0)
+        return {
+            "pendiente_ars": pendiente,
+            "al_dia": pendiente <= 0,
+            # A favor: pagó de más. Se muestra en positivo con otro cartel,
+            # que si no queda un "-$5.000" que parece un error.
+            "a_favor_ars": abs(pendiente) if pendiente < 0 else 0,
+        }
+    except Exception as e:
+        print(f"[portal] no pude calcular el saldo de {cliente_id}: {e}")
+        return None
+
+
+templates.env.globals["saldo_menu"] = _saldo_menu
+
 BASE_URL = os.getenv("BASE_URL")
 # Cookies con Secure por defecto (Railway sirve por HTTPS). Apagar solo para
 # desarrollo local por HTTP con SESSION_COOKIE_SECURE=0.
@@ -696,9 +727,11 @@ def envios_view(
     request: Request,
     ok: Optional[str] = None,
     tipo: str = "",
+    paso: str = "",
     cliente: str = Depends(cliente_actual),
 ):
     from servicios.couriers_urls import es_nacional as _es_nac
+    from servicios.panel_cliente import PASOS_EMBUDO, paso_de_estado
 
     solicitudes = listar_solicitudes_cliente(cliente)
     # División nacional/internacional de la spec. El filtro es por courier
@@ -710,12 +743,39 @@ def envios_view(
     elif tipo == "internacional":
         solicitudes = [s for s in solicitudes if not _es_nac(s.get("courier"))]
 
+    # Contadores del embudo, chicos, arriba de la tabla. Se cuentan DESPUÉS
+    # del filtro nacional/internacional y ANTES del de paso: así el número
+    # del chip siempre coincide con las filas que vas a ver al tocarlo.
+    # Se saltea "por_armar" — esas son ventas de tienda, todavía no envíos.
+    todos_n = len(solicitudes)
+    conteos = {}
+    for s in solicitudes:
+        p = paso_de_estado(s.get("estado"))
+        if p:
+            conteos[p] = conteos.get(p, 0) + 1
+    chips = [
+        {**p, "cantidad": conteos.get(p["clave"], 0)}
+        for p in PASOS_EMBUDO
+        if p["clave"] != "por_armar"
+    ]
+
+    paso = (paso or "").lower()
+    if paso in {c["clave"] for c in chips}:
+        solicitudes = [s for s in solicitudes if paso_de_estado(s.get("estado")) == paso]
+    else:
+        paso = ""
+
     return templates.TemplateResponse(
         request=request, name="portal/envios.html",
         context={
             "cliente": cliente,
             "solicitudes": solicitudes,
             "tipo_filtro": tipo,
+            "chips": chips,
+            "paso_filtro": paso,
+            # El chip "Todos" cuenta las filas de verdad (incluidos los
+            # cancelados, que no viven en ningún paso del embudo).
+            "total_sin_filtrar": todos_n,
             "flash_ok": "Solicitud creada. Tauro ya la ve en el admin." if ok == "solicitado" else None,
         },
     )

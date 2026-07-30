@@ -229,6 +229,44 @@ h1, h2, h3, h4 {
   background: var(--ok);
   box-shadow: 0 0 8px var(--ok-glow);
 }
+
+/* Saldo siempre a la vista, arriba a la izquierda. Va justo debajo del
+   nombre del cliente y arriba del menú: es lo primero que mira cuando
+   abre cualquier pantalla. Sobrio a propósito — es plata que debe, no
+   un logro; el metálico está reservado para lo que celebra algo. */
+.side-saldo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  margin: -4px 0 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(167, 139, 250, .05);
+  text-decoration: none;
+  transition: border-color .18s ease, background .18s ease;
+}
+.side-saldo:hover {
+  border-color: rgba(167, 139, 250, .4);
+  background: rgba(167, 139, 250, .09);
+}
+.side-saldo-lbl {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--fg-3);
+}
+.side-saldo-n {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--fg-1);
+  white-space: nowrap;
+}
+.side-saldo.al-dia .side-saldo-n { color: var(--ok); font-size: 13px; }
 .side-user .estado.warn { color: var(--warn); }
 .side-user .estado.warn::before { background: var(--warn); box-shadow: none; }
 
@@ -1166,6 +1204,53 @@ tbody td { padding: 13px 16px; color: var(--fg-2); }
 td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .row-actions { display: flex; gap: 8px; align-items: center; }
 
+/* ── Anchos de "Mis envíos" ───────────────────────────────────
+   Es LA tabla del portal: el cliente viene acá a encontrar un envío por
+   destinatario o tracking. Sin esto el navegador reparte parejo y deja
+   "Producto" en 88px partiendo el nombre en tres renglones, mientras la
+   columna de botones se lleva 225px. Prioridad: producto y destinatario
+   legibles; fecha, costo y acciones sin cortarse. */
+/* 16px de padding por lado × 8 columnas = 256px gastados en aire, que es
+   justo lo que hacía que el tracking quedara fuera de la pantalla.
+   Con 10px entran las 8 columnas sin scrollear. */
+.envios-table thead th { padding-left: 10px; padding-right: 10px; }
+.envios-table tbody td { padding-left: 10px; padding-right: 10px; }
+
+.envios-table th:nth-child(1),
+.envios-table td:nth-child(1) { white-space: nowrap; }          /* Fecha */
+.envios-table th:nth-child(2) { min-width: 132px; }              /* Producto */
+.envios-table th:nth-child(3) { min-width: 118px; }              /* Destinatario */
+.envios-table th:nth-child(5),
+.envios-table td:nth-child(5) { white-space: nowrap; }           /* Costo */
+.envios-table th:nth-child(6),
+.envios-table td:nth-child(6) { white-space: nowrap; }           /* Estado */
+.envios-table th:nth-child(7),
+.envios-table td:nth-child(7) { white-space: nowrap; }           /* Tracking */
+.envios-table .row-actions .btn-sm { padding: 5px 10px; }
+
+/* Acciones ancladas a la derecha: con 8 columnas la tabla no entra y, al
+   scrollear, "Guía PDF" —la acción que el cliente vino a hacer— quedaba
+   fuera de la pantalla. Fijada, siempre está a mano. */
+.envios-table th:last-child,
+.envios-table td:last-child {
+  white-space: nowrap;
+  position: sticky;
+  right: 0;
+  background: var(--bg-elev);
+  text-align: right;
+}
+/* Bisel que avisa que hay contenido debajo cuando estás scrolleando. */
+.envios-table td:last-child::before,
+.envios-table th:last-child::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 14px;
+  transform: translateX(-100%);
+  background: linear-gradient(to right, transparent, rgba(0, 0, 0, .28));
+  pointer-events: none;
+}
+
 /* tracking clickeable (abre seguimiento FedEx) */
 .track-link { color: var(--accent-soft); border-bottom: 1px dashed transparent; }
 .track-link:hover { border-bottom-color: var(--accent-soft); }
@@ -1778,8 +1863,75 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   border-radius: 99px; padding: 2px 8px;
 }
 
+/* ── Chips del embudo en Mis envíos ───────────────────────────
+   La versión chica y filtrante. En el escritorio el embudo es grande
+   porque ahí la pregunta es "¿qué hago ahora?"; acá la protagonista es
+   la tabla y el contador es sólo el atajo para llegar a la fila. */
+.chips-embudo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.chip-e {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--bg-2);
+  font-size: 12.5px;
+  color: var(--fg-2);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+.chip-e b {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg-1);
+}
+.chip-e:hover { border-color: rgba(167, 139, 250, .45); color: var(--fg-1); }
+.chip-e.on {
+  border-color: rgba(167, 139, 250, .6);
+  background: rgba(167, 139, 250, .12);
+  color: var(--fg-1);
+}
+.chip-e.on b { color: var(--accent-soft); }
+/* Punto violeta en lo que espera una acción del cliente — la misma señal
+   que el flag "Te espera a vos" del escritorio, en versión mínima. */
+.chip-e.espera::after {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  box-shadow: 0 0 6px rgba(167, 139, 250, .8);
+  align-self: center;
+}
+.chips-tipo { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.envios-resumen {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  margin: 0 0 12px;
+}
+.envios-resumen b { color: var(--fg-2); font-weight: 600; }
+
 @media (max-width: 900px) {
   .embudo { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  /* Los chips no se apilan: se deslizan, para no comerse media pantalla
+     antes de que aparezca la tabla. */
+  .chips-embudo {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+  }
+  .chips-embudo::-webkit-scrollbar { display: none; }
 }
 @media (max-width: 560px) {
   .arranque { padding: 16px 16px 18px; }
