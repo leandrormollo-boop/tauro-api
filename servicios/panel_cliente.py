@@ -49,9 +49,9 @@ PASOS_EMBUDO = [
         "accion_de": "cliente",
     },
     {
-        "clave": "entregados",
-        "titulo": "Entregados",
-        "detalle": "Llegaron a destino",
+        "clave": "despachados",
+        "titulo": "Despachados",
+        "detalle": "Ya viajan a destino",
         "url": "/portal/envios",
         "accion_de": None,
     },
@@ -81,13 +81,25 @@ def embudo_envios(cliente_id: str) -> list[dict]:
                 for fila in cur.fetchall():
                     estado = (fila["estado"] or "").upper()
                     n = int(fila["n"] or 0)
-                    if estado in ("SOLICITADO", "EMITIENDO"):
+                    if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO"):
+                        # Los tres significan lo mismo para el cliente: la
+                        # pelota la tiene Tauro. Mismo criterio que usa la
+                        # bandeja del admin.
                         conteos["esperando_guia"] += n
                     elif estado == "GUIA_LISTA":
                         conteos["guia_lista"] += n
-                    elif estado == "ENTREGADO":
-                        conteos["entregados"] += n
-                    # CANCELADO no se muestra: no espera acción de nadie.
+                    elif estado in ("DESPACHADO", "ENTREGADO"):
+                        # DESPACHADO es el estado terminal que la tabla tiene
+                        # hoy; ENTREGADO queda contemplado para cuando el
+                        # tracking escriba la entrega confirmada.
+                        conteos["despachados"] += n
+                    elif estado == "CANCELADO":
+                        pass  # no espera acción de nadie
+                    else:
+                        # Si mañana alguien agrega un estado y no pasa por
+                        # acá, esos envíos desaparecerían del embudo sin que
+                        # nadie se entere. Que quede en el log.
+                        print(f"[panel] estado sin mapear en el embudo: {estado!r}")
 
                 # Ventas de tienda que todavía no se convirtieron en envío.
                 # La tabla puede no existir si el cliente nunca conectó una
@@ -133,10 +145,17 @@ def checklist_arranque(cliente_id: str) -> dict:
             print(f"[panel] checklist de {cliente_id}: {e}")
             return default
 
-    productos = _seguro(lambda: len(get_productos(cliente_id)), 0)
+    # solo_activos=False a propósito: el paso mide una acción del CLIENTE
+    # (cargó el producto), no una de Tauro (se lo aprobamos). Con el default
+    # el tilde no aparecía hasta que un admin validaba, que puede ser días.
+    productos = _seguro(lambda: len(get_productos(cliente_id, solo_activos=False)), 0)
     dirs = _seguro(lambda: contar_direcciones(cliente_id), {})
     destinatarios = int(dirs.get("DESTINATARIO", 0) or 0)
-    tiendas = _seguro(lambda: len(listar_tiendas(cliente_id)), 0)
+    # Sólo las conectadas: una tienda desconectada no le entra ninguna venta,
+    # tildar el paso sería mentirle. Mismo filtro que /portal/tienda.
+    tiendas = _seguro(
+        lambda: len([t for t in listar_tiendas(cliente_id) if t.get("activa")]), 0
+    )
 
     envios = 0
     try:
@@ -167,7 +186,11 @@ def checklist_arranque(cliente_id: str) -> dict:
             "detalle": "Los que más usás quedan en la libreta y se cargan con un click",
             "url": "/portal/direcciones",
             "cta": "Abrir libreta",
-            "hecho": destinatarios > 0,
+            # El que ya despachó no necesita la libreta para arrancar: los
+            # que venden por tienda reciben el destinatario del checkout y
+            # nunca la usan. Sin este "or", a Pesca Jacks el cartel de
+            # primeros pasos le quedaba pegado para siempre.
+            "hecho": destinatarios > 0 or envios > 0,
             "opcional": False,
         },
         {
@@ -201,6 +224,10 @@ def checklist_arranque(cliente_id: str) -> dict:
         "pasos": pasos,
         "hechos": hechos_total,
         "total": len(pasos),
+        # El "x de y" que se muestra al lado del % tiene que medir lo mismo
+        # que el %, si no queda "67%" arriba de "3 de 4" (que es 75%).
+        "hechos_oblig": hechos_oblig,
+        "total_oblig": len(obligatorios),
         "pct": pct,
         "completo": hechos_oblig == len(obligatorios),
     }
