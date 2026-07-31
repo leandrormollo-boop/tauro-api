@@ -178,10 +178,65 @@ def eliminar_producto_cliente(cliente: str, alias_interno: str) -> bool:
 
 
 def aprobar_producto(producto_id: int) -> None:
-    """Admin: aprueba un producto (activo=TRUE)."""
+    """
+    Admin: aprueba un producto (activo=TRUE) y le avisa al cliente por mail.
+
+    El aviso es una promesa escrita en el portal ("te llega un mail cuando
+    está aprobado"): sin él, el cliente carga su primer producto, ve
+    "En revisión" y no sabe cuándo puede empezar a usarlo.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("UPDATE productos SET activo = TRUE WHERE id = %s", (producto_id,))
+            cur.execute("""
+                UPDATE productos SET activo = TRUE WHERE id = %s
+                RETURNING alias_interno, cliente_id
+            """, (producto_id,))
+            fila = cur.fetchone()
+
+    if not fila:
+        return
+
+    # El mail nunca puede tumbar la aprobación: si falla, queda en el log.
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT email FROM clientes WHERE cliente_id = %s",
+                            (fila["cliente_id"],))
+                c = cur.fetchone()
+        destino = (c or {}).get("email")
+        if destino:
+            from core.email_sender import _enviar_mail_a
+            alias = fila["alias_interno"]
+            _enviar_mail_a(
+                destino,
+                f"✓ Tu producto «{alias}» ya está aprobado",
+                f"""<html><body style="margin:0;background:#f4f4f6;">
+<div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
+  <div style="background:#0c0a14;padding:28px 24px;text-align:center;">
+    <div style="font-size:22px;font-weight:700;letter-spacing:.08em;color:#fff;">
+      TAURO <span style="color:#a78bfa;">SOLUTIONS</span>
+    </div>
+  </div>
+  <div style="padding:30px;">
+    <h2 style="margin:0 0 12px;font-size:19px;color:#1e1b2e;">Tu producto ya está aprobado</h2>
+    <p style="line-height:1.7;color:#4a4a58;margin:0 0 18px;">
+      <b>«{alias}»</b> pasó la validación y ya podés usarlo en tus envíos:
+      cotizarlo, verlo en el catálogo con tu precio por unidad, y despacharlo.
+    </p>
+    <p style="text-align:center;margin:26px 0 0;">
+      <a href="https://taurosolutions.ar/portal/catalogo"
+         style="background:#7c5cf6;color:#fff;padding:13px 30px;text-decoration:none;
+                font-weight:600;border-radius:999px;display:inline-block;">Ver mi catálogo</a>
+    </p>
+  </div>
+  <div style="background:#0c0a14;padding:16px;text-align:center;font-size:11px;color:#8b86a0;">
+    taurosolutions.ar
+  </div>
+</div></body></html>""",
+            )
+            print(f"[catalogo] aviso de aprobación enviado a {destino} ({alias})")
+    except Exception as e:
+        print(f"[catalogo] producto {producto_id} aprobado pero el mail falló: {e}")
 
 
 def rechazar_producto(producto_id: int) -> None:

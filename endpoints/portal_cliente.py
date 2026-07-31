@@ -83,6 +83,12 @@ from servicios.couriers_urls import es_nacional, url_tracking
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
 
+# Canal de ayuda (WhatsApp/mail) disponible en todos los templates. Se
+# evalúa por render porque el número puede cargarse en /admin/config sin
+# deploy — con cache interno de 60s para no viajar a la base por página.
+from servicios.ayuda import ayuda_info
+templates.env.globals["ayuda"] = ayuda_info
+
 
 def _pendientes_menu(cliente_id: str) -> dict:
     """
@@ -992,6 +998,11 @@ def envio_nuevo_post(
         "guardar_destinatario": guardar_destinatario,
         "precio_cliente_final_ars": precio_cliente_final_ars,
         "observaciones": observaciones,
+        # BUG corregido: sin esto, un error de validación re-renderizaba el
+        # form con el hidden del pedido VACÍO — el vínculo con la venta de la
+        # tienda se perdía, el pedido quedaba "pendiente" para siempre y se
+        # podía terminar despachando dos veces.
+        "pedido_tienda_id": pedido_tienda_id,
     }
 
     try:
@@ -1147,6 +1158,15 @@ def envio_nuevo_post(
             **courier_extra,
         )
     except Exception as e:
+        # ValueError = mensaje escrito para humanos (validaciones propias).
+        # Cualquier otra excepción es interna: al log completa, a la pantalla
+        # una frase — un traceback de Python asusta y no ayuda a corregir.
+        if isinstance(e, ValueError):
+            mensaje_error = str(e)
+        else:
+            print(f"[portal] error creando envío de {cliente}: {type(e).__name__}: {e}")
+            mensaje_error = ("No pudimos crear el envío por un problema nuestro. "
+                            "Probá de nuevo en un minuto o escribinos.")
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={
@@ -1157,7 +1177,7 @@ def envio_nuevo_post(
                 "remitentes": remitentes,
                 "destinatarios": destinatarios,
                 "form": form,
-                "error": str(e),
+                "error": mensaje_error,
             },
         )
 

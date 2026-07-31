@@ -15,7 +15,7 @@
 {% if qp.get('ok') == '2' %}
     <div class="msg ok">Producto eliminado del catálogo.</div>
 {% elif qp.get('ok') %}
-    <div class="msg ok">Producto guardado. Queda en revisión hasta que Tauro lo apruebe.</div>
+    <div class="msg ok">Producto guardado. Tauro lo valida en el día y te llega un mail cuando está aprobado.</div>
 {% endif %}
 {% if qp.get('error') %}
     <div class="msg error">No pudimos guardar el producto: {{ qp.get('error') }}</div>
@@ -116,7 +116,7 @@
         <a href="/portal/catalogo" id="form-prod-cancelar" class="btn btn-ghost btn-sm" hidden>Cancelar edición</a>
     </div>
 
-    <div class="msg warn">Los productos nuevos (y los editados) los valida Tauro antes de que puedas usarlos en tus envíos. Hasta la aprobación figuran como "En revisión".</div>
+    <div class="msg warn">Los productos nuevos (y los editados) los valida Tauro antes de que puedas usarlos en tus envíos — en el día, y te avisamos por mail. Hasta entonces figuran como "En revisión".</div>
 
     <form method="POST" action="/portal/catalogo/add">
         <input type="hidden" name="alias_original" id="alias_original" value="">
@@ -138,10 +138,18 @@
                 <input type="text" name="nombre_invoice" id="cat-invoice" required placeholder="Leather handbag 100%">
             </div>
             <div class="form-group">
-                <label for="cat-hs">HS code (XXXX.XX.XX)</label>
+                <label for="cat-hs">Código de aduana (HS code)</label>
                 <input type="text" name="hs_code" id="cat-hs" required pattern="\d{4}\.\d{2}\.\d{2}"
                        placeholder="4202.21.00" inputmode="numeric"
                        title="Formato: 4 dígitos, punto, 2 dígitos, punto, 2 dígitos — ej: 4202.21.00">
+                {# El muro clásico del onboarding: campo obligatorio de jerga
+                   aduanera. Mejor que nos pregunte a que invente un código
+                   que viaja a la aduana. #}
+                <small class="hint">Clasifica tu producto en la aduana de destino.
+                {% set _ay = ayuda() %}
+                ¿No lo sabés? <a href="{{ _ay.whatsapp_url or _ay.mail_url }}"
+                {% if _ay.whatsapp_url %}target="_blank" rel="noopener"{% endif %}>Escribinos</a>
+                con la descripción del producto y te lo pasamos.</small>
             </div>
         </div>
 

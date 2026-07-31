@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% set courier_nombre = (s.courier or "FedEx")|upper|title if (s.courier or "FEDEX")|upper != "FEDEX" else "FedEx" %}
 {% block title %}Envío #{{ s.id }}{% endblock %}
 
 {% block content %}
@@ -16,7 +17,7 @@
 </div>
 
 {% if s.estado == "CANCELADO" %}
-    <div class="msg error">Este envío fue cancelado. Si fue un error, escribinos y lo revisamos.</div>
+    <div class="msg error">Este envío fue cancelado. Si fue un error, {% set _ay = ayuda() %}<a href="{{ _ay.whatsapp_url or _ay.mail_url }}"{% if _ay.whatsapp_url %} target="_blank" rel="noopener"{% endif %}>escribinos</a> y lo revisamos.</div>
 {% else %}
 <!-- ── Timeline de estado (stepper del design system) ───── -->
 <div class="card" style="margin-bottom:16px;">
@@ -30,13 +31,13 @@
     </div>
     <p style="text-align:center;color:var(--fg-3);font-size:13px;margin-top:4px;">
         {% if s.estado == "SOLICITADO" %}
-            Recibimos tu solicitud. Tauro la está revisando para generar la guía.
+            {% if puede_emitir %}Tu solicitud está lista: emití la guía con el botón de abajo, o no hagas nada y la emite Tauro.{% else %}Recibimos tu solicitud. Tauro está generando la guía — te avisamos apenas esté lista.{% endif %}
         {% elif s.estado == "EN_PROCESO" %}
-            Estamos preparando tu guía con FedEx. Te avisamos apenas esté lista.
+            Estamos preparando tu guía con {{ courier_nombre }}. Te avisamos apenas esté lista.
         {% elif s.estado == "GUIA_LISTA" %}
             ¡Tu guía está lista! Descargá el PDF, imprimí las etiquetas y prepará las cajas.
         {% elif s.estado == "DESPACHADO" %}
-            Tu envío ya está en la red FedEx. Seguilo con el tracking de abajo.
+            Tu envío ya está en la red de {{ courier_nombre }}. Seguilo con el tracking de abajo.
         {% endif %}
     </p>
 </div>
@@ -47,7 +48,7 @@
     <div class="card">
         <div class="card-head">
             <div>
-                <h3>Guía FedEx</h3>
+                <h3>Guía {{ courier_nombre }}</h3>
                 <p>Etiquetas para imprimir y pegar en cada caja.</p>
             </div>
         </div>
@@ -80,7 +81,7 @@
         <div class="card-head">
             <div>
                 <h3>Tracking</h3>
-                <p>Seguimiento oficial en la red FedEx.</p>
+                <p>Seguimiento oficial en la red de {{ courier_nombre }}.</p>
             </div>
         </div>
         {% set track_url = url_tracking(s.courier, s.tracking) %}
