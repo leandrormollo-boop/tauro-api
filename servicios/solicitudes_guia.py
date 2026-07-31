@@ -3,6 +3,7 @@
 # ============================================================
 
 import json
+import uuid
 from typing import Optional
 
 import psycopg2
@@ -506,6 +507,88 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
     if not row or not row["label_pdf"]:
         return None
     return bytes(row["label_pdf"])
+
+
+def cargar_envio_externo(
+    *,
+    cliente_id: str,
+    dest_nombre: str,
+    dest_ciudad: str,
+    destino_pais: str,
+    producto: str,
+    cantidad: int,
+    peso_kg: float,
+    tracking: str,
+    precio_tauro_ars: float,
+    label_pdf: Optional[bytes] = None,
+    dest_direccion: str = "",
+    observaciones: str = "",
+) -> dict:
+    """
+    Alta de un envío YA REALIZADO por un canal externo (hoy: los que salen
+    por el proveedor mayorista mientras se negocian las cuentas directas).
+
+    En el portal del cliente queda indistinguible de un envío emitido por
+    la plataforma: courier FedEx (el tracking del mayorista ES un tracking
+    FedEx real), guía PDF descargable si se adjunta, cargo automático en la
+    cuenta corriente y presencia en el Excel y el sheet espejo. El nombre
+    del proveedor NO se escribe en ningún campo visible al cliente — la
+    discreción es un requisito de negocio, no un descuido.
+
+    Idempotencia del cargo: la da el índice único por solicitud de
+    cargar_guia_emitida, igual que en la emisión propia.
+    """
+    from servicios.cotizador import dolar_ars
+
+    tracking = (tracking or "").strip()
+    if not tracking:
+        return {"ok": False, "error": "Falta el tracking."}
+    if precio_tauro_ars <= 0:
+        return {"ok": False, "error": "El precio al cliente tiene que ser mayor a cero."}
+
+    # Mismo tracking ya cargado = doble click o doble carga: no duplicar.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM solicitudes_guia WHERE tracking = %s LIMIT 1",
+                        (tracking,))
+            if cur.fetchone():
+                return {"ok": False, "error": f"El tracking {tracking} ya está cargado."}
+
+    dolar = dolar_ars()
+    try:
+        creada = crear_solicitud_guia(
+            cliente_id=cliente_id.strip().upper(),
+            producto_alias=(producto or "Mercadería")[:120],
+            cantidad=max(int(cantidad or 1), 1),
+            destino_pais=(destino_pais or "").strip().upper()[:3],
+            dest_nombre=(dest_nombre or "")[:160],
+            dest_documento="",
+            dest_email="",
+            dest_telefono="",
+            dest_direccion=(dest_direccion or "")[:300],
+            dest_ciudad=(dest_ciudad or "")[:120],
+            dest_estado="",
+            dest_zip="",
+            observaciones=(observaciones or "")[:400],
+            peso_kg=max(float(peso_kg or 0.5), 0.1),
+            largo_cm=0, ancho_cm=0, alto_cm=0,
+            valor_declarado_usd=0,
+            ruta_id=f"AR-{(destino_pais or 'XX').strip().upper()[:2]}",
+            coti_id=f"EXT-{uuid.uuid4().hex[:10]}",
+            precio_tauro_ars=float(precio_tauro_ars),
+            precio_tauro_usd=round(float(precio_tauro_ars) / dolar, 2) if dolar else 0,
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"No se pudo crear el envío: {e}"}
+
+    sid = creada.get("id")
+    # guardar_guia_generada hace el resto: GUIA_LISTA + label + cargo
+    # automático en cuenta corriente. El aviso a tienda sale limpio porque
+    # no hay pedido vinculado.
+    guardar_guia_generada(sid, tracking, label_pdf, courier="FEDEX")
+    print(f"[solicitudes] envío externo cargado: solicitud {sid} · {cliente_id} · "
+          f"{tracking} · ARS {precio_tauro_ars:,.0f}")
+    return {"ok": True, "solicitud_id": sid}
 
 
 def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:

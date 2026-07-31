@@ -1,0 +1,98 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Cargar envío realizado{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Operaciones</div>
+  <h1>Cargar envío realizado</h1>
+  <p>Un envío que ya salió por otro canal, cargado al portal del cliente como uno más:
+     tracking FedEx funcionando, guía descargable y cargo automático en su cuenta corriente.</p>
+</div>
+
+{% if request.query_params.get('error') %}
+  <div class="msg error">{{ request.query_params.get('error') }}</div>
+{% endif %}
+
+<div class="card" style="max-width:720px;">
+  <form method="POST" action="/admin/envios-realizados/nuevo" enctype="multipart/form-data">
+
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Cliente *</label>
+        <select name="cliente_id" required>
+          <option value="">— Seleccioná —</option>
+          {% for c in clientes %}
+          <option value="{{ c.cliente_id }}">{{ c.cliente_id }} — {{ c.nombre or c.email }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tracking (el de la guía FedEx) *</label>
+        <input type="text" name="tracking" required placeholder="874937552842" class="mono">
+      </div>
+    </div>
+
+    <h3 style="margin:6px 0 12px;">Destinatario</h3>
+    <div class="form-grid-3">
+      <div class="form-group">
+        <label>Nombre *</label>
+        <input type="text" name="dest_nombre" required placeholder="Michelle Bordelon">
+      </div>
+      <div class="form-group">
+        <label>Ciudad</label>
+        <input type="text" name="dest_ciudad" placeholder="Seattle">
+      </div>
+      <div class="form-group">
+        <label>País (código) *</label>
+        <input type="text" name="destino_pais" required maxlength="2"
+               placeholder="US" style="text-transform:uppercase;">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Dirección (opcional)</label>
+      <input type="text" name="dest_direccion" placeholder="5223 42nd Ave SW">
+    </div>
+
+    <h3 style="margin:6px 0 12px;">Carga y precio</h3>
+    <div class="form-grid-3">
+      <div class="form-group">
+        <label>Producto *</label>
+        <input type="text" name="producto" required placeholder="Cartera 1">
+      </div>
+      <div class="form-group">
+        <label>Cajas</label>
+        <input type="number" name="cantidad" min="1" step="1" value="1">
+      </div>
+      <div class="form-group">
+        <label>Peso (kg)</label>
+        <input type="text" name="peso_kg" inputmode="decimal" value="1">
+      </div>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Precio al cliente (ARS) *</label>
+        <input type="text" name="precio_ars" required inputmode="decimal"
+               placeholder="85.500 — entra a su cuenta corriente">
+      </div>
+      <div class="form-group">
+        <label>Guía PDF (opcional)</label>
+        <input type="file" name="guia_pdf"
+               accept=".pdf,application/pdf,.jpg,.jpeg,.png,image/jpeg,image/png">
+        <small style="color:var(--fg-4);">El cliente la descarga desde su portal.
+        Subí la versión con membrete TAURO.</small>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Observaciones</label>
+      <input type="text" name="observaciones"
+             placeholder="⚠️ Este texto lo VE el cliente en su portal">
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:8px;">
+      <button type="submit" class="btn btn-primary">Cargar al portal del cliente</button>
+      <a href="/admin/pedidos" class="btn btn-ghost">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

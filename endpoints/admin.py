@@ -1351,6 +1351,76 @@ async def admin_pago_nuevo(
         )
 
 
+# ── Cargar un envío ya realizado (canal externo) ────────────
+
+@router.get("/envios-realizados/nuevo", response_class=HTMLResponse)
+def admin_envio_realizado_form(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    return templates.TemplateResponse(
+        request=request, name="admin/envio_realizado_form.html",
+        context={"seccion": "envio_realizado", "clientes": _get_clientes_lista()},
+    )
+
+
+@router.post("/envios-realizados/nuevo")
+async def admin_envio_realizado_post(
+    request: Request,
+    cliente_id: str = Form(...),
+    dest_nombre: str = Form(...),
+    dest_ciudad: str = Form(""),
+    destino_pais: str = Form(...),
+    dest_direccion: str = Form(""),
+    producto: str = Form(...),
+    cantidad: int = Form(1),
+    peso_kg: str = Form("1"),
+    tracking: str = Form(...),
+    precio_ars: str = Form(...),
+    observaciones: str = Form(""),
+    guia_pdf: Optional[UploadFile] = File(None),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """
+    Envío que YA salió por el canal externo → aparece en el portal del
+    cliente como uno más (courier FedEx, tracking real, PDF si se adjunta)
+    y el cargo entra solo a su cuenta corriente.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    from urllib.parse import quote
+
+    from servicios.cuenta_corriente import leer_comprobante_con_tope
+    from servicios.solicitudes_guia import cargar_envio_externo
+
+    try:
+        pdf = await leer_comprobante_con_tope(guia_pdf)
+        resultado = cargar_envio_externo(
+            cliente_id=cliente_id,
+            dest_nombre=dest_nombre,
+            dest_ciudad=dest_ciudad,
+            destino_pais=destino_pais,
+            dest_direccion=dest_direccion,
+            producto=producto,
+            cantidad=cantidad,
+            peso_kg=float((peso_kg or "1").replace(",", ".")),
+            tracking=tracking,
+            precio_tauro_ars=parse_monto_ars(precio_ars) or 0,
+            label_pdf=pdf or None,
+            observaciones=observaciones,
+        )
+    except Exception as e:
+        resultado = {"ok": False, "error": str(e)}
+
+    if resultado.get("ok"):
+        return RedirectResponse(
+            url=f"/admin/clientes/{cliente_id.strip().upper()}?ok=envio_cargado",
+            status_code=303)
+    return RedirectResponse(
+        url=f"/admin/envios-realizados/nuevo?error={quote(str(resultado.get('error') or 'error'))}",
+        status_code=303)
+
+
 # ── Verificación de pagos informados por clientes ───────────
 
 @router.get("/pagos/pendientes", response_class=HTMLResponse)
