@@ -206,6 +206,20 @@ def login_submit(
             status_code=429,
         )
     auth = autenticar_cliente(email, password)
+    if auth and auth.get("sin_password"):
+        # Cuenta recién creada sin contraseña: decirlo, no fingir un error
+        # de tipeo. El camino es el link mágico (o que Tauro le asigne una).
+        return templates.TemplateResponse(
+            request=request, name="portal/login.html",
+            context={
+                "mensaje": "Tu cuenta todavía no tiene contraseña. Usá "
+                           "«Entrar sin contraseña» acá abajo y te mandamos un "
+                           "link de acceso, o pedile a Tauro que te asigne una.",
+                "tipo_msg": "error",
+                "email_prefill": email,
+            },
+            status_code=401,
+        )
     if not auth:
         return templates.TemplateResponse(
             request=request, name="portal/login.html",

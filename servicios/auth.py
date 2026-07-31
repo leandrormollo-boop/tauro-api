@@ -86,8 +86,14 @@ def autenticar_cliente(usuario: str, password: str) -> Optional[dict]:
     if not row:
         return None
     if not row["password_hash"]:
-        # Cliente existe pero nunca le seteamos contraseña → no puede entrar con password
-        return None
+        # Cliente existe pero sin contraseña asignada (el alta del admin la
+        # deja opcional). Antes esto devolvía None y el cliente veía
+        # "incorrectos" — imposible de distinguir de una contraseña mal
+        # tipeada, y terminaba en un WhatsApp a Leandro. Se devuelve el caso
+        # explícito para que el login lo explique. Sí, esto le confirma a un
+        # tercero que el ID existe: aceptable acá — los IDs son razones
+        # sociales semi-públicas y el portal es de pocos clientes conocidos.
+        return {"sin_password": True}
     if not verify_password(password, row["password_hash"]):
         return None
     return {
