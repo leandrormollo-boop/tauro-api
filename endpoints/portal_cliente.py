@@ -189,7 +189,11 @@ def login_submit(
     email: str = Form(...),
     password: str = Form(...),
 ):
-    """Login clásico con email + password. Setea cookie y redirige a /portal/home."""
+    """
+    Login con EMAIL o ID DE CLIENTE + contraseña. El campo se sigue llamando
+    `email` para no romper autocompletes guardados, pero acepta las dos cosas
+    (MELCIOR o melcior@…): la distinción la hace autenticar_cliente.
+    """
     ip = client_ip(request)
     if not check_rate(f"portal_login:{ip}", max_attempts=8, window_seconds=300):
         return templates.TemplateResponse(
@@ -201,12 +205,12 @@ def login_submit(
             },
             status_code=429,
         )
-    cliente = autenticar_cliente(email, password)
-    if not cliente:
+    auth = autenticar_cliente(email, password)
+    if not auth:
         return templates.TemplateResponse(
             request=request, name="portal/login.html",
             context={
-                "mensaje": "Email o contraseña incorrectos.",
+                "mensaje": "Usuario o contraseña incorrectos.",
                 "tipo_msg": "error",
                 "email_prefill": email,
             },
@@ -214,7 +218,8 @@ def login_submit(
         )
 
     reset_rate(f"portal_login:{ip}")
-    token = generar_token(email, cliente)
+    # La sesión guarda el email real aunque hayan entrado con el ID.
+    token = generar_token(auth["email"], auth["cliente_id"])
     response = RedirectResponse(url="/portal/home", status_code=303)
     response.set_cookie(
         key="token", value=token,
@@ -236,11 +241,28 @@ def login_send(request: Request, email: str = Form(...)):
             status_code=429,
         )
 
+    # También acá vale el ID de cliente: si no trae arroba, se busca el
+    # email registrado de esa cuenta y el link viaja a ESE buzón (el que
+    # está en la ficha — nunca a una dirección tipeada por un tercero).
+    email = (email or "").strip()
+    if email and "@" not in email:
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT email FROM clientes WHERE cliente_id = %s AND activo = TRUE",
+                        (email.upper(),))
+                    fila = cur.fetchone()
+                    if fila and fila.get("email"):
+                        email = str(fila["email"]).strip().lower()
+        except Exception as e:
+            print(f"[login] lookup por ID falló: {e}")
+
     cliente = buscar_cliente_por_email(email)
     if not cliente:
         return templates.TemplateResponse(
             request=request, name="portal/login.html",
-            context={"mensaje": "Email no registrado. Contactá a Tauro.", "tipo_msg": "error"},
+            context={"mensaje": "Usuario no registrado. Contactá a Tauro.", "tipo_msg": "error"},
         )
 
     token = generar_token(email, cliente)

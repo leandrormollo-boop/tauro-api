@@ -54,21 +54,34 @@ def set_cliente_password(cliente_id: str, password: str) -> bool:
             return cur.rowcount > 0
 
 
-def autenticar_cliente(email: str, password: str) -> Optional[str]:
+def autenticar_cliente(usuario: str, password: str) -> Optional[dict]:
     """
-    Verifica email + password contra la DB.
-    Retorna cliente_id si OK, None si email no existe / inactivo / password incorrecto / sin password seteado.
+    Verifica usuario + password contra la DB. El usuario puede ser el EMAIL
+    o el ID DE CLIENTE (pedido de Leandro 28/07: "la idea es que se pueda
+    con mail y con id de usuario") — se distingue por la arroba, así que un
+    ID nunca se confunde con un mail.
+
+    Retorna {"cliente_id", "email"} si OK (el email hace falta para la
+    sesión aunque hayan entrado con el ID), None en cualquier otro caso.
     """
-    email = (email or "").strip().lower()
-    if not email or not password:
+    usuario = (usuario or "").strip()
+    if not usuario or not password:
         return None
+
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT cliente_id, password_hash FROM clientes "
-                "WHERE email = %s AND activo = TRUE",
-                (email,),
-            )
+            if "@" in usuario:
+                cur.execute(
+                    "SELECT cliente_id, email, password_hash FROM clientes "
+                    "WHERE email = %s AND activo = TRUE",
+                    (usuario.lower(),),
+                )
+            else:
+                cur.execute(
+                    "SELECT cliente_id, email, password_hash FROM clientes "
+                    "WHERE cliente_id = %s AND activo = TRUE",
+                    (usuario.upper(),),
+                )
             row = cur.fetchone()
     if not row:
         return None
@@ -77,7 +90,10 @@ def autenticar_cliente(email: str, password: str) -> Optional[str]:
         return None
     if not verify_password(password, row["password_hash"]):
         return None
-    return str(row["cliente_id"]).strip().upper()
+    return {
+        "cliente_id": str(row["cliente_id"]).strip().upper(),
+        "email": str(row["email"] or "").strip().lower(),
+    }
 
 
 def buscar_cliente_por_email(email: str) -> Optional[str]:
