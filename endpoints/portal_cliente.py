@@ -574,6 +574,9 @@ def cotizar_post(
             "opciones": opciones,
             "resultado": opciones[0] if opciones else None,
             "error": error,
+            # Para que cada tarjeta de opción linkee a "crear envío" con el
+            # destino ya elegido.
+            "destino_sel": destino_pais,
         },
     )
 
@@ -850,12 +853,17 @@ def _paises_con_nacional() -> list:
 def envio_nuevo_form(
     request: Request,
     pedido_tienda: Optional[int] = None,
+    destino: str = "",
     cliente: str = Depends(cliente_actual),
 ):
     # Si viene de un pedido de la tienda (Shopify/Tiendanube), prellenamos
     # el destinatario con lo que el comprador completó en el checkout.
     form: dict = {}
     pedido_info = None
+    # Si viene del cotizador ("tocá la opción para crear el envío"), el
+    # destino elegido ya llega puesto — una promesa menos que romper.
+    if destino.strip() and not pedido_tienda:
+        form["destino_pais"] = destino.strip().upper()[:3]
     if pedido_tienda:
         p = obtener_pedido(cliente, pedido_tienda)
         if p and p["estado"] == "PENDIENTE":

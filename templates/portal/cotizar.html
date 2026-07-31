@@ -77,7 +77,12 @@
     <div id="resultado" class="fade-up">
         <div class="quote-options">
             {% for op in opciones %}
-            <div class="price-card{% if loop.first and opciones|length > 1 %} featured{% endif %}">
+            {# Toda la tarjeta es un link a crear el envío con el destino ya
+               elegido — antes era una vidriera sin puerta. #}
+            <a href="/portal/envios/nuevo?destino={{ destino_sel }}"
+               class="price-card{% if loop.first and opciones|length > 1 %} featured{% endif %}"
+               style="display:block;text-decoration:none;color:inherit;cursor:pointer;"
+               title="Crear un envío a este destino">
                 <div class="pc-badge">
                     {% if loop.first and opciones|length > 1 %}⭐ Recomendado · {% endif %}{{ op.servicio_nombre }}
                 </div>
@@ -105,9 +110,13 @@
                 <div class="pc-meta">
                     USD {{ op.precio_final_usd }} · {{ op.dias_estimados }} días
                 </div>
-            </div>
+            </a>
             {% endfor %}
         </div>
+        <p style="text-align:center;color:var(--fg-3);font-size:12.5px;margin:10px 0 0;">
+            Tocá una opción para crear el envío a ese destino. El precio final
+            sale de los productos de tu catálogo.
+        </p>
 
         <div class="result-box" style="margin-top:14px;">
             <div class="mini-row"><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
@@ -115,7 +124,9 @@
             <div class="mini-row"><span>Peso real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
             <div class="mini-row"><span>Cotización válida hasta</span><strong>{{ resultado.valida_hasta }}</strong></div>
 
-            <a href="/portal/envios/nuevo" class="btn btn-primary btn-full" style="margin-top:18px;">Crear envío con este precio</a>
+            {# "con este precio" prometía algo que el form no cumple: el
+               precio final sale del catálogo. El destino sí viaja. #}
+            <a href="/portal/envios/nuevo?destino={{ destino_sel }}" class="btn btn-primary btn-full" style="margin-top:18px;">Crear envío a este destino →</a>
         </div>
     </div>
     {% endif %}
