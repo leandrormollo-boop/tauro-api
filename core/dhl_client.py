@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
+
 import requests
 from dotenv import load_dotenv
 from core.fedex_client import CarrierBase
 
 load_dotenv()
+
+# Argentina es UTC-3 fijo y no tiene horario de verano, así que el offset va
+# a mano en vez de con ZoneInfo: evita depender del paquete tzdata, que en
+# las imágenes slim de Railway puede no estar y tiraría ZoneInfoNotFoundError
+# en producción justo al cotizar.
+TZ_AR = timezone(timedelta(hours=-3))
 
 # ─────────────────────────────────────────────
 # DHL EXPRESS CLIENT (MyDHL API)
@@ -20,12 +28,20 @@ class DHLClient(CarrierBase):
     SANDBOX_URL = "https://express.api.dhl.com/mydhlapi/test"
     PROD_URL    = "https://express.api.dhl.com/mydhlapi"
 
+    # Versión del contrato contra la que validamos. Pineada a propósito.
+    API_VERSION = "3.3.1"
+
+    # "P" = EXPRESS WORLDWIDE NONDOC, el producto que corresponde a TAURO:
+    # nuestros envíos llevan mercadería con valor declarado, no documentos.
+    PRODUCTO_DEFAULT = "P"
+
     def __init__(self):
         self.api_key        = os.getenv("DHL_API_KEY")
         self.api_secret     = os.getenv("DHL_API_SECRET")
         self.account_number = os.getenv("DHL_ACCOUNT_NUMBER")
         self.environment    = os.getenv("DHL_ENVIRONMENT", "sandbox").lower()
         self.base_url       = self.SANDBOX_URL if self.environment == "sandbox" else self.PROD_URL
+        self.product_code   = os.getenv("DHL_PRODUCT_CODE", self.PRODUCTO_DEFAULT)
 
     def get_rates(self, origen: dict, destino: dict, paquete: dict) -> dict:
         """
@@ -57,7 +73,17 @@ class DHLClient(CarrierBase):
                 "length": int(paquete.get("largo", 30)),
                 "width":  int(paquete.get("ancho", 20)),
                 "height": int(paquete.get("alto", 10)),
-                "plannedShippingDate": None,   # DHL usa fecha del día si se omite en algunos entornos
+                # OBLIGATORIO según el OpenAPI oficial (required: true). Antes
+                # iba en None y el filtro de abajo lo borraba, con el comentario
+                # "DHL usa la fecha del día si se omite" — la spec dice lo
+                # contrario y sin este parámetro DHL contesta 400 SIEMPRE.
+                # Formato YYYY-MM-DD, no ISO con hora.
+                "plannedShippingDate": (
+                    datetime.now(TZ_AR).date() + timedelta(days=1)
+                ).isoformat(),
+                # Si la fecha cae domingo o feriado, DHL devuelve los productos
+                # del próximo día hábil en vez de una lista vacía.
+                "nextBusinessDay": "true",
                 "isCustomsDeclarable": "true",
                 "unitOfMeasurement": "metric",
             }
@@ -68,7 +94,15 @@ class DHLClient(CarrierBase):
                 url,
                 params=params,
                 auth=(self.api_key, self.api_secret),
-                headers={"Accept": "application/json"},
+                headers={
+                    "Accept": "application/json",
+                    # Único header obligatorio de MyDHL API v2. Su schema tiene
+                    # default 3.3.1, así que hoy pasaría igual — pero pinearlo
+                    # evita que el día que DHL publique 3.4 la cuenta se mueva
+                    # sola de contrato y cambie la forma de la respuesta en
+                    # producción sin que nadie haya tocado una línea.
+                    "x-version": self.API_VERSION,
+                },
                 timeout=30,
             )
 
@@ -81,8 +115,29 @@ class DHLClient(CarrierBase):
             if not productos:
                 return {"encontrado": False, "error": "Sin tarifas en respuesta DHL"}
 
-            # Primer producto (típicamente EXPRESS WORLDWIDE). Tomamos el total facturado.
-            prod = productos[0]
+            # Elegir el producto POR CÓDIGO, nunca el primero de la lista.
+            # GET /rates devuelve varios (Express Worldwide, 12:00, 9:00…) y no
+            # garantiza el orden: agarrar el [0] podía cotizar un premium y
+            # perder la venta, o —peor— cotizar uno más barato y despachar
+            # después como Worldwide, con la factura de DHL más alta que lo
+            # que ya le cobramos al cliente.
+            # Se descartan los isCustomerAgreement: DHL sólo los da con un
+            # acuerdo previo y no son los que vendemos.
+            estandar = [p for p in productos if not p.get("isCustomerAgreement")]
+            prod = next(
+                (p for p in estandar if p.get("productCode") == self.product_code),
+                None,
+            )
+            if prod is None:
+                disponibles = [p.get("productCode") for p in estandar]
+                return {
+                    "encontrado": False,
+                    "error": (
+                        f"DHL no ofrece {self.product_code} en esa ruta "
+                        f"(disponibles: {disponibles})"
+                    ),
+                }
+
             precios = prod.get("totalPrice", [])
             if not precios:
                 return {"encontrado": False, "error": "Producto DHL sin precio"}
