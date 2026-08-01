@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -59,6 +60,11 @@ class DHLClient(CarrierBase):
         if not self.api_key or not self.api_secret:
             return {"encontrado": False, "error": "Credenciales DHL no configuradas"}
 
+        # Identificador propio de esta llamada. Cuando le reclames un error a
+        # soporte de DHL te lo van a pedir para buscar el request de su lado,
+        # así que viaja en el header y queda en nuestro log.
+        msg_ref = str(uuid.uuid4())
+
         try:
             url = f"{self.base_url}/rates"
             params = {
@@ -102,12 +108,13 @@ class DHLClient(CarrierBase):
                     # sola de contrato y cambie la forma de la respuesta en
                     # producción sin que nadie haya tocado una línea.
                     "x-version": self.API_VERSION,
+                    "Message-Reference": msg_ref,
                 },
                 timeout=30,
             )
 
             if resp.status_code != 200:
-                print(f"[dhl] get_rates error {resp.status_code}: {resp.text[:300]}")
+                print(f"[dhl] get_rates error {resp.status_code} (ref {msg_ref}): {resp.text[:300]}")
                 return {"encontrado": False, "error": resp.text}
 
             data = resp.json()
