@@ -99,16 +99,16 @@ function QuoteWidget({ compact = false }) {
               courier cotiza distinto según para qué lado viaja la caja. */}
           <div className="tweb-sentido" role="group" aria-label="Sentido del envío">
             <button type="button"
-                    className={`tweb-sentido-btn ${sentido === "exportacion" ? "on" : ""}`}
+                    className={`btn ${sentido === "exportacion" ? "btn-primary" : "btn-ghost"}`}
                     aria-pressed={sentido === "exportacion"}
                     onClick={() => setSentido("exportacion")}>
-              Exporto
+              Exportar
             </button>
             <button type="button"
-                    className={`tweb-sentido-btn ${sentido === "importacion" ? "on" : ""}`}
+                    className={`btn ${sentido === "importacion" ? "btn-primary" : "btn-ghost"}`}
                     aria-pressed={sentido === "importacion"}
                     onClick={() => setSentido("importacion")}>
-              Importo
+              Importar
             </button>
           </div>
 
