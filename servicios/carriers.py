@@ -201,6 +201,15 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         # FedEx sale con descuento sobre su tarifa de lista (WEB_DESC_FEDEX_PCT,
         # tunable en Railway → Variables sin tocar código; 0 = sin descuento).
         #
+        # POR QUÉ FEDEX VA CON DESCUENTO Y DHL CON MARGEN (Leandro, 01/08/2026):
+        # no es una inconsistencia, es que están en momentos distintos.
+        # Con FedEx TODAVÍA NO tenemos tarifa negociada, así que el descuento
+        # SIMULA el precio al que queremos vender. Con DHL sí la tenemos, así
+        # que su tarifa se toma como costo real y se le suma el 20% de ganancia
+        # (WEB_MARKUP_PCT / WEB_MARKUP_PCT_DHL) como corresponde.
+        # El día que entre la cuenta negociada de FedEx, este descuento tiene
+        # que morir y FedEx pasa a margen igual que DHL.
+        #
         # OJO CON LA CALIBRACIÓN (corregido 28/07): este comentario decía que el
         # 90% dejaba el paquete de 1,2 kg a US en ~USD 40. Está MAL: esos USD 40
         # eran del paquete de 5 kg (el default del widget de la web, no el de
@@ -208,7 +217,7 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         # 1,2 kg sale USD 24-27 — entre 30% y 40% POR DEBAJO del objetivo que
         # definió Leandro. No recalibrar este número contra las tarifas de
         # sandbox, que son ficticias: hacerlo recién con la cuenta de producción.
-        descuento = float(os.getenv("WEB_DESC_FEDEX_PCT", "90")) if c["id"] == "fedex" else 0.0
+        descuento = float(os.getenv("WEB_DESC_FEDEX_PCT", "88")) if c["id"] == "fedex" else 0.0
 
         # Markup POR CARRIER: cada courier tiene su propio margen. Se setea con
         # WEB_MARKUP_PCT_DHL / _FEDEX / _UPS en Railway y, si no está, cae al
