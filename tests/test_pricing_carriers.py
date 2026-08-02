@@ -62,3 +62,75 @@ def test_el_descuento_de_fedex_tambien_se_edita_desde_el_admin():
         assert _desc_fedex({"WEB_DESC_FEDEX_PCT": 88.0}) == 88.0
     with mock.patch.dict(os.environ, {}, clear=True):
         assert _desc_fedex({}) == 88.0
+
+
+# ── Las dos capas de precio: web vs portal ───────────────────
+
+def _carriers_falsos(costo_usd=130.18):
+    """CARRIERS con un solo courier activo que siempre cotiza lo mismo."""
+    class Falso:
+        def get_rates(self, o, d, p):
+            return {"encontrado": True, "costo": costo_usd, "moneda": "USD",
+                    "servicio": "EXPRESS_WORLDWIDE", "dias_estimados": "2"}
+    return [{
+        "id": "dhl", "nombre": "DHL Express", "servicio": "Express Worldwide",
+        "logo": "/x.svg", "requisitos": ("FAKE_KEY",), "cliente": Falso,
+    }]
+
+
+def _cotizar(fn, **kw):
+    from servicios import carriers as C
+    with mock.patch.dict(os.environ, {"FAKE_KEY": "1"}, clear=True), \
+         mock.patch.object(C, "CARRIERS", _carriers_falsos()), \
+         mock.patch.object(C, "_pricing_configurado", return_value={}):
+        return fn(**kw)
+
+
+ENVIO = dict(origen={"country": "AR"}, destino={"country": "US"},
+             paquete={"peso_kg": 1.4}, dolar=1450.0)
+
+
+def test_el_portal_cobra_el_monto_fijo_del_cliente():
+    """
+    WAIMAO: costo + $100.000. Costo USD 130,18 × 1450 = ARS 188.761.
+    Precio final = 288.761. Nada de markup de la web acá.
+    """
+    from servicios.carriers import cotizar_carriers_cliente
+    r = _cotizar(cotizar_carriers_cliente, **ENVIO,
+                 pricing_cliente={"tipo": "FIJO_ARS", "valor": 100000.0})[0]
+    assert r["precio_ars"] == round(130.18 * 1450) + 100000
+
+
+def test_cada_cliente_su_precio_con_el_mismo_costo():
+    """Prete Rosso $11.000 y Melcior $14.000 sobre el MISMO envío."""
+    from servicios.carriers import cotizar_carriers_cliente
+    base = round(130.18 * 1450)
+    for valor in (11000.0, 14000.0):
+        r = _cotizar(cotizar_carriers_cliente, **ENVIO,
+                     pricing_cliente={"tipo": "FIJO_ARS", "valor": valor})[0]
+        assert r["precio_ars"] == base + valor
+
+
+def test_el_portal_no_devuelve_el_costo_ni_el_margen():
+    """
+    LA REGLA: "NO puede ver el costo nuestro" (Leandro, 01/08/2026).
+    aplicar_pricing devuelve markup_valor y markup_pct_equivalente; si alguno
+    se cuela, el cliente despeja nuestro costo con una resta.
+    """
+    from servicios.carriers import cotizar_carriers_cliente
+    r = _cotizar(cotizar_carriers_cliente, **ENVIO,
+                 pricing_cliente={"tipo": "FIJO_ARS", "valor": 100000.0})[0]
+    filtradas = [k for k in r if k.startswith(("costo", "margen", "markup"))]
+    assert not filtradas, f"el portal filtra el costo de TAURO: {filtradas}"
+
+
+def test_la_web_y_el_portal_dan_precios_distintos():
+    """
+    El punto de haber partido las capas: mismo costo, dos negocios.
+    Si dieran igual, alguien enchufó el cotizador equivocado.
+    """
+    from servicios.carriers import cotizar_carriers, cotizar_carriers_cliente
+    web = _cotizar(cotizar_carriers, **ENVIO, markup_pct=20.0)[0]
+    portal = _cotizar(cotizar_carriers_cliente, **ENVIO,
+                      pricing_cliente={"tipo": "FIJO_ARS", "valor": 100000.0})[0]
+    assert web["precio_ars"] != portal["precio_ars"]

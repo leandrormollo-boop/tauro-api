@@ -224,20 +224,27 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
     return {"precio_ars": precio_ars, "precio_usd": precio_usd}
 
 
-def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
-                     dolar: float, markup_pct: float) -> list[dict]:
+def costos_carriers(origen: dict, destino: dict, paquete: dict) -> list[dict]:
     """
-    Cotiza los 3 carriers y devuelve una tarjeta por cada uno.
+    ⚠️ CAPA INTERNA: devuelve LO QUE CADA COURIER NOS COBRA A NOSOTROS.
+    NUNCA mandar esto tal cual a un cliente — de acá sale nuestro margen.
 
-    estado:
-      - "cotizado"     → tarifa real (precio_ars/precio_usd/dias_estimados)
-      - "proximamente" → carrier sin credenciales todavía (se muestra con logo)
-      - "sin_tarifa"   → activo pero sin cobertura para esa ruta
+    Es la única capa que le habla a los couriers. Encima van dos calculadoras
+    de precio distintas, porque son dos negocios distintos:
+
+      cotizar_carriers()         → web pública: costo + margen de vidriera
+      cotizar_carriers_cliente() → portal: costo + el monto fijo de ESE cliente
+                                   (Prete Rosso $11.000, Melcior $14.000,
+                                    WAIMAO $100.000)
+
+    Antes había una sola función con el precio de la web cableado adentro.
+    Enchufarla al portal le habría cobrado a WAIMAO el precio de vidriera en
+    vez de su regla.
+
+    Cada item: {id, nombre, logo, servicio, estado} y, si estado=="cotizado",
+    además {costo, moneda, dias_estimados}.
     """
     salida: list[dict] = []
-
-    # Una sola lectura de config por cotización, no una por carrier.
-    pricing = _pricing_configurado()
 
     for c in CARRIERS:
         base = {
@@ -258,11 +265,52 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
             resultado = {"encontrado": False}
 
         if not resultado.get("encontrado"):
-            salida.append({**base, "estado": "sin_tarifa"})
+            salida.append({**base, "estado": "sin_tarifa", "error": resultado.get("error")})
             continue
 
         # "INTERNATIONAL_PRIORITY" → "International Priority" (prolijo para la web)
-        servicio = (resultado.get("servicio") or c["servicio"]).replace("_", " ").title()
+        salida.append({
+            **base,
+            "estado": "cotizado",
+            "servicio": (resultado.get("servicio") or c["servicio"]).replace("_", " ").title(),
+            "dias_estimados": str(resultado.get("dias_estimados", "3-5")),
+            "costo": resultado["costo"],
+            "moneda": resultado.get("moneda", "USD"),
+            "costo_lista": resultado.get("costo_lista"),
+        })
+
+    return salida
+
+
+def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
+                     dolar: float, markup_pct: float) -> list[dict]:
+    """
+    PRECIO DE VIDRIERA (web pública taurosolutions.ar).
+
+    estado:
+      - "cotizado"     → tarifa real (precio_ars/precio_usd/dias_estimados)
+      - "proximamente" → carrier sin credenciales todavía (se muestra con logo)
+      - "sin_tarifa"   → activo pero sin cobertura para esa ruta
+    """
+    salida: list[dict] = []
+
+    # Una sola lectura de config por cotización, no una por carrier.
+    pricing = _pricing_configurado()
+
+    for crudo in costos_carriers(origen, destino, paquete):
+        base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
+
+        if crudo["estado"] != "cotizado":
+            salida.append({**base, "estado": crudo["estado"]})
+            continue
+
+        c = {"id": crudo["id"]}
+        resultado = {
+            "costo": crudo["costo"],
+            "moneda": crudo["moneda"],
+            "costo_lista": crudo.get("costo_lista"),
+        }
+        servicio = crudo["servicio"]
 
         # FedEx sale con descuento sobre su tarifa de lista (WEB_DESC_FEDEX_PCT,
         # tunable en Railway → Variables sin tocar código; 0 = sin descuento).
@@ -296,8 +344,55 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
             **base,
             "estado": "cotizado",
             "servicio": servicio,
-            "dias_estimados": str(resultado.get("dias_estimados", "3-5")),
+            "dias_estimados": crudo["dias_estimados"],
             **_precios(resultado, dolar, markup_carrier, descuento_pct=descuento),
+        })
+
+    return salida
+
+
+def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
+                             dolar: float, pricing_cliente: dict) -> list[dict]:
+    """
+    PRECIO DEL PORTAL: los 3 couriers con la regla de ESE cliente.
+
+    `pricing_cliente` es lo que devuelve pricing.get_pricing_config(cliente):
+    {"tipo": "FIJO_ARS", "valor": 100000.0} para WAIMAO, por ejemplo.
+
+    Devuelve SÓLO precios finales. Ninguna clave con el costo ni el margen:
+    el cliente ve lo que le cobramos y nada más (regla de Leandro, 01/08/2026).
+    Lo vigila tests/test_no_fuga_costo.py.
+    """
+    from servicios.pricing import aplicar_pricing
+
+    salida: list[dict] = []
+
+    for crudo in costos_carriers(origen, destino, paquete):
+        base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
+
+        if crudo["estado"] != "cotizado":
+            salida.append({**base, "estado": crudo["estado"]})
+            continue
+
+        es_usd = crudo["moneda"] == "USD"
+        costo_ars = round(crudo["costo"] * dolar) if es_usd else round(crudo["costo"])
+        costo_usd = crudo["costo"] if es_usd else round(crudo["costo"] / dolar, 2)
+
+        precio = aplicar_pricing(
+            costo_usd=costo_usd, costo_ars=costo_ars,
+            dolar=dolar, pricing=pricing_cliente,
+        )
+
+        # Las claves se eligen a mano: aplicar_pricing devuelve además
+        # markup_valor y markup_pct_equivalente, y con eso el cliente despeja
+        # nuestro costo con una resta.
+        salida.append({
+            **base,
+            "estado": "cotizado",
+            "servicio": crudo["servicio"],
+            "dias_estimados": crudo["dias_estimados"],
+            "precio_ars": precio["precio_final_ars"],
+            "precio_usd": precio["precio_final_usd"],
         })
 
     return salida
