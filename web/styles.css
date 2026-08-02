@@ -754,3 +754,46 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
     margin-top: 0;
   }
 }
+
+/* ── Selector de sentido del cotizador (exporto / importo) ──────
+   TAURO opera los dos lados. Va arriba de todo el formulario porque
+   cambia qué significan los campos de abajo. */
+.tweb-sentido {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.tweb-sentido-btn {
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-3);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color .18s ease, background .18s ease, border-color .18s ease;
+}
+.tweb-sentido-btn:hover { color: var(--fg-1); }
+.tweb-sentido-btn.on {
+  color: var(--fg-1);
+  background: linear-gradient(180deg, #35206b, #180c33);
+  border-color: rgba(167, 139, 250, .5);
+}
+.tweb-sentido-btn:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+/* Nombres de los partners en el hero: son varios, no un número. */
+.hero-meta-item .num.tweb-partners {
+  font-size: clamp(15px, 2.4vw, 19px);
+  letter-spacing: -.01em;
+  white-space: nowrap;
+}

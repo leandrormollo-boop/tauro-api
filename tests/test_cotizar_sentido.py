@@ -1,0 +1,94 @@
+"""
+El cotizador público tiene que cotizar los DOS sentidos (Leandro, 01/08/2026:
+"el cotizador debe permitir cotizar importaciones y exportaciones").
+
+Lo que se verifica acá es que el sentido no sea cosmético: en una importación
+la caja sale del exterior y entra a Argentina, y de eso depende qué cuenta de
+DHL se factura. Si origen y destino no se dan vuelta de verdad, DHL cotiza con
+la cuenta de exportación una importación — y eso NO da error, devuelve el
+precio del otro sentido.
+"""
+import os
+import sys
+from unittest import mock
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import main  # noqa: E402
+from main import CotizarWebRequest  # noqa: E402
+
+CUERPO = {
+    "destino_pais": "US",
+    "peso_kg": 1.4,
+    "largo_cm": 33,
+    "ancho_cm": 33,
+    "alto_cm": 22,
+    "valor_declarado_usd": 300,
+}
+
+
+def _cotizar(sentido=None):
+    """Llama al endpoint y devuelve (origen, destino) que recibió cotizar_carriers."""
+    visto = {}
+
+    def fake_cotizar(origen, destino, paquete, dolar, markup_pct):
+        visto["origen"] = origen
+        visto["destino"] = destino
+        return [{
+            "id": "dhl", "nombre": "DHL Express", "logo": "",
+            "estado": "cotizado", "servicio": "Express Worldwide",
+            "dias_estimados": "2", "precio_ars": 100, "precio_usd": 1.0,
+        }]
+
+    cuerpo = dict(CUERPO)
+    if sentido:
+        cuerpo["sentido"] = sentido
+
+    # Se llama la función del endpoint directo: prueba la misma lógica sin
+    # levantar el servidor ni sumar httpx como dependencia sólo para un test.
+    with mock.patch.object(main, "cotizar_carriers", fake_cotizar), \
+         mock.patch("servicios.cotizador.dolar_ars", return_value=1450.0):
+        data = main.cotizar_web(CotizarWebRequest(**cuerpo))
+
+    return visto, data
+
+
+def test_exportacion_sale_de_argentina():
+    visto, data = _cotizar("exportacion")
+    assert visto["origen"]["country"] == "AR"
+    assert visto["destino"]["country"] == "US"
+    assert data["sentido"] == "exportacion"
+
+
+def test_importacion_da_vuelta_origen_y_destino():
+    visto, data = _cotizar("importacion")
+    assert visto["origen"]["country"] == "US", "la caja tiene que salir del exterior"
+    assert visto["destino"]["country"] == "AR", "y entrar a Argentina"
+    assert data["sentido"] == "importacion"
+    assert data["destino"] == "AR"
+
+
+def test_sin_sentido_sigue_siendo_exportacion():
+    """Retrocompatible: quien ya llamaba este endpoint no se rompe."""
+    visto, data = _cotizar(None)
+    assert visto["origen"]["country"] == "AR"
+    assert data["sentido"] == "exportacion"
+
+
+def test_la_importacion_le_pega_a_dhl_con_la_cuenta_de_impo():
+    """
+    El test que cierra el círculo: que el sentido llegue hasta la cuenta.
+    Sin esto, dar vuelta origen/destino sería decorativo.
+    """
+    from core.dhl_client import DHLClient
+
+    visto, _ = _cotizar("importacion")
+    with mock.patch.dict(os.environ, {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_EXPO": "741622792",
+        "DHL_ACCOUNT_NUMBER_IMPO": "730089966",
+    }, clear=True):
+        cuenta, error = DHLClient()._cuenta_para(visto["origen"], visto["destino"])
+
+    assert error is None
+    assert cuenta == "730089966", "una importación tiene que facturar contra la cuenta de impo"

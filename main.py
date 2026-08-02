@@ -129,12 +129,17 @@ class PedidoRequest(BaseModel):
 
 
 class CotizarWebRequest(BaseModel):
-    destino_pais: str = Field(..., description="ISO-2: US, BR, CL, UY")
+    destino_pais: str = Field(..., description="ISO-2 del país del exterior: US, BR, CL, UY, MX, ES")
     peso_kg: float = Field(..., gt=0, le=70)
     largo_cm: float = Field(..., gt=0)
     ancho_cm: float = Field(..., gt=0)
     alto_cm: float = Field(..., gt=0)
     valor_declarado_usd: float = Field(default=100.0, gt=0)
+    # TAURO opera los dos sentidos. El campo es opcional y cae en exportación
+    # para no romper a nadie que ya esté llamando este endpoint sin él.
+    # Ojo: `destino_pais` es SIEMPRE el país del exterior; en una importación
+    # ese país es el ORIGEN y el destino es Argentina.
+    sentido: str = Field(default="exportacion", description="exportacion | importacion")
 
 
 # ─────────────────────────────────────────────
@@ -224,6 +229,17 @@ async def error_global(request: Request, exc: Exception):
     )
 
 
+@app.get("/partners", tags=["public"])
+def partners_activos():
+    """
+    Los couriers habilitados hoy, para la barra de partners de la web pública.
+    Sale de las credenciales cargadas, así que la web nunca promete un partner
+    que no puede cotizar.
+    """
+    from servicios.carriers import carriers_activos
+    return {"partners": carriers_activos()}
+
+
 @app.post("/cotizar-web", tags=["public"])
 def cotizar_web(body: CotizarWebRequest):
     """
@@ -239,18 +255,25 @@ def cotizar_web(body: CotizarWebRequest):
         "ES": {"city": "MADRID",     "state": "M",  "postal_code": "28001"},
     }
 
-    destino_info = DESTINOS.get(body.destino_pais.upper())
-    if not destino_info:
+    pais_exterior = body.destino_pais.upper()
+    info_exterior = DESTINOS.get(pais_exterior)
+    if not info_exterior:
         raise HTTPException(status_code=400, detail=f"País '{body.destino_pais}' no soportado aún.")
 
-    origen = {
+    ARGENTINA = {
         "street": "Av. Corrientes 1234",
         "city": "BUENOS AIRES",
         "state": "B",
         "postal_code": "1043",
         "country": "AR",
     }
-    destino = {**destino_info, "country": body.destino_pais.upper()}
+    exterior = {**info_exterior, "street": "Main St 100", "country": pais_exterior}
+
+    # En una importación la caja viaja al revés: sale del exterior y entra a
+    # Argentina. No es sólo cosmético — cada courier cotiza distinto según el
+    # sentido y DHL directamente factura contra otra cuenta (ver dhl_client).
+    importacion = (body.sentido or "").lower().startswith("impo")
+    origen, destino = (exterior, ARGENTINA) if importacion else (ARGENTINA, exterior)
     paquete = {
         "peso_kg": body.peso_kg,
         "largo": body.largo_cm,
@@ -280,8 +303,9 @@ def cotizar_web(body: CotizarWebRequest):
 
     return {
         "status": "success",
-        "origen": "Buenos Aires, AR",
-        "destino": body.destino_pais.upper(),
+        "sentido": "importacion" if importacion else "exportacion",
+        "origen": f"{exterior['city'].title()}, {pais_exterior}" if importacion else "Buenos Aires, AR",
+        "destino": "AR" if importacion else pais_exterior,
         "peso_kg": body.peso_kg,
         "recomendado": recomendado,
         "carriers": carriers,

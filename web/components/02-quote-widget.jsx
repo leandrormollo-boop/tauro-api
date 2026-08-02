@@ -13,6 +13,9 @@ const DESTINOS = [
 ];
 
 function QuoteWidget({ compact = false }) {
+  // TAURO opera los dos sentidos. `destino` es SIEMPRE el país del exterior:
+  // en una importación ese país es el origen y la caja entra a Argentina.
+  const [sentido, setSentido] = useStateQ("exportacion");
   const [destino, setDestino] = useStateQ("US");
   const [peso, setPeso] = useStateQ(5);
   const [largo, setLargo] = useStateQ(30);
@@ -31,6 +34,7 @@ function QuoteWidget({ compact = false }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sentido,
           destino_pais: destino,
           peso_kg: parseFloat(peso) || 1,
           largo_cm: parseFloat(largo) || 30,
@@ -91,18 +95,52 @@ function QuoteWidget({ compact = false }) {
 
       {step !== "result" && (
         <>
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-              Origen
-            </div>
-            <div style={{ padding: "11px 12px", background: "var(--bg)", border: "1px solid var(--line-soft)", borderRadius: 8, color: "var(--fg-2)", fontSize: 14 }}>
-              Buenos Aires, Argentina
-            </div>
+          {/* Sentido del envío: TAURO opera exportación e importación, y cada
+              courier cotiza distinto según para qué lado viaja la caja. */}
+          <div className="tweb-sentido" role="group" aria-label="Sentido del envío">
+            <button type="button"
+                    className={`tweb-sentido-btn ${sentido === "exportacion" ? "on" : ""}`}
+                    aria-pressed={sentido === "exportacion"}
+                    onClick={() => setSentido("exportacion")}>
+              Exporto
+            </button>
+            <button type="button"
+                    className={`tweb-sentido-btn ${sentido === "importacion" ? "on" : ""}`}
+                    aria-pressed={sentido === "importacion"}
+                    onClick={() => setSentido("importacion")}>
+              Importo
+            </button>
           </div>
 
-          <div style={{ marginBottom: 12 }}>
-            <SelectField label="Destino" value={destino} onChange={setDestino} options={DESTINOS} />
-          </div>
+          {sentido === "exportacion" ? (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+                  Origen
+                </div>
+                <div style={{ padding: "11px 12px", background: "var(--bg)", border: "1px solid var(--line-soft)", borderRadius: 8, color: "var(--fg-2)", fontSize: 14 }}>
+                  Buenos Aires, Argentina
+                </div>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <SelectField label="Destino" value={destino} onChange={setDestino} options={DESTINOS} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ marginBottom: 12 }}>
+                <SelectField label="Origen" value={destino} onChange={setDestino} options={DESTINOS} />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+                  Destino
+                </div>
+                <div style={{ padding: "11px 12px", background: "var(--bg)", border: "1px solid var(--line-soft)", borderRadius: 8, color: "var(--fg-2)", fontSize: 14 }}>
+                  Buenos Aires, Argentina
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
             <Field label="Peso (kg)" value={peso} onChange={setPeso} type="number" />

@@ -67,6 +67,36 @@ def carrier_activo(carrier: dict) -> bool:
     return all(presente(r) for r in carrier["requisitos"])
 
 
+def _markup_de(carrier_id: str, default_pct: float) -> float:
+    """
+    Margen de la web para UN carrier. WEB_MARKUP_PCT_DHL, _FEDEX, _UPS…
+    Si la variable no está o no es un número, cae al WEB_MARKUP_PCT general
+    en vez de romper: una variable mal tipeada no puede tumbar el cotizador.
+    """
+    crudo = os.getenv(f"WEB_MARKUP_PCT_{carrier_id.upper()}")
+    if crudo is None:
+        return default_pct
+    try:
+        return float(crudo)
+    except ValueError:
+        print(f"[carriers] WEB_MARKUP_PCT_{carrier_id.upper()}={crudo!r} no es un número; "
+              f"uso el general ({default_pct}%)")
+        return default_pct
+
+
+def carriers_activos() -> list:
+    """
+    Los couriers que HOY pueden cotizar, para mostrarlos como partners en la
+    web. Se calcula de las credenciales cargadas, no de una lista escrita a
+    mano: el día que se encienda UPS aparece solo, y si a un courier se le
+    caen las credenciales deja de figurar en vez de quedar prometido.
+    """
+    return [
+        {"id": c["id"], "nombre": c["nombre"], "logo": c["logo"]}
+        for c in CARRIERS if carrier_activo(c)
+    ]
+
+
 def _precios(resultado: dict, dolar: float, markup_pct: float,
              descuento_pct: float = 0.0) -> dict:
     """
@@ -180,12 +210,19 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         # sandbox, que son ficticias: hacerlo recién con la cuenta de producción.
         descuento = float(os.getenv("WEB_DESC_FEDEX_PCT", "90")) if c["id"] == "fedex" else 0.0
 
+        # Markup POR CARRIER: cada courier tiene su propio margen. Se setea con
+        # WEB_MARKUP_PCT_DHL / _FEDEX / _UPS en Railway y, si no está, cae al
+        # WEB_MARKUP_PCT general. Antes el margen era uno solo para todos, así
+        # que no se podía cobrar distinto un DHL que llega en 2 días que un
+        # FedEx que llega en 5.
+        markup_carrier = _markup_de(c["id"], markup_pct)
+
         salida.append({
             **base,
             "estado": "cotizado",
             "servicio": servicio,
             "dias_estimados": str(resultado.get("dias_estimados", "3-5")),
-            **_precios(resultado, dolar, markup_pct, descuento_pct=descuento),
+            **_precios(resultado, dolar, markup_carrier, descuento_pct=descuento),
         })
 
     return salida

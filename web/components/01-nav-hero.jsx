@@ -17,6 +17,41 @@ function TauroLogo({ size = 32 }) {
 }
 
 /* ============================================================
+   PARTNERS — los couriers habilitados HOY
+   La lista sale de /partners, que la calcula de las credenciales
+   cargadas. A propósito no está escrita a mano: el día que se
+   encienda UPS aparece solo, y si a un courier se le caen las
+   credenciales deja de figurar en vez de quedar prometido en la
+   web. Mientras carga, muestra los que ya sabemos que operan
+   para que no haya un salto visual.
+   ============================================================ */
+function PartnersMeta() {
+  const [partners, setPartners] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    fetch(`${window.TAURO_API_URL ?? ""}/partners`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (vivo && d?.partners?.length) setPartners(d.partners); })
+      .catch(() => {});   // si falla, queda el fallback: nunca una barra vacía
+    return () => { vivo = false; };
+  }, []);
+
+  const nombres = partners
+    ? partners.map((p) => p.nombre.replace(" Express", ""))
+    : ["FedEx", "DHL"];
+
+  return (
+    <div className="hero-meta-item">
+      <div className="num tweb-partners">{nombres.join(" · ")}</div>
+      <div className="lbl">
+        {nombres.length === 1 ? "Partner de envíos" : "Partners de envío"}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    NAV
    ============================================================ */
 function Nav({ onCotizarClick }) {
@@ -164,16 +199,13 @@ function HeroSplit({ onCotizarClick }) {
               </a>
             </div>
             <div className="hero-meta fade-up d4">
-              <div className="hero-meta-item">
-                <div className="num">FedEx</div>
-                <div className="lbl">Partner de envíos</div>
-              </div>
+              <PartnersMeta />
               <div className="hero-meta-item">
                 <div className="num">200+</div>
                 <div className="lbl">Destinos</div>
               </div>
               <div className="hero-meta-item">
-                <div className="num">24hs</div>
+                <div className="num">Inmediata</div>
                 <div className="lbl">Respuesta</div>
               </div>
             </div>
