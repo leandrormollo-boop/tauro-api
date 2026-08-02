@@ -137,6 +137,66 @@ def test_sin_credenciales_no_llama_a_la_api():
     assert not out["encontrado"]
 
 
+# ── Expo vs impo: una cuenta por sentido ─────────────────────
+
+def _cliente_con(env):
+    base = {
+        "DHL_API_KEY": "k",
+        "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER": "741622792",      # EXPO
+        "DHL_ENVIRONMENT": "sandbox",
+    }
+    base.update(env)
+    with mock.patch.dict(os.environ, base, clear=True):
+        return DHLClient()
+
+
+def _cuenta_usada(cli, origen, destino):
+    resp = mock.Mock(status_code=200)
+    resp.json.return_value = {"products": [_producto("P", 120.0)]}
+    with mock.patch("core.dhl_client.requests.get", return_value=resp) as get:
+        out = cli.get_rates(origen, destino, PAQUETE)
+    if not get.called:
+        return None, out
+    return get.call_args.kwargs["params"]["accountNumber"], out
+
+
+AR = {"country": "AR", "city": "BUENOS AIRES", "postal_code": "1043"}
+US = {"country": "US", "city": "MIAMI", "postal_code": "33131"}
+
+
+def test_una_exportacion_usa_la_cuenta_de_expo():
+    cli = _cliente_con({"DHL_ACCOUNT_NUMBER_IMPORT": "730089966"})
+    cuenta, _ = _cuenta_usada(cli, AR, US)
+    assert cuenta == "741622792"
+
+
+def test_una_importacion_usa_la_cuenta_de_impo():
+    """
+    Cada cuenta tiene su propia grilla negociada. Cotizar una importación con
+    la cuenta de exportación NO da error en DHL: devuelve el precio del otro
+    sentido y después la factura no coincide.
+    """
+    cli = _cliente_con({"DHL_ACCOUNT_NUMBER_IMPORT": "730089966"})
+    cuenta, _ = _cuenta_usada(cli, US, AR)
+    assert cuenta == "730089966"
+
+
+def test_sin_cuenta_de_impo_no_cotiza_una_importacion():
+    """Antes que publicar un precio con la grilla equivocada, no cotiza."""
+    cli = _cliente_con({})  # sin DHL_ACCOUNT_NUMBER_IMPORT
+    cuenta, out = _cuenta_usada(cli, US, AR)
+    assert cuenta is None, "no tendría que haber llamado a DHL"
+    assert not out["encontrado"]
+    assert "IMPORT" in out["error"]
+
+
+def test_un_envio_nacional_usa_la_de_expo():
+    cli = _cliente_con({"DHL_ACCOUNT_NUMBER_IMPORT": "730089966"})
+    cuenta, _ = _cuenta_usada(cli, AR, {"country": "AR", "city": "CORDOBA"})
+    assert cuenta == "741622792"
+
+
 def test_un_error_de_dhl_no_lanza_excepcion():
     resp = mock.Mock(status_code=400, text="Bad request: missing parameter")
     with mock.patch("core.dhl_client.requests.get", return_value=resp):

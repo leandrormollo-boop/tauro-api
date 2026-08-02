@@ -39,10 +39,40 @@ class DHLClient(CarrierBase):
     def __init__(self):
         self.api_key        = os.getenv("DHL_API_KEY")
         self.api_secret     = os.getenv("DHL_API_SECRET")
+        # DHL da UNA CUENTA POR SENTIDO y cada una tiene su propia grilla
+        # negociada. DHL_ACCOUNT_NUMBER es la de exportación (lo que sale de
+        # Argentina) y DHL_ACCOUNT_NUMBER_IMPORT la de importación.
         self.account_number = os.getenv("DHL_ACCOUNT_NUMBER")
+        self.account_import = os.getenv("DHL_ACCOUNT_NUMBER_IMPORT")
         self.environment    = os.getenv("DHL_ENVIRONMENT", "sandbox").lower()
         self.base_url       = self.SANDBOX_URL if self.environment == "sandbox" else self.PROD_URL
         self.product_code   = os.getenv("DHL_PRODUCT_CODE", self.PRODUCTO_DEFAULT)
+
+    def _cuenta_para(self, origen: dict, destino: dict) -> tuple:
+        """
+        Elige la cuenta según el sentido del envío.
+
+        Devuelve (numero_de_cuenta, error). Mandar la cuenta del sentido
+        equivocado NO da error en DHL: contesta con la grilla del otro
+        sentido, o sea un precio que después no es el que facturan. Por eso,
+        si es una importación y no está cargada la cuenta de impo, se
+        devuelve error explícito en vez de caer a la de expo — mejor que el
+        comparador diga "no disponible" a que publique un precio mentiroso.
+        """
+        origen_ar  = (origen.get("country")  or "AR").upper() == "AR"
+        destino_ar = (destino.get("country") or "").upper()   == "AR"
+
+        # Importación: entra a Argentina desde afuera.
+        if destino_ar and not origen_ar:
+            if not self.account_import:
+                return None, (
+                    "Falta DHL_ACCOUNT_NUMBER_IMPORT: es una importación y no "
+                    "se puede cotizar con la cuenta de exportación"
+                )
+            return self.account_import, None
+
+        # Todo lo demás (incluido AR→AR) va por la de exportación.
+        return self.account_number, None
 
     def get_rates(self, origen: dict, destino: dict, paquete: dict) -> dict:
         """
@@ -65,10 +95,15 @@ class DHLClient(CarrierBase):
         # así que viaja en el header y queda en nuestro log.
         msg_ref = str(uuid.uuid4())
 
+        cuenta, error_cuenta = self._cuenta_para(origen, destino)
+        if error_cuenta:
+            print(f"[dhl] {error_cuenta}")
+            return {"encontrado": False, "error": error_cuenta}
+
         try:
             url = f"{self.base_url}/rates"
             params = {
-                "accountNumber": self.account_number,
+                "accountNumber": cuenta,
                 "originCountryCode": origen.get("country", "AR"),
                 "originCityName": origen.get("city", "BUENOS AIRES"),
                 "originPostalCode": origen.get("postal_code", "1043"),
