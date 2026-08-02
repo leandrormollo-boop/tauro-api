@@ -40,15 +40,31 @@ CARRIERS = [
         "nombre": "DHL Express",
         "servicio": "Express Worldwide",
         "logo": "/static/img/carriers/dhl.svg",
-        "requisitos": ("DHL_API_KEY", "DHL_API_SECRET", "DHL_ACCOUNT_NUMBER"),
+        # La cuenta acepta dos nombres (ver dhl_client): alcanza con uno.
+        "requisitos": (
+            "DHL_API_KEY",
+            "DHL_API_SECRET",
+            ("DHL_ACCOUNT_NUMBER_EXPO", "DHL_ACCOUNT_NUMBER"),
+        ),
         "cliente": DHLClient,
     },
 ]
 
 
 def carrier_activo(carrier: dict) -> bool:
-    """Un carrier está activo cuando TODAS sus variables de entorno están cargadas."""
-    return all(os.getenv(v) for v in carrier["requisitos"])
+    """
+    Un carrier está activo cuando TODAS sus variables de entorno están cargadas.
+
+    Un requisito puede ser el nombre de una variable, o una tupla de nombres
+    alternativos para el MISMO dato (por ejemplo la cuenta de DHL, que acepta
+    DHL_ACCOUNT_NUMBER_EXPO o el nombre viejo DHL_ACCOUNT_NUMBER): en ese caso
+    alcanza con que esté cargada una.
+    """
+    def presente(req) -> bool:
+        nombres = (req,) if isinstance(req, str) else req
+        return any(os.getenv(n) for n in nombres)
+
+    return all(presente(r) for r in carrier["requisitos"])
 
 
 def _precios(resultado: dict, dolar: float, markup_pct: float,

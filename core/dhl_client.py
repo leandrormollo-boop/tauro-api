@@ -40,10 +40,18 @@ class DHLClient(CarrierBase):
         self.api_key        = os.getenv("DHL_API_KEY")
         self.api_secret     = os.getenv("DHL_API_SECRET")
         # DHL da UNA CUENTA POR SENTIDO y cada una tiene su propia grilla
-        # negociada. DHL_ACCOUNT_NUMBER es la de exportación (lo que sale de
-        # Argentina) y DHL_ACCOUNT_NUMBER_IMPORT la de importación.
-        self.account_number = os.getenv("DHL_ACCOUNT_NUMBER")
-        self.account_import = os.getenv("DHL_ACCOUNT_NUMBER_IMPORT")
+        # negociada. Se aceptan los dos nombres a propósito: son dos números
+        # de 9 dígitos parecidísimos (741622792 / 730089966) y un nombre que
+        # no dice el sentido invita a cargarlos cruzados. _EXPO gana si están
+        # las dos, y el nombre viejo sigue andando para no romper nada.
+        self.account_number = (
+            os.getenv("DHL_ACCOUNT_NUMBER_EXPO")
+            or os.getenv("DHL_ACCOUNT_NUMBER")
+        )
+        self.account_import = (
+            os.getenv("DHL_ACCOUNT_NUMBER_IMPO")
+            or os.getenv("DHL_ACCOUNT_NUMBER_IMPORT")
+        )
         self.environment    = os.getenv("DHL_ENVIRONMENT", "sandbox").lower()
         self.base_url       = self.SANDBOX_URL if self.environment == "sandbox" else self.PROD_URL
         self.product_code   = os.getenv("DHL_PRODUCT_CODE", self.PRODUCTO_DEFAULT)
