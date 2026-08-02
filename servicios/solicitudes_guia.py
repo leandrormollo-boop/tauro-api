@@ -652,9 +652,29 @@ def generar_guia(solicitud_id: int) -> dict:
     sol = obtener_solicitud(solicitud_id)
     if not sol:
         return {"ok": False, "error": "Solicitud no encontrada."}
-    if (sol.get("courier") or "FEDEX").upper() == "ENVIA":
+
+    courier = (sol.get("courier") or "FEDEX").upper()
+
+    if courier == "ENVIA":
         return generar_guia_envia(sol)
-    return generar_guia_fedex(solicitud_id)
+    if courier == "FEDEX":
+        return generar_guia_fedex(solicitud_id)
+
+    # NUNCA caer a FedEx por descarte. Antes esto era un `else` y cualquier
+    # courier desconocido —DHL, UPS— se emitía con una etiqueta de FedEx:
+    # el cliente pagaba precio DHL, recibía una guía FedEx, y el link de
+    # tracking apuntaba al courier equivocado. Un error a la vista es
+    # infinitamente mejor que una guía emitida por el courier que no es.
+    print(f"[guia] solicitud {solicitud_id}: courier {courier!r} sin emisión "
+          f"implementada — NO se emite nada")
+    return {
+        "ok": False,
+        "error": (
+            f"Todavía no emitimos guías de {courier} desde el sistema. "
+            f"La cotización de {courier} sí funciona; la emisión está en "
+            f"desarrollo. Emitila a mano o elegí otro courier."
+        ),
+    }
 
 
 def generar_guia_envia(sol: dict) -> dict:
