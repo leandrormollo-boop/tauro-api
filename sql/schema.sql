@@ -278,5 +278,12 @@ CREATE TABLE IF NOT EXISTS config (
 INSERT INTO config (parametro, valor) VALUES
     ('COTIZACION_DOLAR_ARS', '1450'),
     ('WEB_MARKUP_PCT', '20'),
-    ('MARGEN_MINIMO_ARS', '5000')
+    ('MARGEN_MINIMO_ARS', '5000'),
+    -- Margen de la web POR COURIER. Cada uno tiene el suyo: no es lo mismo
+    -- vender un DHL que llega en 2 días que un FedEx que llega en 5, ni son
+    -- iguales las tarifas que negociamos con cada uno. Se editan desde
+    -- /admin/config sin deploy. Si se borran, cae al WEB_MARKUP_PCT general.
+    ('WEB_MARKUP_PCT_FEDEX', '35'),
+    ('WEB_MARKUP_PCT_DHL', '20'),
+    ('WEB_MARKUP_PCT_UPS', '20')
 ON CONFLICT (parametro) DO NOTHING;

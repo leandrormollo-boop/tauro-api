@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 
+from core.database import get_conn
 from core.fedex_client import FedExClient
 from core.ups_client import UPSClient
 from core.dhl_client import DHLClient
@@ -67,21 +68,83 @@ def carrier_activo(carrier: dict) -> bool:
     return all(presente(r) for r in carrier["requisitos"])
 
 
-def _markup_de(carrier_id: str, default_pct: float) -> float:
+def _pricing_configurado() -> dict:
     """
-    Margen de la web para UN carrier. WEB_MARKUP_PCT_DHL, _FEDEX, _UPS…
-    Si la variable no está o no es un número, cae al WEB_MARKUP_PCT general
-    en vez de romper: una variable mal tipeada no puede tumbar el cotizador.
+    Las perillas de precio cargadas en la tabla `config` — las que Leandro
+    edita desde /admin/config, sin deploy ni tocar Railway: los márgenes por
+    courier y el descuento de FedEx.
+
+    Van todas juntas a propósito. Si el margen de FedEx viviera en el admin y
+    su descuento en una variable de Railway, la pantalla mostraría una perilla
+    que no hace nada — que es exactamente el problema que tenía WEB_MARKUP_PCT
+    hasta hoy: estaba en la tabla y el código leía el entorno.
+
+    Ante cualquier problema de base devuelve {} y todo cae a las variables de
+    entorno: que no se pueda leer un margen no puede dejar la web sin cotizar.
     """
-    crudo = os.getenv(f"WEB_MARKUP_PCT_{carrier_id.upper()}")
-    if crudo is None:
-        return default_pct
     try:
-        return float(crudo)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT parametro, valor FROM config "
+                    "WHERE parametro LIKE 'WEB_MARKUP_PCT%%' "
+                    "   OR parametro = 'WEB_DESC_FEDEX_PCT'"
+                )
+                filas = cur.fetchall()
+    except Exception as e:
+        print(f"[carriers] no pude leer las perillas de precio de config: {e}")
+        return {}
+
+    valores = {}
+    for f in filas:
+        try:
+            valores[f["parametro"]] = float(str(f["valor"]).strip())
+        except (TypeError, ValueError):
+            print(f"[carriers] {f['parametro']}={f['valor']!r} no es un número; se ignora")
+    return valores
+
+
+def _markup_de(carrier_id: str, default_pct: float, config: dict = None) -> float:
+    """
+    Margen de la web para UN carrier, en orden de prioridad:
+
+      1. WEB_MARKUP_PCT_<CARRIER> en la tabla config  ← lo edita el admin
+      2. WEB_MARKUP_PCT_<CARRIER> como variable de entorno
+      3. WEB_MARKUP_PCT general de la tabla config
+      4. El general que venga por parámetro
+
+    Cada courier tiene su propio margen (decisión de Leandro, 01/08/2026): no
+    es lo mismo vender un DHL que llega en 2 días que un FedEx que llega en 5,
+    ni son iguales las tarifas que negociamos con cada uno.
+    """
+    config = config or {}
+    clave = f"WEB_MARKUP_PCT_{carrier_id.upper()}"
+
+    if clave in config:
+        return config[clave]
+
+    crudo = os.getenv(clave)
+    if crudo is not None:
+        try:
+            return float(crudo)
+        except ValueError:
+            print(f"[carriers] {clave}={crudo!r} no es un número; sigo con el general")
+
+    return config.get("WEB_MARKUP_PCT", default_pct)
+
+
+def _desc_fedex(config: dict) -> float:
+    """
+    Descuento de FedEx: primero la tabla config (editable desde el admin),
+    después la variable de entorno, después el 88 que definió Leandro.
+    """
+    if "WEB_DESC_FEDEX_PCT" in config:
+        return config["WEB_DESC_FEDEX_PCT"]
+    try:
+        return float(os.getenv("WEB_DESC_FEDEX_PCT", "88"))
     except ValueError:
-        print(f"[carriers] WEB_MARKUP_PCT_{carrier_id.upper()}={crudo!r} no es un número; "
-              f"uso el general ({default_pct}%)")
-        return default_pct
+        print("[carriers] WEB_DESC_FEDEX_PCT no es un número; uso 88")
+        return 88.0
 
 
 def carriers_activos() -> list:
@@ -173,6 +236,9 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
     """
     salida: list[dict] = []
 
+    # Una sola lectura de config por cotización, no una por carrier.
+    pricing = _pricing_configurado()
+
     for c in CARRIERS:
         base = {
             "id": c["id"],
@@ -217,14 +283,14 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         # 1,2 kg sale USD 24-27 — entre 30% y 40% POR DEBAJO del objetivo que
         # definió Leandro. No recalibrar este número contra las tarifas de
         # sandbox, que son ficticias: hacerlo recién con la cuenta de producción.
-        descuento = float(os.getenv("WEB_DESC_FEDEX_PCT", "88")) if c["id"] == "fedex" else 0.0
+        descuento = _desc_fedex(pricing) if c["id"] == "fedex" else 0.0
 
         # Markup POR CARRIER: cada courier tiene su propio margen. Se setea con
         # WEB_MARKUP_PCT_DHL / _FEDEX / _UPS en Railway y, si no está, cae al
         # WEB_MARKUP_PCT general. Antes el margen era uno solo para todos, así
         # que no se podía cobrar distinto un DHL que llega en 2 días que un
         # FedEx que llega en 5.
-        markup_carrier = _markup_de(c["id"], markup_pct)
+        markup_carrier = _markup_de(c["id"], markup_pct, pricing)
 
         salida.append({
             **base,
