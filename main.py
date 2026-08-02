@@ -329,6 +329,15 @@ def cotizar(body: CotizarRequest, x_api_key: str = Header(default=None)):
             detail=f"No se encontró precio para producto '{body.producto_id}' hacia '{body.destino_pais}'."
         )
 
+    # ⚠️ NUNCA agregar acá una clave que empiece con costo_, margen_ o markup_.
+    # Este endpoint lo llama el CLIENTE con su propia API key. Hasta hoy devolvía
+    # markup_tipo / markup_valor / markup_pct_equivalente, o sea que le estábamos
+    # diciendo cuánto le ganamos: con FIJO_ARS el costo salía de una resta
+    # (costo = precio_ars − markup_valor) y con PCT de una división. El
+    # diccionario que llega de api_b2b trae además costo_fedex_ars y margen_ars,
+    # así que las claves se listan UNA POR UNA a propósito — un `{**resultado}`
+    # acá filtraría el costo entero. Hay un test que lo vigila:
+    # tests/test_no_fuga_costo.py
     return {
         "status": "success",
         "producto_id": body.producto_id,
@@ -338,9 +347,6 @@ def cotizar(body: CotizarRequest, x_api_key: str = Header(default=None)):
         "precio_ars": resultado["precio_ars"],
         "precio_usd": resultado["precio_usd"],
         "tipo_cambio_usado": resultado["tipo_cambio_usado"],
-        "markup_tipo": resultado["markup_tipo"],
-        "markup_valor": resultado["markup_valor"],
-        "markup_pct_equivalente": resultado["markup_pct_equivalente"],
         "dias_estimados": resultado["dias_estimados"],
         "valida_hasta": resultado["valida_hasta"],
     }

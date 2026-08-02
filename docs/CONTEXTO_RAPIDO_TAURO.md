@@ -51,7 +51,9 @@ Importante: diferenciar bien tres superficies:
     - `MULTIPLICADOR`: costo x factor, ejemplo TOPOLLAN `1.30`.
   - Admin permite cargar/ver la regla comercial de cada cliente.
   - Cotizador B2B/portal usa la regla del cliente.
-  - API devuelve `markup_tipo`, `markup_valor` y `markup_pct_equivalente`.
+  - ⚠️ La API **NO** devuelve `markup_tipo`, `markup_valor` ni `markup_pct_equivalente`:
+    eso era una fuga (01/08/2026) y se sacó. Con esos campos el cliente despejaba
+    nuestro costo con una resta. El cliente ve `precio_ars` / `precio_usd` y nada más.
 
 Commits previos relevantes:
 
