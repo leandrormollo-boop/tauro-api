@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse, FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import (
+    FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -85,6 +87,36 @@ def servir_css():
 @app.get("/tweaks-panel.jsx", include_in_schema=False)
 def servir_tweaks():
     return FileResponse(os.path.join(WEB_DIR, "tweaks-panel.jsx"))
+
+
+@app.get("/guias", include_in_schema=False)
+def servir_guias_indice():
+    """Guías por país — contenido SEO: lo que la pyme googlea antes de exportar."""
+    from servicios.guias_pais import pagina_indice
+    return HTMLResponse(pagina_indice())
+
+
+@app.get("/guias/{slug}", include_in_schema=False)
+def servir_guia_pais(slug: str):
+    from servicios.guias_pais import pagina_guia
+    html = pagina_guia(slug)
+    if html is None:
+        return RedirectResponse(url="/guias", status_code=303)
+    return HTMLResponse(html)
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def servir_sitemap():
+    """Para que Google indexe las guías sin esperar a que alguien las linkee."""
+    from servicios.guias_pais import sitemap_xml
+    return Response(content=sitemap_xml(), media_type="application/xml")
+
+
+@app.get("/estado", include_in_schema=False)
+def servir_estado():
+    """Página de estado pública: 'no le tenemos miedo a que nos midan'."""
+    from servicios.estado_publico import pagina_estado
+    return HTMLResponse(pagina_estado())
 
 
 @app.get("/privacidad", include_in_schema=False)

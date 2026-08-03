@@ -140,6 +140,14 @@ ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT;
 ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_pdf BYTEA;
 ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_nombre TEXT;
 
+-- Historial de salud para la página de estado pública (/estado). El
+-- centinela (cada 15 min) suma acá: checks del día y cuántos fallaron.
+CREATE TABLE IF NOT EXISTS salud_historial (
+    dia     DATE PRIMARY KEY,
+    checks  INTEGER NOT NULL DEFAULT 0,
+    fallos  INTEGER NOT NULL DEFAULT 0
+);
+
 -- ── Envíos / Facturas (ex ENVIOS 2026) ─────────────────────
 CREATE TABLE IF NOT EXISTS envios (
     id           SERIAL PRIMARY KEY,

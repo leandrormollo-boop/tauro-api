@@ -153,6 +153,23 @@ def _avisar(motivo: str) -> None:
         print(f"[centinela] no pude mandar la alerta: {e}")
 
 
+def _anotar_historial(hubo_fallo: bool) -> None:
+    """Alimenta la página de estado pública (/estado): checks y fallos por día."""
+    from core.database import get_conn
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO salud_historial (dia, checks, fallos)
+                    VALUES (CURRENT_DATE, 1, %s)
+                    ON CONFLICT (dia) DO UPDATE SET
+                        checks = salud_historial.checks + 1,
+                        fallos = salud_historial.fallos + EXCLUDED.fallos
+                """, (1 if hubo_fallo else 0,))
+    except Exception as e:
+        print(f"[centinela] no pude anotar el historial de salud: {e}")
+
+
 def revisar_checkout() -> None:
     """Nombre histórico: lo llama el scheduler de main.py."""
     global _fallos_seguidos, _ya_avise
@@ -166,6 +183,8 @@ def revisar_checkout() -> None:
             ok, detalle = False, f"{chequeo.__name__} falló: {type(e).__name__}: {e}"
         if not ok and detalle:
             problemas.append(detalle)
+
+    _anotar_historial(bool(problemas))
 
     if not problemas:
         if _ya_avise:
