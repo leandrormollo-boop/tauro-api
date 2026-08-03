@@ -487,6 +487,33 @@ def partners_activos():
     return {"partners": carriers_activos()}
 
 
+@app.get("/api/rastrear", tags=["public"])
+def api_rastrear(nro: str, request: Request):
+    """
+    Rastreo público: el cliente pega su número y ve dónde está su envío, sin
+    login. Devuelve sólo datos logísticos (courier, ciudad origen/destino,
+    estado, fecha) — NUNCA datos personales.
+
+    Rate limit anti-enumeración: aunque no expone PII, no queremos que alguien
+    barra números probando de a miles. 20 consultas / 5 min por IP alcanza de
+    sobra para un cliente real chequeando sus envíos.
+    """
+    from servicios.rate_limit import check_rate, client_ip
+
+    if not check_rate(f"rastrear:{client_ip(request)}", max_attempts=20, window_seconds=300):
+        return JSONResponse(
+            {"ok": False, "error": "Demasiadas consultas. Esperá un minuto."},
+            status_code=429)
+    try:
+        from servicios.rastreo import rastrear_publico
+        return rastrear_publico(nro)
+    except Exception as e:
+        print(f"[rastrear] error: {type(e).__name__}: {e}")
+        return JSONResponse(
+            {"ok": False, "error": "No pudimos rastrear ahora. Probá de nuevo."},
+            status_code=200)
+
+
 @app.post("/cotizar-web", tags=["public"])
 def cotizar_web(body: CotizarWebRequest, request: Request):
     """

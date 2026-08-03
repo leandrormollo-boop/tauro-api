@@ -150,8 +150,42 @@ const TRACK_STATES = [
   { id: "delivery", label: "Entregado", time: "—", loc: "Doral, FL", desc: "Pendiente de entrega final al destinatario." },
 ];
 
+// Las 5 etapas visibles de la barra (para el resultado real).
+const ETAPAS = ["Reservado", "Recogida", "En tránsito", "En aduana", "Entregado"];
+
 function Tracking() {
-  const [activeIdx, setActiveIdx] = React.useState(3);
+  const [activeIdx, setActiveIdx] = React.useState(3);   // sólo para el DEMO
+  const [nro, setNro] = React.useState("");
+  const [res, setRes] = React.useState(null);
+  const [cargando, setCargando] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  async function rastrear(e) {
+    if (e) e.preventDefault();
+    const q = nro.trim();
+    if (!q) return;
+    setCargando(true); setError(""); setRes(null);
+    try {
+      const r = await fetch(
+        `${window.TAURO_API_URL || ""}/api/rastrear?nro=${encodeURIComponent(q)}`
+      );
+      const data = await r.json();
+      if (!data.ok) {
+        setError(data.error || "No pudimos rastrear. Probá de nuevo.");
+      } else if (data.encontrado === false && !data.courier) {
+        setError(data.mensaje || "No pudimos identificar el courier por el número.");
+      } else {
+        setRes(data);
+      }
+    } catch (_) {
+      setError("No pudimos conectar. Probá de nuevo en un momento.");
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  const real = res && res.encontrado;          // envío nuestro, con estado
+  const soloCourier = res && res.encontrado === false && res.courier;  // detectado por formato
 
   return (
     <section id="tracking" style={{ background: "var(--bg-elev)", borderTop: "1px solid var(--line-soft)", borderBottom: "1px solid var(--line-soft)" }} data-screen-label="Tracking">
@@ -162,13 +196,40 @@ function Tracking() {
             <h2 style={{ fontSize: "clamp(36px, 4.5vw, 52px)", marginBottom: 20 }}>
               Sabés exactamente<br/>dónde está tu carga.
             </h2>
-            <p style={{ color: "var(--fg-2)", fontSize: 17, lineHeight: 1.6, marginBottom: 28 }}>
-              Así se ve el seguimiento de tu envío: cada hito del recorrido,
-              desde la retirada hasta la entrega, en un solo lugar — sin
-              llamadas ni "esperá y te aviso".
+            <p style={{ color: "var(--fg-2)", fontSize: 17, lineHeight: 1.6, marginBottom: 24 }}>
+              Ingresá tu número de seguimiento y te decimos por dónde va tu
+              envío — reconocemos el courier automáticamente, sin llamadas ni
+              "esperá y te aviso".
             </p>
-            <div style={{ display: "flex", gap: 28, marginBottom: 32 }}>
-              <Stat n="FedEx" l="Red de seguimiento"/>
+
+            <form onSubmit={rastrear} style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+              <input
+                value={nro}
+                onChange={(e) => setNro(e.target.value)}
+                placeholder="Ej: 771234567890"
+                aria-label="Número de seguimiento"
+                style={{
+                  flex: 1, minWidth: 0, padding: "13px 16px",
+                  background: "var(--bg)", border: "1px solid var(--line)",
+                  borderRadius: 10, color: "var(--fg)", fontSize: 15,
+                  fontFamily: "var(--font-mono)",
+                }}
+              />
+              <button type="submit" className="btn btn-primary" disabled={cargando}
+                style={{ whiteSpace: "nowrap" }}>
+                {cargando ? "Buscando…" : "Rastrear"}
+              </button>
+            </form>
+            {error && (
+              <div style={{
+                color: "var(--warn, #ffb454)", fontSize: 14, marginBottom: 18,
+                padding: "10px 14px", background: "var(--bg)",
+                border: "1px solid var(--line-soft)", borderRadius: 8,
+              }}>{error}</div>
+            )}
+
+            <div style={{ display: "flex", gap: 28, marginTop: 18 }}>
+              <Stat n="FedEx · DHL · UPS" l="Couriers reconocidos"/>
               <Stat n="Portal" l="Acceso para clientes"/>
             </div>
           </div>
@@ -181,14 +242,22 @@ function Tracking() {
                 <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#febc2e" }}/>
                 <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#28c840" }}/>
               </div>
-              <div style={{ marginLeft: 12, color: "var(--fg-3)" }}>tauro://tracking/TRO-2026-04812</div>
-              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: "var(--ok)" }}>
-                <span style={{ width: 6, height: 6, background: "var(--ok)", borderRadius: "50%" }} className="pulse"/>
-                DEMO
+              <div style={{ marginLeft: 12, color: "var(--fg-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                tauro://tracking/{res ? nro.trim().toUpperCase() : "TRO-2026-04812"}
+              </div>
+              <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: res ? "var(--accent)" : "var(--ok)" }}>
+                <span style={{ width: 6, height: 6, background: res ? "var(--accent)" : "var(--ok)", borderRadius: "50%" }} className="pulse"/>
+                {res ? "EN VIVO" : "DEMO"}
               </div>
             </div>
 
             <div style={{ padding: 28 }}>
+              {real ? (
+                <ResultadoReal res={res} nro={nro}/>
+              ) : soloCourier ? (
+                <ResultadoCourier res={res}/>
+              ) : (
+              <React.Fragment>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 24 }}>
                 <div>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -263,6 +332,8 @@ function Tracking() {
                   );
                 })}
               </div>
+              </React.Fragment>
+              )}
             </div>
           </div>
         </div>
@@ -291,6 +362,91 @@ function Tracking() {
         }
       `}</style>
     </section>
+  );
+}
+
+// Resultado real: envío nuestro. Mostramos origen→destino, courier, la barra
+// en la etapa que sabemos, el estado, y un botón al detalle en vivo del courier.
+function ResultadoReal({ res, nro }) {
+  const etapa = typeof res.etapa === "number" ? res.etapa : 0;
+  return (
+    <React.Fragment>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 24 }}>
+        <div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Tracking · {nro.trim().toUpperCase()}
+          </div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 600, marginTop: 4 }}>
+            {res.origen} → {res.destino}
+          </div>
+        </div>
+        <div className="chip">{res.courier_nombre}</div>
+      </div>
+
+      {/* progress bar en la etapa real */}
+      <div style={{ marginBottom: 28, position: "relative" }}>
+        <div style={{ height: 3, background: "var(--bg-elev-2)", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{
+            height: "100%",
+            width: `${(etapa / (ETAPAS.length - 1)) * 100}%`,
+            background: "linear-gradient(to right, var(--accent), var(--accent-soft))",
+            transition: "width .5s cubic-bezier(.2,.7,.3,1)",
+          }}/>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10 }}>
+          {ETAPAS.map((label, i) => (
+            <span key={label} style={{
+              fontSize: 10, fontFamily: "var(--font-mono)", textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              color: i <= etapa ? (i === etapa ? "var(--accent)" : "var(--fg-2)") : "var(--fg-4)",
+            }}>{label}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* estado actual */}
+      <div style={{
+        display: "flex", gap: 14, padding: "14px 16px",
+        background: "var(--bg-elev)", border: "1px solid var(--line)", borderRadius: 10,
+        marginBottom: 18,
+      }}>
+        <div style={{ width: 8, height: 8, marginTop: 6, borderRadius: "50%", background: "var(--accent)", boxShadow: "0 0 0 4px var(--accent-glow)", flexShrink: 0 }}/>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>{res.estado}</div>
+            {res.fecha && <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)" }}>{res.fecha}</div>}
+          </div>
+          <div style={{ fontSize: 13, color: "var(--fg-2)", marginTop: 4 }}>
+            Para el detalle en tránsito, aduana y entrega, mirá el seguimiento en vivo del courier.
+          </div>
+        </div>
+      </div>
+
+      <a href={res.url_courier} target="_blank" rel="noopener noreferrer"
+         className="btn btn-primary" style={{ width: "100%", textAlign: "center", boxSizing: "border-box" }}>
+        Ver detalle en {res.courier_nombre} →
+      </a>
+    </React.Fragment>
+  );
+}
+
+// El número no es de un envío nuestro pero reconocimos el courier por su
+// formato: lo mandamos al seguimiento oficial de ese courier.
+function ResultadoCourier({ res }) {
+  return (
+    <div style={{ textAlign: "center", padding: "18px 8px" }}>
+      <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600, marginBottom: 8 }}>
+        Es un envío de {res.courier_nombre}
+      </div>
+      <p style={{ color: "var(--fg-2)", fontSize: 15, lineHeight: 1.6, marginBottom: 24 }}>
+        Reconocimos el courier por el número. Seguí tu paquete en el
+        rastreo oficial de {res.courier_nombre}.
+      </p>
+      <a href={res.url_courier} target="_blank" rel="noopener noreferrer"
+         className="btn btn-primary" style={{ width: "100%", textAlign: "center", boxSizing: "border-box" }}>
+        Ver seguimiento en {res.courier_nombre} →
+      </a>
+    </div>
   );
 }
 
