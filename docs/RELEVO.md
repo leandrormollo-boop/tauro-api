@@ -96,16 +96,23 @@ huérfanas rescatadas al vincular), web pública (cotizador FedEx+DHL vivos,
 guías por país, calculadora volumétrica, /estado, captura de leads), espejo a
 Google Sheet (apagado hasta `GOOGLE_CREDENTIALS_JSON`).
 
-De la spec original de 23 puntos quedan sin construir sólo la emisión por
-UPS/DHL (espera credenciales) y las recolecciones por couriers nacionales.
+**La spec original de 23 puntos está COMPLETA.** Los tres couriers
+internacionales (FedEx, DHL, UPS) cotizan, emiten guías y trackean; el
+despachador de emisión es un registro (`generar_guia_internacional`) donde
+sumar un courier es una línea, porque todo el armado del envío se comparte.
+Suite: 92 tests (`.venv-codex/bin/python -m pytest tests/ -q --ignore=tests/test_email_security.py --ignore=tests/test_security.py`
+— esos dos no colectan, es previo).
 
 ## Pendientes (en orden)
 
-1. **Técnico**: emisión UPS (cliente `NotImplementedError`) y refactor del
-   despachador de emisión al patrón registro. Recolecciones para couriers
-   nacionales (hoy sólo FedEx; envia.com hay que investigar si expone
-   pickup). Ojo: la Pickup API sólo se probó contra sandbox — la primera
-   recolección real hay que mirarla de cerca.
+1. **Técnico**: NADA bloqueante. Lo que queda depende de credenciales:
+   - **Probar contra las APIs vivas** cuando entren las cuentas. La emisión
+     de DHL y UPS está armada contra la documentación y cubierta por tests
+     de payload, pero NUNCA se ejecutó contra el sandbox real. La primera
+     guía de cada courier hay que mirarla de cerca (mismo criterio para la
+     primera recolección: la Pickup API tampoco se probó viva).
+   - Recolecciones para couriers nacionales (hoy sólo FedEx; falta
+     investigar si envia.com expone pickup).
    *(Cerrados el 02/08: open redirect, `state` del OAuth, ventas de tiendas
    sin vincular, reserva atómica en guías nacionales, recolecciones FedEx.)*
 2. **Del dueño**: cargar `WHATSAPP_TAURO` en /admin/config cuando llegue la
