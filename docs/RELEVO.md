@@ -145,6 +145,24 @@ que queda anotada en SEGURIDAD.md: `unsafe-inline` en style-src, rate limit
 en memoria, chunked evade el tope (lo corta el proxy), `auditoria.py` sin
 cablear.
 
+### Integraciones de tienda — finalizadas (03/08)
+
+Inventario con 2 agentes. Todo lo de código cerrado; lo que falta es de Leandro.
+
+- **Shopify**: LISTA y en producción (verificada e2e 28/07). Se sacó el scope
+  `write_shipping` (era del CarrierService retirado; pedir de más = rechazo en
+  el App Store). Para publicar en el App Store: `docs/PUBLICAR_APP_SHOPIFY.md`
+  (credenciales + Partner Dashboard + compliance webhooks + submit). Ojo: la
+  app YA NO cotiza en el checkout — no prometerlo en la ficha.
+- **Tiendanube**: backend completo y ahora **instalable desde el portal**
+  (botón "Instalar app de Tiendanube", aparece con la app configurada; antes
+  decía "próximamente" y no había cómo conectarla). OAuth con `state` anti-CSRF
+  en cookie (state:cliente, un solo uso): el callback sólo vincula si el state
+  vuelve. parsear_pedido captura el flete cobrado. Guía:
+  `docs/PUBLICAR_APP_TIENDANUBE.md` (app en Partners Portal + CLIENT_ID/SECRET
+  en Railway + redirect URI + permisos). Se auto-activa con las 2 env vars.
+- `.env.example` actualizado con DHL, UPS, Shopify, Tiendanube, TOTP, CORS.
+
 ### Primera auditoría del 03/08 (previa)
 
 Se midió producción y se corrió una auditoría adversarial de 26 agentes:
