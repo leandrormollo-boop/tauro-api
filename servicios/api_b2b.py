@@ -267,3 +267,86 @@ def obtener_precio_envio(
         "coti_id": resultado.coti_id,
         "valida_hasta": resultado.valida_hasta,
     }
+
+
+def cotizar_couriers_cliente(
+    cliente_id: str, destino_pais: str, bultos: list, destino_real: dict = None
+) -> dict:
+    """
+    Las 3 opciones de courier para UN cliente del portal, cada una con SU
+    precio final (costo del courier + la regla de ese cliente).
+
+    Decisión de Leandro (01/08/2026): todos los clientes ven todas las
+    cotizaciones; lo que cambia entre uno y otro es el markup, no la lista
+    de couriers.
+
+    Reusa la validación de productos y bultos de obtener_precio_envio_multi
+    —tope de cajas, peso por caja, producto activo— para que el preview diga
+    exactamente lo mismo que el submit.
+
+    Devuelve {encontrado, opciones: [...], motivo}. Cada opción trae SÓLO
+    precio: nunca el costo ni el margen (ver tests/test_no_fuga_costo.py).
+    """
+    from servicios.carriers import cotizar_carriers_cliente
+    from servicios.cotizador import _destino_para_cotizar, dolar_ars
+    from servicios.pricing import get_pricing_config
+    from servicios.rutas import pais_a_iso2
+
+    base = obtener_precio_envio_multi(
+        cliente_id, destino_pais, bultos, destino_real=destino_real
+    )
+    # Si la validación de productos/bultos falló, se devuelve el mismo motivo:
+    # el cliente tiene que ver el problema real, no "no hay cobertura".
+    if not base.get("encontrado"):
+        return base
+
+    ruta = buscar_ruta_para_destino(destino_pais)
+    if not ruta:
+        return {"encontrado": False, "motivo": "ruta_no_encontrada"}
+
+    piezas = [
+        {
+            "peso_kg": b["peso_kg"], "largo_cm": b["largo_cm"],
+            "ancho_cm": b["ancho_cm"], "alto_cm": b["alto_cm"],
+        }
+        for b in (base.get("bultos") or [])
+        # Cada caja va como una entrada: N unidades iguales son N piezas,
+        # porque cada una paga por su propio peso volumétrico.
+        for _ in range(max(int(b.get("cantidad") or 1), 1))
+    ]
+    if not piezas:
+        return {"encontrado": False, "motivo": "sin_bultos"}
+
+    origen = {
+        "city": ruta.origen_ciudad,
+        "postal_code": ruta.origen_zip,
+        "country": pais_a_iso2(ruta.origen_pais),
+    }
+    destino = _destino_para_cotizar(ruta, destino_real)
+
+    tarjetas = cotizar_carriers_cliente(
+        origen=origen, destino=destino, paquete=piezas[0],
+        dolar=dolar_ars(), pricing_cliente=get_pricing_config(cliente_id),
+        paquetes=piezas,
+    )
+
+    opciones = [t for t in tarjetas if t.get("estado") == "cotizado"]
+    opciones.sort(key=lambda o: o["precio_ars"])
+
+    return {
+        "encontrado": bool(opciones),
+        "motivo": None if opciones else "sin_cobertura",
+        "opciones": opciones,
+        # Los que no cotizaron, con el porqué: el cliente merece saber si
+        # DHL no llega a ese destino o si es que no soporta varias cajas.
+        "no_disponibles": [
+            {"id": t["id"], "nombre": t["nombre"], "motivo": t.get("error") or t["estado"]}
+            for t in tarjetas if t.get("estado") != "cotizado"
+        ],
+        "piezas_total": base.get("piezas_total"),
+        "peso_total_kg": base.get("peso_total_kg"),
+        "bultos": base.get("bultos"),
+        # Trazabilidad: la cotización base ya quedó logueada con su coti_id.
+        "ruta_id": base.get("ruta_id"),
+        "coti_id": base.get("coti_id"),
+    }

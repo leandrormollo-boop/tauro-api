@@ -75,6 +75,9 @@
 <form method="POST" action="/portal/envios/nuevo">
     <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
     <!-- Nacional: carrier/servicio elegido en el comparador del precio en vivo -->
+    {# Courier internacional elegido. Si queda vacío el submit no adivina:
+       falla pidiendo que se elija, en vez de cobrar el primero de la lista. #}
+    <input type="hidden" name="intl_courier" id="intl_courier" value="">
     <input type="hidden" name="nac_carrier" id="nac_carrier" value="">
     <input type="hidden" name="nac_servicio" id="nac_servicio" value="">
     <div class="card">
@@ -370,18 +373,38 @@
     } else if (state === "ok") {
       // números siempre en mono tabular: no "saltan" de ancho al recotizar
       var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
-      var lista = data.tarifa_lista_ars
-        ? "<span style='text-decoration:line-through;color:var(--fg-4);" + monoStyle + "'>" + fmtARS(data.tarifa_lista_ars) + "</span> "
+      intlOpciones = data.opciones || [];
+      if (!intlOpciones.length) { renderLivePrice("err", data); return; }
+
+      // Vienen ordenadas de más barata a más cara: la primera es la sugerida.
+      var sel = intlOpciones.length > 1
+        ? "<select id='intl-opcion' style='margin-top:6px;font-size:12.5px;padding:7px 28px 7px 10px;'>" +
+            intlOpciones.map(function (o, i) {
+              return "<option value='" + i + "'>" + o.nombre + " — " + fmtARS(o.precio_ars) +
+                     (o.dias ? " · " + o.dias + " días" : "") + "</option>";
+            }).join("") + "</select>"
         : "";
-      var detalle = "USD " + data.precio_usd;
-      if (data.piezas_total > 1) detalle += " · " + data.piezas_total + " cajas";
-      if (data.peso_total_kg) detalle += " · " + data.peso_total_kg + " kg";
-      if (data.dias_estimados) detalle += " · " + data.dias_estimados + " días";
+
+      // Lo que NO cotizó, con el motivo: el cliente tiene que poder
+      // distinguir "DHL no llega ahí" de "no cotiza varias cajas".
+      var fuera = (data.no_disponibles || []).length
+        ? "<span style='font-size:11px;color:var(--fg-4);display:block;margin-top:4px;'>" +
+            data.no_disponibles.map(function (n) { return n.nombre; }).join(" · ") +
+            ": sin cotización para este envío</span>"
+        : "";
+
       liveBox.innerHTML =
-        "<strong style='font-size:19px;'>" + lista +
-        "<span style='color:var(--accent-soft);" + monoStyle + "'>" + fmtARS(data.precio_ars) + "</span>" +
+        "<strong style='font-size:19px;'>" +
+        "<span id='intl-precio' style='color:var(--accent-soft);" + monoStyle + "'>" +
+        fmtARS(intlOpciones[0].precio_ars) + "</span>" +
         " <span style='font-size:11px;color:var(--fg-3)'>ARS</span></strong>" +
-        "<span>" + detalle + "</span>";
+        "<span id='intl-detalle'></span>" + sel + fuera;
+
+      aplicarIntlSel(0);
+      var combo = document.getElementById("intl-opcion");
+      if (combo) combo.addEventListener("change", function () {
+        aplicarIntlSel(parseInt(this.value, 10) || 0);
+      });
     } else {
       var motivo = (data && data.motivo) || "";
       var msg = motivo.indexOf("peso_excedido") === 0
@@ -392,6 +415,27 @@
   }
 
   // ── Nacional: comparador de couriers en el precio en vivo ─
+  var intlOpciones = [];
+  var intlCourier = document.getElementById("intl_courier");
+
+  function aplicarIntlSel(i) {
+    var o = intlOpciones[i];
+    if (!o) return;
+    // El hidden viaja en el submit: el servidor recotiza y busca ESTE
+    // courier. Si no aparece, falla pidiendo elegir otro — nunca cobra
+    // uno distinto del que se eligió en pantalla.
+    if (intlCourier) intlCourier.value = o.id;
+    var p = document.getElementById("intl-precio");
+    if (p) p.textContent = fmtARS(o.precio_ars);
+    var d = document.getElementById("intl-detalle");
+    if (d) {
+      var t = "USD " + o.precio_usd;
+      if (o.servicio) t += " · " + o.servicio;
+      if (o.dias) t += " · " + o.dias + " días";
+      d.textContent = t;
+    }
+  }
+
   var nacCarrier = document.getElementById("nac_carrier");
   var nacServicio = document.getElementById("nac_servicio");
   var nacOpciones = [];

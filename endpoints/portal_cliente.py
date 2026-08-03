@@ -40,7 +40,9 @@ from servicios.cuenta_corriente import (
     saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes,
     movimientos,
 )
-from servicios.api_b2b import obtener_precio_envio, obtener_precio_envio_multi
+from servicios.api_b2b import (
+    obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
+)
 from servicios.nacional import cotizar_nacional_cliente, nacional_activo
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
@@ -661,7 +663,12 @@ async def api_precio_envio_multi(
         return JSONResponse({"ok": False, "motivo": "faltan_datos"}, status_code=200)
 
     try:
-        precio = obtener_precio_envio_multi(cliente, destino, bultos, destino_real=destino_real)
+        # Los 3 couriers con el precio de ESTE cliente. Todos los clientes
+        # ven todas las cotizaciones; lo que cambia es el markup de cada uno
+        # (decisión de Leandro, 01/08/2026).
+        precio = cotizar_couriers_cliente(
+            cliente, destino, bultos, destino_real=destino_real
+        )
     except Exception as e:
         print(f"[portal] api_precio_multi error: {e}")
         return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
@@ -672,15 +679,30 @@ async def api_precio_envio_multi(
             status_code=200,
         )
 
+    # Las claves se eligen a mano: nunca costo ni margen (test_no_fuga_costo).
+    # `opciones` viene ordenada de más barata a más cara.
+    opciones = precio.get("opciones") or []
     return JSONResponse({
         "ok": True,
-        "precio_ars": precio["precio_ars"],
-        "precio_usd": precio["precio_usd"],
-        "tarifa_lista_ars": precio.get("tarifa_lista_ars"),
+        "opciones": [
+            {
+                "id": o["id"],
+                "nombre": o["nombre"],
+                "logo": o.get("logo"),
+                "servicio": o.get("servicio"),
+                "precio_ars": o["precio_ars"],
+                "precio_usd": o["precio_usd"],
+                "dias": o.get("dias_estimados"),
+            }
+            for o in opciones
+        ],
+        "no_disponibles": precio.get("no_disponibles") or [],
+        # Retrocompat: el JS viejo lee precio_ars suelto. Va el más barato.
+        "precio_ars": opciones[0]["precio_ars"] if opciones else None,
+        "precio_usd": opciones[0]["precio_usd"] if opciones else None,
+        "dias_estimados": opciones[0].get("dias_estimados") if opciones else None,
         "peso_total_kg": precio.get("peso_total_kg"),
         "piezas_total": precio.get("piezas_total"),
-        "dias_estimados": precio.get("dias_estimados"),
-        "coti_id": precio.get("coti_id"),
     })
 
 
@@ -938,6 +960,8 @@ def envio_nuevo_post(
     # Legacy (por si queda un form viejo cacheado): un solo producto.
     producto_alias: str = Form(""),
     cantidad: int = Form(1),
+    # Internacional: courier elegido en el comparador en vivo (fedex/dhl/ups).
+    intl_courier: str = Form(""),
     # Nacional: carrier/servicio elegido en el comparador en vivo.
     nac_carrier: str = Form(""),
     nac_servicio: str = Form(""),
@@ -1089,13 +1113,52 @@ def envio_nuevo_post(
             bultos_detalle = None
         else:
             # La dirección real ya está en el scope (viene del form o de la
-            # libreta, líneas ~1022). La rama nacional de acá arriba ya la
-            # usaba; la internacional la tiraba y cotizaba contra el CP de
-            # referencia — el recargo por zona remota lo comía TAURO.
-            precio = obtener_precio_envio_multi(
-                cliente, destino_pais, filas,
-                destino_real={"cp": dest_zip, "ciudad": dest_ciudad, "estado": dest_estado},
+            # libreta). La rama nacional de acá arriba ya la usaba; la
+            # internacional la tiraba y cotizaba contra el CP de referencia —
+            # el recargo por zona remota lo comía TAURO.
+            destino_real = {"cp": dest_zip, "ciudad": dest_ciudad, "estado": dest_estado}
+            multi = cotizar_couriers_cliente(
+                cliente, destino_pais, filas, destino_real=destino_real
             )
+            if not multi.get("encontrado"):
+                raise ValueError(
+                    f"No se pudo cotizar ese envío ({multi.get('motivo') or 'sin_precio'})."
+                )
+
+            # El courier elegido en pantalla manda. Si en esta recotización
+            # no volvió a aparecer —se cayó, o dejó de cubrir la ruta— NO se
+            # agarra otro: el cliente eligió DHL y no puede terminar con un
+            # FedEx debitado sin enterarse. Falla a la vista y elige de nuevo.
+            opciones = multi["opciones"]
+            elegido = (intl_courier or "").strip().lower()
+            if elegido:
+                op = next((o for o in opciones if o["id"] == elegido), None)
+                if op is None:
+                    nombres = ", ".join(o["nombre"] for o in opciones) or "ninguno"
+                    raise ValueError(
+                        f"{elegido.upper()} no pudo cotizar este envío en este momento. "
+                        f"Disponibles ahora: {nombres}. Elegí otro proveedor y probá de nuevo."
+                    )
+            else:
+                op = opciones[0]   # sin elección explícita: el más barato
+
+            # El courier queda GUARDADO en la solicitud: sin esto el
+            # despachador de emisión no sabe por dónde sale y cae al default.
+            courier_extra = {"courier": op["id"].upper()}
+
+            # ruta_id / coti_id salen de la cotización base (la de trazabilidad
+            # que ya se loguea); el precio, del courier elegido.
+            precio = {
+                "encontrado": True,
+                "precio_ars": op["precio_ars"],
+                "precio_usd": op["precio_usd"],
+                "dias_estimados": op.get("dias"),
+                "ruta_id": multi.get("ruta_id"),
+                "coti_id": multi.get("coti_id"),
+                "bultos": multi.get("bultos"),
+                "piezas_total": multi.get("piezas_total"),
+                "peso_total_kg": multi.get("peso_total_kg"),
+            }
             bultos_detalle = precio.get("bultos")
         if not precio.get("encontrado"):
             motivo = precio.get("motivo") or "sin_precio"
