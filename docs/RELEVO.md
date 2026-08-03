@@ -105,7 +105,43 @@ Suite: 92 tests, `.venv-codex/bin/python -m pytest tests/ -q` — **sin
 el 03/08: importaban `core/security.py`, que no está trackeado, así que
 explotaban al colectar y se venían salteando a mano en cada corrida.
 
-## Seguridad (auditoría del 03/08/2026)
+## Seguridad (03/08/2026)
+
+### Endurecimiento grande de la web ("usa todo tu poder")
+
+Segunda tanda del 03/08, sobre la deuda de fondo. Todo montado, deployado y
+verificado en producción (el marcador de "versión nueva viva" es la cabecera
+CSP; el deploy booteó pese al cambio a contenedor no-root). Detalle en
+`docs/SEGURIDAD.md`. Diseñado con un inventario por superficie (6 agentes) y
+validado con una auditoría adversarial de 5 lentes + verificadores (14
+agentes): **9 hallazgos, 7 confirmados y arreglados en la misma tanda**, 1
+refutado, 1 dependiente de misconfig (ya cerrado).
+
+- **Web compilada con esbuild** → `static/js/app.js` (bundle único, React
+  adentro). Se acabó Babel+unpkg en el navegador. El bundle SE COMMITEA
+  (Railway no tiene node); para editarla: tocar `web/components/*.jsx` +
+  `npm run build:web` + bumpear `?v=`.
+- **CSP estricta** `script-src 'self' 'nonce-<req>'` en toda la web/portal/
+  admin/páginas-Python. Cero handlers inline (migrados a `data-*`), nonce en
+  todos los `<script>`. NO toca `/shopify` (iframe) ni `/docs`.
+- **MFA TOTP opcional en el admin** (`ADMIN_TOTP_SECRET`, generar con
+  `scripts/generar_totp_admin.py`). Anti-replay por paso de tiempo.
+- **api_key B2B hasheada** (sha256), migración en el arranque, botón
+  "Regenerar API key" en el admin.
+- **Guardas**: Host→421 (sin wildcard railway), tope de tamaño por
+  Content-Type, CSRF Origin/Sec-Fetch en /portal|/admin, `client_ip` toma
+  CF-Connecting-IP / XFF derecho (el rate limit era evadible), contenedor
+  no-root.
+
+Hallazgos de LA PROPIA auditoría de esta tanda, ya arreglados: el no-root
+tumbaba el arranque (mkdir en /app al importar tracking) — **ALTA**, era un
+self-DoS del deploy; TOTP anti-replay incompleto y "quemable"; rate limit
+evadible por XFF spoofing; tope de tamaño rompía subidas del admin. Deuda
+que queda anotada en SEGURIDAD.md: `unsafe-inline` en style-src, rate limit
+en memoria, chunked evade el tope (lo corta el proxy), `auditoria.py` sin
+cablear.
+
+### Primera auditoría del 03/08 (previa)
 
 Se midió producción y se corrió una auditoría adversarial de 26 agentes:
 **8 hallazgos confirmados, 14 refutados**. Todo lo confirmado está arreglado,
