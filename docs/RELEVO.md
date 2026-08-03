@@ -87,21 +87,27 @@ y bumpear `?v=N` en `web/Tauro Solutions.html` (Babel standalone, sin build).
 ## Estado al 02/08/2026
 
 VIVO en producción: portal completo (cuenta corriente con débito automático,
-comprobantes con verificación, emisión por cliente con permiso+tope, Excel
-por cliente, catálogo con precio por unidad, login por email o ID), admin
-completo (bandeja, edición pre-emisión, pisar tracking con flag, carga de
-envíos externos, pagos por verificar, margen por ámbito), app Shopify
-(venta→solicitud automática), web pública (cotizador FedEx+DHL vivos, guías
-por país, calculadora volumétrica, /estado, captura de leads), espejo a
+comprobantes con verificación, emisión por cliente con permiso+tope,
+RECOLECCIONES, Excel por cliente, catálogo con precio por unidad, login por
+email o ID), admin completo (bandeja, edición pre-emisión, pisar tracking con
+flag, carga de envíos externos, pagos por verificar, margen por ámbito,
+recolecciones del día), app Shopify (venta→solicitud automática, ventas
+huérfanas rescatadas al vincular), web pública (cotizador FedEx+DHL vivos,
+guías por país, calculadora volumétrica, /estado, captura de leads), espejo a
 Google Sheet (apagado hasta `GOOGLE_CREDENTIALS_JSON`).
+
+De la spec original de 23 puntos quedan sin construir sólo la emisión por
+UPS/DHL (espera credenciales) y las recolecciones por couriers nacionales.
 
 ## Pendientes (en orden)
 
-1. **Técnico**: open redirect + validación de `state` en OAuth de Shopify;
-   tienda instalada sin vincular descarta ventas (el centinela avisa, no
-   arregla); reserva atómica para guías nacionales (envia.com) — doble click
-   emite dos; pickups/recolecciones (0% hecho, FedEx Pickup API); emisión
-   UPS (cliente `NotImplementedError`).
+1. **Técnico**: emisión UPS (cliente `NotImplementedError`) y refactor del
+   despachador de emisión al patrón registro. Recolecciones para couriers
+   nacionales (hoy sólo FedEx; envia.com hay que investigar si expone
+   pickup). Ojo: la Pickup API sólo se probó contra sandbox — la primera
+   recolección real hay que mirarla de cerca.
+   *(Cerrados el 02/08: open redirect, `state` del OAuth, ventas de tiendas
+   sin vincular, reserva atómica en guías nacionales, recolecciones FedEx.)*
 2. **Del dueño**: cargar `WHATSAPP_TAURO` en /admin/config cuando llegue la
    eSIM (el botón de ayuda del portal aparece solo); SKUs+medidas en
    catálogos de clientes; formularios comerciales Andreani/Correo/OCA (dossier
