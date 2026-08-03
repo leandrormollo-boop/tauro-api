@@ -132,6 +132,10 @@ refutado, 1 dependiente de misconfig (ya cerrado).
   Content-Type, CSRF Origin/Sec-Fetch en /portal|/admin, `client_ip` toma
   CF-Connecting-IP / XFF derecho (el rate limit era evadible), contenedor
   no-root.
+- **Registro de auditoría** (`/admin/seguridad`): quién entró (y quién falló)
+  y qué se tocó de dinero/credenciales/acceso, con IP. `servicios/auditoria.py`
+  cableado de verdad (antes sólo lo llamaba el código muerto `core/security.py`,
+  que se borró). Tabla `security_audit` en el schema, job diario de poda.
 
 Hallazgos de LA PROPIA auditoría de esta tanda, ya arreglados: el no-root
 tumbaba el arranque (mkdir en /app al importar tracking) — **ALTA**, era un
