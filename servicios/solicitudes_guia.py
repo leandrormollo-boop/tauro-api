@@ -663,7 +663,7 @@ def generar_guia(solicitud_id: int) -> dict:
         return generar_guia_envia(sol)
     # Registro de couriers internacionales: sumar uno nuevo es agregarlo acá
     # y darle un cliente con create_shipment del mismo contrato.
-    if courier in ("FEDEX", "DHL"):
+    if courier in ("FEDEX", "DHL", "UPS"):
         return generar_guia_internacional(solicitud_id, courier=courier)
 
     # NUNCA caer a FedEx por descarte. Antes esto era un `else` y cualquier
@@ -962,6 +962,9 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
     if courier == "DHL":
         from core.dhl_client import DHLClient
         cliente_courier = DHLClient()
+    elif courier == "UPS":
+        from core.ups_client import UPSClient
+        cliente_courier = UPSClient()
     else:
         from core.fedex_client import FedExClient
         cliente_courier = FedExClient()
@@ -1021,3 +1024,8 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
 def generar_guia_dhl(solicitud_id: int) -> dict:
     """Emisión por DHL Express — mismo camino que FedEx, otro cliente."""
     return generar_guia_internacional(solicitud_id, courier="DHL")
+
+
+def generar_guia_ups(solicitud_id: int) -> dict:
+    """Emisión por UPS — mismo camino que FedEx y DHL, otro cliente."""
+    return generar_guia_internacional(solicitud_id, courier="UPS")

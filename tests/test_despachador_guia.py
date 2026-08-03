@@ -57,14 +57,16 @@ def test_dhl_se_emite_por_dhl():
     assert r["via"] == "dhl", f"se emitió por {r['via']}, no por DHL"
 
 
-def test_ups_tampoco():
+def test_ups_se_emite_por_ups():
     r = _emitir("UPS")
-    assert not r["ok"]
-    assert "via" not in r
+    assert r["ok"] and r["via"] == "ups", f"se emitió por {r.get('via')}, no por UPS"
 
 
-def test_un_courier_inventado_tampoco():
-    """Cualquier valor raro en la columna cae del lado seguro."""
+def test_un_courier_inventado_no_se_emite():
+    """
+    El que NO está en el registro tiene que fallar a la vista. Antes esto era
+    un `else` y cualquier courier desconocido salía con etiqueta FedEx.
+    """
     r = _emitir("ANDREANI")
     assert not r["ok"]
     assert "via" not in r
