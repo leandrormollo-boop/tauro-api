@@ -692,8 +692,18 @@ def generar_guia_envia(sol: dict) -> dict:
     if sol.get("tracking") and sol.get("label_pdf"):
         return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
 
+    # RESERVA ATÓMICA — el mismo candado que FedEx. Sin esto, dos clicks
+    # simultáneos pasaban los chequeos de arriba (ambos leen tracking NULL)
+    # y envia.com emitía DOS guías debitando DOS veces el wallet prepago.
+    # El UPDATE condicional garantiza que de N intentos exactamente uno
+    # sigue; el resto se va con este mensaje.
+    if not _reservar_para_emitir(sol["id"]):
+        return {"ok": False, "error": "Esta guía ya se está emitiendo. Esperá unos "
+                                      "segundos y refrescá."}
+
     servicio_courier = (sol.get("servicio_courier") or "").strip()
     if "/" not in servicio_courier:
+        _liberar_reserva(sol["id"])
         return {"ok": False, "error": "La solicitud no tiene carrier/servicio nacional elegido."}
     carrier, servicio = servicio_courier.split("/", 1)
 
@@ -749,11 +759,22 @@ def generar_guia_envia(sol: dict) -> dict:
     }]
 
     from core.envia_client import EnviaClient
-    resultado = EnviaClient().create_shipment_nacional(
-        origen=origen, destino=destino, bultos=piezas,
-        carrier=carrier, servicio=servicio,
-    )
+    try:
+        resultado = EnviaClient().create_shipment_nacional(
+            origen=origen, destino=destino, bultos=piezas,
+            carrier=carrier, servicio=servicio,
+        )
+    except Exception as e:
+        # Excepción ≠ rechazo: no sabemos si envia emitió o no. Se libera la
+        # reserva (la ventana de 10 min igual la liberaría) y se avisa fuerte
+        # para verificar el wallet antes de reintentar.
+        _liberar_reserva(sol["id"])
+        print(f"[solicitudes] EXCEPCIÓN emitiendo en envia para {sol['id']}: {e}. "
+              f"VERIFICAR en envia.com si la guía salió antes de reintentar.")
+        return {"ok": False, "error": "Error de comunicación con el courier. "
+                                      "Verificá en envia.com antes de reintentar."}
     if not resultado.get("encontrado"):
+        _liberar_reserva(sol["id"])
         return {"ok": False, "error": resultado.get("error", "envia.com no emitió la guía.")}
 
     guardar_guia_generada(

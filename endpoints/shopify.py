@@ -118,12 +118,29 @@ def install(request: Request, shop: str = ""):
         if faltantes:
             print(f"[shopify] {shop} tiene permisos viejos, faltan {sorted(faltantes)} "
                   f"→ se reenvía al consentimiento para actualizarlos")
-            return RedirectResponse(url=url_instalacion(shop, nuevo_state()),
-                                    status_code=303)
+            return _redirect_oauth(shop)
         return _panel_tienda(shop, inst, request.query_params.get("host", ""))
 
-    destino = url_instalacion(shop, nuevo_state())
-    return RedirectResponse(url=destino, status_code=303)
+    return _redirect_oauth(shop)
+
+
+def _redirect_oauth(shop: str) -> RedirectResponse:
+    """
+    Manda al consentimiento de Shopify guardando el `state` en una cookie
+    corta. Hasta ahora el state se generaba, viajaba... y nadie lo comparaba
+    a la vuelta — o sea, teatro. El callback ahora exige que coincida
+    (anti-CSRF del flujo OAuth, y Shopify lo revisa para el App Store).
+    """
+    state = nuevo_state()
+    resp = RedirectResponse(url=url_instalacion(shop, state), status_code=303)
+    resp.set_cookie(
+        key="shopify_state", value=state,
+        max_age=600, httponly=True, secure=True,
+        # Lax: la vuelta de Shopify es una navegación top-level GET, la
+        # cookie viaja. Strict la dejaría afuera y rompería el flujo.
+        samesite="lax",
+    )
+    return resp
 
 
 def _pagina_autodeteccion() -> HTMLResponse:
@@ -285,6 +302,23 @@ def callback(request: Request):
         # Firma inválida = alguien intentó hacerse pasar por Shopify.
         return _pagina("No pudimos verificar la instalación",
                        "La firma de Shopify no coincide. Por seguridad no continuamos.", status=401)
+
+    # `state`: comparado contra la cookie que pusimos al arrancar el flujo.
+    # MISMATCH (cookie presente pero distinta) = alguien metió su propio
+    # flujo en el medio: se corta. Cookie AUSENTE = probablemente la app se
+    # abrió embebida y el navegador bloqueó la cookie de terceros; ahí se
+    # continúa con aviso, porque el HMAC de arriba ya probó que el callback
+    # lo firmó Shopify — cortar acá rompería la reautorización embebida sin
+    # ganar seguridad real (el link público de instalación existe igual).
+    state_cookie = request.cookies.get("shopify_state") or ""
+    if state_cookie and params.get("state") != state_cookie:
+        return _pagina("La instalación expiró",
+                       "Por seguridad, empezá de nuevo desde el link de instalación.",
+                       f'<a href="/shopify/install?shop={shop}">Reintentar instalación</a>',
+                       status=400)
+    if not state_cookie:
+        print(f"[shopify] callback de {shop} sin cookie de state (contexto "
+              f"embebido probable); HMAC válido, se continúa")
 
     data = canjear_token(shop, code)
     if not data or not data.get("access_token"):

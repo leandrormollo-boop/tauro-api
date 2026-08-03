@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import urllib.parse
 from typing import Optional
@@ -122,10 +123,18 @@ def validar_hmac_query(params: dict) -> bool:
     return hmac.compare_digest(calculada, firma)
 
 
+_DOMINIO_SHOPIFY_RE = re.compile(r"^[a-z0-9][a-z0-9\-]*\.myshopify\.com$")
+
+
 def dominio_valido(dominio: str) -> bool:
-    """Solo aceptamos dominios de Shopify: corta el paso a redirecciones a sitios ajenos."""
-    d = (dominio or "").strip().lower()
-    return bool(d) and d.endswith(".myshopify.com") and "/" not in d and " " not in d
+    """
+    Solo dominios de Shopify, con regex ESTRICTA. La versión anterior usaba
+    endswith(".myshopify.com"), que dejaba pasar cosas como
+    "tienda.myshopify.com@evil.com" — el navegador interpreta lo anterior a
+    la arroba como usuario y REDIRIGE A evil.com: open redirect servido.
+    La regex sólo admite [a-z0-9-].myshopify.com, sin @, :, /, ? ni espacios.
+    """
+    return bool(_DOMINIO_SHOPIFY_RE.match((dominio or "").strip().lower()))
 
 
 def canjear_token(dominio: str, code: str) -> Optional[dict]:
