@@ -1,4 +1,18 @@
 import smtplib
+
+
+def _from_visible(remitente: str) -> str:
+    """
+    El remitente que VE el destinatario. EMAIL_FROM permite mandar como un
+    alias del dominio (ej: "TAURO Solutions <cotizaciones@taurosolutions.ar>")
+    mientras el login SMTP sigue siendo la cuenta real (EMAIL_REMITENTE).
+    En Google Workspace el alias tiene que estar dado de alta en el usuario
+    ("Enviar como") o Gmail lo pisa con la cuenta real.
+    """
+    import os
+    return os.getenv("EMAIL_FROM", "").strip() or remitente
+
+
 import os
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -154,7 +168,7 @@ def _enviar_mail(asunto: str, cuerpo_html: str, pdf_bytes: bytes = None, nombre_
         return False
 
     msg = MIMEMultipart("mixed")
-    msg["From"] = remitente
+    msg["From"] = _from_visible(remitente)
     msg["To"] = destinatario
     msg["Subject"] = asunto
 
@@ -275,7 +289,7 @@ def _enviar_mail_a(email_destino: str, asunto: str, cuerpo_html: str) -> bool:
         return False
 
     msg = MIMEMultipart("mixed")
-    msg["From"] = remitente
+    msg["From"] = _from_visible(remitente)
     msg["To"] = email_destino
     msg["Subject"] = asunto
     msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
@@ -348,7 +362,7 @@ def enviar_link_magico(email_destino: str, link: str, cliente: str,
         return False
 
     msg = MIMEMultipart("mixed")
-    msg["From"] = remitente
+    msg["From"] = _from_visible(remitente)
     msg["To"] = email_destino
     msg["Subject"] = asunto
     msg.attach(MIMEText(cuerpo, "html", "utf-8"))
@@ -439,7 +453,7 @@ def enviar_notificacion_estado(
         return False
 
     msg = MIMEMultipart("mixed")
-    msg["From"] = remitente
+    msg["From"] = _from_visible(remitente)
     msg["To"] = email_destino
     msg["Subject"] = asunto
     msg.attach(MIMEText(cuerpo, "html", "utf-8"))
