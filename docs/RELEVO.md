@@ -1,4 +1,4 @@
-# RELEVO — estado y reglas del proyecto (act. 02/08/2026)
+# RELEVO — estado y reglas del proyecto (act. 03/08/2026)
 
 Este documento existe para que CUALQUIER agente (Codex, Claude, humano) pueda
 retomar el trabajo sin contexto previo. Leelo entero antes de tocar código.
@@ -84,7 +84,7 @@ Templates: validar con Jinja2 antes de push. JSX de la web pública: validar
 con `node -e "require('./node_modules/esbuild').transformSync(...,{loader:'jsx'})"`
 y bumpear `?v=N` en `web/Tauro Solutions.html` (Babel standalone, sin build).
 
-## Estado al 02/08/2026
+## Estado al 03/08/2026
 
 VIVO en producción: portal completo (cuenta corriente con débito automático,
 comprobantes con verificación, emisión por cliente con permiso+tope,
@@ -100,8 +100,45 @@ Google Sheet (apagado hasta `GOOGLE_CREDENTIALS_JSON`).
 internacionales (FedEx, DHL, UPS) cotizan, emiten guías y trackean; el
 despachador de emisión es un registro (`generar_guia_internacional`) donde
 sumar un courier es una línea, porque todo el armado del envío se comparte.
-Suite: 92 tests (`.venv-codex/bin/python -m pytest tests/ -q --ignore=tests/test_email_security.py --ignore=tests/test_security.py`
-— esos dos no colectan, es previo).
+Suite: 92 tests, `.venv-codex/bin/python -m pytest tests/ -q` — **sin
+`--ignore`**. `test_security.py` y `test_email_security.py` salieron del repo
+el 03/08: importaban `core/security.py`, que no está trackeado, así que
+explotaban al colectar y se venían salteando a mano en cada corrida.
+
+## Seguridad (auditoría del 03/08/2026)
+
+Se midió producción y se corrió una auditoría adversarial de 26 agentes:
+**8 hallazgos confirmados, 14 refutados**. Todo lo confirmado está arreglado,
+deployado y verificado en vivo. Detalle completo en `docs/SEGURIDAD.md`, que
+ahora sólo lista lo que está montado de verdad.
+
+Lo que se encontró y se cerró:
+
+1. **ALTA — robo de tienda ajena.** `/portal/tienda/reclamar` sólo chequeaba
+   que el dominio estuviera en la lista de instalaciones sin dueño, y esa
+   lista se le mostraba a TODOS los clientes. Un cliente podía apropiarse de
+   la tienda Shopify de otro y quedarse con sus ventas y con los datos de los
+   compradores finales. Ahora `es_dueno_de_la_tienda()` le pregunta a la propia
+   tienda quién es su dueño (`GET shop.json`) y lo compara contra el mail del
+   cliente en TAURO; la lista además se filtra por cliente.
+2. **Sin cabeceras de seguridad, `/docs` abierto y `CORS: *`** en producción.
+   Cerrado: HSTS, nosniff, referrer, permissions, anti-frame (menos en
+   `/shopify/*`, que va en iframe), docs en 404, CORS a los dominios de TAURO.
+3. `/cotizar-web` sin rate limit: cada request cotiza en vivo contra los
+   couriers. 30 por IP cada 5 minutos.
+4. `/cotizacion-lead` era una primitiva para mandar mail a cualquiera con
+   nuestro remitente. Un mail por dirección por día.
+5. El backup del admin exportaba `clientes.api_key` en claro. Fuera.
+6. El webhook GDPR de Shopify logueaba el mail y teléfono del comprador.
+7. `pedidos_huerfanos` no vencía nunca (PII de compradores guardada para
+   siempre). Se borran a los 90 días.
+8. `/portal` y `/admin` sin `Cache-Control`: el HTML quedaba en la caché del
+   navegador después de cerrar sesión. `no-store, private`.
+
+**Deuda de seguridad conocida, en `docs/SEGURIDAD.md`:** no hay CSP (la
+bloquea Babel en runtime — se destraba compilando React en el build), la
+`api_key` se guarda en claro, el contenedor corre como root, el rate limit es
+en memoria (con más de un worker el tope se multiplica) y el admin no tiene MFA.
 
 ## Pendientes (en orden)
 
@@ -114,7 +151,8 @@ Suite: 92 tests (`.venv-codex/bin/python -m pytest tests/ -q --ignore=tests/test
    - Recolecciones para couriers nacionales (hoy sólo FedEx; falta
      investigar si envia.com expone pickup).
    *(Cerrados el 02/08: open redirect, `state` del OAuth, ventas de tiendas
-   sin vincular, reserva atómica en guías nacionales, recolecciones FedEx.)*
+   sin vincular, reserva atómica en guías nacionales, recolecciones FedEx.
+   El 03/08: los 8 hallazgos de la auditoría — ver la sección de arriba.)*
 2. **Del dueño**: cargar `WHATSAPP_TAURO` en /admin/config cuando llegue la
    eSIM (el botón de ayuda del portal aparece solo); SKUs+medidas en
    catálogos de clientes; formularios comerciales Andreani/Correo/OCA (dossier
@@ -136,3 +174,7 @@ Suite: 92 tests (`.venv-codex/bin/python -m pytest tests/ -q --ignore=tests/test
   `es_nacional`, `ayuda`, `pendientes_menu`, `saldo_menu` — si se instancia
   otro `Jinja2Templates`, hay que re-registrarlos.
 - `solicitudes_guia.observaciones` la VE el cliente. Nada interno ahí.
+- Cualquier protección que se agregue tiene que quedar montada en `main.py`.
+  `core/security.py` era un paquete entero de defensas que NUNCA se montó, y
+  `docs/SEGURIDAD.md` las daba por vigentes. Antes de escribir una línea en ese
+  documento, medirla contra producción con `curl -I`.
