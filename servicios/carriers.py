@@ -224,7 +224,8 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
     return {"precio_ars": precio_ars, "precio_usd": precio_usd}
 
 
-def costos_carriers(origen: dict, destino: dict, paquete: dict) -> list[dict]:
+def costos_carriers(origen: dict, destino: dict, paquete: dict,
+                    paquetes: list = None) -> list[dict]:
     """
     ⚠️ CAPA INTERNA: devuelve LO QUE CADA COURIER NOS COBRA A NOSOTROS.
     NUNCA mandar esto tal cual a un cliente — de acá sale nuestro margen.
@@ -258,8 +259,26 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict) -> list[dict]:
             salida.append({**base, "estado": "proximamente"})
             continue
 
+        # Envío de VARIAS cajas distintas: sólo cotizan los couriers que
+        # saben tarifar N piezas. Al que no puede se lo marca y se lo saca
+        # del comparador — NO se le manda la suma de los pesos, porque cada
+        # caja paga por su propio peso volumétrico y sumarlas cotiza de
+        # menos. Un precio de menos hoy es una pérdida al facturar.
+        multi = paquetes is not None and len(paquetes) > 1
+        cliente = c["cliente"]()
+        if multi and not getattr(cliente, "MULTIBULTO", False):
+            salida.append({
+                **base,
+                "estado": "sin_multibulto",
+                "error": f"{c['nombre']} todavía no cotiza envíos de varias cajas",
+            })
+            continue
+
         try:
-            resultado = c["cliente"]().get_rates(origen, destino, paquete)
+            if paquetes is not None:
+                resultado = cliente.get_rates(origen, destino, paquetes=paquetes)
+            else:
+                resultado = cliente.get_rates(origen, destino, paquete)
         except Exception as e:  # una caída de un carrier no tumba a los otros
             print(f"[carriers] {c['id']} get_rates excepción: {e}")
             resultado = {"encontrado": False}
@@ -283,7 +302,8 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict) -> list[dict]:
 
 
 def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
-                     dolar: float, markup_pct: float) -> list[dict]:
+                     dolar: float, markup_pct: float,
+                     paquetes: list = None) -> list[dict]:
     """
     PRECIO DE VIDRIERA (web pública taurosolutions.ar).
 
@@ -297,7 +317,7 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
     # Una sola lectura de config por cotización, no una por carrier.
     pricing = _pricing_configurado()
 
-    for crudo in costos_carriers(origen, destino, paquete):
+    for crudo in costos_carriers(origen, destino, paquete, paquetes):
         base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
 
         if crudo["estado"] != "cotizado":
@@ -352,7 +372,8 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
 
 
 def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
-                             dolar: float, pricing_cliente: dict) -> list[dict]:
+                             dolar: float, pricing_cliente: dict,
+                             paquetes: list = None) -> list[dict]:
     """
     PRECIO DEL PORTAL: los 3 couriers con la regla de ESE cliente.
 
@@ -367,11 +388,11 @@ def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
 
     salida: list[dict] = []
 
-    for crudo in costos_carriers(origen, destino, paquete):
+    for crudo in costos_carriers(origen, destino, paquete, paquetes):
         base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
 
         if crudo["estado"] != "cotizado":
-            salida.append({**base, "estado": crudo["estado"]})
+            salida.append({**base, "estado": crudo["estado"], "error": crudo.get("error")})
             continue
 
         es_usd = crudo["moneda"] == "USD"

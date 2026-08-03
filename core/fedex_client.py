@@ -30,6 +30,16 @@ load_dotenv()
 # ─────────────────────────────────────────────
 
 class CarrierBase(ABC):
+    # ¿Este courier sabe cotizar N cajas DISTINTAS en un mismo envío?
+    #
+    # Importa para plata: cada caja paga por su propio peso volumétrico
+    # (L×A×H/5000), así que sumar los pesos y mandar un bulto equivalente
+    # cotiza de MENOS — tres cajas grandes y livianas se convierten en una
+    # chica y pesada. Los couriers que no lo soportan quedan fuera del
+    # comparador cuando el envío tiene más de una caja, en vez de dar un
+    # precio que después no es el que facturan.
+    MULTIBULTO = False
+
     @abstractmethod
     def get_rates(self, origen: dict, destino: dict, paquete: dict) -> dict:
         pass
@@ -48,6 +58,9 @@ class CarrierBase(ABC):
 # ─────────────────────────────────────────────
 
 class FedExClient(CarrierBase):
+
+    # get_rates acepta paquetes=[...] y FedEx tarifa las N piezas juntas.
+    MULTIBULTO = True
 
     SANDBOX_URL = "https://apis-sandbox.fedex.com"
     PROD_URL = "https://apis.fedex.com"

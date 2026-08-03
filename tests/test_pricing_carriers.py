@@ -134,3 +134,74 @@ def test_la_web_y_el_portal_dan_precios_distintos():
     portal = _cotizar(cotizar_carriers_cliente, **ENVIO,
                       pricing_cliente={"tipo": "FIJO_ARS", "valor": 100000.0})[0]
     assert web["precio_ars"] != portal["precio_ars"]
+
+
+# ── Multi-bulto: quién sabe cotizar N cajas ──────────────────
+
+def _carriers_mixtos():
+    """FedEx sabe multi-bulto; DHL (todavía) no."""
+    class ConMulti:
+        MULTIBULTO = True
+        def get_rates(self, o, d, paquete=None, paquetes=None):
+            n = len(paquetes) if paquetes else 1
+            return {"encontrado": True, "costo": 100.0 * n, "moneda": "USD",
+                    "servicio": "PRIORITY", "dias_estimados": "4"}
+
+    class SinMulti:
+        MULTIBULTO = False
+        def get_rates(self, o, d, paquete=None, paquetes=None):
+            raise AssertionError("no se le puede pedir multi-bulto a este courier")
+
+    return [
+        {"id": "fedex", "nombre": "FedEx", "servicio": "Priority",
+         "logo": "/f.svg", "requisitos": ("FAKE_KEY",), "cliente": ConMulti},
+        {"id": "dhl", "nombre": "DHL Express", "servicio": "Worldwide",
+         "logo": "/d.svg", "requisitos": ("FAKE_KEY",), "cliente": SinMulti},
+    ]
+
+
+def _costos(**kw):
+    from servicios import carriers as C
+    with mock.patch.dict(os.environ, {"FAKE_KEY": "1"}, clear=True), \
+         mock.patch.object(C, "CARRIERS", _carriers_mixtos()):
+        return {c["id"]: c for c in C.costos_carriers(**kw)}
+
+
+def test_con_varias_cajas_el_que_no_sabe_queda_afuera():
+    """
+    Sumar los pesos cotizaría de MENOS: cada caja paga por su propio peso
+    volumétrico, y tres cajas grandes y livianas se volverían una chica y
+    pesada. Mejor no ofrecer ese courier que dar un precio que no se factura.
+    """
+    r = _costos(origen={"country": "AR"}, destino={"country": "US"},
+                paquete=None, paquetes=[{"peso_kg": 1.4}, {"peso_kg": 3.0}])
+    assert r["fedex"]["estado"] == "cotizado"
+    assert r["dhl"]["estado"] == "sin_multibulto"
+    assert "varias cajas" in r["dhl"]["error"]
+
+
+def test_con_una_sola_caja_cotizan_los_dos():
+    """Una caja no es multi-bulto: nadie queda afuera."""
+    class Simple:
+        MULTIBULTO = False
+        def get_rates(self, o, d, paquete=None, paquetes=None):
+            return {"encontrado": True, "costo": 90.0, "moneda": "USD",
+                    "servicio": "WORLDWIDE", "dias_estimados": "2"}
+    from servicios import carriers as C
+    cs = _carriers_mixtos()
+    cs[1]["cliente"] = Simple
+    with mock.patch.dict(os.environ, {"FAKE_KEY": "1"}, clear=True), \
+         mock.patch.object(C, "CARRIERS", cs):
+        r = {c["id"]: c for c in C.costos_carriers(
+            origen={"country": "AR"}, destino={"country": "US"},
+            paquete=None, paquetes=[{"peso_kg": 1.4}])}
+    assert r["fedex"]["estado"] == "cotizado"
+    assert r["dhl"]["estado"] == "cotizado"
+
+
+def test_el_camino_de_un_bulto_sigue_igual():
+    """La web pública manda `paquete` singular: no se puede haber roto."""
+    r = _costos(origen={"country": "AR"}, destino={"country": "US"},
+                paquete={"peso_kg": 1.4})
+    assert r["fedex"]["estado"] == "cotizado"
+    assert r["fedex"]["costo"] == 100.0
