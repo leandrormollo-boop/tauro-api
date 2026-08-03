@@ -46,9 +46,16 @@ def _cotizar(sentido=None):
 
     # Se llama la función del endpoint directo: prueba la misma lógica sin
     # levantar el servidor ni sumar httpx como dependencia sólo para un test.
+    # `request` sólo se usa para el rate limit (IP del visitante): alcanza con
+    # un doble mínimo, y así el test no depende del middleware ni de httpx.
+    class _Req:
+        headers = {}
+        client = type("C", (), {"host": "127.0.0.1"})()
+
     with mock.patch.object(main, "cotizar_carriers", fake_cotizar), \
-         mock.patch("servicios.cotizador.dolar_ars", return_value=1450.0):
-        data = main.cotizar_web(CotizarWebRequest(**cuerpo))
+         mock.patch("servicios.cotizador.dolar_ars", return_value=1450.0), \
+         mock.patch("servicios.rate_limit.check_rate", return_value=True):
+        data = main.cotizar_web(CotizarWebRequest(**cuerpo), _Req())
 
     return visto, data
 
