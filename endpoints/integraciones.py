@@ -113,7 +113,7 @@ async def shopify_webhook(request: Request):
 
 
 @router.get("/tiendanube/callback")
-def tiendanube_callback(request: Request, code: str = ""):
+def tiendanube_callback(request: Request, code: str = "", state: str = ""):
     """
     Tiendanube vuelve acá con el `code` después de que el comerciante
     aceptó los permisos. Lo canjeamos por el token permanente, damos de
@@ -169,12 +169,19 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
     guardar_instalacion(store_id, token, nombre)
     eventos = registrar_webhooks(store_id, token)
 
+    # Vinculación anti-CSRF: sólo se ata la tienda a una cuenta si el navegador
+    # trae la cookie `tn_oauth` que sembró el botón del portal (state:cliente).
+    # Así un callback disparado por un tercero —sin haber pasado por el botón—
+    # NO puede colgar una tienda ajena en la cuenta de la víctima. Si Tiendanube
+    # devuelve el state en la query, se exige que coincida (defensa extra).
     dueno = None
     try:
-        from servicios.auth import validar_token
-        dueno = validar_token(request.cookies.get("token") or "")
-        if dueno:
-            vincular_cliente(store_id, dueno)
+        cookie = request.cookies.get("tn_oauth") or ""
+        if cookie and ":" in cookie:
+            state_cookie, cliente_cookie = cookie.split(":", 1)
+            if state_cookie and (not state or state == state_cookie):
+                dueno = cliente_cookie
+                vincular_cliente(store_id, dueno)
     except Exception as e:
         print(f"[tiendanube] no pude vincular la tienda {store_id}: {e}")
 
@@ -186,10 +193,12 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
                  "lista para generar la guía con un click.")
     else:
         texto = ("Tu tienda quedó conectada. Entrá al portal, sección "
-                 "<b>Mi tienda</b>, y tocá «Es mi tienda — vincular» para "
-                 "empezar a recibir tus ventas.")
-    return _pag("¡Tienda conectada!", texto,
+                 "<b>Mi tienda</b>, e instalá desde el botón de Tiendanube para "
+                 "atarla a tu cuenta y empezar a recibir tus ventas.")
+    resp = _pag("¡Tienda conectada!", texto,
                 '<a href="https://taurosolutions.ar/portal/tienda">Ver mis pedidos</a>')
+    resp.delete_cookie("tn_oauth")   # de un solo uso
+    return resp
 
 
 @router.post("/tiendanube/webhook")

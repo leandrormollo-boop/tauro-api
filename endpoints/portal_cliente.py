@@ -1446,6 +1446,11 @@ def tienda_view(
     # La política de flete se configura por tienda; hoy mostramos la de la
     # primera (el caso normal es una tienda por cuenta).
     dominio_cfg = tiendas[0]["dominio"] if tiendas else ""
+    try:
+        from servicios.tiendanube_app import app_configurada as _tn_ok
+        tiendanube_activa = _tn_ok()
+    except Exception:
+        tiendanube_activa = False
     return templates.TemplateResponse(
         request=request, name="portal/tienda.html",
         context={
@@ -1457,6 +1462,7 @@ def tienda_view(
             "dominio_cfg": dominio_cfg,
             "cfg": obtener_config(dominio_cfg),
             "huerfanas": huerfanas,
+            "tiendanube_activa": tiendanube_activa,
             "flash_ok": ok,
             "flash_error": error,
         },
@@ -1555,6 +1561,33 @@ def tienda_conectar(
     if not r.get("ok"):
         return RedirectResponse(url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo conectar.'))}", status_code=303)
     return RedirectResponse(url="/portal/tienda?ok=conectada", status_code=303)
+
+
+@router.get("/tienda/tiendanube/instalar")
+def tienda_tiendanube_instalar(cliente: str = Depends(cliente_actual)):
+    """
+    Arranca el OAuth de Tiendanube. Genera un `state` que viaja en cookie: a la
+    vuelta, el callback sólo ata la tienda a esta cuenta si el navegador trae
+    ese state (prueba de que el flujo empezó ACÁ, desde el botón del portal, y
+    no de un callback disparado por un tercero). Sin app configurada, vuelve
+    al portal con aviso.
+    """
+    from servicios.tiendanube_app import app_configurada, url_instalacion
+    if not app_configurada():
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "La app de Tiendanube todavía no está habilitada. Escribinos y la activamos."),
+            status_code=303)
+    import secrets as _secrets
+    state = _secrets.token_urlsafe(24)
+    resp = RedirectResponse(url=url_instalacion(state), status_code=303)
+    # El state se ata al cliente: cookie httponly/secure, 10 min, y guarda a
+    # quién vincular cuando Tiendanube devuelva el code.
+    resp.set_cookie(
+        key="tn_oauth", value=f"{state}:{cliente}",
+        httponly=True, max_age=600, samesite="lax", secure=COOKIE_SECURE,
+    )
+    return resp
 
 
 @router.post("/tienda/desconectar")

@@ -52,14 +52,19 @@ API_VERSION = "2026-07"
 # orders VACÍA y marcar_enviado() cortaba en silencio: la guía se emitía pero
 # el comprador nunca recibía el mail con el tracking.
 #
-# Se sacaron `write_orders` y `read_fulfillments` porque ningún endpoint que
-# usamos los necesita — pedir permisos de más es motivo de rechazo en la
-# revisión de la App Store, y asusta al comerciante en la pantalla de
-# instalación.
+# Se sacaron `write_orders`, `read_fulfillments` y `write_shipping` porque
+# ningún endpoint que usamos los necesita — pedir permisos de más es motivo de
+# rechazo en la revisión de la App Store, y asusta al comerciante en la
+# pantalla de instalación.
+#   · write_shipping era SÓLO para el CarrierService (cotizar en el checkout),
+#     retirado el 28/07: /shopify/tarifas devuelve [] a propósito y el precio
+#     del envío lo pone el comerciante con sus tarifas de Shopify. Sin uso
+#     vivo, fuera.
+# Lo que queda es el mínimo: leer las órdenes y marcar el envío como cumplido
+# con su tracking.
 SCOPES = ("read_orders,"
           "read_merchant_managed_fulfillment_orders,"
-          "write_merchant_managed_fulfillment_orders,"
-          "write_shipping")
+          "write_merchant_managed_fulfillment_orders")
 
 _tabla_lista = False
 
@@ -339,6 +344,13 @@ def registrar_webhooks(dominio: str, token: str) -> list[str]:
 
 def registrar_carrier_service(dominio: str, token: str) -> Optional[str]:
     """
+    CÓDIGO TRANSITORIO — el CarrierService fue RETIRADO el 28/07. Ya no se
+    llama desde ningún flujo vivo (el precio del envío lo pone el comerciante
+    con sus tarifas de Shopify). Se conserva SÓLO por resiliencia: el callback
+    da de baja cualquier carrier service colgado de una instalación vieja, y
+    cotizar_para_checkout loguea a las tiendas que todavía peguen. No re-cablear
+    sin volver a pedir el scope write_shipping (que se sacó a propósito).
+
     Registra a TAURO como transportista para que el comprador vea la
     tarifa en vivo en el checkout. Shopify sólo lo habilita en planes
     Advanced/Plus: si la tienda no califica devuelve error y seguimos

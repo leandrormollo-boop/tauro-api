@@ -52,10 +52,18 @@ def app_configurada() -> bool:
     return bool(os.getenv("TIENDANUBE_CLIENT_ID") and os.getenv("TIENDANUBE_CLIENT_SECRET"))
 
 
-def url_instalacion() -> str:
-    """Link para que un comerciante instale la app desde su Tiendanube."""
+def url_instalacion(state: str = "") -> str:
+    """
+    Link para que un comerciante instale la app desde su Tiendanube. El `state`
+    (si se pasa) viaja a la vuelta para atar la instalación al navegador que
+    inició el flujo — anti-CSRF de la vinculación.
+    """
     cid = os.getenv("TIENDANUBE_CLIENT_ID", "")
-    return f"https://www.tiendanube.com/apps/{cid}/authorize"
+    url = f"https://www.tiendanube.com/apps/{cid}/authorize"
+    if state:
+        from urllib.parse import quote
+        url += f"?state={quote(state)}"
+    return url
 
 
 def canjear_token(code: str) -> Optional[dict]:
@@ -204,6 +212,25 @@ def parsear_pedido(order: dict) -> Optional[dict]:
     # trunque y el paquete llegue al edificio pero no al departamento.
     calle = " ".join(x for x in [envio.get("address"), str(envio.get("number") or "")] if x).strip()
 
+    # Flete que le cobró la tienda al comprador: la misma regla de negocio que
+    # en Shopify (comparar lo cobrado vs lo que sale la guía). Tiendanube lo
+    # trae en shipping_cost_customer, con el método en shipping_option.
+    try:
+        flete_cobrado = round(float(order.get("shipping_cost_customer") or 0), 2)
+    except (TypeError, ValueError):
+        flete_cobrado = 0.0
+    flete_detalle = []
+    if flete_cobrado or order.get("shipping_option"):
+        flete_detalle.append({
+            "titulo": (order.get("shipping_option") or "Envío")[:120],
+            "codigo": (order.get("shipping") or "")[:80],
+            "precio": flete_cobrado,
+        })
+
+    # Provincia: Tiendanube manda el nombre (no un código de 2 letras como
+    # Shopify). Para envíos nacionales AR el nombre es lo correcto; si algún día
+    # se despacha internacional desde una venta Tiendanube, revisar el mapeo a
+    # código que piden los couriers (FL, CA…).
     return {
         "pedido_externo_id": str(order.get("id") or ""),
         "numero": str(order.get("number") or order.get("id") or ""),
@@ -223,6 +250,8 @@ def parsear_pedido(order: dict) -> Optional[dict]:
         "items": items,
         "valor_total": order.get("total"),
         "moneda": (order.get("currency") or "")[:6],
+        "flete_cobrado": flete_cobrado,
+        "flete_detalle": flete_detalle,
         "cancelado": bool(order.get("cancelled_at")),
         "estado_pago": (order.get("payment_status") or "")[:30],
     }

@@ -198,24 +198,27 @@
     {% endif %}
 </div>
 
-{# ── Conectar nueva ─────────────────────────────────── #}
+{# ── Conectar Tiendanube (OAuth, un botón) ───────────── #}
 <div class="card">
-    <h3 style="margin:0 0 4px;">Conectar una tienda</h3>
+    <h3 style="margin:0 0 4px;">Conectar Tiendanube</h3>
+    {% if tiendanube_activa %}
+        <p class="sub" style="margin:0 0 18px;">Un click: te lleva a Tiendanube, aceptás los permisos y volvés con tu tienda conectada. Sin copiar claves.</p>
+        <a href="/portal/tienda/tiendanube/instalar" class="btn btn-primary">Instalar app de Tiendanube</a>
+    {% else %}
+        <p class="sub" style="margin:0;">La app oficial de TAURO para Tiendanube está en trámite de aprobación. Apenas esté habilitada, vas a poder conectarla desde acá con un botón.</p>
+    {% endif %}
+</div>
+
+{# ── Conectar Shopify (manual por webhook) ────────────── #}
+<div class="card">
+    <h3 style="margin:0 0 4px;">Conectar Shopify</h3>
     <p class="sub" style="margin:0 0 18px;">Cinco minutos, sin programar.</p>
 
     <form method="POST" action="/portal/tienda/conectar">
-        <div class="form-grid-2">
-            <div class="form-group">
-                <label for="plataforma">Plataforma</label>
-                <select name="plataforma" id="plataforma" required>
-                    <option value="shopify">Shopify</option>
-                    <option value="tiendanube">Tiendanube (próximamente)</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="dominio">Dominio de tu tienda</label>
-                <input type="text" name="dominio" id="dominio" required placeholder="mitienda.myshopify.com">
-            </div>
+        <input type="hidden" name="plataforma" value="shopify">
+        <div class="form-group">
+            <label for="dominio">Dominio de tu tienda</label>
+            <input type="text" name="dominio" id="dominio" required placeholder="mitienda.myshopify.com">
         </div>
         <div class="form-group">
             <label for="secreto">Secreto de firma de webhooks</label>
@@ -234,9 +237,6 @@
             <li>Al pie de esa pantalla Shopify muestra la clave con la que <i>"se firmarán tus webhooks"</i> — <b>copiala</b> y pegala arriba como secreto</li>
             <li>Guardá acá con <b>Conectar tienda</b> — y hacé un pedido de prueba en tu tienda para verlo aparecer</li>
         </ol>
-        <p style="margin:14px 0 0;font-size:12.5px;color:var(--fg-3);">
-            Tiendanube: la app oficial de TAURO está en trámite — apenas esté aprobada se conecta con un botón, sin pasos manuales.
-        </p>
     </div>
 </div>
 {% endblock %}
