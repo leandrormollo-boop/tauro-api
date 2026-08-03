@@ -173,7 +173,7 @@ function Tracking() {
             </div>
           </div>
 
-          <div className="card" style={{ padding: 0, overflow: "hidden", background: "var(--bg)" }}>
+          <div className="card tracking-demo" style={{ padding: 0, overflow: "hidden" }}>
             {/* terminal-style header */}
             <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--line-soft)", display: "flex", alignItems: "center", gap: 12, fontFamily: "var(--font-mono)", fontSize: 12 }}>
               <div style={{ display: "flex", gap: 6 }}>
@@ -270,6 +270,24 @@ function Tracking() {
       <style>{`
         @media (max-width: 880px) {
           .tracking-grid { grid-template-columns: minmax(0, 1fr) !important; }
+        }
+        /* Foto del avión con paquetes DETRÁS de la tarjeta de tracking, con un
+           overlay oscuro degradado para que el texto claro siga legible: se
+           percibe arriba (header + título) y se cierra sobre los eventos. */
+        .tracking-demo {
+          background-image:
+            linear-gradient(180deg, rgba(10,14,18,0.66) 0%, rgba(10,14,18,0.86) 52%, rgba(10,14,18,0.95) 100%),
+            url('/static/img/escenas/avion-hero.jpg');
+          background-size: cover;
+          background-position: center;
+          background-repeat: no-repeat;
+        }
+        @media (max-width: 880px) {
+          .tracking-demo {
+            background-image:
+              linear-gradient(180deg, rgba(10,14,18,0.66) 0%, rgba(10,14,18,0.86) 52%, rgba(10,14,18,0.95) 100%),
+              url('/static/img/escenas/avion-hero-mob.jpg');
+          }
         }
       `}</style>
     </section>
