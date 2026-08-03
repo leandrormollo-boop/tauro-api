@@ -309,6 +309,92 @@ def guardar_pedido(cliente_id: str, tienda_id: int, plataforma: str, pedido: dic
     return creado
 
 
+def guardar_pedido_huerfano(dominio: str, cuerpo: bytes) -> None:
+    """
+    Venta de una tienda instalada pero SIN vincular a una cuenta TAURO.
+
+    Se guarda el pedido crudo para no perder la venta: cuando el comerciante
+    vincule su tienda desde el portal, `volcar_huerfanos` los pasa a
+    pedidos_tienda como si hubieran entrado normalmente. Idempotente por
+    (dominio, pedido): Shopify reintenta.
+    """
+    import json as _json
+
+    _ensure_tablas()
+    try:
+        orden = _json.loads(cuerpo.decode("utf-8"))
+    except Exception:
+        return
+    pedido_id = str(orden.get("id") or "")
+    if not pedido_id:
+        return
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pedidos_huerfanos (
+                    id                SERIAL PRIMARY KEY,
+                    dominio           TEXT NOT NULL,
+                    pedido_externo_id TEXT NOT NULL,
+                    payload           JSONB NOT NULL,
+                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (dominio, pedido_externo_id)
+                );
+            """)
+            cur.execute("""
+                INSERT INTO pedidos_huerfanos (dominio, pedido_externo_id, payload)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (dominio, pedido_externo_id) DO UPDATE
+                    SET payload = EXCLUDED.payload
+            """, (dominio.strip().lower(), pedido_id,
+                  _json.dumps(orden, ensure_ascii=False)))
+
+
+def volcar_huerfanos(cliente_id: str, tienda_id: int, dominio: str) -> int:
+    """
+    Al vincular una tienda, recupera las ventas que entraron mientras estaba
+    huérfana. Devuelve cuántas se volcaron. Un fallo acá no puede romper la
+    vinculación: se loguea y sigue.
+    """
+    _ensure_tablas()
+    dominio = (dominio or "").strip().lower()
+    volcados = 0
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT pedido_externo_id, payload FROM pedidos_huerfanos
+                    WHERE dominio = %s ORDER BY created_at
+                """, (dominio,))
+                filas = cur.fetchall()
+    except Exception as e:
+        print(f"[integraciones] no pude leer huérfanos de {dominio}: {e}")
+        return 0
+
+    for f in filas:
+        try:
+            pedido = parsear_pedido_shopify(f["payload"])
+            if not pedido or pedido.get("cancelado"):
+                continue
+            if guardar_pedido(cliente_id, tienda_id, "shopify", pedido):
+                volcados += 1
+        except Exception as e:
+            print(f"[integraciones] huérfano {f['pedido_externo_id']} no se pudo volcar: {e}")
+
+    if filas:
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM pedidos_huerfanos WHERE dominio = %s",
+                                (dominio,))
+        except Exception as e:
+            print(f"[integraciones] no pude limpiar huérfanos de {dominio}: {e}")
+
+    if volcados:
+        print(f"[integraciones] {dominio}: {volcados} venta(s) recuperada(s) al vincular")
+    return volcados
+
+
 def id_de_pedido(tienda_id: int, pedido_externo_id: str) -> Optional[int]:
     """Id interno de un pedido, para poder armarle la solicitud automática."""
     _ensure_tablas()

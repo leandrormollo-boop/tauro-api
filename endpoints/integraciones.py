@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -35,7 +36,26 @@ async def shopify_webhook(request: Request):
 
     tienda = tienda_por_dominio(dominio)
     if not tienda or tienda["plataforma"] != "shopify":
-        # 401 sin detalle: no le confirmamos a un tercero qué dominios existen.
+        # TIENDA INSTALADA PERO SIN VINCULAR a una cuenta TAURO. Antes esto
+        # devolvía 401 y la venta se perdía; peor: a las 8 fallas Shopify da
+        # de baja la suscripción y se pierde el CANAL entero, no una venta.
+        # Ahora se valida la firma con el secreto de la APP (es el mismo con
+        # el que Shopify firma los webhooks de todas sus tiendas) y, si es
+        # legítima, se guarda en la bandeja de huérfanos y se contesta 200.
+        # Tiendanube ya resolvía esto bien; faltaba portarlo.
+        secreto_app = os.getenv("SHOPIFY_API_SECRET", "").strip()
+        if secreto_app and verificar_hmac_shopify(secreto_app, cuerpo, firma):
+            try:
+                from servicios.integraciones_tienda import guardar_pedido_huerfano
+                guardar_pedido_huerfano(dominio, cuerpo)
+            except Exception as e:
+                print(f"[integraciones] no pude guardar el huérfano de {dominio}: {e}")
+            print(f"[integraciones] shopify {dominio} SIN VINCULAR: venta guardada "
+                  f"como huérfana. El comerciante tiene que vincular su tienda "
+                  f"en /portal/tienda para verla.")
+            return {"ok": True, "estado": "sin_vincular"}
+        # Firma inválida o app sin configurar: 401 sin detalle, no le
+        # confirmamos a un tercero qué dominios existen.
         return JSONResponse({"ok": False}, status_code=401)
 
     if not verificar_hmac_shopify(tienda["secreto"], cuerpo, firma):

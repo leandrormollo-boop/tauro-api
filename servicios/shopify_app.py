@@ -206,8 +206,16 @@ def vincular_cliente(dominio: str, cliente_id: str) -> None:
     if not secreto:
         return
     try:
-        from servicios.integraciones_tienda import conectar_tienda
+        from servicios.integraciones_tienda import (
+            conectar_tienda, tienda_por_dominio, volcar_huerfanos,
+        )
         conectar_tienda(cliente_id, "shopify", dominio, secreto)
+        # Las ventas que entraron mientras la tienda estaba sin vincular no
+        # se perdieron: se guardaron como huérfanas y se recuperan ACÁ, que
+        # es el momento exacto en que ya hay a quién atribuírselas.
+        t = tienda_por_dominio(dominio)
+        if t:
+            volcar_huerfanos(cliente_id, t["id"], dominio)
     except Exception as e:
         print(f"[shopify] no pude registrar {dominio} en tiendas_conectadas: {e}")
 
