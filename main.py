@@ -90,6 +90,15 @@ async def headers_de_seguridad(request: Request, call_next):
     if not path.startswith("/shopify"):
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
 
+    # Las páginas privadas no se guardan en disco. Sin esto, el HTML del
+    # portal —saldo, envíos, direcciones de los compradores— queda en la
+    # caché del navegador después de cerrar sesión: el que agarra esa
+    # computadora aprieta "atrás" y lo lee sin loguearse. Y si algún día
+    # hay un proxy o CDN adelante, tampoco lo guarda ni se lo sirve a otro.
+    if path.startswith(("/portal", "/admin")):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+        response.headers["Pragma"] = "no-cache"
+
     return response
 
 # Inicializar base de datos PostgreSQL al arrancar

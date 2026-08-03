@@ -348,6 +348,15 @@ def guardar_pedido_huerfano(dominio: str, cuerpo: bytes) -> None:
                     SET payload = EXCLUDED.payload
             """, (dominio.strip().lower(), pedido_id,
                   _json.dumps(orden, ensure_ascii=False)))
+            # RETENCIÓN ACOTADA. El payload es la orden entera: nombre,
+            # dirección y teléfono del comprador final. Una tienda que probó
+            # la app, no se vinculó nunca y desinstaló nos dejaba esos datos
+            # guardados para siempre. A los 90 días la venta ya no se puede
+            # despachar, así que no hay motivo para conservarla.
+            cur.execute("""
+                DELETE FROM pedidos_huerfanos
+                WHERE created_at < NOW() - INTERVAL '90 days'
+            """)
 
 
 def volcar_huerfanos(cliente_id: str, tienda_id: int, dominio: str) -> int:
@@ -364,7 +373,10 @@ def volcar_huerfanos(cliente_id: str, tienda_id: int, dominio: str) -> int:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT pedido_externo_id, payload FROM pedidos_huerfanos
-                    WHERE dominio = %s ORDER BY created_at
+                    WHERE dominio = %s
+                      AND created_at > NOW() - INTERVAL '90 days'
+                    ORDER BY created_at
+                    LIMIT 500
                 """, (dominio,))
                 filas = cur.fetchall()
     except Exception as e:
@@ -382,11 +394,26 @@ def volcar_huerfanos(cliente_id: str, tienda_id: int, dominio: str) -> int:
             print(f"[integraciones] huérfano {f['pedido_externo_id']} no se pudo volcar: {e}")
 
     if filas:
+        # Se borra SÓLO lo que se acaba de procesar (más lo vencido). Si la
+        # tienda tenía más de 500 huérfanos, la tanda que quedó afuera sigue
+        # ahí para el próximo vínculo en vez de desaparecer sin que nadie
+        # se entere.
+        procesados = [f["pedido_externo_id"] for f in filas]
         try:
             with get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("DELETE FROM pedidos_huerfanos WHERE dominio = %s",
+                    cur.execute("""
+                        DELETE FROM pedidos_huerfanos
+                        WHERE dominio = %s
+                          AND (pedido_externo_id = ANY(%s)
+                               OR created_at < NOW() - INTERVAL '90 days')
+                    """, (dominio, procesados))
+                    cur.execute("SELECT COUNT(*) AS n FROM pedidos_huerfanos WHERE dominio = %s",
                                 (dominio,))
+                    quedan = cur.fetchone()["n"]
+            if quedan:
+                print(f"[integraciones] {dominio}: quedan {quedan} huérfano(s) sin volcar "
+                      f"(tope de 500 por tanda) — se vuelcan al próximo intento")
         except Exception as e:
             print(f"[integraciones] no pude limpiar huérfanos de {dominio}: {e}")
 
