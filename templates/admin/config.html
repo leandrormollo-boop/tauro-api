@@ -7,6 +7,15 @@
   <h1>Configuración</h1>
 </div>
 
+<div class="card" style="max-width:480px;padding:14px 16px;margin-bottom:16px;background:var(--bg-2,#16131f);border:1px solid var(--border,#2a2440);">
+  <p style="margin:0;font-size:13px;color:var(--fg-3);line-height:1.6;">
+    💱 <b>COTIZACION_DOLAR_ARS</b> se actualiza sola con el dólar oficial cada 6 h
+    (mirá <b>COTIZACION_DOLAR_ORIGEN</b> para ver de dónde salió). Si la editás a
+    mano, el automático la vuelve a pisar en la próxima corrida — para dejarla
+    fija, cargá <code>DOLAR_AUTO=0</code> en Railway.
+  </p>
+</div>
+
 <div class="card" style="max-width:480px;">
   <form method="POST" action="/admin/config">
     {% for item in config_items %}

@@ -807,6 +807,36 @@ def job_limpiar_auditoria():
 scheduler.add_job(job_limpiar_auditoria, trigger="cron", hour=3, minute=30)
 
 
+# Dólar oficial automático: el tipo de cambio mueve TODOS los precios. En vez
+# de cargarlo a mano, se actualiza solo desde el oficial. Corre cada 6 h (el
+# oficial se mueve un par de veces al día) y también al arrancar (más abajo).
+# Se apaga con DOLAR_AUTO=0 para volver al control manual.
+def job_actualizar_dolar():
+    try:
+        from servicios.dolar_oficial import actualizar_dolar_auto
+        r = actualizar_dolar_auto()
+        # El checkout NO cotiza en vivo: lee precio_ars ya calculado de
+        # tarifas_cache, congelado con el dólar del último refresco. Si el
+        # dólar cambió, hay que recalcular la cache o el checkout —la ruta que
+        # factura— sigue vendiendo con el dólar viejo hasta las 4am. Se hace en
+        # un hilo porque son ~66 cotizaciones y no puede trabar el scheduler.
+        if r and r.get("motivo") == "actualizado":
+            def _refrescar():
+                try:
+                    from servicios.tarifas_cache import refrescar_cache
+                    refrescar_cache()
+                    print("[scheduler] tarifas del checkout recalculadas con el dólar nuevo")
+                except Exception as e:
+                    print(f"[scheduler] no pude refrescar tarifas tras el dólar: {e}")
+            import threading as _t
+            _t.Thread(target=_refrescar, daemon=True).start()
+    except Exception as e:
+        print(f"[scheduler] actualización de dólar falló: {e}")
+
+
+scheduler.add_job(job_actualizar_dolar, trigger="interval", hours=6)
+
+
 def job_refrescar_tarifas():
     """
     Deja las tarifas del checkout frescas. Corre de madrugada porque
@@ -856,6 +886,12 @@ def _tarifas_al_arrancar():
     esperar al job de las 4am. Sin esto, el checkout depende de cotizar en
     vivo — que es justo lo que queremos evitar.
     """
+    # Primero el dólar (las tarifas se calculan con él): que arranque fresco.
+    try:
+        from servicios.dolar_oficial import actualizar_dolar_auto
+        actualizar_dolar_auto()
+    except Exception as e:
+        print(f"[startup] no pude actualizar el dólar: {e}")
     try:
         from servicios.tarifas_cache import estado_cache, refrescar_cache
         estado = estado_cache()
