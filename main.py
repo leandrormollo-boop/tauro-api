@@ -26,18 +26,71 @@ from servicios.solicitudes_guia import crear_solicitud_guia
 
 load_dotenv()
 
+# Documentación interactiva SÓLO fuera de producción. Estaba abierta al
+# público: /docs le daba a cualquiera el mapa completo de la API — rutas de
+# admin, de webhooks, y la forma exacta de cada payload. No es un secreto
+# criptográfico, pero es regalarle el trabajo de reconocimiento a un atacante.
+_ES_PROD = os.getenv("ENV", "").strip().upper() != "DEV"
+
 app = FastAPI(
     title="Tauro Solutions API",
     description="API de cotización y gestión de envíos internacionales para eCommerce argentino.",
     version="1.0.0",
+    docs_url=None if _ES_PROD else "/docs",
+    redoc_url=None if _ES_PROD else "/redoc",
+    openapi_url=None if _ES_PROD else "/openapi.json",
 )
+
+# CORS: sólo los endpoints públicos necesitan cross-origin (el cotizador
+# puede embeberse). El portal y el admin viajan same-origin, así que abrir
+# "*" no les sumaba nada y ampliaba la superficie. Sin allow_credentials
+# (default False) las cookies nunca viajan cross-origin — eso ya estaba bien
+# y se mantiene explícito para que nadie lo "arregle" a futuro.
+_ORIGENES = [o.strip() for o in os.getenv(
+    "CORS_ORIGINS",
+    "https://taurosolutions.ar,https://www.taurosolutions.ar",
+).split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ORIGENES,
+    allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def headers_de_seguridad(request: Request, call_next):
+    """
+    Headers que no estaban en NINGUNA respuesta (medido en producción).
+
+    Deliberadamente NO se pone Content-Security-Policy global: la web pública
+    compila JSX en el navegador con Babel standalone desde unpkg, y una CSP
+    estricta la rompería entera. Va aparte cuando se compile el bundle.
+
+    X-Frame-Options tampoco es global: las páginas de /shopify/* se abren
+    DENTRO del admin de Shopify y ya mandan su propio `frame-ancestors`.
+    Ponerlo acá bloquearía el iframe y dejaría al comerciante mirando una
+    pantalla en blanco.
+    """
+    response = await call_next(request)
+    path = request.scope.get("path", "")
+
+    # HSTS: Railway ya sirve por HTTPS; esto impide el downgrade a HTTP.
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    # Nada de adivinar tipos: un .txt subido no se ejecuta como script.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # No filtrar la URL completa (con query) a sitios externos.
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()")
+
+    if not path.startswith("/shopify"):
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+
+    return response
 
 # Inicializar base de datos PostgreSQL al arrancar
 try:
