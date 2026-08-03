@@ -145,6 +145,27 @@ que queda anotada en SEGURIDAD.md: `unsafe-inline` en style-src, rate limit
 en memoria, chunked evade el tope (lo corta el proxy), `auditoria.py` sin
 cablear.
 
+### Dólar oficial automático (03/08)
+
+`COTIZACION_DOLAR_ARS` (la ÚNICA fuente de verdad de todos los precios) se
+actualiza sola desde el oficial (dolarapi.com, venta) cada 6h y al arrancar —
+antes se cargaba a mano. Verificado en prod: cotiza a $1515 (el oficial del
+día). `servicios/dolar_oficial.py`. Guardas: rango sano, tope de salto (no
+pisa un salto >50% — manda MAIL de alerta a Leandro, urgente si es hacia
+arriba = vender bajo costo), fallback de referencia si no hay valor previo.
+Cuando el dólar cambia, refresca `tarifas_cache` en background (el checkout lee
+de ahí, no cotiza en vivo). Se apaga con `DOLAR_AUTO=0`. Muestra origen
+(auto/manual) en `/admin/config`. **La ALERTA de la regla 8 (revisar
+WEB_DESC_FEDEX_PCT antes de FedEx producción) sigue vigente** — el dólar
+automático no la reemplaza, son cosas distintas.
+
+Modelo de precios en Shopify/Tiendanube (definido con Leandro 03/08): el portal
+cotiza con el dólar del día; el comerciante define su política (precio + tax)
+por tienda; en Shopify **Basic** el precio se muestra con tabla de tarifas por
+peso (el comprador NO ve cotización en vivo — eso necesita Advanced/Plus). La
+tabla con números reales espera a las cuentas FedEx/UPS operativas; la
+maquinaria (peso volumétrico, dólar auto, política) ya está lista.
+
 ### Integraciones de tienda — finalizadas (03/08)
 
 Inventario con 2 agentes. Todo lo de código cerrado; lo que falta es de Leandro.
