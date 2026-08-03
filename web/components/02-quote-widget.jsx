@@ -196,6 +196,11 @@ function QuoteWidget({ compact = false }) {
             ))}
           </div>
 
+          {/* Captura de contacto DESPUÉS del precio, en el momento de máximo
+              interés. El cotizador sigue gratis y sin login: esto es una
+              oferta, no un peaje. */}
+          <EmailCapture destino={destino} peso={peso} carriers={result.carriers} />
+
           <a className="btn btn-primary" style={{ width: "100%" }} href="/portal/login">
             Crear este envío en el portal <ArrowRight size={14}/>
           </a>
@@ -206,6 +211,84 @@ function QuoteWidget({ compact = false }) {
         </div>
       )}
     </div>
+    </div>
+  );
+}
+
+function EmailCapture({ destino, peso, carriers }) {
+  const [email, setEmail] = React.useState("");
+  const [estado, setEstado] = React.useState("idle"); // idle | enviando | ok | error
+  const [msg, setMsg] = React.useState("");
+
+  const enviar = async () => {
+    if (!email.trim()) return;
+    setEstado("enviando");
+    try {
+      const r = await fetch("/cotizacion-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim(),
+          destino,
+          peso_kg: parseFloat(peso) || 0,
+          carriers: (carriers || []).filter(c => c.estado === "cotizado"),
+        }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setEstado("ok");
+      } else {
+        setEstado("error");
+        setMsg(d.error || "No pudimos mandarla. Probá de nuevo.");
+      }
+    } catch (e) {
+      setEstado("error");
+      setMsg("No pudimos mandarla. Probá de nuevo.");
+    }
+  };
+
+  if (estado === "ok") {
+    return (
+      <div style={{
+        marginBottom: 14, padding: "12px 14px", borderRadius: 10,
+        background: "rgba(46,194,126,0.08)", border: "1px solid rgba(46,194,126,0.3)",
+        fontSize: 13, color: "#2ec27e", textAlign: "center",
+      }}>
+        ✓ Listo — te mandamos la cotización a {email}. Revisá tu correo.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      marginBottom: 14, padding: "12px 14px", borderRadius: 10,
+      background: "rgba(255,255,255,0.02)", border: "1px solid var(--line-soft)",
+    }}>
+      <div style={{ fontSize: 12, color: "var(--fg-3)", marginBottom: 8, fontFamily: "var(--font-mono)" }}>
+        ¿Querés guardar esta cotización? Te la mandamos por mail.
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input
+          type="email"
+          value={email}
+          placeholder="tu@email.com"
+          onChange={(e) => { setEmail(e.target.value); if (estado === "error") setEstado("idle"); }}
+          onKeyDown={(e) => { if (e.key === "Enter") enviar(); }}
+          style={{
+            flex: 1, minWidth: 0, padding: "10px 12px",
+            background: "var(--bg)", border: "1px solid var(--line-soft)",
+            borderRadius: 8, color: "var(--fg)", fontSize: 13,
+          }}
+        />
+        <button className="btn btn-ghost" onClick={enviar}
+                disabled={estado === "enviando"}
+                style={{ whiteSpace: "nowrap", padding: "10px 16px", fontSize: 13 }}>
+          {estado === "enviando" ? "Enviando…" : "Mandámela"}
+        </button>
+      </div>
+      {estado === "error" && (
+        <div style={{ marginTop: 8, fontSize: 12, color: "#ff6b6b" }}>{msg}</div>
+      )}
     </div>
   );
 }

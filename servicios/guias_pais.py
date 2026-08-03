@@ -355,6 +355,12 @@ def pagina_indice() -> str:
 para pymes, sin jerga y con las reglas VIGENTES (varias cambiaron fuerte
 entre 2025 y 2026, y buena parte de lo que se lee por ahí está vencido).</p>
 <div class="grid-paises">{cards}</div>
+
+<h2>Herramientas gratis</h2>
+<div class="grid-paises">
+  <a class="pais-card" href="/calculadora-volumetrica"><b>📦 Calculadora de peso volumétrico</b>
+  <small>Sabé cuántos kilos te factura el courier antes de despachar.</small></a>
+</div>
 {_CTA}
 """
     return _pagina(
@@ -363,9 +369,97 @@ entre 2025 y 2026, y buena parte de lo que se lee por ahí está vencido).</p>
         "/guias", cuerpo)
 
 
+def pagina_calculadora() -> str:
+    """
+    Calculadora pública de peso volumétrico. Imán SEO clásico del rubro
+    (patrón Easyship/DHL Discover): responde "¿por qué me cobran más kilos
+    de los que pesa?" y termina en el cotizador. Todo client-side: una
+    fórmula, cero backend.
+    """
+    cuerpo = """
+<h1>Calculadora de peso volumétrico</h1>
+<p class="fecha">La fórmula que usan los couriers aéreos · """ + ACTUALIZADO + """</p>
+
+<p>Los couriers internacionales no cobran solo por lo que pesa tu paquete,
+sino por el espacio que ocupa en el avión. Facturan <b>el mayor</b> entre el
+peso real y el peso volumétrico:</p>
+
+<div class="destacado" style="font-family:monospace;font-size:16px;">
+Peso volumétrico = largo × ancho × alto (cm) ÷ 5000
+</div>
+
+<div style="background:#131020;border:1px solid #241f38;border-radius:12px;padding:22px;margin:22px 0;">
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+    <label style="font-size:12px;color:#6f6a85;">LARGO (cm)
+      <input id="cv-l" type="number" min="0" step="0.5" placeholder="60" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+    <label style="font-size:12px;color:#6f6a85;">ANCHO (cm)
+      <input id="cv-a" type="number" min="0" step="0.5" placeholder="40" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+    <label style="font-size:12px;color:#6f6a85;">ALTO (cm)
+      <input id="cv-h" type="number" min="0" step="0.5" placeholder="40" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+    <label style="font-size:12px;color:#6f6a85;">PESO REAL (kg)
+      <input id="cv-p" type="number" min="0" step="0.1" placeholder="10" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+  </div>
+  <div id="cv-out" style="margin-top:18px;font-size:15px;color:#6f6a85;">
+    Completá las medidas y te mostramos el peso que te van a facturar.
+  </div>
+</div>
+
+<h2>¿Por qué 5000?</h2>
+<p>Es el divisor estándar de los couriers aéreos internacionales (FedEx, UPS,
+DHL) para medidas en centímetros. Un paquete liviano pero voluminoso — una
+caja de 60×40×40 con almohadones — "pesa" 19,2 kg para el courier aunque la
+balanza diga 3.</p>
+
+<h2>Cómo pagar menos</h2>
+<ul>
+  <li><b>Achicá la caja al mínimo</b>: el aire se factura como si fuera producto.</li>
+  <li><b>Repartí en más de una caja</b> si el producto lo permite: dos cajas
+      chicas pueden facturar menos que una grande medio vacía.</li>
+  <li><b>Cargá las medidas reales de tus productos</b> en tu catálogo TAURO:
+      cotizamos con el peso facturable exacto, sin sorpresas al despachar.</li>
+</ul>
+""" + _CTA + """
+
+<script>
+(function () {
+  var ids = ["cv-l", "cv-a", "cv-h", "cv-p"];
+  function calc() {
+    var l = parseFloat(document.getElementById("cv-l").value) || 0;
+    var a = parseFloat(document.getElementById("cv-a").value) || 0;
+    var h = parseFloat(document.getElementById("cv-h").value) || 0;
+    var p = parseFloat(document.getElementById("cv-p").value) || 0;
+    var out = document.getElementById("cv-out");
+    if (!(l && a && h)) {
+      out.innerHTML = "Completá las medidas y te mostramos el peso que te van a facturar.";
+      out.style.color = "#6f6a85";
+      return;
+    }
+    var vol = l * a * h / 5000;
+    var fact = Math.max(vol, p);
+    var manda = vol > p ? "el volumétrico" : "el peso real";
+    out.style.color = "#d7d3e4";
+    out.innerHTML = "Peso volumétrico: <b style='color:#fff'>" + vol.toFixed(2) +
+      " kg</b> · Peso real: <b style='color:#fff'>" + (p || 0).toFixed(2) + " kg</b>" +
+      "<div style='margin-top:8px;font-size:18px;color:#a78bfa;'>Se factura: <b>" +
+      fact.toFixed(2) + " kg</b> <span style='font-size:13px;color:#6f6a85;'>(manda " +
+      manda + ")</span></div>";
+  }
+  ids.forEach(function (id) {
+    document.getElementById(id).addEventListener("input", calc);
+  });
+})();
+</script>
+"""
+    return _pagina(
+        "Calculadora de peso volumétrico para envíos internacionales · TAURO Solutions",
+        "Calculá gratis el peso volumétrico de tu paquete (largo × ancho × alto ÷ 5000) y sabé cuántos kilos te va a facturar el courier antes de despachar.",
+        "/calculadora-volumetrica", cuerpo)
+
+
 def sitemap_xml() -> str:
     """Sitemap para que Google encuentre las guías sin esperar a los links."""
-    urls = ["/web", "/guias", "/privacidad", "/terminos"] + \
+    urls = ["/web", "/guias", "/calculadora-volumetrica", "/estado",
+            "/privacidad", "/terminos"] + \
            [f"/guias/{slug}" for slug in GUIAS]
     cuerpo = "".join(
         f"<url><loc>https://taurosolutions.ar{u}</loc></url>" for u in urls)

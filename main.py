@@ -89,6 +89,34 @@ def servir_tweaks():
     return FileResponse(os.path.join(WEB_DIR, "tweaks-panel.jsx"))
 
 
+class LeadCotizacionRequest(BaseModel):
+    email: str = Field(..., max_length=160)
+    destino: str = Field("", max_length=4)
+    peso_kg: float = Field(0, ge=0, le=100)
+    carriers: list = Field(default_factory=list)
+
+
+@app.post("/cotizacion-lead", tags=["public"])
+def cotizacion_lead(body: LeadCotizacionRequest, request: Request):
+    """
+    "Recibí esta cotización por mail": captura el contacto DESPUÉS de mostrar
+    el precio — el cotizador sigue gratis y sin login, ese diferencial no se
+    toca. Rate limit porque es público y manda mails.
+    """
+    from servicios.leads import guardar_lead
+    from servicios.rate_limit import check_rate, client_ip
+
+    if not check_rate(f"lead:{client_ip(request)}", max_attempts=5, window_seconds=900):
+        return JSONResponse({"ok": False, "error": "Demasiados pedidos. Probá en unos minutos."},
+                            status_code=429)
+    try:
+        return guardar_lead(body.email, body.destino, body.peso_kg, body.carriers)
+    except Exception as e:
+        print(f"[leads] error guardando lead: {e}")
+        return JSONResponse({"ok": False, "error": "No pudimos guardar tu email. Probá de nuevo."},
+                            status_code=200)
+
+
 @app.get("/guias", include_in_schema=False)
 def servir_guias_indice():
     """Guías por país — contenido SEO: lo que la pyme googlea antes de exportar."""
@@ -103,6 +131,13 @@ def servir_guia_pais(slug: str):
     if html is None:
         return RedirectResponse(url="/guias", status_code=303)
     return HTMLResponse(html)
+
+
+@app.get("/calculadora-volumetrica", include_in_schema=False)
+def servir_calculadora():
+    """Herramienta gratis: imán SEO que termina en el cotizador."""
+    from servicios.guias_pais import pagina_calculadora
+    return HTMLResponse(pagina_calculadora())
 
 
 @app.get("/sitemap.xml", include_in_schema=False)
