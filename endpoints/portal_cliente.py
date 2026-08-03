@@ -638,6 +638,14 @@ async def api_precio_envio_multi(
     try:
         body = await request.json()
         destino = str(body.get("destino") or "").strip()
+        # CP/ciudad reales del destinatario, si el form ya los tiene cargados.
+        # Sin esto el preview cotiza contra el CP de referencia de la ruta y
+        # muestra un precio sin los recargos de zona remota.
+        destino_real = {
+            "cp": str(body.get("dest_zip") or "").strip(),
+            "ciudad": str(body.get("dest_ciudad") or "").strip(),
+            "estado": str(body.get("dest_estado") or "").strip(),
+        }
         bultos = body.get("bultos") or []
         # Sin truncar en silencio: si hay de más, obtener_precio_envio_multi
         # lo rechaza con motivo y el preview muestra lo MISMO que diría el submit.
@@ -653,7 +661,7 @@ async def api_precio_envio_multi(
         return JSONResponse({"ok": False, "motivo": "faltan_datos"}, status_code=200)
 
     try:
-        precio = obtener_precio_envio_multi(cliente, destino, bultos)
+        precio = obtener_precio_envio_multi(cliente, destino, bultos, destino_real=destino_real)
     except Exception as e:
         print(f"[portal] api_precio_multi error: {e}")
         return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
@@ -1080,7 +1088,14 @@ def envio_nuevo_post(
             )
             bultos_detalle = None
         else:
-            precio = obtener_precio_envio_multi(cliente, destino_pais, filas)
+            # La dirección real ya está en el scope (viene del form o de la
+            # libreta, líneas ~1022). La rama nacional de acá arriba ya la
+            # usaba; la internacional la tiraba y cotizaba contra el CP de
+            # referencia — el recargo por zona remota lo comía TAURO.
+            precio = obtener_precio_envio_multi(
+                cliente, destino_pais, filas,
+                destino_real={"cp": dest_zip, "ciudad": dest_ciudad, "estado": dest_estado},
+            )
             bultos_detalle = precio.get("bultos")
         if not precio.get("encontrado"):
             motivo = precio.get("motivo") or "sin_precio"

@@ -96,7 +96,7 @@ def obtener_datos_producto(cliente_id: str, producto_id: str) -> dict:
 
 
 def obtener_precio_envio_multi(
-    cliente_id: str, destino_pais: str, bultos: list
+    cliente_id: str, destino_pais: str, bultos: list, destino_real: dict = None
 ) -> dict:
     """
     Cotiza un envío MULTI-BULTO en vivo: lista de cajas del catálogo
@@ -164,11 +164,15 @@ def obtener_precio_envio_multi(
         }
 
     try:
+        # destino_real: el CP del destinatario de verdad. Sin él se cotiza
+        # contra el CP de referencia de la ruta y el recargo por zona remota
+        # lo termina pagando TAURO. Ver _destino_para_cotizar en cotizador.py.
         resultado = cotizar_bultos(
             cliente=cliente_id.strip().upper(),
             markup_pct=get_markup_pct(cliente_id),
             ruta_id=ruta.ruta_id,
             bultos=piezas,
+            destino_real=destino_real,
         )
     except ValueError as e:
         return {"encontrado": False, "motivo": str(e)}

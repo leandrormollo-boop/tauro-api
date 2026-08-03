@@ -470,7 +470,17 @@
       fetch("/portal/api/precio-multi", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ destino: destino, bultos: bultos }),
+        // Va el CP real del destinatario, no sólo el país: los recargos por
+        // zona remota dependen del CP exacto y vienen adentro del precio que
+        // devuelve el courier. Sin esto el preview muestra un precio que
+        // después no es el que factura el courier.
+        body: JSON.stringify({
+          destino: destino,
+          bultos: bultos,
+          dest_zip: (document.getElementById("dest_zip") || {}).value || "",
+          dest_ciudad: (document.getElementById("dest_ciudad") || {}).value || "",
+          dest_estado: (document.getElementById("dest_estado") || {}).value || "",
+        }),
       })
         .then(function (r) { return r.json(); })
         .then(function (data) {

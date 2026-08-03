@@ -182,11 +182,46 @@ def cotizar_opciones(
     return opciones
 
 
+def _destino_para_cotizar(ruta, destino_real: dict = None) -> dict:
+    """
+    A qué dirección se le cotiza.
+
+    La ruta trae una ciudad y un CP de REFERENCIA (US → MIAMI 33101): sirve
+    para una estimación sin destinatario, no para cobrar. Los couriers cobran
+    recargos que dependen del CP exacto —zona remota, DHL USD 38 o 0,70/kg el
+    que sea mayor; residencial USD 9,50— y esos recargos vienen ADENTRO del
+    precio si les pasás la dirección real.
+
+    Cotizando contra el CP de referencia: el courier contesta barato, le
+    cobramos eso al cliente, después despachamos a la dirección REAL y el
+    courier nos factura el recargo. La diferencia la come TAURO, y como nadie
+    concilia, no aparece en ningún lado. La rama nacional ya lo hacía bien
+    (portal_cliente.py:1051); la internacional tiraba la dirección.
+
+    Si `destino_real` no trae CP, se usa la referencia: mejor una estimación
+    que un error.
+    """
+    if destino_real and (destino_real.get("cp") or destino_real.get("postal_code")):
+        return {
+            "city": destino_real.get("ciudad") or destino_real.get("city") or ruta.destino_ciudad,
+            "state": destino_real.get("estado") or destino_real.get("state") or "",
+            "postal_code": destino_real.get("cp") or destino_real.get("postal_code"),
+            "country": pais_a_iso2(ruta.destino_pais),
+        }
+    return {
+        "city": ruta.destino_ciudad,
+        "state": ciudad_a_state(ruta.destino_ciudad),
+        "postal_code": ruta.destino_zip,
+        "country": pais_a_iso2(ruta.destino_pais),
+    }
+
+
 def cotizar_bultos(
     cliente: str,
     markup_pct: float,
     ruta_id: str,
     bultos: list,
+    destino_real: dict = None,
 ) -> dict:
     """
     Cotiza un envío MULTI-BULTO: N cajas (posiblemente de productos distintos)
@@ -236,12 +271,7 @@ def cotizar_bultos(
             "postal_code": ruta.origen_zip,
             "country": pais_a_iso2(ruta.origen_pais),
         },
-        destino={
-            "city": ruta.destino_ciudad,
-            "state": ciudad_a_state(ruta.destino_ciudad),
-            "postal_code": ruta.destino_zip,
-            "country": pais_a_iso2(ruta.destino_pais),
-        },
+        destino=_destino_para_cotizar(ruta, destino_real),
         paquetes=piezas_fedex,
     )
     if not rate_resp.get("encontrado"):
