@@ -121,25 +121,31 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
   </div>
 </div></body></html>"""
 
-    try:
-        from core.email_sender import _enviar_mail_a
-        _enviar_mail_a(email, f"Tu cotización de envío a {destino} · TAURO Solutions", cuerpo)
-    except Exception as e:
-        print(f"[leads] lead {lead_id} guardado pero el mail al visitante falló: {e}")
+    # Los mails salen en un hilo aparte: SMTP puede tardar 10-30 segundos y
+    # el visitante estaba mirando "Enviando…" todo ese tiempo (medido contra
+    # producción: el POST superaba los 25s). El lead ya está guardado — la
+    # respuesta no tiene por qué esperar a Gmail.
+    def _mandar_mails():
+        try:
+            from core.email_sender import _enviar_mail_a
+            _enviar_mail_a(email, f"Tu cotización de envío a {destino} · TAURO Solutions", cuerpo)
+        except Exception as e:
+            print(f"[leads] lead {lead_id} guardado pero el mail al visitante falló: {e}")
+        try:
+            from core.email_sender import _enviar_mail_a
+            mejor = min(limpios, key=lambda c: c["precio_ars"])
+            _enviar_mail_a(
+                "taurosolutionsar@gmail.com",
+                f"🎣 Lead del cotizador: {email} → {destino}",
+                f"<p><b>{email}</b> cotizó {peso_kg:g} kg a <b>{destino}</b> y pidió "
+                f"la cotización por mail.<br>Mejor precio mostrado: "
+                f"{mejor['nombre']} $ {mejor['precio_ars']:,.0f} ARS.<br><br>"
+                f"Escribile mientras está caliente.</p>".replace(",", "."))
+        except Exception as e:
+            print(f"[leads] aviso interno falló: {e}")
 
-    # Aviso interno: un lead con email real que ya vio el precio ES pipeline.
-    try:
-        from core.email_sender import _enviar_mail_a
-        mejor = min(limpios, key=lambda c: c["precio_ars"])
-        _enviar_mail_a(
-            "taurosolutionsar@gmail.com",
-            f"🎣 Lead del cotizador: {email} → {destino}",
-            f"<p><b>{email}</b> cotizó {peso_kg:g} kg a <b>{destino}</b> y pidió "
-            f"la cotización por mail.<br>Mejor precio mostrado: "
-            f"{mejor['nombre']} $ {mejor['precio_ars']:,.0f} ARS.<br><br>"
-            f"Escribile mientras está caliente.</p>".replace(",", "."))
-    except Exception as e:
-        print(f"[leads] aviso interno falló: {e}")
+    import threading
+    threading.Thread(target=_mandar_mails, daemon=True).start()
 
     print(f"[leads] nuevo lead #{lead_id}: {email} → {destino} ({peso_kg}kg)")
     return {"ok": True}
