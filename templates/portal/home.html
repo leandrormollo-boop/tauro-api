@@ -149,11 +149,11 @@
         {# /portal/track resuelve el courier contra los envíos del cliente:
            un tracking de envia.com ya no se abre en FedEx por error. #}
         <div class="track-box">
+            {# El Enter y el click los cablea el script de base.html sobre
+               estos ids — sin handlers inline, que la CSP prohíbe. #}
             <input type="text" id="track-input" placeholder="Ej: 771234567890" autocomplete="off"
-                   aria-label="Número de tracking"
-                   onkeydown="if(event.key==='Enter'){this.nextElementSibling.click()}">
-            <button type="button" class="btn btn-primary"
-                onclick="var v=document.getElementById('track-input').value.trim(); if(v) window.open('/portal/track?nro='+encodeURIComponent(v),'_blank')">
+                   aria-label="Número de tracking">
+            <button type="button" id="track-submit" class="btn btn-primary">
                 Rastrear
             </button>
         </div>

@@ -2,6 +2,9 @@
 # Servicio API B2B — PostgreSQL
 # ============================================================
 
+import hashlib
+import secrets
+
 from core.database import get_conn
 from modelos.cotizacion import CotizacionInput
 from servicios.auth import get_markup_pct
@@ -14,6 +17,63 @@ from servicios.rutas import get_rutas_activas, pais_a_iso2
 MAX_KG_POR_CAJA = 70
 MAX_CAJAS_POR_ENVIO = 20
 
+# ── API keys: hasheadas, nunca en claro ─────────────────────
+# La clave se guarda como sha256(clave). Un dump de la base (backup robado,
+# SQL injection, laptop perdida) ya no entrega credenciales vivas de la API.
+# sha256 sin salt alcanza PORQUE las claves que genera generar_api_key() son
+# de alta entropía (token_urlsafe(32) ≈ 256 bits): no hay diccionario que
+# las adivine. Las claves viejas cargadas a mano pueden ser débiles —
+# rotarlas con el botón "Regenerar API key" del admin.
+
+_hash_migrado = False
+
+
+def hash_api_key(api_key: str) -> str:
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+def _ensure_hash_migrado() -> None:
+    """
+    Migración perezosa y una sola vez por proceso: agrega la columna
+    api_key_hash, hashea las claves en claro que existan y las BORRA.
+    Idempotente: si no queda nada en claro, no hace nada.
+    """
+    global _hash_migrado
+    if _hash_migrado:
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS api_key_hash TEXT")
+            cur.execute("SELECT cliente_id, api_key FROM clientes WHERE api_key IS NOT NULL")
+            filas = cur.fetchall()
+            for f in filas:
+                cur.execute(
+                    "UPDATE clientes SET api_key_hash = %s, api_key = NULL WHERE cliente_id = %s",
+                    (hash_api_key(str(f["api_key"]).strip()), f["cliente_id"]),
+                )
+            if filas:
+                print(f"[api_b2b] {len(filas)} api_key(s) hasheada(s) y borradas del claro")
+    _hash_migrado = True
+
+
+def generar_api_key(cliente_id: str) -> str:
+    """
+    Genera una clave nueva para el cliente, guarda SOLO el hash y devuelve
+    la clave en claro UNA única vez (para mostrársela al dueño en el admin).
+    Pisa la anterior: regenerar = rotar.
+    """
+    _ensure_hash_migrado()
+    clave = f"tauro_{secrets.token_urlsafe(32)}"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE clientes SET api_key_hash = %s, api_key = NULL WHERE cliente_id = %s",
+                (hash_api_key(clave), cliente_id.strip().upper()),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"Cliente {cliente_id} no existe")
+    return clave
+
 
 def obtener_cliente_por_api_key(api_key: str) -> dict:
     """Valida una API key contra PostgreSQL y devuelve el perfil del cliente."""
@@ -21,17 +81,18 @@ def obtener_cliente_por_api_key(api_key: str) -> dict:
     if not api_key:
         return {"encontrado": False}
 
+    _ensure_hash_migrado()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT cliente_id, email, api_key, markup_pct, markup_tipo, markup_valor, activo, nombre, cuit,
+                SELECT cliente_id, email, markup_pct, markup_tipo, markup_valor, activo, nombre, cuit,
                        direccion, cp, ciudad, pais, telefono, notas
                 FROM clientes
-                WHERE api_key = %s AND activo = TRUE
+                WHERE api_key_hash = %s AND activo = TRUE
                 LIMIT 1
                 """,
-                (api_key,),
+                (hash_api_key(api_key),),
             )
             row = cur.fetchone()
 

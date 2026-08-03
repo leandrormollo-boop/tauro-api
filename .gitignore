@@ -32,3 +32,6 @@ var/
 
 # Shim local de dotenv para .venv-codex (NO subir: pisaría python-dotenv real en Railway)
 dotenv.py
+
+# toolchain de build de la web (Railway no lo usa; el bundle se commitea)
+node_modules/

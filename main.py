@@ -60,22 +60,121 @@ app.add_middleware(
 )
 
 
+# ── Hosts permitidos ────────────────────────────────────────
+# Un Host falsificado envenena todo lo que se construye con la URL del
+# request (links absolutos, redirects). Se aceptan los dominios de TAURO,
+# el dominio de Railway y localhost para desarrollo. EXTRA_HOSTS suma más
+# sin tocar código. /health y /salud quedan exentos: los monitores y el
+# healthcheck de Railway pegan con hosts internos y no deben caerse nunca.
+_HOSTS_OK = {
+    "taurosolutions.ar", "www.taurosolutions.ar",
+    "localhost", "127.0.0.1", "testserver",
+}
+_HOSTS_OK.update(h.strip().lower() for h in os.getenv("EXTRA_HOSTS", "").split(",") if h.strip())
+_railway = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().lower()
+if _railway:
+    _HOSTS_OK.add(_railway)
+
+
+def _host_permitido(host: str) -> bool:
+    host = (host or "").split(":")[0].strip().lower()
+    # NO se acepta el sufijo `.up.railway.app`: es un namespace compartido
+    # (cualquiera tiene su `loquesea.up.railway.app`) y confiar en él dejaba
+    # envenenar el Host. El dominio propio de Railway entra por su valor
+    # EXACTO, que Railway inyecta en RAILWAY_PUBLIC_DOMAIN (ya en _HOSTS_OK).
+    # `.railway.internal` sí: es la red privada, no llega desde afuera.
+    return host in _HOSTS_OK or host.endswith(".railway.internal")
+
+
+# Tope de tamaño por request. Los forms y JSON son chicos (2 MB de sobra);
+# las subidas de archivos (comprobantes, facturas, guías: hasta 8 MB en el
+# handler) llegan como multipart/form-data y se les da 12 MB. Se decide por
+# Content-Type, NO por lista de rutas: cualquier endpoint de subida —del
+# portal o del admin— hereda el límite ancho sin mantener una lista frágil
+# que se olvida de una ruta y corta un PDF legítimo con 413 (pasó: la lista
+# sólo tenía /portal/pagos y rompía las 3 subidas del admin).
+# /shopify aparte: sus webhooks (venta con muchos ítems) no pueden caerse por
+# tamaño y ya se validan por HMAC.
+_MAX_BODY = 2 * 1024 * 1024            # 2 MB general
+_MAX_BODY_UPLOAD = 12 * 1024 * 1024    # margen sobre los 8 MB de archivo
+_RUTAS_UPLOAD = ("/shopify",)
+
+
 @app.middleware("http")
 async def headers_de_seguridad(request: Request, call_next):
     """
-    Headers que no estaban en NINGUNA respuesta (medido en producción).
+    Guardas de entrada + headers de seguridad + CSP (03/08/2026).
 
-    Deliberadamente NO se pone Content-Security-Policy global: la web pública
-    compila JSX en el navegador con Babel standalone desde unpkg, y una CSP
-    estricta la rompería entera. Va aparte cuando se compile el bundle.
+    La CSP fue posible recién cuando la web pública dejó de compilar JSX en
+    el navegador (ahora carga JS pre-compilado desde /static — ver
+    scripts/build_web.sh). Diseño, basado en el inventario completo de las
+    superficies:
 
-    X-Frame-Options tampoco es global: las páginas de /shopify/* se abren
-    DENTRO del admin de Shopify y ya mandan su propio `frame-ancestors`.
-    Ponerlo acá bloquearía el iframe y dejaría al comerciante mirando una
-    pantalla en blanco.
+    - SCRIPTS: candado. `script-src 'self' 'nonce-…'` — sólo corren los
+      archivos propios y los bloques inline que llevan el nonce de ESTE
+      request. Un atacante que logre inyectar HTML no puede ejecutar nada.
+      No hay eval ni handlers inline (se migraron todos a data-attrs).
+    - ESTILOS: pragmático. Los templates tienen ~280 atributos style= y
+      React inyecta <style> en runtime → 'unsafe-inline'. Inyectar CSS no
+      ejecuta código; el riesgo que importa es el script, y ése está cerrado.
+    - Google Fonts es el ÚNICO tercero permitido (hoja CSS + woff2).
+
+    X-Frame-Options y esta CSP NO tocan /shopify/*: esas páginas viven en un
+    iframe del admin de Shopify y mandan su propio `frame-ancestors` dinámico
+    por tienda (endpoints/shopify.py). El setdefault respeta ese header;
+    pisarlo = pantalla en blanco para el comerciante y cadena de ventas rota.
     """
-    response = await call_next(request)
+    import secrets as _secrets
     path = request.scope.get("path", "")
+
+    # 1) Host: si no es nuestro, 421 y listo — salvo los healthchecks.
+    if path not in ("/health", "/salud") and not _host_permitido(request.headers.get("host", "")):
+        return JSONResponse({"detail": "Host no permitido"}, status_code=421)
+
+    # 2) Tamaño: el Content-Length se chequea ANTES de leer el cuerpo.
+    #    (Un body chunked sin Content-Length lo frena igual el límite del
+    #    proxy de Railway; esto corta el 99% de los abusos gratis.)
+    if request.method in ("POST", "PUT", "PATCH"):
+        try:
+            largo = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            largo = 0
+        es_upload = (path.startswith(_RUTAS_UPLOAD)
+                     or "multipart/form-data" in (request.headers.get("content-type") or "").lower())
+        tope = _MAX_BODY_UPLOAD if es_upload else _MAX_BODY
+        if largo > tope:
+            return JSONResponse({"detail": "El archivo o el pedido es demasiado grande."},
+                                status_code=413)
+
+    # 3) CSRF en el portal y el admin: un POST que un navegador manda desde
+    #    OTRO sitio llega con Origin/Sec-Fetch-Site delatores. La cookie ya
+    #    es SameSite=Lax; esto es la segunda tranca (defensa en profundidad).
+    #    Los clientes no-navegador (tests, scripts) no mandan estos headers
+    #    y pasan. /shopify queda afuera: sus webhooks se validan por HMAC.
+    if request.method == "POST" and path.startswith(("/portal", "/admin")):
+        sfs = (request.headers.get("sec-fetch-site") or "").lower()
+        if sfs and sfs not in ("same-origin", "same-site", "none"):
+            return JSONResponse({"detail": "Origen del pedido no permitido."}, status_code=403)
+        origin = (request.headers.get("origin") or "").strip().rstrip("/")
+        if origin and origin.lower() != "null":
+            host_origin = origin.split("://", 1)[-1]
+            if not _host_permitido(host_origin):
+                return JSONResponse({"detail": "Origen del pedido no permitido."}, status_code=403)
+
+    nonce = _secrets.token_urlsafe(16)
+    request.state.csp_nonce = nonce
+
+    response = await call_next(request)
+
+    if not path.startswith("/shopify") and not path.startswith(("/docs", "/redoc", "/openapi.json")):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+            "base-uri 'self'; form-action 'self'; frame-src 'none'"
+        )
 
     # HSTS: Railway ya sirve por HTTPS; esto impide el downgrade a HTTP.
     response.headers.setdefault(
@@ -98,6 +197,9 @@ async def headers_de_seguridad(request: Request, call_next):
     if path.startswith(("/portal", "/admin")):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
         response.headers["Pragma"] = "no-cache"
+        # Que Google ni loco indexe páginas privadas (aunque estén tras login,
+        # el título "Cuenta corriente · MELCIOR" en resultados ya es una fuga).
+        response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
 
     return response
 
@@ -106,6 +208,17 @@ try:
     init_db()
 except Exception as _db_err:
     print(f"[startup] DB init error: {_db_err}")
+
+# Migrar api_key → api_key_hash UNA vez, en el arranque y no en el primer
+# request. La migración hace ALTER TABLE (lock exclusivo sobre `clientes`)
+# seguido de los UPDATE: hacerlo en el request-path serializaba cualquier
+# lectura de clientes detrás de ese lock. Sigue siendo idempotente, así que
+# queda como red si el arranque no llegó a correrla.
+try:
+    from servicios.api_b2b import _ensure_hash_migrado
+    _ensure_hash_migrado()
+except Exception as _mig_err:
+    print(f"[startup] migración de api_key diferida al primer uso: {_mig_err}")
 
 # Static files (CSS, JS, imágenes), portal del cliente y admin
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -120,18 +233,15 @@ WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
 @app.middleware("http")
 async def revalidar_assets_web(request: Request, call_next):
     """
-    Los assets de la web pública (HTML, styles.css, los .jsx) NO tienen
-    versión en la URL, así que el browser los cacheaba de más y la gente
-    seguía viendo la versión vieja tras un deploy. Con `no-cache` el
-    navegador revalida cada vez: el ETag hace que si no cambió devuelva
-    304 (barato), y si cambió trae lo nuevo al instante. Nunca más una
-    versión pegada.
+    El HTML y el CSS de la web pública NO tienen versión en la URL, así que
+    el browser los cacheaba de más y la gente seguía viendo la versión vieja
+    tras un deploy. Con `no-cache` el navegador revalida cada vez: el ETag
+    hace que si no cambió devuelva 304 (barato), y si cambió trae lo nuevo
+    al instante. El JS compilado va con ?v=N, así que no necesita esto.
     """
     response = await call_next(request)
     path = request.url.path
-    if (path in ("/web", "/styles.css", "/tweaks-panel.jsx")
-            or path.startswith("/components")
-            or path.endswith(".jsx")):
+    if path in ("/web", "/styles.css"):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
@@ -140,15 +250,13 @@ async def revalidar_assets_web(request: Request, call_next):
 def servir_web():
     return FileResponse(os.path.join(WEB_DIR, "Tauro Solutions.html"))
 
-app.mount("/components", StaticFiles(directory=os.path.join(WEB_DIR, "components")), name="web-components")
+# Los .jsx ya NO se sirven: la web carga el JS compilado desde /static/js/web
+# (ver scripts/build_web.sh). Los fuentes quedan en web/components/ como
+# fuente de verdad, pero exponerlos era regalar el código sin minificar.
 
 @app.get("/styles.css", include_in_schema=False)
 def servir_css():
     return FileResponse(os.path.join(WEB_DIR, "styles.css"))
-
-@app.get("/tweaks-panel.jsx", include_in_schema=False)
-def servir_tweaks():
-    return FileResponse(os.path.join(WEB_DIR, "tweaks-panel.jsx"))
 
 
 class LeadCotizacionRequest(BaseModel):

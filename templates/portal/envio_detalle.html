@@ -64,7 +64,7 @@
                 <div class="msg error" style="margin-bottom:10px;">{{ request.query_params.get('error') }}</div>
             {% endif %}
             <form method="POST" action="/portal/envios/{{ s.id }}/emitir"
-                  onsubmit="return confirm('¿Emitir la guía ahora? Se genera la guía real en el courier y el cargo entra a tu cuenta corriente. No se puede deshacer.');">
+                  data-confirm="¿Emitir la guía ahora? Se genera la guía real en el courier y el cargo entra a tu cuenta corriente. No se puede deshacer.">
                 <button type="submit" class="btn btn-primary btn-full">Emitir guía ahora</button>
             </form>
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">

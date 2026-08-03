@@ -37,8 +37,12 @@
 <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
   <a href="/admin/envios/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-primary btn-sm">+ Cargar factura</a>
   <a href="/admin/pagos/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">+ Registrar pago</a>
-  <button type="button" onclick="document.getElementById('reset-pwd-form').style.display='block';this.style.display='none';"
+  <button type="button" id="btn-reset-pwd" data-muestra="#reset-pwd-form"
           class="btn btn-ghost btn-sm">🔑 Resetear contraseña del portal</button>
+  <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/api-key" style="display:inline;"
+        data-confirm="¿Generar una API key nueva para {{ cliente.cliente_id }}? Si ya tenía una, la anterior DEJA DE FUNCIONAR y hay que actualizarla donde la use.">
+    <button type="submit" class="btn btn-ghost btn-sm">🗝️ Regenerar API key B2B</button>
+  </form>
 </div>
 
 <!-- Reset password form (oculto por defecto) -->
@@ -51,7 +55,7 @@
       <small style="color:var(--fg-4);">Pasásela al cliente por WhatsApp / llamada.</small>
     </div>
     <button type="submit" class="btn btn-primary btn-sm">Guardar contraseña</button>
-    <button type="button" onclick="document.getElementById('reset-pwd-form').style.display='none';this.parentElement.parentElement.previousElementSibling.querySelector('button').style.display='inline-block';"
+    <button type="button" data-oculta="#reset-pwd-form" data-reaparece="#btn-reset-pwd"
             class="btn btn-ghost btn-sm">Cancelar</button>
   </form>
 </div>

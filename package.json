@@ -1,0 +1,14 @@
+{
+  "name": "tauro-web",
+  "private": true,
+  "scripts": {
+    "build:web": "node scripts/build_web.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
+  }
+}

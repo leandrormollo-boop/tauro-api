@@ -132,7 +132,7 @@
     {% endif %}
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 document.getElementById('form-cotizar').addEventListener('submit', function () {
     this.style.display = 'none';
     var res = document.getElementById('resultado');

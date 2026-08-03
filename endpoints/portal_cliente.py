@@ -289,7 +289,10 @@ def login_send(request: Request, email: str = Form(...)):
         )
 
     token = generar_token(email, cliente)
-    base_url = BASE_URL or str(request.base_url).rstrip("/")
+    # El token que autentica viaja en este link. NO derivarlo del Host del
+    # request (envenenable): fallback fijo al dominio oficial, igual que el
+    # admin. Así un Host falso nunca puede desviar el magic link a otro lado.
+    base_url = BASE_URL or "https://taurosolutions.ar"
     link = link_magico_url(base_url, token)
 
     # DEV explícito: mostrar el link en pantalla para poder entrar sin SMTP.

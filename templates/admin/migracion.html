@@ -65,7 +65,7 @@
   {% if request.query_params.get("error") == "confirm_numeric" %}
   <div class="flash-msg error">Escribí NUMERIC en el campo de confirmación para ejecutarla.</div>
   {% endif %}
-  <form method="POST" action="/admin/migracion/numeric" onsubmit="return confirm('¿Aplicar la migración de dinero a NUMERIC? Hacé un backup/snapshot de la DB antes si tenés datos cargados.');">
+  <form method="POST" action="/admin/migracion/numeric" data-confirm="¿Aplicar la migración de dinero a NUMERIC? Hacé un backup/snapshot de la DB antes si tenés datos cargados.">
     <div class="form-group">
       <label>Confirmación</label>
       <input type="text" name="confirmacion" placeholder="Escribí NUMERIC para ejecutar">

@@ -80,7 +80,7 @@
   </div>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   // Ojito mostrar/ocultar contraseña
   var toggle = document.getElementById("toggle-pass");
   if (toggle) {

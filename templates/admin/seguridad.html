@@ -1,0 +1,66 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Seguridad{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Control interno</div>
+  <h1>Seguridad</h1>
+</div>
+
+<div class="card-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:28px;">
+  <div class="stat-card">
+    <div class="label">Eventos en 24 h</div>
+    <div class="value">{{ stats.eventos_24h or 0 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Intentos fallidos</div>
+    <div class="value {% if stats.fallos_24h %}warn{% endif %}">{{ stats.fallos_24h or 0 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Bloqueos de origen</div>
+    <div class="value {% if stats.csrf_24h %}warn{% endif %}">{{ stats.csrf_24h or 0 }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Últimos eventos</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Evento</th>
+          <th>Actor</th>
+          <th>IP</th>
+          <th>Solicitud</th>
+          <th>Estado</th>
+          <th>ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in eventos %}
+        <tr>
+          <td class="mono">{{ e.created_at.strftime('%d/%m/%Y %H:%M:%S') if e.created_at else '-' }}</td>
+          <td><strong>{{ e.event }}</strong></td>
+          <td>{{ e.actor_type }}{% if e.actor_ref %}<br><small class="mono">{{ e.actor_ref }}</small>{% endif %}</td>
+          <td class="mono">{{ e.ip or '-' }}</td>
+          <td><span class="mono">{{ e.method or '-' }}</span> {{ e.path or '-' }}</td>
+          <td>
+            <span class="badge {{ 'ok' if e.success else 'error' }}">
+              {{ e.status_code or '-' }}
+            </span>
+          </td>
+          <td class="mono"><small>{{ (e.request_id or '-')[:12] }}</small></td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" style="color:var(--fg-4);text-align:center;padding:24px;">
+            Todavía no hay eventos registrados.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

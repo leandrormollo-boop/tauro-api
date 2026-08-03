@@ -61,7 +61,7 @@
                     <div class="row-actions" style="margin-top:8px;">
                         <button type="button" class="btn btn-ghost btn-sm addr-editar">Editar</button>
                         <form method="POST" action="/portal/direcciones/{{ r.id }}/eliminar"
-                              onsubmit="return confirm('¿Borrar la dirección de {{ r.nombre }}?')">
+                              data-confirm="¿Borrar la dirección de {{ r.nombre }}?">
                             <button type="submit" class="btn btn-ghost btn-sm">Eliminar</button>
                         </form>
                     </div>
@@ -81,7 +81,7 @@
         <div class="empty">
             <p style="margin-bottom:12px;">Todavía no cargaste remitentes.</p>
             <button type="button" class="btn btn-primary btn-sm"
-                onclick="document.querySelector('[name=tipo]').value='REMITENTE';document.querySelector('#form-direccion').scrollIntoView({behavior:'smooth'});document.querySelector('[name=nombre]').focus({preventScroll:true})">
+                data-set-tipo="REMITENTE">
                 Agregar remitente
             </button>
         </div>
@@ -119,7 +119,7 @@
                     <div class="row-actions" style="margin-top:8px;">
                         <button type="button" class="btn btn-ghost btn-sm addr-editar">Editar</button>
                         <form method="POST" action="/portal/direcciones/{{ d.id }}/eliminar"
-                              onsubmit="return confirm('¿Borrar la dirección de {{ d.nombre }}?')">
+                              data-confirm="¿Borrar la dirección de {{ d.nombre }}?">
                             <button type="submit" class="btn btn-ghost btn-sm">Eliminar</button>
                         </form>
                     </div>
@@ -130,7 +130,7 @@
         <div class="empty">
             <p style="margin-bottom:12px;">Todavía no guardaste destinatarios. El primero que cargues te queda listo para el próximo envío.</p>
             <button type="button" class="btn btn-primary btn-sm"
-                onclick="document.querySelector('[name=tipo]').value='DESTINATARIO';document.querySelector('#form-direccion').scrollIntoView({behavior:'smooth'});document.querySelector('[name=nombre]').focus({preventScroll:true})">
+                data-set-tipo="DESTINATARIO">
                 Agregar destinatario
             </button>
         </div>
@@ -232,7 +232,7 @@
     </form>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Editar dirección: precarga el form de abajo con los datos del item
 // y lo pasa a modo edición (mismo POST, con direccion_id).
 document.querySelectorAll(".addr-editar").forEach(function (btn) {
@@ -266,7 +266,7 @@ document.querySelectorAll(".addr-editar").forEach(function (btn) {
 });
 </script>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Tabs reales: un panel visible por vez, estado activo de verdad.
 document.querySelectorAll(".tab[data-target]").forEach(function (t) {
     t.addEventListener("click", function () {

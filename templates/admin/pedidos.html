@@ -89,7 +89,7 @@
               <div class="mono" style="font-size:11px;margin-top:6px;">{{ s.tracking }}</div>
             {% else %}
               <form method="POST" action="/admin/pedidos/{{ s.id }}/generar-guia"
-                    onsubmit="return confirm('¿Generar la guía real en FedEx para el pedido #{{ s.id }}? Esto emite una guía y consume la cuenta.');">
+                    data-confirm="¿Generar la guía real en FedEx para el pedido #{{ s.id }}? Esto emite una guía y consume la cuenta.">
                 <button type="submit" class="btn btn-sm btn-primary">Generar guía en FedEx</button>
               </form>
               {# Editable sólo pre-emisión: después los datos ya viajaron. #}
@@ -110,7 +110,7 @@
                  Tildarlo = lo que escribas (o dejes vacío) MANDA. #}
               <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg-3);cursor:pointer;">
                 <input type="checkbox" name="pisar" value="1"
-                       onchange="if(this.checked && !confirm('Con esto, lo que quede en los campos PISA lo guardado. Un tracking vacío vuelve a habilitar la emisión de otra guía. ¿Seguro?')) this.checked=false;">
+                       data-confirm-check="Con esto, lo que quede en los campos PISA lo guardado. Un tracking vacío vuelve a habilitar la emisión de otra guía. ¿Seguro?">
                 Pisar valores (corregir tracking mal cargado)
               </label>
               <button type="submit" class="btn btn-sm btn-primary">Guardar</button>

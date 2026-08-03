@@ -91,7 +91,7 @@
                         <div class="row-actions">
                             <button type="button" class="btn btn-ghost btn-sm prod-editar">Editar</button>
                             <form method="POST" action="/portal/catalogo/eliminar"
-                                  onsubmit="return confirm('¿Borrar {{ p.alias_interno }} del catálogo? Los envíos ya hechos no se tocan.')">
+                                  data-confirm="¿Borrar {{ p.alias_interno }} del catálogo? Los envíos ya hechos no se tocan.">
                                 <input type="hidden" name="alias_interno" value="{{ p.alias_interno }}">
                                 <button type="submit" class="btn btn-ghost btn-sm">Eliminar</button>
                             </form>
@@ -194,7 +194,7 @@
     </form>
 </div>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Editar producto: precarga el form con la fila elegida. Al guardar,
 // vuelve a revisión de Tauro (cambian datos que van a la aduana).
 document.querySelectorAll(".prod-editar").forEach(function (btn) {

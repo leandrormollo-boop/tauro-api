@@ -153,7 +153,7 @@
       {% block content %}{% endblock %}
     </main>
   </div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
 // Prefetch al hover — misma técnica que el portal: navegación casi instantánea.
 (function () {
   var hechos = {};
@@ -169,6 +169,48 @@
     document.head.appendChild(l);
   }, { passive: true });
 })();
+
+// ── Utilidades data-* ───────────────────────────────────────
+// Reemplazan a los handlers inline (onclick/onsubmit/onchange), que la CSP
+// prohíbe: script-src sólo permite 'self' y bloques con el nonce del request.
+
+// Confirmación antes de enviar un form: <form data-confirm="¿Seguro?">
+document.querySelectorAll("form[data-confirm]").forEach(function (form) {
+  form.addEventListener("submit", function (event) {
+    if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+  });
+});
+
+// Checkbox que pide confirmación al marcarse (el "pisar tracking"):
+// <input type="checkbox" data-confirm-check="¿Seguro?">
+document.querySelectorAll("[data-confirm-check]").forEach(function (chk) {
+  chk.addEventListener("change", function () {
+    if (chk.checked && !window.confirm(chk.dataset.confirmCheck)) {
+      chk.checked = false;
+    }
+  });
+});
+
+// Mostrar un bloque oculto y esconder el botón que lo abre:
+// <button data-muestra="#selector">
+document.querySelectorAll("[data-muestra]").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var destino = document.querySelector(btn.dataset.muestra);
+    if (destino) destino.style.display = "block";
+    btn.style.display = "none";
+  });
+});
+
+// Cancelar: esconder el bloque y hacer reaparecer el botón original:
+// <button data-oculta="#selector" data-reaparece="#selector-del-boton">
+document.querySelectorAll("[data-oculta]").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var destino = document.querySelector(btn.dataset.oculta);
+    if (destino) destino.style.display = "none";
+    var otro = document.querySelector(btn.dataset.reaparece || "");
+    if (otro) otro.style.display = "inline-block";
+  });
+});
 </script>
 </body>
 </html>

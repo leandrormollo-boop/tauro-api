@@ -202,6 +202,20 @@ document.querySelectorAll("[data-confirm]").forEach(function (form) {
   });
 });
 
+// Botones "Agregar remitente/destinatario" (direcciones.html): setean el
+// tipo y llevan al formulario. Antes era un onclick inline; la CSP los
+// prohíbe (script-src con nonce, sin 'unsafe-inline').
+document.querySelectorAll("[data-set-tipo]").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var tipo = document.querySelector("[name=tipo]");
+    if (tipo) tipo.value = btn.dataset.setTipo;
+    var form = document.querySelector("#form-direccion");
+    if (form) form.scrollIntoView({ behavior: "smooth" });
+    var nombre = document.querySelector("[name=nombre]");
+    if (nombre) nombre.focus({ preventScroll: true });
+  });
+});
+
 // Tracking desde el escritorio.
 (function () {
   var input = document.getElementById("track-input");
@@ -210,9 +224,10 @@ document.querySelectorAll("[data-confirm]").forEach(function (form) {
   var openTracking = function () {
     var value = input.value.trim();
     if (value) {
+      // Página de tracking PROPIA: detecta el courier por el formato del
+      // número — un tracking de envia.com ya no se abre en FedEx por error.
       window.open(
-        "https://www.fedex.com/fedextrack/?trknbr=" +
-          encodeURIComponent(value),
+        "/portal/track?nro=" + encodeURIComponent(value),
         "_blank",
         "noopener,noreferrer"
       );

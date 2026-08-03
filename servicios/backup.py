@@ -43,7 +43,7 @@ COLUMNAS_SENSIBLES = {
     # api_key es una CREDENCIAL VIVA de la API B2B: con ella se cotiza y se
     # pide guías en nombre del cliente. Sale del backup por lo mismo que el
     # password_hash — el archivo se descarga y termina en un Drive cualquiera.
-    "clientes": {"password_hash", "api_key"},
+    "clientes": {"password_hash", "api_key", "api_key_hash"},
 }
 
 

@@ -19,8 +19,15 @@ from core.fedex_client import FedExClient
 
 
 ROOT = Path(__file__).resolve().parent.parent
-STATE_DIR = ROOT / "var"
-STATE_DIR.mkdir(exist_ok=True)
+# STATE_DIR se puede mover con env var (en el contenedor /app lo posee root y
+# el proceso corre como `tauro`). El mkdir va en try: este módulo se importa al
+# arrancar (main → admin_router → acá), y un directorio no escribible NUNCA
+# debe tumbar el arranque de toda la app — a lo sumo se degrada el tracking.
+STATE_DIR = Path(os.getenv("STATE_DIR", str(ROOT / "var")))
+try:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as _e:
+    print(f"[tracking_fedex] no pude crear {STATE_DIR} ({_e}); el estado no persiste")
 STATE_PATH = STATE_DIR / "tracking_fedex_tauro_state.json"
 
 DEFAULT_TOKEN = "/Users/leanrmollo/Documents/colab tauro/token.json"
@@ -250,7 +257,12 @@ def load_state() -> dict[str, Any]:
 
 
 def save_state(state: dict[str, Any]) -> None:
-    STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as e:
+        # Sin persistencia el tracking reprocesa desde el checkpoint anterior,
+        # molesto pero no fatal. Nunca romper la corrida por no poder escribir.
+        print(f"[tracking_fedex] no pude guardar el estado en {STATE_PATH}: {e}")
 
 
 def reset_tracking_checkpoint() -> dict[str, Any]:

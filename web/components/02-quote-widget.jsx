@@ -1,7 +1,10 @@
 /* global React */
 const { useState: useStateQ, useRef: useRefQ, useEffect: useEffectQ } = React;
 
-const API_URL = window.TAURO_API_URL ?? "http://localhost:8000";
+// Same-origin: la web SIEMPRE se sirve desde la propia API. El viejo fallback
+// a http://localhost:8000 quedaba cross-origin en producción y la CSP
+// (connect-src 'self') lo bloquearía en silencio. "" = mismo dominio.
+const API_URL = window.TAURO_API_URL || "";
 
 const DESTINOS = [
   { value: "US", label: "Estados Unidos" },
@@ -422,6 +425,12 @@ function SelectField({ label, value, onChange, options }) {
    se muestra igual con su logo) · "sin_tarifa" (sin cobertura en la ruta). */
 function CarrierCard({ carrier, recomendado }) {
   const cotizado = carrier.estado === "cotizado";
+  const logoSize = {
+    fedex: { width: 66, height: 28 },
+    ups: { width: 32, height: 34 },
+    dhl: { width: 68, height: 34 },
+  }[carrier.id] || { width: 66, height: 32 };
+
   return (
     <div className={`tweb-carrier${recomendado ? " tweb-neon-ring" : ""}`} style={{
       display: "flex", alignItems: "center", gap: 14,
@@ -430,7 +439,7 @@ function CarrierCard({ carrier, recomendado }) {
       border: `1px solid ${recomendado ? "var(--accent)" : "var(--line-soft)"}`,
       // el glow de la recomendada lo pone .tweb-neon-ring (neón respirando)
       borderRadius: 12,
-      opacity: cotizado ? 1 : 0.72,
+      opacity: 1,
       position: "relative",
     }}>
       {recomendado && (
@@ -446,13 +455,19 @@ function CarrierCard({ carrier, recomendado }) {
       )}
 
       <div style={{
-        width: 74, height: 40, flexShrink: 0,
+        width: 82, height: 44, flexShrink: 0,
         background: "#fff", borderRadius: 8,
         display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "5px 8px", boxSizing: "border-box",
+        padding: "5px 7px", boxSizing: "border-box",
+        boxShadow: "inset 0 0 0 1px rgba(0,0,0,.06)",
       }}>
         <img src={carrier.logo} alt={carrier.nombre}
-             style={{ maxWidth: "100%", maxHeight: "100%", display: "block" }} />
+             style={{
+               width: logoSize.width,
+               height: logoSize.height,
+               objectFit: "contain",
+               display: "block",
+             }} />
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>

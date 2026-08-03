@@ -229,9 +229,14 @@ def json_dumps_pretty(value: dict) -> str:
 
 # ── Login ───────────────────────────────────────────────────
 
+def _totp_secret() -> str:
+    """Segundo factor del admin. Vacío = apagado (login sólo con contraseña)."""
+    return os.getenv("ADMIN_TOTP_SECRET", "").strip()
+
+
 @router.get("/login", response_class=HTMLResponse)
 def admin_login_form(request: Request, error: Optional[str] = None):
-    ctx = {}
+    ctx = {"totp_activo": bool(_totp_secret())}
     if error == "link_vencido":
         ctx["error"] = "Ese link ya se usó o venció. Pedí uno nuevo."
     return templates.TemplateResponse(
@@ -240,19 +245,38 @@ def admin_login_form(request: Request, error: Optional[str] = None):
 
 
 @router.post("/login", response_class=HTMLResponse)
-def admin_login(request: Request, password: str = Form(...)):
+def admin_login(request: Request, password: str = Form(...),
+                codigo: str = Form(default="")):
     ip = client_ip(request)
+    totp_activo = bool(_totp_secret())
     if not check_rate(f"admin_login:{ip}", max_attempts=5, window_seconds=300):
         return templates.TemplateResponse(
             request=request, name="admin/login.html",
-            context={"error": "Demasiados intentos. Esperá unos minutos e intentá de nuevo."},
+            context={"error": "Demasiados intentos. Esperá unos minutos e intentá de nuevo.",
+                     "totp_activo": totp_activo},
             status_code=429,
         )
     # Comparación de tiempo constante para no filtrar la contraseña por timing.
-    if not secrets.compare_digest(password, ADMIN_PASSWORD):
+    password_ok = secrets.compare_digest(password, ADMIN_PASSWORD)
+
+    # Segundo factor (si ADMIN_TOTP_SECRET está cargada). El código se CONSUME
+    # (anti-replay) sólo si la contraseña ya es correcta: así un atacante no
+    # puede 'quemar' el código del dueño mandándolo con una contraseña basura.
+    # El error es UNO solo: no se revela cuál de los dos factores falló.
+    totp_ok = True
+    if totp_activo:
+        if password_ok:
+            from servicios.totp import verificar_codigo
+            totp_ok = verificar_codigo(_totp_secret(), codigo)
+        else:
+            totp_ok = False
+
+    if not (password_ok and totp_ok):
         return templates.TemplateResponse(
             request=request, name="admin/login.html",
-            context={"error": "Contraseña incorrecta."},
+            context={"error": "Contraseña o código incorrecto." if totp_activo
+                     else "Contraseña incorrecta.",
+                     "totp_activo": totp_activo},
             status_code=401,
         )
     reset_rate(f"admin_login:{ip}")
@@ -687,6 +711,32 @@ def admin_cliente_set_password(
     set_cliente_password(cliente_id, new_password)
     return RedirectResponse(
         url=f"/admin/clientes/{cliente_id}?ok=pwd_actualizada", status_code=303,
+    )
+
+
+@router.post("/clientes/{cliente_id}/api-key", response_class=HTMLResponse)
+def admin_cliente_regenerar_api_key(
+    request: Request,
+    cliente_id: str,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """
+    Genera (o rota) la API key B2B del cliente. La clave se muestra UNA sola
+    vez acá — en la base queda sólo el hash, así que no hay forma de volver
+    a verla: si se pierde, se regenera. A propósito NO redirige: un redirect
+    obligaría a pasar la clave por la URL y quedaría en los access logs.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.api_b2b import generar_api_key
+    cliente_id = cliente_id.strip().upper()
+    try:
+        clave = generar_api_key(cliente_id)
+    except ValueError:
+        return RedirectResponse(url="/admin/clientes", status_code=303)
+    return templates.TemplateResponse(
+        request=request, name="admin/api_key_creada.html",
+        context={"cliente_id": cliente_id, "clave": clave},
     )
 
 

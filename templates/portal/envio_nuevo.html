@@ -282,7 +282,7 @@
     </div>
 </form>
 
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   const savedSelect = document.getElementById("destinatario_id");
   const fieldMap = {
     nombre: "dest_nombre",

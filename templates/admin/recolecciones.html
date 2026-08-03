@@ -42,7 +42,7 @@
           <td class="mono" style="font-size:11px;">{{ r.confirmation_code or '—' }}</td>
           <td>
             <form method="POST" action="/admin/recolecciones/{{ r.id }}/cancelar"
-                  onsubmit="return confirm('¿Cancelar la recolección de {{ r.cliente_id }} del {{ r.fecha.strftime('%d/%m') if r.fecha else '' }}?');">
+                  data-confirm="¿Cancelar la recolección de {{ r.cliente_id }} del {{ r.fecha.strftime('%d/%m') if r.fecha else '' }}?">
               <button type="submit" class="btn btn-ghost btn-sm">Cancelar</button>
             </form>
           </td>

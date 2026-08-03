@@ -41,16 +41,16 @@
           </td>
           {% set monto_fmt = "{:,.0f}".format(p.monto_ars).replace(",", ".") %}
           <td style="white-space:nowrap;">
-            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;">
+            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;"
+                  data-confirm="¿Aprobar el pago de {{ p.cliente_id }} por $ {{ monto_fmt }}? Entra al saldo al instante.">
               <input type="hidden" name="decision" value="aprobar">
-              <button type="submit" class="btn btn-primary btn-sm"
-                      onclick="return confirm('¿Aprobar el pago de {{ p.cliente_id }} por $ {{ monto_fmt }}? Entra al saldo al instante.')">
+              <button type="submit" class="btn btn-primary btn-sm">
                 Aprobar</button>
             </form>
-            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;">
+            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;"
+                  data-confirm="¿Rechazar este pago? No cuenta para el saldo; el registro queda.">
               <input type="hidden" name="decision" value="rechazar">
-              <button type="submit" class="btn btn-ghost btn-sm"
-                      onclick="return confirm('¿Rechazar este pago? No cuenta para el saldo; el registro queda.')">
+              <button type="submit" class="btn btn-ghost btn-sm">
                 Rechazar</button>
             </form>
           </td>

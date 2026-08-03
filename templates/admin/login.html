@@ -35,6 +35,13 @@
           </button>
         </div>
       </div>
+      {% if totp_activo %}
+      <div class="form-group">
+        <label>Código del autenticador</label>
+        <input type="text" name="codigo" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]{6}" maxlength="6" required placeholder="6 dígitos">
+      </div>
+      {% endif %}
       <button type="submit" class="btn btn-primary btn-full">Entrar</button>
     </form>
 
@@ -71,7 +78,7 @@
     </details>
   </div>
 </div>
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   // Ojito mostrar/ocultar contraseña (mismo patrón que el login del portal)
   var toggle = document.getElementById("toggle-pass");
   if (toggle) {

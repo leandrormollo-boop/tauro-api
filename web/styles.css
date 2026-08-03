@@ -774,3 +774,14 @@ button:active, .btn:active, a[class*="btn"]:active, [role="button"]:active,
   letter-spacing: -.01em;
   white-space: nowrap;
 }
+
+/* ── Movidas desde el <style> inline del HTML (03/08/2026) ──
+   El head quedó sin CSS inline para poder servir la página con una
+   Content-Security-Policy estricta. Si editás esto, bumpeá ?v= en el HTML. */
+@keyframes spin { to { transform: rotate(360deg); } }
+html { scroll-behavior: smooth; }
+::selection { background: var(--accent); color: #fff; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-4); }
