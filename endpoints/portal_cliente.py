@@ -1414,14 +1414,22 @@ def tienda_view(
     if base_url.startswith("http://") and "localhost" not in base_url and "127.0.0.1" not in base_url:
         base_url = "https://" + base_url[len("http://"):]
     tiendas = [t for t in listar_tiendas(cliente) if t["activa"]]
-    # Tiendas que instalaron la app pero quedaron sin dueño (p. ej. porque
-    # el comerciante instaló sin la sesión del portal abierta).
+    # Tiendas sin dueño: SÓLO las que este cliente puede probar que son
+    # suyas. Antes se listaban TODAS a TODOS — un cliente veía el dominio
+    # myshopify de otro comercio y podía reclamarlo. Ahora se filtra contra
+    # la verificación real (mail de la cuenta Shopify = mail del cliente),
+    # así que la lista queda vacía salvo para su verdadero dueño.
+    huerfanas = []
     try:
-        from servicios.shopify_app import instalaciones_sin_dueno
-        huerfanas = instalaciones_sin_dueno()
+        from servicios.shopify_app import es_dueno_de_la_tienda, instalaciones_sin_dueno
+        for h in instalaciones_sin_dueno():
+            try:
+                if es_dueno_de_la_tienda(h["dominio"], cliente):
+                    huerfanas.append(h)
+            except Exception as e:
+                print(f"[portal] no pude verificar {h.get('dominio')}: {e}")
     except Exception as e:
         print(f"[portal] no pude listar instalaciones sin dueño: {e}")
-        huerfanas = []
     # La política de flete se configura por tienda; hoy mostramos la de la
     # primera (el caso normal es una tienda por cuenta).
     dominio_cfg = tiendas[0]["dominio"] if tiendas else ""
@@ -1447,14 +1455,36 @@ def tienda_reclamar(
     dominio: str = Form(...),
     cliente: str = Depends(cliente_actual),
 ):
-    """El comerciante dice 'esta tienda instalada es mía' y la ata a su cuenta."""
-    from servicios.shopify_app import instalaciones_sin_dueno, vincular_cliente
+    """
+    El comerciante dice "esta tienda es mía" — y ahora hay que probarlo.
+
+    AGUJERO CERRADO (03/08): esto sólo verificaba que el dominio estuviera
+    en la lista de tiendas sin vincular, lista que además se le mostraba a
+    TODOS los clientes. Cualquiera podía reclamar la tienda de otro y
+    quedarse con sus ventas y con los datos personales de sus compradores.
+    Ahora se le pregunta a la propia tienda Shopify quién es su dueño.
+    """
+    from servicios.shopify_app import (
+        es_dueno_de_la_tienda, instalaciones_sin_dueno, vincular_cliente,
+    )
+
     dominio = dominio.strip().lower()
     if dominio not in {h["dominio"] for h in instalaciones_sin_dueno()}:
         return RedirectResponse(
             url="/portal/tienda?error=Esa+tienda+ya+esta+vinculada+a+una+cuenta.",
             status_code=303,
         )
+
+    if not es_dueno_de_la_tienda(dominio, cliente):
+        print(f"[portal] {cliente} intentó reclamar {dominio} sin ser el dueño")
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "No pudimos verificar que esa tienda sea tuya. El mail de tu "
+                "cuenta Shopify tiene que ser el mismo que el de tu cuenta "
+                "TAURO. Si no coincide, escribinos y la vinculamos nosotros."),
+            status_code=303,
+        )
+
     vincular_cliente(dominio, cliente)
     return RedirectResponse(url="/portal/tienda?ok=conectada", status_code=303)
 

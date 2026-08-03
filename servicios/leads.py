@@ -51,6 +51,28 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
     if not _EMAIL_RE.match(email):
         return {"ok": False, "error": "Ese email no parece válido."}
 
+    # UN MAIL POR DIRECCIÓN Y POR DÍA. El rate limit por IP no alcanza:
+    # desde IPs rotativas esto es una primitiva para mandarle mails con
+    # nuestro remitente a cualquier persona — la víctima recibe correo de
+    # TAURO que nunca pidió y nuestro dominio se gana la reputación de spam.
+    # Un visitante real pide su cotización una vez.
+    _ensure_tabla()
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT 1 FROM leads_cotizacion
+                    WHERE email = %s AND created_at > NOW() - INTERVAL '24 hours'
+                    LIMIT 1
+                """, (email,))
+                if cur.fetchone():
+                    # No se le avisa al que abusa que el tope existe, y el
+                    # visitante honesto que reintenta ve un mensaje sensato.
+                    print(f"[leads] {email} ya pidió una cotización hoy: no se reenvía")
+                    return {"ok": True}
+    except Exception as e:
+        print(f"[leads] no pude chequear el tope diario de {email}: {e}")
+
     destino = (destino or "")[:4].upper()
     limpios = []
     for c in (carriers or [])[:5]:

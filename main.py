@@ -361,11 +361,27 @@ def partners_activos():
 
 
 @app.post("/cotizar-web", tags=["public"])
-def cotizar_web(body: CotizarWebRequest):
+def cotizar_web(body: CotizarWebRequest, request: Request):
     """
     Cotización pública para taurosolutions.ar — sin auth.
     Llama directo a FedEx y aplica el markup web de Tauro.
+
+    RATE LIMIT (03/08): cada request cotiza EN VIVO contra los couriers —
+    tarda segundos, ocupa un hilo del pool y consume cuota real. Sin límite,
+    cualquiera abría 40 conexiones en paralelo y dejaba sin hilos al portal,
+    al admin y a los webhooks: el sitio caído, gratis y desde el anonimato.
+    El tope es generoso a propósito: comparar 4-5 destinos es uso normal.
     """
+    from servicios.rate_limit import check_rate, client_ip
+
+    if not check_rate(f"cotweb:{client_ip(request)}", max_attempts=30,
+                      window_seconds=300):
+        return JSONResponse(
+            {"status": "error",
+             "detail": "Estás cotizando muy seguido. Esperá un minuto y "
+                       "volvé a probar."},
+            status_code=429,
+        )
     DESTINOS = {
         "US": {"city": "MIAMI",      "state": "FL", "postal_code": "33101"},
         "BR": {"city": "SAO PAULO",  "state": "SP", "postal_code": "01310100"},

@@ -181,6 +181,61 @@ def instalacion(dominio: str) -> Optional[dict]:
             return dict(row) if row else None
 
 
+def es_dueno_de_la_tienda(dominio: str, cliente_id: str) -> bool:
+    """
+    ¿El cliente TAURO es realmente el dueño de esa tienda Shopify?
+
+    Se pregunta a la propia tienda con el access_token que nos dio al
+    instalar: si el email de la cuenta Shopify coincide con el email del
+    cliente en TAURO, es suyo. Es la única prueba de propiedad que no
+    depende de que el que reclama diga la verdad.
+
+    Existe porque el auto-servicio "es mi tienda" no verificaba NADA: con la
+    lista de tiendas sin vincular a la vista, cualquier cliente podía
+    reclamar la tienda de otro y quedarse con sus ventas — y con los datos
+    personales de los compradores.
+    """
+    dominio = (dominio or "").strip().lower()
+    cliente_id = (cliente_id or "").strip().upper()
+    if not dominio or not cliente_id:
+        return False
+
+    inst = instalacion(dominio)
+    if not inst or not inst.get("access_token"):
+        return False
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT email FROM clientes WHERE cliente_id = %s",
+                            (cliente_id,))
+                fila = cur.fetchone()
+        email_cliente = str((fila or {}).get("email") or "").strip().lower()
+    except Exception as e:
+        print(f"[shopify] no pude leer el email de {cliente_id}: {e}")
+        return False
+    if not email_cliente:
+        return False
+
+    r = _api(dominio, inst["access_token"], "GET", "shop.json")
+    if r is None or r.status_code != 200:
+        print(f"[shopify] no pude verificar la propiedad de {dominio} "
+              f"(shop.json no respondió)")
+        return False
+    try:
+        shop = r.json().get("shop") or {}
+    except Exception:
+        return False
+
+    # Shopify expone el mail de la cuenta y el de contacto: vale cualquiera.
+    posibles = {str(shop.get(k) or "").strip().lower()
+                for k in ("email", "customer_email")}
+    coincide = email_cliente in posibles
+    print(f"[shopify] verificación de propiedad {dominio} ↔ {cliente_id}: "
+          f"{'OK' if coincide else 'NO COINCIDE'}")
+    return coincide
+
+
 def vincular_cliente(dominio: str, cliente_id: str) -> None:
     """
     Ata la tienda instalada a la cuenta TAURO del comerciante.

@@ -414,8 +414,11 @@ async def gdpr_data_request(request: Request):
     cuerpo = await request.body()
     if not _firma_valida_app(cuerpo, request.headers.get("x-shopify-hmac-sha256", "")):
         return JSONResponse({"ok": False}, status_code=401)
-    print(f"[gdpr] data_request de {request.headers.get('x-shopify-shop-domain', '?')}: "
-          f"{cuerpo[:400]!r}")
+    # El cuerpo trae mail y teléfono del comprador: NO va al log. Un pedido
+    # de privacidad no puede terminar copiando esos datos a otro lado —
+    # sería exactamente lo contrario de lo que el comprador pidió.
+    print(f"[gdpr] data_request de {request.headers.get('x-shopify-shop-domain', '?')} "
+          f"({len(cuerpo)} bytes)")
     return {"ok": True}
 
 
