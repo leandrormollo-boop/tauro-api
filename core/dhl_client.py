@@ -26,6 +26,9 @@ TZ_AR = timezone(timedelta(hours=-3))
 
 class DHLClient(CarrierBase):
 
+    # POST /rates acepta la lista de bultos, cada uno con su peso y medidas.
+    MULTIBULTO = True
+
     SANDBOX_URL = "https://express.api.dhl.com/mydhlapi/test"
     PROD_URL    = "https://express.api.dhl.com/mydhlapi"
 
@@ -82,7 +85,151 @@ class DHLClient(CarrierBase):
         # Todo lo demás (incluido AR→AR) va por la de exportación.
         return self.account_number, None
 
-    def get_rates(self, origen: dict, destino: dict, paquete: dict) -> dict:
+    def _parsear_rates(self, data: dict) -> dict:
+        """
+        Lee la respuesta de /rates. GET y POST devuelven el MISMO schema, así
+        que el parseo es uno solo.
+        """
+        productos = data.get("products", [])
+        if not productos:
+            return {"encontrado": False, "error": "Sin tarifas en respuesta DHL"}
+
+        # Elegir el producto POR CÓDIGO, nunca el primero de la lista: DHL
+        # devuelve varios (Worldwide, 12:00, 9:00) sin garantizar el orden.
+        # Se descartan los isCustomerAgreement, que necesitan acuerdo previo.
+        estandar = [p for p in productos if not p.get("isCustomerAgreement")]
+        prod = next(
+            (p for p in estandar if p.get("productCode") == self.product_code),
+            None,
+        )
+        if prod is None:
+            disponibles = [p.get("productCode") for p in estandar]
+            return {"encontrado": False,
+                    "error": f"DHL no ofrece {self.product_code} en esa ruta "
+                             f"(disponibles: {disponibles})"}
+
+        precios = prod.get("totalPrice", [])
+        if not precios:
+            return {"encontrado": False, "error": "Producto DHL sin precio"}
+
+        return {
+            "encontrado": True,
+            "costo": float(precios[0].get("price", 0)),
+            "moneda": precios[0].get("priceCurrency", "USD"),
+            "servicio": prod.get("productName", "DHL Express Worldwide"),
+            "dias_estimados": str(
+                prod.get("deliveryCapabilities", {}).get("totalTransitDays", "2-4")
+            ),
+        }
+
+    def _fecha_envio(self) -> str:
+        """
+        plannedShippingDateAndTime para el POST: YYYY-MM-DDTHH:MM:SSGMT-03:00.
+
+        SIN espacio antes de GMT. La spec se contradice consigo misma —los
+        ejemplos de /rates van sin espacio, los mensajes de error de la misma
+        spec lo muestran con espacio— así que se arranca con la forma del
+        ejemplo de /rates, que es el endpoint que estamos llamando. Si DHL
+        devuelve "not well formatted", probar con espacio antes de GMT.
+        """
+        d = datetime.now(TZ_AR) + timedelta(days=1)
+        return d.strftime("%Y-%m-%dT13:00:00GMT-03:00")
+
+    @staticmethod
+    def _direccion(d: dict, por_defecto_ciudad: str = "") -> dict:
+        """
+        Bloque de dirección del POST. `cityName` tiene minLength 1: mandarlo
+        vacío —como hacía el camino del GET con destino.get("city", "")— es
+        un rechazo garantizado. Y los objetos van con additionalProperties
+        false, así que sólo pueden ir estas claves.
+        """
+        ciudad = (d.get("city") or por_defecto_ciudad or "").strip()
+        bloque = {
+            "postalCode": (d.get("postal_code") or "").strip(),
+            "cityName": ciudad,
+            "countryCode": (d.get("country") or "").strip().upper(),
+        }
+        if d.get("state"):
+            bloque["provinceCode"] = str(d["state"]).strip()
+        return bloque
+
+    def get_rates_multibulto(self, origen: dict, destino: dict, paquetes: list) -> dict:
+        """
+        POST /rates — cotiza N cajas DISTINTAS en un mismo envío.
+
+        Cada caja va como un elemento de `packages` con SU peso y SUS medidas:
+        no hay campo de cantidad, tres cajas iguales son tres elementos. Es
+        justamente el punto — cada una paga por su propio peso volumétrico, y
+        sumarlas cotizaría de menos.
+
+        Devuelve el MISMO contrato que get_rates(): la respuesta del POST usa
+        el mismo schema que el GET, así que el parseo se comparte.
+        """
+        if not self.api_key or not self.api_secret:
+            return {"encontrado": False, "error": "Credenciales DHL no configuradas"}
+        if not paquetes:
+            return {"encontrado": False, "error": "Sin bultos para cotizar"}
+
+        cuenta, error_cuenta = self._cuenta_para(origen, destino)
+        if error_cuenta:
+            print(f"[dhl] {error_cuenta}")
+            return {"encontrado": False, "error": error_cuenta}
+
+        ciudad_destino = (destino.get("city") or "").strip()
+        if not ciudad_destino:
+            # minLength 1: sin ciudad el POST vuelve 400. Mejor decirlo.
+            return {"encontrado": False,
+                    "error": "DHL necesita la ciudad de destino para cotizar"}
+
+        msg_ref = str(uuid.uuid4())
+        cuerpo = {
+            "customerDetails": {
+                "shipperDetails": self._direccion(origen, "BUENOS AIRES"),
+                "receiverDetails": self._direccion(destino),
+            },
+            "accounts": [{"typeCode": "shipper", "number": str(cuenta)}],
+            "plannedShippingDateAndTime": self._fecha_envio(),
+            "unitOfMeasurement": "metric",
+            # boolean de verdad: en el GET viajaba como el string "true".
+            "isCustomsDeclarable": True,
+            "packages": [
+                {
+                    "weight": round(float(p.get("peso_kg") or 0.5), 3),
+                    "dimensions": {
+                        # Las tres son obligatorias si mandás dimensions.
+                        "length": round(float(p.get("largo_cm") or p.get("largo") or 30), 3),
+                        "width": round(float(p.get("ancho_cm") or p.get("ancho") or 20), 3),
+                        "height": round(float(p.get("alto_cm") or p.get("alto") or 10), 3),
+                    },
+                }
+                for p in paquetes
+            ],
+        }
+
+        try:
+            resp = requests.post(
+                f"{self.base_url}/rates",
+                json=cuerpo,
+                auth=(self.api_key, self.api_secret),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "x-version": self.API_VERSION,
+                    "Message-Reference": msg_ref,
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                print(f"[dhl] POST /rates error {resp.status_code} (ref {msg_ref}): "
+                      f"{resp.text[:300]}")
+                return {"encontrado": False, "error": resp.text}
+            return self._parsear_rates(resp.json())
+        except Exception as e:
+            print(f"[dhl] Excepción en get_rates_multibulto (ref {msg_ref}): {e}")
+            return {"encontrado": False, "error": str(e)}
+
+    def get_rates(self, origen: dict, destino: dict, paquete: dict = None,
+                  paquetes: list = None) -> dict:
         """
         Consulta tarifas DHL Express Worldwide.
 
@@ -95,6 +242,12 @@ class DHLClient(CarrierBase):
             "dias_estimados": str,
         }
         """
+        # Varias cajas → POST /rates, que es el único que las acepta.
+        if paquetes is not None and len(paquetes) > 1:
+            return self.get_rates_multibulto(origen, destino, paquetes)
+        if paquetes:
+            paquete = paquetes[0]
+
         if not self.api_key or not self.api_secret:
             return {"encontrado": False, "error": "Credenciales DHL no configuradas"}
 
@@ -160,49 +313,7 @@ class DHLClient(CarrierBase):
                 print(f"[dhl] get_rates error {resp.status_code} (ref {msg_ref}): {resp.text[:300]}")
                 return {"encontrado": False, "error": resp.text}
 
-            data = resp.json()
-            productos = data.get("products", [])
-            if not productos:
-                return {"encontrado": False, "error": "Sin tarifas en respuesta DHL"}
-
-            # Elegir el producto POR CÓDIGO, nunca el primero de la lista.
-            # GET /rates devuelve varios (Express Worldwide, 12:00, 9:00…) y no
-            # garantiza el orden: agarrar el [0] podía cotizar un premium y
-            # perder la venta, o —peor— cotizar uno más barato y despachar
-            # después como Worldwide, con la factura de DHL más alta que lo
-            # que ya le cobramos al cliente.
-            # Se descartan los isCustomerAgreement: DHL sólo los da con un
-            # acuerdo previo y no son los que vendemos.
-            estandar = [p for p in productos if not p.get("isCustomerAgreement")]
-            prod = next(
-                (p for p in estandar if p.get("productCode") == self.product_code),
-                None,
-            )
-            if prod is None:
-                disponibles = [p.get("productCode") for p in estandar]
-                return {
-                    "encontrado": False,
-                    "error": (
-                        f"DHL no ofrece {self.product_code} en esa ruta "
-                        f"(disponibles: {disponibles})"
-                    ),
-                }
-
-            precios = prod.get("totalPrice", [])
-            if not precios:
-                return {"encontrado": False, "error": "Producto DHL sin precio"}
-
-            costo  = float(precios[0].get("price", 0))
-            moneda = precios[0].get("priceCurrency", "USD")
-            dias   = str(prod.get("deliveryCapabilities", {}).get("totalTransitDays", "2-4"))
-
-            return {
-                "encontrado": True,
-                "costo": costo,
-                "moneda": moneda,
-                "servicio": prod.get("productName", "DHL Express Worldwide"),
-                "dias_estimados": dias,
-            }
+            return self._parsear_rates(resp.json())
 
         except Exception as e:
             print(f"[dhl] Excepción en get_rates: {e}")

@@ -203,3 +203,97 @@ def test_un_error_de_dhl_no_lanza_excepcion():
         out = _cliente().get_rates(ORIGEN, DESTINO, PAQUETE)
     assert not out["encontrado"]
     assert "Bad request" in out["error"]
+
+
+# ── Multi-bulto: POST /rates ─────────────────────────────────
+
+BULTOS = [
+    {"peso_kg": 1.4, "largo_cm": 33, "ancho_cm": 33, "alto_cm": 22},
+    {"peso_kg": 3.0, "largo_cm": 40, "ancho_cm": 30, "alto_cm": 20},
+]
+
+
+def _post(origen=None, destino=None, bultos=None, env=None):
+    base = {"DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+            "DHL_ACCOUNT_NUMBER_EXPO": "741622792",
+            "DHL_ACCOUNT_NUMBER_IMPO": "730089966"}
+    base.update(env or {})
+    resp = mock.Mock(status_code=200)
+    resp.json.return_value = {"products": [_producto("P", 240.0)]}
+    with mock.patch.dict(os.environ, base, clear=True), \
+         mock.patch("core.dhl_client.requests.post", return_value=resp) as post:
+        out = DHLClient().get_rates(
+            origen or ORIGEN, destino or DESTINO, paquetes=bultos or BULTOS)
+    return out, (post.call_args.kwargs if post.called else None)
+
+
+def test_varias_cajas_van_por_post_con_una_entrada_cada_una():
+    """
+    Sin campo de cantidad: 2 cajas son 2 elementos. Cada una con SUS medidas,
+    porque cada una paga su propio peso volumétrico.
+    """
+    out, kw = _post()
+    assert out["encontrado"]
+    pk = kw["json"]["packages"]
+    assert len(pk) == 2
+    assert pk[0]["weight"] == 1.4
+    assert pk[0]["dimensions"] == {"length": 33.0, "width": 33.0, "height": 22.0}
+    assert pk[1]["dimensions"]["length"] == 40.0
+
+
+def test_la_cuenta_va_en_accounts_no_en_la_raiz():
+    """
+    En el GET era un query param suelto; en el POST es un array. Y la raíz
+    tiene additionalProperties:false, así que un `accountNumber` de más es
+    rechazo directo.
+    """
+    _, kw = _post()
+    body = kw["json"]
+    assert body["accounts"] == [{"typeCode": "shipper", "number": "741622792"}]
+    assert "accountNumber" not in body
+
+
+def test_una_importacion_multibulto_usa_la_cuenta_de_impo():
+    _, kw = _post(origen=DESTINO, destino={**ORIGEN, "country": "AR"})
+    assert kw["json"]["accounts"][0]["number"] == "730089966"
+
+
+def test_isCustomsDeclarable_es_booleano_no_string():
+    """En el querystring del GET viajaba como el string "true"."""
+    _, kw = _post()
+    assert kw["json"]["isCustomsDeclarable"] is True
+
+
+def test_la_fecha_lleva_hora_y_no_espacio_antes_de_GMT():
+    _, kw = _post()
+    f = kw["json"]["plannedShippingDateAndTime"]
+    assert " GMT" not in f, f"la spec de /rates lo ejemplifica sin espacio: {f}"
+    assert f.endswith("GMT-03:00")
+    assert len(f) <= 29, "maxLength 29"
+
+
+def test_manda_el_header_de_version_en_el_post():
+    _, kw = _post()
+    assert kw["headers"]["x-version"] == DHLClient.API_VERSION
+
+
+def test_sin_ciudad_de_destino_ni_llama():
+    """cityName tiene minLength 1: mandarlo vacío es un 400 garantizado."""
+    out, kw = _post(destino={"country": "US", "postal_code": "33101", "city": ""})
+    assert not out["encontrado"]
+    assert kw is None, "no tendría que haber llamado a DHL"
+    assert "ciudad" in out["error"].lower()
+
+
+def test_una_sola_caja_sigue_yendo_por_el_GET():
+    """El camino probado en producción no se toca."""
+    resp = mock.Mock(status_code=200)
+    resp.json.return_value = {"products": [_producto("P", 120.0)]}
+    with mock.patch.dict(os.environ, {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_EXPO": "741622792"}, clear=True), \
+         mock.patch("core.dhl_client.requests.get", return_value=resp) as get, \
+         mock.patch("core.dhl_client.requests.post") as post:
+        out = DHLClient().get_rates(ORIGEN, DESTINO, paquetes=[BULTOS[0]])
+    assert out["encontrado"]
+    assert get.called and not post.called
