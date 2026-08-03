@@ -50,3 +50,27 @@ def incoterm(tax_paga: str) -> str:
 def paga_el_remitente(tax_paga: str) -> bool:
     """Para el bloque dutiesPayment de FedEx y valueAddedServices de DHL."""
     return normalizar(tax_paga) == CLIENTE
+
+
+def tax_paga_cliente(cliente_id: str) -> str:
+    """
+    El default que el cliente dejó configurado en su ficha.
+
+    Ante cualquier problema devuelve DESTINATARIO, que es la opción que no
+    expone plata de TAURO: si no podemos leer la preferencia, no asumimos
+    que el cliente quiso hacerse cargo.
+    """
+    from core.database import get_conn
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT tax_paga FROM clientes WHERE cliente_id = %s",
+                    ((cliente_id or "").strip().upper(),),
+                )
+                fila = cur.fetchone()
+        return normalizar(fila["tax_paga"] if fila else None)
+    except Exception as e:
+        print(f"[impuestos] no pude leer el default de {cliente_id}: {e}")
+        return DEFAULT

@@ -78,6 +78,9 @@ def crear_solicitud_guia(
     bultos: Optional[list] = None,
     courier: str = "FEDEX",
     servicio_courier: Optional[str] = None,
+    # Quién paga los impuestos de destino EN ESTE envío (DESTINATARIO |
+    # CLIENTE). Define el incoterm de la guía, por eso se congela acá.
+    tax_paga: Optional[str] = None,
 ) -> dict:
     """Crea una solicitud de guía pendiente para gestión operativa.
 
@@ -102,7 +105,7 @@ def crear_solicitud_guia(
                     observaciones, peso_kg, largo_cm, ancho_cm, alto_cm,
                     valor_declarado_usd, ruta_id, coti_id, precio_tauro_ars,
                     precio_tauro_usd, precio_cliente_final_ars, bultos,
-                    courier, servicio_courier
+                    courier, servicio_courier, tax_paga
                 )
                 VALUES (
                     %s, %s, %s, %s,
@@ -112,7 +115,7 @@ def crear_solicitud_guia(
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s
+                    %s, %s, %s
                 )
                 RETURNING *
                 """,
@@ -153,6 +156,7 @@ def crear_solicitud_guia(
                     json.dumps(bultos) if bultos else None,
                     (courier or "FEDEX").strip().upper(),
                     _clean(servicio_courier),
+                    _clean(tax_paga),
                 ),
             )
             return dict(cur.fetchone())
@@ -923,6 +927,10 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
             "valor_unitario_usd": round(valor_total_sol / cantidad_sol, 2),
             "pais_origen": "AR",
         }
+
+    # Quién paga los impuestos en ESTE envío: se decidió al crearlo y se
+    # congeló ahí. Sin esto FedEx vuelve al SENDER fijo con la cuenta de TAURO.
+    datos_envio["tax_paga"] = sol.get("tax_paga")
 
     from core.fedex_client import FedExClient
     try:

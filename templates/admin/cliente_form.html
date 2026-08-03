@@ -163,6 +163,28 @@
       </div>
     </div>
 
+    {# Impuestos de destino: lo elige el cliente y lo deja predefinido acá.
+       Prete Rosso los paga siempre, así que no lo tilda envío por envío.
+       Se puede pisar por envío desde el wizard del portal. #}
+    <div class="form-group">
+      <label>Impuestos de destino — quién los paga por defecto</label>
+      <select name="tax_paga">
+        <option value="DESTINATARIO"
+                {% if not cliente or cliente.tax_paga != 'CLIENTE' %}selected{% endif %}>
+          Los paga quien recibe el paquete
+        </option>
+        <option value="CLIENTE"
+                {% if cliente and cliente.tax_paga == 'CLIENTE' %}selected{% endif %}>
+          Los paga {{ (cliente.nombre if cliente and cliente.nombre else cliente.cliente_id) if cliente else "el cliente" }} — se los facturamos
+        </option>
+      </select>
+      <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
+        Con "los paga quien recibe", el destinatario abona los aranceles en la puerta.
+        Con la otra opción los adelanta Tauro y se le suman a la cuenta corriente del cliente.
+        Ojo con Estados Unidos: se eliminó la franquicia de USD 800 y hoy toda caja paga arancel.
+      </p>
+    </div>
+
     <div class="form-group">
       <label>Notas internas</label>
       <textarea name="notas" rows="2" placeholder="Observaciones...">{{ cliente.notas if cliente else '' }}</textarea>

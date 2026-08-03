@@ -48,6 +48,7 @@ from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
 )
+from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
 from servicios.pricing import parse_monto_ars
 from servicios.panel_cliente import checklist_arranque, embudo_envios
 from servicios.integraciones_tienda import (
@@ -943,6 +944,9 @@ def envio_nuevo_form(
             "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
             "form": form,
             "pedido_tienda": pedido_info,
+            # Arranca con lo que el cliente dejó configurado en su ficha; el
+            # selector del wizard sólo sirve para pisarlo en este envío.
+            "tax_paga_default": tax_paga_cliente(cliente),
             "error": None,
         },
     )
@@ -962,6 +966,9 @@ def envio_nuevo_post(
     cantidad: int = Form(1),
     # Internacional: courier elegido en el comparador en vivo (fedex/dhl/ups).
     intl_courier: str = Form(""),
+    # Quién paga los impuestos de destino EN ESTE envío. Viene con el default
+    # del cliente ya seleccionado; acá se guarda lo que quedó elegido.
+    tax_paga: str = Form(""),
     # Nacional: carrier/servicio elegido en el comparador en vivo.
     nac_carrier: str = Form(""),
     nac_servicio: str = Form(""),
@@ -1233,6 +1240,9 @@ def envio_nuevo_post(
             precio_tauro_usd=precio["precio_usd"],
             precio_cliente_final_ars=precio_final,
             bultos=bultos_detalle,
+            # Se guarda POR ENVÍO: si el cliente cambia su default mañana,
+            # los envíos ya despachados no cambian de manos.
+            tax_paga=normalizar_tax(tax_paga, tax_paga_cliente(cliente)),
             **courier_extra,
         )
     except Exception as e:

@@ -66,3 +66,41 @@ def test_fedex_ya_no_tiene_el_pagador_hardcodeado():
     assert '"paymentType": "RECIPIENT"' in fuente, (
         "falta la rama en la que paga el destinatario"
     )
+
+
+def test_la_eleccion_llega_hasta_el_courier_al_emitir():
+    """
+    Cableado de punta a punta: la ficha del cliente y el wizard pueden estar
+    perfectos y el valor perderse en el camino a la guía. Sin esta línea,
+    FedEx vuelve al SENDER fijo con la cuenta de TAURO.
+    """
+    import inspect
+
+    import servicios.solicitudes_guia as sg
+
+    fuente = inspect.getsource(sg.generar_guia_fedex)
+    assert 'datos_envio["tax_paga"] = sol.get("tax_paga")' in fuente
+
+
+def test_la_solicitud_congela_la_eleccion():
+    """
+    Se guarda POR ENVÍO: si el cliente cambia su default mañana, los envíos
+    ya despachados no pueden cambiar de manos.
+    """
+    import inspect
+
+    import servicios.solicitudes_guia as sg
+
+    fuente = inspect.getsource(sg.crear_solicitud_guia)
+    assert "tax_paga" in fuente, "la solicitud no guarda quién paga los impuestos"
+
+
+def test_el_wizard_arranca_con_el_default_del_cliente():
+    import inspect
+
+    import endpoints.portal_cliente as pc
+
+    fuente = inspect.getsource(pc.envio_nuevo_form)
+    assert "tax_paga_cliente" in fuente, (
+        "el wizard no precarga lo que el cliente dejó configurado"
+    )
