@@ -48,6 +48,16 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_valor REAL;
 -- tope (sólo el flag manda).
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS puede_emitir BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tope_deuda_ars REAL;
+-- Quién paga los impuestos de destino (decisión de Leandro 01/08/2026).
+-- El CLIENTE elige, y lo deja predefinido en su cuenta: Prete Rosso los
+-- paga siempre, así que no lo tilda envío por envío. Se puede pisar por
+-- envío desde el wizard.
+--   DESTINATARIO = los abona quien recibe (incoterm DAP)
+--   CLIENTE      = los prepaga TAURO y se los factura al cliente (DDP)
+-- Default DESTINATARIO: es la opción que NO expone plata de TAURO, y hasta
+-- hoy el código mandaba SENDER con la cuenta de TAURO sin que nadie lo
+-- hubiera decidido — o sea que pagábamos los derechos de todos los envíos.
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tax_paga TEXT NOT NULL DEFAULT 'DESTINATARIO';
 -- Password hasheado con bcrypt (login email + password)
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
@@ -275,6 +285,11 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS servicio_courier
 -- con su propio label). Los campos legacy (producto_alias, cantidad,
 -- peso_kg, ...) guardan el primer bulto + totales para retrocompat.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS bultos JSONB;
+-- Quién paga los impuestos de destino EN ESTE ENVÍO. Se copia del default
+-- del cliente al crear la solicitud y puede pisarse desde el wizard. Queda
+-- guardado porque define el incoterm de la guía: si el cliente cambia su
+-- default mañana, los envíos ya despachados no pueden cambiar de manos.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS tax_paga TEXT;
 
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (

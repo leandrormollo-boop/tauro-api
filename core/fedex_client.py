@@ -7,6 +7,8 @@ from datetime import date
 import requests
 from abc import ABC, abstractmethod
 
+from servicios.impuestos import paga_el_remitente
+
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError:
@@ -494,11 +496,24 @@ class FedExClient(CarrierBase):
                     "imageType": "PDF",
                     "labelStockType": "PAPER_4X6",
                 },
+                # ── QUIÉN PAGA LOS IMPUESTOS DE DESTINO ─────────────
+                # Lo elige el CLIENTE (regla de Leandro 01/08/2026), no es
+                # una constante. Hasta hoy esto decía SENDER fijo con la
+                # cuenta de TAURO: pagábamos los derechos de TODOS los
+                # envíos, incluidas importaciones de mercadería ajena. Con
+                # EE.UU. pesa fuerte — se eliminó la franquicia de USD 800
+                # y hoy toda caja paga arancel.
+                #   RECIPIENT = los abona quien recibe (DAP)
+                #   SENDER    = los prepagamos y se los facturamos (DDP)
                 "customsClearanceDetail": {
-                    "dutiesPayment": {
-                        "paymentType": "SENDER",
-                        "payor": {"responsibleParty": {"accountNumber": {"value": self.account_number}}},
-                    },
+                    "dutiesPayment": (
+                        {
+                            "paymentType": "SENDER",
+                            "payor": {"responsibleParty": {"accountNumber": {"value": self.account_number}}},
+                        }
+                        if paga_el_remitente(datos.get("tax_paga"))
+                        else {"paymentType": "RECIPIENT"}
+                    ),
                     "commodities": commodities,
                 },
                 "requestedPackageLineItems": line_items,
