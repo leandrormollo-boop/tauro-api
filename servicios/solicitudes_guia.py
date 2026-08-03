@@ -661,8 +661,10 @@ def generar_guia(solicitud_id: int) -> dict:
 
     if courier == "ENVIA":
         return generar_guia_envia(sol)
-    if courier == "FEDEX":
-        return generar_guia_fedex(solicitud_id)
+    # Registro de couriers internacionales: sumar uno nuevo es agregarlo acá
+    # y darle un cliente con create_shipment del mismo contrato.
+    if courier in ("FEDEX", "DHL"):
+        return generar_guia_internacional(solicitud_id, courier=courier)
 
     # NUNCA caer a FedEx por descarte. Antes esto era un `else` y cualquier
     # courier desconocido —DHL, UPS— se emitía con una etiqueta de FedEx:
@@ -838,7 +840,7 @@ def _liberar_reserva(solicitud_id: int, estado: str = "SOLICITADO") -> None:
         print(f"[guia] no pude liberar la reserva de {solicitud_id}: {e}")
 
 
-def generar_guia_fedex(solicitud_id: int) -> dict:
+def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dict:
     """
     Emite la guía real en FedEx para una solicitud y guarda tracking + label PDF.
     Devuelve {ok, tracking, tiene_label} o {ok: False, error}.
@@ -953,17 +955,28 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
     # congeló ahí. Sin esto FedEx vuelve al SENDER fijo con la cuenta de TAURO.
     datos_envio["tax_paga"] = sol.get("tax_paga")
 
-    from core.fedex_client import FedExClient
+    # El cliente del courier se elige acá: el payload (shipper/recipient/
+    # bultos) es el MISMO contrato para los dos, por eso todo el armado de
+    # arriba se comparte y sumar un courier no duplica esta función.
+    courier = (courier or "FEDEX").upper()
+    if courier == "DHL":
+        from core.dhl_client import DHLClient
+        cliente_courier = DHLClient()
+    else:
+        from core.fedex_client import FedExClient
+        cliente_courier = FedExClient()
+
     try:
-        resultado = FedExClient().create_shipment(datos_envio)
+        resultado = cliente_courier.create_shipment(datos_envio)
     except Exception as e:
         _liberar_reserva(solicitud_id)
-        print(f"[guia] excepción emitiendo la solicitud {solicitud_id}: {e}")
+        print(f"[guia] excepción emitiendo la solicitud {solicitud_id} en {courier}: {e}")
         return {"ok": False, "error": f"No pudimos emitir la guía: {e}"}
 
     if not resultado.get("encontrado"):
         _liberar_reserva(solicitud_id)
-        return {"ok": False, "error": resultado.get("error", "FedEx no emitió la guía.")}
+        return {"ok": False,
+                "error": resultado.get("error", f"{courier} no emitió la guía.")}
 
     # Desde acá el envío YA EXISTE en FedEx. Si el guardado local falla,
     # el tracking no puede perderse: quedaría una guía real que TAURO no
@@ -974,7 +987,7 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
     for intento in (1, 2, 3):
         try:
             guardar_guia_generada(
-                solicitud_id, tracking, resultado.get("label_pdf"), courier="FEDEX",
+                solicitud_id, tracking, resultado.get("label_pdf"), courier=courier,
             )
             guardado = True
             break
@@ -987,9 +1000,9 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
     if not guardado:
         print(f"[guia] ⛔ GUÍA EMITIDA SIN GUARDAR — solicitud {solicitud_id}, "
               f"tracking {tracking}. Cargalo a mano antes de reintentar: el "
-              f"envío YA existe en FedEx.")
+              f"envío YA existe en {courier}.")
         return {"ok": False,
-                "error": f"La guía se emitió en FedEx (tracking {tracking}) pero no "
+                "error": f"La guía se emitió en {courier} (tracking {tracking}) pero no "
                          f"pudimos guardarla. Anotá ese número y avisá a soporte: "
                          f"NO vuelvas a generar la guía o saldría duplicada."}
 
@@ -998,3 +1011,13 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
         "tracking": tracking,
         "tiene_label": bool(resultado.get("label_pdf")),
     }
+
+
+def generar_guia_fedex(solicitud_id: int) -> dict:
+    """Alias histórico: la emisión internacional ahora es multi-courier."""
+    return generar_guia_internacional(solicitud_id, courier="FEDEX")
+
+
+def generar_guia_dhl(solicitud_id: int) -> dict:
+    """Emisión por DHL Express — mismo camino que FedEx, otro cliente."""
+    return generar_guia_internacional(solicitud_id, courier="DHL")

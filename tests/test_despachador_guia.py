@@ -7,8 +7,9 @@ el cliente pagaba precio DHL, recibía una guía FedEx y el link de tracking
 apuntaba al courier equivocado. Nadie se enteraba hasta que el paquete no
 aparecía donde el cliente lo buscaba.
 
-Hoy DHL cotiza pero no emite. Este test es el que impide que, al agregar DHL
-al portal, la emisión se vaya en silencio por el canal que no es.
+Desde el 02/08 DHL TAMBIÉN emite (mismo camino, otro cliente). El test
+cambió de significado pero no de espíritu: cada courier tiene que emitirse
+POR SU CANAL, y el que no esté implementado tiene que fallar a la vista.
 """
 import os
 import sys
@@ -20,9 +21,15 @@ import servicios.solicitudes_guia as sg  # noqa: E402
 
 
 def _emitir(courier):
+    """Devuelve lo que el despachador decidió, sin tocar la base ni el courier."""
+    def _fake_internacional(solicitud_id, courier="FEDEX"):
+        # `via` guarda el courier REAL con el que se habría emitido: es lo
+        # que permite detectar que una solicitud DHL salga como FedEx.
+        return {"ok": True, "via": courier.lower()}
+
     with mock.patch.object(sg, "obtener_solicitud", return_value={"id": 1, "courier": courier}), \
          mock.patch.object(sg, "generar_guia_envia", return_value={"ok": True, "via": "envia"}), \
-         mock.patch.object(sg, "generar_guia_fedex", return_value={"ok": True, "via": "fedex"}):
+         mock.patch.object(sg, "generar_guia_internacional", side_effect=_fake_internacional):
         return sg.generar_guia(1)
 
 
@@ -39,15 +46,15 @@ def test_sin_courier_va_por_fedex():
     assert _emitir(None)["via"] == "fedex"
 
 
-def test_dhl_no_se_emite_por_fedex():
+def test_dhl_se_emite_por_dhl():
     """
-    EL TEST QUE IMPORTA. Mientras create_shipment de DHL no exista, una
-    solicitud DHL tiene que fallar a la vista — no salir con etiqueta FedEx.
+    EL TEST QUE IMPORTA. Una solicitud DHL tiene que emitirse POR DHL: si
+    sale por FedEx, el cliente paga precio DHL, recibe etiqueta FedEx y el
+    tracking apunta al courier equivocado.
     """
     r = _emitir("DHL")
-    assert not r["ok"], "una solicitud DHL NO puede emitirse todavía"
-    assert "via" not in r, "se emitió por otro courier"
-    assert "DHL" in r["error"]
+    assert r["ok"], "DHL ya emite: no puede fallar"
+    assert r["via"] == "dhl", f"se emitió por {r['via']}, no por DHL"
 
 
 def test_ups_tampoco():

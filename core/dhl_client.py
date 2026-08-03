@@ -319,8 +319,237 @@ class DHLClient(CarrierBase):
             print(f"[dhl] Excepción en get_rates: {e}")
             return {"encontrado": False, "error": str(e)}
 
+    @staticmethod
+    def _contacto(d: dict, por_defecto_nombre: str = "") -> dict:
+        """
+        contactInformation del POST /shipments. DHL exige phone y email con
+        formato válido: si el cliente no cargó teléfono, mandar vacío hace
+        que rechace el envío entero, así que hay fallback.
+        """
+        return {
+            "phone": (d.get("telefono") or "0000000000").strip()[:25],
+            "companyName": (d.get("empresa") or d.get("nombre")
+                            or por_defecto_nombre or "N/A").strip()[:60],
+            "fullName": (d.get("nombre") or por_defecto_nombre or "N/A").strip()[:45],
+            **({"email": d["email"].strip()[:50]} if (d.get("email") or "").strip() else {}),
+        }
+
+    def _direccion_envio(self, d: dict) -> dict:
+        """
+        postalAddress del POST. Igual que en /rates pero con la calle, que
+        para cotizar no hace falta y para emitir es obligatoria.
+        """
+        bloque = self._direccion(d)
+        bloque["addressLine1"] = (d.get("calle") or d.get("direccion") or "")[:45]
+        if d.get("direccion2"):
+            bloque["addressLine2"] = str(d["direccion2"])[:45]
+        return bloque
+
     def create_shipment(self, datos: dict) -> dict:
-        raise NotImplementedError("create_shipment DHL — Fase 2")
+        """
+        Emite una guía real en DHL (MyDHL API POST /shipments) y devuelve el
+        tracking + el label PDF.
+
+        Mismo contrato de entrada que FedExClient.create_shipment para que el
+        despachador de emisión los trate igual:
+          {"shipper": {...}, "recipient": {...}, "bultos": [...]} o
+          {"package": {...}, "commodity": {...}}
+
+        NO es idempotente: dos llamadas emiten dos guías facturadas. Quien
+        llame tiene que traer su propia reserva (igual que FedEx).
+        """
+        if not (self.api_key and self.api_secret):
+            return {"encontrado": False, "error": "Faltan credenciales de DHL."}
+
+        shipper = datos.get("shipper") or {}
+        recipient = datos.get("recipient") or {}
+        bultos = datos.get("bultos") or []
+        if not bultos:
+            package = datos.get("package") or {}
+            commodity = datos.get("commodity") or {}
+            bultos = [{
+                "peso_kg": package.get("peso_kg", 0.5),
+                "largo": package.get("largo", 30), "ancho": package.get("ancho", 20),
+                "alto": package.get("alto", 10),
+                "unidades": commodity.get("cantidad", 1),
+                "valor_unitario_usd": commodity.get("valor_unitario_usd", 100),
+                "descripcion_en": commodity.get("descripcion", "Merchandise"),
+                "hs_code": commodity.get("hs_code", ""),
+                "pais_origen": commodity.get("pais_origen", "AR"),
+            }]
+
+        cuenta, error = self._cuenta_para(
+            {"country": shipper.get("pais", "AR")},
+            {"country": recipient.get("pais", "")})
+        if error:
+            return {"encontrado": False, "error": error}
+
+        # Una pieza por unidad, igual que en FedEx: N cajas idénticas viajan
+        # como N piezas, cada una con su etiqueta.
+        piezas, line_items, valor_total = [], [], 0.0
+        for i, b in enumerate(bultos, start=1):
+            unidades = max(int(b.get("unidades") or b.get("cantidad") or 1), 1)
+            valor_u = float(b.get("valor_unitario_usd") or 0)
+            for _ in range(unidades):
+                piezas.append({
+                    "weight": round(float(b.get("peso_kg") or 0.5), 3),
+                    "dimensions": {
+                        "length": round(float(b.get("largo_cm") or b.get("largo") or 30), 3),
+                        "width": round(float(b.get("ancho_cm") or b.get("ancho") or 20), 3),
+                        "height": round(float(b.get("alto_cm") or b.get("alto") or 10), 3),
+                    },
+                })
+            valor_total += valor_u * unidades
+            line_items.append({
+                "number": i,
+                "description": (b.get("descripcion_en") or b.get("producto_alias")
+                                or "Merchandise")[:75],
+                "price": round(valor_u, 2),
+                "quantity": {"value": unidades, "unitOfMeasurement": "PCS"},
+                "commodityCodes": ([{"typeCode": "outbound",
+                                     "value": str(b["hs_code"]).replace(".", "")[:18]}]
+                                   if b.get("hs_code") else []),
+                "exportReasonType": "permanent",
+                "manufacturerCountry": (b.get("pais_origen") or "AR").upper()[:2],
+                "weight": {
+                    "netValue": round(float(b.get("peso_kg") or 0.5), 3),
+                    "grossValue": round(float(b.get("peso_kg") or 0.5), 3),
+                },
+            })
+
+        msg_ref = f"tauro-ship-{uuid.uuid4().hex[:20]}"
+        cuerpo = {
+            "plannedShippingDateAndTime": self._fecha_envio(),
+            "pickup": {"isRequested": False},
+            "productCode": self.product_code,
+            "accounts": [{"typeCode": "shipper", "number": cuenta}],
+            "customerDetails": {
+                "shipperDetails": {
+                    "postalAddress": self._direccion_envio(shipper),
+                    "contactInformation": self._contacto(shipper, "TAURO Solutions"),
+                },
+                "receiverDetails": {
+                    "postalAddress": self._direccion_envio(recipient),
+                    "contactInformation": self._contacto(recipient),
+                },
+            },
+            "content": {
+                "packages": piezas,
+                "isCustomsDeclarable": True,
+                "declaredValue": round(valor_total or 1, 2),
+                "declaredValueCurrency": "USD",
+                "description": (line_items[0]["description"] if line_items else "Merchandise")[:70],
+                "incoterm": "DAP",
+                "unitOfMeasurement": "metric",
+                "exportDeclaration": {
+                    "lineItems": line_items,
+                    "invoice": {
+                        "number": msg_ref[-15:],
+                        "date": datetime.now(TZ_AR).strftime("%Y-%m-%d"),
+                    },
+                    "exportReason": "permanent",
+                },
+            },
+            "outputImageProperties": {
+                "imageOptions": [{"typeCode": "label", "templateName": "ECOM26_84_A4_001"}],
+            },
+        }
+
+        try:
+            resp = requests.post(
+                f"{self.base_url}/shipments",
+                json=cuerpo,
+                auth=(self.api_key, self.api_secret),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "x-version": self.API_VERSION,
+                    "Message-Reference": msg_ref,
+                },
+                timeout=60,   # emitir tarda más que cotizar
+            )
+        except Exception as e:
+            # Sin respuesta NO sabemos si DHL emitió: se avisa para verificar
+            # antes de reintentar, igual que en el camino nacional.
+            print(f"[dhl] EXCEPCIÓN emitiendo (ref {msg_ref}): {e}. "
+                  f"VERIFICAR en MyDHL si la guía salió antes de reintentar.")
+            return {"encontrado": False,
+                    "error": "Error de comunicación con DHL. Verificá en MyDHL "
+                             "antes de reintentar."}
+
+        if resp.status_code not in (200, 201):
+            print(f"[dhl] POST /shipments error {resp.status_code} (ref {msg_ref}): "
+                  f"{resp.text[:400]}")
+            detalle = resp.text[:300]
+            try:
+                j = resp.json()
+                detalle = j.get("detail") or j.get("message") or detalle
+            except Exception:
+                pass
+            return {"encontrado": False, "error": detalle}
+
+        try:
+            data = resp.json()
+            tracking = str(data.get("shipmentTrackingNumber") or "")
+            if not tracking:
+                return {"encontrado": False, "error": "DHL no devolvió tracking."}
+
+            # El label viene en base64 dentro de documents (typeCode "label").
+            label_b64 = ""
+            for doc in (data.get("documents") or []):
+                if (doc.get("typeCode") or "").lower() == "label":
+                    label_b64 = doc.get("content") or ""
+                    break
+            label_pdf = None
+            if label_b64:
+                import base64
+                try:
+                    label_pdf = base64.b64decode(label_b64)
+                except Exception as e:
+                    print(f"[dhl] guía {tracking} emitida pero el label no decodifica: {e}")
+
+            print(f"[dhl] guía emitida: {tracking} (ref {msg_ref})")
+            return {
+                "encontrado": True,
+                "tracking": tracking,
+                "servicio": "DHL Express Worldwide",
+                "label_pdf": label_pdf,
+                "label_b64": label_b64,
+            }
+        except Exception as e:
+            # La guía PUEDE existir aunque no podamos leer la respuesta.
+            print(f"[dhl] respuesta ilegible tras emitir (ref {msg_ref}): {e}")
+            return {"encontrado": False,
+                    "error": "DHL respondió algo inesperado. Verificá en MyDHL "
+                             "si la guía se emitió."}
 
     def track(self, tracking_number: str) -> dict:
-        raise NotImplementedError("track DHL — Fase 2")
+        """Estado de un envío DHL. Devuelve {encontrado, estado, descripcion, eventos}."""
+        tracking_number = str(tracking_number or "").strip()
+        if not tracking_number:
+            return {"encontrado": False, "error": "tracking vacío"}
+        if not (self.api_key and self.api_secret):
+            return {"encontrado": False, "error": "Faltan credenciales de DHL."}
+        try:
+            resp = requests.get(
+                f"{self.base_url}/shipments/{tracking_number}/tracking",
+                auth=(self.api_key, self.api_secret),
+                headers={"Accept": "application/json", "x-version": self.API_VERSION},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                return {"encontrado": False, "error": f"DHL {resp.status_code}"}
+            envios = (resp.json().get("shipments") or [])
+            if not envios:
+                return {"encontrado": False, "error": "Sin datos de tracking"}
+            env = envios[0]
+            eventos = env.get("events") or []
+            return {
+                "encontrado": True,
+                "estado": (env.get("status") or "").upper(),
+                "descripcion": env.get("description") or "",
+                "eventos": eventos,
+                "ultimo_evento": eventos[0] if eventos else None,
+            }
+        except Exception as e:
+            return {"encontrado": False, "error": str(e)}

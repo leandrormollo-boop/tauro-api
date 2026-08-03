@@ -78,7 +78,7 @@ def test_la_eleccion_llega_hasta_el_courier_al_emitir():
 
     import servicios.solicitudes_guia as sg
 
-    fuente = inspect.getsource(sg.generar_guia_fedex)
+    fuente = inspect.getsource(sg.generar_guia_internacional)
     assert 'datos_envio["tax_paga"] = sol.get("tax_paga")' in fuente
 
 
