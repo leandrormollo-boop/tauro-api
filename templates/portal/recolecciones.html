@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Recolecciones{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <div class="page-title-row">
+        <div>
+            <div class="eyebrow">Operaciones</div>
+            <h1>Recolecciones</h1>
+            <p>Pedí que el chofer pase a buscar los paquetes, en vez de llevarlos vos.</p>
+        </div>
+    </div>
+</div>
+
+{% set qp = request.query_params %}
+{% if qp.get('ok') == '2' %}
+    <div class="msg ok">Recolección cancelada. El chofer ya no va a pasar.</div>
+{% elif qp.get('ok') %}
+    <div class="msg ok">Listo, la recolección quedó agendada. Tené los paquetes
+    cerrados y con la etiqueta pegada antes del horario de inicio.</div>
+{% endif %}
+{% if qp.get('error') %}
+    <div class="msg error">{{ qp.get('error') }}</div>
+{% endif %}
+
+{% if recolecciones %}
+<div class="card" style="margin-bottom:16px;">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Horario</th>
+                    <th>Bultos / peso</th>
+                    <th>Dirección</th>
+                    <th>Estado</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in recolecciones %}
+                <tr>
+                    <td class="mono">{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else '—' }}</td>
+                    <td class="mono">{{ r.ready_time }} a {{ r.close_time }}</td>
+                    <td class="mono">{{ r.bultos }} × {{ '%g'|format(r.peso_kg) }} kg</td>
+                    <td style="font-size:13px;">{{ r.direccion or '—' }}
+                        {% if r.confirmation_code %}
+                        <br><small class="mono" style="color:var(--fg-3);">cód. {{ r.confirmation_code }}</small>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
+                        {% elif r.estado == 'CANCELADA' %}<span class="badge">Cancelada</span>
+                        {% else %}<span class="badge">{{ r.estado|title }}</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if r.estado == 'AGENDADA' %}
+                        <form method="POST" action="/portal/recolecciones/{{ r.id }}/cancelar"
+                              onsubmit="return confirm('¿Cancelar la recolección del {{ r.fecha.strftime('%d/%m') if r.fecha else '' }}?');">
+                            <button type="submit" class="btn btn-ghost btn-sm">Cancelar</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-head">
+        <div>
+            <h3>Pedir una recolección</h3>
+            <p>El chofer pasa por tu dirección en la ventana horaria que elijas.</p>
+        </div>
+    </div>
+
+    {% if not remitente or not remitente.direccion %}
+        <div class="msg warn">Primero cargá tu dirección de retiro en la
+        <a href="/portal/direcciones">libreta</a> — es donde el chofer tiene que ir.</div>
+    {% else %}
+    <div style="background:rgba(167,139,250,.08);border-left:3px solid var(--brand,#a78bfa);
+                padding:11px 14px;border-radius:0 8px 8px 0;margin-bottom:16px;font-size:13px;">
+        <strong>Retiran en:</strong> {{ remitente.direccion }}{% if remitente.ciudad %}, {{ remitente.ciudad }}{% endif %}
+        <br><small style="color:var(--fg-3);">Es tu dirección de remitente. Se cambia desde la libreta.</small>
+    </div>
+
+    <form method="POST" action="/portal/recolecciones/nueva">
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label for="rec-fecha">Fecha *</label>
+                {# Sin fines de semana ni más de 14 días: son las reglas del
+                   courier, mejor frenarlas acá que recibir el rechazo. #}
+                <input type="date" name="fecha" id="rec-fecha" required
+                       value="{{ fecha_sugerida }}" min="{{ fecha_sugerida }}" max="{{ fecha_max }}">
+            </div>
+            <div class="form-group">
+                <label for="rec-desde">Listos desde *</label>
+                <input type="time" name="ready_time" id="rec-desde" required value="09:00">
+            </div>
+            <div class="form-group">
+                <label for="rec-hasta">Hasta *</label>
+                <input type="time" name="close_time" id="rec-hasta" required value="17:00">
+                <small class="hint">Al menos 2 horas después: es la ventana que el
+                chofer necesita para poder pasar.</small>
+            </div>
+        </div>
+
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label for="rec-bultos">Cantidad de bultos</label>
+                <input type="number" name="bultos" id="rec-bultos" min="1" step="1" value="1">
+            </div>
+            <div class="form-group">
+                <label for="rec-peso">Peso total aproximado (kg)</label>
+                <input type="text" name="peso_kg" id="rec-peso" inputmode="decimal" value="1">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="rec-obs">Indicaciones para el chofer</label>
+            <input type="text" name="instrucciones" id="rec-obs"
+                   placeholder="Timbre 3B · preguntar por Ana · portón del fondo">
+        </div>
+
+        <button type="submit" class="btn btn-primary">Agendar recolección</button>
+        <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
+            Tené los paquetes cerrados y con la etiqueta pegada antes del horario
+            de inicio. Si no hay nadie, el chofer se va y hay que agendar de nuevo.
+        </p>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

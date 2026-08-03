@@ -430,6 +430,73 @@ def backup_cliente(cliente: str = Depends(cliente_actual)):
     )
 
 
+# ── Recolecciones ───────────────────────────────────────────
+@router.get("/recolecciones", response_class=HTMLResponse)
+def recolecciones_view(request: Request, cliente: str = Depends(cliente_actual)):
+    """Que el chofer pase a buscar, en vez de llevar los paquetes."""
+    from servicios.recolecciones import listar
+    from datetime import date, timedelta
+
+    try:
+        recolecciones = listar(cliente)
+    except Exception as e:
+        print(f"[portal] no pude listar recolecciones de {cliente}: {e}")
+        recolecciones = []
+
+    remitente = obtener_remitente_para_envio(cliente, None)
+    # Mañana por defecto (hoy suele estar pasado el corte); si cae finde,
+    # el lunes — así el form abre con una fecha que el courier acepta.
+    sugerida = date.today() + timedelta(days=1)
+    while sugerida.weekday() >= 5:
+        sugerida += timedelta(days=1)
+
+    return templates.TemplateResponse(
+        request=request, name="portal/recolecciones.html",
+        context={"cliente": cliente, "recolecciones": recolecciones,
+                 "remitente": remitente,
+                 "fecha_sugerida": sugerida.strftime("%Y-%m-%d"),
+                 "fecha_max": (date.today() + timedelta(days=14)).strftime("%Y-%m-%d")},
+    )
+
+
+@router.post("/recolecciones/nueva")
+def recoleccion_nueva(
+    fecha: str = Form(...),
+    ready_time: str = Form("09:00"),
+    close_time: str = Form("17:00"),
+    bultos: int = Form(1),
+    peso_kg: str = Form("1"),
+    instrucciones: str = Form(""),
+    cliente: str = Depends(cliente_actual),
+):
+    from servicios.recolecciones import crear
+
+    try:
+        r = crear(cliente, fecha, ready_time, close_time, bultos,
+                  float((peso_kg or "1").replace(",", ".")), instrucciones)
+    except Exception as e:
+        print(f"[portal] error agendando recolección de {cliente}: {e}")
+        r = {"ok": False, "error": "No pudimos agendarla. Probá de nuevo o escribinos."}
+
+    if r.get("ok"):
+        return RedirectResponse(url="/portal/recolecciones?ok=1", status_code=303)
+    return RedirectResponse(
+        url=f"/portal/recolecciones?error={quote(str(r.get('error') or 'Error'))}",
+        status_code=303)
+
+
+@router.post("/recolecciones/{rec_id}/cancelar")
+def recoleccion_cancelar(rec_id: int, cliente: str = Depends(cliente_actual)):
+    from servicios.recolecciones import cancelar
+
+    r = cancelar(rec_id, cliente_id=cliente)
+    if r.get("ok"):
+        return RedirectResponse(url="/portal/recolecciones?ok=2", status_code=303)
+    return RedirectResponse(
+        url=f"/portal/recolecciones?error={quote(str(r.get('error') or 'Error'))}",
+        status_code=303)
+
+
 # ── Cuenta corriente ────────────────────────────────────────
 @router.get("/cuenta", response_class=HTMLResponse)
 def cuenta_corriente(request: Request, cliente: str = Depends(cliente_actual)):

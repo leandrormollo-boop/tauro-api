@@ -1360,6 +1360,40 @@ async def admin_pago_nuevo(
         )
 
 
+# ── Recolecciones ───────────────────────────────────────────
+
+@router.get("/recolecciones", response_class=HTMLResponse)
+def admin_recolecciones(request: Request, admin_token: Optional[str] = Cookie(None)):
+    """Qué recolecciones hay agendadas: lo que el chofer va a buscar."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.recolecciones import listar_admin
+    try:
+        recolecciones = listar_admin()
+    except Exception as e:
+        print(f"[admin] no pude listar recolecciones: {e}")
+        recolecciones = []
+    return templates.TemplateResponse(
+        request=request, name="admin/recolecciones.html",
+        context={"seccion": "recolecciones", "recolecciones": recolecciones},
+    )
+
+
+@router.post("/recolecciones/{rec_id}/cancelar")
+def admin_recoleccion_cancelar(rec_id: int, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+
+    from servicios.recolecciones import cancelar
+    r = cancelar(rec_id)
+    if r.get("ok"):
+        return RedirectResponse(url="/admin/recolecciones?ok=1", status_code=303)
+    return RedirectResponse(
+        url=f"/admin/recolecciones?error={quote(str(r.get('error') or 'Error'))}",
+        status_code=303)
+
+
 # ── Cargar un envío ya realizado (canal externo) ────────────
 
 @router.get("/envios-realizados/nuevo", response_class=HTMLResponse)

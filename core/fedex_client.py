@@ -668,3 +668,130 @@ class FedExClient(CarrierBase):
         if not tracking_number:
             return {"error": "tracking_number vacío"}
         return self.track_many([tracking_number]).get(tracking_number, {})
+
+    # ── Recolecciones (Pickup API) ──────────────────────────────
+    # El chofer pasa a buscar los paquetes en vez de que el cliente los
+    # lleve a una sucursal. Reglas de FedEx que definen el diseño:
+    #   - readyTime  = desde cuándo están listos (default 09:00)
+    #   - closeTime  = hasta qué hora puede entrar el chofer (default 14:00)
+    #   - closeTime tiene que ser POSTERIOR a readyTime y anterior al corte
+    #     del código postal; entre ambos tiene que haber tiempo suficiente
+    #     ("access time"), por eso se exige un mínimo de 2 horas.
+    # Ref: https://developer.fedex.com/api/en-us/catalog/pickup.html
+
+    PICKUP_MIN_HORAS = 2
+
+    def _direccion_pickup(self, d: dict) -> dict:
+        return {
+            "address": {
+                "streetLines": [d.get("calle", "")][:2],
+                "city": d.get("ciudad", ""),
+                "stateOrProvinceCode": d.get("estado", ""),
+                "postalCode": d.get("zip", ""),
+                "countryCode": d.get("pais", "AR"),
+                "residential": False,
+            },
+            "contact": {
+                "personName": d.get("nombre", ""),
+                "companyName": d.get("empresa", "") or d.get("nombre", ""),
+                "phoneNumber": d.get("telefono", ""),
+            },
+        }
+
+    def create_pickup(self, datos: dict) -> dict:
+        """
+        Agenda una recolección. datos:
+          {
+            "origen": {nombre, empresa, telefono, calle, ciudad, estado, zip, pais},
+            "fecha": "YYYY-MM-DD",
+            "ready_time": "09:00", "close_time": "17:00",
+            "peso_kg": 5.0, "bultos": 2,
+            "instrucciones": "Timbre 3B",
+          }
+        Devuelve {encontrado, confirmation_code, ubicacion, error}.
+
+        NO es idempotente: dos llamadas agendan dos visitas del chofer. Quien
+        llame tiene que traer su propia reserva (igual que la emisión).
+        """
+        origen = datos.get("origen") or {}
+        fecha = str(datos.get("fecha") or "").strip()
+        ready = str(datos.get("ready_time") or "09:00").strip()
+        close = str(datos.get("close_time") or "17:00").strip()
+
+        if not fecha:
+            return {"encontrado": False, "error": "Falta la fecha de la recolección."}
+        try:
+            h_ready = int(ready.split(":")[0]) * 60 + int(ready.split(":")[1])
+            h_close = int(close.split(":")[0]) * 60 + int(close.split(":")[1])
+        except (ValueError, IndexError):
+            return {"encontrado": False, "error": "Horarios inválidos (formato HH:MM)."}
+        if h_close - h_ready < self.PICKUP_MIN_HORAS * 60:
+            return {"encontrado": False,
+                    "error": f"Tiene que haber al menos {self.PICKUP_MIN_HORAS} horas "
+                             f"entre que está listo y el cierre — el chofer necesita "
+                             f"esa ventana para pasar."}
+
+        payload = {
+            "associatedAccountNumber": {"value": self.account_number},
+            "originDetail": {
+                "pickupLocation": self._direccion_pickup(origen),
+                "readyDateTimestamp": f"{fecha}T{ready}:00Z",
+                "customerCloseTime": f"{close}:00",
+            },
+            "totalWeight": {"units": "KG", "value": float(datos.get("peso_kg") or 1)},
+            "packageCount": max(int(datos.get("bultos") or 1), 1),
+            "carrierCode": "FDXE",
+            "countryRelationship": "INTERNATIONAL",
+        }
+        if datos.get("instrucciones"):
+            payload["remarks"] = str(datos["instrucciones"])[:255]
+
+        try:
+            resp = self._request_with_retry(
+                "POST", f"{self.base_url}/pickup/v1/pickups",
+                json=payload, max_retries=1,   # agendar NO es idempotente
+            )
+        except Exception as e:
+            return {"encontrado": False, "error": f"Error de red con FedEx: {e}"}
+
+        if resp.status_code not in (200, 201):
+            detalle = ""
+            try:
+                errs = resp.json().get("errors") or []
+                detalle = "; ".join(e.get("message", "") for e in errs)[:300]
+            except Exception:
+                detalle = resp.text[:200]
+            return {"encontrado": False,
+                    "error": detalle or f"FedEx rechazó la recolección ({resp.status_code})."}
+
+        try:
+            out = resp.json().get("output") or {}
+            return {
+                "encontrado": True,
+                "confirmation_code": out.get("pickupConfirmationCode") or "",
+                "ubicacion": out.get("location") or "",
+            }
+        except Exception as e:
+            return {"encontrado": False, "error": f"Respuesta inesperada de FedEx: {e}"}
+
+    def cancel_pickup(self, confirmation_code: str, fecha: str,
+                      ubicacion: str = "") -> dict:
+        """Cancela una recolección agendada. Devuelve {ok, error}."""
+        payload = {
+            "associatedAccountNumber": {"value": self.account_number},
+            "pickupConfirmationCode": str(confirmation_code),
+            "scheduledDate": fecha,
+            "carrierCode": "FDXE",
+        }
+        if ubicacion:
+            payload["location"] = ubicacion
+        try:
+            resp = self._request_with_retry(
+                "PUT", f"{self.base_url}/pickup/v1/pickups/cancel",
+                json=payload, max_retries=1,
+            )
+        except Exception as e:
+            return {"ok": False, "error": f"Error de red con FedEx: {e}"}
+        if resp.status_code in (200, 201):
+            return {"ok": True}
+        return {"ok": False, "error": f"FedEx no canceló la recolección ({resp.status_code})."}
