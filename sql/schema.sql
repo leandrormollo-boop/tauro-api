@@ -297,6 +297,27 @@ CREATE TABLE IF NOT EXISTS config (
     valor     TEXT NOT NULL
 );
 
+-- ── Auditoría de seguridad ──────────────────────────────────
+-- Quién entró al panel (y quién falló al intentarlo) y qué acción sensible se
+-- ejecutó, con IP y momento. NUNCA guarda cuerpos de request ni credenciales
+-- (lo garantiza servicios/auditoria.py). Es el registro que mira /admin/seguridad.
+CREATE TABLE IF NOT EXISTS security_audit (
+    id          BIGSERIAL PRIMARY KEY,
+    event       TEXT NOT NULL,
+    actor_type  TEXT NOT NULL,
+    actor_ref   TEXT,
+    ip          TEXT,
+    method      TEXT,
+    path        TEXT,
+    status_code INTEGER,
+    success     BOOLEAN NOT NULL DEFAULT TRUE,
+    request_id  TEXT,
+    metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_security_audit_created ON security_audit (created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_security_audit_event   ON security_audit (event);
+
 -- Valores default de config
 INSERT INTO config (parametro, valor) VALUES
     ('COTIZACION_DOLAR_ARS', '1450'),

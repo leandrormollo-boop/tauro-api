@@ -272,6 +272,9 @@ def admin_login(request: Request, password: str = Form(...),
             totp_ok = False
 
     if not (password_ok and totp_ok):
+        from servicios.auditoria import registrar_desde_request
+        registrar_desde_request(request, event="admin.login", actor_type="admin",
+                                success=False, status_code=401)
         return templates.TemplateResponse(
             request=request, name="admin/login.html",
             context={"error": "Contraseña o código incorrecto." if totp_activo
@@ -280,6 +283,9 @@ def admin_login(request: Request, password: str = Form(...),
             status_code=401,
         )
     reset_rate(f"admin_login:{ip}")
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(request, event="admin.login", actor_type="admin",
+                            success=True, status_code=303)
     response = RedirectResponse(url="/admin/home", status_code=303)
     response.set_cookie(
         key="admin_token", value=_ADMIN_TOKEN,
@@ -508,6 +514,52 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
     )
 
 
+@router.get("/seguridad", response_class=HTMLResponse)
+def admin_seguridad(request: Request, admin_token: Optional[str] = Cookie(None)):
+    """
+    Registro de accesos y acciones sensibles: quién entró (y quién falló), y
+    qué se tocó de dinero/credenciales/accesos, con IP y momento. Alimenta el
+    template que ya existía; los eventos los graba servicios/auditoria.py.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    stats = {"eventos_24h": 0, "fallos_24h": 0, "csrf_24h": 0}
+    eventos = []
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS eventos_24h,
+                        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours'
+                                         AND success = FALSE) AS fallos_24h,
+                        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours'
+                                         AND event LIKE '%%csrf%%') AS csrf_24h
+                    FROM security_audit
+                """)
+                fila = cur.fetchone()
+                if fila:
+                    stats = dict(fila)
+                cur.execute("""
+                    SELECT created_at, event, actor_type, actor_ref, ip, method,
+                           path, status_code, success, request_id
+                    FROM security_audit
+                    ORDER BY created_at DESC
+                    LIMIT 200
+                """)
+                eventos = cur.fetchall()
+    except Exception as e:
+        # La tabla se crea en init_db; si por lo que sea no está, la página
+        # abre igual (vacía) en vez de tirar 500.
+        print(f"[admin] /seguridad sin datos: {type(e).__name__}: {e}")
+
+    return templates.TemplateResponse(
+        request=request, name="admin/seguridad.html",
+        context={"seccion": "seguridad", "stats": stats, "eventos": eventos},
+    )
+
+
 # ── Clientes ─────────────────────────────────────────────────
 
 @router.get("/clientes", response_class=HTMLResponse)
@@ -709,6 +761,9 @@ def admin_cliente_set_password(
         )
     from servicios.auth import set_cliente_password
     set_cliente_password(cliente_id, new_password)
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(request, event="admin.reset_password", actor_type="admin",
+                            actor_ref=cliente_id, metadata={"cliente": cliente_id})
     return RedirectResponse(
         url=f"/admin/clientes/{cliente_id}?ok=pwd_actualizada", status_code=303,
     )
@@ -734,6 +789,9 @@ def admin_cliente_regenerar_api_key(
         clave = generar_api_key(cliente_id)
     except ValueError:
         return RedirectResponse(url="/admin/clientes", status_code=303)
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(request, event="admin.regenerar_api_key", actor_type="admin",
+                            actor_ref=cliente_id, metadata={"cliente": cliente_id})
     return templates.TemplateResponse(
         request=request, name="admin/api_key_creada.html",
         context={"cliente_id": cliente_id, "clave": clave},
@@ -1200,6 +1258,7 @@ async def admin_pedido_editar(
 
 @router.post("/pedidos/{solicitud_id}/generar-guia")
 def admin_pedido_generar_guia(
+    request: Request,
     solicitud_id: int,
     admin_token: Optional[str] = Cookie(None),
 ):
@@ -1210,6 +1269,9 @@ def admin_pedido_generar_guia(
 
     resultado = generar_guia(solicitud_id)
     if resultado.get("ok"):
+        from servicios.auditoria import registrar_desde_request
+        registrar_desde_request(request, event="admin.emitir_guia", actor_type="admin",
+                                actor_ref=str(solicitud_id), metadata={"solicitud_id": solicitud_id})
         _notificar_estado_async(solicitud_id, "GUIA_LISTA")
         return RedirectResponse(url="/admin/pedidos?ok=guia_generada", status_code=303)
 
@@ -1543,6 +1605,7 @@ def admin_ver_comprobante(pago_id: int, admin_token: Optional[str] = Cookie(None
 
 @router.post("/pagos/{pago_id}/resolver")
 def admin_resolver_pago(
+    request: Request,
     pago_id: int,
     decision: str = Form(...),
     admin_token: Optional[str] = Cookie(None),
@@ -1554,9 +1617,16 @@ def admin_resolver_pago(
     if not _is_auth(admin_token):
         return _redirect_login()
     from servicios.cuenta_corriente import resolver_pago
-    cambio = resolver_pago(pago_id, aprobar=(decision == "aprobar"))
+    aprobar = (decision == "aprobar")
+    cambio = resolver_pago(pago_id, aprobar=aprobar)
     if not cambio:
         print(f"[admin] pago {pago_id}: ya estaba resuelto, no se toca")
+    elif cambio:
+        from servicios.auditoria import registrar_desde_request
+        registrar_desde_request(
+            request, event="admin.resolver_pago", actor_type="admin",
+            actor_ref=str(pago_id),
+            metadata={"pago_id": pago_id, "decision": "aprobado" if aprobar else "rechazado"})
     return RedirectResponse(url="/admin/pagos/pendientes", status_code=303)
 
 

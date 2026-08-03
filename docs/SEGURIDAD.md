@@ -117,6 +117,16 @@ pone el cliente y permitía evadir el tope rotando el header.
 > El contador vive en memoria del proceso. Con más de un worker el tope se
 > multiplica. Mover a Redis o Cloudflare antes de escalar horizontalmente.
 
+### Registro de auditoría (`/admin/seguridad`)
+
+`servicios/auditoria.py` graba en `security_audit` (sin bodies ni credenciales)
+quién entró y qué acción sensible se ejecutó, con IP y momento. Eventos
+cableados: login admin y portal (éxito y fallo), reset de contraseña,
+regeneración de api_key, resolución de pagos, emisión de guías (admin y
+cliente), reclamo de tienda, y rechazos de CSRF. La vista `/admin/seguridad`
+muestra las stats de 24 h y los últimos 200 eventos. Job diario que poda lo
+más viejo que `SECURITY_AUDIT_RETENTION_DAYS` (default 365).
+
 ### Integración con tiendas
 
 - Webhooks Shopify por **HMAC**; sin/mal firma → 401 (lo verifica
@@ -146,7 +156,6 @@ CI en `.github/workflows/security-checks.yml` corre `npm audit`.
 | `style-src 'unsafe-inline'` | Los ~280 `style=` inline exigirían un refactor masivo a clases para sacarlo. Inyectar CSS no ejecuta JS: riesgo bajo con el script ya cerrado. |
 | Rate limit en memoria | Con >1 worker el tope se multiplica. Redis o Cloudflare. |
 | Tope de tamaño evadible por `Transfer-Encoding: chunked` | El chequeo mira `Content-Length`; un body chunked no lo manda. Lo corta el proxy de Railway (mitigación externa). Impacto: presión de memoria del worker, no fuga ni bypass de auth. Tradeoff aceptado; cerrarlo en la app exige leer el body con tope byte a byte. |
-| `security_audit` / `auditoria.py` | Existe pero sólo lo llama `core/security.py`, que NO está montado. Hoy no se registra nada. Cablearlo o borrarlo. |
 
 ## Variables en Railway
 

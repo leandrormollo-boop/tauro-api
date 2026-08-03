@@ -152,14 +152,24 @@ async def headers_de_seguridad(request: Request, call_next):
     #    Los clientes no-navegador (tests, scripts) no mandan estos headers
     #    y pasan. /shopify queda afuera: sus webhooks se validan por HMAC.
     if request.method == "POST" and path.startswith(("/portal", "/admin")):
+        def _rechazo_csrf():
+            try:
+                from servicios.auditoria import registrar_desde_request
+                actor = "admin" if path.startswith("/admin") else "cliente"
+                registrar_desde_request(request, event=f"{actor}.csrf_rejected",
+                                        actor_type=actor, success=False, status_code=403)
+            except Exception:
+                pass
+            return JSONResponse({"detail": "Origen del pedido no permitido."}, status_code=403)
+
         sfs = (request.headers.get("sec-fetch-site") or "").lower()
         if sfs and sfs not in ("same-origin", "same-site", "none"):
-            return JSONResponse({"detail": "Origen del pedido no permitido."}, status_code=403)
+            return _rechazo_csrf()
         origin = (request.headers.get("origin") or "").strip().rstrip("/")
         if origin and origin.lower() != "null":
             host_origin = origin.split("://", 1)[-1]
             if not _host_permitido(host_origin):
-                return JSONResponse({"detail": "Origen del pedido no permitido."}, status_code=403)
+                return _rechazo_csrf()
 
     nonce = _secrets.token_urlsafe(16)
     request.state.csp_nonce = nonce
@@ -753,6 +763,21 @@ scheduler.add_job(
     hour=3,
     minute=0,
 )
+
+
+# Job diario: podar el registro de auditoría (retención configurable, 1 año
+# por default) para que la tabla no crezca sin fin.
+def job_limpiar_auditoria():
+    try:
+        from servicios.auditoria import limpiar_auditoria_antigua
+        borrados = limpiar_auditoria_antigua()
+        if borrados:
+            print(f"[scheduler] auditoría: {borrados} eventos viejos podados")
+    except Exception as e:
+        print(f"[scheduler] poda de auditoría falló: {e}")
+
+
+scheduler.add_job(job_limpiar_auditoria, trigger="cron", hour=3, minute=30)
 
 
 def job_refrescar_tarifas():

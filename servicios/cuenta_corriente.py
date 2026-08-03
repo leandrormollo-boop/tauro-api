@@ -269,11 +269,11 @@ _FIRMAS_COMPROBANTE = {
     b"\x89PNG": "image/png",
 }
 
-# Tope de tamaño APLICADO EN EL HANDLER, no en un middleware: el middleware
-# de core/security.py no está montado en la app (es del paquete viejo que
-# quedó en stash), así que confiar en él era confiar en nada. Leer con tope
-# funciona siempre: se piden tope+1 bytes y si vino de más, se rechaza sin
-# cargar el resto en memoria (starlette ya lo tiene en un spool de disco).
+# Tope de tamaño APLICADO EN EL HANDLER, además del tope por tamaño del
+# middleware de main.py (12 MB para multipart). Este segundo control acota a
+# 8 MB el comprobante específico: se piden tope+1 bytes y si vino de más, se
+# rechaza sin cargar el resto en memoria (starlette ya lo tiene en un spool
+# de disco). Defensa en profundidad, no se apoya en un solo control.
 COMPROBANTE_MAX_BYTES = 8 * 1024 * 1024
 
 

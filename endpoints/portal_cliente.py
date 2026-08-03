@@ -230,6 +230,9 @@ def login_submit(
             status_code=401,
         )
     if not auth:
+        from servicios.auditoria import registrar_desde_request
+        registrar_desde_request(request, event="portal.login", actor_type="cliente",
+                                actor_ref=(email or "")[:120], success=False, status_code=401)
         return templates.TemplateResponse(
             request=request, name="portal/login.html",
             context={
@@ -241,6 +244,9 @@ def login_submit(
         )
 
     reset_rate(f"portal_login:{ip}")
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(request, event="portal.login", actor_type="cliente",
+                            actor_ref=auth["cliente_id"], success=True, status_code=303)
     # La sesión guarda el email real aunque hayan entrado con el ID.
     token = generar_token(auth["email"], auth["cliente_id"])
     response = RedirectResponse(url="/portal/home", status_code=303)
@@ -1382,6 +1388,7 @@ def envio_detalle(
 
 @router.post("/envios/{solicitud_id}/emitir")
 def emitir_guia_portal(
+    request: Request,
     solicitud_id: int,
     cliente: str = Depends(cliente_actual),
 ):
@@ -1395,6 +1402,9 @@ def emitir_guia_portal(
 
     resultado = emitir_guia_como_cliente(solicitud_id, cliente)
     if resultado.get("ok"):
+        from servicios.auditoria import registrar_desde_request
+        registrar_desde_request(request, event="portal.emitir_guia", actor_type="cliente",
+                                actor_ref=cliente, metadata={"solicitud_id": solicitud_id})
         return RedirectResponse(url=f"/portal/envios/{solicitud_id}?ok=guia",
                                 status_code=303)
     return RedirectResponse(
@@ -1455,6 +1465,7 @@ def tienda_view(
 
 @router.post("/tienda/reclamar")
 def tienda_reclamar(
+    request: Request,
     dominio: str = Form(...),
     cliente: str = Depends(cliente_actual),
 ):
@@ -1478,8 +1489,14 @@ def tienda_reclamar(
             status_code=303,
         )
 
+    from servicios.auditoria import registrar_desde_request
     if not es_dueno_de_la_tienda(dominio, cliente):
         print(f"[portal] {cliente} intentó reclamar {dominio} sin ser el dueño")
+        # Un intento fallido de reclamar una tienda ajena es exactamente la
+        # señal que este registro existe para capturar.
+        registrar_desde_request(request, event="portal.reclamar_tienda", actor_type="cliente",
+                                actor_ref=cliente, success=False,
+                                metadata={"dominio": dominio})
         return RedirectResponse(
             url="/portal/tienda?error=" + quote(
                 "No pudimos verificar que esa tienda sea tuya. El mail de tu "
@@ -1489,6 +1506,8 @@ def tienda_reclamar(
         )
 
     vincular_cliente(dominio, cliente)
+    registrar_desde_request(request, event="portal.reclamar_tienda", actor_type="cliente",
+                            actor_ref=cliente, success=True, metadata={"dominio": dominio})
     return RedirectResponse(url="/portal/tienda?ok=conectada", status_code=303)
 
 
