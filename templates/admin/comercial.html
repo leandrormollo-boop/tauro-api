@@ -1,0 +1,288 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Centro comercial{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Crecimiento</div>
+  <h1>Centro comercial</h1>
+  <p>Investigación, calificación y propuestas con aprobación humana.</p>
+</div>
+
+{% if not ia_configurada %}
+<div class="flash-msg error" style="margin-bottom:22px;">
+  Los agentes están apagados: falta configurar <b>OPENAI_API_KEY</b>. Podés cargar cuentas y dejar trabajos en cola; no se ejecutará ninguna investigación ni saldrá ningún correo.
+</div>
+{% endif %}
+
+<div class="stat-grid" style="margin-bottom:26px;">
+  <div class="stat-card">
+    <div class="label">Prospectos</div>
+    <div class="value">{{ stats.cuentas }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Calificados</div>
+    <div class="value {% if stats.calificadas %}ok{% endif %}">{{ stats.calificadas }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Por aprobar</div>
+    <div class="value {% if stats.por_aprobar %}warn{% endif %}">{{ stats.por_aprobar }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Enviados</div>
+    <div class="value">{{ stats.enviados }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Cola</div>
+    <div class="value">{{ stats.trabajos_pendientes }}</div>
+  </div>
+</div>
+
+<section class="card" style="margin-bottom:24px;">
+  <div style="display:flex;justify-content:space-between;gap:24px;align-items:flex-start;flex-wrap:wrap;">
+    <div style="max-width:760px;">
+      <div class="eyebrow">Perfil ideal activo</div>
+      <h2 style="font-size:20px;margin:6px 0 8px;">{{ icp.nombre or 'TAURO B2B 2026' }}</h2>
+      <p class="sub" style="margin:0;line-height:1.65;">{{ icp.descripcion }}</p>
+    </div>
+    <div style="min-width:150px;">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--fg-4);text-transform:uppercase;">Umbral</div>
+      <div style="font-size:30px;font-weight:700;margin-top:5px;">{{ icp.umbral_calificado or 65 }}<span style="font-size:14px;color:var(--fg-4);"> / 100</span></div>
+    </div>
+  </div>
+</section>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;margin-bottom:28px;" class="commercial-tools-grid">
+  <section class="card">
+    <h2 style="font-size:18px;margin:0 0 16px;">Buscar empresas</h2>
+    <form method="POST" action="/admin/comercial/descubrir">
+      <div class="form-group">
+        <label>Mercado a investigar</label>
+        <textarea name="brief" rows="5" required minlength="10" placeholder="Ej.: tiendas argentinas de indumentaria o diseño que vendan por Shopify y exporten a Estados Unidos o Europa."></textarea>
+      </div>
+      <div class="form-group">
+        <label>Máximo de candidatos</label>
+        <input type="number" name="limite" min="1" max="20" value="10">
+      </div>
+      <button type="submit" class="btn btn-primary">Agregar investigación a la cola</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2 style="font-size:18px;margin:0 0 16px;">Cargar una cuenta</h2>
+    <form method="POST" action="/admin/comercial/cuentas/nueva">
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>Empresa *</label>
+          <input type="text" name="empresa" required maxlength="200" placeholder="Nombre comercial">
+        </div>
+        <div class="form-group">
+          <label>Dominio</label>
+          <input type="text" name="dominio" placeholder="empresa.com">
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>País</label>
+          <input type="text" name="pais" value="AR" maxlength="3">
+        </div>
+        <div class="form-group">
+          <label>Segmento</label>
+          <select name="segmento">
+            <option value="ECOMMERCE_EXPORTADOR">E-commerce exportador</option>
+            <option value="PYME_EXPORTADORA">Pyme exportadora</option>
+            <option value="IMPORTADOR_MAYORISTA">Importador mayorista</option>
+            <option value="MARCA_CON_VENTAS_INTERNACIONALES">Marca internacional</option>
+            <option value="OTRO" selected>Por investigar</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>Contacto</label>
+          <input type="text" name="contacto_nombre" placeholder="Nombre o área">
+        </div>
+        <div class="form-group">
+          <label>Cargo</label>
+          <input type="text" name="contacto_cargo" placeholder="E-commerce / Operaciones">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Email comercial</label>
+        <input type="email" name="contacto_email" placeholder="logistica@empresa.com">
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" name="email_verificado" value="1">
+          Verifiqué que este email pertenece a la empresa
+        </label>
+      </div>
+      <button type="submit" class="btn btn-primary">Crear cuenta</button>
+    </form>
+  </section>
+</div>
+
+<section style="margin-bottom:30px;">
+  <div style="display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:12px;">
+    <div>
+      <div class="eyebrow">Pipeline</div>
+      <h2 style="font-size:20px;margin:5px 0 0;">Cuentas comerciales</h2>
+    </div>
+    {% if leads_web_pendientes %}
+      <span class="badge accent">{{ leads_web_pendientes }} leads del cotizador por incorporar</span>
+    {% endif %}
+  </div>
+  <div class="card" style="padding:0;overflow:hidden;">
+    {% if cuentas %}
+    <div style="overflow-x:auto;">
+      <table class="envios-table">
+        <thead>
+          <tr>
+            <th>Empresa</th>
+            <th>Fit</th>
+            <th>Contacto</th>
+            <th>Evidencia</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for c in cuentas %}
+          <tr>
+            <td>
+              <strong>{{ c.empresa }}</strong>
+              {% if c.dominio %}<br><a href="https://{{ c.dominio }}" target="_blank" rel="noopener" style="font-size:12px;color:var(--fg-3);">{{ c.dominio }}</a>{% endif %}
+              {% if c.research_summary %}<br><span style="font-size:12px;color:var(--fg-4);">{{ c.research_summary[:150] }}{% if c.research_summary|length > 150 %}…{% endif %}</span>{% endif %}
+            </td>
+            <td>
+              <span style="font-size:21px;font-weight:700;">{{ c.score }}</span><span style="color:var(--fg-4);font-size:11px;">/100</span>
+              <br><span style="font-size:11px;color:var(--fg-4);">{{ c.segmento|replace('_', ' ') }}</span>
+            </td>
+            <td>
+              {% if c.contacto_email %}
+                <span style="font-size:12px;">{{ c.contacto_email }}</span><br>
+                <span class="badge {% if c.estado_email == 'VERIFICADO' %}ok{% else %}warn{% endif %}">{{ c.estado_email|replace('_', ' ') }}</span>
+                {% if c.estado_email == 'NO_VERIFICADO' %}
+                <form method="POST" action="/admin/comercial/contactos/{{ c.contacto_id }}/verificar" style="margin-top:7px;" data-confirm="Confirmá únicamente si verificaste que el email pertenece a esta empresa.">
+                  <button type="submit" class="btn btn-ghost btn-sm">Verificar email</button>
+                </form>
+                {% endif %}
+              {% else %}
+                <span style="color:var(--fg-4);">Sin contacto</span>
+              {% endif %}
+            </td>
+            <td class="mono">{{ c.fuentes_count }}</td>
+            <td>
+              <span class="badge {% if c.estado == 'CALIFICADO' %}ok{% elif c.estado == 'INVESTIGADO' %}accent{% else %}muted{% endif %}">{{ c.estado }}</span>
+            </td>
+            <td>
+              <div style="display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;">
+                <form method="POST" action="/admin/comercial/cuentas/{{ c.id }}/investigar">
+                  <button type="submit" class="btn btn-ghost btn-sm">Investigar</button>
+                </form>
+                {% if c.research_summary and c.contacto_email %}
+                <form method="POST" action="/admin/comercial/cuentas/{{ c.id }}/propuesta">
+                  <button type="submit" class="btn btn-primary btn-sm">Crear propuesta</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p style="padding:22px;color:var(--fg-3);margin:0;">Todavía no hay cuentas comerciales.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section style="margin-bottom:30px;">
+  <div class="eyebrow">Control humano</div>
+  <h2 style="font-size:20px;margin:5px 0 12px;">Propuestas y envíos</h2>
+  {% if mensajes %}
+    <div style="display:grid;gap:12px;">
+    {% for m in mensajes %}
+      <article class="card" style="padding:18px 20px;">
+        <div style="display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap;">
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <strong>{{ m.empresa }}</strong>
+              <span class="badge {% if m.estado == 'ENVIADO' %}ok{% elif m.estado == 'APROBADO' %}accent{% elif m.estado == 'OBSERVADO' %}error{% else %}warn{% endif %}">{{ m.estado }}</span>
+            </div>
+            <div style="font-size:12px;color:var(--fg-3);margin-top:5px;">{{ m.email }} · {{ m.asunto }}</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            {% if m.estado == 'BORRADOR' %}
+            <form method="POST" action="/admin/comercial/mensajes/{{ m.id }}/aprobar" data-confirm="¿Revisaste destinatario, asunto, contenido y afirmaciones? Aprobar todavía no envía el correo.">
+              <button type="submit" class="btn btn-primary btn-sm">Aprobar borrador</button>
+            </form>
+            {% endif %}
+            {% if m.estado == 'APROBADO' %}
+              {% if m.estado_email == 'VERIFICADO' %}
+              <form method="POST" action="/admin/comercial/mensajes/{{ m.id }}/enviar" data-confirm="Esta acción enviará un correo real a {{ m.email }}. ¿Confirmás el envío?">
+                <button type="submit" class="btn btn-primary btn-sm">Enviar correo</button>
+              </form>
+              {% else %}
+                <span class="badge warn">Email sin verificar</span>
+              {% endif %}
+            {% endif %}
+            {% if m.estado in ['BORRADOR', 'OBSERVADO', 'APROBADO'] %}
+            <form method="POST" action="/admin/comercial/mensajes/{{ m.id }}/cancelar">
+              <button type="submit" class="btn btn-ghost btn-sm">Cancelar</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+        <details style="margin-top:13px;">
+          <summary style="cursor:pointer;color:var(--accent-soft);font-size:13px;">Revisar contenido</summary>
+          <div style="border-top:1px solid var(--line-soft);margin-top:10px;padding-top:12px;white-space:pre-wrap;line-height:1.65;font-size:13px;">{{ m.cuerpo_texto }}</div>
+          {% if m.review_payload.problemas %}
+            <div style="margin-top:12px;color:var(--warn);font-size:12px;">Observaciones: {{ m.review_payload.problemas|join(' · ') }}</div>
+          {% endif %}
+        </details>
+      </article>
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="card"><p style="margin:0;color:var(--fg-3);">No hay propuestas todavía.</p></div>
+  {% endif %}
+</section>
+
+<section>
+  <div class="eyebrow">Trazabilidad</div>
+  <h2 style="font-size:20px;margin:5px 0 12px;">Trabajos de agentes</h2>
+  <div class="card" style="padding:0;overflow:hidden;">
+    {% if trabajos %}
+    <div style="overflow-x:auto;">
+      <table class="envios-table">
+        <thead><tr><th>ID</th><th>Tarea</th><th>Cuenta</th><th>Estado</th><th>Intentos</th><th>Resultado</th><th>Fecha</th></tr></thead>
+        <tbody>
+        {% for j in trabajos %}
+          <tr>
+            <td class="mono">#{{ j.id }}</td>
+            <td>{{ j.tipo }}</td>
+            <td>{{ j.empresa or 'Mercado' }}</td>
+            <td><span class="badge {% if j.estado == 'COMPLETADO' %}ok{% elif j.estado == 'FALLIDO' %}error{% elif j.estado == 'EJECUTANDO' %}accent{% else %}warn{% endif %}">{{ j.estado }}</span></td>
+            <td class="mono">{{ j.intentos }}</td>
+            <td style="max-width:320px;font-size:12px;color:var(--fg-3);">
+              {% if j.error %}{{ j.error[:220] }}{% elif j.resultado %}{{ j.resultado }}{% else %}—{% endif %}
+            </td>
+            <td style="white-space:nowrap;font-size:12px;color:var(--fg-4);">{{ j.created_at.strftime('%d/%m %H:%M') if j.created_at else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p style="padding:22px;color:var(--fg-3);margin:0;">La cola está vacía.</p>
+    {% endif %}
+  </div>
+</section>
+
+<style>
+@media (max-width: 900px) {
+  .commercial-tools-grid { grid-template-columns: 1fr !important; }
+}
+</style>
+{% endblock %}
