@@ -88,6 +88,7 @@ def _pricing_configurado() -> dict:
                 cur.execute(
                     "SELECT parametro, valor FROM config "
                     "WHERE parametro LIKE 'WEB_MARKUP_PCT%%' "
+                    "   OR parametro LIKE 'WEB_MARGEN_FIJO_%%' "
                     "   OR parametro = 'WEB_DESC_FEDEX_PCT'"
                 )
                 filas = cur.fetchall()
@@ -133,6 +134,30 @@ def _markup_de(carrier_id: str, default_pct: float, config: dict = None) -> floa
     return config.get("WEB_MARKUP_PCT", default_pct)
 
 
+def _margen_fijo_de(carrier_id: str, config: dict = None) -> float:
+    """
+    Ganancia FIJA en ARS para UN carrier de la web (mismo modelo que el monto
+    fijo por cliente del portal). Cuando está seteada, el precio de ese courier
+    es COSTO + este monto, ignorando el markup %: la ganancia por envío es
+    exactamente esta plata, no un porcentaje.
+
+    Decisión de Leandro (04/08): DHL va con ganancia fija de $135.000. Se edita
+    en /admin/config como WEB_MARGEN_FIJO_DHL_ARS (o por env var), sin deploy.
+    0 / ausente = ese carrier sigue con markup %.
+    """
+    config = config or {}
+    clave = f"WEB_MARGEN_FIJO_{carrier_id.upper()}_ARS"
+    if clave in config:
+        return config[clave]
+    crudo = os.getenv(clave)
+    if crudo is not None:
+        try:
+            return float(crudo)
+        except ValueError:
+            print(f"[carriers] {clave}={crudo!r} no es un número; se ignora")
+    return 0.0
+
+
 def _desc_fedex(config: dict) -> float:
     """
     Descuento de FedEx: primero la tabla config (editable desde el admin),
@@ -161,20 +186,27 @@ def carriers_activos() -> list:
 
 
 def _precios(resultado: dict, dolar: float, markup_pct: float,
-             descuento_pct: float = 0.0) -> dict:
+             descuento_pct: float = 0.0, margen_fijo_ars: float = 0.0) -> dict:
     """
     Convierte el costo crudo del carrier a precio final (ARS + USD).
 
-    Sin descuento: precio = tarifa × (1 + markup web).
-    Con descuento (pedido de Leandro para FedEx): el precio final es la tarifa
-    del carrier CON el descuento aplicado (sin markup encima), y se devuelve
-    también la tarifa de lista para mostrarla tachada en la web.
+    Prioridad:
+      1. margen_fijo_ars > 0  → precio = COSTO + ese monto (ganancia fija en
+         ARS, ej. DHL +$135.000). La ganancia por envío es esa plata exacta.
+      2. descuento_pct > 0    → tarifa de lista con descuento (caso FedEx).
+      3. si no                → tarifa × (1 + markup web).
     """
     # `costo` es lo que el carrier nos cobra a NOSOTROS (tarifa ACCOUNT en
     # FedEx). `costo_lista` es el precio público (LIST) cuando el courier
     # lo informa — es el correcto para mostrar tachado.
     es_usd = resultado.get("moneda", "USD") == "USD"
     costo_real_ars = round(resultado["costo"] * dolar) if es_usd else round(resultado["costo"])
+
+    # Ganancia FIJA: costo + monto. Gana la prioridad porque es una decisión
+    # comercial explícita por courier (no se le encima el markup %).
+    if margen_fijo_ars and margen_fijo_ars > 0:
+        precio_ars = round(costo_real_ars + margen_fijo_ars)
+        return {"precio_ars": precio_ars, "precio_usd": round(precio_ars / dolar, 2)}
 
     base = resultado.get("costo_lista") or resultado["costo"]
     if es_usd:
@@ -360,12 +392,17 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         # FedEx que llega en 5.
         markup_carrier = _markup_de(c["id"], markup_pct, pricing)
 
+        # Ganancia fija por courier (DHL +$135.000, decisión de Leandro 04/08):
+        # si está seteada, manda sobre el markup % y sobre el descuento.
+        margen_fijo = _margen_fijo_de(c["id"], pricing)
+
         salida.append({
             **base,
             "estado": "cotizado",
             "servicio": servicio,
             "dias_estimados": crudo["dias_estimados"],
-            **_precios(resultado, dolar, markup_carrier, descuento_pct=descuento),
+            **_precios(resultado, dolar, markup_carrier,
+                       descuento_pct=descuento, margen_fijo_ars=margen_fijo),
         })
 
     return salida

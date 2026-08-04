@@ -14,7 +14,32 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from servicios.carriers import _markup_de, _desc_fedex  # noqa: E402
+from servicios.carriers import _markup_de, _desc_fedex, _margen_fijo_de, _precios  # noqa: E402
+
+
+def test_dhl_ganancia_fija_es_costo_mas_el_monto():
+    """Leandro 04/08: DHL va con ganancia fija de $135.000 = costo + 135.000,
+    sin markup % encima."""
+    r = _precios({"costo": 130, "moneda": "USD"}, dolar=1500,
+                 markup_pct=20, margen_fijo_ars=135000)
+    assert r["precio_ars"] == 130 * 1500 + 135000   # 330.000
+
+
+def test_margen_fijo_manda_sobre_el_markup():
+    """Con margen fijo seteado, el markup % se ignora para ese courier."""
+    con_fijo = _precios({"costo": 100, "moneda": "USD"}, dolar=1000,
+                        markup_pct=50, margen_fijo_ars=135000)
+    sin_fijo = _precios({"costo": 100, "moneda": "USD"}, dolar=1000, markup_pct=50)
+    assert con_fijo["precio_ars"] == 100 * 1000 + 135000   # costo + fijo, no +50%
+    assert sin_fijo["precio_ars"] != con_fijo["precio_ars"]
+
+
+def test_margen_fijo_solo_para_el_courier_seteado():
+    config = {"WEB_MARGEN_FIJO_DHL_ARS": 135000.0}
+    with mock.patch.dict(os.environ, {}, clear=True):
+        assert _margen_fijo_de("dhl", config) == 135000.0
+        assert _margen_fijo_de("fedex", config) == 0.0   # FedEx sigue con markup %
+        assert _margen_fijo_de("ups", config) == 0.0
 
 
 def test_el_admin_le_gana_a_la_variable_de_entorno():

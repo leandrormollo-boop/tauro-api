@@ -329,5 +329,9 @@ INSERT INTO config (parametro, valor) VALUES
     -- /admin/config sin deploy. Si se borran, cae al WEB_MARKUP_PCT general.
     ('WEB_MARKUP_PCT_FEDEX', '35'),
     ('WEB_MARKUP_PCT_DHL', '20'),
-    ('WEB_MARKUP_PCT_UPS', '20')
+    ('WEB_MARKUP_PCT_UPS', '20'),
+    -- Ganancia FIJA en ARS por courier (decisión de Leandro 04/08): cuando
+    -- está, el precio de ese courier es COSTO + este monto (ignora el markup %).
+    -- DHL va con ganancia fija de $135.000. Editable en /admin/config.
+    ('WEB_MARGEN_FIJO_DHL_ARS', '135000')
 ON CONFLICT (parametro) DO NOTHING;
