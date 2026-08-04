@@ -15,7 +15,7 @@ import os
 import re
 import time
 
-MAIL_TAURO = "taurosolutionsar@gmail.com"
+MAIL_TAURO = "cotizaciones@taurosolutions.ar"
 
 _cache: dict = {"valor": None, "hasta": 0.0}
 

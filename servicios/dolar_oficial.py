@@ -71,7 +71,7 @@ def _valor_actual() -> float | None:
 
 def _avisar_salto(actual: float, nuevo: float, salto: float, hacia: str) -> None:
     """Mail a Leandro cuando el dólar saltó tanto que no se actualiza solo."""
-    destino = (os.getenv("ADMIN_RECOVERY_EMAIL") or "taurosolutionsar@gmail.com").strip()
+    destino = (os.getenv("ADMIN_RECOVERY_EMAIL") or "cotizaciones@taurosolutions.ar").strip()
     cuerpo = f"""<html><body style="margin:0;background:#f4f4f6;">
 <div style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
   <div style="background:#0c0a14;padding:28px 24px;text-align:center;">

@@ -23,7 +23,7 @@ from core.database import get_conn
 
 API_BASE = "https://api.tiendanube.com/v1"
 OAUTH_URL = "https://www.tiendanube.com/apps/authorize/token"
-USER_AGENT = "TAURO Solutions (taurosolutionsar@gmail.com)"
+USER_AGENT = "TAURO Solutions (cotizaciones@taurosolutions.ar)"
 
 _tabla_lista = False
 

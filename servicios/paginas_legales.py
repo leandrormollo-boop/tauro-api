@@ -7,7 +7,7 @@
 # ============================================================
 from __future__ import annotations
 
-CONTACTO = "taurosolutionsar@gmail.com"
+CONTACTO = "cotizaciones@taurosolutions.ar"
 
 _LAYOUT = """<!DOCTYPE html>
 <html lang="es"><head>
@@ -93,7 +93,7 @@ necesarios para esas obligaciones se eliminan o anonimizan.</p>
 <h2>Tus derechos</h2>
 <p>Podés pedirnos en cualquier momento acceder a tus datos, corregirlos,
 eliminarlos o llevártelos. Escribinos a
-<a href="mailto:taurosolutionsar@gmail.com">taurosolutionsar@gmail.com</a>
+<a href="mailto:cotizaciones@taurosolutions.ar">cotizaciones@taurosolutions.ar</a>
 y respondemos dentro de los 10 días hábiles.</p>
 <p>Si conectaste una tienda, tus compradores pueden ejercer los mismos
 derechos a través tuyo: cuando la plataforma de tu tienda nos transmite

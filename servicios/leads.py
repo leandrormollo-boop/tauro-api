@@ -159,7 +159,7 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
             from core.email_sender import _enviar_mail_a
             mejor = min(limpios, key=lambda c: c["precio_ars"])
             _enviar_mail_a(
-                _os.getenv("LEADS_AVISO_EMAIL", "taurosolutionsar@gmail.com"),
+                _os.getenv("LEADS_AVISO_EMAIL", "cotizaciones@taurosolutions.ar"),
                 f"🎣 Lead del cotizador: {email} → {destino}",
                 f"<p><b>{email}</b> cotizó {peso_kg:g} kg a <b>{destino}</b> y pidió "
                 f"la cotización por mail.<br>Mejor precio mostrado: "

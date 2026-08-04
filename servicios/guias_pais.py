@@ -15,7 +15,7 @@
 # ============================================================
 from __future__ import annotations
 
-CONTACTO = "taurosolutionsar@gmail.com"
+CONTACTO = "cotizaciones@taurosolutions.ar"
 ACTUALIZADO = "agosto de 2026"
 
 _LAYOUT = """<!DOCTYPE html>

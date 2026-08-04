@@ -151,12 +151,12 @@ function ContactCTA({ onCotizarClick }) {
               <button className="btn btn-primary btn-lg" onClick={onCotizarClick}>
                 Cotizar ahora <ArrowRight size={16}/>
               </button>
-              <a href="mailto:taurosolutionsar@gmail.com" className="btn btn-ghost btn-lg">
+              <a href="mailto:cotizaciones@taurosolutions.ar" className="btn btn-ghost btn-lg">
                 Hablar con un experto
               </a>
             </div>
             <div style={{ marginTop: 56, display: "flex", justifyContent: "center", gap: 48, flexWrap: "wrap", fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-3)" }}>
-              <span>taurosolutionsar@gmail.com</span>
+              <span>cotizaciones@taurosolutions.ar</span>
               <span>Buenos Aires, Argentina</span>
             </div>
           </div>

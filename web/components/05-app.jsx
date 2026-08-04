@@ -68,7 +68,7 @@ function App() {
    completá acá abajo y listo.
    ============================================================ */
 const CONTACTO = {
-  email: "taurosolutionsar@gmail.com",
+  email: "cotizaciones@taurosolutions.ar",
   whatsapp: "",     // ej: "5491130092804" (país + área + número, sin + ni espacios)
   instagram: "",    // ej: "taurosolutions.ar" (sin la arroba)
 };

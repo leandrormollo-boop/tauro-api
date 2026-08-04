@@ -208,7 +208,7 @@ function QuoteWidget({ compact = false }) {
             Crear este envío en el portal <ArrowRight size={14}/>
           </a>
           <a className="btn btn-ghost" style={{ width: "100%", marginTop: 10 }}
-             href="mailto:taurosolutionsar@gmail.com?subject=Quiero%20una%20cuenta%20en%20el%20portal%20Tauro">
+             href="mailto:cotizaciones@taurosolutions.ar?subject=Quiero%20una%20cuenta%20en%20el%20portal%20Tauro">
             Todavía no tengo cuenta
           </a>
         </div>
