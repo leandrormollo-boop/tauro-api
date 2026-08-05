@@ -903,7 +903,24 @@ else:
 # Cola comercial: apagada por default. El panel puede preparar trabajos sin
 # que ningun agente se ejecute; para procesarlos hacen falta la key y el flag
 # explicito. Los correos siguen necesitando dos acciones humanas en /admin.
-from jobs.agentes_comerciales import procesar_cola_comercial, habilitado as _crm_agents_on
+#
+# ⚠️ Import TOLERANTE a propósito: jobs/agentes_comerciales.py es un WIP de
+# otra sesión que todavía no está commiteado (necesita `openai` en
+# requirements y sus credenciales). Este import directo TUMBÓ los deploys
+# del 05/08: en local bootea porque el archivo existe untracked, en el
+# contenedor no existe → ModuleNotFoundError → Railway descarta el deploy y
+# sigue sirviendo el build viejo. Un feature opcional apagado por default
+# JAMÁS puede tener poder de veto sobre el arranque.
+try:
+    from jobs.agentes_comerciales import (
+        procesar_cola_comercial, habilitado as _crm_agents_on,
+    )
+except ImportError:
+    procesar_cola_comercial = None
+
+    def _crm_agents_on() -> bool:
+        return False
+
 if _crm_agents_on():
     scheduler.add_job(
         procesar_cola_comercial,
@@ -914,7 +931,7 @@ if _crm_agents_on():
     )
     print("[scheduler] Agentes comerciales ACTIVOS: cola cada 1 min")
 else:
-    print("[scheduler] Agentes comerciales APAGADOS (flag o OPENAI_API_KEY faltante)")
+    print("[scheduler] Agentes comerciales APAGADOS (flag, key o módulo faltante)")
 
 scheduler.start()
 
