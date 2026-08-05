@@ -446,8 +446,14 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
             "producto_alias": producto.alias_interno, "cantidad": cantidad,
             "peso_kg": producto.peso_kg, "largo_cm": producto.largo_cm,
             "ancho_cm": producto.ancho_cm, "alto_cm": producto.alto_cm,
-            "valor_unitario_usd": producto.valor_usd_default,
-            "hs_code": producto.hs_code, "descripcion_en": producto.nombre_invoice,
+            # La declaración de invoice de ESTE envío manda sobre el default
+            # del catálogo (Leandro 05/08): el valor real de venta cambia
+            # entre envíos. Vacío = catálogo, como siempre.
+            "valor_unitario_usd": float(b.get("valor_unitario_usd")
+                                        or producto.valor_usd_default),
+            "hs_code": (b.get("hs_code") or producto.hs_code),
+            "descripcion_en": (b.get("descripcion_en") or producto.nombre_invoice),
+            **({"pais_origen": b["pais_origen"]} if b.get("pais_origen") else {}),
         })
 
     if total_cajas > MAX_CAJAS_POR_ENVIO:

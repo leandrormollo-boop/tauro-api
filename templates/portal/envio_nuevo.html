@@ -274,7 +274,11 @@
                         <select name="bulto_producto" class="bulto-producto" required>
                             <option value="">Seleccionar</option>
                             {% for p in productos %}
-                                <option value="{{ p.alias_interno }}" {% if f.producto == p.alias_interno %}selected{% endif %}>
+                                <option value="{{ p.alias_interno }}"
+                                        data-valor="{{ p.valor_usd_default }}"
+                                        data-desc="{{ p.nombre_invoice }}"
+                                        data-hs="{{ p.hs_code }}"
+                                        {% if f.producto == p.alias_interno %}selected{% endif %}>
                                     {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
                                 </option>
                             {% endfor %}
@@ -287,6 +291,40 @@
                     <div class="form-group bulto-quitar-wrap">
                         <label aria-hidden="true">&nbsp;</label>
                         <button type="button" class="btn btn-ghost btn-sm bulto-quitar" aria-label="Quitar esta caja">✕</button>
+                    </div>
+
+                    {# ── Declaración para la invoice de ESTE envío ─────────
+                       Los couriers exigen por ítem: descripción, valor
+                       unitario, HS y país de fabricación. Se precargan del
+                       catálogo al elegir el producto y SE PUEDEN CORREGIR
+                       acá: el valor real de venta cambia entre envíos, y
+                       declarar el default del catálogo cuando vendiste a
+                       otro precio es un problema en la aduana. #}
+                    <div class="bulto-invoice" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap:10px;">
+                        <div class="form-group">
+                            <label>Descripción invoice (EN)</label>
+                            <input type="text" name="bulto_desc_en" class="bulto-desc"
+                                   value="{{ f.descripcion_en or '' }}" placeholder="Cotton T-shirts">
+                        </div>
+                        <div class="form-group">
+                            <label>Valor unit. USD</label>
+                            <input type="number" name="bulto_valor_usd" class="bulto-valor"
+                                   min="0" step="0.01" value="{{ f.valor_unitario_usd or '' }}" placeholder="del catálogo">
+                        </div>
+                        <div class="form-group">
+                            <label>HS code</label>
+                            <input type="text" name="bulto_hs" class="bulto-hs"
+                                   value="{{ f.hs_code or '' }}" placeholder="6109.10">
+                        </div>
+                        <div class="form-group">
+                            <label>País de fabricación</label>
+                            <select name="bulto_pais_fab" class="bulto-pais-fab">
+                                <option value="">= origen del envío</option>
+                                {% for iso, nom in paises_destino %}
+                                    <option value="{{ iso }}" {% if f.pais_origen == iso %}selected{% endif %}>{{ nom }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
                 </div>
                 {% endfor %}
@@ -438,6 +476,22 @@
   function bultoRows() {
     return Array.prototype.slice.call(bultosList.querySelectorAll("[data-bulto]"));
   }
+
+  // Elegir un producto precarga SU declaración de invoice en la fila
+  // (valor, descripción, HS del catálogo) — editable después.
+  document.getElementById("bultos-list").addEventListener("change", function (e) {
+    if (!e.target.classList.contains("bulto-producto")) return;
+    var row = e.target.closest("[data-bulto]");
+    var op = e.target.options[e.target.selectedIndex];
+    if (!row || !op || !op.value) return;
+    var setea = function (sel, v) {
+      var el = row.querySelector(sel);
+      if (el) el.value = v || "";
+    };
+    setea(".bulto-valor", op.dataset.valor);
+    setea(".bulto-desc", op.dataset.desc);
+    setea(".bulto-hs", op.dataset.hs);
+  });
 
   function leerBultos() {
     // Filas completas → [{producto, cantidad}]

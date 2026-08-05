@@ -1061,6 +1061,13 @@ def envio_nuevo_post(
     # normaliza a 1 más abajo.
     bulto_producto: list[str] = Form([]),
     bulto_cantidad: list[str] = Form([]),
+    # Declaración de invoice POR RENGLÓN (Leandro 05/08): el valor real de
+    # venta cambia entre envíos; declarar el default del catálogo cuando se
+    # vendió a otro precio es un problema en la aduana. Vacío = catálogo.
+    bulto_desc_en: list[str] = Form([]),
+    bulto_valor_usd: list[str] = Form([]),
+    bulto_hs: list[str] = Form([]),
+    bulto_pais_fab: list[str] = Form([]),
     # Legacy (por si queda un form viejo cacheado): un solo producto.
     producto_alias: str = Form(""),
     cantidad: int = Form(1),
@@ -1120,7 +1127,28 @@ def envio_nuevo_post(
             cant = int(bulto_cantidad[i]) if i < len(bulto_cantidad or []) else 1
         except (TypeError, ValueError):
             cant = 1
-        filas.append({"producto": alias, "cantidad": max(cant, 1)})
+        def _campo(lista, idx):
+            v = lista[idx] if idx < len(lista or []) else ""
+            return (v or "").strip()
+
+        fila = {"producto": alias, "cantidad": max(cant, 1)}
+        # Overrides de invoice: sólo viajan los completados; el resto sale
+        # del catálogo, como siempre.
+        if _campo(bulto_desc_en, i):
+            fila["descripcion_en"] = _campo(bulto_desc_en, i)[:75]
+        if _campo(bulto_hs, i):
+            fila["hs_code"] = _campo(bulto_hs, i)
+        if _campo(bulto_pais_fab, i):
+            fila["pais_origen"] = _campo(bulto_pais_fab, i).upper()[:2]
+        v = _campo(bulto_valor_usd, i).replace(",", ".")
+        if v:
+            try:
+                valor = float(v)
+                if valor > 0:
+                    fila["valor_unitario_usd"] = round(valor, 2)
+            except ValueError:
+                pass   # un valor ilegible cae al catálogo, no rompe el envío
+        filas.append(fila)
     # Form viejo cacheado (pre multi-bulto): ahí "cantidad" significaba
     # unidades dentro de UNA caja — se respeta esa semántica para que el
     # precio cobrado sea el mismo que ese form mostró.

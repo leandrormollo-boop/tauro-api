@@ -927,7 +927,11 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
                 "unidades": max(int(b.get("cantidad") or 1), 1),
                 "hs_code": b.get("hs_code") or "",
                 "descripcion_en": b.get("descripcion_en") or "Merchandise",
-                "pais_origen": "AR",
+                # El de la invoice si el cliente lo declaró; si no, el país
+                # de ORIGEN del envío (Leandro 01/08: sale de China → CN).
+                # "AR" fijo declaraba como argentina una importación china.
+                "pais_origen": (b.get("pais_origen")
+                                or sol.get("remitente_pais") or "AR"),
             }
             for b in bultos
         ]
@@ -948,7 +952,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
             "hs_code": hs_code,
             "cantidad": cantidad_sol,
             "valor_unitario_usd": round(valor_total_sol / cantidad_sol, 2),
-            "pais_origen": "AR",
+            "pais_origen": sol.get("remitente_pais") or "AR",
         }
 
     # Quién paga los impuestos en ESTE envío: se decidió al crearlo y se
