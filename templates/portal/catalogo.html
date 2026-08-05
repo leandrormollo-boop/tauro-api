@@ -44,8 +44,8 @@
         </label>
         <select id="cat-destino" class="input" style="max-width:220px;">
             <option value="">— elegí un destino —</option>
-            {% for pais in paises_destino %}
-            <option value="{{ pais }}">{{ pais }}</option>
+            {% for iso, nom in paises_destino %}
+            <option value="{{ iso }}">{{ nom }}</option>
             {% endfor %}
         </select>
         <span id="cat-destino-nota" style="font-size:12px;color:var(--fg-3);"></span>

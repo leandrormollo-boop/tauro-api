@@ -609,8 +609,8 @@ def cotizar_form(request: Request, cliente: str = Depends(cliente_actual)):
         request=request, name="portal/cotizar.html",
         context={
             "cliente": cliente,
-            "paises_origen": get_paises_origen(),
-            "paises_destino": get_paises_destino(),
+            "paises_origen": _paises_con_nacional(),
+            "paises_destino": _paises_con_nacional(),
             "resultado": None,
         },
     )
@@ -654,8 +654,8 @@ def cotizar_post(
         request=request, name="portal/cotizar.html",
         context={
             "cliente": cliente,
-            "paises_origen": get_paises_origen(),
-            "paises_destino": get_paises_destino(),
+            "paises_origen": _paises_con_nacional(),
+            "paises_destino": _paises_con_nacional(),
             "opciones": opciones,
             "resultado": opciones[0] if opciones else None,
             "error": error,
@@ -1725,7 +1725,7 @@ def catalogo_view(request: Request, cliente: str = Depends(cliente_actual)):
                  # Para la columna "costo de envío por unidad": el JS cotiza
                  # cada producto contra el destino elegido, con el pricing
                  # del cliente ya aplicado (/portal/api/precio).
-                 "paises_destino": get_paises_destino()},
+                 "paises_destino": _paises_con_nacional()},
     )
 
 

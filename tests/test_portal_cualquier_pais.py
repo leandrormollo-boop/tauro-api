@@ -64,3 +64,24 @@ def test_un_pais_inventado_se_rechaza_con_su_motivo():
     r = b2b.cotizar_couriers_cliente("TEST", "XX", [{"producto": "x", "cantidad": 1}])
     assert not r["encontrado"]
     assert "pais_no_soportado" in r["motivo"]
+
+
+def test_NINGUNA_pantalla_del_portal_queda_con_la_lista_vieja():
+    """
+    Se me escapó /portal/cotizar la primera vez: cambié el wizard y dejé el
+    cotizador suelto con get_paises_destino(), que sale de las rutas. Leandro
+    lo vio enseguida ("me sigue figurando igual el portal").
+
+    Este test recorre el archivo entero en vez de confiar en que me acordé de
+    todas las pantallas.
+    """
+    import re
+
+    ruta = inspect.getsourcefile(pc)
+    fuente = open(ruta, encoding="utf-8").read()
+    # Se ignoran los comentarios: hablar de la función vieja está permitido.
+    codigo = "\n".join(l for l in fuente.splitlines() if not l.lstrip().startswith("#"))
+    culpables = re.findall(r'"paises_(?:destino|origen)":\s*get_paises_\w+\(\)', codigo)
+    assert not culpables, (
+        f"quedaron {len(culpables)} pantallas atadas a las rutas cargadas: {culpables}"
+    )
