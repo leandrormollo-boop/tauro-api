@@ -84,29 +84,86 @@
         <div class="form-section">
             <h4><span class="n">1</span> Remitente <span class="badge muted">Origen</span></h4>
 
+            {# El remitente se ELIGE de la libreta y después se puede EDITAR.
+               Antes era sólo un desplegable o una tarjeta de sólo lectura: para
+               una importación, donde el remitente es un proveedor distinto cada
+               vez, había que ir a la libreta, crearlo y volver. Y como el país
+               de ORIGEN del envío sale de acá, tampoco se podía cotizar desde
+               otro país sin pasar por la libreta. #}
             {% if remitentes %}
                 <div class="form-group">
-                    <label>Elegir remitente</label>
-                    <select name="remitente_id">
+                    <label>Traer de la libreta</label>
+                    <select name="remitente_id" id="remitente_id">
+                        <option value="">Cargar remitente nuevo</option>
                         {% for r in remitentes %}
-                            <option value="{{ r.id }}" {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada) %}selected{% endif %}>
+                            <option value="{{ r.id }}"
+                                    data-nombre="{{ r.nombre }}"
+                                    data-documento="{{ r.documento or '' }}"
+                                    data-email="{{ r.email or '' }}"
+                                    data-telefono="{{ r.telefono or '' }}"
+                                    data-direccion="{{ r.direccion }}"
+                                    data-ciudad="{{ r.ciudad }}"
+                                    data-estado="{{ r.estado or '' }}"
+                                    data-cp="{{ r.cp }}"
+                                    data-pais="{{ r.pais }}"
+                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada) %}selected{% endif %}>
                                 {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
                             </option>
                         {% endfor %}
                     </select>
                 </div>
-            {% elif remitente %}
-                <input type="hidden" name="remitente_id" value="">
-                <div class="address-preview">
-                    <strong>{{ remitente.nombre }}</strong>
-                    <span>{{ remitente.direccion }} · {{ remitente.ciudad }} {{ remitente.cp }} · {{ remitente.pais }}</span>
-                    <small>{{ remitente.email or "Sin email" }} · {{ remitente.telefono or "Sin teléfono" }}</small>
-                </div>
-            {% else %}
-                <div class="msg warn" style="margin-bottom:0;">
-                    No hay remitente cargado. Agregalo desde la libreta de direcciones o completá el perfil en el admin.
-                </div>
             {% endif %}
+
+            <div class="form-grid-2">
+                <div class="form-group">
+                    <label for="rem_nombre">Nombre / razón social</label>
+                    <input type="text" name="rem_nombre" id="rem_nombre" value="{{ form.rem_nombre or (remitente.nombre if remitente else '') }}">
+                </div>
+                <div class="form-group">
+                    <label for="rem_documento">CUIT / Tax ID <span style="color:var(--fg-4);font-weight:400;">— exportador</span></label>
+                    <input type="text" name="rem_documento" id="rem_documento" value="{{ form.rem_documento or (remitente.documento if remitente else '') }}">
+                </div>
+            </div>
+
+            <div class="form-grid-2">
+                <div class="form-group">
+                    <label for="rem_email">Email</label>
+                    <input type="email" name="rem_email" id="rem_email" value="{{ form.rem_email or (remitente.email if remitente else '') }}">
+                </div>
+                <div class="form-group">
+                    <label for="rem_telefono">Teléfono</label>
+                    <input type="text" name="rem_telefono" id="rem_telefono" value="{{ form.rem_telefono or (remitente.telefono if remitente else '') }}">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="rem_direccion">Dirección</label>
+                <input type="text" name="rem_direccion" id="rem_direccion" value="{{ form.rem_direccion or (remitente.direccion if remitente else '') }}">
+            </div>
+
+            <div class="form-grid-4">
+                <div class="form-group">
+                    <label for="rem_pais">País de origen</label>
+                    <select name="rem_pais" id="rem_pais">
+                        {% set pais_sel = form.rem_pais or (remitente.pais if remitente else 'AR') %}
+                        {% for iso, nom in paises_destino %}
+                            <option value="{{ iso }}" {% if pais_sel == iso %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="rem_ciudad">Ciudad</label>
+                    <input type="text" name="rem_ciudad" id="rem_ciudad" value="{{ form.rem_ciudad or (remitente.ciudad if remitente else '') }}">
+                </div>
+                <div class="form-group">
+                    <label for="rem_estado">Provincia / Estado</label>
+                    <input type="text" name="rem_estado" id="rem_estado" value="{{ form.rem_estado or (remitente.estado if remitente else '') }}">
+                </div>
+                <div class="form-group">
+                    <label for="rem_zip">Código postal</label>
+                    <input type="text" name="rem_zip" id="rem_zip" value="{{ form.rem_zip or (remitente.cp if remitente else '') }}">
+                </div>
+            </div>
         </div>
 
         <div class="form-section">
@@ -319,6 +376,36 @@
   const countrySelect = document.getElementById("destino_pais");
   if (countrySelect) {
     countrySelect.addEventListener("change", () => setField("dest_pais", countrySelect.value));
+  }
+
+  // ── Remitente: elegir de la libreta precarga los campos editables ──
+  // Mismo patrón que el destinatario. Y como el país de ORIGEN del envío
+  // sale de acá, cambiarlo recotiza: importar desde China cambia el precio.
+  const remSelect = document.getElementById("remitente_id");
+  const remFieldMap = {
+    nombre: "rem_nombre",
+    documento: "rem_documento",
+    email: "rem_email",
+    telefono: "rem_telefono",
+    direccion: "rem_direccion",
+    ciudad: "rem_ciudad",
+    estado: "rem_estado",
+    cp: "rem_zip",
+    pais: "rem_pais",
+  };
+  if (remSelect) {
+    remSelect.addEventListener("change", () => {
+      const option = remSelect.options[remSelect.selectedIndex];
+      if (!option || !option.value) return;
+      Object.entries(remFieldMap).forEach(([k, id]) => setField(id, option.dataset[k]));
+      if (typeof refreshLivePrice === "function") refreshLivePrice();
+    });
+  }
+  const remPais = document.getElementById("rem_pais");
+  if (remPais) {
+    remPais.addEventListener("change", () => {
+      if (typeof refreshLivePrice === "function") refreshLivePrice();
+    });
   }
 
   // ── Filas de cajas (multi-bulto) ──────────────────────────
@@ -545,6 +632,11 @@
           dest_zip: (document.getElementById("dest_zip") || {}).value || "",
           dest_ciudad: (document.getElementById("dest_ciudad") || {}).value || "",
           dest_estado: (document.getElementById("dest_estado") || {}).value || "",
+          // El ORIGEN del envío: el remitente puede ser un proveedor del
+          // exterior, y el precio cambia según de dónde sale la caja.
+          origen_pais: (document.getElementById("rem_pais") || {}).value || "",
+          origen_ciudad: (document.getElementById("rem_ciudad") || {}).value || "",
+          origen_cp: (document.getElementById("rem_zip") || {}).value || "",
         }),
       })
         .then(function (r) { return r.json(); })

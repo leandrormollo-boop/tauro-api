@@ -725,6 +725,18 @@ async def api_precio_envio_multi(
             "ciudad": str(body.get("dest_ciudad") or "").strip(),
             "estado": str(body.get("dest_estado") or "").strip(),
         }
+        # El origen que el cliente eligió en el form (puede ser un proveedor
+        # del exterior). Vacío = el remitente de la libreta, como siempre.
+        origen_real = {
+            "pais": str(body.get("origen_pais") or "").strip(),
+            "ciudad": str(body.get("origen_ciudad") or "").strip(),
+            "cp": str(body.get("origen_cp") or "").strip(),
+        }
+        if not origen_real["pais"]:
+            rem = obtener_remitente_para_envio(cliente) or {}
+            origen_real = {"pais": rem.get("pais") or "AR",
+                           "ciudad": rem.get("ciudad") or "",
+                           "cp": rem.get("cp") or ""}
         bultos = body.get("bultos") or []
         # Sin truncar en silencio: si hay de más, obtener_precio_envio_multi
         # lo rechaza con motivo y el preview muestra lo MISMO que diría el submit.
@@ -744,7 +756,8 @@ async def api_precio_envio_multi(
         # ven todas las cotizaciones; lo que cambia es el markup de cada uno
         # (decisión de Leandro, 01/08/2026).
         precio = cotizar_couriers_cliente(
-            cliente, destino, bultos, destino_real=destino_real
+            cliente, destino, bultos,
+            destino_real=destino_real, origen_real=origen_real,
         )
     except Exception as e:
         print(f"[portal] api_precio_multi error: {e}")
@@ -1056,6 +1069,18 @@ def envio_nuevo_post(
     nac_carrier: str = Form(""),
     nac_servicio: str = Form(""),
     remitente_id: str = Form(""),
+    # Remitente EDITABLE (05/08): lo que quedó en los campos manda sobre lo
+    # que vino de la libreta. Para una importación el remitente es el
+    # proveedor del exterior y puede cambiar envío a envío.
+    rem_nombre: str = Form(""),
+    rem_documento: str = Form(""),
+    rem_email: str = Form(""),
+    rem_telefono: str = Form(""),
+    rem_direccion: str = Form(""),
+    rem_ciudad: str = Form(""),
+    rem_estado: str = Form(""),
+    rem_zip: str = Form(""),
+    rem_pais: str = Form(""),
     destinatario_id: str = Form(""),
     dest_nombre: str = Form(...),
     dest_documento: str = Form(""),
@@ -1128,10 +1153,24 @@ def envio_nuevo_post(
     }
 
     try:
-        remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id))
-        if not remitente:
+        remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id)) or {}
+        # Lo que el cliente EDITÓ en el form manda sobre la libreta: campo
+        # por campo, para que elegir de la libreta y corregir una sola cosa
+        # (el CP, el teléfono) no pierda el resto.
+        editado = {
+            "nombre": rem_nombre, "documento": rem_documento,
+            "email": rem_email, "telefono": rem_telefono,
+            "direccion": rem_direccion, "ciudad": rem_ciudad,
+            "estado": rem_estado, "cp": rem_zip, "pais": rem_pais,
+        }
+        for campo, valor in editado.items():
+            if (valor or "").strip():
+                remitente[campo] = valor.strip()
+        if not (remitente.get("nombre") and remitente.get("direccion")
+                and remitente.get("ciudad")):
             raise ValueError(
-                "No hay remitente cargado. Agregá uno en Direcciones o completá los datos del cliente en el admin."
+                "Faltan datos del remitente: nombre, dirección y ciudad como mínimo. "
+                "Completalos en el paso 1 o elegí uno de la libreta."
             )
 
         if destinatario_id:
