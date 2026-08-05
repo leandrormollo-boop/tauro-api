@@ -34,6 +34,12 @@ from servicios.catalogo import (
 )
 from servicios.rutas import get_todas_las_rutas, upsert_ruta, toggle_ruta
 from servicios.impuestos import normalizar as normalizar_tax
+
+
+def _courier_valido(valor: str) -> str:
+    """fedex | dhl | ups, o '' = el cliente elige en cada envío."""
+    v = (valor or "").strip().lower()
+    return v if v in ("fedex", "dhl", "ups") else ""
 from servicios.pricing import (
     PRICING_MODES, describir_pricing, parse_monto_ars, parse_pricing_value,
 )
@@ -560,6 +566,244 @@ def admin_seguridad(request: Request, admin_token: Optional[str] = Cookie(None))
     )
 
 
+# ── Centro comercial / agentes ──────────────────────────────
+
+_FLASH_COMERCIAL = {
+    "cuenta-creada": "Cuenta comercial creada.",
+    "descubrimiento-encolado": "Investigacion de mercado agregada a la cola.",
+    "investigacion-encolada": "Investigacion de empresa agregada a la cola.",
+    "propuesta-encolada": "Redaccion y revision agregadas a la cola.",
+    "contacto-verificado": "Email comercial marcado como verificado.",
+    "mensaje-aprobado": "Borrador aprobado. Todavia no fue enviado.",
+    "mensaje-enviado": "Correo enviado y registrado.",
+    "mensaje-cancelado": "Mensaje cancelado.",
+}
+
+
+def _redirect_comercial(resultado: str):
+    return RedirectResponse(url=f"/admin/comercial?resultado={resultado}", status_code=303)
+
+
+@router.get("/comercial", response_class=HTMLResponse)
+def admin_comercial(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.crm_comercial import obtener_dashboard
+
+    try:
+        datos = obtener_dashboard()
+        error = None
+    except Exception as exc:
+        print(f"[admin] centro comercial sin datos: {type(exc).__name__}: {exc}")
+        datos = {
+            "stats": {"cuentas": 0, "calificadas": 0, "por_aprobar": 0, "enviados": 0, "trabajos_pendientes": 0},
+            "cuentas": [], "mensajes": [], "trabajos": [], "leads_web_pendientes": 0,
+            "icp": {}, "ia_configurada": False,
+        }
+        error = "No se pudo abrir el CRM. Revisa la inicializacion de la base de datos."
+    resultado = request.query_params.get("resultado", "")
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/comercial.html",
+        context={
+            "seccion": "comercial",
+            **datos,
+            "flash_ok": _FLASH_COMERCIAL.get(resultado),
+            "flash_error": error or ("La accion no pudo completarse." if resultado == "error" else None),
+        },
+    )
+
+
+@router.post("/comercial/cuentas/nueva")
+def admin_comercial_cuenta_nueva(
+    request: Request,
+    empresa: str = Form(...),
+    dominio: str = Form(""),
+    pais: str = Form("AR"),
+    segmento: str = Form("OTRO"),
+    contacto_nombre: str = Form(""),
+    contacto_cargo: str = Form(""),
+    contacto_email: str = Form(""),
+    email_verificado: Optional[str] = Form(None),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import crear_cuenta
+        from servicios.auditoria import registrar_desde_request
+
+        cuenta_id = crear_cuenta(
+            empresa=empresa,
+            dominio=dominio,
+            pais=pais,
+            segmento=segmento,
+            contacto_nombre=contacto_nombre,
+            contacto_cargo=contacto_cargo,
+            contacto_email=contacto_email,
+            email_verificado=bool(email_verificado),
+        )
+        registrar_desde_request(
+            request, event="crm.cuenta_creada", actor_type="admin",
+            actor_ref="admin", metadata={"cuenta_id": cuenta_id},
+        )
+        return _redirect_comercial("cuenta-creada")
+    except Exception as exc:
+        print(f"[admin] crear cuenta comercial fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
+@router.post("/comercial/descubrir")
+def admin_comercial_descubrir(
+    request: Request,
+    brief: str = Form(...),
+    limite: int = Form(10),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import encolar_trabajo
+        from servicios.auditoria import registrar_desde_request
+
+        job_id = encolar_trabajo("DESCUBRIR", payload={"brief": brief[:3000], "limite": max(1, min(limite, 20))})
+        registrar_desde_request(
+            request, event="crm.descubrimiento_encolado", actor_type="admin",
+            actor_ref="admin", metadata={"job_id": job_id, "limite": max(1, min(limite, 20))},
+        )
+        return _redirect_comercial("descubrimiento-encolado")
+    except Exception as exc:
+        print(f"[admin] encolar descubrimiento fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
+@router.post("/comercial/cuentas/{cuenta_id}/investigar")
+def admin_comercial_investigar(
+    request: Request,
+    cuenta_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import encolar_trabajo
+        job_id = encolar_trabajo("INVESTIGAR", cuenta_id=cuenta_id)
+        from servicios.auditoria import registrar_desde_request
+        registrar_desde_request(
+            request, event="crm.investigacion_encolada", actor_type="admin",
+            actor_ref="admin", metadata={"cuenta_id": cuenta_id, "job_id": job_id},
+        )
+        return _redirect_comercial("investigacion-encolada")
+    except Exception as exc:
+        print(f"[admin] encolar investigacion fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
+@router.post("/comercial/cuentas/{cuenta_id}/propuesta")
+def admin_comercial_propuesta(
+    request: Request,
+    cuenta_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import encolar_trabajo
+        job_id = encolar_trabajo("PROPUESTA", cuenta_id=cuenta_id)
+        from servicios.auditoria import registrar_desde_request
+        registrar_desde_request(
+            request, event="crm.propuesta_encolada", actor_type="admin",
+            actor_ref="admin", metadata={"cuenta_id": cuenta_id, "job_id": job_id},
+        )
+        return _redirect_comercial("propuesta-encolada")
+    except Exception as exc:
+        print(f"[admin] encolar propuesta fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
+@router.post("/comercial/contactos/{contacto_id}/verificar")
+def admin_comercial_verificar_contacto(
+    request: Request,
+    contacto_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import verificar_contacto
+        from servicios.auditoria import registrar_desde_request
+        verificar_contacto(contacto_id)
+        registrar_desde_request(
+            request, event="crm.contacto_verificado", actor_type="admin",
+            actor_ref="admin", metadata={"contacto_id": contacto_id},
+        )
+        return _redirect_comercial("contacto-verificado")
+    except Exception as exc:
+        print(f"[admin] verificar contacto fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
+@router.post("/comercial/mensajes/{mensaje_id}/aprobar")
+def admin_comercial_aprobar_mensaje(
+    request: Request,
+    mensaje_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import aprobar_mensaje
+        from servicios.auditoria import registrar_desde_request
+        aprobar_mensaje(mensaje_id)
+        registrar_desde_request(
+            request, event="crm.mensaje_aprobado", actor_type="admin",
+            actor_ref="admin", metadata={"mensaje_id": mensaje_id},
+        )
+        return _redirect_comercial("mensaje-aprobado")
+    except Exception as exc:
+        print(f"[admin] aprobar mensaje fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
+@router.post("/comercial/mensajes/{mensaje_id}/enviar")
+def admin_comercial_enviar_mensaje(
+    request: Request,
+    mensaje_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import enviar_mensaje
+        from servicios.auditoria import registrar_desde_request
+        enviado = enviar_mensaje(mensaje_id)
+        registrar_desde_request(
+            request, event="crm.mensaje_envio", actor_type="admin",
+            actor_ref="admin", success=enviado, metadata={"mensaje_id": mensaje_id},
+        )
+        return _redirect_comercial("mensaje-enviado" if enviado else "error")
+    except Exception as exc:
+        print(f"[admin] enviar mensaje fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
+@router.post("/comercial/mensajes/{mensaje_id}/cancelar")
+def admin_comercial_cancelar_mensaje(
+    request: Request,
+    mensaje_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.crm_comercial import cancelar_mensaje
+        cancelar_mensaje(mensaje_id)
+        return _redirect_comercial("mensaje-cancelado")
+    except Exception as exc:
+        print(f"[admin] cancelar mensaje fallo: {type(exc).__name__}: {exc}")
+        return _redirect_comercial("error")
+
+
 # ── Clientes ─────────────────────────────────────────────────
 
 @router.get("/clientes", response_class=HTMLResponse)
@@ -692,6 +936,8 @@ def admin_cliente_nuevo(
     # Quién paga los impuestos de destino por defecto en los envíos de este
     # cliente. Se puede pisar por envío desde el wizard del portal.
     tax_paga: str = Form(""),
+    # Courier preferido: WAIMAO opera por DHL y lo deja fijado.
+    courier_default: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -720,8 +966,8 @@ def admin_cliente_nuevo(
                     INSERT INTO clientes
                         (cliente_id, email, password_hash, markup_pct, markup_tipo, markup_valor, activo,
                          nombre, cuit, direccion, cp, ciudad, pais, telefono, notas,
-                         markup_nac_tipo, markup_nac_valor, puede_emitir, tope_deuda_ars, tax_paga)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         markup_nac_tipo, markup_nac_valor, puede_emitir, tope_deuda_ars, tax_paga, courier_default)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cliente_id, email.strip().lower(), password_hash_db, markup_pct_db,
@@ -733,6 +979,7 @@ def admin_cliente_nuevo(
                         nac_tipo, nac_valor,
                         puede_emitir == "1", tope_db,
                         normalizar_tax(tax_paga),
+                        _courier_valido(courier_default),
                     ),
                 )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id}?ok=creado", status_code=303)
@@ -929,6 +1176,8 @@ def admin_cliente_editar(
     # Quién paga los impuestos de destino por defecto en los envíos de este
     # cliente. Se puede pisar por envío desde el wizard del portal.
     tax_paga: str = Form(""),
+    # Courier preferido: WAIMAO opera por DHL y lo deja fijado.
+    courier_default: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -957,7 +1206,7 @@ def admin_cliente_editar(
                         email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
                         direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s,
                         markup_nac_tipo=%s, markup_nac_valor=%s,
-                        puede_emitir=%s, tope_deuda_ars=%s, tax_paga=%s
+                        puede_emitir=%s, tope_deuda_ars=%s, tax_paga=%s, courier_default=%s
                     WHERE cliente_id=%s
                     """,
                     (
@@ -970,6 +1219,7 @@ def admin_cliente_editar(
                         nac_tipo, nac_valor,
                         puede_emitir == "1", tope_db,
                         normalizar_tax(tax_paga),
+                        _courier_valido(courier_default),
                         cliente_id.strip().upper(),
                     ),
                 )

@@ -48,6 +48,7 @@ from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
 )
+from servicios.carriers import courier_default_cliente
 from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
 from servicios.pricing import parse_monto_ars
 from servicios.panel_cliente import checklist_arranque, embudo_envios
@@ -1043,6 +1044,9 @@ def envio_nuevo_form(
             # Arranca con lo que el cliente dejó configurado en su ficha; el
             # selector del wizard sólo sirve para pisarlo en este envío.
             "tax_paga_default": tax_paga_cliente(cliente),
+            # El courier que el cliente dejó configurado (WAIMAO → DHL):
+            # el selector del wizard arranca con este elegido.
+            "courier_default": courier_default_cliente(cliente),
             "error": None,
         },
     )
@@ -1397,6 +1401,10 @@ def envio_nuevo_post(
                 "destinatarios": destinatarios,
                 "form": form,
                 "error": mensaje_error,
+                # Sin estos dos, el re-render tras un error pierde el courier
+                # y el default de impuestos configurados del cliente.
+                "tax_paga_default": tax_paga_cliente(cliente),
+                "courier_default": courier_default_cliente(cliente),
             },
         )
 

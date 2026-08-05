@@ -303,6 +303,29 @@
                 </div>
             </div>
 
+            {# Courier del envío (Leandro 05/08): el cliente especifica por
+               qué empresa sale. Arranca con su courier configurado (WAIMAO →
+               DHL) y se puede cambiar acá. Cuando el precio en vivo cotiza,
+               cada botón muestra su precio. #}
+            <div class="form-group">
+                <label>Courier del envío</label>
+                <div id="courier-btns" style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" class="btn btn-ghost btn-sm" data-courier="fedex">
+                        FedEx <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-courier="dhl">
+                        DHL <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-courier="ups">
+                        UPS <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
+                    </button>
+                </div>
+                <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
+                    Sin elegir, va el más barato de los que coticen.
+                    {% if courier_default %}Tu cuenta tiene {{ courier_default|upper }} configurado.{% endif %}
+                </p>
+            </div>
+
             {# Impuestos de destino. Arranca con lo que el cliente dejó
                configurado en su cuenta; acá sólo se pisa para ESTE envío. #}
             <div class="form-group">
@@ -479,40 +502,11 @@
     } else if (state === "loading") {
       liveBox.innerHTML = "<div class='matrix-pill matrix-sm'><div class='matrix'></div></div><span>Consultando tarifa en vivo…</span>";
     } else if (state === "ok") {
-      // números siempre en mono tabular: no "saltan" de ancho al recotizar
-      var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
       intlOpciones = data.opciones || [];
+      intlNoDisp = data.no_disponibles || [];
       if (!intlOpciones.length) { renderLivePrice("err", data); return; }
-
-      // Vienen ordenadas de más barata a más cara: la primera es la sugerida.
-      var sel = intlOpciones.length > 1
-        ? "<select id='intl-opcion' style='margin-top:6px;font-size:12.5px;padding:7px 28px 7px 10px;'>" +
-            intlOpciones.map(function (o, i) {
-              return "<option value='" + i + "'>" + o.nombre + " — " + fmtARS(o.precio_ars) +
-                     (o.dias ? " · " + o.dias + " días" : "") + "</option>";
-            }).join("") + "</select>"
-        : "";
-
-      // Lo que NO cotizó, con el motivo: el cliente tiene que poder
-      // distinguir "DHL no llega ahí" de "no cotiza varias cajas".
-      var fuera = (data.no_disponibles || []).length
-        ? "<span style='font-size:11px;color:var(--fg-4);display:block;margin-top:4px;'>" +
-            data.no_disponibles.map(function (n) { return n.nombre; }).join(" · ") +
-            ": sin cotización para este envío</span>"
-        : "";
-
-      liveBox.innerHTML =
-        "<strong style='font-size:19px;'>" +
-        "<span id='intl-precio' style='color:var(--accent-soft);" + monoStyle + "'>" +
-        fmtARS(intlOpciones[0].precio_ars) + "</span>" +
-        " <span style='font-size:11px;color:var(--fg-3)'>ARS</span></strong>" +
-        "<span id='intl-detalle'></span>" + sel + fuera;
-
-      aplicarIntlSel(0);
-      var combo = document.getElementById("intl-opcion");
-      if (combo) combo.addEventListener("change", function () {
-        aplicarIntlSel(parseInt(this.value, 10) || 0);
-      });
+      pintarBotonesCourier();
+      mostrarSeleccion();
     } else {
       var motivo = (data && data.motivo) || "";
       var msg = motivo.indexOf("peso_excedido") === 0
@@ -522,27 +516,68 @@
     }
   }
 
-  // ── Nacional: comparador de couriers en el precio en vivo ─
+  // ── Courier internacional: el cliente especifica por cuál sale ──
   var intlOpciones = [];
+  var intlNoDisp = [];
   var intlCourier = document.getElementById("intl_courier");
+  // Arranca con el courier configurado en la cuenta (WAIMAO → DHL).
+  var courierElegido = "{{ courier_default or '' }}";
+  if (intlCourier && courierElegido) intlCourier.value = courierElegido;
 
-  function aplicarIntlSel(i) {
-    var o = intlOpciones[i];
-    if (!o) return;
-    // El hidden viaja en el submit: el servidor recotiza y busca ESTE
-    // courier. Si no aparece, falla pidiendo elegir otro — nunca cobra
-    // uno distinto del que se eligió en pantalla.
-    if (intlCourier) intlCourier.value = o.id;
-    var p = document.getElementById("intl-precio");
-    if (p) p.textContent = fmtARS(o.precio_ars);
-    var d = document.getElementById("intl-detalle");
-    if (d) {
-      var t = "USD " + o.precio_usd;
-      if (o.servicio) t += " · " + o.servicio;
-      if (o.dias) t += " · " + o.dias + " días";
-      d.textContent = t;
-    }
+  function pintarBotonesCourier() {
+    document.querySelectorAll("#courier-btns [data-courier]").forEach(function (btn) {
+      var id = btn.dataset.courier;
+      var op = intlOpciones.find(function (o) { return o.id === id; });
+      var precio = btn.querySelector(".courier-precio");
+      if (precio) precio.textContent = op ? fmtARS(op.precio_ars) : "";
+      btn.classList.toggle("btn-primary", id === courierElegido);
+      btn.classList.toggle("btn-ghost", id !== courierElegido);
+    });
   }
+
+  function mostrarSeleccion() {
+    var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
+    var fuera = intlNoDisp.length
+      ? "<span style='font-size:11px;color:var(--fg-4);display:block;margin-top:4px;'>" +
+          intlNoDisp.map(function (n) { return n.nombre; }).join(" · ") +
+          ": sin cotización para este envío</span>"
+      : "";
+    var op = courierElegido
+      ? intlOpciones.find(function (o) { return o.id === courierElegido; })
+      : intlOpciones[0];   // sin elección: el más barato
+
+    if (!op) {
+      // El elegido no cotizó ESTE envío. Nunca se muestra otro en su
+      // lugar: el cliente pidió DHL y tiene que verlo, no descubrirlo
+      // en el resumen de cuenta.
+      liveBox.innerHTML =
+        "<strong style='color:var(--warn)'>" + courierElegido.toUpperCase() +
+        " no cotizó este envío</strong><span>Elegí otro courier arriba o revisá origen/destino.</span>" + fuera;
+      return;
+    }
+    // El hidden viaja en el submit: el servidor recotiza y busca ESTE
+    // courier. Si no aparece, falla pidiendo elegir otro.
+    if (intlCourier) intlCourier.value = op.id;
+    var t = "USD " + op.precio_usd;
+    if (op.servicio) t += " · " + op.servicio;
+    if (op.dias) t += " · " + op.dias + " días";
+    liveBox.innerHTML =
+      "<strong style='font-size:19px;'>" +
+      "<span style='color:var(--accent-soft);" + monoStyle + "'>" + fmtARS(op.precio_ars) + "</span>" +
+      " <span style='font-size:11px;color:var(--fg-3)'>ARS · " + op.nombre + "</span></strong>" +
+      "<span>" + t + "</span>" + fuera;
+  }
+
+  document.querySelectorAll("#courier-btns [data-courier]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      courierElegido = btn.dataset.courier;
+      if (intlCourier) intlCourier.value = courierElegido;
+      pintarBotonesCourier();
+      if (intlOpciones.length) mostrarSeleccion();
+      else refreshLivePrice();
+    });
+  });
+  pintarBotonesCourier();
 
   var nacCarrier = document.getElementById("nac_carrier");
   var nacServicio = document.getElementById("nac_servicio");

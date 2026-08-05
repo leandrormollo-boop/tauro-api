@@ -185,6 +185,25 @@
       </p>
     </div>
 
+    {# Courier preferido (Leandro 05/08): "el cliente tiene que especificar
+       por qué empresa realiza sus envíos. Puede dejarlo configurado".
+       WAIMAO opera por DHL: el wizard le arranca con DHL elegido. #}
+    <div class="form-group">
+      <label>Courier preferido</label>
+      <select name="courier_default">
+        <option value="" {% if not cliente or not cliente.courier_default %}selected{% endif %}>
+          Elige en cada envío
+        </option>
+        <option value="fedex" {% if cliente and cliente.courier_default == 'fedex' %}selected{% endif %}>FedEx</option>
+        <option value="dhl" {% if cliente and cliente.courier_default == 'dhl' %}selected{% endif %}>DHL Express</option>
+        <option value="ups" {% if cliente and cliente.courier_default == 'ups' %}selected{% endif %}>UPS</option>
+      </select>
+      <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
+        El wizard de nuevo envío le arranca con este courier preseleccionado.
+        Siempre puede cambiarlo por envío.
+      </p>
+    </div>
+
     <div class="form-group">
       <label>Notas internas</label>
       <textarea name="notas" rows="2" placeholder="Observaciones...">{{ cliente.notas if cliente else '' }}</textarea>

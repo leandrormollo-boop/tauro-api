@@ -172,6 +172,26 @@ def _desc_fedex(config: dict) -> float:
         return 88.0
 
 
+def courier_default_cliente(cliente_id: str) -> str:
+    """
+    El courier que el cliente dejó configurado ("mis envíos van por DHL").
+    Devuelve 'fedex' | 'dhl' | 'ups' o '' si elige en cada envío. Ante
+    cualquier problema, '': que no se pueda leer la preferencia no puede
+    frenar el wizard.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT courier_default FROM clientes WHERE cliente_id = %s",
+                            ((cliente_id or "").strip().upper(),))
+                fila = cur.fetchone()
+        valor = (fila["courier_default"] if fila else "").strip().lower()
+        return valor if valor in {c["id"] for c in CARRIERS} else ""
+    except Exception as e:
+        print(f"[carriers] no pude leer el courier default de {cliente_id}: {e}")
+        return ""
+
+
 def carriers_activos() -> list:
     """
     Los couriers que HOY pueden cotizar, para mostrarlos como partners en la

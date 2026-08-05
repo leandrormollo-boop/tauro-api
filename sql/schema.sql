@@ -58,6 +58,11 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tope_deuda_ars REAL;
 -- hoy el código mandaba SENDER con la cuenta de TAURO sin que nadie lo
 -- hubiera decidido — o sea que pagábamos los derechos de todos los envíos.
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tax_paga TEXT NOT NULL DEFAULT 'DESTINATARIO';
+-- Courier preferido del cliente (Leandro 05/08): "el cliente tiene que
+-- especificar por qué empresa realiza sus envíos. Puede dejarlo
+-- configurado". WAIMAO opera por DHL: lo deja fijado y el wizard arranca
+-- con DHL preseleccionado. Vacío = elige en cada envío.
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS courier_default TEXT NOT NULL DEFAULT '';
 -- Password hasheado con bcrypt (login email + password)
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
@@ -157,6 +162,20 @@ CREATE TABLE IF NOT EXISTS salud_historial (
     checks  INTEGER NOT NULL DEFAULT 0,
     fallos  INTEGER NOT NULL DEFAULT 0
 );
+
+-- ── Leads del cotizador publico ────────────────────────────
+-- Antes se creaba dentro del primer request. Queda en el schema para que el
+-- CRM pueda leerla desde el arranque y para que la migracion sea auditable.
+CREATE TABLE IF NOT EXISTS leads_cotizacion (
+    id         SERIAL PRIMARY KEY,
+    email      TEXT NOT NULL,
+    destino    TEXT,
+    peso_kg    REAL,
+    resumen    JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_leads_cotizacion_email_fecha
+    ON leads_cotizacion (LOWER(email), created_at DESC);
 
 -- ── Envíos / Facturas (ex ENVIOS 2026) ─────────────────────
 CREATE TABLE IF NOT EXISTS envios (
@@ -296,6 +315,127 @@ CREATE TABLE IF NOT EXISTS config (
     parametro TEXT PRIMARY KEY,
     valor     TEXT NOT NULL
 );
+
+-- ── CRM comercial y agentes ────────────────────────────────
+-- Se mantiene separado de `clientes`: una cuenta prospectada no se convierte
+-- en cliente operativo hasta que exista una decision comercial humana.
+CREATE TABLE IF NOT EXISTS crm_cuentas (
+    id                   BIGSERIAL PRIMARY KEY,
+    empresa              TEXT NOT NULL,
+    dominio              TEXT UNIQUE,
+    sitio_web            TEXT,
+    pais                 TEXT,
+    segmento             TEXT NOT NULL DEFAULT 'OTRO',
+    estado               TEXT NOT NULL DEFAULT 'NUEVO',
+    fuente               TEXT NOT NULL DEFAULT 'MANUAL',
+    score                INTEGER NOT NULL DEFAULT 0,
+    score_breakdown      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    discovery_payload    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    discovery_job_id     BIGINT,
+    research_summary     TEXT,
+    research_payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    research_model       TEXT,
+    research_response_id TEXT,
+    excluida             BOOLEAN NOT NULL DEFAULT FALSE,
+    investigado_at       TIMESTAMPTZ,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (score BETWEEN 0 AND 100),
+    CHECK (estado IN ('NUEVO', 'INVESTIGADO', 'CALIFICADO', 'DESCARTADO', 'CLIENTE'))
+);
+CREATE INDEX IF NOT EXISTS idx_crm_cuentas_estado_score
+    ON crm_cuentas (estado, score DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS crm_contactos (
+    id            BIGSERIAL PRIMARY KEY,
+    cuenta_id     BIGINT NOT NULL REFERENCES crm_cuentas(id) ON DELETE CASCADE,
+    nombre        TEXT,
+    cargo         TEXT,
+    email         TEXT NOT NULL UNIQUE,
+    estado_email  TEXT NOT NULL DEFAULT 'NO_VERIFICADO',
+    fuente_url    TEXT,
+    es_principal  BOOLEAN NOT NULL DEFAULT FALSE,
+    excluido      BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (estado_email IN ('NO_VERIFICADO', 'VERIFICADO', 'REBOTADO', 'BAJA'))
+);
+CREATE INDEX IF NOT EXISTS idx_crm_contactos_cuenta
+    ON crm_contactos (cuenta_id, es_principal DESC);
+
+CREATE TABLE IF NOT EXISTS crm_fuentes (
+    id            BIGSERIAL PRIMARY KEY,
+    cuenta_id     BIGINT NOT NULL REFERENCES crm_cuentas(id) ON DELETE CASCADE,
+    url           TEXT NOT NULL,
+    titulo        TEXT,
+    evidencia     TEXT,
+    tipo          TEXT NOT NULL DEFAULT 'INVESTIGACION',
+    verificado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (cuenta_id, url)
+);
+
+CREATE TABLE IF NOT EXISTS crm_trabajos_agente (
+    id            BIGSERIAL PRIMARY KEY,
+    tipo          TEXT NOT NULL,
+    cuenta_id     BIGINT REFERENCES crm_cuentas(id) ON DELETE CASCADE,
+    payload       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resultado     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    estado        TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos      INTEGER NOT NULL DEFAULT 0,
+    error         TEXT,
+    creado_por    TEXT NOT NULL DEFAULT 'admin',
+    iniciado_at   TIMESTAMPTZ,
+    finalizado_at TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (tipo IN ('DESCUBRIR', 'INVESTIGAR', 'PROPUESTA')),
+    CHECK (estado IN ('PENDIENTE', 'EJECUTANDO', 'COMPLETADO', 'FALLIDO', 'CANCELADO'))
+);
+CREATE INDEX IF NOT EXISTS idx_crm_trabajos_cola
+    ON crm_trabajos_agente (estado, created_at);
+
+CREATE TABLE IF NOT EXISTS crm_mensajes (
+    id                 BIGSERIAL PRIMARY KEY,
+    cuenta_id          BIGINT NOT NULL REFERENCES crm_cuentas(id) ON DELETE CASCADE,
+    contacto_id        BIGINT NOT NULL REFERENCES crm_contactos(id) ON DELETE RESTRICT,
+    tipo               TEXT NOT NULL DEFAULT 'PRIMER_CONTACTO',
+    asunto             TEXT NOT NULL,
+    cuerpo_texto       TEXT NOT NULL,
+    estado             TEXT NOT NULL DEFAULT 'BORRADOR',
+    draft_payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    review_payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    draft_model        TEXT,
+    review_model       TEXT,
+    draft_response_id  TEXT,
+    review_response_id TEXT,
+    checksum           TEXT NOT NULL,
+    aprobado_por       TEXT,
+    aprobado_at        TIMESTAMPTZ,
+    enviado_por        TEXT,
+    enviado_at         TIMESTAMPTZ,
+    envio_intentos     INTEGER NOT NULL DEFAULT 0,
+    ultimo_error       TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (estado IN ('BORRADOR', 'OBSERVADO', 'APROBADO', 'ENVIANDO', 'ENVIADO', 'CANCELADO'))
+);
+CREATE INDEX IF NOT EXISTS idx_crm_mensajes_estado
+    ON crm_mensajes (estado, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_crm_mensaje_activo
+    ON crm_mensajes (cuenta_id, contacto_id, tipo)
+    WHERE estado IN ('BORRADOR', 'APROBADO', 'ENVIANDO');
+
+CREATE TABLE IF NOT EXISTS crm_eventos (
+    id          BIGSERIAL PRIMARY KEY,
+    event       TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id   BIGINT,
+    actor       TEXT NOT NULL,
+    metadata    JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_crm_eventos_fecha
+    ON crm_eventos (created_at DESC);
 
 -- ── Auditoría de seguridad ──────────────────────────────────
 -- Quién entró al panel (y quién falló al intentarlo) y qué acción sensible se
