@@ -342,7 +342,13 @@ class DHLClient(CarrierBase):
         se omite la clave entera: mandarla vacía hace que DHL rechace el
         envío, y un bloque ausente es válido.
         """
-        doc = "".join(ch for ch in str(shipper.get("documento") or "") if ch.isdigit())
+        # Alfanumérico A PROPÓSITO: el CUIT argentino es numérico, pero el
+        # USCC chino (91330782MA2DCHET04) y el RFC mexicano (CEN040218L96)
+        # llevan letras. Quedarse sólo con dígitos MUTILABA el Tax ID del
+        # shipper de la primera guía real (HAILU) — lo cazó el test con
+        # datos reales. Se sacan sólo separadores: espacios, puntos, guiones.
+        doc = "".join(ch for ch in str(shipper.get("documento") or "")
+                      if ch.isalnum()).upper()
         if not doc:
             return {}
         return {

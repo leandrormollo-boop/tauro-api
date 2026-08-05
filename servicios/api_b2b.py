@@ -419,42 +419,76 @@ def cotizar_couriers_cliente(
 
 def _piezas_del_catalogo(cliente_id: str, bultos: list):
     """
-    Convierte las filas del form en piezas (una por caja) validando contra el
-    catálogo. Devuelve (piezas, detalle, error). Una entrada POR CAJA porque
-    cada una paga su propio peso volumétrico.
+    Convierte las filas del form en piezas (una por caja). Devuelve
+    (piezas, detalle, error).
+
+    DOS MODOS por fila, como Boxfly/DHL (guía HAILU, 05/08):
+      - CON producto del catálogo → base del catálogo + overrides de invoice.
+      - SIN producto (carga libre) → peso y medidas A MANO, obligatorios.
+        El catálogo precarga si se quiere, pero no es requisito: un
+        freight-forwarder despacha cajas distintas en cada envío.
     """
     if not bultos:
         return [], [], "sin_bultos"
+
+    def _num(v, default=None):
+        try:
+            n = float(str(v).replace(",", "."))
+            return n if n > 0 else default
+        except (TypeError, ValueError):
+            return default
 
     piezas, detalle, total_cajas = [], [], 0
     for b in bultos:
         alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
         cantidad = max(int(b.get("cantidad") or 1), 1)
-        producto = get_producto(cliente_id, alias)
-        if not producto or not producto.activo:
-            return [], [], f"producto_no_encontrado: {alias}"
-        if producto.peso_kg > MAX_KG_POR_CAJA:
-            return [], [], (f"peso_excedido: cada caja de {alias} pesa "
-                            f"{producto.peso_kg}kg y el máximo es {MAX_KG_POR_CAJA}kg.")
+
+        if alias:
+            producto = get_producto(cliente_id, alias)
+            if not producto or not producto.activo:
+                return [], [], f"producto_no_encontrado: {alias}"
+            base = {
+                "peso_kg": producto.peso_kg, "largo_cm": producto.largo_cm,
+                "ancho_cm": producto.ancho_cm, "alto_cm": producto.alto_cm,
+                "valor_unitario_usd": producto.valor_usd_default,
+                "hs_code": producto.hs_code,
+                "descripcion_en": producto.nombre_invoice,
+                "producto_alias": producto.alias_interno,
+            }
+        else:
+            # Carga libre: sin peso o sin medidas no hay flete posible.
+            if not (_num(b.get("peso_kg")) and _num(b.get("largo_cm"))
+                    and _num(b.get("ancho_cm")) and _num(b.get("alto_cm"))):
+                return [], [], ("caja_incompleta: sin producto del catálogo, "
+                                "cada caja necesita peso y las tres medidas")
+            if not str(b.get("descripcion_en") or "").strip():
+                return [], [], ("caja_incompleta: la descripción del contenido "
+                                "es obligatoria para la aduana")
+            base = {"producto_alias": "CARGA"}
+
+        fila = dict(base)
+        # Lo declarado EN ESTE envío manda sobre el catálogo, campo por campo.
+        for k in ("peso_kg", "largo_cm", "ancho_cm", "alto_cm", "valor_unitario_usd"):
+            v = _num(b.get(k))
+            if v is not None:
+                fila[k] = v
+        for k in ("hs_code", "descripcion_en", "pais_origen"):
+            v = str(b.get(k) or "").strip()
+            if v:
+                fila[k] = v
+        fila["cantidad"] = cantidad
+
+        if float(fila.get("peso_kg") or 0) > MAX_KG_POR_CAJA:
+            return [], [], (f"peso_excedido: cada caja pesa {fila['peso_kg']}kg "
+                            f"y el máximo es {MAX_KG_POR_CAJA}kg.")
+
         total_cajas += cantidad
         for _ in range(cantidad):
             piezas.append({
-                "peso_kg": producto.peso_kg, "largo_cm": producto.largo_cm,
-                "ancho_cm": producto.ancho_cm, "alto_cm": producto.alto_cm,
+                "peso_kg": fila["peso_kg"], "largo_cm": fila["largo_cm"],
+                "ancho_cm": fila["ancho_cm"], "alto_cm": fila["alto_cm"],
             })
-        detalle.append({
-            "producto_alias": producto.alias_interno, "cantidad": cantidad,
-            "peso_kg": producto.peso_kg, "largo_cm": producto.largo_cm,
-            "ancho_cm": producto.ancho_cm, "alto_cm": producto.alto_cm,
-            # La declaración de invoice de ESTE envío manda sobre el default
-            # del catálogo (Leandro 05/08): el valor real de venta cambia
-            # entre envíos. Vacío = catálogo, como siempre.
-            "valor_unitario_usd": float(b.get("valor_unitario_usd")
-                                        or producto.valor_usd_default),
-            "hs_code": (b.get("hs_code") or producto.hs_code),
-            "descripcion_en": (b.get("descripcion_en") or producto.nombre_invoice),
-            **({"pais_origen": b["pais_origen"]} if b.get("pais_origen") else {}),
-        })
+        detalle.append(fila)
 
     if total_cajas > MAX_CAJAS_POR_ENVIO:
         return [], [], (f"peso_excedido: {total_cajas} cajas superan el máximo "

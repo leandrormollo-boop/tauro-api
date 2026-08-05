@@ -54,7 +54,8 @@ def crear_solicitud_guia(
     dest_ciudad: str,
     dest_estado: str,
     dest_zip: str,
-    observaciones: str,
+    dest_contacto: str = "",
+    observaciones: str = "",
     peso_kg: float,
     largo_cm: float,
     ancho_cm: float,
@@ -74,6 +75,7 @@ def crear_solicitud_guia(
     remitente_estado: str = "",
     remitente_zip: str = "",
     remitente_pais: str = "",
+    remitente_contacto: str = "",
     precio_cliente_final_ars: Optional[float] = None,
     bultos: Optional[list] = None,
     courier: str = "FEDEX",
@@ -105,7 +107,8 @@ def crear_solicitud_guia(
                     observaciones, peso_kg, largo_cm, ancho_cm, alto_cm,
                     valor_declarado_usd, ruta_id, coti_id, precio_tauro_ars,
                     precio_tauro_usd, precio_cliente_final_ars, bultos,
-                    courier, servicio_courier, tax_paga
+                    courier, servicio_courier, tax_paga,
+                    remitente_contacto, dest_contacto
                 )
                 VALUES (
                     %s, %s, %s, %s,
@@ -115,7 +118,8 @@ def crear_solicitud_guia(
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s, %s
+                    %s, %s, %s,
+                    %s, %s
                 )
                 RETURNING *
                 """,
@@ -157,6 +161,8 @@ def crear_solicitud_guia(
                     (courier or "FEDEX").strip().upper(),
                     _clean(servicio_courier),
                     _clean(tax_paga),
+                    _clean(remitente_contacto),
+                    _clean(dest_contacto),
                 ),
             )
             return dict(cur.fetchone())
@@ -718,8 +724,13 @@ def generar_guia_envia(sol: dict) -> dict:
             bultos = []
 
     origen = {
-        "nombre": sol.get("remitente_nombre") or sol.get("cliente_nombre") or sol["cliente_id"],
-        "empresa": sol.get("cliente_nombre") or "",
+        # personName = el CONTACTO del envío; companyName = la razón social
+        # DEL REMITENTE (guía HAILU: "Yiwu Hailu Garment" + "JEFF JANG").
+        # Antes empresa era el cliente de TAURO — la guía salía a nombre de
+        # WAIMAO en vez del shipper real.
+        "nombre": (sol.get("remitente_contacto") or sol.get("remitente_nombre")
+                   or sol.get("cliente_nombre") or sol["cliente_id"]),
+        "empresa": sol.get("remitente_nombre") or sol.get("cliente_nombre") or "",
         "email": sol.get("remitente_email") or "",
         "telefono": sol.get("remitente_telefono") or sol.get("cliente_telefono") or "",
         "direccion": sol.get("remitente_direccion") or sol.get("cliente_direccion") or "",
@@ -728,7 +739,8 @@ def generar_guia_envia(sol: dict) -> dict:
         "cp": sol.get("remitente_zip") or sol.get("cliente_cp") or "",
     }
     destino = {
-        "nombre": sol.get("dest_nombre") or "",
+        "nombre": sol.get("dest_contacto") or sol.get("dest_nombre") or "",
+        "empresa": sol.get("dest_nombre") or "",
         "email": sol.get("dest_email") or "",
         "telefono": sol.get("dest_telefono") or "",
         "direccion": sol.get("dest_direccion") or "",
@@ -893,8 +905,13 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
     from servicios.rutas import pais_a_iso2
 
     shipper = {
-        "nombre": sol.get("remitente_nombre") or sol.get("cliente_nombre") or sol["cliente_id"],
-        "empresa": sol.get("cliente_nombre") or "",
+        # personName = el CONTACTO del envío; companyName = la razón social
+        # DEL REMITENTE (guía HAILU: "Yiwu Hailu Garment" + "JEFF JANG").
+        # Antes empresa era el cliente de TAURO — la guía salía a nombre de
+        # WAIMAO en vez del shipper real.
+        "nombre": (sol.get("remitente_contacto") or sol.get("remitente_nombre")
+                   or sol.get("cliente_nombre") or sol["cliente_id"]),
+        "empresa": sol.get("remitente_nombre") or sol.get("cliente_nombre") or "",
         "telefono": sol.get("remitente_telefono") or sol.get("cliente_telefono") or "",
         "calle": sol.get("remitente_direccion") or sol.get("cliente_direccion") or "",
         "ciudad": sol.get("remitente_ciudad") or sol.get("cliente_ciudad") or "Buenos Aires",
@@ -903,7 +920,8 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
         "pais": pais_a_iso2(sol.get("remitente_pais") or sol.get("cliente_pais") or "AR"),
     }
     recipient = {
-        "nombre": sol.get("dest_nombre") or "",
+        "nombre": sol.get("dest_contacto") or sol.get("dest_nombre") or "",
+        "empresa": sol.get("dest_nombre") or "",
         "telefono": sol.get("dest_telefono") or "",
         "calle": sol.get("dest_direccion") or "",
         "ciudad": sol.get("dest_ciudad") or "",

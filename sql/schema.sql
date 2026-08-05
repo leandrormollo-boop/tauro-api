@@ -309,6 +309,12 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS bultos JSONB;
 -- guardado porque define el incoterm de la guía: si el cliente cambia su
 -- default mañana, los envíos ya despachados no pueden cambiar de manos.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS tax_paga TEXT;
+-- Empresa y CONTACTO separados (guía real de HAILU, 05/08): los couriers
+-- piden companyName (razón social) Y personName (quién atiende). Antes un
+-- solo campo forzaba a elegir, y la emisión ponía como empresa al cliente
+-- de TAURO en vez del shipper real del envío.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_contacto TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS dest_contacto TEXT;
 
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (

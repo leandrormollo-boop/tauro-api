@@ -742,9 +742,20 @@ async def api_precio_envio_multi(
         # Sin truncar en silencio: si hay de más, obtener_precio_envio_multi
         # lo rechaza con motivo y el preview muestra lo MISMO que diría el submit.
         bultos = [
-            {"producto": str(b.get("producto") or ""), "cantidad": int(b.get("cantidad") or 1)}
+            {
+                "producto": str(b.get("producto") or ""),
+                "cantidad": int(b.get("cantidad") or 1),
+                # Carga libre: el preview cotiza con lo tipeado, igual que
+                # el submit — peso, medidas y la invoice de esta caja.
+                **{k: b.get(k) for k in (
+                    "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
+                    "valor_unitario_usd", "descripcion_en", "hs_code",
+                    "pais_origen",
+                ) if b.get(k) not in (None, "")},
+            }
             for b in bultos
             if str(b.get("producto") or "").strip()
+               or b.get("peso_kg") or b.get("descripcion_en")
         ]
     except Exception:
         return JSONResponse({"ok": False, "motivo": "body_invalido"}, status_code=200)
@@ -1064,6 +1075,11 @@ def envio_nuevo_post(
     # Declaración de invoice POR RENGLÓN (Leandro 05/08): el valor real de
     # venta cambia entre envíos; declarar el default del catálogo cuando se
     # vendió a otro precio es un problema en la aduana. Vacío = catálogo.
+    # Carga libre (guía HAILU 05/08): peso y medidas por caja, sin catálogo.
+    bulto_peso: list[str] = Form([]),
+    bulto_largo: list[str] = Form([]),
+    bulto_ancho: list[str] = Form([]),
+    bulto_alto: list[str] = Form([]),
     bulto_desc_en: list[str] = Form([]),
     bulto_valor_usd: list[str] = Form([]),
     bulto_hs: list[str] = Form([]),
@@ -1084,6 +1100,7 @@ def envio_nuevo_post(
     # que vino de la libreta. Para una importación el remitente es el
     # proveedor del exterior y puede cambiar envío a envío.
     rem_nombre: str = Form(""),
+    rem_contacto: str = Form(""),
     rem_documento: str = Form(""),
     rem_email: str = Form(""),
     rem_telefono: str = Form(""),
@@ -1094,6 +1111,7 @@ def envio_nuevo_post(
     rem_pais: str = Form(""),
     destinatario_id: str = Form(""),
     dest_nombre: str = Form(...),
+    dest_contacto: str = Form(""),
     dest_documento: str = Form(""),
     dest_email: str = Form(""),
     dest_telefono: str = Form(""),
@@ -1119,28 +1137,41 @@ def envio_nuevo_post(
     # Normalizar filas de bultos: pares (producto, cantidad) sin filas vacías.
     # Fallback legacy: producto_alias + cantidad sueltos = una sola fila.
     filas = []
-    for i, alias in enumerate(bulto_producto or []):
-        alias = (alias or "").strip()
-        if not alias:
-            continue
-        try:
-            cant = int(bulto_cantidad[i]) if i < len(bulto_cantidad or []) else 1
-        except (TypeError, ValueError):
-            cant = 1
-        def _campo(lista, idx):
+    n_filas = max(len(bulto_producto or []), len(bulto_peso or []),
+                  len(bulto_desc_en or []))
+    for i in range(n_filas):
+        def _campo(lista, idx=i):
             v = lista[idx] if idx < len(lista or []) else ""
             return (v or "").strip()
 
+        alias = _campo(bulto_producto)
+        # Una fila vale con producto del catálogo O con carga manual: si no
+        # tiene ninguna de las dos cosas, es un renglón vacío y se saltea.
+        if not alias and not (_campo(bulto_peso) or _campo(bulto_desc_en)):
+            continue
+        try:
+            cant = int(_campo(bulto_cantidad) or 1)
+        except (TypeError, ValueError):
+            cant = 1
         fila = {"producto": alias, "cantidad": max(cant, 1)}
+        # Caja manual: peso y medidas de ESTE envío (con catálogo, lo pisan).
+        for lista, clave in ((bulto_peso, "peso_kg"), (bulto_largo, "largo_cm"),
+                             (bulto_ancho, "ancho_cm"), (bulto_alto, "alto_cm")):
+            v = _campo(lista).replace(",", ".")
+            if v:
+                try:
+                    fila[clave] = float(v)
+                except ValueError:
+                    pass
         # Overrides de invoice: sólo viajan los completados; el resto sale
         # del catálogo, como siempre.
-        if _campo(bulto_desc_en, i):
-            fila["descripcion_en"] = _campo(bulto_desc_en, i)[:75]
-        if _campo(bulto_hs, i):
-            fila["hs_code"] = _campo(bulto_hs, i)
-        if _campo(bulto_pais_fab, i):
-            fila["pais_origen"] = _campo(bulto_pais_fab, i).upper()[:2]
-        v = _campo(bulto_valor_usd, i).replace(",", ".")
+        if _campo(bulto_desc_en):
+            fila["descripcion_en"] = _campo(bulto_desc_en)[:75]
+        if _campo(bulto_hs):
+            fila["hs_code"] = _campo(bulto_hs)
+        if _campo(bulto_pais_fab):
+            fila["pais_origen"] = _campo(bulto_pais_fab).upper()[:2]
+        v = _campo(bulto_valor_usd).replace(",", ".")
         if v:
             try:
                 valor = float(v)
@@ -1357,7 +1388,7 @@ def envio_nuevo_post(
         # Campos legacy: primer bulto + totales (los listados y el admin los usan).
         if legacy_single:
             prod0 = get_producto(cliente, filas[0]["producto"])
-            alias_display = prod0.alias_interno
+            alias_display = prod0.alias_interno if prod0 else filas[0].get("producto") or "CARGA"
             total_cajas = filas[0]["cantidad"]
             dims0 = (prod0.largo_cm, prod0.ancho_cm, prod0.alto_cm)
             valor_declarado = round(prod0.valor_usd_default * total_cajas, 2)
@@ -1366,7 +1397,13 @@ def envio_nuevo_post(
             alias_display = primero["producto_alias"]
             total_cajas = sum(b["cantidad"] for b in bultos_detalle)
             dims0 = (primero["largo_cm"], primero["ancho_cm"], primero["alto_cm"])
-            valor_declarado = precio.get("valor_total_usd") or 100
+            # El valor declarado sale de la INVOICE de este envío (suma de
+            # valor unitario × cantidad por renglón), no de un default 100:
+            # declarar 100 USD cuando la carga vale 960 es falsear la aduana.
+            valor_declarado = round(sum(
+                float(b.get("valor_unitario_usd") or 0) * int(b.get("cantidad") or 1)
+                for b in bultos_detalle
+            ), 2) or (precio.get("valor_total_usd") or 100)
         solicitud_creada = crear_solicitud_guia(
             cliente_id=cliente,
             producto_alias=alias_display,
@@ -1382,7 +1419,9 @@ def envio_nuevo_post(
             remitente_estado=remitente.get("estado") or "",
             remitente_zip=remitente.get("cp") or "",
             remitente_pais=remitente.get("pais") or "AR",
+            remitente_contacto=rem_contacto or remitente.get("contacto") or "",
             dest_nombre=dest_nombre,
+            dest_contacto=dest_contacto,
             dest_documento=dest_documento,
             dest_email=dest_email,
             dest_telefono=dest_telefono,

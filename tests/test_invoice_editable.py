@@ -52,11 +52,18 @@ def test_lo_declarado_manda_sobre_el_catalogo():
     El corazón: en las piezas que van al courier, el valor/HS/descripción
     declarados en el envío pisan el default del producto.
     """
-    fuente = inspect.getsource(b2b._piezas_del_catalogo)
-    assert 'b.get("valor_unitario_usd")' in fuente
-    assert 'b.get("hs_code")' in fuente
-    assert 'b.get("descripcion_en")' in fuente
-    assert 'b.get("pais_origen")' in fuente
+    # Ya no se inspecciona la fuente: se ejecuta con datos reales, que es
+    # más fuerte — la refactorización de carga libre cambió el código pero
+    # la regla es la misma.
+    _, det, err = b2b._piezas_del_catalogo("X", [{
+        "peso_kg": 3.9, "largo_cm": 48, "ancho_cm": 47, "alto_cm": 20,
+        "cantidad": 1, "descripcion_en": "SHIRTS 60% POLYESTER 40% COTTON",
+        "valor_unitario_usd": 120, "hs_code": "6205.30", "pais_origen": "CN",
+    }])
+    assert not err
+    assert det[0]["valor_unitario_usd"] == 120
+    assert det[0]["hs_code"] == "6205.30"
+    assert det[0]["pais_origen"] == "CN"
 
 
 def test_un_valor_ilegible_cae_al_catalogo_sin_romper():
