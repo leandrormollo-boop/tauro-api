@@ -169,8 +169,11 @@
                     <label for="destino_pais">País</label>
                     <select name="destino_pais" id="destino_pais" required>
                         <option value="">Seleccionar</option>
-                        {% for p in paises_destino %}
-                            <option value="{{ p }}" {% if form.destino_pais == p %}selected{% endif %}>{{ paises_nombres.get(p, p) }} ({{ p }})</option>
+                        {# paises_destino viene como [(iso, nombre)] del catálogo
+                           compartido: el cliente elige cualquier país, no sólo
+                           los que tengan ruta cargada. #}
+                        {% for iso, nombre_pais in paises_destino %}
+                            <option value="{{ iso }}" {% if form.destino_pais == iso %}selected{% endif %}>{{ nombre_pais }} ({{ iso }})</option>
                         {% endfor %}
                     </select>
                     <input type="hidden" name="dest_pais" id="dest_pais" value="{{ form.dest_pais or form.destino_pais or '' }}">

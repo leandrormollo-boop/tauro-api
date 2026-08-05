@@ -954,12 +954,19 @@ def descargar_guia(solicitud_id: int, cliente: str = Depends(cliente_actual)):
 
 
 def _paises_con_nacional() -> list:
-    """Países destino: las rutas internacionales + Argentina si la pata
-    nacional (envia.com) está habilitada."""
-    paises = list(get_paises_destino())
-    if nacional_activo() and "AR" not in paises:
-        paises.insert(0, "AR")
-    return paises
+    """
+    Países que el cliente puede elegir como DESTINO: todos.
+
+    Antes salían de las rutas cargadas a mano, así que un cliente sólo podía
+    despachar a donde el admin ya hubiera creado la fila. Regla de Leandro
+    (05/08): el cliente elige desde dónde y hacia dónde, cualquier país. La
+    cobertura la decide el courier, no una tabla nuestra: si ninguno cotiza
+    esa ruta, el precio en vivo lo dice con todas las letras.
+
+    Devuelve [(iso, nombre), ...] ordenado por nombre.
+    """
+    from servicios.paises import opciones
+    return opciones()
 
 
 @router.get("/envios/nuevo", response_class=HTMLResponse)
@@ -1201,7 +1208,16 @@ def envio_nuevo_post(
             # el recargo por zona remota lo comía TAURO.
             destino_real = {"cp": dest_zip, "ciudad": dest_ciudad, "estado": dest_estado}
             multi = cotizar_couriers_cliente(
-                cliente, destino_pais, filas, destino_real=destino_real
+                cliente, destino_pais, filas,
+                destino_real=destino_real,
+                # El remitente puede ser un proveedor del exterior: de ahí
+                # sale el país de ORIGEN del envío, no de una constante.
+                origen_real={
+                    "pais": remitente.get("pais") or "AR",
+                    "ciudad": remitente.get("ciudad") or "",
+                    "cp": remitente.get("cp") or "",
+                    "estado": remitente.get("estado") or "",
+                },
             )
             if not multi.get("encontrado"):
                 raise ValueError(

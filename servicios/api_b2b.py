@@ -331,63 +331,67 @@ def obtener_precio_envio(
 
 
 def cotizar_couriers_cliente(
-    cliente_id: str, destino_pais: str, bultos: list, destino_real: dict = None
+    cliente_id: str, destino_pais: str, bultos: list,
+    destino_real: dict = None, origen_real: dict = None,
 ) -> dict:
     """
     Las 3 opciones de courier para UN cliente del portal, cada una con SU
     precio final (costo del courier + la regla de ese cliente).
 
-    Decisión de Leandro (01/08/2026): todos los clientes ven todas las
-    cotizaciones; lo que cambia entre uno y otro es el markup, no la lista
-    de couriers.
+    NO necesita una ruta cargada. Regla de Leandro (05/08): el cliente elige
+    desde dónde y hacia dónde, cualquier país — incluso China → India, donde
+    Argentina ni aparece. Exigir una fila en `rutas` era pedirle al admin que
+    cargara cientos de pares a mano, y cada país nuevo bloqueaba al cliente.
+    La cobertura la decide el COURIER: si ninguno cotiza esa combinación, se
+    devuelve "sin_cobertura" y el cliente lo ve.
 
-    Reusa la validación de productos y bultos de obtener_precio_envio_multi
-    —tope de cajas, peso por caja, producto activo— para que el preview diga
-    exactamente lo mismo que el submit.
+    `origen_real` es la dirección del remitente (que puede ser un proveedor
+    del exterior) y `destino_real` la del destinatario. Se cotiza contra ELLAS,
+    no contra un CP de referencia: los recargos por zona remota dependen del
+    código postal exacto.
 
-    Devuelve {encontrado, opciones: [...], motivo}. Cada opción trae SÓLO
-    precio: nunca el costo ni el margen (ver tests/test_no_fuga_costo.py).
+    Devuelve {encontrado, opciones, motivo}. Cada opción trae SÓLO precio:
+    nunca el costo ni el margen (ver tests/test_no_fuga_costo.py).
     """
     from servicios.carriers import cotizar_carriers_cliente
-    from servicios.cotizador import _destino_para_cotizar, dolar_ars
+    from servicios.cotizador import dolar_ars
+    from servicios.paises import existe, referencia
     from servicios.pricing import get_pricing_config
-    from servicios.rutas import pais_a_iso2
 
-    base = obtener_precio_envio_multi(
-        cliente_id, destino_pais, bultos, destino_real=destino_real
-    )
-    # Si la validación de productos/bultos falló, se devuelve el mismo motivo:
-    # el cliente tiene que ver el problema real, no "no hay cobertura".
-    if not base.get("encontrado"):
-        return base
+    destino_iso = (destino_pais or "").strip().upper()
+    if not existe(destino_iso):
+        return {"encontrado": False, "motivo": f"pais_no_soportado: {destino_iso}"}
 
-    ruta = buscar_ruta_para_destino(destino_pais)
-    if not ruta:
-        return {"encontrado": False, "motivo": "ruta_no_encontrada"}
+    # Validación de productos y bultos: misma que el resto del portal, para
+    # que el preview diga exactamente lo mismo que el submit.
+    piezas, detalle, error = _piezas_del_catalogo(cliente_id, bultos)
+    if error:
+        return {"encontrado": False, "motivo": error}
 
-    piezas = [
-        {
-            "peso_kg": b["peso_kg"], "largo_cm": b["largo_cm"],
-            "ancho_cm": b["ancho_cm"], "alto_cm": b["alto_cm"],
+    def _direccion(real: dict, iso: str) -> dict:
+        """La dirección real si la hay; si no, la de referencia del país."""
+        real = real or {}
+        base = referencia(iso)
+        cp = (real.get("cp") or real.get("postal_code") or "").strip()
+        ciudad = (real.get("ciudad") or real.get("city") or "").strip()
+        return {
+            "country": iso,
+            "city": ciudad or base.get("city", ""),
+            "postal_code": cp or base.get("postal_code", ""),
+            "state": (real.get("estado") or real.get("state") or "").strip(),
         }
-        for b in (base.get("bultos") or [])
-        # Cada caja va como una entrada: N unidades iguales son N piezas,
-        # porque cada una paga por su propio peso volumétrico.
-        for _ in range(max(int(b.get("cantidad") or 1), 1))
-    ]
-    if not piezas:
-        return {"encontrado": False, "motivo": "sin_bultos"}
 
-    origen = {
-        "city": ruta.origen_ciudad,
-        "postal_code": ruta.origen_zip,
-        "country": pais_a_iso2(ruta.origen_pais),
-    }
-    destino = _destino_para_cotizar(ruta, destino_real)
+    origen_iso = ((origen_real or {}).get("pais")
+                  or (origen_real or {}).get("country") or "AR").strip().upper()
+    if not existe(origen_iso):
+        origen_iso = "AR"
 
     tarjetas = cotizar_carriers_cliente(
-        origen=origen, destino=destino, paquete=piezas[0],
-        dolar=dolar_ars(), pricing_cliente=get_pricing_config(cliente_id),
+        origen=_direccion(origen_real, origen_iso),
+        destino=_direccion(destino_real, destino_iso),
+        paquete=piezas[0],
+        dolar=dolar_ars(),
+        pricing_cliente=get_pricing_config(cliente_id),
         paquetes=piezas,
     )
 
@@ -398,16 +402,55 @@ def cotizar_couriers_cliente(
         "encontrado": bool(opciones),
         "motivo": None if opciones else "sin_cobertura",
         "opciones": opciones,
-        # Los que no cotizaron, con el porqué: el cliente merece saber si
-        # DHL no llega a ese destino o si es que no soporta varias cajas.
+        # Los que no cotizaron, con el porqué: el cliente merece saber si el
+        # courier no llega a ese destino o si no soporta varias cajas.
         "no_disponibles": [
-            {"id": t["id"], "nombre": t["nombre"], "motivo": t.get("error") or t["estado"]}
+            {"id": t["id"], "nombre": t["nombre"],
+             "motivo": t.get("error") or t["estado"]}
             for t in tarjetas if t.get("estado") != "cotizado"
         ],
-        "piezas_total": base.get("piezas_total"),
-        "peso_total_kg": base.get("peso_total_kg"),
-        "bultos": base.get("bultos"),
-        # Trazabilidad: la cotización base ya quedó logueada con su coti_id.
-        "ruta_id": base.get("ruta_id"),
-        "coti_id": base.get("coti_id"),
+        "piezas_total": sum(1 for _ in piezas),
+        "peso_total_kg": round(sum(float(p["peso_kg"]) for p in piezas), 2),
+        "bultos": detalle,
+        "origen_pais": origen_iso,
+        "destino_pais": destino_iso,
     }
+
+
+def _piezas_del_catalogo(cliente_id: str, bultos: list):
+    """
+    Convierte las filas del form en piezas (una por caja) validando contra el
+    catálogo. Devuelve (piezas, detalle, error). Una entrada POR CAJA porque
+    cada una paga su propio peso volumétrico.
+    """
+    if not bultos:
+        return [], [], "sin_bultos"
+
+    piezas, detalle, total_cajas = [], [], 0
+    for b in bultos:
+        alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
+        cantidad = max(int(b.get("cantidad") or 1), 1)
+        producto = get_producto(cliente_id, alias)
+        if not producto or not producto.activo:
+            return [], [], f"producto_no_encontrado: {alias}"
+        if producto.peso_kg > MAX_KG_POR_CAJA:
+            return [], [], (f"peso_excedido: cada caja de {alias} pesa "
+                            f"{producto.peso_kg}kg y el máximo es {MAX_KG_POR_CAJA}kg.")
+        total_cajas += cantidad
+        for _ in range(cantidad):
+            piezas.append({
+                "peso_kg": producto.peso_kg, "largo_cm": producto.largo_cm,
+                "ancho_cm": producto.ancho_cm, "alto_cm": producto.alto_cm,
+            })
+        detalle.append({
+            "producto_alias": producto.alias_interno, "cantidad": cantidad,
+            "peso_kg": producto.peso_kg, "largo_cm": producto.largo_cm,
+            "ancho_cm": producto.ancho_cm, "alto_cm": producto.alto_cm,
+            "valor_unitario_usd": producto.valor_usd_default,
+            "hs_code": producto.hs_code, "descripcion_en": producto.nombre_invoice,
+        })
+
+    if total_cajas > MAX_CAJAS_POR_ENVIO:
+        return [], [], (f"peso_excedido: {total_cajas} cajas superan el máximo "
+                        f"de {MAX_CAJAS_POR_ENVIO} por envío.")
+    return piezas, detalle, None
