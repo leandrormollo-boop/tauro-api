@@ -18,7 +18,11 @@
     <div class="msg error">{{ error }}</div>
 {% endif %}
 
-{% set paises_nombres = {'AR':'Argentina','US':'Estados Unidos','ES':'España','BR':'Brasil','CL':'Chile','UY':'Uruguay','MX':'México','PE':'Perú','CO':'Colombia','PY':'Paraguay','BO':'Bolivia','EC':'Ecuador','GB':'Reino Unido','DE':'Alemania','FR':'Francia','IT':'Italia','CA':'Canadá','CN':'China'} %}
+{# Países de la libreta. Incluye los de ORIGEN de importación, no sólo
+   destinos: el remitente de una importación es el proveedor del
+   exterior. Leandro (01/08): "puede elegir bangladesh, india, china,
+   usa. Cualquiera". #}
+{% set paises_nombres = {'AR':'Argentina','US':'Estados Unidos','CN':'China','IN':'India','BD':'Bangladesh','VN':'Vietnam','PK':'Pakistán','TH':'Tailandia','ID':'Indonesia','TR':'Turquía','KR':'Corea del Sur','JP':'Japón','HK':'Hong Kong','TW':'Taiwán','AE':'Emiratos Árabes','ES':'España','IT':'Italia','DE':'Alemania','FR':'Francia','PT':'Portugal','NL':'Países Bajos','GB':'Reino Unido','BR':'Brasil','CL':'Chile','UY':'Uruguay','PY':'Paraguay','BO':'Bolivia','PE':'Perú','EC':'Ecuador','CO':'Colombia','MX':'México','CA':'Canadá'} %}
 
 {# tabs REALES: muestran un panel por vez (no anclas decorativas) #}
 <div class="tabs" role="tablist">
