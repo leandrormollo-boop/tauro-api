@@ -2,6 +2,12 @@
 El cotizador público tiene que cotizar los DOS sentidos (Leandro, 01/08/2026:
 "el cotizador debe permitir cotizar importaciones y exportaciones").
 
+ACTUALIZADO 05/08: el campo `sentido` de la RESPUESTA se reemplazó por
+`origen_pais` / `destino_pais`, porque el cotizador pasó a aceptar cualquier
+par de países y "sentido" ya no alcanza para describir un China → India. El
+parámetro de ENTRADA sigue existiendo por retrocompatibilidad y estos tests
+lo siguen cubriendo: lo que cambió es cómo se lee el resultado.
+
 Lo que se verifica acá es que el sentido no sea cosmético: en una importación
 la caja sale del exterior y entra a Argentina, y de eso depende qué cuenta de
 DHL se factura. Si origen y destino no se dan vuelta de verdad, DHL cotiza con
@@ -64,22 +70,22 @@ def test_exportacion_sale_de_argentina():
     visto, data = _cotizar("exportacion")
     assert visto["origen"]["country"] == "AR"
     assert visto["destino"]["country"] == "US"
-    assert data["sentido"] == "exportacion"
+    assert data["origen_pais"] == "AR"
 
 
 def test_importacion_da_vuelta_origen_y_destino():
     visto, data = _cotizar("importacion")
     assert visto["origen"]["country"] == "US", "la caja tiene que salir del exterior"
     assert visto["destino"]["country"] == "AR", "y entrar a Argentina"
-    assert data["sentido"] == "importacion"
-    assert data["destino"] == "AR"
+    assert data["origen_pais"] == "US"
+    assert data["destino_pais"] == "AR"
 
 
 def test_sin_sentido_sigue_siendo_exportacion():
     """Retrocompatible: quien ya llamaba este endpoint no se rompe."""
     visto, data = _cotizar(None)
     assert visto["origen"]["country"] == "AR"
-    assert data["sentido"] == "exportacion"
+    assert data["origen_pais"] == "AR"
 
 
 def test_la_importacion_le_pega_a_dhl_con_la_cuenta_de_impo():
