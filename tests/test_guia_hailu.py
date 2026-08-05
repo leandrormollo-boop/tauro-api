@@ -101,10 +101,10 @@ def test_la_invoice_lleva_composicion_pais_y_valor():
     assert li["quantity"]["value"] == 1
 
 
-def test_cn_a_mx_usa_la_cuenta_de_exportacion():
+def test_cn_a_mx_usa_la_cuenta_de_impo():
     """
-    Destino MX ≠ AR: no es una importación a Argentina, va por la cuenta
-    de expo. Queda pendiente con DHL si la cuenta argentina puede despachar
-    tercer-país — el test fija QUÉ cuenta mandamos hoy.
+    Regla de Leandro (05/08): "va por la cuenta de IMPO lo que es terceros
+    países". EXPO es sólo para lo que SALE de Argentina; China → México va
+    por la de importación.
     """
-    assert _cuerpo_dhl()["accounts"][0]["number"] == "741622792"
+    assert _cuerpo_dhl()["accounts"][0]["number"] == "730089966"

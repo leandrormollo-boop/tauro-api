@@ -71,20 +71,21 @@ class DHLClient(CarrierBase):
         devuelve error explícito en vez de caer a la de expo — mejor que el
         comparador diga "no disponible" a que publique un precio mentiroso.
         """
-        origen_ar  = (origen.get("country")  or "AR").upper() == "AR"
-        destino_ar = (destino.get("country") or "").upper()   == "AR"
+        origen_ar = (origen.get("country") or "AR").upper() == "AR"
 
-        # Importación: entra a Argentina desde afuera.
-        if destino_ar and not origen_ar:
-            if not self.account_import:
-                return None, (
-                    "Falta DHL_ACCOUNT_NUMBER_IMPORT: es una importación y no "
-                    "se puede cotizar con la cuenta de exportación"
-                )
-            return self.account_import, None
+        # Regla de Leandro (05/08): la cuenta de EXPO es sólo para lo que
+        # SALE de Argentina. Todo lo demás —importaciones a AR Y envíos
+        # entre terceros países (China → México)— va por la cuenta de IMPO.
+        if origen_ar:
+            return self.account_number, None
 
-        # Todo lo demás (incluido AR→AR) va por la de exportación.
-        return self.account_number, None
+        if not self.account_import:
+            return None, (
+                "Falta DHL_ACCOUNT_NUMBER_IMPO: los envíos que no salen de "
+                "Argentina (importaciones y tercer país) van por la cuenta "
+                "de importación y no se pueden cotizar con la de expo"
+            )
+        return self.account_import, None
 
     def _parsear_rates(self, data: dict) -> dict:
         """

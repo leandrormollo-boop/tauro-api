@@ -188,7 +188,7 @@ def test_sin_cuenta_de_impo_no_cotiza_una_importacion():
     cuenta, out = _cuenta_usada(cli, US, AR)
     assert cuenta is None, "no tendría que haber llamado a DHL"
     assert not out["encontrado"]
-    assert "IMPORT" in out["error"]
+    assert "IMPO" in out["error"]
 
 
 def test_un_envio_nacional_usa_la_de_expo():
