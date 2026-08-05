@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 from dotenv import load_dotenv
 from core.fedex_client import CarrierBase
+from servicios.impuestos import incoterm as incoterm_de
 
 load_dotenv()
 
@@ -334,6 +335,27 @@ class DHLClient(CarrierBase):
             **({"email": d["email"].strip()[:50]} if (d.get("email") or "").strip() else {}),
         }
 
+    @staticmethod
+    def _registro_exportador(shipper: dict) -> dict:
+        """
+        registrationNumbers con el CUIT del cliente. Sin documento cargado
+        se omite la clave entera: mandarla vacía hace que DHL rechace el
+        envío, y un bloque ausente es válido.
+        """
+        doc = "".join(ch for ch in str(shipper.get("documento") or "") if ch.isdigit())
+        if not doc:
+            return {}
+        return {
+            "registrationNumbers": [{
+                "number": doc[:35],
+                "issuerCountryCode": (shipper.get("pais") or "AR").upper()[:2],
+                # VAT es el typeCode que DHL usa para el número de
+                # contribuyente del exportador en los países sin figura
+                # propia. Si DHL lo rechaza, el error lo va a decir.
+                "typeCode": "VAT",
+            }],
+        }
+
     def _direccion_envio(self, d: dict) -> dict:
         """
         postalAddress del POST. Igual que en /rates pero con la calle, que
@@ -384,6 +406,12 @@ class DHLClient(CarrierBase):
         if error:
             return {"encontrado": False, "error": error}
 
+        # El país de fabricación por defecto es el del ORIGEN DEL ENVÍO
+        # (regla de Leandro 01/08): sale de China → CN, de Argentina → AR.
+        # Un "AR" fijo es una declaración falsa ante la aduana en cualquier
+        # importación, que es justo lo que va a hacer WAIMAO.
+        pais_origen_envio = (shipper.get("pais") or "AR").upper()[:2]
+
         # Una pieza por unidad, igual que en FedEx: N cajas idénticas viajan
         # como N piezas, cada una con su etiqueta.
         piezas, line_items, valor_total = [], [], 0.0
@@ -410,7 +438,12 @@ class DHLClient(CarrierBase):
                                      "value": str(b["hs_code"]).replace(".", "")[:18]}]
                                    if b.get("hs_code") else []),
                 "exportReasonType": "permanent",
-                "manufacturerCountry": (b.get("pais_origen") or "AR").upper()[:2],
+                # Regla de Leandro (01/08): el país de fabricación es el del
+                # ORIGEN DEL ENVÍO. Sale de China → CN. El "AR" fijo era falso
+                # para cualquier importación y es una declaración ante aduana.
+                "manufacturerCountry": (
+                    b.get("pais_origen") or pais_origen_envio
+                ).upper()[:2],
                 "weight": {
                     "netValue": round(float(b.get("peso_kg") or 0.5), 3),
                     "grossValue": round(float(b.get("peso_kg") or 0.5), 3),
@@ -427,6 +460,11 @@ class DHLClient(CarrierBase):
                 "shipperDetails": {
                     "postalAddress": self._direccion_envio(shipper),
                     "contactInformation": self._contacto(shipper, "TAURO Solutions"),
+                    # CUIT del cliente como EXPORTADOR (Leandro, 01/08: "el
+                    # cuit es el del cliente como exportador siempre"). Viaja
+                    # en la solicitud como remitente_documento y hasta hoy
+                    # nunca se le mandaba al courier.
+                    **self._registro_exportador(shipper),
                 },
                 "receiverDetails": {
                     "postalAddress": self._direccion_envio(recipient),
@@ -439,12 +477,17 @@ class DHLClient(CarrierBase):
                 "declaredValue": round(valor_total or 1, 2),
                 "declaredValueCurrency": "USD",
                 "description": (line_items[0]["description"] if line_items else "Merchandise")[:70],
-                "incoterm": "DAP",
+                # DDP si el cliente eligió hacerse cargo de los impuestos,
+                # DAP si los paga quien recibe. Estaba fijo en DAP, así que
+                # la elección del cliente no llegaba a la guía.
+                "incoterm": incoterm_de(datos.get("tax_paga")),
                 "unitOfMeasurement": "metric",
                 "exportDeclaration": {
                     "lineItems": line_items,
                     "invoice": {
-                        "number": msg_ref[-15:],
+                        # Leandro: "nro de factura: siempre el número de la
+                        # fecha que se está realizando el envío".
+                        "number": datetime.now(TZ_AR).strftime("%Y%m%d"),
                         "date": datetime.now(TZ_AR).strftime("%Y-%m-%d"),
                     },
                     "exportReason": "permanent",

@@ -297,3 +297,82 @@ def test_una_sola_caja_sigue_yendo_por_el_GET():
         out = DHLClient().get_rates(ORIGEN, DESTINO, paquetes=[BULTOS[0]])
     assert out["encontrado"]
     assert get.called and not post.called
+
+
+# ── create_shipment: las reglas de negocio de Leandro (01/08) ──
+
+SHIPPER_CN = {
+    "nombre": "Shenzhen Trading Co", "pais": "CN", "ciudad": "SHENZHEN",
+    "city": "SHENZHEN", "postal_code": "518000", "zip": "518000",
+    "direccion": "Main Rd 1", "documento": "30-71234567-9",
+}
+RECEIVER_AR = {
+    "nombre": "WAIMAO", "pais": "AR", "ciudad": "BUENOS AIRES",
+    "zip": "1043", "direccion": "Corrientes 1234",
+}
+BULTO_IMPO = {
+    "peso_kg": 2.0, "largo_cm": 30, "ancho_cm": 20, "alto_cm": 10,
+    "unidades": 1, "valor_unitario_usd": 150, "hs_code": "6109.10",
+    "descripcion_en": "Cotton T-shirts",
+}
+
+
+def _emitir(extra=None):
+    """Devuelve el body que se le manda a DHL, sin llamar a nadie."""
+    datos = {"shipper": SHIPPER_CN, "recipient": RECEIVER_AR,
+             "bultos": [BULTO_IMPO], **(extra or {})}
+    resp = mock.Mock(status_code=201)
+    resp.json.return_value = {"shipmentTrackingNumber": "1234567890", "documents": []}
+    with mock.patch.dict(os.environ, {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_EXPO": "741622792",
+        "DHL_ACCOUNT_NUMBER_IMPO": "730089966"}, clear=True), \
+         mock.patch("core.dhl_client.requests.post", return_value=resp) as post:
+        DHLClient().create_shipment(datos)
+    return post.call_args.kwargs["json"]
+
+
+def test_el_incoterm_sale_de_quien_paga_los_impuestos():
+    """
+    Estaba fijo en DAP: si el cliente elegía hacerse cargo, la guía salía
+    igual con los impuestos a cargo del que recibe.
+    """
+    assert _emitir({"tax_paga": "DESTINATARIO"})["content"]["incoterm"] == "DAP"
+    assert _emitir({"tax_paga": "CLIENTE"})["content"]["incoterm"] == "DDP"
+
+
+def test_el_pais_de_fabricacion_es_el_del_origen_del_envio():
+    """
+    Regla de Leandro: sale de China → CN. El "AR" fijo era una declaración
+    FALSA ante la aduana en cualquier importación — justo lo que hace WAIMAO.
+    """
+    li = _emitir()["content"]["exportDeclaration"]["lineItems"][0]
+    assert li["manufacturerCountry"] == "CN", (
+        "declara Argentina como origen de una importación de China"
+    )
+
+
+def test_manda_el_cuit_del_cliente_como_exportador():
+    """El CUIT estaba en la base y nunca se le mandaba al courier."""
+    reg = _emitir()["customerDetails"]["shipperDetails"].get("registrationNumbers")
+    assert reg, "no viaja el CUIT del exportador"
+    assert reg[0]["number"] == "30712345679", "el CUIT tiene que ir sin guiones"
+
+
+def test_sin_cuit_no_manda_el_bloque_vacio():
+    """Un registrationNumbers vacío hace que DHL rechace el envío entero."""
+    sin_doc = {**SHIPPER_CN, "documento": ""}
+    datos = {"shipper": sin_doc, "recipient": RECEIVER_AR, "bultos": [BULTO_IMPO]}
+    resp = mock.Mock(status_code=201)
+    resp.json.return_value = {"shipmentTrackingNumber": "1", "documents": []}
+    with mock.patch.dict(os.environ, {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_IMPO": "730089966"}, clear=True), \
+         mock.patch("core.dhl_client.requests.post", return_value=resp) as post:
+        DHLClient().create_shipment(datos)
+    ship = post.call_args.kwargs["json"]["customerDetails"]["shipperDetails"]
+    assert "registrationNumbers" not in ship
+
+
+def test_una_importacion_se_emite_con_la_cuenta_de_impo():
+    assert _emitir()["accounts"][0]["number"] == "730089966"
