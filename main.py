@@ -376,7 +376,12 @@ class PedidoRequest(BaseModel):
 
 
 class CotizarWebRequest(BaseModel):
-    destino_pais: str = Field(..., description="ISO-2 del país del exterior: US, BR, CL, UY, MX, ES")
+    # TAURO cotiza CUALQUIER par de países (Leandro 05/08): AR→CN, CN→AR,
+    # AR→AR y también CN→IN, donde Argentina ni aparece. `origen_pais` es lo
+    # que manda; `destino_pais` + `sentido` quedan por retrocompatibilidad
+    # con el widget viejo y con quien ya llame a este endpoint.
+    origen_pais: str = Field(default="", description="ISO-2 del origen. Vacío = se deduce del sentido")
+    destino_pais: str = Field(..., description="ISO-2 del destino (o del país del exterior si va sentido)")
     peso_kg: float = Field(..., gt=0, le=70)
     largo_cm: float = Field(..., gt=0)
     ancho_cm: float = Field(..., gt=0)
@@ -514,6 +519,17 @@ def api_rastrear(nro: str, request: Request):
             status_code=200)
 
 
+@app.get("/paises", tags=["public"])
+def paises_disponibles():
+    """
+    Los países que el cotizador acepta, como ORIGEN y como DESTINO.
+    Una sola fuente para la web, el portal y la libreta: si se agrega un
+    país acá, aparece en los tres sin tocar nada más.
+    """
+    from servicios.paises import opciones
+    return {"paises": [{"iso": iso, "nombre": nombre} for iso, nombre in opciones()]}
+
+
 @app.post("/cotizar-web", tags=["public"])
 def cotizar_web(body: CotizarWebRequest, request: Request):
     """
@@ -545,25 +561,32 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
         "ES": {"city": "MADRID",     "state": "M",  "postal_code": "28001"},
     }
 
-    pais_exterior = body.destino_pais.upper()
-    info_exterior = DESTINOS.get(pais_exterior)
-    if not info_exterior:
-        raise HTTPException(status_code=400, detail=f"País '{body.destino_pais}' no soportado aún.")
+    from servicios.paises import existe, nombre as nombre_pais, referencia
 
-    ARGENTINA = {
-        "street": "Av. Corrientes 1234",
-        "city": "BUENOS AIRES",
-        "state": "B",
-        "postal_code": "1043",
-        "country": "AR",
-    }
-    exterior = {**info_exterior, "street": "Main St 100", "country": pais_exterior}
+    destino_iso = (body.destino_pais or "").strip().upper()
+    origen_iso = (body.origen_pais or "").strip().upper()
 
-    # En una importación la caja viaja al revés: sale del exterior y entra a
-    # Argentina. No es sólo cosmético — cada courier cotiza distinto según el
-    # sentido y DHL directamente factura contra otra cuenta (ver dhl_client).
-    importacion = (body.sentido or "").lower().startswith("impo")
-    origen, destino = (exterior, ARGENTINA) if importacion else (ARGENTINA, exterior)
+    # Sin origen explícito se deduce del sentido, que es como llamaba el
+    # widget viejo: exportación = sale de Argentina; importación = entra.
+    if not origen_iso:
+        if (body.sentido or "").lower().startswith("impo"):
+            origen_iso, destino_iso = destino_iso, "AR"
+        else:
+            origen_iso = "AR"
+
+    for iso, cual in ((origen_iso, "origen"), (destino_iso, "destino")):
+        if not existe(iso):
+            raise HTTPException(
+                status_code=400,
+                detail=f"País de {cual} '{iso}' no soportado todavía.",
+            )
+
+    # Dirección de REFERENCIA de cada país: alcanza para una estimación
+    # pública. En el portal, con destinatario cargado, se cotiza contra el
+    # CP real porque los recargos por zona remota dependen de él.
+    origen = {**referencia(origen_iso), "street": "Main St 100"}
+    destino = {**referencia(destino_iso), "street": "Main St 100"}
+
     paquete = {
         "peso_kg": body.peso_kg,
         "largo": body.largo_cm,
@@ -593,9 +616,10 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
 
     return {
         "status": "success",
-        "sentido": "importacion" if importacion else "exportacion",
-        "origen": f"{exterior['city'].title()}, {pais_exterior}" if importacion else "Buenos Aires, AR",
-        "destino": "AR" if importacion else pais_exterior,
+        "origen": f"{nombre_pais(origen_iso)} ({origen_iso})",
+        "destino": f"{nombre_pais(destino_iso)} ({destino_iso})",
+        "origen_pais": origen_iso,
+        "destino_pais": destino_iso,
         "peso_kg": body.peso_kg,
         "recomendado": recomendado,
         "carriers": carriers,
@@ -875,6 +899,22 @@ if _sheet_conf():
     print("[scheduler] Espejo en Google Sheet: cada 30 min (pestaña PLATAFORMA)")
 else:
     print("[scheduler] Espejo en Google Sheet APAGADO (falta GOOGLE_CREDENTIALS_JSON)")
+
+# Cola comercial: apagada por default. El panel puede preparar trabajos sin
+# que ningun agente se ejecute; para procesarlos hacen falta la key y el flag
+# explicito. Los correos siguen necesitando dos acciones humanas en /admin.
+from jobs.agentes_comerciales import procesar_cola_comercial, habilitado as _crm_agents_on
+if _crm_agents_on():
+    scheduler.add_job(
+        procesar_cola_comercial,
+        trigger="interval",
+        minutes=1,
+        max_instances=1,
+        coalesce=True,
+    )
+    print("[scheduler] Agentes comerciales ACTIVOS: cola cada 1 min")
+else:
+    print("[scheduler] Agentes comerciales APAGADOS (flag o OPENAI_API_KEY faltante)")
 
 scheduler.start()
 

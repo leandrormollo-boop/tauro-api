@@ -6,20 +6,37 @@ const { useState: useStateQ, useRef: useRefQ, useEffect: useEffectQ } = React;
 // (connect-src 'self') lo bloquearía en silencio. "" = mismo dominio.
 const API_URL = window.TAURO_API_URL || "";
 
-const DESTINOS = [
+// Fallback mientras carga /paises: nunca un desplegable vacío.
+const PAISES_FALLBACK = [
+  { value: "AR", label: "Argentina" },
   { value: "US", label: "Estados Unidos" },
+  { value: "CN", label: "China" },
   { value: "BR", label: "Brasil" },
-  { value: "CL", label: "Chile" },
-  { value: "UY", label: "Uruguay" },
-  { value: "MX", label: "México" },
   { value: "ES", label: "España" },
 ];
 
 function QuoteWidget({ compact = false }) {
   // TAURO opera los dos sentidos. `destino` es SIEMPRE el país del exterior:
   // en una importación ese país es el origen y la caja entra a Argentina.
-  const [sentido, setSentido] = useStateQ("exportacion");
+  // TAURO cotiza CUALQUIER par: AR→CN, CN→AR, AR→AR y también CN→IN,
+  // donde Argentina ni aparece. Los botones de arriba son atajos que
+  // setean los dos combos; los combos son la verdad.
+  const [origen, setOrigen] = useStateQ("AR");
   const [destino, setDestino] = useStateQ("US");
+  const [paises, setPaises] = useStateQ(PAISES_FALLBACK);
+
+  useEffectQ(() => {
+    let vivo = true;
+    fetch(`${API_URL}/paises`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (vivo && d?.paises?.length) {
+          setPaises(d.paises.map((p) => ({ value: p.iso, label: p.nombre })));
+        }
+      })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []);
   const [peso, setPeso] = useStateQ(5);
   const [largo, setLargo] = useStateQ(30);
   const [ancho, setAncho] = useStateQ(20);
@@ -37,7 +54,7 @@ function QuoteWidget({ compact = false }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          sentido,
+          origen_pais: origen,
           destino_pais: destino,
           peso_kg: parseFloat(peso) || 1,
           largo_cm: parseFloat(largo) || 30,
@@ -98,52 +115,25 @@ function QuoteWidget({ compact = false }) {
 
       {step !== "result" && (
         <>
-          {/* Sentido del envío: TAURO opera exportación e importación, y cada
-              courier cotiza distinto según para qué lado viaja la caja. */}
-          <div className="tweb-sentido" role="group" aria-label="Sentido del envío">
+          {/* Atajos: setean los dos combos de abajo. TAURO cotiza cualquier
+              par de países, así que los combos siguen libres después. */}
+          <div className="tweb-sentido" role="group" aria-label="Atajos de sentido">
             <button type="button"
-                    className={`btn ${sentido === "exportacion" ? "btn-primary" : "btn-ghost"}`}
-                    aria-pressed={sentido === "exportacion"}
-                    onClick={() => setSentido("exportacion")}>
+                    className={`btn ${origen === "AR" && destino !== "AR" ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => { setOrigen("AR"); if (destino === "AR") setDestino("US"); }}>
               Exportar
             </button>
             <button type="button"
-                    className={`btn ${sentido === "importacion" ? "btn-primary" : "btn-ghost"}`}
-                    aria-pressed={sentido === "importacion"}
-                    onClick={() => setSentido("importacion")}>
+                    className={`btn ${destino === "AR" && origen !== "AR" ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => { setDestino("AR"); if (origen === "AR") setOrigen("CN"); }}>
               Importar
             </button>
           </div>
 
-          {sentido === "exportacion" ? (
-            <>
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-                  Origen
-                </div>
-                <div style={{ padding: "11px 12px", background: "var(--bg)", border: "1px solid var(--line-soft)", borderRadius: 8, color: "var(--fg-2)", fontSize: 14 }}>
-                  Buenos Aires, Argentina
-                </div>
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <SelectField label="Destino" value={destino} onChange={setDestino} options={DESTINOS} />
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ marginBottom: 12 }}>
-                <SelectField label="Origen" value={destino} onChange={setDestino} options={DESTINOS} />
-              </div>
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-                  Destino
-                </div>
-                <div style={{ padding: "11px 12px", background: "var(--bg)", border: "1px solid var(--line-soft)", borderRadius: 8, color: "var(--fg-2)", fontSize: 14 }}>
-                  Buenos Aires, Argentina
-                </div>
-              </div>
-            </>
-          )}
+          <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
+            <SelectField label="Origen" value={origen} onChange={setOrigen} options={paises} />
+            <SelectField label="Destino" value={destino} onChange={setDestino} options={paises} />
+          </div>
 
           <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
             <Field label="Peso (kg)" value={peso} onChange={setPeso} type="number" />
