@@ -638,3 +638,139 @@ class DHLClient(CarrierBase):
             }
         except Exception as e:
             return {"encontrado": False, "error": str(e)}
+
+    # ── Recolecciones (MyDHL API POST /pickups) ──────────────────────────
+    def create_pickup(self, datos: dict) -> dict:
+        """
+        Agenda una recolección en DHL. Mismo contrato de entrada/salida que
+        FedExClient.create_pickup para que servicios/recolecciones.py los
+        trate igual: {origen, fecha, ready_time, close_time, peso_kg, bultos,
+        instrucciones} → {encontrado, confirmation_code, ubicacion, error}.
+
+        El payload está calcado del ejemplo oficial que mandó DHL
+        (Pickup.txt, 09/2025) — con NUESTRA cuenta, no la 741582719 del
+        ejemplo, que es de un tercero. Ojo con la fecha: acá va con offset
+        "-03:00" (así viene en el ejemplo), NO el formato "GMT-03:00" de
+        /shipments. Son distintos a propósito de DHL, no nuestro.
+        """
+        if not (self.api_key and self.api_secret):
+            return {"encontrado": False, "error": "Faltan credenciales de DHL."}
+
+        origen = datos.get("origen") or {}
+        cuenta, error = self._cuenta_para(
+            {"country": origen.get("pais", "AR")}, {"country": ""})
+        if error:
+            return {"encontrado": False, "error": error}
+
+        fecha = (datos.get("fecha") or "").strip()
+        ready = (datos.get("ready_time") or "09:00").strip()
+        close = (datos.get("close_time") or "17:00").strip()
+
+        cuerpo = {
+            "plannedPickupDateAndTime": f"{fecha}T{ready}:00-03:00",
+            "closeTime": close,
+            "accounts": [{"typeCode": "shipper", "number": cuenta}],
+            "customerDetails": {
+                "shipperDetails": {
+                    "postalAddress": {
+                        "postalCode": (origen.get("zip") or "").strip(),
+                        "cityName": (origen.get("ciudad") or "").strip(),
+                        "countryCode": (origen.get("pais") or "AR").upper()[:2],
+                        "addressLine1": (origen.get("calle") or "")[:45],
+                    },
+                    "contactInformation": {
+                        "phone": (origen.get("telefono") or "0000000000")[:25],
+                        "companyName": (origen.get("empresa")
+                                        or origen.get("nombre") or "N/A")[:60],
+                        "fullName": (origen.get("nombre") or "N/A")[:45],
+                    },
+                },
+            },
+            "shipmentDetails": [{
+                "productCode": self.product_code,
+                "isCustomsDeclarable": True,
+                "unitOfMeasurement": "metric",
+                "packages": [{
+                    "weight": round(float(datos.get("peso_kg") or 1), 3),
+                    "dimensions": {"length": 30, "width": 20, "height": 15},
+                } for _ in range(max(int(datos.get("bultos") or 1), 1))],
+            }],
+        }
+        if (datos.get("instrucciones") or "").strip():
+            cuerpo["specialInstructions"] = [
+                {"value": str(datos["instrucciones"])[:75]}]
+
+        msg_ref = f"tauro-pickup-{uuid.uuid4().hex[:18]}"
+        try:
+            resp = requests.post(
+                f"{self.base_url}/pickups",
+                json=cuerpo,
+                auth=(self.api_key, self.api_secret),
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "x-version": self.API_VERSION,
+                    "Message-Reference": msg_ref,
+                },
+                timeout=30,
+            )
+        except Exception as e:
+            print(f"[dhl] EXCEPCIÓN agendando pickup (ref {msg_ref}): {e}")
+            return {"encontrado": False,
+                    "error": "Error de comunicación con DHL al agendar."}
+
+        if resp.status_code not in (200, 201):
+            print(f"[dhl] POST /pickups error {resp.status_code} "
+                  f"(ref {msg_ref}): {resp.text[:400]}")
+            return {"encontrado": False, "error": self._error_legible(resp)}
+
+        try:
+            data = resp.json()
+            codigos = data.get("dispatchConfirmationNumbers") or []
+            if not codigos:
+                return {"encontrado": False,
+                        "error": "DHL no devolvió número de confirmación."}
+            return {
+                "encontrado": True,
+                "confirmation_code": str(codigos[0]),
+                # DHL no informa estación en la respuesta; se guarda vacío y
+                # cancel_pickup no la necesita (usa sólo el código).
+                "ubicacion": "",
+            }
+        except Exception as e:
+            return {"encontrado": False,
+                    "error": f"Respuesta de DHL ilegible: {e}"}
+
+    def cancel_pickup(self, confirmation_code: str, fecha: str = "",
+                      ubicacion: str = "") -> dict:
+        """
+        Cancela una recolección. `fecha` y `ubicacion` existen para calzar la
+        firma de FedEx; DHL cancela sólo con el código.
+
+        Escrita contra la doc (DELETE /pickups/{código} + requestorName) y
+        NUNCA ejecutada en vivo — la primera cancelación real hay que mirarla,
+        mismo criterio que la primera guía.
+        """
+        if not (self.api_key and self.api_secret):
+            return {"ok": False, "error": "Faltan credenciales de DHL."}
+        codigo = (confirmation_code or "").strip()
+        if not codigo:
+            return {"ok": False, "error": "Sin código de confirmación."}
+        try:
+            resp = requests.delete(
+                f"{self.base_url}/pickups/{codigo}",
+                params={"requestorName": "TAURO Solutions",
+                        "reason": "001"},
+                auth=(self.api_key, self.api_secret),
+                headers={"Accept": "application/json",
+                         "x-version": self.API_VERSION},
+                timeout=30,
+            )
+        except Exception as e:
+            return {"ok": False, "error": f"Error de comunicación con DHL: {e}"}
+
+        if resp.status_code in (200, 202, 204):
+            return {"ok": True}
+        print(f"[dhl] DELETE /pickups/{codigo} error {resp.status_code}: "
+              f"{resp.text[:300]}")
+        return {"ok": False, "error": self._error_legible(resp)}

@@ -477,13 +477,15 @@ def recoleccion_nueva(
     bultos: int = Form(1),
     peso_kg: str = Form("1"),
     instrucciones: str = Form(""),
+    courier: str = Form("FEDEX"),
     cliente: str = Depends(cliente_actual),
 ):
     from servicios.recolecciones import crear
 
     try:
         r = crear(cliente, fecha, ready_time, close_time, bultos,
-                  float((peso_kg or "1").replace(",", ".")), instrucciones)
+                  float((peso_kg or "1").replace(",", ".")), instrucciones,
+                  courier=courier)
     except Exception as e:
         print(f"[portal] error agendando recolección de {cliente}: {e}")
         r = {"ok": False, "error": "No pudimos agendarla. Probá de nuevo o escribinos."}

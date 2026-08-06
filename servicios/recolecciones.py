@@ -74,8 +74,27 @@ def _dias_habiles_validos(fecha_str: str) -> Optional[str]:
     return None
 
 
+def _cliente_pickup(courier: str):
+    """
+    El cliente de API que agenda/cancela para ese courier. Registro chico y
+    explícito: sumar un courier acá es UNA línea, y un courier que no está
+    devuelve None → error claro en vez de caer a FedEx por descarte (el mismo
+    principio que el despachador de emisión: hasta el 06/08 esto estaba
+    cableado a FedExClient y una recolección "DHL" se agendaba en FedEx).
+    """
+    courier = (courier or "FEDEX").strip().upper()
+    if courier == "FEDEX":
+        from core.fedex_client import FedExClient
+        return FedExClient()
+    if courier == "DHL":
+        from core.dhl_client import DHLClient
+        return DHLClient()
+    return None
+
+
 def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
-          bultos: int, peso_kg: float, instrucciones: str = "") -> dict:
+          bultos: int, peso_kg: float, instrucciones: str = "",
+          courier: str = "FEDEX") -> dict:
     """
     Agenda la recolección en el courier y la guarda. La dirección sale del
     remitente predeterminado del cliente: es donde el chofer tiene que ir.
@@ -84,6 +103,12 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
 
     _ensure_tabla()
     cliente_id = (cliente_id or "").strip().upper()
+    courier = (courier or "FEDEX").strip().upper()
+
+    cliente_api = _cliente_pickup(courier)
+    if cliente_api is None:
+        return {"ok": False, "error": f"Todavía no agendamos recolecciones de "
+                                      f"{courier}. Elegí FedEx o DHL."}
 
     motivo = _dias_habiles_validos(fecha)
     if motivo:
@@ -102,20 +127,19 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
                 cur.execute("""
                     INSERT INTO recolecciones
                         (cliente_id, fecha, ready_time, close_time, bultos, peso_kg,
-                         direccion, instrucciones, estado)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'AGENDADA')
+                         direccion, instrucciones, estado, courier)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'AGENDADA', %s)
                     RETURNING id
                 """, (cliente_id, fecha, ready_time, close_time,
                       max(int(bultos or 1), 1), float(peso_kg or 1),
                       f"{rem.get('direccion','')}, {rem.get('ciudad','')}".strip(", "),
-                      (instrucciones or "")[:255]))
+                      (instrucciones or "")[:255], courier))
                 rec_id = cur.fetchone()["id"]
             except Exception:
                 return {"ok": False, "error": "Ya tenés una recolección agendada para "
                                               "ese día. Cancelala si querés cambiarla."}
 
-    from core.fedex_client import FedExClient
-    resultado = FedExClient().create_pickup({
+    resultado = cliente_api.create_pickup({
         "origen": {
             "nombre": rem.get("nombre") or cliente_id,
             "empresa": rem.get("alias") or "",
@@ -147,7 +171,7 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
                 WHERE id = %s
             """, (resultado.get("confirmation_code"), resultado.get("ubicacion"), rec_id))
 
-    print(f"[recolecciones] {cliente_id} agendó para {fecha} "
+    print(f"[recolecciones] {cliente_id} agendó {courier} para {fecha} "
           f"({resultado.get('confirmation_code')})")
     return {"ok": True, "id": rec_id,
             "confirmation_code": resultado.get("confirmation_code")}
@@ -200,8 +224,11 @@ def cancelar(rec_id: int, cliente_id: Optional[str] = None) -> dict:
         return {"ok": False, "error": "Esa recolección ya no está agendada."}
 
     if rec.get("confirmation_code"):
-        from core.fedex_client import FedExClient
-        r = FedExClient().cancel_pickup(
+        cliente_api = _cliente_pickup(rec.get("courier"))
+        if cliente_api is None:
+            return {"ok": False, "error": f"No sé cancelar recolecciones de "
+                                          f"{rec.get('courier')}."}
+        r = cliente_api.cancel_pickup(
             rec["confirmation_code"], rec["fecha"].strftime("%Y-%m-%d"),
             rec.get("ubicacion") or "")
         if not r.get("ok"):

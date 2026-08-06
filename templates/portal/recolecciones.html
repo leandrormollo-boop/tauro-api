@@ -40,7 +40,9 @@
             <tbody>
             {% for r in recolecciones %}
                 <tr>
-                    <td class="mono">{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else '—' }}</td>
+                    <td class="mono">{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else '—' }}
+                        <br><small style="color:var(--fg-3);">{{ (r.courier or 'FEDEX')|upper }}</small>
+                    </td>
                     <td class="mono">{{ r.ready_time }} a {{ r.close_time }}</td>
                     <td class="mono">{{ r.bultos }} × {{ '%g'|format(r.peso_kg) }} kg</td>
                     <td style="font-size:13px;">{{ r.direccion or '—' }}
@@ -88,6 +90,19 @@
     </div>
 
     <form method="POST" action="/portal/recolecciones/nueva">
+        {# El courier que va a pasar a buscar. Antes no se elegía y TODA
+           recolección se agendaba en FedEx — con una guía DHL el chofer
+           equivocado tocaba el timbre. #}
+        <div class="form-group">
+            <label for="rec-courier">¿Quién pasa a buscar? *</label>
+            <select name="courier" id="rec-courier" required>
+                <option value="FEDEX">FedEx</option>
+                <option value="DHL">DHL Express</option>
+            </select>
+            <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
+                Elegí el mismo courier de las guías que van a retirar.
+            </p>
+        </div>
         <div class="form-grid-3">
             <div class="form-group">
                 <label for="rec-fecha">Fecha *</label>
