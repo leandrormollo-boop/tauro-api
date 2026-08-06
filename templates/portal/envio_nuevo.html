@@ -231,23 +231,23 @@
                     <label for="dest_documento">Tax ID / ID fiscal</label>
                     <input type="text" name="dest_documento" id="dest_documento" placeholder="Ej: CEN040218L96" value="{{ form.dest_documento or '' }}">
                 </div>
-                <div class="form-group"></div>
-            </div>
-
-            <div class="form-grid-2">
+                {# Mismo arreglo que en Remitente: este Tax ID iba solo con una
+                   celda vacía al lado, una fila de 70px para un campo. #}
                 <div class="form-group">
                     <label for="dest_email">Email</label>
                     <input type="email" name="dest_email" id="dest_email" value="{{ form.dest_email or '' }}">
                 </div>
+            </div>
+
+            <div class="form-grid-2">
                 <div class="form-group">
                     <label for="dest_telefono">Teléfono</label>
                     <input type="text" name="dest_telefono" id="dest_telefono" value="{{ form.dest_telefono or '' }}">
                 </div>
-            </div>
-
-            <div class="form-group">
-                <label for="dest_direccion">Dirección</label>
-                <input type="text" name="dest_direccion" id="dest_direccion" required value="{{ form.dest_direccion or '' }}">
+                <div class="form-group">
+                    <label for="dest_direccion">Dirección</label>
+                    <input type="text" name="dest_direccion" id="dest_direccion" required value="{{ form.dest_direccion or '' }}">
+                </div>
             </div>
 
             {% set paises_nombres = {'AR':'Argentina','US':'Estados Unidos','ES':'España','BR':'Brasil','CL':'Chile','UY':'Uruguay','MX':'México','PE':'Perú','CO':'Colombia','PY':'Paraguay','BO':'Bolivia','EC':'Ecuador','GB':'Reino Unido','DE':'Alemania','FR':'Francia','IT':'Italia','CA':'Canadá','CN':'China'} %}
@@ -417,26 +417,28 @@
             </div>
 
             {# Impuestos de destino. Arranca con lo que el cliente dejó
-               configurado en su cuenta; acá sólo se pisa para ESTE envío. #}
-            <div class="form-group">
-                <label for="tax_paga">Impuestos de destino</label>
-                <select name="tax_paga" id="tax_paga">
-                    <option value="DESTINATARIO" {% if tax_paga_default != 'CLIENTE' %}selected{% endif %}>
-                        Los paga quien recibe
-                    </option>
-                    <option value="CLIENTE" {% if tax_paga_default == 'CLIENTE' %}selected{% endif %}>
-                        Los pago yo — se suman a mi cuenta
-                    </option>
-                </select>
-                <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                    Los aranceles del país de destino. Si los paga quien recibe, los abona
-                    al retirar el paquete. Estados Unidos ya no tiene franquicia: toda caja paga.
-                </p>
-            </div>
-
-            <div class="form-group">
-                <label for="observaciones">Observaciones</label>
-                <textarea name="observaciones" id="observaciones" rows="3" placeholder="Instrucciones para Tauro, referencia interna, nota comercial...">{{ form.observaciones or '' }}</textarea>
+               configurado en su cuenta; acá sólo se pisa para ESTE envío.
+               Va al lado de Observaciones: eran dos filas enteras para dos
+               campos y el paso 3 es el más alto de los tres. #}
+            <div class="form-grid-2">
+                <div class="form-group">
+                    <label for="tax_paga">Impuestos de destino</label>
+                    <select name="tax_paga" id="tax_paga">
+                        <option value="DESTINATARIO" {% if tax_paga_default != 'CLIENTE' %}selected{% endif %}>
+                            Los paga quien recibe
+                        </option>
+                        <option value="CLIENTE" {% if tax_paga_default == 'CLIENTE' %}selected{% endif %}>
+                            Los pago yo — se suman a mi cuenta
+                        </option>
+                    </select>
+                    <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
+                        Aranceles del país de destino. EEUU ya no tiene franquicia: toda caja paga.
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label for="observaciones">Observaciones</label>
+                    <textarea name="observaciones" id="observaciones" rows="2" placeholder="Instrucciones para Tauro, referencia interna...">{{ form.observaciones or '' }}</textarea>
+                </div>
             </div>
         </div>
     </div>
