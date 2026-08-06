@@ -7,31 +7,39 @@
   <h1>Dashboard</h1>
 </div>
 
+{# Las tarjetas son LINKS, no carteles (Leandro, 06/08): "deberían ser botones
+   para que la experiencia sea fluida y rápida". Un número que te dice que hay 4
+   guías esperando y no te lleva a ellas te obliga a buscarlas en el menú. #}
 <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 28px;">
-  <div class="stat-card">
+  <a href="/admin/clientes" class="stat-card stat-link">
     <div class="label">Clientes activos</div>
     <div class="value">{{ stats.clientes_activos }}</div>
-  </div>
-  <div class="stat-card">
+    <div class="ir">Ver clientes →</div>
+  </a>
+  <a href="/admin/envios/nuevo" class="stat-card stat-link">
     <div class="label">Facturas cargadas</div>
     <div class="value">{{ stats.total_envios }}</div>
-  </div>
-  <div class="stat-card">
+    <div class="ir">Cargar factura →</div>
+  </a>
+  <a href="/admin/pagos/pendientes" class="stat-card stat-link">
     <div class="label">Pagos registrados</div>
     <div class="value">{{ stats.total_pagos }}</div>
-  </div>
-  <div class="stat-card">
+    <div class="ir">Ver pagos →</div>
+  </a>
+  <a href="/admin/productos" class="stat-card stat-link {% if stats.productos_pendientes > 0 %}urge{% endif %}">
     <div class="label">Productos pendientes</div>
     <div class="value {% if stats.productos_pendientes > 0 %}warn{% endif %}">
       {{ stats.productos_pendientes }}
     </div>
-  </div>
-  <div class="stat-card">
+    <div class="ir">{% if stats.productos_pendientes > 0 %}Validar ahora →{% else %}Ver catálogo →{% endif %}</div>
+  </a>
+  <a href="/admin/pedidos" class="stat-card stat-link {% if stats.solicitudes_pendientes > 0 %}urge{% endif %}">
     <div class="label">Guías pendientes</div>
     <div class="value {% if stats.solicitudes_pendientes > 0 %}warn{% endif %}">
       {{ stats.solicitudes_pendientes }}
     </div>
-  </div>
+    <div class="ir">{% if stats.solicitudes_pendientes > 0 %}Emitir ahora →{% else %}Ver solicitudes →{% endif %}</div>
+  </a>
 </div>
 
 <!-- Resumen por cliente -->

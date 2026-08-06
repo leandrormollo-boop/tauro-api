@@ -87,6 +87,38 @@ class DHLClient(CarrierBase):
             )
         return self.account_import, None
 
+    @staticmethod
+    def _error_legible(resp) -> str:
+        """
+        Traduce el cuerpo de error de DHL a algo accionable.
+
+        MyDHL API contesta los rechazos de validación con un `detail` genérico
+        —"Multiple problems found, see Additional Details"— y mete los problemas
+        REALES en `additionalDetails`. Leer sólo `detail` deja al admin con un
+        cartel rojo que no dice nada: pasó exactamente eso emitiendo la guía #4
+        el 06/08. Es la diferencia entre "no anda" y "el CP de destino no existe".
+        """
+        try:
+            j = resp.json()
+        except Exception:
+            return (resp.text or "")[:300]
+
+        if not isinstance(j, dict):
+            return (resp.text or "")[:300]
+
+        base = j.get("detail") or j.get("message") or j.get("title") or ""
+
+        detalles = j.get("additionalDetails")
+        if isinstance(detalles, str):
+            detalles = [detalles]
+        if isinstance(detalles, (list, tuple)):
+            partes = [str(d).strip() for d in detalles if str(d or "").strip()]
+            if partes:
+                # Sin el " · " los problemas se leen como una sola frase larga.
+                return " · ".join(partes)[:600]
+
+        return (base or (resp.text or ""))[:300]
+
     def _parsear_rates(self, data: dict) -> dict:
         """
         Lee la respuesta de /rates. GET y POST devuelven el MISMO schema, así
@@ -224,7 +256,7 @@ class DHLClient(CarrierBase):
             if resp.status_code != 200:
                 print(f"[dhl] POST /rates error {resp.status_code} (ref {msg_ref}): "
                       f"{resp.text[:300]}")
-                return {"encontrado": False, "error": resp.text}
+                return {"encontrado": False, "error": self._error_legible(resp)}
             return self._parsear_rates(resp.json())
         except Exception as e:
             print(f"[dhl] Excepción en get_rates_multibulto (ref {msg_ref}): {e}")
@@ -313,7 +345,7 @@ class DHLClient(CarrierBase):
 
             if resp.status_code != 200:
                 print(f"[dhl] get_rates error {resp.status_code} (ref {msg_ref}): {resp.text[:300]}")
-                return {"encontrado": False, "error": resp.text}
+                return {"encontrado": False, "error": self._error_legible(resp)}
 
             return self._parsear_rates(resp.json())
 
@@ -530,13 +562,7 @@ class DHLClient(CarrierBase):
         if resp.status_code not in (200, 201):
             print(f"[dhl] POST /shipments error {resp.status_code} (ref {msg_ref}): "
                   f"{resp.text[:400]}")
-            detalle = resp.text[:300]
-            try:
-                j = resp.json()
-                detalle = j.get("detail") or j.get("message") or detalle
-            except Exception:
-                pass
-            return {"encontrado": False, "error": detalle}
+            return {"encontrado": False, "error": self._error_legible(resp)}
 
         try:
             data = resp.json()

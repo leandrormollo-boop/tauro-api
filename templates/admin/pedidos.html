@@ -34,7 +34,7 @@
           <th>Destinatario</th>
           <th>Dirección</th>
           <th>Precio</th>
-          <th>Guía FedEx</th>
+          <th>Guía</th>
           <th>Operación</th>
         </tr>
       </thead>
@@ -88,9 +88,14 @@
               <span class="badge">Con tracking</span>
               <div class="mono" style="font-size:11px;margin-top:6px;">{{ s.tracking }}</div>
             {% else %}
+              {# El courier sale de la SOLICITUD, no cableado: el cliente elige
+                 en el portal y el admin tiene que ver por dónde va a salir de
+                 verdad antes de apretar. Decía "FedEx" incluso cuando el
+                 cliente había elegido DHL. #}
+              {% set courier_sol = (s.courier or '')|upper or 'el courier del envío' %}
               <form method="POST" action="/admin/pedidos/{{ s.id }}/generar-guia"
-                    data-confirm="¿Generar la guía real en FedEx para el pedido #{{ s.id }}? Esto emite una guía y consume la cuenta.">
-                <button type="submit" class="btn btn-sm btn-primary">Generar guía en FedEx</button>
+                    data-confirm="¿Generar la guía real en {{ courier_sol }} para el pedido #{{ s.id }}? Esto emite una guía y consume la cuenta.">
+                <button type="submit" class="btn btn-sm btn-primary">Generar guía en {{ courier_sol }}</button>
               </form>
               {# Editable sólo pre-emisión: después los datos ya viajaron. #}
               <a href="/admin/pedidos/{{ s.id }}/editar" class="btn btn-sm btn-ghost"
