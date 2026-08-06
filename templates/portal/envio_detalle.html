@@ -57,6 +57,13 @@
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
                 {% if s.bultos and s.bultos|length %}El PDF trae una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}Imprimí la etiqueta y pegala en la caja.{% endif %}
             </p>
+            {% if s.estado == 'GUIA_LISTA' %}
+            {# El paso que sigue a tener la etiqueta: que pasen a buscarla.
+               Llega al form con courier/bultos/peso de este envío puestos. #}
+            <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-full" style="margin-top:8px;">
+                🚚 Coordinar retiro con {{ courier_nombre }}
+            </a>
+            {% endif %}
         {% elif not s.tracking and puede_emitir %}
             {# Emisión habilitada para este cliente (flag + tope de deuda se
                validan de nuevo en el servidor: el botón es sólo la puerta). #}

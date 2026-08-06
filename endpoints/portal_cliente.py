@@ -442,8 +442,19 @@ def backup_cliente(cliente: str = Depends(cliente_actual)):
 
 # ── Recolecciones ───────────────────────────────────────────
 @router.get("/recolecciones", response_class=HTMLResponse)
-def recolecciones_view(request: Request, cliente: str = Depends(cliente_actual)):
-    """Que el chofer pase a buscar, en vez de llevar los paquetes."""
+def recolecciones_view(
+    request: Request,
+    envio: Optional[int] = None,
+    cliente: str = Depends(cliente_actual),
+):
+    """
+    Que el chofer pase a buscar, en vez de llevar los paquetes.
+
+    Con ?envio=N el form llega desde "Mis envíos" (pedido de Leandro, 06/08:
+    "la recolección tiene que programarse desde el perfil de todos los
+    envíos") y se precargan courier, bultos y peso de ESA guía — el cliente
+    coordina el retiro del envío que está mirando, no arranca de cero.
+    """
     from servicios.recolecciones import listar
     from datetime import date, timedelta
 
@@ -452,6 +463,20 @@ def recolecciones_view(request: Request, cliente: str = Depends(cliente_actual))
     except Exception as e:
         print(f"[portal] no pude listar recolecciones de {cliente}: {e}")
         recolecciones = []
+
+    envio_pre = None
+    if envio:
+        s = obtener_solicitud_de_cliente(envio, cliente)
+        # Sólo precarga si la guía existe: sin guía todavía no hay nada que
+        # el chofer pueda llevarse.
+        if s and s.get("tracking"):
+            envio_pre = {
+                "id": s["id"],
+                "courier": (s.get("courier") or "FEDEX").upper(),
+                "bultos": s.get("cantidad") or 1,
+                "peso_kg": s.get("peso_kg") or 1,
+                "tracking": s.get("tracking"),
+            }
 
     remitente = obtener_remitente_para_envio(cliente, None)
     # Mañana por defecto (hoy suele estar pasado el corte); si cae finde,
@@ -463,7 +488,7 @@ def recolecciones_view(request: Request, cliente: str = Depends(cliente_actual))
     return templates.TemplateResponse(
         request=request, name="portal/recolecciones.html",
         context={"cliente": cliente, "recolecciones": recolecciones,
-                 "remitente": remitente,
+                 "remitente": remitente, "envio_pre": envio_pre,
                  "fecha_sugerida": sugerida.strftime("%Y-%m-%d"),
                  "fecha_max": (date.today() + timedelta(days=14)).strftime("%Y-%m-%d")},
     )

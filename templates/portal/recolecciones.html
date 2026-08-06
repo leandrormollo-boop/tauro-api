@@ -90,14 +90,23 @@
     </div>
 
     <form method="POST" action="/portal/recolecciones/nueva">
+        {% if envio_pre %}
+        {# Llegó desde "Mis envíos": el retiro es DE ese envío, así que
+           courier, bultos y peso vienen puestos (editables igual). #}
+        <div class="msg ok" style="margin-bottom:14px;">
+            Coordinando el retiro del envío <b>#{{ envio_pre.id }}</b>
+            ({{ envio_pre.courier }} · guía {{ envio_pre.tracking }}).
+            Ya te cargamos el courier y los bultos — revisá la fecha y listo.
+        </div>
+        {% endif %}
         {# El courier que va a pasar a buscar. Antes no se elegía y TODA
            recolección se agendaba en FedEx — con una guía DHL el chofer
            equivocado tocaba el timbre. #}
         <div class="form-group">
             <label for="rec-courier">¿Quién pasa a buscar? *</label>
             <select name="courier" id="rec-courier" required>
-                <option value="FEDEX">FedEx</option>
-                <option value="DHL">DHL Express</option>
+                <option value="FEDEX" {% if envio_pre and envio_pre.courier == 'FEDEX' %}selected{% endif %}>FedEx</option>
+                <option value="DHL" {% if envio_pre and envio_pre.courier == 'DHL' %}selected{% endif %}>DHL Express</option>
             </select>
             <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
                 Elegí el mismo courier de las guías que van a retirar.
@@ -126,11 +135,11 @@
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="rec-bultos">Cantidad de bultos</label>
-                <input type="number" name="bultos" id="rec-bultos" min="1" step="1" value="1">
+                <input type="number" name="bultos" id="rec-bultos" min="1" step="1" value="{{ envio_pre.bultos if envio_pre else 1 }}">
             </div>
             <div class="form-group">
                 <label for="rec-peso">Peso total aproximado (kg)</label>
-                <input type="text" name="peso_kg" id="rec-peso" inputmode="decimal" value="1">
+                <input type="text" name="peso_kg" id="rec-peso" inputmode="decimal" value="{{ '%g'|format(envio_pre.peso_kg) if envio_pre else 1 }}">
             </div>
         </div>
 
