@@ -143,6 +143,15 @@
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-sm">⬇ Guía PDF</a>
                             {% elif s.guia_url %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>
+                            {% elif puede_emitir and not s.tracking and s.estado not in ('CANCELADO', 'EMITIENDO') %}
+                                {# Estaba SOLO en el detalle, un click adentro, así que
+                                   desde acá parecía que el cliente no podía emitir. El
+                                   servidor revalida las tres llaves (es suya, flag,
+                                   tope de deuda): el botón es la puerta, no el permiso. #}
+                                <form method="POST" action="/portal/envios/{{ s.id }}/emitir"
+                                      data-confirm="¿Emitir la guía de {{ (s.courier or 'el courier')|upper }} ahora? Se genera la guía real y el cargo entra a tu cuenta corriente. No se puede deshacer.">
+                                    <button type="submit" class="btn btn-primary btn-sm">Emitir guía</button>
+                                </form>
                             {% endif %}
                             <a href="/portal/envios/{{ s.id }}" class="btn btn-ghost btn-sm">Detalle</a>
                         </div>

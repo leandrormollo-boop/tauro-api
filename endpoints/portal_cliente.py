@@ -906,6 +906,29 @@ async def api_parsear_pedido(
 
 
 # ── Envíos / solicitudes de guía ───────────────────────────
+def _cliente_puede_emitir(cliente: str) -> bool:
+    """
+    ¿Este cliente emite sus guías solo? El flag lo prende Tauro por ficha.
+
+    Vive acá y no inline porque lo necesitan DOS pantallas: el detalle y el
+    listado. Estaba sólo en el detalle, así que el botón quedaba escondido un
+    click adentro y desde "Mis envíos" parecía que el cliente no podía emitir.
+
+    Ante cualquier problema de base devuelve False: no poder leer un permiso
+    nunca puede terminar en mostrar un botón que emite plata real.
+    """
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT puede_emitir FROM clientes WHERE cliente_id = %s",
+                            (cliente,))
+                fila = cur.fetchone()
+                return bool(fila and fila["puede_emitir"])
+    except Exception as e:
+        print(f"[portal] no pude leer puede_emitir de {cliente}: {e}")
+        return False
+
+
 @router.get("/envios", response_class=HTMLResponse)
 def envios_view(
     request: Request,
@@ -949,6 +972,8 @@ def envios_view(
     else:
         paso = ""
 
+    puede_emitir = _cliente_puede_emitir(cliente)
+
     return templates.TemplateResponse(
         request=request, name="portal/envios.html",
         context={
@@ -960,7 +985,13 @@ def envios_view(
             # El chip "Todos" cuenta las filas de verdad (incluidos los
             # cancelados, que no viven en ningún paso del embudo).
             "total_sin_filtrar": todos_n,
-            "flash_ok": "Solicitud creada. Tauro ya la ve en el admin." if ok == "solicitado" else None,
+            "puede_emitir": puede_emitir,
+            "flash_ok": (
+                ("Solicitud creada. Podés emitir la guía vos mismo desde el botón "
+                 "de la fila, o dejarla y la emitimos nosotros.")
+                if (ok == "solicitado" and puede_emitir)
+                else ("Solicitud creada. Tauro ya la ve en el admin." if ok == "solicitado" else None)
+            ),
         },
     )
 
@@ -1533,16 +1564,7 @@ def envio_detalle(
         return RedirectResponse(url="/portal/envios", status_code=303)
 
     # ¿Este cliente puede emitir solo? Define si se muestra el botón.
-    puede_emitir = False
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT puede_emitir FROM clientes WHERE cliente_id = %s",
-                            (cliente,))
-                fila = cur.fetchone()
-                puede_emitir = bool(fila and fila["puede_emitir"])
-    except Exception as e:
-        print(f"[portal] no pude leer puede_emitir de {cliente}: {e}")
+    puede_emitir = _cliente_puede_emitir(cliente)
 
     return templates.TemplateResponse(
         request=request, name="portal/envio_detalle.html",
