@@ -2020,3 +2020,21 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   .wizard-compacto .stepper { position: static; }
   .wizard-compacto .step label { font-size: 11px; }
 }
+
+/* Lo que quedaba comiéndose la pantalla, medido en producción con el bloque
+   de arriba ya aplicado (paso 1: 927px contra 776px de viewport):
+     · 90px de padding inferior de .main-inner (era para la barra fija vieja)
+     · 58px del pie "Tauro Solutions · Logística internacional"
+     · 52px de padding de la tarjeta
+   `:has()` porque .wizard-compacto vive ADENTRO de .main-inner y hay que
+   estilar al padre. Si un browser no lo soporta, el wizard sigue andando:
+   scrollea un poco más, que es exactamente el estado anterior. */
+.main-inner:has(.wizard-compacto) { padding-bottom: 24px; }
+.main:has(.wizard-compacto) > .footer { display: none; }
+.wizard-compacto .card { padding: 18px 22px; }
+.wizard-compacto .stepper { padding: 4px 0 6px; }
+
+/* El paso 3 crece con cada caja del multi-bulto: ahí el scroll es inevitable
+   y no es un problema — con el stepper y la botonera ancladas nunca se pierde
+   el contexto. Lo que sí se evita es el salto brusco al cambiar de paso. */
+.wizard-compacto .form-section { scroll-margin-top: 90px; }
