@@ -2,6 +2,10 @@
 {% block title %}Crear envío{% endblock %}
 
 {% block content %}
+{# .wizard-compacto: compacta el alto para que CADA PASO entre en una
+   pantalla y ancla el stepper y la navegación. Ver el bloque WIZARD DE
+   UN PASO POR PANTALLA en static/css/tauro.css. #}
+<div class="wizard-compacto">
 <div class="page-title page-title-row">
     <div>
         <div class="eyebrow">Operaciones</div>
@@ -135,28 +139,29 @@
                     <input type="text" name="rem_contacto" id="rem_contacto" placeholder="Quién entrega la carga" value="{{ form.rem_contacto or '' }}">
                 </div>
             </div>
+            {# Tax ID iba solo con una celda VACÍA al lado: una fila entera de
+               79px para un campo. Ahora va con el email y el paso entra en una
+               pantalla sin scrollear. #}
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_documento">Tax ID / CUIT <span style="color:var(--fg-4);font-weight:400;">— exportador</span></label>
                     <input type="text" name="rem_documento" id="rem_documento" placeholder="Ej: 30-12345678-9" value="{{ form.rem_documento or (remitente.documento if remitente else '') }}">
                 </div>
-                <div class="form-group"></div>
-            </div>
-
-            <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_email">Email</label>
                     <input type="email" name="rem_email" id="rem_email" value="{{ form.rem_email or (remitente.email if remitente else '') }}">
                 </div>
+            </div>
+
+            <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_telefono">Teléfono</label>
                     <input type="text" name="rem_telefono" id="rem_telefono" value="{{ form.rem_telefono or (remitente.telefono if remitente else '') }}">
                 </div>
-            </div>
-
-            <div class="form-group">
-                <label for="rem_direccion">Dirección</label>
-                <input type="text" name="rem_direccion" id="rem_direccion" value="{{ form.rem_direccion or (remitente.direccion if remitente else '') }}">
+                <div class="form-group">
+                    <label for="rem_direccion">Dirección</label>
+                    <input type="text" name="rem_direccion" id="rem_direccion" value="{{ form.rem_direccion or (remitente.direccion if remitente else '') }}">
+                </div>
             </div>
 
             <div class="form-grid-4">
@@ -982,7 +987,9 @@
     // Botonera Atrás / Siguiente al pie de cada paso.
     secs.forEach(function (sec, i) {
       var nav = document.createElement("div");
-      nav.style.cssText = "display:flex;justify-content:space-between;gap:10px;margin-top:22px;";
+      // .paso-nav se pega al pie del paso: el botón para avanzar tiene que
+      // estar SIEMPRE a la vista, si no el paso "queda a medias" igual.
+      nav.className = "paso-nav";
       var atras = "";
       if (i > 0) atras = "<button type='button' class='btn btn-ghost' data-nav='-1'>← Atrás</button>";
       var sig = "";
@@ -998,4 +1005,5 @@
     pintar();
   })();
 </script>
+</div>
 {% endblock %}
