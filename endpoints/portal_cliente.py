@@ -1252,10 +1252,36 @@ def envio_nuevo_post(
         if not filas:
             raise ValueError("Agregá al menos una caja al envío.")
 
-        for fila in filas:
-            producto = get_producto(cliente, fila["producto"])
-            if not producto or not producto.activo:
-                raise ValueError(f"El producto \"{fila['producto']}\" no está activo en tu catálogo.")
+        # El catálogo es OPCIONAL (Leandro, 06/08): sirve para que la tienda
+        # integre por API sin volver a declarar el producto en cada venta, pero
+        # desde el portal el cliente puede cargar la caja a mano. Antes toda
+        # fila exigía un producto aprobado, así que un cliente nuevo no podía
+        # crear NI UN envío hasta que Tauro le validara el catálogo.
+        es_nacional_prev = destino_pais.strip().upper() == "AR"
+        for i, fila in enumerate(filas, start=1):
+            alias = (fila.get("producto") or "").strip()
+            if alias:
+                producto = get_producto(cliente, alias)
+                if not producto or not producto.activo:
+                    raise ValueError(f"El producto \"{alias}\" no está activo en tu catálogo.")
+                continue
+
+            # Carga manual: sin catálogo de dónde sacarlos, estos datos son
+            # obligatorios. Peso y medidas siempre (sin eso no hay peso
+            # facturable ni cotización); descripción y valor sólo en
+            # internacional, que es donde los pide la aduana.
+            obligatorios = [("peso_kg", "el peso"), ("largo_cm", "el largo"),
+                            ("ancho_cm", "el ancho"), ("alto_cm", "el alto")]
+            if not es_nacional_prev:
+                obligatorios += [("descripcion_en", "la descripción en inglés"),
+                                 ("valor_unitario_usd", "el valor declarado en USD")]
+            faltan = [nombre for clave, nombre in obligatorios if not fila.get(clave)]
+            if faltan:
+                donde = f"la caja {i}" if len(filas) > 1 else "la caja"
+                raise ValueError(
+                    f"En {donde} te falta {', '.join(faltan)}. "
+                    "Completalos, o elegí un producto de tu catálogo y se cargan solos."
+                )
 
         courier_extra = {}
         es_nacional = destino_pais.strip().upper() == "AR"
@@ -1390,6 +1416,14 @@ def envio_nuevo_post(
             prod0 = get_producto(cliente, filas[0]["producto"])
             alias_display = prod0.alias_interno if prod0 else filas[0].get("producto") or "CARGA"
             total_cajas = filas[0]["cantidad"]
+            # `prod0` puede venir None (form viejo cacheado apuntando a un
+            # producto que ya no existe): la línea de abajo lo daba por hecho y
+            # tiraba AttributeError sobre None en vez de un error entendible.
+            if not prod0:
+                raise ValueError(
+                    f"El producto \"{filas[0].get('producto')}\" ya no está en tu catálogo. "
+                    "Recargá la página y volvé a armar el envío."
+                )
             dims0 = (prod0.largo_cm, prod0.ancho_cm, prod0.alto_cm)
             valor_declarado = round(prod0.valor_usd_default * total_cajas, 2)
         else:

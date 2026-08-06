@@ -15,9 +15,17 @@
     <div class="msg error">{{ error }}</div>
 {% endif %}
 
+{# El catálogo es OPCIONAL (Leandro, 06/08): acelera la carga y es lo que
+   usa la integración por API, pero desde el portal se puede declarar la caja
+   a mano. Antes este aviso venía con el submit DESHABILITADO, así que un
+   cliente nuevo no podía crear ni un envío hasta que Tauro le aprobara el
+   catálogo. Ahora es informativo. #}
 {% if not productos %}
-    <div class="msg warn">
-        No tenés productos aprobados todavía. <a href="/portal/catalogo">Cargalo en el catálogo →</a> — Tauro lo valida en el día y te avisamos por mail.
+    <div class="msg">
+        Todavía no tenés productos en el catálogo, pero podés seguir igual:
+        cargá el peso y las medidas de la caja a mano más abajo.
+        <a href="/portal/catalogo">Cargarlos en el catálogo →</a> te ahorra
+        tipearlos en cada envío y es lo que usa la integración con tu tienda.
     </div>
 {% endif %}
 
@@ -63,7 +71,8 @@
     <div style="color:var(--fg-2);font-size:13.5px;line-height:1.7;">
         Ya te cargamos los datos del comprador
         {% if pedido_tienda.destinatario %}(<b>{{ pedido_tienda.destinatario.nombre }}</b>, {{ pedido_tienda.destinatario.ciudad }}{% if pedido_tienda.destinatario.pais %} · {{ pedido_tienda.destinatario.pais }}{% endif %}){% endif %}.
-        <br><b>Sólo te falta:</b> elegir el producto del catálogo en el paso 3 y apretar <b>Crear solicitud</b>.
+        <br><b>Sólo te falta:</b> en el paso 3, elegir el producto del catálogo
+        —o cargar peso y medidas a mano— y apretar <b>Crear solicitud</b>.
         {% if pedido_tienda['items'] %}
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--fg-3);">
             Compró: {% for it in pedido_tienda['items'] %}{{ it.cantidad }}x {{ it.titulo }}{% if not loop.last %} · {% endif %}{% endfor %}
@@ -119,7 +128,7 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_nombre">Empresa / razón social</label>
-                    <input type="text" name="rem_nombre" id="rem_nombre" placeholder="Yiwu Hailu Garment" value="{{ form.rem_nombre or (remitente.nombre if remitente else '') }}">
+                    <input type="text" name="rem_nombre" id="rem_nombre" placeholder="Ej: Yiwu Hailu Garment" value="{{ form.rem_nombre or (remitente.nombre if remitente else '') }}">
                 </div>
                 <div class="form-group">
                     <label for="rem_contacto">Persona de contacto</label>
@@ -129,7 +138,7 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_documento">Tax ID / CUIT <span style="color:var(--fg-4);font-weight:400;">— exportador</span></label>
-                    <input type="text" name="rem_documento" id="rem_documento" placeholder="91330782MA2DCHET04" value="{{ form.rem_documento or (remitente.documento if remitente else '') }}">
+                    <input type="text" name="rem_documento" id="rem_documento" placeholder="Ej: 30-12345678-9" value="{{ form.rem_documento or (remitente.documento if remitente else '') }}">
                 </div>
                 <div class="form-group"></div>
             </div>
@@ -205,7 +214,7 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="dest_nombre">Empresa / razón social</label>
-                    <input type="text" name="dest_nombre" id="dest_nombre" required placeholder="COMERCIO EXCELENTE NORTE SUR" value="{{ form.dest_nombre or '' }}">
+                    <input type="text" name="dest_nombre" id="dest_nombre" required placeholder="Ej: Comercio Excelente Norte Sur" value="{{ form.dest_nombre or '' }}">
                 </div>
                 <div class="form-group">
                     <label for="dest_contacto">Persona de contacto</label>
@@ -215,7 +224,7 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="dest_documento">Tax ID / ID fiscal</label>
-                    <input type="text" name="dest_documento" id="dest_documento" placeholder="CEN040218L96" value="{{ form.dest_documento or '' }}">
+                    <input type="text" name="dest_documento" id="dest_documento" placeholder="Ej: CEN040218L96" value="{{ form.dest_documento or '' }}">
                 </div>
                 <div class="form-group"></div>
             </div>
@@ -309,19 +318,19 @@
                     <div class="bulto-fisico" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 44px; gap:10px;">
                         <div class="form-group">
                             <label>Peso caja (kg)</label>
-                            <input type="number" name="bulto_peso" class="bulto-peso" min="0.01" step="0.01" placeholder="3.9" value="{{ f.peso_kg or '' }}">
+                            <input type="number" name="bulto_peso" class="bulto-peso" min="0.01" step="0.01" placeholder="Ej: 3.9" value="{{ f.peso_kg or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Largo (cm)</label>
-                            <input type="number" name="bulto_largo" class="bulto-largo" min="1" step="0.1" placeholder="48" value="{{ f.largo_cm or '' }}">
+                            <input type="number" name="bulto_largo" class="bulto-largo" min="1" step="0.1" placeholder="Ej: 48" value="{{ f.largo_cm or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Ancho (cm)</label>
-                            <input type="number" name="bulto_ancho" class="bulto-ancho" min="1" step="0.1" placeholder="47" value="{{ f.ancho_cm or '' }}">
+                            <input type="number" name="bulto_ancho" class="bulto-ancho" min="1" step="0.1" placeholder="Ej: 47" value="{{ f.ancho_cm or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Alto (cm)</label>
-                            <input type="number" name="bulto_alto" class="bulto-alto" min="1" step="0.1" placeholder="20" value="{{ f.alto_cm or '' }}">
+                            <input type="number" name="bulto_alto" class="bulto-alto" min="1" step="0.1" placeholder="Ej: 20" value="{{ f.alto_cm or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Cajas iguales</label>
@@ -342,17 +351,17 @@
                             <label>Contenido / descripción invoice (EN)</label>
                             <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75"
                                    value="{{ f.descripcion_en or '' }}"
-                                   placeholder="8 SHIRTS 60% POLYESTER 40% COTTON WOVEN">
+                                   placeholder="Ej: 8 SHIRTS 60% POLYESTER 40% COTTON WOVEN">
                         </div>
                         <div class="form-group">
                             <label>Valor unit. USD</label>
                             <input type="number" name="bulto_valor_usd" class="bulto-valor"
-                                   min="0" step="0.01" value="{{ f.valor_unitario_usd or '' }}" placeholder="120">
+                                   min="0" step="0.01" value="{{ f.valor_unitario_usd or '' }}" placeholder="Ej: 120">
                         </div>
                         <div class="form-group">
                             <label>HS code</label>
                             <input type="text" name="bulto_hs" class="bulto-hs"
-                                   value="{{ f.hs_code or '' }}" placeholder="6205.30">
+                                   value="{{ f.hs_code or '' }}" placeholder="Ej: 6205.30">
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
@@ -434,7 +443,7 @@
         </div>
         <div class="submit-actions">
             <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
-            <button type="submit" class="btn btn-primary" {% if not productos or not remitente %}disabled{% endif %}>
+            <button type="submit" class="btn btn-primary" {% if not remitente %}disabled{% endif %}>
                 Crear solicitud
             </button>
         </div>
@@ -459,17 +468,52 @@
     if (el) el.value = value || "";
   }
 
+  // Avisito bajo el select: qué se cargó y que se puede editar. Sin esto no
+  // se distingue un campo traído de la libreta de uno tipeado a mano.
+  function avisoLibreta(select, texto) {
+    if (!select) return;
+    var id = select.id + "-aviso";
+    var el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = id;
+      el.style.cssText = "margin-top:7px;font-size:12.5px;color:var(--ok,#2ec27e);" +
+                         "display:flex;align-items:center;gap:6px;";
+      select.parentNode.appendChild(el);
+    }
+    el.textContent = texto || "";
+    el.style.display = texto ? "flex" : "none";
+  }
+
   if (savedSelect) {
     savedSelect.addEventListener("change", () => {
       const option = savedSelect.options[savedSelect.selectedIndex];
-      if (!option || !option.value) return;
+
+      // "Cargar destinatario nuevo": LIMPIA todo. Antes hacía `return` y
+      // dejaba los datos del destinatario anterior en pantalla, así que no
+      // había forma de arrancar de cero sin recargar la página.
+      if (!option || !option.value) {
+        Object.values(fieldMap).forEach((inputId) => setField(inputId, ""));
+        avisoLibreta(savedSelect, "");
+        refreshLivePrice();
+        return;
+      }
+
       Object.entries(fieldMap).forEach(([dataKey, inputId]) => setField(inputId, option.dataset[dataKey]));
       setField("destino_pais", option.dataset.pais);
       setField("dest_pais", option.dataset.pais);
+      avisoLibreta(savedSelect,
+                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
+                   "los cambios valen sólo para este envío.");
       // setear .value no dispara "change": recotizamos a mano para que
       // el precio en vivo refleje el nuevo destino al instante.
       refreshLivePrice();
     });
+    if (savedSelect.value) {
+      avisoLibreta(savedSelect,
+                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
+                   "los cambios valen sólo para este envío.");
+    }
   }
 
   const countrySelect = document.getElementById("destino_pais");
@@ -495,10 +539,24 @@
   if (remSelect) {
     remSelect.addEventListener("change", () => {
       const option = remSelect.options[remSelect.selectedIndex];
-      if (!option || !option.value) return;
+      // Igual que el destinatario: "Cargar remitente nuevo" limpia de verdad.
+      if (!option || !option.value) {
+        Object.values(remFieldMap).forEach((id) => setField(id, ""));
+        avisoLibreta(remSelect, "");
+        if (typeof refreshLivePrice === "function") refreshLivePrice();
+        return;
+      }
       Object.entries(remFieldMap).forEach(([k, id]) => setField(id, option.dataset[k]));
+      avisoLibreta(remSelect,
+                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
+                   "los cambios valen sólo para este envío.");
       if (typeof refreshLivePrice === "function") refreshLivePrice();
     });
+    if (remSelect.value) {
+      avisoLibreta(remSelect,
+                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
+                   "los cambios valen sólo para este envío.");
+    }
   }
   const remPais = document.getElementById("rem_pais");
   if (remPais) {

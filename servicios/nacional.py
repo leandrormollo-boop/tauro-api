@@ -58,35 +58,67 @@ def cotizar_nacional_cliente(
     for b in bultos:
         alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
         cantidad = max(int(b.get("cantidad") or 1), 1)
-        producto = get_producto(cliente_id, alias)
-        if not producto or not producto.activo:
+
+        # El catálogo es OPCIONAL (Leandro, 06/08). Con alias, los datos salen
+        # del producto aprobado y lo que venga en la fila los PISA (override de
+        # este envío). Sin alias, la caja se declara entera a mano.
+        producto = get_producto(cliente_id, alias) if alias else None
+        if alias and (not producto or not producto.activo):
             return {"encontrado": False, "motivo": f"producto_no_encontrado: {alias}"}
-        if producto.peso_kg > MAX_KG_POR_CAJA_NAC:
+
+        def _num(clave, del_producto, por_defecto=0.0):
+            """Lo cargado a mano manda; si no, el catálogo; si no, el default."""
+            crudo = b.get(clave)
+            if crudo not in (None, ""):
+                try:
+                    return float(crudo)
+                except (TypeError, ValueError):
+                    pass
+            return float(del_producto if del_producto is not None else por_defecto)
+
+        peso_kg = _num("peso_kg", producto.peso_kg if producto else None)
+        largo_cm = _num("largo_cm", producto.largo_cm if producto else None)
+        ancho_cm = _num("ancho_cm", producto.ancho_cm if producto else None)
+        alto_cm = _num("alto_cm", producto.alto_cm if producto else None)
+        valor_usd = _num("valor_unitario_usd",
+                         producto.valor_usd_default if producto else None)
+        descripcion = (str(b.get("descripcion_en") or "").strip()
+                       or (producto.nombre_invoice or producto.alias_interno if producto else "")
+                       or "Mercadería")
+
+        etiqueta = alias or descripcion
+        if peso_kg <= 0:
+            return {"encontrado": False, "motivo": f"sin_peso: {etiqueta}"}
+        if peso_kg > MAX_KG_POR_CAJA_NAC:
             return {"encontrado": False,
-                    "motivo": f"cada caja de {alias} pesa {producto.peso_kg}kg; máximo nacional {MAX_KG_POR_CAJA_NAC}kg"}
+                    "motivo": f"cada caja de {etiqueta} pesa {peso_kg}kg; máximo nacional {MAX_KG_POR_CAJA_NAC}kg"}
+
         total_cajas += cantidad
-        peso_total += producto.peso_kg * cantidad
-        valor_unitario_ars = round(producto.valor_usd_default * dolar, 2)
+        peso_total += peso_kg * cantidad
+        valor_unitario_ars = round(valor_usd * dolar, 2)
         valor_total_ars += valor_unitario_ars * cantidad
         piezas.append({
-            "descripcion": producto.nombre_invoice or producto.alias_interno,
+            "descripcion": descripcion,
             "cantidad": cantidad,
-            "largo_cm": producto.largo_cm,
-            "ancho_cm": producto.ancho_cm,
-            "alto_cm": producto.alto_cm,
-            "peso_kg": producto.peso_kg,
+            "largo_cm": largo_cm,
+            "ancho_cm": ancho_cm,
+            "alto_cm": alto_cm,
+            "peso_kg": peso_kg,
             "valor_declarado_ars": valor_unitario_ars,
         })
         detalle.append({
-            "producto_alias": producto.alias_interno,
+            # Sin catálogo no hay alias: se guarda la descripción para que el
+            # listado y el admin no muestren un renglón en blanco.
+            "producto_alias": producto.alias_interno if producto else descripcion[:40],
             "cantidad": cantidad,
-            "peso_kg": producto.peso_kg,
-            "largo_cm": producto.largo_cm,
-            "ancho_cm": producto.ancho_cm,
-            "alto_cm": producto.alto_cm,
-            "valor_unitario_usd": producto.valor_usd_default,
-            "hs_code": producto.hs_code,
-            "descripcion_en": producto.nombre_invoice,
+            "peso_kg": peso_kg,
+            "largo_cm": largo_cm,
+            "ancho_cm": ancho_cm,
+            "alto_cm": alto_cm,
+            "valor_unitario_usd": valor_usd,
+            "hs_code": (str(b.get("hs_code") or "").strip()
+                        or (producto.hs_code if producto else "")),
+            "descripcion_en": descripcion,
         })
 
     if total_cajas > MAX_CAJAS_POR_ENVIO_NAC:
