@@ -132,11 +132,11 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_nombre">Empresa / razón social</label>
-                    <input type="text" name="rem_nombre" id="rem_nombre" placeholder="Ej: Yiwu Hailu Garment" value="{{ form.rem_nombre or (remitente.nombre if remitente else '') }}">
+                    <input type="text" name="rem_nombre" id="rem_nombre" value="{{ form.rem_nombre or (remitente.nombre if remitente else '') }}">
                 </div>
                 <div class="form-group">
                     <label for="rem_contacto">Persona de contacto</label>
-                    <input type="text" name="rem_contacto" id="rem_contacto" placeholder="Quién entrega la carga" value="{{ form.rem_contacto or '' }}">
+                    <input type="text" name="rem_contacto" id="rem_contacto" value="{{ form.rem_contacto or '' }}">
                 </div>
             </div>
             {# Tax ID iba solo con una celda VACÍA al lado: una fila entera de
@@ -145,7 +145,7 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_documento">Tax ID / CUIT <span style="color:var(--fg-4);font-weight:400;">— exportador</span></label>
-                    <input type="text" name="rem_documento" id="rem_documento" placeholder="Ej: 30-12345678-9" value="{{ form.rem_documento or (remitente.documento if remitente else '') }}">
+                    <input type="text" name="rem_documento" id="rem_documento" value="{{ form.rem_documento or (remitente.documento if remitente else '') }}">
                 </div>
                 <div class="form-group">
                     <label for="rem_email">Email</label>
@@ -219,17 +219,17 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="dest_nombre">Empresa / razón social</label>
-                    <input type="text" name="dest_nombre" id="dest_nombre" required placeholder="Ej: Comercio Excelente Norte Sur" value="{{ form.dest_nombre or '' }}">
+                    <input type="text" name="dest_nombre" id="dest_nombre" required value="{{ form.dest_nombre or '' }}">
                 </div>
                 <div class="form-group">
                     <label for="dest_contacto">Persona de contacto</label>
-                    <input type="text" name="dest_contacto" id="dest_contacto" placeholder="Quién recibe" value="{{ form.dest_contacto or '' }}">
+                    <input type="text" name="dest_contacto" id="dest_contacto" value="{{ form.dest_contacto or '' }}">
                 </div>
             </div>
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="dest_documento">Tax ID / ID fiscal</label>
-                    <input type="text" name="dest_documento" id="dest_documento" placeholder="Ej: CEN040218L96" value="{{ form.dest_documento or '' }}">
+                    <input type="text" name="dest_documento" id="dest_documento" value="{{ form.dest_documento or '' }}">
                 </div>
                 {# Mismo arreglo que en Remitente: este Tax ID iba solo con una
                    celda vacía al lado, una fila de 70px para un campo. #}
@@ -286,7 +286,7 @@
             </label>
                 <div class="form-group compact-field">
                 <label for="dest_alias">Alias para guardar</label>
-                <input type="text" name="dest_alias" id="dest_alias" placeholder="Ej: Miami depósito / Cliente Pérez" value="{{ form.dest_alias or '' }}">
+                <input type="text" name="dest_alias" id="dest_alias" value="{{ form.dest_alias or '' }}">
             </div>
             </div>
         </div>
@@ -324,19 +324,19 @@
                     <div class="bulto-fisico" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 44px; gap:10px;">
                         <div class="form-group">
                             <label>Peso caja (kg)</label>
-                            <input type="number" name="bulto_peso" class="bulto-peso" min="0.01" step="0.01" placeholder="Ej: 3.9" value="{{ f.peso_kg or '' }}">
+                            <input type="number" name="bulto_peso" class="bulto-peso" min="0.01" step="0.01" value="{{ f.peso_kg or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Largo (cm)</label>
-                            <input type="number" name="bulto_largo" class="bulto-largo" min="1" step="0.1" placeholder="Ej: 48" value="{{ f.largo_cm or '' }}">
+                            <input type="number" name="bulto_largo" class="bulto-largo" min="1" step="0.1" value="{{ f.largo_cm or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Ancho (cm)</label>
-                            <input type="number" name="bulto_ancho" class="bulto-ancho" min="1" step="0.1" placeholder="Ej: 47" value="{{ f.ancho_cm or '' }}">
+                            <input type="number" name="bulto_ancho" class="bulto-ancho" min="1" step="0.1" value="{{ f.ancho_cm or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Alto (cm)</label>
-                            <input type="number" name="bulto_alto" class="bulto-alto" min="1" step="0.1" placeholder="Ej: 20" value="{{ f.alto_cm or '' }}">
+                            <input type="number" name="bulto_alto" class="bulto-alto" min="1" step="0.1" value="{{ f.alto_cm or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Cajas iguales</label>
@@ -356,18 +356,17 @@
                         <div class="form-group">
                             <label>Contenido / descripción invoice (EN)</label>
                             <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75"
-                                   value="{{ f.descripcion_en or '' }}"
-                                   placeholder="Ej: 8 SHIRTS 60% POLYESTER 40% COTTON WOVEN">
+                                   value="{{ f.descripcion_en or '' }}">
                         </div>
                         <div class="form-group">
                             <label>Valor unit. USD</label>
                             <input type="number" name="bulto_valor_usd" class="bulto-valor"
-                                   min="0" step="0.01" value="{{ f.valor_unitario_usd or '' }}" placeholder="Ej: 120">
+                                   min="0" step="0.01" value="{{ f.valor_unitario_usd or '' }}">
                         </div>
                         <div class="form-group">
                             <label>HS code</label>
                             <input type="text" name="bulto_hs" class="bulto-hs"
-                                   value="{{ f.hs_code or '' }}" placeholder="Ej: 6205.30">
+                                   value="{{ f.hs_code or '' }}">
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
@@ -389,8 +388,8 @@
 
             <div class="form-grid-2">
                 <div class="form-group">
-                    <label for="precio_cliente_final_ars">Precio final a tu cliente ARS</label>
-                    <input type="text" name="precio_cliente_final_ars" id="precio_cliente_final_ars" inputmode="decimal" placeholder="Opcional" value="{{ form.precio_cliente_final_ars or '' }}">
+                    <label for="precio_cliente_final_ars">Precio final a tu cliente ARS <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label>
+                    <input type="text" name="precio_cliente_final_ars" id="precio_cliente_final_ars" inputmode="decimal" value="{{ form.precio_cliente_final_ars or '' }}">
                 </div>
             </div>
 

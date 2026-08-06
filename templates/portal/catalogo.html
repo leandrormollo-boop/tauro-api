@@ -128,19 +128,18 @@
                      peso real y se cobra de menos. Antes decía "cómo lo llamás
                      vos" con ejemplo "Mini bag", así que nadie ponía el SKU. -->
                 <label for="cat-alias">SKU — igual al de tu tienda</label>
-                <input type="text" name="alias_interno" id="cat-alias" required placeholder="MB-001">
+                <input type="text" name="alias_interno" id="cat-alias" required>
                 <small class="hint">Tiene que ser <strong>idéntico</strong> al SKU del producto
                 en Shopify o Tiendanube. Es lo que nos permite cotizar el envío con las medidas
                 reales; si no coincide, cobramos de menos.</small>
             </div>
             <div class="form-group">
                 <label for="cat-invoice">Descripción para invoice (inglés)</label>
-                <input type="text" name="nombre_invoice" id="cat-invoice" required placeholder="Leather handbag 100%">
+                <input type="text" name="nombre_invoice" id="cat-invoice" required>
             </div>
             <div class="form-group">
                 <label for="cat-hs">Código de aduana (HS code)</label>
-                <input type="text" name="hs_code" id="cat-hs" required pattern="\d{4}\.\d{2}\.\d{2}"
-                       placeholder="4202.21.00" inputmode="numeric"
+                <input type="text" name="hs_code" id="cat-hs" required pattern="\d{4}\.\d{2}\.\d{2}" inputmode="numeric"
                        title="Formato: 4 dígitos, punto, 2 dígitos, punto, 2 dígitos — ej: 4202.21.00">
                 {# El muro clásico del onboarding: campo obligatorio de jerga
                    aduanera. Mejor que nos pregunte a que invente un código
@@ -156,32 +155,32 @@
         <div class="form-grid-3">
             <div class="form-group">
                 <label for="cat-largo">Largo (cm)</label>
-                <input type="number" name="largo_cm" id="cat-largo" step="0.5" min="0" required placeholder="30">
+                <input type="number" name="largo_cm" id="cat-largo" step="0.5" min="0" required>
             </div>
             <div class="form-group">
                 <label for="cat-ancho">Ancho (cm)</label>
-                <input type="number" name="ancho_cm" id="cat-ancho" step="0.5" min="0" required placeholder="20">
+                <input type="number" name="ancho_cm" id="cat-ancho" step="0.5" min="0" required>
             </div>
             <div class="form-group">
                 <label for="cat-alto">Alto (cm)</label>
-                <input type="number" name="alto_cm" id="cat-alto" step="0.5" min="0" required placeholder="10">
+                <input type="number" name="alto_cm" id="cat-alto" step="0.5" min="0" required>
             </div>
         </div>
 
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="cat-peso">Peso (kg)</label>
-                <input type="number" name="peso_kg" id="cat-peso" step="0.1" min="0" required placeholder="2">
+                <input type="number" name="peso_kg" id="cat-peso" step="0.1" min="0" required>
             </div>
             <div class="form-group">
                 <label for="cat-valor">Valor declarado (USD)</label>
-                <input type="number" name="valor_usd_default" id="cat-valor" step="1" min="0" required placeholder="120">
+                <input type="number" name="valor_usd_default" id="cat-valor" step="1" min="0" required>
             </div>
         </div>
 
         <div class="form-group">
             <label for="cat-tax">Impuestos de destino estimados (USD) <span style="color:var(--fg-3);font-weight:400;">— opcional</span></label>
-            <input type="number" name="tax_estimado_usd" id="cat-tax" step="0.01" min="0" placeholder="0">
+            <input type="number" name="tax_estimado_usd" id="cat-tax" step="0.01" min="0">
             <small style="color:var(--fg-3);font-size:12px;">
                 Lo que aproximadamente paga este producto de impuestos al entrar al país de destino.
                 Se usa sólo si activás "mostrar impuestos" en
