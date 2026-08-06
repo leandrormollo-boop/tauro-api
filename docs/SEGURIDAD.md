@@ -32,7 +32,14 @@ base-uri 'self'; form-action 'self'; frame-src 'none'
 - **Estilos: `'unsafe-inline'` a propósito.** Los templates tienen ~280
   atributos `style=` y React inyecta `<style>` en runtime. Inyectar CSS no
   ejecuta código; el vector que importa es el script y ese está cerrado.
-- **Google Fonts** es el único tercero permitido (hoja + woff2).
+- **Google Fonts** es el único tercero permanente (hoja + woff2). Si existe un
+  `META_PIXEL_ID` numérico válido, sólo `/web` suma
+  `https://connect.facebook.net` para el script y las conexiones, y
+  `https://www.facebook.com` para el `PageView`. Sin ID, esos orígenes no
+  aparecen en la CSP y no se carga ningún recurso de Meta.
+- **Meta Pixel es opt-in.** Sólo emite `PageView` en la home pública. No usa
+  advanced matching, desactiva `autoConfig`, no lee formularios y no corre en
+  portal, admin, checkout ni integraciones.
 - **NO se aplica a `/shopify/*`** (su propio `frame-ancestors` dinámico por
   tienda) ni a `/docs|/redoc|/openapi.json`. El `setdefault` respeta headers
   ya puestos por el endpoint.

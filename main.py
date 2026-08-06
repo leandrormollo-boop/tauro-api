@@ -23,6 +23,13 @@ from servicios.api_b2b import (
     obtener_datos_producto,
 )
 from servicios.solicitudes_guia import crear_solicitud_guia
+from servicios.meta_ads import (
+    construir_content_security_policy,
+    inyectar_meta_pixel,
+    javascript_meta_pixel,
+    meta_pixel_habilitado,
+    obtener_meta_pixel_id,
+)
 
 load_dotenv()
 
@@ -117,7 +124,9 @@ async def headers_de_seguridad(request: Request, call_next):
     - ESTILOS: pragmático. Los templates tienen ~280 atributos style= y
       React inyecta <style> en runtime → 'unsafe-inline'. Inyectar CSS no
       ejecuta código; el riesgo que importa es el script, y ése está cerrado.
-    - Google Fonts es el ÚNICO tercero permitido (hoja CSS + woff2).
+    - Google Fonts es el ÚNICO tercero permanente (hoja CSS + woff2). En
+      `/web`, y sólo si existe un `META_PIXEL_ID` válido, se habilitan los dos
+      orígenes exactos que necesita el Pixel de Meta.
 
     X-Frame-Options y esta CSP NO tocan /shopify/*: esas páginas viven en un
     iframe del admin de Shopify y mandan su propio `frame-ancestors` dinámico
@@ -179,11 +188,10 @@ async def headers_de_seguridad(request: Request, call_next):
     if not path.startswith("/shopify") and not path.startswith(("/docs", "/redoc", "/openapi.json")):
         response.headers.setdefault(
             "Content-Security-Policy",
-            f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
-            "base-uri 'self'; form-action 'self'; frame-src 'none'"
+            construir_content_security_policy(
+                nonce,
+                pixel_habilitado=meta_pixel_habilitado(path),
+            ),
         )
 
     # HSTS: Railway ya sirve por HTTPS; esto impide el downgrade a HTTP.
@@ -238,6 +246,7 @@ app.include_router(integraciones_router)
 app.include_router(shopify_router)
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
+_WEB_HTML_PATH = os.path.join(WEB_DIR, "Tauro Solutions.html")
 
 
 @app.middleware("http")
@@ -258,7 +267,27 @@ async def revalidar_assets_web(request: Request, call_next):
 
 @app.get("/web", include_in_schema=False)
 def servir_web():
-    return FileResponse(os.path.join(WEB_DIR, "Tauro Solutions.html"))
+    pixel_id = obtener_meta_pixel_id()
+    if not pixel_id:
+        # Camino default: mismo FileResponse estático, sin loader ni llamadas
+        # a Meta y conservando ETag/Last-Modified.
+        return FileResponse(_WEB_HTML_PATH)
+
+    with open(_WEB_HTML_PATH, encoding="utf-8") as archivo:
+        html = inyectar_meta_pixel(archivo.read(), pixel_id)
+    return HTMLResponse(html)
+
+
+@app.get("/meta-pixel.js", include_in_schema=False)
+def servir_meta_pixel():
+    pixel_id = obtener_meta_pixel_id()
+    if not pixel_id:
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+    return Response(
+        content=javascript_meta_pixel(pixel_id),
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
 
 # Los .jsx ya NO se sirven: la web carga el JS compilado desde /static/js/web
 # (ver scripts/build_web.sh). Los fuentes quedan en web/components/ como
