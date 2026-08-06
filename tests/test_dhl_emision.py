@@ -65,6 +65,49 @@ def test_emite_y_devuelve_tracking_y_label():
     assert r["label_pdf"] and r["label_pdf"].startswith(b"%PDF")
 
 
+def test_las_direcciones_llegan_completas_a_dhl():
+    """
+    Regresión de la guía #4 (06/08): el despachador arma las direcciones con
+    el contrato en CASTELLANO ({ciudad, zip, pais} — ver el docstring de
+    FedExClient.create_shipment) y `_direccion` leía sólo inglés ({city,
+    postal_code, country}). Resultado: cityName y countryCode viajaban VACÍOS
+    y DHL rechazaba con "expected minLength 1, actual 0".
+
+    Este fixture siempre usó castellano, pero nadie miraba qué llegaba en el
+    payload: el test pasaba con las direcciones vacías. Nunca más.
+    """
+    cap, _ = _emitir_capturando()
+    ship = cap["body"]["customerDetails"]["shipperDetails"]["postalAddress"]
+    recv = cap["body"]["customerDetails"]["receiverDetails"]["postalAddress"]
+
+    assert ship["cityName"] == "CABA"
+    assert ship["countryCode"] == "AR"
+    assert ship["postalCode"] == "1416"
+    assert recv["cityName"] == "Seattle"
+    assert recv["countryCode"] == "US"
+    assert recv["postalCode"] == "98136"
+
+    # minLength 1 / pattern .*\S+.* del schema: nada puede ir vacío o espacios.
+    for bloque in (ship, recv):
+        for clave in ("cityName", "countryCode"):
+            assert bloque[clave].strip(), f"{clave} viajó vacío"
+
+
+def test_el_camino_ingles_de_cotizacion_sigue_andando():
+    """La cotización pasa {city, postal_code, country}: no romperla al biling."""
+    envio = {
+        **ENVIO,
+        "shipper": {"nombre": "X", "telefono": "1", "calle": "Calle 1",
+                    "city": "CABA", "postal_code": "1414", "country": "AR"},
+        "recipient": {"nombre": "Y", "telefono": "2", "calle": "5th Av 1",
+                      "city": "New York", "postal_code": "10001", "country": "US"},
+    }
+    cap, r = _emitir_capturando(envio)
+    assert r["encontrado"]
+    ship = cap["body"]["customerDetails"]["shipperDetails"]["postalAddress"]
+    assert ship["cityName"] == "CABA" and ship["countryCode"] == "AR"
+
+
 def test_una_pieza_por_unidad():
     """2 unidades = 2 piezas: cada caja viaja con su etiqueta."""
     cap, _ = _emitir_capturando()

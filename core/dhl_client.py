@@ -176,15 +176,24 @@ class DHLClient(CarrierBase):
         vacío —como hacía el camino del GET con destino.get("city", "")— es
         un rechazo garantizado. Y los objetos van con additionalProperties
         false, así que sólo pueden ir estas claves.
+
+        Acepta las claves EN LOS DOS IDIOMAS, y no es gusto: el contrato de
+        create_shipment está documentado en castellano ({ciudad, zip, pais},
+        ver FedExClient.create_shipment) y así arma el despachador de
+        emisión, mientras que el camino de cotización pasa {city,
+        postal_code, country}. Esta función leía SOLO inglés, así que toda
+        emisión llegaba a DHL con ciudad y país vacíos — el rechazo
+        "cityName: expected minLength 1, actual 0" de la guía #4 (06/08).
         """
-        ciudad = (d.get("city") or por_defecto_ciudad or "").strip()
+        ciudad = (d.get("ciudad") or d.get("city") or por_defecto_ciudad or "").strip()
         bloque = {
-            "postalCode": (d.get("postal_code") or "").strip(),
+            "postalCode": str(d.get("zip") or d.get("postal_code") or "").strip(),
             "cityName": ciudad,
-            "countryCode": (d.get("country") or "").strip().upper(),
+            "countryCode": str(d.get("pais") or d.get("country") or "").strip().upper(),
         }
-        if d.get("state"):
-            bloque["provinceCode"] = str(d["state"]).strip()
+        estado = d.get("estado") or d.get("state")
+        if estado:
+            bloque["provinceCode"] = str(estado).strip()
         return bloque
 
     def get_rates_multibulto(self, origen: dict, destino: dict, paquetes: list) -> dict:
