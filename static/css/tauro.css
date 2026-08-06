@@ -2038,3 +2038,21 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
    y no es un problema — con el stepper y la botonera ancladas nunca se pierde
    el contexto. Lo que sí se evita es el salto brusco al cambiar de paso. */
 .wizard-compacto .form-section { scroll-margin-top: 90px; }
+
+/* Últimos ajustes de alto, medidos en producción (779 / 879 / 1096 contra 776
+   de viewport). El atajo de pegar pedido es lo único de arriba que todavía
+   pesa sin ser parte del formulario. */
+.wizard-compacto details.card { margin-bottom: 8px; padding: 6px 14px !important; }
+.wizard-compacto details.card summary { font-size: 12px; }
+
+/* "Guardar este destinatario" y su alias eran dos filas seguidas para algo
+   opcional: el alias sólo tiene sentido si se tildó guardar. */
+.wizard-compacto .guardar-dest { display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap; }
+.wizard-compacto .guardar-dest > label.check-inline { margin-bottom: 10px; white-space: nowrap; }
+.wizard-compacto .guardar-dest > .form-group { flex: 1; min-width: 220px; margin-bottom: 0; }
+
+/* El paso 3 crece con cada caja del multi-bulto: no hay forma de que "entre"
+   siempre, y forzarlo escondería campos obligatorios de aduana. Ahí el scroll
+   es corto y nunca se pierde el contexto porque el stepper queda arriba y la
+   botonera abajo. Lo que sí se evita es que la última caja quede tapada. */
+.wizard-compacto #bultos-list { scroll-padding-bottom: 80px; }

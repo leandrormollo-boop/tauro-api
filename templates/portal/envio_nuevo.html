@@ -279,14 +279,15 @@
                 </div>
             </div>
 
+            <div class="guardar-dest">
             <label class="check-row">
                 <input type="checkbox" name="guardar_destinatario" value="1" {% if form.guardar_destinatario %}checked{% endif %}>
                 <span>Guardar este destinatario para próximos envíos</span>
             </label>
-
-            <div class="form-group compact-field">
+                <div class="form-group compact-field">
                 <label for="dest_alias">Alias para guardar</label>
                 <input type="text" name="dest_alias" id="dest_alias" placeholder="Ej: Miami depósito / Cliente Pérez" value="{{ form.dest_alias or '' }}">
+            </div>
             </div>
         </div>
 
