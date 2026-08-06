@@ -89,6 +89,7 @@ def _pricing_configurado() -> dict:
                     "SELECT parametro, valor FROM config "
                     "WHERE parametro LIKE 'WEB_MARKUP_PCT%%' "
                     "   OR parametro LIKE 'WEB_MARGEN_FIJO_%%' "
+                    "   OR parametro LIKE 'WEB_ADICIONAL_%%' "
                     "   OR parametro = 'WEB_DESC_FEDEX_PCT'"
                 )
                 filas = cur.fetchall()
@@ -161,15 +162,44 @@ def _margen_fijo_de(carrier_id: str, config: dict = None) -> float:
 def _desc_fedex(config: dict) -> float:
     """
     Descuento de FedEx: primero la tabla config (editable desde el admin),
-    después la variable de entorno, después el 88 que definió Leandro.
+    después la variable de entorno, después el 90 que definió Leandro (06/08).
     """
     if "WEB_DESC_FEDEX_PCT" in config:
         return config["WEB_DESC_FEDEX_PCT"]
     try:
-        return float(os.getenv("WEB_DESC_FEDEX_PCT", "88"))
+        return float(os.getenv("WEB_DESC_FEDEX_PCT", "90"))
     except ValueError:
-        print("[carriers] WEB_DESC_FEDEX_PCT no es un número; uso 88")
-        return 88.0
+        print("[carriers] WEB_DESC_FEDEX_PCT no es un número; uso 90")
+        return 90.0
+
+
+def _adicional_de(carrier_id: str, config: dict = None) -> float:
+    """
+    Monto FIJO en ARS que se suma DESPUÉS del descuento, sólo en la web.
+
+    Regla de Leandro (06/08/2026) para FedEx: "aplicarle un 90% de descuento y
+    sumarle un markup de $10.000". O sea el precio de vidriera es
+    `lista − 90% + $10.000`, no `lista − 90%` a secas.
+
+    Es distinto de WEB_MARGEN_FIJO_<CARRIER>_ARS: aquél REEMPLAZA el cálculo
+    (precio = costo + monto, caso DHL) y éste se APILA sobre el precio ya
+    descontado. Los dos no se pisan porque la ganancia fija corta antes.
+
+    Se edita en /admin/config o por env var como WEB_ADICIONAL_FEDEX_ARS.
+    0 / ausente = no se suma nada.
+    """
+    config = config or {}
+    clave = f"WEB_ADICIONAL_{carrier_id.upper()}_ARS"
+    if clave in config:
+        return config[clave]
+    crudo = os.getenv(clave)
+    if crudo is not None:
+        try:
+            return float(crudo)
+        except ValueError:
+            print(f"[carriers] {clave}={crudo!r} no es un número; se ignora")
+    # Default sólo para FedEx: es el único que va con el modelo de descuento.
+    return 10000.0 if carrier_id.lower() == "fedex" else 0.0
 
 
 def courier_default_cliente(cliente_id: str) -> str:
@@ -206,14 +236,16 @@ def carriers_activos() -> list:
 
 
 def _precios(resultado: dict, dolar: float, markup_pct: float,
-             descuento_pct: float = 0.0, margen_fijo_ars: float = 0.0) -> dict:
+             descuento_pct: float = 0.0, margen_fijo_ars: float = 0.0,
+             adicional_ars: float = 0.0) -> dict:
     """
     Convierte el costo crudo del carrier a precio final (ARS + USD).
 
     Prioridad:
       1. margen_fijo_ars > 0  → precio = COSTO + ese monto (ganancia fija en
          ARS, ej. DHL +$135.000). La ganancia por envío es esa plata exacta.
-      2. descuento_pct > 0    → tarifa de lista con descuento (caso FedEx).
+      2. descuento_pct > 0    → tarifa de lista con descuento MÁS
+         `adicional_ars` (caso FedEx: lista − 90% + $10.000).
       3. si no                → tarifa × (1 + markup web).
     """
     # `costo` es lo que el carrier nos cobra a NOSOTROS (tarifa ACCOUNT en
@@ -237,7 +269,10 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
         lista_usd = round(lista_ars / dolar, 2)
 
     if descuento_pct > 0:
-        precio_ars = round(lista_ars * (1 - descuento_pct / 100))
+        # Regla de Leandro (06/08): "aplicarle un 90% de descuento y sumarle un
+        # markup de $10.000". El adicional va DESPUÉS del descuento y ANTES del
+        # piso, así el piso ve el precio que el cliente realmente va a pagar.
+        precio_ars = round(lista_ars * (1 - descuento_pct / 100)) + round(adicional_ars)
 
         # ── PISO DE SEGURIDAD ──────────────────────────────────────────
         # OJO con lo que representa `resultado["costo"]`: para FedEx es la
@@ -416,13 +451,18 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         # si está seteada, manda sobre el markup % y sobre el descuento.
         margen_fijo = _margen_fijo_de(c["id"], pricing)
 
+        # Monto fijo que se SUMA al precio ya descontado (FedEx +$10.000,
+        # decisión de Leandro 06/08). Sólo aplica en la rama del descuento.
+        adicional = _adicional_de(c["id"], pricing) if descuento > 0 else 0.0
+
         salida.append({
             **base,
             "estado": "cotizado",
             "servicio": servicio,
             "dias_estimados": crudo["dias_estimados"],
             **_precios(resultado, dolar, markup_carrier,
-                       descuento_pct=descuento, margen_fijo_ars=margen_fijo),
+                       descuento_pct=descuento, margen_fijo_ars=margen_fijo,
+                       adicional_ars=adicional),
         })
 
     return salida

@@ -83,10 +83,11 @@ def test_el_descuento_de_fedex_tambien_se_edita_desde_el_admin():
     Si el margen de FedEx viviera en el admin y su descuento en Railway, la
     pantalla mostraría una perilla que no hace nada.
     """
-    with mock.patch.dict(os.environ, {"WEB_DESC_FEDEX_PCT": "90"}, clear=True):
+    with mock.patch.dict(os.environ, {"WEB_DESC_FEDEX_PCT": "85"}, clear=True):
         assert _desc_fedex({"WEB_DESC_FEDEX_PCT": 88.0}) == 88.0
+    # Default del código: 90 desde el 06/08/2026 (antes 88).
     with mock.patch.dict(os.environ, {}, clear=True):
-        assert _desc_fedex({}) == 88.0
+        assert _desc_fedex({}) == 90.0
 
 
 # ── Las dos capas de precio: web vs portal ───────────────────
