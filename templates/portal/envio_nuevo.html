@@ -712,7 +712,6 @@
   }
 
   function mostrarSeleccion() {
-    var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
     var fuera = intlNoDisp.length
       ? "<span style='font-size:11px;color:var(--fg-4);display:block;margin-top:4px;'>" +
           intlNoDisp.map(function (n) { return n.nombre; }).join(" · ") +
@@ -737,11 +736,15 @@
     var t = "USD " + op.precio_usd;
     if (op.servicio) t += " · " + op.servicio;
     if (op.dias) t += " · " + op.dias + " días";
+    // El importe es lo más grande de la pantalla y va en violeta metálico
+    // (.t-metal, el mismo barrido de la web pública). Antes era un <strong>
+    // de 19px que se perdía al lado de los botones.
     liveBox.innerHTML =
-      "<strong style='font-size:19px;'>" +
-      "<span style='color:var(--accent-soft);" + monoStyle + "'>" + fmtARS(op.precio_ars) + "</span>" +
-      " <span style='font-size:11px;color:var(--fg-3)'>ARS · " + op.nombre + "</span></strong>" +
-      "<span>" + t + "</span>" + fuera;
+      "<div class='precio-vivo'>" +
+        "<span class='monto t-metal'>" + fmtARS(op.precio_ars) + "</span>" +
+        "<span class='moneda'>ARS · " + op.nombre + "</span>" +
+      "</div>" +
+      "<span class='precio-detalle'>" + t + "</span>" + fuera;
   }
 
   document.querySelectorAll("#courier-btns [data-courier]").forEach(function (btn) {
@@ -773,15 +776,16 @@
   function renderNacional(data) {
     nacOpciones = data.opciones || [];
     if (!nacOpciones.length) { renderLivePrice("err", { motivo: "sin_cobertura" }); return; }
-    var monoStyle = "font-family:var(--font-mono);font-variant-numeric:tabular-nums;";
     var sel = "<select id='nac-opcion' style='margin-top:6px;font-size:12.5px;padding:7px 28px 7px 10px;'>" +
       nacOpciones.map(function (o, i) {
         return "<option value='" + i + "'>" + o.nombre + " — " + fmtARS(o.precio_ars) + "</option>";
       }).join("") + "</select>";
     liveBox.innerHTML =
-      "<strong style='font-size:19px;'><span id='nac-precio' style='color:var(--accent-soft);" + monoStyle + "'>" +
-      fmtARS(nacOpciones[0].precio_ars) + "</span> <span style='font-size:11px;color:var(--fg-3)'>ARS</span>" +
-      " <span id='nac-dias' style='font-size:11px;color:var(--fg-3)'>" + (nacOpciones[0].dias || "") + "</span></strong>" + sel;
+      "<div class='precio-vivo'>" +
+        "<span id='nac-precio' class='monto t-metal'>" + fmtARS(nacOpciones[0].precio_ars) + "</span>" +
+        "<span class='moneda'>ARS</span>" +
+      "</div>" +
+      "<span class='precio-detalle' id='nac-dias'>" + (nacOpciones[0].dias || "") + "</span>" + sel;
     aplicarNacSel(0);
     document.getElementById("nac-opcion").addEventListener("change", function () {
       aplicarNacSel(parseInt(this.value, 10) || 0);

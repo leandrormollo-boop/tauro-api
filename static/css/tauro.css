@@ -2056,3 +2056,50 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
    es corto y nunca se pierde el contexto porque el stepper queda arriba y la
    botonera abajo. Lo que sí se evita es que la última caja quede tapada. */
 .wizard-compacto #bultos-list { scroll-padding-bottom: 80px; }
+
+/* ── PRECIO COTIZADO EN GRANDE (Leandro, 06/08) ────────────────────────────
+   "El precio cotizado debe figurar en grande acá: tiene que estar bien visible
+   el importe. Podemos respetar los números que habíamos elegido para nuestra
+   web: violeta metálico brillante."
+   Antes el importe vivía chiquito adentro del botón del courier ($ 145.858 en
+   11px) y en un <strong> de 19px de la barra. Ahora es lo más grande de la
+   pantalla, con el mismo barrido metálico de la web pública (.t-metal). */
+.submit-bar .precio-vivo {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+  line-height: 1.05;
+}
+.submit-bar .precio-vivo .monto {
+  font-size: clamp(28px, 3.2vw, 38px);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.submit-bar .precio-vivo .moneda {
+  font-size: 12px;
+  color: var(--fg-3);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+/* Gana sobre `.submit-bar span { display:block; font-size:12px }`. */
+.submit-bar .precio-detalle {
+  display: block;
+  margin-top: 5px;
+  font-size: 12.5px;
+  color: var(--fg-3);
+}
+.submit-bar .precio-vivo + .precio-detalle { color: var(--fg-2); }
+
+/* La barra crece un poco para que el número respire. */
+.wizard-compacto .submit-bar { padding: 15px 20px; }
+
+/* El importe dentro del botón del courier deja de competir con el grande:
+   queda como referencia para comparar, no como EL precio. */
+.courier-precio { opacity: .75; }
+
+@media (prefers-reduced-motion: reduce) {
+  .submit-bar .precio-vivo .monto { animation: none; }
+}
