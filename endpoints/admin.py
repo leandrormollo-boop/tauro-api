@@ -1980,6 +1980,31 @@ def admin_ruta_toggle(
     return RedirectResponse(url="/admin/rutas", status_code=303)
 
 
+# ── Referencia de mercado (Boxfly) ───────────────────────────
+
+@router.get("/referencia", response_class=HTMLResponse)
+def admin_referencia(request: Request, admin_token: Optional[str] = Cookie(None)):
+    """
+    Lo que Boxfly (revendedor FedEx) le cobró a TAURO, en escalones reales.
+    SÓLO admin: es inteligencia competitiva, jamás va al portal del cliente.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.cotizador import dolar_ars
+    from servicios.referencia_mercado import calibracion, resumen
+    try:
+        dolar = dolar_ars()
+    except Exception:
+        dolar = None
+    return templates.TemplateResponse(
+        request=request, name="admin/referencia.html",
+        context={"seccion": "referencia",
+                 "filas": resumen(dolar=dolar),
+                 "calibracion": calibracion(),
+                 "dolar": dolar},
+    )
+
+
 # ── Config ───────────────────────────────────────────────────
 
 @router.get("/config", response_class=HTMLResponse)

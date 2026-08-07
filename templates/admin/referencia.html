@@ -1,0 +1,58 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Referencia de mercado{% endblock %}
+{% block content %}
+<div class="page-title">
+    <div class="eyebrow">Inteligencia competitiva</div>
+    <h1>Lo que Boxfly nos cobró</h1>
+    <p>420 envíos reales del portal de Boxfly (extraído 07/08/2026). Es el precio de
+       mercado DEMOSTRADO de un revendedor de FedEx — la vara contra la que calibrar
+       nuestros precios de venta{% if dolar %} · dólar {{ "%.0f"|format(dolar) }}{% endif %}.</p>
+</div>
+
+<div class="msg warn" style="margin-bottom:16px;">
+    Sólo visible en el admin. Los escalones son los brackets de peso de Boxfly:
+    los dos calibrados (Perú) son de 0,5 kg reales; los de EE.UU. todavía no están
+    mapeados a kg — abrir el detalle de un envío por banda en el portal de Boxfly
+    para terminar de calibrarlos.
+</div>
+
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>País</th><th>Escalón</th><th>Rango ARS</th>
+                    <th>Mediana</th>{% if dolar %}<th>≈ USD</th>{% endif %}
+                    <th>Envíos</th></tr>
+            </thead>
+            <tbody>
+            {% for f in filas %}
+                <tr>
+                    <td>{% if loop.first or filas[loop.index0-1].pais != f.pais %}
+                        <b>{{ f.pais }}</b> <small style="color:var(--fg-3)">({{ f.total_pais }})</small>
+                        {% endif %}</td>
+                    <td class="mono">{{ f.escalon }}</td>
+                    <td class="mono">$ {{ "{:,.0f}".format(f.desde).replace(",", ".") }} – {{ "{:,.0f}".format(f.hasta).replace(",", ".") }}</td>
+                    <td class="mono"><b>$ {{ "{:,.0f}".format(f.mediana).replace(",", ".") }}</b></td>
+                    {% if dolar %}<td class="mono">{{ f.mediana_usd }}</td>{% endif %}
+                    <td class="mono">{{ f.envios }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+    <h3 style="margin-top:0;">Puntos calibrados</h3>
+    <ul style="margin:0;padding-left:20px;line-height:2;">
+    {% for c in calibracion %}
+        {% if c.ref %}
+        <li><b>{{ c.ref }}</b> · {{ c.pais }} · {{ c.peso_kg }} kg ({{ c.dims }} cm)
+            → $ {{ "{:,.0f}".format(c.ars).replace(",", ".") }}</li>
+        {% else %}
+        <li style="color:var(--fg-3)">{{ c.nota }}</li>
+        {% endif %}
+    {% endfor %}
+    </ul>
+</div>
+{% endblock %}

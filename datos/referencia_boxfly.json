@@ -1,0 +1,2324 @@
+{
+ "fuente": "Historial real del portal Boxfly de TAURO (420 envíos, extraído 07/08/2026)",
+ "calibracion": [
+  {
+   "ref": "EN45881",
+   "pais": "Perú",
+   "peso_kg": 0.5,
+   "dims": "40×30×10",
+   "ars": 41105
+  },
+  {
+   "ref": "EN46332",
+   "pais": "Perú",
+   "peso_kg": 0.5,
+   "dims": "40×30×5",
+   "ars": 42639
+  },
+  {
+   "nota": "Boxfly cobró por peso REAL en ambos (vol 2.4 y 1.2 kg, mismo precio ≈0.5kg). Los escalones de EE.UU. NO están calibrados a peso todavía."
+  }
+ ],
+ "escalones_ars": {
+  "Estados Unidos": [
+   {
+    "desde": 40298,
+    "hasta": 44845,
+    "mediana": 42990,
+    "envios": 13
+   },
+   {
+    "desde": 63080,
+    "hasta": 72347,
+    "mediana": 69108,
+    "envios": 224
+   },
+   {
+    "desde": 85935,
+    "hasta": 97842,
+    "mediana": 92914,
+    "envios": 77
+   },
+   {
+    "desde": 116935,
+    "hasta": 161374,
+    "mediana": 129384,
+    "envios": 22
+   },
+   {
+    "desde": 185464,
+    "hasta": 209306,
+    "mediana": 205710,
+    "envios": 5
+   },
+   {
+    "desde": 238416,
+    "hasta": 238416,
+    "mediana": 238416,
+    "envios": 1
+   },
+   {
+    "desde": 274949,
+    "hasta": 274949,
+    "mediana": 274949,
+    "envios": 1
+   },
+   {
+    "desde": 365645,
+    "hasta": 374203,
+    "mediana": 374203,
+    "envios": 2
+   }
+  ],
+  "Canadá": [
+   {
+    "desde": 40709,
+    "hasta": 40709,
+    "mediana": 40709,
+    "envios": 2
+   },
+   {
+    "desde": 62034,
+    "hasta": 70134,
+    "mediana": 67771,
+    "envios": 17
+   },
+   {
+    "desde": 88565,
+    "hasta": 95363,
+    "mediana": 91323,
+    "envios": 6
+   },
+   {
+    "desde": 124609,
+    "hasta": 127208,
+    "mediana": 127208,
+    "envios": 2
+   },
+   {
+    "desde": 159176,
+    "hasta": 159176,
+    "mediana": 159176,
+    "envios": 1
+   },
+   {
+    "desde": 233108,
+    "hasta": 233108,
+    "mediana": 233108,
+    "envios": 1
+   },
+   {
+    "desde": 279738,
+    "hasta": 279738,
+    "mediana": 279738,
+    "envios": 1
+   }
+  ],
+  "Italia": [
+   {
+    "desde": 165780,
+    "hasta": 165780,
+    "mediana": 165780,
+    "envios": 1
+   },
+   {
+    "desde": 198381,
+    "hasta": 200461,
+    "mediana": 199667,
+    "envios": 7
+   }
+  ],
+  "Alemania": [
+   {
+    "desde": 55206,
+    "hasta": 55206,
+    "mediana": 55206,
+    "envios": 1
+   },
+   {
+    "desde": 86312,
+    "hasta": 90068,
+    "mediana": 86608,
+    "envios": 3
+   },
+   {
+    "desde": 122173,
+    "hasta": 122173,
+    "mediana": 122173,
+    "envios": 1
+   }
+  ],
+  "Costa Rica": [
+   {
+    "desde": 214574,
+    "hasta": 216044,
+    "mediana": 216044,
+    "envios": 4
+   },
+   {
+    "desde": 447047,
+    "hasta": 447047,
+    "mediana": 447047,
+    "envios": 1
+   }
+  ],
+  "Australia": [
+   {
+    "desde": 85409,
+    "hasta": 85409,
+    "mediana": 85409,
+    "envios": 1
+   },
+   {
+    "desde": 207834,
+    "hasta": 207834,
+    "mediana": 207834,
+    "envios": 2
+   }
+  ],
+  "Reino Unido (Gran Bretaña)": [
+   {
+    "desde": 52052,
+    "hasta": 54828,
+    "mediana": 54828,
+    "envios": 2
+   },
+   {
+    "desde": 91350,
+    "hasta": 91350,
+    "mediana": 91350,
+    "envios": 1
+   }
+  ],
+  "Colombia": [
+   {
+    "desde": 41247,
+    "hasta": 41247,
+    "mediana": 41247,
+    "envios": 1
+   },
+   {
+    "desde": 67771,
+    "hasta": 69474,
+    "mediana": 69474,
+    "envios": 2
+   }
+  ],
+  "Perú": [
+   {
+    "desde": 41105,
+    "hasta": 42639,
+    "mediana": 42639,
+    "envios": 2
+   },
+   {
+    "desde": 506074,
+    "hasta": 506074,
+    "mediana": 506074,
+    "envios": 1
+   }
+  ]
+ },
+ "envios": [
+  {
+   "fecha": "07/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97842.04
+  },
+  {
+   "fecha": "07/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 72346.89
+  },
+  {
+   "fecha": "06/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 72108.9
+  },
+  {
+   "fecha": "06/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 72108.9
+  },
+  {
+   "fecha": "06/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 72346.89
+  },
+  {
+   "fecha": "06/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 72346.89
+  },
+  {
+   "fecha": "06/08/2026",
+   "pais": "Canadá",
+   "ars": 70133.77
+  },
+  {
+   "fecha": "06/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97520.19
+  },
+  {
+   "fecha": "06/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97520.19
+  },
+  {
+   "fecha": "04/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97520.19
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97198.33
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97198.33
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 71870.93
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Canadá",
+   "ars": 69672.37
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 161374.3
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97198.33
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97198.33
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 71870.93
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Estados Unidos",
+   "ars": 97198.33
+  },
+  {
+   "fecha": "03/08/2026",
+   "pais": "Canadá",
+   "ars": 159175.74
+  },
+  {
+   "fecha": "31/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71910.38
+  },
+  {
+   "fecha": "31/07/2026",
+   "pais": "Australia",
+   "ars": 207834.24
+  },
+  {
+   "fecha": "31/07/2026",
+   "pais": "Australia",
+   "ars": 207834.24
+  },
+  {
+   "fecha": "31/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71673.06
+  },
+  {
+   "fecha": "31/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71910.38
+  },
+  {
+   "fecha": "29/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 72147.71
+  },
+  {
+   "fecha": "29/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 72147.71
+  },
+  {
+   "fecha": "28/07/2026",
+   "pais": "Canadá",
+   "ars": 95363.34
+  },
+  {
+   "fecha": "28/07/2026",
+   "pais": "Canadá",
+   "ars": 279738.37
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 96934.52
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 132765.07
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Canadá",
+   "ars": 233107.92
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 72147.71
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Reino Unido (Gran Bretaña)",
+   "ars": 91350.17
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71673.06
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 96934.52
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Colombia",
+   "ars": 69474.5
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71673.06
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71673.06
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71673.06
+  },
+  {
+   "fecha": "27/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71673.06
+  },
+  {
+   "fecha": "23/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "23/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Canadá",
+   "ars": 68490.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 95593.68
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 95593.68
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Alemania",
+   "ars": 90068.16
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Canadá",
+   "ars": 68490.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "22/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70674.24
+  },
+  {
+   "fecha": "17/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70286.29
+  },
+  {
+   "fecha": "17/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 157790.43
+  },
+  {
+   "fecha": "17/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 95057.37
+  },
+  {
+   "fecha": "17/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70286.29
+  },
+  {
+   "fecha": "17/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70286.29
+  },
+  {
+   "fecha": "17/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70286.29
+  },
+  {
+   "fecha": "16/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70286.29
+  },
+  {
+   "fecha": "15/07/2026",
+   "pais": "Bangladés",
+   "ars": 68675.52
+  },
+  {
+   "fecha": "14/07/2026",
+   "pais": "España",
+   "ars": 56700.87
+  },
+  {
+   "fecha": "14/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 95693.19
+  },
+  {
+   "fecha": "14/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Paraguay",
+   "ars": 42520.16
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 96011.12
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 96011.12
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 44718.72
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Canadá",
+   "ars": 68792.95
+  },
+  {
+   "fecha": "13/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70991.51
+  },
+  {
+   "fecha": "08/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 95945.16
+  },
+  {
+   "fecha": "08/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 96262.85
+  },
+  {
+   "fecha": "08/07/2026",
+   "pais": "Perú",
+   "ars": 42638.89
+  },
+  {
+   "fecha": "08/07/2026",
+   "pais": "México",
+   "ars": 42498.16
+  },
+  {
+   "fecha": "08/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 44844.73
+  },
+  {
+   "fecha": "08/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "07/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "07/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 95945.16
+  },
+  {
+   "fecha": "07/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Canadá",
+   "ars": 68748.97
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 95945.16
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 159285.67
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "06/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70947.53
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Francia",
+   "ars": 90514.72
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71035.47
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Canadá",
+   "ars": 68836.91
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71035.47
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 159461.55
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 130682.41
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71035.47
+  },
+  {
+   "fecha": "03/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 71035.47
+  },
+  {
+   "fecha": "02/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70565.04
+  },
+  {
+   "fecha": "02/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 96055.09
+  },
+  {
+   "fecha": "02/07/2026",
+   "pais": "México",
+   "ars": 156221.52
+  },
+  {
+   "fecha": "02/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70565.04
+  },
+  {
+   "fecha": "01/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "01/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 129384.23
+  },
+  {
+   "fecha": "01/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 365645.42
+  },
+  {
+   "fecha": "01/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "01/07/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 95100.89
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Canadá",
+   "ars": 127207.51
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 95100.89
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 157877.5
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 95100.89
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70329.83
+  },
+  {
+   "fecha": "30/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 238416.14
+  },
+  {
+   "fecha": "26/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70634.56
+  },
+  {
+   "fecha": "26/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70634.56
+  },
+  {
+   "fecha": "26/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70634.56
+  },
+  {
+   "fecha": "26/06/2026",
+   "pais": "Canadá",
+   "ars": 68457.84
+  },
+  {
+   "fecha": "26/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70634.56
+  },
+  {
+   "fecha": "25/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70634.56
+  },
+  {
+   "fecha": "25/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70398.33
+  },
+  {
+   "fecha": "25/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 95216.72
+  },
+  {
+   "fecha": "25/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70398.33
+  },
+  {
+   "fecha": "25/06/2026",
+   "pais": "Canadá",
+   "ars": 93047.28
+  },
+  {
+   "fecha": "25/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 44343.35
+  },
+  {
+   "fecha": "24/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 70398.33
+  },
+  {
+   "fecha": "24/06/2026",
+   "pais": "Canadá",
+   "ars": 67770.98
+  },
+  {
+   "fecha": "23/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69925.86
+  },
+  {
+   "fecha": "23/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69925.86
+  },
+  {
+   "fecha": "23/06/2026",
+   "pais": "Colombia",
+   "ars": 67770.98
+  },
+  {
+   "fecha": "23/06/2026",
+   "pais": "Canadá",
+   "ars": 67770.98
+  },
+  {
+   "fecha": "23/06/2026",
+   "pais": "Perú",
+   "ars": 506073.57
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 127798.51
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "22/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69453.38
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69646.01
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 94195.49
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 94195.49
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69646.01
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Costa Rica",
+   "ars": 216043.9
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69646.01
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Costa Rica",
+   "ars": 216043.9
+  },
+  {
+   "fecha": "19/06/2026",
+   "pais": "Costa Rica",
+   "ars": 214574.22
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Costa Rica",
+   "ars": 447047.33
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Italia",
+   "ars": 200352.88
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Italia",
+   "ars": 199666.74
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Italia",
+   "ars": 199666.74
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 93554.69
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69172.24
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69172.24
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Costa Rica",
+   "ars": 214574.22
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "China",
+   "ars": 54677.97
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Panamá",
+   "ars": 41310.36
+  },
+  {
+   "fecha": "18/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 93234.3
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92913.91
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92913.91
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92913.91
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92913.91
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68698.45
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68698.45
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92913.91
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68698.45
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68698.45
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68698.45
+  },
+  {
+   "fecha": "16/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68698.45
+  },
+  {
+   "fecha": "12/06/2026",
+   "pais": "Bangladés",
+   "ars": 65573.87
+  },
+  {
+   "fecha": "12/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68871.78
+  },
+  {
+   "fecha": "12/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68635.11
+  },
+  {
+   "fecha": "12/06/2026",
+   "pais": "Reino Unido (Gran Bretaña)",
+   "ars": 54827.86
+  },
+  {
+   "fecha": "12/06/2026",
+   "pais": "Colombia",
+   "ars": 41246.8
+  },
+  {
+   "fecha": "12/06/2026",
+   "pais": "Perú",
+   "ars": 41105.06
+  },
+  {
+   "fecha": "11/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "11/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 127162.97
+  },
+  {
+   "fecha": "11/06/2026",
+   "pais": "Alemania",
+   "ars": 55205.99
+  },
+  {
+   "fecha": "11/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 43514.31
+  },
+  {
+   "fecha": "11/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 43514.31
+  },
+  {
+   "fecha": "11/06/2026",
+   "pais": "Alemania",
+   "ars": 122172.74
+  },
+  {
+   "fecha": "11/06/2026",
+   "pais": "Canadá",
+   "ars": 124608.99
+  },
+  {
+   "fecha": "10/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 208248.7
+  },
+  {
+   "fecha": "10/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69345.14
+  },
+  {
+   "fecha": "10/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69345.14
+  },
+  {
+   "fecha": "10/06/2026",
+   "pais": "Italia",
+   "ars": 165779.87
+  },
+  {
+   "fecha": "09/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 127598.45
+  },
+  {
+   "fecha": "09/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 127162.97
+  },
+  {
+   "fecha": "09/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 127162.97
+  },
+  {
+   "fecha": "09/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "09/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Italia",
+   "ars": 200119.05
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Suiza",
+   "ars": 88070.23
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Canadá",
+   "ars": 91322.64
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 93448.4
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 93448.4
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Italia",
+   "ars": 199433.71
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68871.78
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68871.78
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "08/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69108.45
+  },
+  {
+   "fecha": "05/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 209305.82
+  },
+  {
+   "fecha": "05/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 43873.72
+  },
+  {
+   "fecha": "05/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 94230.0
+  },
+  {
+   "fecha": "05/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69676.81
+  },
+  {
+   "fecha": "05/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69676.81
+  },
+  {
+   "fecha": "05/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69676.81
+  },
+  {
+   "fecha": "05/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 126727.47
+  },
+  {
+   "fecha": "04/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69437.37
+  },
+  {
+   "fecha": "04/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 94553.8
+  },
+  {
+   "fecha": "03/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 93906.18
+  },
+  {
+   "fecha": "03/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 93906.18
+  },
+  {
+   "fecha": "03/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69197.93
+  },
+  {
+   "fecha": "03/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69197.93
+  },
+  {
+   "fecha": "03/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69197.93
+  },
+  {
+   "fecha": "03/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 69197.93
+  },
+  {
+   "fecha": "02/06/2026",
+   "pais": "Italia",
+   "ars": 198380.59
+  },
+  {
+   "fecha": "02/06/2026",
+   "pais": "Italia",
+   "ars": 200461.49
+  },
+  {
+   "fecha": "02/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92610.92
+  },
+  {
+   "fecha": "02/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68479.61
+  },
+  {
+   "fecha": "02/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92610.92
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 205709.5
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Polonia",
+   "ars": 87322.44
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92610.92
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68479.61
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 92610.92
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 126028.31
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68479.61
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68479.61
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68479.61
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68479.61
+  },
+  {
+   "fecha": "01/06/2026",
+   "pais": "Estados Unidos",
+   "ars": 68479.61
+  },
+  {
+   "fecha": "29/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 92673.38
+  },
+  {
+   "fecha": "29/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "29/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "29/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "29/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "29/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "28/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "28/05/2026",
+   "pais": "Canadá",
+   "ars": 66439.17
+  },
+  {
+   "fecha": "28/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 126090.76
+  },
+  {
+   "fecha": "28/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 92673.38
+  },
+  {
+   "fecha": "28/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "28/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "28/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68521.25
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 42989.86
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 92349.35
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 124327.25
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 92349.35
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 185464.41
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 92349.35
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68281.67
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67562.91
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68281.67
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68281.67
+  },
+  {
+   "fecha": "26/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67562.91
+  },
+  {
+   "fecha": "22/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91880.59
+  },
+  {
+   "fecha": "22/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67918.03
+  },
+  {
+   "fecha": "22/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67439.74
+  },
+  {
+   "fecha": "22/05/2026",
+   "pais": "Alemania",
+   "ars": 86608.41
+  },
+  {
+   "fecha": "22/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67918.03
+  },
+  {
+   "fecha": "21/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67918.03
+  },
+  {
+   "fecha": "21/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67918.03
+  },
+  {
+   "fecha": "20/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 42776.99
+  },
+  {
+   "fecha": "20/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67918.03
+  },
+  {
+   "fecha": "20/05/2026",
+   "pais": "Australia",
+   "ars": 85409.25
+  },
+  {
+   "fecha": "20/05/2026",
+   "pais": "Canadá",
+   "ars": 40709.47
+  },
+  {
+   "fecha": "20/05/2026",
+   "pais": "Canadá",
+   "ars": 40709.47
+  },
+  {
+   "fecha": "19/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67918.03
+  },
+  {
+   "fecha": "19/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 42776.99
+  },
+  {
+   "fecha": "18/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91557.06
+  },
+  {
+   "fecha": "18/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67678.88
+  },
+  {
+   "fecha": "18/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67678.88
+  },
+  {
+   "fecha": "18/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67678.88
+  },
+  {
+   "fecha": "18/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67678.88
+  },
+  {
+   "fecha": "15/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91701.29
+  },
+  {
+   "fecha": "15/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "15/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "15/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91701.29
+  },
+  {
+   "fecha": "15/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "15/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "14/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67323.33
+  },
+  {
+   "fecha": "14/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67323.33
+  },
+  {
+   "fecha": "14/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67323.33
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91701.29
+  },
+  {
+   "fecha": "13/05/2026",
+   "pais": "Canadá",
+   "ars": 89641.05
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Canadá",
+   "ars": 65974.57
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67802.5
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 124768.14
+  },
+  {
+   "fecha": "12/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "11/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 68042.09
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Canadá",
+   "ars": 88564.7
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 90617.66
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 90617.66
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 90617.66
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Polonia",
+   "ars": 118866.38
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91260.33
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 66988.08
+  },
+  {
+   "fecha": "08/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 66988.08
+  },
+  {
+   "fecha": "07/05/2026",
+   "pais": "Taiwán",
+   "ars": 84511.04
+  },
+  {
+   "fecha": "07/05/2026",
+   "pais": "Canadá",
+   "ars": 65165.39
+  },
+  {
+   "fecha": "07/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 90938.99
+  },
+  {
+   "fecha": "07/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 150974.39
+  },
+  {
+   "fecha": "07/05/2026",
+   "pais": "Canadá",
+   "ars": 64935.12
+  },
+  {
+   "fecha": "07/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67225.63
+  },
+  {
+   "fecha": "06/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91581.67
+  },
+  {
+   "fecha": "06/05/2026",
+   "pais": "Alemania",
+   "ars": 86311.68
+  },
+  {
+   "fecha": "06/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67700.72
+  },
+  {
+   "fecha": "06/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67700.72
+  },
+  {
+   "fecha": "05/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 42337.93
+  },
+  {
+   "fecha": "05/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 91581.67
+  },
+  {
+   "fecha": "05/05/2026",
+   "pais": "Canadá",
+   "ars": 88878.75
+  },
+  {
+   "fecha": "05/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 90938.99
+  },
+  {
+   "fecha": "05/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 67225.63
+  },
+  {
+   "fecha": "05/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 42337.93
+  },
+  {
+   "fecha": "04/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 64640.03
+  },
+  {
+   "fecha": "04/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 64640.03
+  },
+  {
+   "fecha": "04/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 64640.03
+  },
+  {
+   "fecha": "04/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 64640.03
+  },
+  {
+   "fecha": "04/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 64640.03
+  },
+  {
+   "fecha": "04/05/2026",
+   "pais": "Estados Unidos",
+   "ars": 87441.34
+  },
+  {
+   "fecha": "04/05/2026",
+   "pais": "Chile",
+   "ars": 38728.55
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 64461.74
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Brasil",
+   "ars": 38629.5
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Reino Unido (Gran Bretaña)",
+   "ars": 52052.0
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 65145.08
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 146286.14
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 65145.08
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 65145.08
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 88108.02
+  },
+  {
+   "fecha": "30/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 87183.81
+  },
+  {
+   "fecha": "29/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 88724.16
+  },
+  {
+   "fecha": "29/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 65600.64
+  },
+  {
+   "fecha": "28/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 87491.88
+  },
+  {
+   "fecha": "28/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 64689.52
+  },
+  {
+   "fecha": "28/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 87491.88
+  },
+  {
+   "fecha": "27/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 64689.52
+  },
+  {
+   "fecha": "27/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 64689.52
+  },
+  {
+   "fecha": "27/04/2026",
+   "pais": "Canadá",
+   "ars": 62480.74
+  },
+  {
+   "fecha": "27/04/2026",
+   "pais": "Canadá",
+   "ars": 62480.74
+  },
+  {
+   "fecha": "27/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 87183.81
+  },
+  {
+   "fecha": "24/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 40297.6
+  },
+  {
+   "fecha": "24/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 86553.6
+  },
+  {
+   "fecha": "24/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 86553.6
+  },
+  {
+   "fecha": "24/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63994.0
+  },
+  {
+   "fecha": "24/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63994.0
+  },
+  {
+   "fecha": "24/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 64679.65
+  },
+  {
+   "fecha": "23/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 40297.6
+  },
+  {
+   "fecha": "23/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63994.0
+  },
+  {
+   "fecha": "23/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 86553.6
+  },
+  {
+   "fecha": "23/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 374203.2
+  },
+  {
+   "fecha": "23/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63994.0
+  },
+  {
+   "fecha": "22/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63994.0
+  },
+  {
+   "fecha": "22/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 86553.6
+  },
+  {
+   "fecha": "22/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 86553.6
+  },
+  {
+   "fecha": "22/04/2026",
+   "pais": "Canadá",
+   "ars": 62034.0
+  },
+  {
+   "fecha": "22/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63994.0
+  },
+  {
+   "fecha": "21/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63536.9
+  },
+  {
+   "fecha": "21/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 274948.8
+  },
+  {
+   "fecha": "21/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 85935.36
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63536.9
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63536.9
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63079.8
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 85935.36
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 189471.24
+  },
+  {
+   "fecha": "20/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 116935.14
+  },
+  {
+   "fecha": "17/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 142497.11
+  },
+  {
+   "fecha": "17/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63444.08
+  },
+  {
+   "fecha": "17/04/2026",
+   "pais": "Estados Unidos",
+   "ars": 63444.08
+  }
+ ]
+}
