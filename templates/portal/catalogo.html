@@ -155,32 +155,32 @@
         <div class="form-grid-3">
             <div class="form-group">
                 <label for="cat-largo">Largo (cm)</label>
-                <input type="number" name="largo_cm" id="cat-largo" step="0.5" min="0" required>
+                <input type="text" name="largo_cm" id="cat-largo" inputmode="decimal" data-numero="decimal" required>
             </div>
             <div class="form-group">
                 <label for="cat-ancho">Ancho (cm)</label>
-                <input type="number" name="ancho_cm" id="cat-ancho" step="0.5" min="0" required>
+                <input type="text" name="ancho_cm" id="cat-ancho" inputmode="decimal" data-numero="decimal" required>
             </div>
             <div class="form-group">
                 <label for="cat-alto">Alto (cm)</label>
-                <input type="number" name="alto_cm" id="cat-alto" step="0.5" min="0" required>
+                <input type="text" name="alto_cm" id="cat-alto" inputmode="decimal" data-numero="decimal" required>
             </div>
         </div>
 
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="cat-peso">Peso (kg)</label>
-                <input type="number" name="peso_kg" id="cat-peso" step="0.1" min="0" required>
+                <input type="text" name="peso_kg" id="cat-peso" inputmode="decimal" data-numero="decimal" required>
             </div>
             <div class="form-group">
                 <label for="cat-valor">Valor declarado (USD)</label>
-                <input type="number" name="valor_usd_default" id="cat-valor" step="1" min="0" required>
+                <input type="text" name="valor_usd_default" id="cat-valor" inputmode="decimal" data-numero="monto" required>
             </div>
         </div>
 
         <div class="form-group">
             <label for="cat-tax">Impuestos de destino estimados (USD) <span style="color:var(--fg-3);font-weight:400;">— opcional</span></label>
-            <input type="number" name="tax_estimado_usd" id="cat-tax" step="0.01" min="0">
+            <input type="text" name="tax_estimado_usd" id="cat-tax" inputmode="decimal" data-numero="monto">
             <small style="color:var(--fg-3);font-size:12px;">
                 Lo que aproximadamente paga este producto de impuestos al entrar al país de destino.
                 Se usa sólo si activás "mostrar impuestos" en

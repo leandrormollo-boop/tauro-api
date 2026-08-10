@@ -3,6 +3,7 @@
 # ============================================================
 
 import hashlib
+import math
 import secrets
 
 from core.database import get_conn
@@ -10,6 +11,7 @@ from modelos.cotizacion import CotizacionInput
 from servicios.auth import get_markup_pct
 from servicios.catalogo import get_producto
 from servicios.cotizador import cotizar, cotizar_bultos, _get_dolar_ars
+from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
 from servicios.rutas import get_rutas_activas, pais_a_iso2
 
 # Límites multi-bulto: FedEx IP admite hasta 70 kg por pieza; el tope de
@@ -453,12 +455,17 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
     if not bultos:
         return [], [], "sin_bultos"
 
-    def _num(v, default=None):
-        try:
-            n = float(str(v).replace(",", "."))
-            return n if n > 0 else default
-        except (TypeError, ValueError):
+    numero_invalido = object()
+
+    def _num(v, default=None, *, importe=False):
+        if v is None or (isinstance(v, str) and not v.strip()):
             return default
+        try:
+            numero = parse_importe_humano(v) if importe else parse_numero_humano(v)
+            n = float(numero) if numero is not None else 0
+            return n if math.isfinite(n) and n > 0 else numero_invalido
+        except (TypeError, ValueError):
+            return numero_invalido
 
     piezas, detalle, total_cajas = [], [], 0
     for b in bultos:
@@ -493,10 +500,13 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
             }
         else:
             # Carga libre: sin peso o sin medidas no hay flete posible.
-            if not (_num(b.get("peso_kg")) and _num(b.get("largo_cm"))
-                    and _num(b.get("ancho_cm")) and _num(b.get("alto_cm"))):
+            numeros_manual = {
+                k: _num(b.get(k))
+                for k in ("peso_kg", "largo_cm", "ancho_cm", "alto_cm")
+            }
+            if any(v is None or v is numero_invalido for v in numeros_manual.values()):
                 return [], [], ("caja_incompleta: sin producto del catálogo, "
-                                "cada caja necesita peso y las tres medidas")
+                                "cada caja necesita peso y las tres medidas válidas")
             if not str(b.get("descripcion_en") or "").strip():
                 return [], [], ("caja_incompleta: la descripción del contenido "
                                 "es obligatoria para la aduana")
@@ -505,7 +515,9 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
         fila = dict(base)
         # Lo declarado EN ESTE envío manda sobre el catálogo, campo por campo.
         for k in ("peso_kg", "largo_cm", "ancho_cm", "alto_cm", "valor_unitario_usd"):
-            v = _num(b.get(k))
+            v = _num(b.get(k), importe=k == "valor_unitario_usd")
+            if v is numero_invalido:
+                return [], [], f"caja_incompleta: {k} debe ser un número válido mayor a cero"
             if v is not None:
                 fila[k] = v
         for k in ("hs_code", "descripcion_en", "pais_origen"):

@@ -25,7 +25,10 @@ def _get_dolar_ars() -> float:
     Si el valor guardado es basura (0, mal tipeado, fuera de rango), usa el fallback
     y deja una alerta en el log en vez de romper todos los precios en silencio.
     """
-    fallback = float(os.getenv("COTIZACION_DOLAR_ARS", "1450"))
+    try:
+        fallback = parse_monto_ars(os.getenv("COTIZACION_DOLAR_ARS", "1450")) or 1450.0
+    except ValueError:
+        fallback = 1450.0
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:

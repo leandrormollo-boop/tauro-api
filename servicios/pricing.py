@@ -2,9 +2,11 @@
 # Reglas de pricing por cliente
 # ============================================================
 
+import math
 from typing import Optional
 
 from core.database import get_conn
+from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
 
 
 PRICING_MODES = {
@@ -37,26 +39,24 @@ def normalizar_pricing(markup_tipo: str, markup_valor: Optional[float], fallback
 
 def parse_monto_ars(raw) -> Optional[float]:
     """
-    Parsea un monto en pesos tipeado en formato argentino.
-    El punto es separador de miles; la coma, decimal.
-      "1.500"    -> 1500.0
-      "9.100,50" -> 9100.50
-      "1450"     -> 1450.0
+    Parsea un monto en pesos escrito en formato argentino o ingles.
+      "1.500" / "1,500"       -> 1500.0
+      "9.100,50" / "9,100.50" -> 9100.50
+      "1450"                    -> 1450.0
     Devuelve None si el string está vacío. Lanza ValueError si no es numérico.
     """
-    raw = (str(raw) if raw is not None else "").strip()
-    if not raw:
+    numero = parse_importe_humano(raw)
+    if numero is None:
         return None
-    if "," in raw:
-        raw = raw.replace(".", "").replace(",", ".")
-    else:
-        raw = raw.replace(".", "")  # sin coma: el punto es separador de miles
-    return float(raw)
+    resultado = float(numero)
+    if not math.isfinite(resultado):
+        raise ValueError("El importe es demasiado grande.")
+    return resultado
 
 
 def parse_pricing_value(raw: str, markup_tipo: str, fallback_pct: float = 25.0) -> dict:
     """
-    Interpreta el valor tipeado en el admin respetando el formato argentino.
+    Interpreta el valor tipeado en el admin respetando formatos ES/EN.
 
     La ambigüedad del punto depende del tipo:
       - FIJO_ARS: es un monto en pesos, el punto es separador de miles.
@@ -68,14 +68,18 @@ def parse_pricing_value(raw: str, markup_tipo: str, fallback_pct: float = 25.0) 
     valor = None
     if raw:
         tipo = (markup_tipo or "PCT").strip().upper()
-        if "," in raw:
-            # Formato argentino con decimales: miles con punto, decimal con coma.
-            raw = raw.replace(".", "").replace(",", ".")
-        elif tipo == "FIJO_ARS":
-            # Monto en pesos sin coma: el punto es separador de miles.
-            raw = raw.replace(".", "")
-        # PCT y MULTIPLICADOR sin coma: el punto ya es decimal, se deja.
-        valor = float(raw)
+        numero = (
+            parse_importe_humano(raw)
+            if tipo == "FIJO_ARS"
+            else parse_numero_humano(raw)
+        )
+        valor = float(numero)
+        if not math.isfinite(valor):
+            raise ValueError("El valor de pricing debe ser un número finito.")
+        if tipo == "MULTIPLICADOR" and valor < 1:
+            raise ValueError("El multiplicador no puede ser menor a 1.")
+        if tipo in {"PCT", "FIJO_ARS"} and valor < 0:
+            raise ValueError("El valor de pricing no puede ser negativo.")
     return normalizar_pricing(markup_tipo, valor, fallback_pct=fallback_pct)
 
 

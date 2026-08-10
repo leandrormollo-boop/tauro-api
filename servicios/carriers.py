@@ -18,6 +18,7 @@ from core.database import get_conn
 from core.fedex_client import FedExClient
 from core.ups_client import UPSClient
 from core.dhl_client import DHLClient
+from servicios.numeros_humanos import parse_configuracion_numerica
 
 # Orden = orden de aparición en la web.
 CARRIERS = [
@@ -51,6 +52,18 @@ CARRIERS = [
         "cliente": DHLClient,
     },
 ]
+
+
+def _numero_config(parametro: str, valor) -> float | None:
+    """Lee DB/env con la misma semántica numérica ES/EN que usa el admin."""
+    try:
+        numero = parse_configuracion_numerica(parametro, valor)
+        if numero is None:
+            return None
+        resultado = float(numero)
+        return resultado if math.isfinite(resultado) else None
+    except (TypeError, ValueError):
+        return None
 
 
 def carrier_activo(carrier: dict) -> bool:
@@ -100,10 +113,11 @@ def _pricing_configurado() -> dict:
 
     valores = {}
     for f in filas:
-        try:
-            valores[f["parametro"]] = float(str(f["valor"]).strip())
-        except (TypeError, ValueError):
+        numero = _numero_config(f["parametro"], f["valor"])
+        if numero is None:
             print(f"[carriers] {f['parametro']}={f['valor']!r} no es un número; se ignora")
+        else:
+            valores[f["parametro"]] = numero
     return valores
 
 
@@ -128,9 +142,10 @@ def _markup_de(carrier_id: str, default_pct: float, config: dict = None) -> floa
 
     crudo = os.getenv(clave)
     if crudo is not None:
-        try:
-            return float(crudo)
-        except ValueError:
+        numero = _numero_config(clave, crudo)
+        if numero is not None:
+            return numero
+        else:
             print(f"[carriers] {clave}={crudo!r} no es un número; sigo con el general")
 
     return config.get("WEB_MARKUP_PCT", default_pct)
@@ -153,9 +168,10 @@ def _margen_fijo_de(carrier_id: str, config: dict = None) -> float:
         return config[clave]
     crudo = os.getenv(clave)
     if crudo is not None:
-        try:
-            return float(crudo)
-        except ValueError:
+        numero = _numero_config(clave, crudo)
+        if numero is not None:
+            return numero
+        else:
             print(f"[carriers] {clave}={crudo!r} no es un número; se ignora")
     return 0.0
 
@@ -167,11 +183,13 @@ def _desc_fedex(config: dict) -> float:
     """
     if "WEB_DESC_FEDEX_PCT" in config:
         return config["WEB_DESC_FEDEX_PCT"]
-    try:
-        return float(os.getenv("WEB_DESC_FEDEX_PCT", "90"))
-    except ValueError:
+    numero = _numero_config(
+        "WEB_DESC_FEDEX_PCT", os.getenv("WEB_DESC_FEDEX_PCT", "90")
+    )
+    if numero is None:
         print("[carriers] WEB_DESC_FEDEX_PCT no es un número; uso 90")
         return 90.0
+    return numero
 
 
 def _adicional_de(carrier_id: str, config: dict = None) -> float:
@@ -195,9 +213,10 @@ def _adicional_de(carrier_id: str, config: dict = None) -> float:
         return config[clave]
     crudo = os.getenv(clave)
     if crudo is not None:
-        try:
-            return float(crudo)
-        except ValueError:
+        numero = _numero_config(clave, crudo)
+        if numero is not None:
+            return numero
+        else:
             print(f"[carriers] {clave}={crudo!r} no es un número; se ignora")
     # Default sólo para FedEx: es el único que va con el modelo de descuento.
     return 10000.0 if carrier_id.lower() == "fedex" else 0.0

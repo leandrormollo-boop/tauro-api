@@ -113,13 +113,13 @@
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="markup_pct">Porcentaje a sumar (%)</label>
-                <input type="text" name="markup_pct" id="markup_pct" value="{{ cfg.markup_pct|round(2) }}"
+                <input type="text" name="markup_pct" id="markup_pct" inputmode="decimal" data-numero="decimal" value="{{ cfg.markup_pct|round(2) }}"
                        placeholder="Ej: 15">
                 <small style="color:var(--fg-3);font-size:12px;">Sólo si elegiste "TAURO + porcentaje".</small>
             </div>
             <div class="form-group">
                 <label for="precio_fijo_ars">Precio fijo (ARS)</label>
-                <input type="text" name="precio_fijo_ars" id="precio_fijo_ars" value="{{ cfg.precio_fijo_ars|round(0)|int }}"
+                <input type="text" name="precio_fijo_ars" id="precio_fijo_ars" inputmode="decimal" data-numero="monto" value="{{ cfg.precio_fijo_ars|round(0)|int }}"
                        placeholder="Ej: 25000">
                 <small style="color:var(--fg-3);font-size:12px;">Sólo si elegiste "precio fijo".</small>
             </div>
@@ -147,7 +147,7 @@
 
         <div class="form-group" style="max-width:280px;">
             <label for="tax_pct_default">Impuesto por defecto (% del valor)</label>
-            <input type="text" name="tax_pct_default" id="tax_pct_default" value="{{ cfg.tax_pct_default|round(2) }}"
+            <input type="text" name="tax_pct_default" id="tax_pct_default" inputmode="decimal" data-numero="decimal" value="{{ cfg.tax_pct_default|round(2) }}"
                    placeholder="Ej: 20">
         </div>
 

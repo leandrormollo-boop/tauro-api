@@ -105,7 +105,7 @@
             <input id="{{ c.id }}-markup" type="text" name="{{ c.id }}_markup_valor"
                    value="{% if c.markup_valor is not none %}{{ '%g'|format(c.markup_valor|float) }}{% endif %}"
                    placeholder="{% if c.id == 'dhl' %}14.000{% else %}Valor{% endif %}"
-                   inputmode="decimal" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
+                   inputmode="decimal" data-numero="pricing" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
           </div>
           {% if not c.markup_tipo %}<div class="inherit-note">Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}</div>{% endif %}
         </div>
@@ -126,7 +126,7 @@
           <label for="tope-deuda">Tope de deuda para emitir (ARS)</label>
           <input id="tope-deuda" type="text" name="tope_deuda_ars"
                  value="{% if matriz.tope_deuda_ars is not none %}{{ '%g'|format(matriz.tope_deuda_ars|float) }}{% endif %}"
-                 placeholder="Vacío = sin tope" inputmode="decimal">
+                 placeholder="Vacío = sin tope" inputmode="decimal" data-numero="monto">
         </div>
       </div>
     </div>

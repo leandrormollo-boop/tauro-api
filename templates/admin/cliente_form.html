@@ -108,7 +108,7 @@
     <div class="form-group">
       <label>Valor de la regla *</label>
       <input type="hidden" name="markup_pct" value="{{ cliente.markup_pct if cliente else '25' }}">
-      <input type="text" name="markup_valor" required
+      <input type="text" name="markup_valor" required inputmode="decimal" data-numero="pricing"
              value="{% if cliente and cliente.markup_valor is not none %}{{ cliente.markup_valor }}{% elif cliente %}{{ cliente.markup_pct }}{% else %}25{% endif %}"
              placeholder="25 para %, 9100 para fijo ARS, 1.30 para multiplicador">
       <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
@@ -134,7 +134,7 @@
       </div>
       <div class="form-group">
         <label>Valor nacional</label>
-        <input type="text" name="markup_nac_valor"
+        <input type="text" name="markup_nac_valor" inputmode="decimal" data-numero="pricing"
                value="{% if cliente and cliente.markup_nac_valor is not none %}{{ cliente.markup_nac_valor }}{% endif %}"
                placeholder="ej: 3500 para +ARS 3.500 por envío nacional">
         <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
