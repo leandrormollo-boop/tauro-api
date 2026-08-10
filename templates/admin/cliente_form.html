@@ -2,9 +2,14 @@
 {% block title %}{{ "Editar" if cliente else "Nuevo" }} cliente{% endblock %}
 
 {% block content %}
-<div class="page-title">
-  <div class="eyebrow">Clientes</div>
-  <h1>{{ "Editar" if cliente else "Nuevo" }} cliente</h1>
+<div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+  <div>
+    <div class="eyebrow">Clientes</div>
+    <h1>{{ "Editar" if cliente else "Nuevo" }} cliente</h1>
+  </div>
+  {% if cliente %}
+  <a href="/admin/clientes/{{ cliente.cliente_id }}/acceso-precios" class="btn btn-primary btn-sm">Acceso y precios</a>
+  {% endif %}
 </div>
 
 <div class="card" style="max-width:640px;">
@@ -138,30 +143,16 @@
       </div>
     </div>
 
-    {# Emisión directa: el cliente genera sus guías desde el portal sin pasar
-       por el admin. Emitir cuesta plata real, por eso es opt-in por cliente
-       y con tope de deuda opcional. #}
-    <div class="form-grid-2">
-      <div class="form-group">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-          <input type="checkbox" name="puede_emitir" value="1"
-                 {% if cliente and cliente.puede_emitir %}checked{% endif %}>
-          Puede emitir guías desde el portal
-        </label>
-        <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
-          Apagado: el cliente sólo reenvía la solicitud y emite Tauro.
-        </p>
-      </div>
-      <div class="form-group">
-        <label>Tope de deuda para emitir (ARS)</label>
-        <input type="text" name="tope_deuda_ars"
-               value="{% if cliente and cliente.tope_deuda_ars is not none %}{{ '%g'|format(cliente.tope_deuda_ars) }}{% endif %}"
-               placeholder="ej: 500.000 — vacío = sin tope">
-        <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
-          Si su saldo pendiente supera este monto, no puede emitir hasta ponerse al día.
-        </p>
-      </div>
+    {% if cliente %}
+    <div class="msg" style="margin-bottom:16px;">
+      Los permisos para cotizar, crear guías, pedir pickups y la ganancia de cada courier se administran en
+      <a href="/admin/clientes/{{ cliente.cliente_id }}/acceso-precios"><strong>Acceso y precios</strong></a>.
     </div>
+    {% else %}
+    <div class="msg" style="margin-bottom:16px;">
+      Al crear el cliente, sus operaciones reales quedan apagadas. Después las habilitás por courier desde <strong>Acceso y precios</strong>.
+    </div>
+    {% endif %}
 
     {# Impuestos de destino: lo elige el cliente y lo deja predefinido acá.
        Prete Rosso los paga siempre, así que no lo tilda envío por envío.
@@ -182,25 +173,6 @@
         Con "los paga quien recibe", el destinatario abona los aranceles en la puerta.
         Con la otra opción los adelanta Tauro y se le suman a la cuenta corriente del cliente.
         Ojo con Estados Unidos: se eliminó la franquicia de USD 800 y hoy toda caja paga arancel.
-      </p>
-    </div>
-
-    {# Courier preferido (Leandro 05/08): "el cliente tiene que especificar
-       por qué empresa realiza sus envíos. Puede dejarlo configurado".
-       WAIMAO opera por DHL: el wizard le arranca con DHL elegido. #}
-    <div class="form-group">
-      <label>Courier preferido</label>
-      <select name="courier_default">
-        <option value="" {% if not cliente or not cliente.courier_default %}selected{% endif %}>
-          Elige en cada envío
-        </option>
-        <option value="fedex" {% if cliente and cliente.courier_default == 'fedex' %}selected{% endif %}>FedEx</option>
-        <option value="dhl" {% if cliente and cliente.courier_default == 'dhl' %}selected{% endif %}>DHL Express</option>
-        <option value="ups" {% if cliente and cliente.courier_default == 'ups' %}selected{% endif %}>UPS</option>
-      </select>
-      <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
-        El wizard de nuevo envío le arranca con este courier preseleccionado.
-        Siempre puede cambiarlo por envío.
       </p>
     </div>
 

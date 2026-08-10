@@ -9,6 +9,8 @@ import os
 import sys
 from unittest import mock
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.dhl_client import DHLClient  # noqa: E402
@@ -63,6 +65,14 @@ def test_emite_y_devuelve_tracking_y_label():
     _, r = _emitir_capturando()
     assert r["encontrado"] and r["tracking"] == "1234567890"
     assert r["label_pdf"] and r["label_pdf"].startswith(b"%PDF")
+
+
+def test_usa_la_referencia_que_el_servicio_persistio_antes_del_post():
+    referencia = "tauro-dhl-ship-81-abcd1234"
+    cap, r = _emitir_capturando({**ENVIO, "message_reference": referencia})
+
+    assert cap["headers"]["Message-Reference"] == referencia
+    assert r["message_reference"] == referencia
 
 
 def test_las_direcciones_llegan_completas_a_dhl():
@@ -150,12 +160,13 @@ def test_sin_credenciales_no_intenta():
     assert not r["encontrado"] and "credenciales" in r["error"]
 
 
-def test_telefono_vacio_no_rompe_el_envio():
-    """DHL exige phone: sin fallback, un cliente sin teléfono no puede enviar."""
+def test_telefono_vacio_bloquea_antes_de_inventar_un_contacto():
+    """Un dato falso puede invalidar la guía: se pide el teléfono real."""
     envio = {**ENVIO, "recipient": {**ENVIO["recipient"], "telefono": ""}}
-    cap, r = _emitir_capturando(envio)
-    tel = cap["body"]["customerDetails"]["receiverDetails"]["contactInformation"]["phone"]
-    assert tel and r["encontrado"]
+    with mock.patch("core.dhl_client.requests.post") as post:
+        r = _cliente().create_shipment(envio)
+    assert not r["encontrado"] and "teléfono" in r["error"]
+    post.assert_not_called()
 
 
 def test_error_de_dhl_se_reporta_sin_inventar_tracking():
@@ -174,3 +185,52 @@ def test_excepcion_de_red_avisa_que_hay_que_verificar():
     with mock.patch("core.dhl_client.requests.post", side_effect=OSError("timeout")):
         r = _cliente().create_shipment(ENVIO)
     assert not r["encontrado"] and "Verificá en MyDHL" in r["error"]
+
+
+@pytest.mark.parametrize("status", [408, 503])
+def test_http_transitorio_de_emision_es_incierto_y_conserva_referencia(status):
+    """Un 408/5xx puede ocurrir después de que DHL ya persistió la guía."""
+    _, r = _emitir_capturando(status=status)
+    assert not r["encontrado"]
+    assert r["incierto"] is True
+    assert r["message_reference"].startswith("tauro-ship-")
+    assert "Verificá en MyDHL" in r["error"]
+
+
+@pytest.mark.parametrize("status", [408, 503])
+def test_http_transitorio_de_pickup_es_incierto_y_conserva_referencia(status):
+    """No se debe agendar otro retiro si DHL no confirma el resultado."""
+    respuesta = mock.Mock(status_code=status, text="Error transitorio")
+    datos = {
+        "origen": {
+            "nombre": "Prete Rosso", "calle": "Nicasio Oroño 1680",
+            "telefono": "1145678900", "ciudad": "CABA", "zip": "1416", "pais": "AR",
+        },
+        "fecha": "2026-08-11", "ready_time": "09:00", "close_time": "17:00",
+        "peso_kg": 1.4, "bultos": 1,
+    }
+    with mock.patch("core.dhl_client.requests.post", return_value=respuesta):
+        r = _cliente().create_pickup(datos)
+
+    assert not r["encontrado"]
+    assert r["incierto"] is True
+    assert r["message_reference"].startswith("tauro-pickup-")
+    assert "Verificá en MyDHL" in r["error"]
+
+
+def test_pickup_usa_la_referencia_persistida_antes_del_post():
+    respuesta = mock.Mock(status_code=201, text="ok")
+    respuesta.json.return_value = {"dispatchConfirmationNumbers": ["PU-1"]}
+    datos = {
+        "origen": {"nombre": "WAIMAO", "telefono": "1145678900",
+                   "calle": "Calle 1", "ciudad": "CABA",
+                   "zip": "1000", "pais": "AR"},
+        "fecha": "2026-08-11", "ready_time": "09:00", "close_time": "17:00",
+        "peso_kg": 1, "bultos": 1,
+        "message_reference": "tauro-dhl-pick-abcd1234",
+    }
+    with mock.patch("core.dhl_client.requests.post", return_value=respuesta) as post:
+        r = _cliente().create_pickup(datos)
+
+    assert post.call_args.kwargs["headers"]["Message-Reference"] == datos["message_reference"]
+    assert r["message_reference"] == datos["message_reference"]

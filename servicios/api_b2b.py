@@ -16,6 +16,7 @@ from servicios.rutas import get_rutas_activas, pais_a_iso2
 # cajas por envío es una guarda operativa nuestra (no de FedEx).
 MAX_KG_POR_CAJA = 70
 MAX_CAJAS_POR_ENVIO = 20
+MAX_UNIDADES_ADUANA_POR_RENGLON = 9999
 
 # ── API keys: hasheadas, nunca en claro ─────────────────────
 # La clave se guarda como sha256(clave). Un dump de la base (backup robado,
@@ -185,7 +186,23 @@ def obtener_precio_envio_multi(
     valor_total_usd = 0.0
     for b in bultos:
         alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
-        cantidad = max(int(b.get("cantidad") or 1), 1)
+        try:
+            cantidad = int(b.get("cantidad") or 1)
+            unidades_aduana = int(b.get("unidades_aduana") or cantidad)
+        except (TypeError, ValueError):
+            return {"encontrado": False,
+                    "motivo": "caja_incompleta: cajas y unidades aduaneras deben ser numeros enteros"}
+        if cantidad < 1 or total_cajas + cantidad > MAX_CAJAS_POR_ENVIO:
+            return {
+                "encontrado": False,
+                "motivo": f"peso_excedido: máximo {MAX_CAJAS_POR_ENVIO} cajas por envío. Dividí en dos envíos.",
+            }
+        if not 1 <= unidades_aduana <= MAX_UNIDADES_ADUANA_POR_RENGLON:
+            return {
+                "encontrado": False,
+                "motivo": ("caja_incompleta: las unidades aduaneras deben estar "
+                           f"entre 1 y {MAX_UNIDADES_ADUANA_POR_RENGLON}"),
+            }
         producto = get_producto(cliente_id, alias)
         if not producto or not producto.activo:
             return {"encontrado": False, "motivo": f"producto_no_encontrado: {alias}"}
@@ -195,7 +212,7 @@ def obtener_precio_envio_multi(
                 "motivo": f"peso_excedido: cada caja de {alias} pesa {producto.peso_kg}kg y el máximo por caja es {MAX_KG_POR_CAJA}kg.",
             }
         total_cajas += cantidad
-        valor_total_usd += producto.valor_usd_default * cantidad
+        valor_total_usd += producto.valor_usd_default * unidades_aduana
         piezas.append({
             "peso_kg": producto.peso_kg,
             "largo_cm": producto.largo_cm,
@@ -203,12 +220,14 @@ def obtener_precio_envio_multi(
             "alto_cm": producto.alto_cm,
             "valor_unitario_usd": producto.valor_usd_default,
             "unidades": cantidad,
+            "unidades_aduana": unidades_aduana,
             "hs_code": producto.hs_code,
             "descripcion_en": producto.nombre_invoice,
         })
         detalle.append({
             "producto_alias": producto.alias_interno,
             "cantidad": cantidad,
+            "unidades_aduana": unidades_aduana,
             "peso_kg": producto.peso_kg,
             "largo_cm": producto.largo_cm,
             "ancho_cm": producto.ancho_cm,
@@ -356,7 +375,7 @@ def cotizar_couriers_cliente(
     from servicios.carriers import cotizar_carriers_cliente
     from servicios.cotizador import dolar_ars
     from servicios.paises import existe, referencia
-    from servicios.pricing import get_pricing_config
+    from servicios.configuracion_couriers_cliente import configuracion_cotizacion
 
     destino_iso = (destino_pais or "").strip().upper()
     if not existe(destino_iso):
@@ -386,13 +405,16 @@ def cotizar_couriers_cliente(
     if not existe(origen_iso):
         origen_iso = "AR"
 
+    acceso_couriers = configuracion_cotizacion(cliente_id)
     tarjetas = cotizar_carriers_cliente(
         origen=_direccion(origen_real, origen_iso),
         destino=_direccion(destino_real, destino_iso),
         paquete=piezas[0],
         dolar=dolar_ars(),
-        pricing_cliente=get_pricing_config(cliente_id),
+        pricing_cliente=acceso_couriers["pricing_general"],
         paquetes=piezas,
+        pricing_por_courier=acceso_couriers["pricing_por_courier"],
+        couriers_habilitados=acceso_couriers["couriers_habilitados"],
     )
 
     opciones = [t for t in tarjetas if t.get("estado") == "cotizado"]
@@ -441,7 +463,21 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
     piezas, detalle, total_cajas = [], [], 0
     for b in bultos:
         alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
-        cantidad = max(int(b.get("cantidad") or 1), 1)
+        try:
+            cantidad = int(b.get("cantidad") or 1)
+            unidades_aduana = int(b.get("unidades_aduana") or cantidad)
+        except (TypeError, ValueError):
+            return [], [], ("caja_incompleta: cajas y unidades aduaneras "
+                            "deben ser numeros enteros")
+        # Validar ANTES de expandir `range(cantidad)`: un POST manipulado no
+        # puede obligar al proceso a materializar millones de cajas para recién
+        # después descubrir que superaba el máximo operativo.
+        if cantidad < 1 or total_cajas + cantidad > MAX_CAJAS_POR_ENVIO:
+            return [], [], (f"peso_excedido: máximo {MAX_CAJAS_POR_ENVIO} cajas "
+                            "por envío. Dividí en dos envíos.")
+        if not 1 <= unidades_aduana <= MAX_UNIDADES_ADUANA_POR_RENGLON:
+            return [], [], ("caja_incompleta: las unidades aduaneras deben estar "
+                            f"entre 1 y {MAX_UNIDADES_ADUANA_POR_RENGLON}")
 
         if alias:
             producto = get_producto(cliente_id, alias)
@@ -477,6 +513,10 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
             if v:
                 fila[k] = v
         fila["cantidad"] = cantidad
+        # `cantidad` son cajas fisicas; `unidades_aduana` son las unidades
+        # comerciales del renglon (p. ej. 1 caja con 8 camisas). DHL exige
+        # ambos conceptos por separado.
+        fila["unidades_aduana"] = unidades_aduana
 
         if float(fila.get("peso_kg") or 0) > MAX_KG_POR_CAJA:
             return [], [], (f"peso_excedido: cada caja pesa {fila['peso_kg']}kg "

@@ -123,6 +123,30 @@ def test_ignora_los_productos_que_requieren_acuerdo_previo():
     assert out["costo"] == 120.0
 
 
+def test_elige_billc_aunque_basec_venga_primero():
+    producto = _producto("P", 1)
+    producto["totalPrice"] = [
+        {"price": 80, "priceCurrency": "USD", "currencyType": "BASEC"},
+        {"price": 125, "priceCurrency": "USD", "currencyType": "BILLC"},
+    ]
+
+    out, _ = _llamar([producto])
+
+    assert out["encontrado"] and out["costo"] == 125
+
+
+def test_precio_billc_cero_o_no_finito_falla_cerrado():
+    for invalido in (0, -1, "NaN"):
+        producto = _producto("P", 1)
+        producto["totalPrice"] = [{
+            "price": invalido, "priceCurrency": "USD", "currencyType": "BILLC",
+        }]
+
+        out, _ = _llamar([producto])
+
+        assert not out["encontrado"] and "inválido" in out["error"]
+
+
 def test_avisa_cuando_la_ruta_no_tiene_nuestro_producto():
     out, _ = _llamar([_producto("K", 310.0)])
     assert not out["encontrado"]
@@ -304,11 +328,12 @@ def test_una_sola_caja_sigue_yendo_por_el_GET():
 SHIPPER_CN = {
     "nombre": "Shenzhen Trading Co", "pais": "CN", "ciudad": "SHENZHEN",
     "city": "SHENZHEN", "postal_code": "518000", "zip": "518000",
-    "direccion": "Main Rd 1", "documento": "30-71234567-9",
+    "direccion": "Main Rd 1", "telefono": "+86 755 1234567",
+    "documento": "30-71234567-9",
 }
 RECEIVER_AR = {
     "nombre": "WAIMAO", "pais": "AR", "ciudad": "BUENOS AIRES",
-    "zip": "1043", "direccion": "Corrientes 1234",
+    "zip": "1043", "direccion": "Corrientes 1234", "telefono": "+54 11 1234 5678",
 }
 BULTO_IMPO = {
     "peso_kg": 2.0, "largo_cm": 30, "ancho_cm": 20, "alto_cm": 10,

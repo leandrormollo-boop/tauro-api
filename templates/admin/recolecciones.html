@@ -9,7 +9,8 @@
 </div>
 
 {% set qp = request.query_params %}
-{% if qp.get('ok') %}<div class="msg ok" style="margin-bottom:16px;">Recolección cancelada.</div>{% endif %}
+{% if qp.get('ok') == 'verificada' %}<div class="msg ok" style="margin-bottom:16px;">Verificación registrada.</div>
+{% elif qp.get('ok') %}<div class="msg ok" style="margin-bottom:16px;">Recolección cancelada.</div>{% endif %}
 {% if qp.get('error') %}<div class="msg error" style="margin-bottom:16px;">{{ qp.get('error') }}</div>{% endif %}
 
 {% if recolecciones %}
@@ -20,6 +21,7 @@
         <tr>
           <th>Fecha</th>
           <th>Cliente</th>
+          <th>Courier / estado</th>
           <th>Horario</th>
           <th>Bultos / peso</th>
           <th>Dirección e indicaciones</th>
@@ -33,18 +35,53 @@
           <td class="mono"><strong>{{ r.fecha.strftime('%d/%m') if r.fecha else '—' }}</strong></td>
           <td><strong>{{ r.cliente_id }}</strong>
               {% if r.cliente_nombre %}<br><small style="color:var(--fg-3);">{{ r.cliente_nombre }}</small>{% endif %}</td>
+          <td>
+            <strong>{{ (r.courier or 'FEDEX')|upper }}</strong><br>
+            {% if r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
+            {% elif r.estado == 'AGENDANDO' %}<span class="badge warn">Confirmando</span>
+            {% elif r.estado == 'CANCELANDO' %}<span class="badge warn">Cancelando</span>
+            {% elif r.estado == 'VERIFICAR_COURIER' %}<span class="badge warn">Verificar courier</span>
+            {% else %}<span class="badge">{{ r.estado|title }}</span>{% endif %}
+          </td>
           <td class="mono">{{ r.ready_time }}–{{ r.close_time }}</td>
           <td class="mono">{{ r.bultos }} × {{ '%g'|format(r.peso_kg) }} kg</td>
           <td style="font-size:13px;max-width:280px;">
             {{ r.direccion or '—' }}
             {% if r.instrucciones %}<br><small style="color:var(--fg-3);">{{ r.instrucciones }}</small>{% endif %}
           </td>
-          <td class="mono" style="font-size:11px;">{{ r.confirmation_code or '—' }}</td>
+          <td class="mono" style="font-size:11px;">
+            {{ r.confirmation_code or '—' }}
+            {% if r.courier_message_reference %}<br><small>ref. {{ r.courier_message_reference }}</small>{% endif %}
+            {% if r.error_operativo %}<br><small style="color:var(--warn);">{{ r.error_operativo }}</small>{% endif %}
+          </td>
           <td>
+            {% if r.estado == 'AGENDADA' %}
             <form method="POST" action="/admin/recolecciones/{{ r.id }}/cancelar"
                   data-confirm="¿Cancelar la recolección de {{ r.cliente_id }} del {{ r.fecha.strftime('%d/%m') if r.fecha else '' }}?">
               <button type="submit" class="btn btn-ghost btn-sm">Cancelar</button>
             </form>
+            {% elif r.estado == 'VERIFICAR_COURIER' or
+                    (r.estado in ['AGENDANDO', 'CANCELANDO'] and r.puede_conciliar) %}
+            {% if r.estado != 'VERIFICAR_COURIER' %}
+            <small style="display:block;color:var(--warn);margin-bottom:6px;">
+              La operación quedó sin respuesta hace más de 10 minutos. Verificá la referencia antes de resolver.
+            </small>
+            {% endif %}
+            <form method="POST" action="/admin/recolecciones/{{ r.id }}/resolver"
+                  style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+              <input type="hidden" name="resultado" value="AGENDADA">
+              <input type="text" name="confirmation_code" value="{{ r.confirmation_code or '' }}"
+                     placeholder="Código courier" style="min-width:120px;padding:6px 8px;font-size:11px;">
+              <button type="submit" class="btn btn-primary btn-sm">Está activa</button>
+            </form>
+            <form method="POST" action="/admin/recolecciones/{{ r.id }}/resolver"
+                  data-confirm="Confirmá sólo después de revisar la referencia en el courier. ¿No existe o quedó cancelada?">
+              <input type="hidden" name="resultado" value="CANCELADA">
+              <button type="submit" class="btn btn-ghost btn-sm">No existe / cancelada</button>
+            </form>
+            {% else %}
+            <small style="color:var(--fg-3);">Sin acción hasta recibir respuesta.</small>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

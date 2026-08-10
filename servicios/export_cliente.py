@@ -54,7 +54,8 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     """El archivo completo, en memoria. Nunca toca disco."""
     from servicios.catalogo import get_productos
     from servicios.cuenta_corriente import (
-        get_facturado_real, get_facturas_recientes, get_pagos, movimientos, saldo,
+        get_facturado_real, get_facturas_recientes, get_pagos, movimientos,
+        resumir_facturacion, saldo,
     )
     from servicios.solicitudes_guia import listar_solicitudes_cliente
 
@@ -63,7 +64,7 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     wb.remove(wb.active)   # la hoja default vacía
 
     # ── Envíos ──────────────────────────────────────────────
-    solicitudes = listar_solicitudes_cliente(cliente_id, limite=5000)
+    solicitudes = listar_solicitudes_cliente(cliente_id, limite=None)
 
     def _nac_o_int(s: dict) -> str:
         # Regla vigente: lo emitido por envia.com es nacional, el resto
@@ -100,11 +101,21 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     # ── Cuenta corriente ────────────────────────────────────
     facturado = get_facturado_real(cliente_id)
     s = saldo(cliente_id, total_facturado_ars=facturado)
-    movs = movimientos(cliente_id, get_facturas_recientes(cliente_id, limite=5000))
-    filas_cc = [[m["fecha"], "Pago" if m["tipo"] == "PAGO" else "Factura",
+    cargos = get_facturas_recientes(cliente_id, limite=None)
+    resumen_fc = resumir_facturacion(cargos)
+    movs = movimientos(cliente_id, cargos)
+    tipos_cc = {
+        "PAGO": "Pago aplicado",
+        "PAGO_PENDIENTE": "Pago en revisión",
+        "FC": "Factura",
+        "PENDIENTE_FACTURA": "Pendiente de facturación",
+    }
+    filas_cc = [[m["fecha"], tipos_cc.get(m["tipo"], m["tipo"]),
                  m["concepto"], m["monto_ars"]] for m in movs]
     filas_cc.append([])
-    filas_cc.append(["", "", "TOTAL FACTURADO", s["facturado_ars"]])
+    filas_cc.append(["", "", "TOTAL FACTURADO", resumen_fc["facturado_ars"]])
+    filas_cc.append(["", "", "PENDIENTE DE FACTURACIÓN", resumen_fc["pendiente_ars"]])
+    filas_cc.append(["", "", "TOTAL CARGOS", resumen_fc["total_cargos_ars"]])
     filas_cc.append(["", "", "TOTAL PAGADO", -s["pagado_ars"]])
     filas_cc.append(["", "", "SALDO PENDIENTE", s["saldo_pendiente_ars"]])
     _hoja(wb, "Cuenta corriente",

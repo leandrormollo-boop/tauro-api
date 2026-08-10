@@ -40,6 +40,8 @@
       </thead>
       <tbody>
       {% for s in solicitudes %}
+        {% set conciliar_courier = s.puede_conciliar_courier %}
+        {% set liberar_reserva = s.puede_liberar_reserva %}
         <tr>
           <td class="mono">
             #{{ s.id }}<br>
@@ -78,6 +80,9 @@
             {% if s.precio_cliente_final_ars %}
               <br><small style="color:var(--fg-4)">Cliente $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
             {% endif %}
+            {% if s.cargo_pendiente %}
+              <div class="msg warn" style="font-size:11px;margin-top:8px;padding:7px;">Cargo pendiente de conciliar</div>
+            {% endif %}
           </td>
           <td style="min-width:170px;">
             {% if s.tracking and s.tiene_label %}
@@ -85,8 +90,27 @@
               <div class="mono" style="font-size:11px;margin:6px 0;">{{ s.tracking }}</div>
               <a href="/admin/pedidos/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-sm btn-primary">⬇ Descargar PDF</a>
             {% elif s.tracking %}
-              <span class="badge">Con tracking</span>
+              <span class="badge warn">Etiqueta pendiente</span>
               <div class="mono" style="font-size:11px;margin-top:6px;">{{ s.tracking }}</div>
+              <form method="POST" action="/admin/pedidos/{{ s.id }}/etiqueta"
+                    enctype="multipart/form-data" style="display:grid;gap:6px;margin-top:8px;">
+                <input type="file" name="label_pdf" accept="application/pdf,.pdf" required>
+                <button type="submit" class="btn btn-sm btn-primary">Adjuntar PDF recuperado</button>
+              </form>
+            {% elif conciliar_courier %}
+              <span class="badge warn">Verificar en {{ (s.courier or 'courier')|upper }}</span>
+              {% if s.courier_message_reference %}
+                <div class="mono" style="font-size:10px;margin-top:6px;">{{ s.courier_message_reference }}</div>
+              {% endif %}
+              <small style="display:block;color:var(--warn);margin-top:6px;">No reemitir hasta conciliar.</small>
+            {% elif liberar_reserva %}
+              <span class="badge warn">Reserva detenida</span>
+              <small style="display:block;color:var(--warn);margin-top:6px;">
+                No llegó a llamar al courier. Liberala desde Operación.
+              </small>
+            {% elif s.estado == 'EMITIENDO' %}
+              <span class="badge warn">Emitiendo ahora</span>
+              <small style="display:block;color:var(--warn);margin-top:6px;">No cambiar ni reemitir.</small>
             {% else %}
               {# El courier sale de la SOLICITUD, no cableado: el cliente elige
                  en el portal y el admin tiene que ver por dónde va a salir de
@@ -103,7 +127,41 @@
             {% endif %}
           </td>
           <td style="min-width:250px;">
+            {% if conciliar_courier %}
+            <div class="msg warn" style="font-size:11px;padding:7px;margin-bottom:8px;">
+              {% if s.estado == 'EMITIENDO' %}La emisión quedó sin respuesta hace más de 10 minutos. {% endif %}
+              Revisá la referencia en {{ (s.courier or 'el courier')|upper }}. No cambies el estado a mano.
+            </div>
+            <form method="POST" action="/admin/pedidos/{{ s.id }}/resolver-courier"
+                  enctype="multipart/form-data" style="display:grid;gap:6px;margin-bottom:8px;"
+                  data-confirm="Confirmá sólo si encontraste la guía real en el courier. Se registrará el tracking y el cargo del cliente.">
+              <input type="hidden" name="resultado" value="CREADA">
+              <input type="text" name="tracking" placeholder="Tracking confirmado" required>
+              <label style="font-size:10px;color:var(--fg-3);">Etiqueta PDF recuperada</label>
+              <input type="file" name="label_pdf" accept="application/pdf,.pdf" required>
+              <button type="submit" class="btn btn-sm btn-primary">
+                La guía existe
+              </button>
+            </form>
+            <form method="POST" action="/admin/pedidos/{{ s.id }}/resolver-courier"
+                  data-confirm="Confirmá sólo después de comprobar que el courier NO creó la guía. Esto volverá a habilitar la emisión.">
+              <input type="hidden" name="resultado" value="NO_CREADA">
+              <button type="submit" class="btn btn-sm btn-ghost">No fue creada</button>
+            </form>
+            {% elif liberar_reserva %}
+            <div class="msg warn" style="font-size:11px;padding:7px;margin-bottom:8px;">
+              La reserva lleva más de 10 minutos y no tiene referencia del courier.
+              Es seguro volverla a Solicitud.
+            </div>
+            <form method="POST" action="/admin/pedidos/{{ s.id }}/liberar-reserva"
+                  data-confirm="Esta fila no llegó a llamar al courier. ¿Liberar la reserva y volver a habilitar la emisión?">
+              <button type="submit" class="btn btn-sm btn-primary">Liberar reserva</button>
+            </form>
+            {% else %}
             <form method="POST" action="/admin/pedidos/{{ s.id }}/estado" class="form" style="display:grid;gap:8px;">
+              {% if s.estado == 'EMITIENDO' %}
+              <div class="msg warn" style="font-size:11px;padding:7px;">Esperá la respuesta del courier antes de editar.</div>
+              {% endif %}
               <select name="estado">
                 {% for e in estados %}
                   <option value="{{ e }}" {% if s.estado == e %}selected{% endif %}>{{ e.replace("_", " ") }}</option>
@@ -118,8 +176,9 @@
                        data-confirm-check="Con esto, lo que quede en los campos PISA lo guardado. Un tracking vacío vuelve a habilitar la emisión de otra guía. ¿Seguro?">
                 Pisar valores (corregir tracking mal cargado)
               </label>
-              <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
+              <button type="submit" class="btn btn-sm btn-primary" {% if s.estado == 'EMITIENDO' %}disabled{% endif %}>Guardar</button>
             </form>
+            {% endif %}
           </td>
         </tr>
       {% else %}

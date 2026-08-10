@@ -2,142 +2,172 @@
 {% block title %}Cotizar{% endblock %}
 
 {% block content %}
-<div class="page-title">
-    <span class="eyebrow">Cotizador</span>
-    <h1>Cotizá tu envío</h1>
-    <p>Precio cerrado al instante, sin compromiso. Si te sirve, lo convertís en envío con un click.</p>
-</div>
+<div class="quote-screen {% if opciones %}has-results{% endif %}">
+    <header class="quote-screen-head">
+        <div>
+            <span class="eyebrow">Cotizador</span>
+            <h1>{% if opciones %}Compará las opciones{% else %}Cotizá tu envío{% endif %}</h1>
+            <p>{% if opciones %}Usalas como referencia y continuá con el destino precargado.{% else %}Obtené una estimación con ruta, peso y medidas. Eso es todo.{% endif %}</p>
+        </div>
+        {% if opciones %}
+        <div class="quote-modify-actions">
+            <button type="button" class="btn btn-ghost btn-sm" id="quote-modify">Modificar datos</button>
+            <noscript><a href="/portal/cotizar" class="btn btn-ghost btn-sm">Nueva cotización</a></noscript>
+        </div>
+        {% endif %}
+    </header>
 
-{% if error %}
-    <div class="msg error" style="max-width:760px;">
+    {% if error %}
+    <div class="msg error quote-error">
         <strong>No pudimos cotizar ese envío.</strong> {{ error }}
     </div>
-{% endif %}
-
-{# con resultados el card se ensancha para que las opciones entren lado a lado #}
-<div class="card" style="max-width:{{ '1020px' if opciones else '760px' }};">
-    <form id="form-cotizar" method="POST" action="/portal/cotizar">
-        {% set paises_nombres = {'AR':'Argentina','US':'Estados Unidos','ES':'España','BR':'Brasil','CL':'Chile','UY':'Uruguay','MX':'México','PE':'Perú','CO':'Colombia','PY':'Paraguay','BO':'Bolivia','EC':'Ecuador','GB':'Reino Unido','DE':'Alemania','FR':'Francia','IT':'Italia','CA':'Canadá','CN':'China'} %}
-        <div class="form-section">
-            <h4><span class="n">1</span> Ruta</h4>
-            <div class="form-grid-2">
-                <div class="form-group">
-                    <label for="origen_pais">Origen (país)</label>
-                    <select name="origen_pais" id="origen_pais" required>
-                        {% for iso, nom in paises_origen %}
-                            <option value="{{ iso }}" {% if iso == 'AR' %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="destino_pais">Destino (país)</label>
-                    <select name="destino_pais" id="destino_pais" required>
-                        {% for iso, nom in paises_destino %}
-                            <option value="{{ iso }}">{{ nom }} ({{ iso }})</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-            <p style="font-size:12.5px;color:var(--fg-4);margin:-4px 0 0;">
-                Tauro asume ciudad y código postal por defecto según la ruta. No tenés que cargar nada más.
-            </p>
-        </div>
-
-        <div class="form-section" style="margin-bottom:20px;">
-            <h4><span class="n">2</span> Paquete</h4>
-            <div class="form-group">
-                <label for="peso_kg">Peso (kg)</label>
-                <input type="number" name="peso_kg" id="peso_kg" min="0.1" max="70" step="0.1" required>
-            </div>
-            <div class="form-grid-3">
-                <div class="form-group">
-                    <label for="largo_cm">Largo (cm)</label>
-                    <input type="number" name="largo_cm" id="largo_cm" min="1" step="0.5" required>
-                </div>
-                <div class="form-group">
-                    <label for="ancho_cm">Ancho (cm)</label>
-                    <input type="number" name="ancho_cm" id="ancho_cm" min="1" step="0.5" required>
-                </div>
-                <div class="form-group">
-                    <label for="alto_cm">Alto (cm)</label>
-                    <input type="number" name="alto_cm" id="alto_cm" min="1" step="0.5" required>
-                </div>
-            </div>
-        </div>
-
-        <button type="submit" class="btn btn-primary btn-full">Cotizar envío</button>
-    </form>
-
-    <div id="toro-loading" class="dots-loader" style="display:none;">
-        <div class="matrix-pill"><div class="matrix"></div></div>
-        <p>Consultando tarifas de la ruta…</p>
-    </div>
-
-    {% if opciones %}
-    <div id="resultado" class="fade-up">
-        <div class="quote-options">
-            {% for op in opciones %}
-            {# Toda la tarjeta es un link a crear el envío con el destino ya
-               elegido — antes era una vidriera sin puerta. #}
-            <a href="/portal/envios/nuevo?destino={{ destino_sel }}"
-               class="price-card{% if loop.first and opciones|length > 1 %} featured{% endif %}"
-               style="display:block;text-decoration:none;color:inherit;cursor:pointer;"
-               title="Crear un envío a este destino">
-                <div class="pc-badge">
-                    {% if loop.first and opciones|length > 1 %}⭐ Recomendado · {% endif %}{{ op.servicio_nombre }}
-                </div>
-
-                {% if op.tarifa_lista_ars %}
-                <div class="was">
-                    Tarifa pública FedEx
-                    <s>$ {{ "{:,.0f}".format(op.tarifa_lista_ars).replace(",", ".") }}</s>
-                </div>
-                {% else %}
-                <div class="was">Precio final puerta a puerta</div>
-                {% endif %}
-
-                <div class="big">
-                    $ {{ "{:,.0f}".format(op.precio_final_ars).replace(",", ".") }}<span class="cur">ARS</span>
-                </div>
-
-                {% if op.tarifa_lista_ars %}
-                {% set ahorro = ((op.tarifa_lista_ars - op.precio_final_ars) / op.tarifa_lista_ars * 100) | round(0) | int %}
-                {% if ahorro >= 1 %}
-                <div class="save">↓ Ahorrás {{ ahorro }}%</div>
-                {% endif %}
-                {% endif %}
-
-                <div class="pc-meta">
-                    USD {{ op.precio_final_usd }} · {{ op.dias_estimados }} días
-                </div>
-            </a>
-            {% endfor %}
-        </div>
-        <p style="text-align:center;color:var(--fg-3);font-size:12.5px;margin:10px 0 0;">
-            Tocá una opción para crear el envío a ese destino. El precio final
-            sale de los productos de tu catálogo.
-        </p>
-
-        <div class="result-box" style="margin-top:14px;">
-            <div class="mini-row"><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
-            <div class="mini-row"><span>Peso facturable</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
-            <div class="mini-row"><span>Peso real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
-            <div class="mini-row"><span>Cotización válida hasta</span><strong>{{ resultado.valida_hasta }}</strong></div>
-
-            {# "con este precio" prometía algo que el form no cumple: el
-               precio final sale del catálogo. El destino sí viaja. #}
-            <a href="/portal/envios/nuevo?destino={{ destino_sel }}" class="btn btn-primary btn-full" style="margin-top:18px;">Crear envío a este destino →</a>
-        </div>
-    </div>
     {% endif %}
+
+    <div class="quote-stage" id="quote-stage" aria-busy="false">
+        <section class="card quote-form-card {% if opciones %}is-hidden{% endif %}" id="quote-form-panel">
+            <form id="form-cotizar" method="POST" action="/portal/cotizar">
+                <div class="quote-form-sections">
+                    <div class="quote-form-block">
+                        <div class="quote-block-head">
+                            <span>1</span>
+                            <div><strong>Ruta</strong><small>Desde dónde y hacia dónde</small></div>
+                        </div>
+                        <div class="quote-route-grid">
+                            <div class="form-group">
+                                <label for="origen_pais">Origen</label>
+                                <select name="origen_pais" id="origen_pais" data-searchable required>
+                                    {% for iso, nom in paises_origen %}
+                                    <option value="{{ iso }}" {% if iso == (form.origen_pais or 'AR') %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="destino_pais">Destino</label>
+                                <select name="destino_pais" id="destino_pais" data-searchable required>
+                                    <option value="" disabled {% if not form.destino_pais %}selected{% endif %}>Elegí destino</option>
+                                    {% for iso, nom in paises_destino %}
+                                    <option value="{{ iso }}" {% if iso == form.destino_pais %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="quote-form-block">
+                        <div class="quote-block-head">
+                            <span>2</span>
+                            <div><strong>Paquete</strong><small>Peso y medidas exteriores</small></div>
+                        </div>
+                        <div class="quote-package-grid">
+                            <div class="form-group">
+                                <label for="peso_kg">Peso (kg)</label>
+                                <input type="number" name="peso_kg" id="peso_kg" min="0.1" max="70" step="0.1" required value="{{ form.peso_kg or '' }}">
+                            </div>
+                            <div class="form-group">
+                                <label for="largo_cm">Largo (cm)</label>
+                                <input type="number" name="largo_cm" id="largo_cm" min="1" step="0.5" required value="{{ form.largo_cm or '' }}">
+                            </div>
+                            <div class="form-group">
+                                <label for="ancho_cm">Ancho (cm)</label>
+                                <input type="number" name="ancho_cm" id="ancho_cm" min="1" step="0.5" required value="{{ form.ancho_cm or '' }}">
+                            </div>
+                            <div class="form-group">
+                                <label for="alto_cm">Alto (cm)</label>
+                                <input type="number" name="alto_cm" id="alto_cm" min="1" step="0.5" required value="{{ form.alto_cm or '' }}">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="quote-submit-row">
+                    <p>Usamos ciudades y códigos postales de referencia. En el envío final volvemos a cotizar con la dirección completa.</p>
+                    <button type="submit" class="btn btn-primary">Ver opciones</button>
+                </div>
+            </form>
+        </section>
+
+        <div id="toro-loading" class="dots-loader quote-loader" role="status" aria-live="polite" hidden>
+            <div class="matrix-pill"><div class="matrix"></div></div>
+            <p>Consultando tarifas de la ruta…</p>
+        </div>
+
+        {% if opciones %}
+        <section id="resultado" class="quote-result-panel fade-up" tabindex="-1"
+                 aria-label="Opciones estimadas para tu envío" aria-live="polite">
+            <div class="quote-result-summary">
+                <div><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
+                <div><span>Peso facturable</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
+                <div><span>Real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
+                <div><span>Comparación</span><strong>{{ resultado.couriers_consultados }} couriers</strong></div>
+            </div>
+
+            <div class="quote-options quote-options-compact">
+                {% for op in opciones %}
+                <article class="price-card quote-price-card"
+                         aria-label="{{ op.servicio_nombre }}: {{ '{:,.0f}'.format(op.precio_final_ars).replace(',', '.') }} pesos estimados, {{ op.dias_estimados }} días estimados.">
+                    <div class="pc-badge quote-carrier-head">
+                        <span><strong>{{ op.carrier_nombre }}</strong><small>{{ op.servicio }}</small></span>
+                        {% if op.carrier_logo %}<img class="quote-carrier-logo" src="{{ op.carrier_logo }}" alt="" aria-hidden="true">{% endif %}
+                    </div>
+                    <div class="quote-price-body">
+                        <div class="was">Estimación del transporte</div>
+                        <div class="big">$ {{ "{:,.0f}".format(op.precio_final_ars).replace(",", ".") }}<span class="cur">ARS</span></div>
+                    </div>
+                    <div class="quote-price-foot">
+                        <span>USD {{ op.precio_final_usd }} · {{ op.dias_estimados }} días</span>
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+
+            {% if no_disponibles %}
+            <div class="quote-unavailable" aria-label="Couriers sin tarifa para esta referencia">
+                {% for courier in no_disponibles %}
+                <span><strong>{{ courier.nombre }}</strong> no cotizó esta referencia</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="quote-result-actions">
+                <p class="quote-result-note">Referencia: elegís el courier y volvemos a cotizar con la dirección completa.</p>
+                <a href="/portal/envios/nuevo?origen={{ form.origen_pais }}&amp;destino={{ destino_sel }}" class="btn btn-primary btn-sm">Crear envío con esta ruta</a>
+            </div>
+        </section>
+        {% endif %}
+    </div>
 </div>
 
 <script nonce="{{ request.state.csp_nonce }}">
-document.getElementById('form-cotizar').addEventListener('submit', function () {
-    this.style.display = 'none';
-    var res = document.getElementById('resultado');
-    if (res) res.style.display = 'none';
-    document.getElementById('toro-loading').style.display = 'block';
-});
+(function () {
+    var form = document.getElementById("form-cotizar");
+    var panel = document.getElementById("quote-form-panel");
+    var result = document.getElementById("resultado");
+    var loader = document.getElementById("toro-loading");
+    var modify = document.getElementById("quote-modify");
+    var stage = document.getElementById("quote-stage");
+
+    if (form) {
+        form.addEventListener("submit", function () {
+            panel.classList.add("is-hidden");
+            if (result) result.classList.add("is-hidden");
+            loader.hidden = false;
+            if (stage) stage.setAttribute("aria-busy", "true");
+        });
+    }
+    if (modify) {
+        modify.addEventListener("click", function () {
+            if (result) result.classList.add("is-hidden");
+            panel.classList.remove("is-hidden");
+            modify.hidden = true;
+            var origin = document.getElementById("origen_pais");
+            if (origin) origin.focus({ preventScroll: true });
+        });
+    }
+    if (result) {
+        window.setTimeout(function () {
+            result.focus({ preventScroll: true });
+        }, 0);
+    }
+})();
 </script>
 {% endblock %}

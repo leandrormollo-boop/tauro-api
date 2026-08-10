@@ -27,6 +27,7 @@ _ESTADOS = {
     "SOLICITADO": ("Reservado", 0),
     "EN_PROCESO": ("En preparación", 1),
     "EMITIENDO":  ("En preparación", 1),
+    "VERIFICAR_COURIER": ("Verificando con el courier", 1),
     "GUIA_LISTA": ("Listo para despacho", 1),
     "DESPACHADO": ("Despachado — en camino", 2),
 }

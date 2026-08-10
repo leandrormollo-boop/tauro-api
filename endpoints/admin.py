@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+import math
 import secrets
 import subprocess
 import sys
@@ -42,6 +43,12 @@ def _courier_valido(valor: str) -> str:
     return v if v in ("fedex", "dhl", "ups") else ""
 from servicios.pricing import (
     PRICING_MODES, describir_pricing, parse_monto_ars, parse_pricing_value,
+)
+from servicios.configuracion_couriers_cliente import (
+    guardar_matriz_con_cursor,
+    obtener_matriz,
+    parsear_fila,
+    resumen_auditoria,
 )
 from servicios.solicitudes_guia import (
     ESTADOS_SOLICITUD,
@@ -931,13 +938,9 @@ def admin_cliente_nuevo(
     markup_valor: str = Form(""),
     markup_nac_tipo: str = Form(""),
     markup_nac_valor: str = Form(""),
-    puede_emitir: str = Form(""),
-    tope_deuda_ars: str = Form(""),
     # Quién paga los impuestos de destino por defecto en los envíos de este
     # cliente. Se puede pisar por envío desde el wizard del portal.
     tax_paga: str = Form(""),
-    # Courier preferido: WAIMAO opera por DHL y lo deja fijado.
-    courier_default: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -955,7 +958,6 @@ def admin_cliente_nuevo(
             nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
                                       fallback_pct=markup_pct)
             nac_tipo, nac_valor = nac["tipo"], nac["valor"]
-        tope_db = parse_monto_ars(tope_deuda_ars)
         # Hashear password si vino una
         from servicios.auth import hash_password
         password_hash_db = hash_password(password.strip()) if password.strip() else None
@@ -966,8 +968,9 @@ def admin_cliente_nuevo(
                     INSERT INTO clientes
                         (cliente_id, email, password_hash, markup_pct, markup_tipo, markup_valor, activo,
                          nombre, cuit, direccion, cp, ciudad, pais, telefono, notas,
-                         markup_nac_tipo, markup_nac_valor, puede_emitir, tope_deuda_ars, tax_paga, courier_default)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         markup_nac_tipo, markup_nac_valor, puede_emitir, puede_recolectar,
+                         tope_deuda_ars, tax_paga, courier_default)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cliente_id, email.strip().lower(), password_hash_db, markup_pct_db,
@@ -977,9 +980,9 @@ def admin_cliente_nuevo(
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
                         nac_tipo, nac_valor,
-                        puede_emitir == "1", tope_db,
+                        False, False, None,
                         normalizar_tax(tax_paga),
-                        _courier_valido(courier_default),
+                        "",
                     ),
                 )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id}?ok=creado", status_code=303)
@@ -1132,6 +1135,180 @@ def admin_cliente_detail(
     )
 
 
+@router.get("/clientes/{cliente_id}/acceso-precios", response_class=HTMLResponse)
+def admin_cliente_acceso_precios_form(
+    request: Request,
+    cliente_id: str,
+    ok: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Una pantalla compacta para permisos y margen por courier."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        matriz = obtener_matriz(cliente_id)
+    except Exception as exc:
+        print(f"[admin] no pude leer acceso/precios de {cliente_id}: {exc}")
+        matriz = None
+    if not matriz:
+        return RedirectResponse(url="/admin/clientes", status_code=303)
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/cliente_acceso_precios.html",
+        context={
+            "seccion": "clientes",
+            "matriz": matriz,
+            "pricing_modes": PRICING_MODES,
+            "flash_ok": (
+                f"Configuración de {matriz['nombre']} actualizada."
+                if ok == "guardado" else None
+            ),
+        },
+    )
+
+
+@router.post("/clientes/{cliente_id}/acceso-precios", response_class=HTMLResponse)
+def admin_cliente_acceso_precios_guardar(
+    request: Request,
+    cliente_id: str,
+    fedex_cotizar: str = Form(""),
+    fedex_emitir: str = Form(""),
+    fedex_pickup: str = Form(""),
+    fedex_markup_tipo: str = Form(""),
+    fedex_markup_valor: str = Form(""),
+    dhl_cotizar: str = Form(""),
+    dhl_emitir: str = Form(""),
+    dhl_pickup: str = Form(""),
+    dhl_markup_tipo: str = Form(""),
+    dhl_markup_valor: str = Form(""),
+    ups_cotizar: str = Form(""),
+    ups_emitir: str = Form(""),
+    ups_pickup: str = Form(""),
+    ups_markup_tipo: str = Form(""),
+    ups_markup_valor: str = Form(""),
+    courier_default: str = Form(""),
+    tope_deuda_ars: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    cliente_id = cliente_id.strip().upper()
+    configs = []
+    try:
+        configs = [
+            parsear_fila(
+                "fedex",
+                puede_cotizar=fedex_cotizar == "1",
+                puede_emitir=fedex_emitir == "1",
+                puede_recolectar=fedex_pickup == "1",
+                markup_tipo=fedex_markup_tipo,
+                markup_valor=fedex_markup_valor,
+            ),
+            parsear_fila(
+                "dhl",
+                puede_cotizar=dhl_cotizar == "1",
+                puede_emitir=dhl_emitir == "1",
+                puede_recolectar=dhl_pickup == "1",
+                markup_tipo=dhl_markup_tipo,
+                markup_valor=dhl_markup_valor,
+            ),
+            parsear_fila(
+                "ups",
+                puede_cotizar=ups_cotizar == "1",
+                puede_emitir=ups_emitir == "1",
+                puede_recolectar=ups_pickup == "1",
+                markup_tipo=ups_markup_tipo,
+                markup_valor=ups_markup_valor,
+            ),
+        ]
+        courier_default_db = _courier_valido(courier_default)
+        if courier_default.strip() and not courier_default_db:
+            raise ValueError("El courier preseleccionado no es válido.")
+        por_id = {c["courier"]: c for c in configs}
+        if courier_default_db and not por_id[courier_default_db]["puede_cotizar"]:
+            raise ValueError(
+                "El courier preseleccionado debe estar habilitado para cotizar."
+            )
+        tope_db = parse_monto_ars(tope_deuda_ars)
+        if tope_db is not None and (not math.isfinite(tope_db) or tope_db < 0):
+            raise ValueError("El tope de deuda debe ser un importe válido no negativo.")
+
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT cliente_id FROM clientes WHERE cliente_id=%s FOR UPDATE",
+                    (cliente_id,),
+                )
+                if not cur.fetchone():
+                    return RedirectResponse(url="/admin/clientes", status_code=303)
+                cur.execute(
+                    """
+                    UPDATE clientes
+                    SET courier_default=%s, tope_deuda_ars=%s
+                    WHERE cliente_id=%s
+                    """,
+                    (courier_default_db, tope_db, cliente_id),
+                )
+                guardar_matriz_con_cursor(cur, cliente_id, configs)
+                from servicios.auditoria import registrar_desde_request_con_cursor
+                registrar_desde_request_con_cursor(
+                    cur,
+                    request,
+                    event="admin.configurar_couriers_cliente",
+                    actor_type="admin",
+                    actor_ref=cliente_id,
+                    status_code=303,
+                    metadata={
+                        "cliente": cliente_id,
+                        "couriers": resumen_auditoria(configs),
+                        "courier_default": courier_default_db or None,
+                        "tope_deuda_configurado": tope_db is not None,
+                    },
+                )
+        return RedirectResponse(
+            url=f"/admin/clientes/{cliente_id}/acceso-precios?ok=guardado",
+            status_code=303,
+        )
+    except Exception as exc:
+        print(f"[admin] no pude guardar acceso/precios de {cliente_id}: {exc}")
+        try:
+            matriz = obtener_matriz(cliente_id)
+        except Exception:
+            matriz = None
+        if not matriz:
+            return RedirectResponse(url="/admin/clientes", status_code=303)
+        if configs:
+            intentadas = {c["courier"]: c for c in configs}
+            for fila in matriz["couriers"]:
+                intento = intentadas.get(fila["id"])
+                if intento:
+                    fila.update({
+                        "config_puede_cotizar": intento["puede_cotizar"],
+                        "config_puede_emitir": intento["puede_emitir"],
+                        "config_puede_recolectar": intento["puede_recolectar"],
+                        "puede_cotizar": intento["puede_cotizar"],
+                        "puede_emitir": intento["puede_emitir"],
+                        "puede_recolectar": intento["puede_recolectar"],
+                        "markup_tipo": intento["markup_tipo"] or "",
+                        "markup_valor": intento["markup_valor"],
+                    })
+            matriz["courier_default"] = _courier_valido(courier_default)
+            matriz["courier_default_configurado"] = _courier_valido(courier_default)
+            matriz["tope_deuda_ars"] = tope_deuda_ars
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/cliente_acceso_precios.html",
+            context={
+                "seccion": "clientes",
+                "matriz": matriz,
+                "pricing_modes": PRICING_MODES,
+                "flash_error": str(exc),
+            },
+            status_code=422,
+        )
+
+
 @router.get("/clientes/{cliente_id}/editar", response_class=HTMLResponse)
 def admin_cliente_editar_form(
     request: Request, cliente_id: str,
@@ -1171,13 +1348,9 @@ def admin_cliente_editar(
     markup_valor: str = Form(""),
     markup_nac_tipo: str = Form(""),
     markup_nac_valor: str = Form(""),
-    puede_emitir: str = Form(""),
-    tope_deuda_ars: str = Form(""),
     # Quién paga los impuestos de destino por defecto en los envíos de este
     # cliente. Se puede pisar por envío desde el wizard del portal.
     tax_paga: str = Form(""),
-    # Courier preferido: WAIMAO opera por DHL y lo deja fijado.
-    courier_default: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -1196,8 +1369,6 @@ def admin_cliente_editar(
             nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
                                       fallback_pct=markup_pct)
             nac_tipo, nac_valor = nac["tipo"], nac["valor"]
-        tope_db = parse_monto_ars(tope_deuda_ars)
-
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1206,7 +1377,7 @@ def admin_cliente_editar(
                         email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
                         direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s,
                         markup_nac_tipo=%s, markup_nac_valor=%s,
-                        puede_emitir=%s, tope_deuda_ars=%s, tax_paga=%s, courier_default=%s
+                        tax_paga=%s
                     WHERE cliente_id=%s
                     """,
                     (
@@ -1216,10 +1387,7 @@ def admin_cliente_editar(
                         nombre or None, cuit or None, direccion or None,
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
-                        nac_tipo, nac_valor,
-                        puede_emitir == "1", tope_db,
-                        normalizar_tax(tax_paga),
-                        _courier_valido(courier_default),
+                        nac_tipo, nac_valor, normalizar_tax(tax_paga),
                         cliente_id.strip().upper(),
                     ),
                 )
@@ -1237,6 +1405,9 @@ def admin_cliente_editar(
             "markup_pct": markup_pct,
             "markup_tipo": markup_tipo,
             "markup_valor": markup_valor,
+            "markup_nac_tipo": markup_nac_tipo,
+            "markup_nac_valor": markup_nac_valor,
+            "tax_paga": normalizar_tax(tax_paga),
             "notas": notas,
             "activo": activo.lower() == "true",
         }
@@ -1376,6 +1547,10 @@ def admin_pedidos(
         flash_ok = "Solicitud actualizada."
     elif ok == "guia_generada":
         flash_ok = "✅ Guía generada en FedEx. Ya podés descargar el PDF."
+    elif ok == "conciliado":
+        flash_ok = "Verificación del courier conciliada y registrada."
+    elif ok == "etiqueta":
+        flash_ok = "Etiqueta PDF recuperada y adjuntada a la guía."
 
     solicitudes = listar_solicitudes_admin(estado=estado)
     return templates.TemplateResponse(
@@ -1450,6 +1625,122 @@ def admin_pedido_estado(
     )
     _notificar_estado_async(solicitud_id, estado)
     return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
+
+
+@router.post("/pedidos/{solicitud_id}/resolver-courier")
+def admin_pedido_resolver_courier(
+    request: Request,
+    solicitud_id: int,
+    resultado: str = Form(...),
+    tracking: str = Form(""),
+    label_pdf: Optional[UploadFile] = File(None),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Concilia una guía incierta sin saltear el cargo de cuenta corriente."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.solicitudes_guia import resolver_verificacion_courier
+
+    contenido = None
+    if label_pdf and label_pdf.filename:
+        contenido = label_pdf.file.read(10 * 1024 * 1024 + 1)
+        if len(contenido) > 10 * 1024 * 1024:
+            r = {"ok": False, "error": "La etiqueta supera el máximo de 10 MB."}
+        else:
+            r = resolver_verificacion_courier(
+                solicitud_id, resultado, tracking, contenido,
+            )
+    else:
+        r = resolver_verificacion_courier(
+            solicitud_id, resultado, tracking, None,
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="admin.resolver_guia_courier",
+        actor_type="admin",
+        actor_ref=str(solicitud_id),
+        success=bool(r.get("ok")),
+        status_code=303,
+        metadata={"solicitud_id": solicitud_id,
+                  "resultado": (resultado or "").strip().upper()},
+    )
+    if r.get("ok"):
+        return RedirectResponse(url="/admin/pedidos?ok=conciliado", status_code=303)
+    return RedirectResponse(
+        url=f"/admin/pedidos?guia_error={quote(str(r.get('error') or 'Error'))}",
+        status_code=303,
+    )
+
+
+@router.post("/pedidos/{solicitud_id}/liberar-reserva")
+def admin_pedido_liberar_reserva(
+    request: Request,
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Libera sólo una emisión stale que nunca llegó a llamar al courier."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.solicitudes_guia import liberar_reserva_sin_operacion_courier
+
+    r = liberar_reserva_sin_operacion_courier(solicitud_id)
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="admin.liberar_reserva_guia",
+        actor_type="admin",
+        actor_ref=str(solicitud_id),
+        success=bool(r.get("ok")),
+        status_code=303,
+        metadata={"solicitud_id": solicitud_id},
+    )
+    if r.get("ok"):
+        return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
+    return RedirectResponse(
+        url=f"/admin/pedidos?guia_error={quote(str(r.get('error') or 'Error'))}",
+        status_code=303,
+    )
+
+
+@router.post("/pedidos/{solicitud_id}/etiqueta")
+def admin_pedido_adjuntar_etiqueta(
+    request: Request,
+    solicitud_id: int,
+    label_pdf: UploadFile = File(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Recupera una etiqueta faltante sin recrear la guía ni tocar el cargo."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.solicitudes_guia import adjuntar_label_guia
+
+    contenido = label_pdf.file.read(10 * 1024 * 1024 + 1)
+    if len(contenido) > 10 * 1024 * 1024:
+        r = {"ok": False, "error": "La etiqueta supera el máximo de 10 MB."}
+    else:
+        r = adjuntar_label_guia(solicitud_id, contenido)
+
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="admin.adjuntar_etiqueta_guia",
+        actor_type="admin",
+        actor_ref=str(solicitud_id),
+        success=bool(r.get("ok")),
+        status_code=303,
+        metadata={"solicitud_id": solicitud_id},
+    )
+    if r.get("ok"):
+        return RedirectResponse(url="/admin/pedidos?ok=etiqueta", status_code=303)
+    return RedirectResponse(
+        url=f"/admin/pedidos?guia_error={quote(str(r.get('error') or 'Error'))}",
+        status_code=303,
+    )
 
 
 @router.get("/pedidos/{solicitud_id}/editar", response_class=HTMLResponse)
@@ -1754,6 +2045,40 @@ def admin_recoleccion_cancelar(rec_id: int, admin_token: Optional[str] = Cookie(
     return RedirectResponse(
         url=f"/admin/recolecciones?error={quote(str(r.get('error') or 'Error'))}",
         status_code=303)
+
+
+@router.post("/recolecciones/{rec_id}/resolver")
+def admin_recoleccion_resolver(
+    request: Request,
+    rec_id: int,
+    resultado: str = Form(...),
+    confirmation_code: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Registra el resultado que un operador verificó en el courier."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.recolecciones import resolver_verificacion
+
+    r = resolver_verificacion(rec_id, resultado, confirmation_code)
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="admin.resolver_recoleccion",
+        actor_type="admin",
+        actor_ref=str(rec_id),
+        success=bool(r.get("ok")),
+        status_code=303,
+        metadata={"recoleccion_id": rec_id,
+                  "resultado": (resultado or "").strip().upper()},
+    )
+    if r.get("ok"):
+        return RedirectResponse(url="/admin/recolecciones?ok=verificada", status_code=303)
+    return RedirectResponse(
+        url=f"/admin/recolecciones?error={quote(str(r.get('error') or 'Error'))}",
+        status_code=303,
+    )
 
 
 # ── Cargar un envío ya realizado (canal externo) ────────────

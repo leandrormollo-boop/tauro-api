@@ -5,7 +5,7 @@ Regla de Leandro (01/08/2026): "en su portal él realiza el envío y ve todo el
 tiempo el precio final que tiene este cliente. NO puede ver el costo nuestro."
 
 No es una preferencia de diseño: de esa diferencia sale el margen. Si WAIMAO
-—costo + $100.000 fijos— ve el markup, sabe nuestro costo con una resta, y con
+—costo + $95.000 fijos— ve el markup, sabe nuestro costo con una resta, y con
 eso puede negociar contra nuestro propio número o irse a comprarle directo al
 courier.
 

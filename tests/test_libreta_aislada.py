@@ -67,8 +67,16 @@ def test_la_libreta_acepta_remitentes_del_exterior():
 
 
 def test_el_pais_no_esta_forzado_a_argentina():
-    """El default es AR, pero tiene que aceptar cualquier país."""
+    """El default es AR, pero acepta cualquier ISO incluido en el catálogo."""
     fuente = inspect.getsource(dd.crear_direccion)
-    assert 'pais = (pais or "AR").strip().upper()' in fuente, (
-        "el país se estaría pisando en vez de tomar el elegido"
-    )
+    assert "pais = _pais(pais)" in fuente
+    assert dd._pais(" cn ") == "CN"
+
+
+def test_un_pais_fuera_del_catalogo_no_se_puede_guardar():
+    try:
+        dd._pais("ZZ")
+    except ValueError as e:
+        assert str(e) == "País inválido."
+    else:
+        raise AssertionError("una ficha manipulada podría persistir un país inexistente")

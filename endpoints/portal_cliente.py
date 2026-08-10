@@ -23,22 +23,18 @@ from fastapi.templating import Jinja2Templates
 
 from servicios.auth import (
     buscar_cliente_por_email, generar_token, validar_token,
-    revocar_token, link_magico_url, get_markup_pct,
+    revocar_token, link_magico_url,
     autenticar_cliente, consumir_magic_token,
 )
 from servicios.rate_limit import check_rate, reset_rate, client_ip
-from servicios.rutas import (
-    get_rutas_activas, get_ruta,
-    get_paises_origen, get_paises_destino, find_ruta_por_paises,
-)
 from servicios.catalogo import (
     get_productos, get_producto, agregar_producto,
     actualizar_producto_cliente, eliminar_producto_cliente,
 )
-from servicios.cotizador import cotizar, cotizar_opciones
+from servicios.cotizador import cotizar_referencia_couriers
 from servicios.cuenta_corriente import (
-    saldo, total_pagado, get_pagos, get_facturado_real, get_facturas_recientes,
-    movimientos,
+    saldo, total_pagado, get_facturado_real, get_facturas_recientes,
+    movimientos, resumir_facturacion,
 )
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
@@ -51,7 +47,7 @@ from servicios.solicitudes_guia import (
 from servicios.carriers import courier_default_cliente
 from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
 from servicios.pricing import parse_monto_ars
-from servicios.panel_cliente import checklist_arranque, embudo_envios
+from servicios.panel_cliente import embudo_envios, preparar_historial_envios
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
     listar_pedidos, contar_pendientes, obtener_pedido,
@@ -64,14 +60,12 @@ from servicios.direcciones import (
     TIPO_DESTINATARIO,
     TIPO_REMITENTE,
     actualizar_direccion,
-    contar_direcciones,
     crear_direccion,
     eliminar_direccion,
     listar_direcciones,
     obtener_direccion,
     obtener_remitente_para_envio,
 )
-from modelos.cotizacion import CotizacionInput
 from modelos.producto import ProductoNuevo
 
 # Email sender — para link mágico de login
@@ -365,22 +359,15 @@ def logout(token: Optional[str] = Cookie(None)):
 def home(request: Request, cliente: str = Depends(cliente_actual)):
     facturado = get_facturado_real(cliente)
     saldo_data = saldo(cliente, total_facturado_ars=facturado)
-    pagos_recientes = get_pagos(cliente)[-5:][::-1]
-    facturas_recientes = get_facturas_recientes(cliente, limite=5)
     solicitudes = listar_solicitudes_cliente(cliente, limite=5)
-    direcciones_count = contar_direcciones(cliente)
 
     return templates.TemplateResponse(
         request=request, name="portal/home.html",
         context={
             "cliente": cliente,
             "saldo": saldo_data,
-            "pagos_recientes": pagos_recientes,
-            "facturas_recientes": facturas_recientes,
             "solicitudes": solicitudes,
-            "direcciones_count": direcciones_count,
-            # Bloques "¿qué falta?" y "¿qué pasó?" — ver servicios/panel_cliente.py
-            "checklist": checklist_arranque(cliente),
+            # Sólo alimenta recordatorios compactos de acciones reales.
             "embudo": embudo_envios(cliente),
         },
     )
@@ -455,7 +442,9 @@ def recolecciones_view(
     envíos") y se precargan courier, bultos y peso de ESA guía — el cliente
     coordina el retiro del envío que está mirando, no arranca de cero.
     """
-    from servicios.recolecciones import listar
+    from servicios.recolecciones import (
+        listar, datos_retiro_desde_solicitud, cliente_puede_recolectar,
+    )
     from datetime import date, timedelta
 
     try:
@@ -463,6 +452,16 @@ def recolecciones_view(
     except Exception as e:
         print(f"[portal] no pude listar recolecciones de {cliente}: {e}")
         recolecciones = []
+    from servicios.configuracion_couriers_cliente import mapa_permisos
+    permisos_pickup = mapa_permisos(cliente, "recolectar")
+    couriers_recoleccion = [
+        {"id": "FEDEX", "nombre": "FedEx"},
+        {"id": "DHL", "nombre": "DHL Express"},
+    ]
+    couriers_recoleccion = [
+        c for c in couriers_recoleccion
+        if permisos_pickup.get(c["id"].lower(), False)
+    ]
 
     envio_pre = None
     if envio:
@@ -470,15 +469,23 @@ def recolecciones_view(
         # Sólo precarga si la guía existe: sin guía todavía no hay nada que
         # el chofer pueda llevarse.
         if s and s.get("tracking"):
-            envio_pre = {
-                "id": s["id"],
-                "courier": (s.get("courier") or "FEDEX").upper(),
-                "bultos": s.get("cantidad") or 1,
-                "peso_kg": s.get("peso_kg") or 1,
-                "tracking": s.get("tracking"),
-            }
+            envio_pre = datos_retiro_desde_solicitud(s)
 
-    remitente = obtener_remitente_para_envio(cliente, None)
+    puede_recolectar = bool(couriers_recoleccion)
+    if envio_pre:
+        puede_recolectar = bool(
+            permisos_pickup.get((envio_pre.get("courier") or "").lower(), False)
+        )
+
+    if envio_pre:
+        origen = envio_pre["origen"]
+        remitente = {
+            "nombre": origen["nombre"], "direccion": origen["calle"],
+            "ciudad": origen["ciudad"], "estado": origen["estado"],
+            "cp": origen["zip"], "pais": origen["pais"],
+        }
+    else:
+        remitente = obtener_remitente_para_envio(cliente, None)
     # Mañana por defecto (hoy suele estar pasado el corte); si cae finde,
     # el lunes — así el form abre con una fecha que el courier acepta.
     sugerida = date.today() + timedelta(days=1)
@@ -489,6 +496,9 @@ def recolecciones_view(
         request=request, name="portal/recolecciones.html",
         context={"cliente": cliente, "recolecciones": recolecciones,
                  "remitente": remitente, "envio_pre": envio_pre,
+                 "puede_recolectar": puede_recolectar,
+                 "couriers_recoleccion": couriers_recoleccion,
+                 "courier_default": (courier_default_cliente(cliente) or "fedex").upper(),
                  "fecha_sugerida": sugerida.strftime("%Y-%m-%d"),
                  "fecha_max": (date.today() + timedelta(days=14)).strftime("%Y-%m-%d")},
     )
@@ -503,6 +513,7 @@ def recoleccion_nueva(
     peso_kg: str = Form("1"),
     instrucciones: str = Form(""),
     courier: str = Form("FEDEX"),
+    solicitud_id: Optional[int] = Form(None),
     cliente: str = Depends(cliente_actual),
 ):
     from servicios.recolecciones import crear
@@ -510,7 +521,7 @@ def recoleccion_nueva(
     try:
         r = crear(cliente, fecha, ready_time, close_time, bultos,
                   float((peso_kg or "1").replace(",", ".")), instrucciones,
-                  courier=courier)
+                  courier=courier, solicitud_id=solicitud_id)
     except Exception as e:
         print(f"[portal] error agendando recolección de {cliente}: {e}")
         r = {"ok": False, "error": "No pudimos agendarla. Probá de nuevo o escribinos."}
@@ -544,13 +555,20 @@ def cuenta_corriente(request: Request, cliente: str = Depends(cliente_actual)):
     """
     facturado = get_facturado_real(cliente)
     saldo_data = saldo(cliente, total_facturado_ars=facturado)
-    # Todas las facturas, no las últimas 5 del home: esto ES el historial.
-    facturas = get_facturas_recientes(cliente, limite=500)
+    # Esto ES el historial: no truncar movimientos viejos. Cada cargo conserva
+    # además si ya tiene número de factura o sigue pendiente de facturación.
+    facturas = get_facturas_recientes(cliente, limite=None)
     movs = movimientos(cliente, facturas)
+    resumen_facturacion = resumir_facturacion(facturas)
 
     return templates.TemplateResponse(
         request=request, name="portal/cuenta.html",
-        context={"cliente": cliente, "saldo": saldo_data, "movimientos": movs},
+        context={
+            "cliente": cliente,
+            "saldo": saldo_data,
+            "movimientos": movs,
+            "resumen_facturacion": resumen_facturacion,
+        },
     )
 
 
@@ -640,6 +658,10 @@ def cotizar_form(request: Request, cliente: str = Depends(cliente_actual)):
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
             "resultado": None,
+            "opciones": None,
+            "no_disponibles": [],
+            "error": None,
+            "form": {},
         },
     )
 
@@ -657,24 +679,24 @@ def cotizar_post(
 ):
     error = None
     opciones = None
+    no_disponibles = []
+    resumen = None
 
     try:
-        ruta = find_ruta_por_paises(origen_pais, destino_pais)
-        if not ruta:
-            raise ValueError(
-                f"No hay ruta activa para {origen_pais} → {destino_pais}. "
-                "Contactá a Tauro para habilitarla."
-            )
-
-        input_data = CotizacionInput(
-            ruta_id=ruta.ruta_id, peso_kg=peso_kg,
-            largo_cm=largo_cm, ancho_cm=ancho_cm, alto_cm=alto_cm,
+        comparacion = cotizar_referencia_couriers(
+            cliente=cliente,
+            origen_pais=origen_pais,
+            destino_pais=destino_pais,
+            peso_kg=peso_kg,
+            largo_cm=largo_cm,
+            ancho_cm=ancho_cm,
+            alto_cm=alto_cm,
         )
-        markup = get_markup_pct(cliente)
-        # Todas las opciones de servicio (Priority, Economy...) en una llamada
-        opciones = cotizar_opciones(cliente, markup_pct=markup, input_data=input_data)
-        if not opciones:
-            raise ValueError("FedEx no devolvió opciones para esa ruta.")
+        opciones = comparacion["opciones"]
+        no_disponibles = comparacion["no_disponibles"]
+        resumen = comparacion["resumen"]
+        if not comparacion["encontrado"]:
+            raise ValueError("Ningún courier devolvió una tarifa para esa referencia.")
     except Exception as e:
         error = str(e)
 
@@ -685,8 +707,17 @@ def cotizar_post(
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
             "opciones": opciones,
-            "resultado": opciones[0] if opciones else None,
+            "resultado": resumen,
+            "no_disponibles": no_disponibles,
             "error": error,
+            "form": {
+                "origen_pais": origen_pais,
+                "destino_pais": destino_pais,
+                "peso_kg": peso_kg,
+                "largo_cm": largo_cm,
+                "ancho_cm": ancho_cm,
+                "alto_cm": alto_cm,
+            },
             # Para que cada tarjeta de opción linkee a "crear envío" con el
             # destino ya elegido.
             "destino_sel": destino_pais,
@@ -759,12 +790,14 @@ async def api_precio_envio_multi(
             "pais": str(body.get("origen_pais") or "").strip(),
             "ciudad": str(body.get("origen_ciudad") or "").strip(),
             "cp": str(body.get("origen_cp") or "").strip(),
+            "estado": str(body.get("origen_estado") or "").strip(),
         }
         if not origen_real["pais"]:
             rem = obtener_remitente_para_envio(cliente) or {}
             origen_real = {"pais": rem.get("pais") or "AR",
                            "ciudad": rem.get("ciudad") or "",
-                           "cp": rem.get("cp") or ""}
+                           "cp": rem.get("cp") or "",
+                           "estado": rem.get("estado") or ""}
         bultos = body.get("bultos") or []
         # Sin truncar en silencio: si hay de más, obtener_precio_envio_multi
         # lo rechaza con motivo y el preview muestra lo MISMO que diría el submit.
@@ -777,7 +810,7 @@ async def api_precio_envio_multi(
                 **{k: b.get(k) for k in (
                     "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
                     "valor_unitario_usd", "descripcion_en", "hs_code",
-                    "pais_origen",
+                    "pais_origen", "unidades_aduana",
                 ) if b.get(k) not in (None, "")},
             }
             for b in bultos
@@ -944,16 +977,14 @@ def _cliente_puede_emitir(cliente: str) -> bool:
     Ante cualquier problema de base devuelve False: no poder leer un permiso
     nunca puede terminar en mostrar un botón que emite plata real.
     """
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT puede_emitir FROM clientes WHERE cliente_id = %s",
-                            (cliente,))
-                fila = cur.fetchone()
-                return bool(fila and fila["puede_emitir"])
-    except Exception as e:
-        print(f"[portal] no pude leer puede_emitir de {cliente}: {e}")
-        return False
+    from servicios.configuracion_couriers_cliente import mapa_permisos
+    return any(mapa_permisos(cliente, "emitir").values())
+
+
+def _cliente_puede_emitir_courier(cliente: str, courier: str) -> bool:
+    """Permiso visual del courier concreto; el servicio lo revalida con lock."""
+    from servicios.configuracion_couriers_cliente import permiso_courier
+    return permiso_courier(cliente, courier, "emitir")
 
 
 @router.get("/envios", response_class=HTMLResponse)
@@ -962,56 +993,27 @@ def envios_view(
     ok: Optional[str] = None,
     tipo: str = "",
     paso: str = "",
+    pagina: str = "1",
     cliente: str = Depends(cliente_actual),
 ):
-    from servicios.couriers_urls import es_nacional as _es_nac
-    from servicios.panel_cliente import PASOS_EMBUDO, paso_de_estado
+    # Esta es la vista de historial, no un preview: no ocultar silenciosamente
+    # los envíos anteriores al límite por defecto del servicio.
+    historial = listar_solicitudes_cliente(cliente, limite=None)
+    vista = preparar_historial_envios(historial, tipo, paso, pagina)
 
-    solicitudes = listar_solicitudes_cliente(cliente)
-    # División nacional/internacional de la spec. El filtro es por courier
-    # (la regla vive en couriers_urls, no acá): se filtra en memoria porque
-    # el listado ya viene acotado por cliente.
-    tipo = (tipo or "").lower()
-    if tipo == "nacional":
-        solicitudes = [s for s in solicitudes if _es_nac(s.get("courier"))]
-    elif tipo == "internacional":
-        solicitudes = [s for s in solicitudes if not _es_nac(s.get("courier"))]
-
-    # Contadores del embudo, chicos, arriba de la tabla. Se cuentan DESPUÉS
-    # del filtro nacional/internacional y ANTES del de paso: así el número
-    # del chip siempre coincide con las filas que vas a ver al tocarlo.
-    # Se saltea "por_armar" — esas son ventas de tienda, todavía no envíos.
-    todos_n = len(solicitudes)
-    conteos = {}
-    for s in solicitudes:
-        p = paso_de_estado(s.get("estado"))
-        if p:
-            conteos[p] = conteos.get(p, 0) + 1
-    chips = [
-        {**p, "cantidad": conteos.get(p["clave"], 0)}
-        for p in PASOS_EMBUDO
-        if p["clave"] != "por_armar"
-    ]
-
-    paso = (paso or "").lower()
-    if paso in {c["clave"] for c in chips}:
-        solicitudes = [s for s in solicitudes if paso_de_estado(s.get("estado")) == paso]
-    else:
-        paso = ""
-
-    puede_emitir = _cliente_puede_emitir(cliente)
+    from servicios.configuracion_couriers_cliente import mapa_permisos
+    permisos_emision = mapa_permisos(cliente, "emitir")
+    puede_emitir = any(permisos_emision.values())
+    for solicitud in vista["solicitudes"]:
+        solicitud["puede_emitir_cliente"] = bool(
+            permisos_emision.get((solicitud.get("courier") or "").lower(), False)
+        )
 
     return templates.TemplateResponse(
         request=request, name="portal/envios.html",
         context={
             "cliente": cliente,
-            "solicitudes": solicitudes,
-            "tipo_filtro": tipo,
-            "chips": chips,
-            "paso_filtro": paso,
-            # El chip "Todos" cuenta las filas de verdad (incluidos los
-            # cancelados, que no viven en ningún paso del embudo).
-            "total_sin_filtrar": todos_n,
+            **vista,
             "puede_emitir": puede_emitir,
             "flash_ok": (
                 ("Solicitud creada. Podés emitir la guía vos mismo desde el botón "
@@ -1056,6 +1058,8 @@ def _paises_con_nacional() -> list:
 def envio_nuevo_form(
     request: Request,
     pedido_tienda: Optional[int] = None,
+    destinatario_id: Optional[int] = None,
+    origen: str = "",
     destino: str = "",
     cliente: str = Depends(cliente_actual),
 ):
@@ -1063,10 +1067,36 @@ def envio_nuevo_form(
     # el destinatario con lo que el comprador completó en el checkout.
     form: dict = {}
     pedido_info = None
+    error = None
     # Si viene del cotizador ("tocá la opción para crear el envío"), el
     # destino elegido ya llega puesto — una promesa menos que romper.
     if destino.strip() and not pedido_tienda:
         form["destino_pais"] = destino.strip().upper()[:3]
+    if origen.strip() and not pedido_tienda:
+        form["rem_pais"] = origen.strip().upper()[:3]
+
+    # Inicio directo desde "Mis clientes". El id nunca alcanza por sí solo:
+    # se resuelve junto con el cliente autenticado, así una cuenta no puede
+    # precargar un destinatario perteneciente a otra.
+    if destinatario_id and not pedido_tienda:
+        destinatario = obtener_direccion(cliente, destinatario_id, TIPO_DESTINATARIO)
+        if destinatario:
+            form.update({
+                "destinatario_id": str(destinatario["id"]),
+                "dest_nombre": destinatario.get("nombre") or "",
+                "dest_documento": destinatario.get("documento") or "",
+                "dest_email": destinatario.get("email") or "",
+                "dest_telefono": destinatario.get("telefono") or "",
+                "dest_direccion": destinatario.get("direccion") or "",
+                "dest_ciudad": destinatario.get("ciudad") or "",
+                "dest_estado": destinatario.get("estado") or "",
+                "dest_zip": destinatario.get("cp") or "",
+                "destino_pais": destinatario.get("pais") or "",
+            })
+        else:
+            # Mismo mensaje para un id inexistente o ajeno: no revela si otra
+            # cuenta tiene ese registro.
+            error = "Ese cliente guardado no está disponible en tu cuenta."
     if pedido_tienda:
         p = obtener_pedido(cliente, pedido_tienda)
         if p and p["estado"] == "PENDIENTE":
@@ -1094,7 +1124,6 @@ def envio_nuevo_form(
                 "dest_estado": d.get("estado", ""),
                 "dest_zip": d.get("cp", ""),
                 "destino_pais": d.get("pais", ""),
-                "dest_pais": d.get("pais", ""),
                 "observaciones": f"Pedido {p.get('numero') or p.get('pedido_externo_id')} de la tienda: {resumen}",
                 "pedido_tienda_id": p["id"],
             }
@@ -1116,7 +1145,7 @@ def envio_nuevo_form(
             # El courier que el cliente dejó configurado (WAIMAO → DHL):
             # el selector del wizard arranca con este elegido.
             "courier_default": courier_default_cliente(cliente),
-            "error": None,
+            "error": error,
         },
     )
 
@@ -1130,6 +1159,9 @@ def envio_nuevo_post(
     # normaliza a 1 más abajo.
     bulto_producto: list[str] = Form([]),
     bulto_cantidad: list[str] = Form([]),
+    # Unidades COMERCIALES declaradas en aduana, independientes de las
+    # cajas fisicas. Ejemplo: una caja puede contener ocho camisas.
+    bulto_unidades_aduana: list[str] = Form([]),
     # Declaración de invoice POR RENGLÓN (Leandro 05/08): el valor real de
     # venta cambia entre envíos; declarar el default del catálogo cuando se
     # vendió a otro precio es un problema en la aduana. Vacío = catálogo.
@@ -1147,6 +1179,9 @@ def envio_nuevo_post(
     cantidad: int = Form(1),
     # Internacional: courier elegido en el comparador en vivo (fedex/dhl/ups).
     intl_courier: str = Form(""),
+    # Precio que estaba visible al confirmar. No se usa para cobrar (el
+    # servidor recotiza); sólo prueba consentimiento al importe vigente.
+    precio_cotizado_ars: str = Form(""),
     # Quién paga los impuestos de destino EN ESTE envío. Viene con el default
     # del cliente ya seleccionado; acá se guarda lo que quedó elegido.
     tax_paga: str = Form(""),
@@ -1177,7 +1212,6 @@ def envio_nuevo_post(
     dest_ciudad: str = Form(...),
     dest_estado: str = Form(""),
     dest_zip: str = Form(...),
-    dest_pais: str = Form(""),
     dest_alias: str = Form(""),
     guardar_destinatario: Optional[str] = Form(None),
     precio_cliente_final_ars: str = Form(""),
@@ -1191,12 +1225,17 @@ def envio_nuevo_post(
     paises_destino = _paises_con_nacional()
     remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
     destinatarios = listar_direcciones(cliente, TIPO_DESTINATARIO)
+    # Algunos tests/consumidores internos invocan la función directamente,
+    # fuera del inyector de FastAPI. En ese caso el default sigue siendo un
+    # FormInfo, no una lista enviada por el navegador.
+    if not isinstance(bulto_unidades_aduana, (list, tuple)):
+        bulto_unidades_aduana = []
 
     # Normalizar filas de bultos: pares (producto, cantidad) sin filas vacías.
     # Fallback legacy: producto_alias + cantidad sueltos = una sola fila.
     filas = []
     n_filas = max(len(bulto_producto or []), len(bulto_peso or []),
-                  len(bulto_desc_en or []))
+                  len(bulto_desc_en or []), len(bulto_unidades_aduana or []))
     for i in range(n_filas):
         def _campo(lista, idx=i):
             v = lista[idx] if idx < len(lista or []) else ""
@@ -1211,7 +1250,16 @@ def envio_nuevo_post(
             cant = int(_campo(bulto_cantidad) or 1)
         except (TypeError, ValueError):
             cant = 1
-        fila = {"producto": alias, "cantidad": max(cant, 1)}
+        cant = max(cant, 1)
+        try:
+            unidades_aduana = int(_campo(bulto_unidades_aduana) or cant)
+        except (TypeError, ValueError):
+            unidades_aduana = cant
+        fila = {
+            "producto": alias,
+            "cantidad": cant,
+            "unidades_aduana": max(unidades_aduana, 1),
+        }
         # Caja manual: peso y medidas de ESTE envío (con catálogo, lo pisan).
         for lista, clave in ((bulto_peso, "peso_kg"), (bulto_largo, "largo_cm"),
                              (bulto_ancho, "ancho_cm"), (bulto_alto, "alto_cm")):
@@ -1252,8 +1300,19 @@ def envio_nuevo_post(
         "destino_pais": destino_pais,
         "cantidad": cantidad,
         "remitente_id": remitente_id,
+        "rem_nombre": rem_nombre,
+        "rem_contacto": rem_contacto,
+        "rem_documento": rem_documento,
+        "rem_email": rem_email,
+        "rem_telefono": rem_telefono,
+        "rem_direccion": rem_direccion,
+        "rem_ciudad": rem_ciudad,
+        "rem_estado": rem_estado,
+        "rem_zip": rem_zip,
+        "rem_pais": rem_pais,
         "destinatario_id": destinatario_id,
         "dest_nombre": dest_nombre,
+        "dest_contacto": dest_contacto,
         "dest_documento": dest_documento,
         "dest_email": dest_email,
         "dest_telefono": dest_telefono,
@@ -1261,11 +1320,15 @@ def envio_nuevo_post(
         "dest_ciudad": dest_ciudad,
         "dest_estado": dest_estado,
         "dest_zip": dest_zip,
-        "dest_pais": dest_pais,
         "dest_alias": dest_alias,
         "guardar_destinatario": guardar_destinatario,
         "precio_cliente_final_ars": precio_cliente_final_ars,
         "observaciones": observaciones,
+        "intl_courier": intl_courier,
+        "precio_cotizado_ars": precio_cotizado_ars,
+        "tax_paga": tax_paga,
+        "nac_carrier": nac_carrier,
+        "nac_servicio": nac_servicio,
         # BUG corregido: sin esto, un error de validación re-renderizaba el
         # form con el hidden del pedido VACÍO — el vínculo con la venta de la
         # tienda se perdía, el pedido quedaba "pendiente" para siempre y se
@@ -1273,6 +1336,7 @@ def envio_nuevo_post(
         "pedido_tienda_id": pedido_tienda_id,
     }
 
+    error_step = 1
     try:
         remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id)) or {}
         # Lo que el cliente EDITÓ en el form manda sobre la libreta: campo
@@ -1294,19 +1358,40 @@ def envio_nuevo_post(
                 "Completalos en el paso 1 o elegí uno de la libreta."
             )
 
+        error_step = 2
         if destinatario_id:
-            destinatario = obtener_direccion(cliente, _id_opt(destinatario_id) or 0)
-            if destinatario and destinatario["tipo"] == TIPO_DESTINATARIO:
-                dest_nombre = destinatario["nombre"]
-                dest_documento = destinatario.get("documento") or ""
-                dest_email = destinatario.get("email") or ""
-                dest_telefono = destinatario.get("telefono") or ""
-                dest_direccion = destinatario["direccion"]
-                dest_ciudad = destinatario["ciudad"]
-                dest_estado = destinatario.get("estado") or ""
-                dest_zip = destinatario["cp"]
-                dest_pais = destinatario["pais"]
+            destinatario = obtener_direccion(
+                cliente, _id_opt(destinatario_id) or 0, TIPO_DESTINATARIO
+            )
+            if not destinatario:
+                raise ValueError("Ese cliente guardado no está disponible en tu cuenta.")
+            # La ficha sólo precarga el GET. En el POST mandan exactamente los
+            # campos visibles: también permite borrar un email/teléfono viejo
+            # para este envío sin modificar la ficha guardada.
 
+        dest_nombre = dest_nombre.strip()
+        dest_contacto = dest_contacto.strip()
+        dest_documento = dest_documento.strip()
+        dest_email = dest_email.strip()
+        dest_telefono = dest_telefono.strip()
+        dest_direccion = dest_direccion.strip()
+        dest_ciudad = dest_ciudad.strip()
+        dest_estado = dest_estado.strip()
+        dest_zip = dest_zip.strip()
+        if not all((dest_nombre, dest_direccion, dest_ciudad, dest_zip)):
+            raise ValueError(
+                "Completá nombre, dirección, ciudad y código postal del destinatario."
+            )
+
+        # Un único país canónico: el que el cliente ve y elige en pantalla.
+        # Antes existía además un hidden `dest_pais`; si divergían se podía
+        # cotizar una ruta y guardar/emitir otra.
+        destino_pais = (destino_pais or "").strip().upper()[:2]
+        paises_validos = {iso for iso, _nombre in paises_destino}
+        if destino_pais not in paises_validos:
+            raise ValueError("Elegí un país de destino válido.")
+
+        error_step = 3
         if not filas:
             raise ValueError("Agregá al menos una caja al envío.")
 
@@ -1373,7 +1458,8 @@ def envio_nuevo_post(
                 "coti_id": precio_n["coti_id"],
                 "peso_total_kg": precio_n["peso_total_kg"],
                 "valor_total_usd": round(
-                    sum(b["valor_unitario_usd"] * b["cantidad"] for b in bultos_detalle), 2
+                    sum(b["valor_unitario_usd"] * b.get("unidades_aduana", b["cantidad"])
+                        for b in bultos_detalle), 2
                 ),
                 "precio_ars": elegido["precio_final_ars"],
                 "precio_usd": elegido["precio_final_usd"],
@@ -1427,6 +1513,25 @@ def envio_nuevo_post(
             else:
                 op = opciones[0]   # sin elección explícita: el más barato
 
+            try:
+                precio_visto = float((precio_cotizado_ars or "").strip())
+            except (TypeError, ValueError):
+                precio_visto = None
+            if precio_visto is None or precio_visto <= 0:
+                raise ValueError(
+                    "Esperá a que aparezca la tarifa de DHL y volvé a confirmar el envío."
+                )
+            if abs(float(precio_visto) - float(op["precio_ars"])) > 0.5:
+                anterior = f"$ {float(precio_visto):,.0f}".replace(",", ".")
+                nuevo = f"$ {float(op['precio_ars']):,.0f}".replace(",", ".")
+                # Conservar la tarifa nueva al re-render. El JS la vuelve a
+                # validar en vivo; el próximo click es la aceptación expresa.
+                form["precio_cotizado_ars"] = str(op["precio_ars"])
+                raise ValueError(
+                    f"La tarifa de {op['nombre']} cambió de {anterior} a {nuevo}. "
+                    "Revisá el nuevo importe y volvé a confirmar; no creamos ni cobramos nada."
+                )
+
             # El courier queda GUARDADO en la solicitud: sin esto el
             # despachador de emisión no sabe por dónde sale y cae al default.
             courier_extra = {"courier": op["id"].upper()}
@@ -1449,6 +1554,28 @@ def envio_nuevo_post(
             motivo = precio.get("motivo") or "sin_precio"
             raise ValueError(f"No se pudo cotizar ese envío ({motivo}).")
 
+        if courier_extra.get("courier") == "DHL":
+            # MyDHL exige contactos reales. Una guía aduanera no puede salir
+            # con el antiguo teléfono ficticio 0000000000 ni sin clasificación
+            # de mercadería: se corrige en el wizard, antes de crear/cobrar.
+            faltan_contacto = []
+            if not str(remitente.get("telefono") or "").strip():
+                faltan_contacto.append("el teléfono del remitente")
+            if not str(dest_telefono or "").strip():
+                faltan_contacto.append("el teléfono del destinatario")
+            if faltan_contacto:
+                raise ValueError(
+                    "Para emitir con DHL completá " + " y ".join(faltan_contacto) + "."
+                )
+            sin_hs = [i for i, b in enumerate(bultos_detalle or [], start=1)
+                      if not str(b.get("hs_code") or "").strip()]
+            if sin_hs:
+                cajas = ", ".join(str(i) for i in sin_hs)
+                raise ValueError(
+                    f"Para emitir con DHL completá el HS code de "
+                    f"{'la caja' if len(sin_hs) == 1 else 'las cajas'} {cajas}."
+                )
+
         precio_final = parse_monto_ars(precio_cliente_final_ars)
 
         if guardar_destinatario:
@@ -1464,7 +1591,7 @@ def envio_nuevo_post(
                 ciudad=dest_ciudad,
                 estado=dest_estado,
                 cp=dest_zip,
-                pais=dest_pais or destino_pais,
+                pais=destino_pais,
                 predeterminada=False,
                 notas="Guardado desde creación de envío.",
             )
@@ -1493,7 +1620,9 @@ def envio_nuevo_post(
             # valor unitario × cantidad por renglón), no de un default 100:
             # declarar 100 USD cuando la carga vale 960 es falsear la aduana.
             valor_declarado = round(sum(
-                float(b.get("valor_unitario_usd") or 0) * int(b.get("cantidad") or 1)
+                float(b.get("valor_unitario_usd") or 0) * int(
+                    b.get("unidades_aduana") or b.get("cantidad") or 1
+                )
                 for b in bultos_detalle
             ), 2) or (precio.get("valor_total_usd") or 100)
         solicitud_creada = crear_solicitud_guia(
@@ -1549,13 +1678,32 @@ def envio_nuevo_post(
             print(f"[portal] error creando envío de {cliente}: {type(e).__name__}: {e}")
             mensaje_error = ("No pudimos crear el envío por un problema nuestro. "
                             "Probá de nuevo en un minuto o escribinos.")
+        form["initial_step"] = error_step
+        # Para re-renderizar se usan exactamente los campos visibles que el
+        # cliente envió, incluidos vacíos intencionales. No volver a mezclar
+        # silenciosamente una ficha vieja después de un error del paso 3.
+        remitente_render = obtener_remitente_para_envio(
+            cliente, _id_opt(remitente_id)
+        ) or {}
+        remitente_render.update({
+            "nombre": rem_nombre,
+            "contacto": rem_contacto,
+            "documento": rem_documento,
+            "email": rem_email,
+            "telefono": rem_telefono,
+            "direccion": rem_direccion,
+            "ciudad": rem_ciudad,
+            "estado": rem_estado,
+            "cp": rem_zip,
+            "pais": rem_pais,
+        })
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={
                 "cliente": cliente,
                 "productos": productos,
                 "paises_destino": paises_destino,
-                "remitente": obtener_remitente_para_envio(cliente, _id_opt(remitente_id)),
+                "remitente": remitente_render,
                 "remitentes": remitentes,
                 "destinatarios": destinatarios,
                 "form": form,
@@ -1591,7 +1739,7 @@ def envio_detalle(
         return RedirectResponse(url="/portal/envios", status_code=303)
 
     # ¿Este cliente puede emitir solo? Define si se muestra el botón.
-    puede_emitir = _cliente_puede_emitir(cliente)
+    puede_emitir = _cliente_puede_emitir_courier(cliente, s.get("courier") or "")
 
     return templates.TemplateResponse(
         request=request, name="portal/envio_detalle.html",
@@ -1821,7 +1969,108 @@ def tienda_pedido_descartar(
     return RedirectResponse(url="/portal/tienda?ok=descartado", status_code=303)
 
 
-# ── Direcciones ─────────────────────────────────────────────
+# ── Mis clientes (destinatarios frecuentes) ─────────────────
+@router.get("/clientes", response_class=HTMLResponse)
+def clientes_view(
+    request: Request,
+    ok: Optional[str] = None,
+    error: Optional[str] = None,
+    cliente: str = Depends(cliente_actual),
+):
+    paises = _paises_con_nacional()
+    flash_ok = None
+    if ok == "1":
+        flash_ok = "Cliente guardado en tu base."
+    elif ok == "2":
+        flash_ok = "Cliente eliminado de tu base."
+    return templates.TemplateResponse(
+        request=request, name="portal/clientes.html",
+        context={
+            "cliente": cliente,
+            # listar_direcciones siempre filtra por el cliente de la sesión.
+            "clientes_guardados": listar_direcciones(cliente, TIPO_DESTINATARIO),
+            "paises": paises,
+            "paises_por_iso": dict(paises),
+            "flash_ok": flash_ok,
+            "error": error,
+        },
+    )
+
+
+@router.post("/clientes")
+def clientes_add(
+    alias: str = Form(""),
+    nombre: str = Form(...),
+    documento: str = Form(""),
+    email: str = Form(""),
+    telefono: str = Form(""),
+    direccion: str = Form(...),
+    ciudad: str = Form(...),
+    estado: str = Form(""),
+    cp: str = Form(...),
+    pais: str = Form("AR"),
+    notas: str = Form(""),
+    direccion_id: str = Form(""),
+    cliente: str = Depends(cliente_actual),
+):
+    # El tipo y el dueño no llegan desde el navegador: esta ruta sólo crea
+    # destinatarios y los asigna a la cuenta autenticada.
+    pais = (pais or "").strip().upper()
+    if pais not in {iso for iso, _nombre in _paises_con_nacional()}:
+        return RedirectResponse(
+            url=f"/portal/clientes?error={quote('Elegí un país válido para el cliente.')}",
+            status_code=303,
+        )
+    campos = dict(
+        cliente_id=cliente,
+        tipo=TIPO_DESTINATARIO,
+        alias=alias,
+        nombre=nombre,
+        documento=documento,
+        email=email,
+        telefono=telefono,
+        direccion=direccion,
+        ciudad=ciudad,
+        estado=estado,
+        cp=cp,
+        pais=pais,
+        predeterminada=False,
+        notas=notas,
+    )
+    try:
+        dir_id = _id_opt(direccion_id)
+        if dir_id:
+            actual = obtener_direccion(cliente, dir_id, TIPO_DESTINATARIO)
+            if not actual:
+                raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
+            if not actualizar_direccion(
+                dir_id, tipo_actual=TIPO_DESTINATARIO, **campos
+            ):
+                raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
+        else:
+            crear_direccion(**campos)
+    except Exception as e:
+        return RedirectResponse(url=f"/portal/clientes?error={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/portal/clientes?ok=1", status_code=303)
+
+
+@router.post("/clientes/{direccion_id}/eliminar")
+def clientes_delete(
+    direccion_id: int,
+    cliente: str = Depends(cliente_actual),
+):
+    try:
+        actual = obtener_direccion(cliente, direccion_id, TIPO_DESTINATARIO)
+        if not actual:
+            raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
+        if not eliminar_direccion(cliente, direccion_id, TIPO_DESTINATARIO):
+            raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
+    except Exception as e:
+        return RedirectResponse(url=f"/portal/clientes?error={quote(str(e))}", status_code=303)
+    return RedirectResponse(url="/portal/clientes?ok=2", status_code=303)
+
+
+# ── Direcciones de origen y libreta avanzada ───────────────
 @router.get("/direcciones", response_class=HTMLResponse)
 def direcciones_view(
     request: Request,

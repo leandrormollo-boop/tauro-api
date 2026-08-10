@@ -131,6 +131,14 @@ def test_el_producto_cuenta_aunque_tauro_no_lo_haya_aprobado():
     assert r["pasos"][0]["hecho"]
 
 
+def test_un_revendedor_no_necesita_catalogo_para_completar_el_arranque():
+    """El catálogo acelera e integra, pero nunca bloquea una carga manual."""
+    r = _checklist(productos=0, destinatarios=1, envios=1, activas=0)
+    producto = next(p for p in r["pasos"] if p["clave"] == "producto")
+    assert producto["opcional"]
+    assert r["completo"]
+
+
 def test_el_que_ya_despacha_no_ve_el_cartel_de_primeros_pasos():
     """
     Caso Pesca Jacks: vende por Shopify, el destinatario se lo trae el

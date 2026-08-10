@@ -42,13 +42,18 @@ def get_facturado_real(cliente: str) -> float:
     return round(float(row["total"]) if row else 0.0, 2)
 
 
-def get_facturas_recientes(cliente: str, limite: int = 10) -> List[Dict[str, Any]]:
-    """Envíos del cliente ordenados por fecha descendente."""
+def get_facturas_recientes(
+    cliente: str, limite: Optional[int] = 10
+) -> List[Dict[str, Any]]:
+    """Cargos del cliente ordenados por fecha descendente.
+
+    Conserva si cada cargo ya tiene número de factura. ``limite=None`` se usa
+    en la cuenta corriente completa; los previews deben pasar un número.
+    """
     cliente = cliente.strip().upper()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
+            query = """
                 SELECT id, fecha, nro_fc, monto_ars, descripcion,
                        (factura_pdf IS NOT NULL) AS tiene_pdf
                 FROM envios
@@ -56,20 +61,24 @@ def get_facturas_recientes(cliente: str, limite: int = 10) -> List[Dict[str, Any
                   AND estado NOT IN ('CANCELADO', 'NC')
                   AND monto_ars > 0
                 ORDER BY fecha DESC
-                LIMIT %s
-                """,
-                (cliente, limite),
-            )
+            """
+            params = [cliente]
+            if limite is not None:
+                query += " LIMIT %s"
+                params.append(max(1, int(limite)))
+            cur.execute(query, tuple(params))
             rows = cur.fetchall()
 
     facturas = []
     for r in rows:
+        nro_fc = str(r["nro_fc"] or "").strip()
         facturas.append({
             "id": r["id"],
             "fecha": r["fecha"].strftime("%d/%m/%Y") if r["fecha"] else "",
             # Los cargos automáticos de guías no tienen nro de factura: sin el
             # fallback a la descripción, el timeline mostraría filas mudas.
-            "nro_fc": str(r["nro_fc"] or "") or str(r["descripcion"] or ""),
+            "nro_fc": nro_fc or str(r["descripcion"] or ""),
+            "facturado": bool(nro_fc),
             "monto_ars": float(r["monto_ars"] or 0),
             "tiene_pdf": bool(r["tiene_pdf"]),
         })
@@ -223,13 +232,33 @@ def saldo(cliente: str, total_facturado_ars: float) -> Dict[str, float]:
     }
 
 
+def resumir_facturacion(facturas: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Separa cargos facturados de los que aún esperan factura."""
+    facturado = round(sum(
+        _parse_monto(fc.get("monto_ars"))
+        for fc in facturas
+        if fc.get("facturado")
+    ), 2)
+    pendiente = round(sum(
+        _parse_monto(fc.get("monto_ars"))
+        for fc in facturas
+        if not fc.get("facturado")
+    ), 2)
+    return {
+        "facturado_ars": facturado,
+        "pendiente_ars": pendiente,
+        "total_cargos_ars": round(facturado + pendiente, 2),
+    }
+
+
 def movimientos(cliente: str, facturas: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Timeline mezclado: facturas + pagos ordenados por fecha desc."""
     items = []
     for fc in facturas:
+        facturado = bool(fc.get("facturado", True))
         items.append({
             "fecha": fc.get("fecha", ""),
-            "tipo": "FC",
+            "tipo": "FC" if facturado else "PENDIENTE_FACTURA",
             "concepto": fc.get("nro_fc", ""),
             "monto_ars": float(fc.get("monto_ars", 0)),
             # Para el link "ver factura" del portal, cuando el admin adjuntó el PDF.
@@ -437,7 +466,9 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
 
     Idempotente por el índice único sobre solicitud_id: reintentos, doble
     click o un reinicio a mitad de camino no pueden duplicar el cargo.
-    Devuelve True si el cargo se insertó, False si ya existía o no se pudo.
+    Devuelve True cuando el cargo quedó garantizado (nuevo o preexistente).
+    Si falta solicitud/precio, lanza: la guía ya existe y el caller debe
+    conservar una tarea persistente de conciliación.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -449,16 +480,16 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
             sol = cur.fetchone()
 
             if not sol:
-                print(f"[cta_cte] solicitud {solicitud_id} no existe: sin cargo")
-                return False
+                raise ValueError(f"La solicitud {solicitud_id} no existe: sin cargo")
             monto = float(sol["precio_tauro_ars"] or 0)
             if monto <= 0:
                 # Sin precio no se inventa un cargo: se avisa para que el
                 # admin lo facture a mano, que es mejor que un débito en 0
                 # que nadie revisaría jamás.
-                print(f"[cta_cte] ATENCIÓN: la solicitud {solicitud_id} no tiene "
-                      f"precio_tauro_ars — el cargo NO se generó, facturalo a mano")
-                return False
+                raise ValueError(
+                    f"La solicitud {solicitud_id} no tiene precio_tauro_ars: "
+                    "el cargo no se generó"
+                )
 
             descripcion = (f"Guía {sol['tracking'] or 's/n'} · "
                            f"{sol['producto_alias'] or 'envío'} → {sol['destino_pais'] or ''} · "
@@ -480,7 +511,7 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
               f"ARS {monto:,.0f} a {sol['cliente_id']}")
         return True
     print(f"[cta_cte] la solicitud {solicitud_id} ya tenía su cargo: no se duplica")
-    return False
+    return True
 
 
 def get_envios_cliente(cliente: str) -> List[Dict[str, Any]]:

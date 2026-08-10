@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+{% block title %}Mis clientes{% endblock %}
+
+{% block content %}
+<div class="page-title page-title-row">
+    <div>
+        <div class="eyebrow">Tu base privada</div>
+        <h1>Mis clientes</h1>
+        <p>Guardá destinatarios habituales una sola vez y empezá el próximo envío con sus datos completos.</p>
+    </div>
+    <div class="client-page-actions">
+        <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Administrar remitentes</a>
+        <button type="button" class="btn btn-primary btn-sm" data-client-form-open>Agregar cliente</button>
+    </div>
+</div>
+
+{% if flash_ok %}<div class="msg ok">{{ flash_ok }}</div>{% endif %}
+{% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+
+<section class="client-directory-intro">
+    <div>
+        <span class="client-directory-kicker">Base exclusiva de {{ cliente }}</span>
+        <strong>Cada cuenta tiene sus propios clientes.</strong>
+        <p>Cuando armes un envío, este listado aparece como un desplegable personalizado. Elegís el cliente, elegís el producto —por ejemplo, Lana— y completás sólo lo que cambió.</p>
+    </div>
+    <span class="client-directory-lock" aria-label="Base privada">Privada</span>
+</section>
+
+{% if clientes_guardados %}
+<div class="client-directory-tools">
+    <div class="client-search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <input type="search" id="client-search" placeholder="Buscar por nombre, ciudad, país o alias" autocomplete="off" aria-label="Buscar en mis clientes">
+    </div>
+    <span><b id="client-visible-count">{{ clientes_guardados|length }}</b> cliente{{ 's' if clientes_guardados|length != 1 else '' }}</span>
+</div>
+
+<div class="client-directory-grid" id="client-directory-grid">
+    {% for d in clientes_guardados %}
+    <article class="client-card">
+        <div class="client-card-head">
+            <span class="client-avatar" aria-hidden="true">{{ (d.alias or d.nombre)[:1]|upper }}</span>
+            <div>
+                <h3>{{ d.nombre }}</h3>
+                {% if d.alias %}<span class="client-alias">{{ d.alias }}</span>{% endif %}
+            </div>
+        </div>
+
+        <div class="client-card-details">
+            <p>
+                <span>Entrega</span>
+                <strong>{{ d.direccion }}</strong>
+                {{ d.ciudad }}{% if d.estado %}, {{ d.estado }}{% endif %} · {{ d.cp }} · {{ paises_por_iso.get(d.pais, d.pais) }}
+            </p>
+            <p>
+                <span>Contacto</span>
+                <strong>{{ d.email or "Sin email" }}</strong>
+                {{ d.telefono or "Sin teléfono" }}{% if d.documento %} · {{ d.documento }}{% endif %}
+            </p>
+        </div>
+
+        <div class="client-card-actions">
+            <a href="/portal/envios/nuevo?destinatario_id={{ d.id }}" class="btn btn-primary btn-sm">Crear envío</a>
+            <button type="button" class="btn btn-ghost btn-sm client-edit"
+                    data-id="{{ d.id }}" data-alias="{{ d.alias or '' }}"
+                    data-nombre="{{ d.nombre }}" data-documento="{{ d.documento or '' }}"
+                    data-email="{{ d.email or '' }}" data-telefono="{{ d.telefono or '' }}"
+                    data-direccion="{{ d.direccion }}" data-ciudad="{{ d.ciudad }}"
+                    data-estado="{{ d.estado or '' }}" data-cp="{{ d.cp }}"
+                    data-pais="{{ d.pais }}" data-notas="{{ d.notas or '' }}">Editar</button>
+            <form method="POST" action="/portal/clientes/{{ d.id }}/eliminar"
+                  data-confirm="¿Eliminar a {{ d.nombre }} de Mis clientes?">
+                <button type="submit" class="btn btn-ghost btn-sm">Eliminar</button>
+            </form>
+        </div>
+    </article>
+    {% endfor %}
+</div>
+<div class="client-search-empty" id="client-search-empty" hidden>No encontramos clientes con esa búsqueda.</div>
+{% else %}
+<section class="card client-directory-empty">
+    <span class="client-avatar" aria-hidden="true">+</span>
+    <h3>Tu base todavía está vacía</h3>
+    <p>Guardá a tu primer cliente habitual. Después aparecerá automáticamente en Nuevo envío.</p>
+    <button type="button" class="btn btn-primary btn-sm" data-client-form-open>Guardar mi primer cliente</button>
+</section>
+{% endif %}
+
+<dialog class="client-dialog" id="client-dialog" aria-labelledby="client-form-title"
+        data-open-on-load="{{ 'true' if request.query_params.get('nuevo') else 'false' }}">
+<section class="card client-form-card" id="cliente-form">
+    <div class="card-head">
+        <div>
+            <div class="eyebrow">Cliente habitual</div>
+            <h3 id="client-form-title">Agregar cliente</h3>
+            <p id="client-form-copy">Completá los datos que querés reutilizar en futuros envíos.</p>
+        </div>
+        <button type="button" id="client-form-cancel" class="btn btn-ghost btn-sm" aria-label="Cerrar formulario">Cerrar</button>
+    </div>
+
+    <form method="POST" action="/portal/clientes" class="form">
+        <input type="hidden" name="direccion_id" id="client-id" value="">
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label for="client-alias">Alias interno</label>
+                <input type="text" name="alias" id="client-alias" placeholder="Ej. Elle McGill">
+            </div>
+            <div class="form-group">
+                <label for="client-name">Nombre / razón social *</label>
+                <input type="text" name="nombre" id="client-name" required>
+            </div>
+        </div>
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label for="client-document">Documento / Tax ID</label>
+                <input type="text" name="documento" id="client-document">
+            </div>
+            <div class="form-group">
+                <label for="client-email">Email</label>
+                <input type="email" name="email" id="client-email">
+            </div>
+        </div>
+        <div class="form-grid-2">
+            <div class="form-group">
+                <label for="client-phone">Teléfono</label>
+                <input type="text" name="telefono" id="client-phone">
+            </div>
+            <div class="form-group">
+                <label for="client-address">Dirección de entrega *</label>
+                <input type="text" name="direccion" id="client-address" required>
+            </div>
+        </div>
+        <div class="form-grid-4">
+            <div class="form-group">
+                <label for="client-country">País *</label>
+                <select name="pais" id="client-country" data-searchable data-search-placeholder="Buscar país o código" required>
+                    {% for iso, nombre in paises %}
+                    <option value="{{ iso }}" {% if iso == 'AR' %}selected{% endif %}>{{ nombre }} ({{ iso }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="client-city">Ciudad *</label>
+                <input type="text" name="ciudad" id="client-city" required>
+            </div>
+            <div class="form-group">
+                <label for="client-state">Estado / provincia</label>
+                <input type="text" name="estado" id="client-state">
+            </div>
+            <div class="form-group">
+                <label for="client-zip">Código postal *</label>
+                <input type="text" name="cp" id="client-zip" required>
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="client-notes">Notas internas</label>
+            <textarea name="notas" id="client-notes" rows="2" placeholder="Horario de recepción, referencia, piso, contacto alternativo..."></textarea>
+        </div>
+        <div class="split-actions">
+            <span class="field-help">Esta ficha sólo queda disponible dentro de tu cuenta.</span>
+            <button type="submit" class="btn btn-primary" id="client-save">Guardar cliente</button>
+        </div>
+    </form>
+</section>
+</dialog>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var search = document.getElementById("client-search");
+    var cards = Array.prototype.slice.call(document.querySelectorAll(".client-card"));
+    var counter = document.getElementById("client-visible-count");
+    var empty = document.getElementById("client-search-empty");
+
+    function normalize(value) {
+        var text = String(value || "").toLowerCase();
+        return text.normalize ? text.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : text;
+    }
+    if (search) {
+        search.addEventListener("input", function () {
+            var query = normalize(search.value).trim();
+            var visible = 0;
+            cards.forEach(function (card) {
+                var show = !query || normalize(card.textContent).indexOf(query) !== -1;
+                card.hidden = !show;
+                if (show) visible += 1;
+            });
+            if (counter) counter.textContent = String(visible);
+            if (empty) empty.hidden = visible !== 0;
+        });
+    }
+
+    var fields = {
+        alias: "client-alias", nombre: "client-name", documento: "client-document",
+        email: "client-email", telefono: "client-phone", direccion: "client-address",
+        ciudad: "client-city", estado: "client-state", cp: "client-zip",
+        pais: "client-country", notas: "client-notes"
+    };
+    var dialog = document.getElementById("client-dialog");
+    var clientForm = dialog ? dialog.querySelector("form") : null;
+    var cancel = document.getElementById("client-form-cancel");
+
+    function resetClientForm() {
+        if (!clientForm) return;
+        clientForm.reset();
+        document.getElementById("client-id").value = "";
+        document.getElementById("client-form-title").textContent = "Agregar cliente";
+        document.getElementById("client-form-copy").textContent = "Completá los datos que querés reutilizar en futuros envíos.";
+        document.getElementById("client-save").textContent = "Guardar cliente";
+        var country = document.getElementById("client-country");
+        if (country) {
+            country.value = "AR";
+            country.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+    }
+    function openClientDialog() {
+        if (!dialog) return;
+        if (typeof dialog.showModal !== "function") return;
+        dialog.showModal();
+        window.setTimeout(function () {
+            var name = document.getElementById("client-name");
+            if (name) name.focus({ preventScroll: true });
+        }, 0);
+    }
+    function closeClientDialog() {
+        if (!dialog) return;
+        dialog.close();
+    }
+    document.querySelectorAll("[data-client-form-open]").forEach(function (button) {
+        button.addEventListener("click", function () {
+            resetClientForm();
+            openClientDialog();
+        });
+    });
+    if (cancel) cancel.addEventListener("click", closeClientDialog);
+    if (dialog) {
+        dialog.addEventListener("close", resetClientForm);
+        dialog.addEventListener("click", function (event) {
+            if (event.target === dialog) closeClientDialog();
+        });
+    }
+    document.querySelectorAll(".client-edit").forEach(function (button) {
+        button.addEventListener("click", function () {
+            resetClientForm();
+            document.getElementById("client-id").value = button.dataset.id || "";
+            Object.keys(fields).forEach(function (key) {
+                var input = document.getElementById(fields[key]);
+                if (input) {
+                    input.value = button.dataset[key] || "";
+                    input.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+            });
+            document.getElementById("client-form-title").textContent = "Editar cliente";
+            document.getElementById("client-form-copy").textContent = "Los cambios se usarán en los próximos envíos; no modifican los ya generados.";
+            document.getElementById("client-save").textContent = "Guardar cambios";
+            openClientDialog();
+        });
+    });
+    if (dialog && dialog.dataset.openOnLoad === "true") {
+        resetClientForm();
+        openClientDialog();
+    }
+})();
+</script>
+{% endblock %}

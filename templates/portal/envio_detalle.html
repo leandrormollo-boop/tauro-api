@@ -19,6 +19,12 @@
 {% if s.estado == "CANCELADO" %}
     <div class="msg error">Este envío fue cancelado. Si fue un error, {% set _ay = ayuda() %}<a href="{{ _ay.whatsapp_url or _ay.mail_url }}"{% if _ay.whatsapp_url %} target="_blank" rel="noopener"{% endif %}>escribinos</a> y lo revisamos.</div>
 {% else %}
+{% if s.estado == "VERIFICAR_COURIER" %}
+    <div class="msg warn" style="margin-bottom:16px;">
+        DHL pudo haber recibido la emisión, pero no devolvió una confirmación concluyente.
+        No vuelvas a emitir: Tauro la está verificando y te avisa cuando quede conciliada.
+    </div>
+{% endif %}
 <!-- ── Timeline de estado (stepper del design system) ───── -->
 <div class="card" style="margin-bottom:16px;">
     <div class="stepper" style="margin:6px 0 8px;">
@@ -64,7 +70,7 @@
                 🚚 Coordinar retiro con {{ courier_nombre }}
             </a>
             {% endif %}
-        {% elif not s.tracking and puede_emitir %}
+        {% elif not s.tracking and puede_emitir and s.estado != 'VERIFICAR_COURIER' %}
             {# Emisión habilitada para este cliente (flag + tope de deuda se
                validan de nuevo en el servidor: el botón es sólo la puerta). #}
             {% if request.query_params.get('error') %}
