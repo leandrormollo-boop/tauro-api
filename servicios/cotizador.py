@@ -11,7 +11,7 @@ from core.fedex_client import FedExClient
 from modelos.cotizacion import (
     CotizacionInput, CotizacionOutput, calcular_peso_volumetrico,
 )
-from servicios.pricing import aplicar_pricing, get_pricing_config, parse_monto_ars
+from servicios.pricing import aplicar_pricing, normalizar_pricing, parse_monto_ars
 from servicios.rutas import get_ruta, pais_a_iso2, ciudad_a_state
 
 
@@ -58,6 +58,25 @@ def dolar_ars() -> float:
     return _get_dolar_ars()
 
 
+def _pricing_courier_cliente(
+    cliente: str, courier: str, fallback_pct: float = 25.0,
+) -> dict:
+    """Regla efectiva y permiso antes de tocar un courier legacy."""
+    from servicios.configuracion_couriers_cliente import configuracion_cotizacion
+
+    acceso = configuracion_cotizacion(cliente)
+    courier = (courier or "").strip().lower()
+    if courier not in acceso["couriers_habilitados"]:
+        raise ValueError(
+            f"{courier.upper()} no está habilitado para cotizar en esta cuenta."
+        )
+    return (
+        acceso["pricing_por_courier"].get(courier)
+        or acceso["pricing_general"]
+        or normalizar_pricing("PCT", fallback_pct)
+    )
+
+
 def cotizar_opciones(
     cliente: str,
     markup_pct: float,
@@ -71,6 +90,7 @@ def cotizar_opciones(
        tarifa_lista_ars, dias_estimados, peso_usado_kg, coti_id, valida_hasta}
     Lanza ValueError si la ruta no existe o FedEx no devuelve tarifas.
     """
+    pricing = _pricing_courier_cliente(cliente, "fedex", markup_pct)
     ruta = get_ruta(input_data.ruta_id)
     if not ruta:
         raise ValueError(f"Ruta '{input_data.ruta_id}' no existe o está inactiva")
@@ -112,7 +132,6 @@ def cotizar_opciones(
         )
 
     dolar = _get_dolar_ars()
-    pricing = get_pricing_config(cliente, fallback_pct=markup_pct)
     valida_hasta = (
         datetime.now(tz=timezone.utc) + timedelta(hours=COTIZACION_VALIDA_HORAS)
     ).isoformat(timespec="seconds")
@@ -182,6 +201,120 @@ def cotizar_opciones(
     return opciones
 
 
+def cotizar_referencia_couriers(
+    cliente: str,
+    origen_pais: str,
+    destino_pais: str,
+    peso_kg: float,
+    largo_cm: float,
+    ancho_cm: float,
+    alto_cm: float,
+) -> dict:
+    """Compara una opción principal por courier para el cotizador rápido.
+
+    Esta pantalla no tiene todavía la dirección completa ni los datos de
+    aduana. Por eso usa la ciudad/CP de referencia de cada país y devuelve una
+    *estimación*; el wizard vuelve a cotizar con los datos reales antes de
+    crear la solicitud.
+
+    Se apoya en la misma capa multi-courier que usa Nuevo envío, pero adapta
+    su respuesta al contrato pequeño de la pantalla. No persiste en
+    ``cotizaciones``: esa tabla histórica tiene columnas FedEx-específicas y
+    guardar ahí un costo DHL falsearía la auditoría.
+    """
+    from servicios.carriers import cotizar_carriers_cliente
+    from servicios.configuracion_couriers_cliente import configuracion_cotizacion
+    from servicios.paises import existe, referencia
+
+    origen_iso = (origen_pais or "").strip().upper()
+    destino_iso = (destino_pais or "").strip().upper()
+    if not existe(origen_iso) or not existe(destino_iso):
+        raise ValueError("Elegí países válidos para origen y destino.")
+
+    medidas = {
+        "peso_kg": float(peso_kg),
+        "largo": float(largo_cm),
+        "ancho": float(ancho_cm),
+        "alto": float(alto_cm),
+    }
+    if any(valor <= 0 for valor in medidas.values()):
+        raise ValueError("El peso y las tres medidas deben ser mayores a cero.")
+    if medidas["peso_kg"] > 70:
+        raise ValueError("El peso máximo por caja es 70 kg.")
+    if medidas["largo"] + medidas["ancho"] + medidas["alto"] > 330:
+        raise ValueError("La suma de las tres medidas no puede superar 330 cm.")
+
+    peso_volumetrico = calcular_peso_volumetrico(
+        medidas["largo"], medidas["ancho"], medidas["alto"],
+    )
+    peso_usado = max(medidas["peso_kg"], peso_volumetrico)
+
+    origen = referencia(origen_iso)
+    destino = referencia(destino_iso)
+    origen["state"] = ciudad_a_state(origen.get("city", ""))
+    destino["state"] = ciudad_a_state(destino.get("city", ""))
+
+    acceso_couriers = configuracion_cotizacion(cliente)
+    tarjetas = cotizar_carriers_cliente(
+        origen=origen,
+        destino=destino,
+        paquete={
+            **medidas,
+            "valor_declarado_usd": 100,
+            "descripcion_en": "Merchandise",
+            "unidades": 1,
+        },
+        dolar=_get_dolar_ars(),
+        pricing_cliente=acceso_couriers["pricing_general"],
+        pricing_por_courier=acceso_couriers["pricing_por_courier"],
+        couriers_habilitados=acceso_couriers["couriers_habilitados"],
+    )
+
+    opciones = []
+    no_disponibles = []
+    for tarjeta in tarjetas:
+        if tarjeta.get("estado") != "cotizado":
+            # No exponer el error crudo: puede contener nombres de cuentas o
+            # variables internas. En la pantalla alcanza con el estado.
+            no_disponibles.append({
+                "id": tarjeta["id"],
+                "nombre": tarjeta["nombre"],
+                "estado": tarjeta.get("estado") or "sin_tarifa",
+            })
+            continue
+
+        servicio = tarjeta.get("servicio") or "Servicio internacional"
+        opciones.append({
+            "carrier_id": tarjeta["id"],
+            "carrier_nombre": tarjeta["nombre"],
+            "carrier_logo": tarjeta.get("logo"),
+            "servicio": servicio,
+            "servicio_nombre": f"{tarjeta['nombre']} · {servicio}",
+            "precio_final_ars": tarjeta["precio_ars"],
+            "precio_final_usd": tarjeta["precio_usd"],
+            "dias_estimados": tarjeta.get("dias_estimados") or "A confirmar",
+            "tarifa_lista_ars": None,
+            "peso_usado_kg": peso_usado,
+            "peso_real_kg": medidas["peso_kg"],
+            "peso_volumetrico_kg": peso_volumetrico,
+            "ruta": f"{origen_iso} → {destino_iso}",
+        })
+
+    opciones.sort(key=lambda opcion: opcion["precio_final_ars"])
+    return {
+        "encontrado": bool(opciones),
+        "opciones": opciones,
+        "no_disponibles": no_disponibles,
+        "resumen": {
+            "ruta": f"{origen_iso} → {destino_iso}",
+            "peso_usado_kg": peso_usado,
+            "peso_real_kg": medidas["peso_kg"],
+            "peso_volumetrico_kg": peso_volumetrico,
+            "couriers_consultados": len(tarjetas),
+        },
+    }
+
+
 def _destino_para_cotizar(ruta, destino_real: dict = None) -> dict:
     """
     A qué dirección se le cotiza.
@@ -234,6 +367,7 @@ def cotizar_bultos(
     CotizacionOutput + piezas_total/peso_total_kg. Lanza ValueError si la
     ruta no existe o FedEx no tarifa.
     """
+    pricing = _pricing_courier_cliente(cliente, "fedex", markup_pct)
     ruta = get_ruta(ruta_id)
     if not ruta:
         raise ValueError(f"Ruta '{ruta_id}' no existe o está inactiva")
@@ -294,7 +428,6 @@ def cotizar_bultos(
         lista = float(rate_resp["costo_lista"])
         tarifa_lista_ars = round(lista * dolar, 2) if moneda == "USD" else round(lista, 2)
 
-    pricing = get_pricing_config(cliente, fallback_pct=markup_pct)
     precio = aplicar_pricing(
         costo_usd=costo_fedex_usd, costo_ars=costo_ars, dolar=dolar, pricing=pricing,
     )
@@ -358,6 +491,9 @@ def cotizar(
     input_data: CotizacionInput,
 ) -> CotizacionOutput:
     """Cotiza un envío. Lanza ValueError si la ruta no existe."""
+
+    # 0. Permiso y regla efectiva ANTES de llamar a FedEx.
+    pricing = _pricing_courier_cliente(cliente, "fedex", markup_pct)
 
     # 1. Resolver ruta
     ruta = get_ruta(input_data.ruta_id)
@@ -424,7 +560,6 @@ def cotizar(
         tarifa_lista_ars = round(lista * dolar, 2) if moneda == "USD" else round(lista, 2)
 
     # 5. Aplicar regla de pricing del cliente.
-    pricing = get_pricing_config(cliente, fallback_pct=markup_pct)
     precio = aplicar_pricing(
         costo_usd=costo_fedex_usd,
         costo_ars=costo_ars,

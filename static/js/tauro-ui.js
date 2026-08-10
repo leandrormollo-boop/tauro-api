@@ -17,6 +17,7 @@
 
   var enhancedSelects = new WeakSet();
   var enhancedQty = new WeakSet();
+  var tselectSeq = 0;
   var selectValueSetter = Object.getOwnPropertyDescriptor(
     HTMLSelectElement.prototype, "value"
   );
@@ -60,21 +61,59 @@
 
     var panel = document.createElement("div");
     panel.className = "tselect-panel";
-    panel.setAttribute("role", "listbox");
+
+    var searchInput = null;
+    if (select.hasAttribute("data-searchable")) {
+      var searchWrap = document.createElement("div");
+      searchWrap.className = "tselect-search-wrap";
+      searchWrap.innerHTML = "<svg width='14' height='14' viewBox='0 0 24 24' fill='none' aria-hidden='true'><circle cx='11' cy='11' r='7' stroke='currentColor' stroke-width='1.8'/><path d='m20 20-4-4' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'/></svg>";
+      searchInput = document.createElement("input");
+      searchInput.type = "search";
+      searchInput.className = "tselect-search";
+      searchInput.placeholder = select.dataset.searchPlaceholder || "Buscar país o código";
+      searchInput.setAttribute("aria-label", searchInput.placeholder);
+      searchInput.autocomplete = "off";
+      searchWrap.appendChild(searchInput);
+      panel.appendChild(searchWrap);
+    }
+
+    var optionsBox = document.createElement("div");
+    optionsBox.className = "tselect-options";
+    optionsBox.setAttribute("role", "listbox");
+    optionsBox.id = (select.id ? select.id + "-options" : "tselect-options-" + (++tselectSeq));
+    if (searchInput) searchInput.setAttribute("aria-controls", optionsBox.id);
+    panel.appendChild(optionsBox);
 
     wrap.appendChild(btn);
     wrap.appendChild(panel);
 
-    function armarOpciones() {
-      panel.innerHTML = "";
+    function normalizar(texto) {
+      var s = String(texto || "").toLowerCase();
+      return s.normalize ? s.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : s;
+    }
+
+    function armarOpciones(consulta) {
+      optionsBox.innerHTML = "";
+      var filtro = normalizar(consulta).trim();
+      var visibles = 0;
       Array.prototype.forEach.call(select.options, function (opt, i) {
+        var buscable = normalizar(opt.text + " " + opt.value);
+        if (filtro && buscable.indexOf(filtro) === -1) return;
+        visibles += 1;
         var item = document.createElement("div");
         item.className = "tselect-option" +
           (i === select.selectedIndex ? " selected" : "") +
           (opt.disabled ? " disabled" : "");
         item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", i === select.selectedIndex ? "true" : "false");
         item.dataset.idx = String(i);
-        item.innerHTML = "<span class='tselect-check'>✓</span><span>" + opt.text.replace(/</g, "&lt;") + "</span>";
+        var check = document.createElement("span");
+        check.className = "tselect-check";
+        check.textContent = "✓";
+        var optionText = document.createElement("span");
+        optionText.textContent = opt.text;
+        item.appendChild(check);
+        item.appendChild(optionText);
         if (!opt.disabled) {
           // mousedown, NO click: el click llega DESPUÉS del blur del select
           // (que cierra el panel), así que con click la selección se perdía
@@ -85,10 +124,17 @@
             e.stopPropagation();
             elegir(i);
             cerrar();
+            select.focus({ preventScroll: true });
           });
         }
-        panel.appendChild(item);
+        optionsBox.appendChild(item);
       });
+      if (!visibles) {
+        var vacio = document.createElement("div");
+        vacio.className = "tselect-empty";
+        vacio.textContent = "No encontramos resultados";
+        optionsBox.appendChild(vacio);
+      }
     }
 
     function elegir(i) {
@@ -101,12 +147,55 @@
     function abrir() {
       if (wrap.classList.contains("open")) return;
       cerrarTodos();
-      armarOpciones();
+      if (searchInput) searchInput.value = "";
+      armarOpciones("");
       wrap.classList.add("open");
-      var sel = panel.querySelector(".selected");
+      // Dentro de dialogs o cerca del borde inferior, el panel se abre hacia
+      // el lado con más espacio y ajusta su alto. Así nunca queda recortado ni
+      // obliga a desplazar toda la página para elegir un país.
+      var wrapRect = wrap.getBoundingClientRect();
+      var clip = wrap.closest("dialog[open]");
+      var clipRect = clip ? clip.getBoundingClientRect() : null;
+      var viewportTop = window.visualViewport ? window.visualViewport.offsetTop : 0;
+      var viewportBottom = viewportTop + (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+      var limiteTop = clipRect ? Math.max(viewportTop, clipRect.top) : viewportTop;
+      var limiteBottom = clipRect ? Math.min(viewportBottom, clipRect.bottom) : viewportBottom;
+      var espacioAbajo = Math.max(0, limiteBottom - wrapRect.bottom - 7);
+      var espacioArriba = Math.max(0, wrapRect.top - limiteTop - 7);
+      var haciaArriba = espacioAbajo < 220 && espacioArriba > espacioAbajo;
+      var espacio = haciaArriba ? espacioArriba : espacioAbajo;
+      wrap.classList.toggle("open-up", haciaArriba);
+      wrap.style.setProperty("--tselect-space", Math.max(120, Math.min(260, espacio)) + "px");
+      var sel = optionsBox.querySelector(".selected");
       if (sel) sel.scrollIntoView({ block: "nearest" });
+      if (searchInput) {
+        window.setTimeout(function () { searchInput.focus({ preventScroll: true }); }, 0);
+      }
     }
-    function cerrar() { wrap.classList.remove("open"); }
+    function cerrar() {
+      wrap.classList.remove("open", "open-up");
+      wrap.style.removeProperty("--tselect-space");
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener("input", function () {
+        armarOpciones(searchInput.value);
+      });
+      searchInput.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cerrar();
+          select.focus({ preventScroll: true });
+        } else if (e.key === "Enter") {
+          var primera = optionsBox.querySelector(".tselect-option:not(.disabled)");
+          if (!primera) return;
+          e.preventDefault();
+          elegir(parseInt(primera.dataset.idx, 10));
+          cerrar();
+          select.focus({ preventScroll: true });
+        }
+      });
+    }
 
     btn.addEventListener("mousedown", function (e) {
       e.preventDefault();
@@ -127,7 +216,7 @@
         var i = select.selectedIndex + d;
         while (i >= 0 && i < select.options.length && select.options[i].disabled) i += d;
         elegir(Math.max(0, Math.min(i, select.options.length - 1)));
-        if (wrap.classList.contains("open")) armarOpciones();
+        if (wrap.classList.contains("open")) armarOpciones(searchInput ? searchInput.value : "");
       } else if (k === "Escape") {
         cerrar();
       } else if (/^[a-zA-Z0-9]$/.test(k)) {
@@ -137,13 +226,19 @@
           var idx = (select.selectedIndex + j) % select.options.length;
           if (select.options[idx].text.trim().toLowerCase().indexOf(low) === 0) {
             elegir(idx);
-            if (wrap.classList.contains("open")) armarOpciones();
+            if (wrap.classList.contains("open")) armarOpciones(searchInput ? searchInput.value : "");
             break;
           }
         }
       }
     });
-    select.addEventListener("blur", cerrar);
+    // El foco puede pasar del select invisible al buscador. Cerramos recién
+    // cuando sale de TODO el componente (por Tab o click), no entre ambos.
+    wrap.addEventListener("focusout", function () {
+      window.setTimeout(function () {
+        if (!wrap.contains(document.activeElement)) cerrar();
+      }, 0);
+    });
 
     // Cambios de valor por código (parser, prefills, form_input):
     // interceptamos el setter para que la etiqueta nunca quede vieja.
@@ -162,7 +257,8 @@
 
   function cerrarTodos() {
     document.querySelectorAll(".tselect.open").forEach(function (w) {
-      w.classList.remove("open");
+      w.classList.remove("open", "open-up");
+      w.style.removeProperty("--tselect-space");
     });
   }
   document.addEventListener("mousedown", function (e) {

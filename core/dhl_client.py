@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import math
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from dotenv import load_dotenv
@@ -16,6 +18,34 @@ load_dotenv()
 # las imágenes slim de Railway puede no estar y tiraría ZoneInfoNotFoundError
 # en producción justo al cotizar.
 TZ_AR = timezone(timedelta(hours=-3))
+
+# Guardas operativas TAURO. Se validan otra vez en el cliente del carrier:
+# así un caller interno o una solicitud histórica tampoco puede expandir una
+# cantidad descontrolada de paquetes antes de llamar a MyDHL.
+MAX_DHL_PACKAGES = 20
+MAX_DHL_PACKAGE_KG = 70.0
+MAX_DHL_PICKUP_KG = MAX_DHL_PACKAGES * MAX_DHL_PACKAGE_KG
+MAX_DHL_CUSTOMS_UNITS = 9999
+
+# MyDHL exige que la hora de retiro/emisión lleve el huso DEL ORIGEN. El
+# contenedor de producción instala tzdata (Dockerfile), por eso usamos zonas
+# IANA y no offsets fijos: Londres/Madrid cambian por horario de verano. Para
+# países con más de un huso, la zona es la de la ciudad de referencia del
+# catálogo; los remitentes de WAIMAO (CN/AR/IN) no tienen esa ambigüedad.
+TZ_POR_PAIS = {
+    "AR": "America/Argentina/Buenos_Aires", "US": "America/New_York",
+    "CN": "Asia/Shanghai", "IN": "Asia/Kolkata", "BD": "Asia/Dhaka",
+    "VN": "Asia/Ho_Chi_Minh", "PK": "Asia/Karachi", "TH": "Asia/Bangkok",
+    "ID": "Asia/Jakarta", "TR": "Europe/Istanbul", "KR": "Asia/Seoul",
+    "JP": "Asia/Tokyo", "HK": "Asia/Hong_Kong", "TW": "Asia/Taipei",
+    "AE": "Asia/Dubai", "ES": "Europe/Madrid", "IT": "Europe/Rome",
+    "DE": "Europe/Berlin", "FR": "Europe/Paris", "PT": "Europe/Lisbon",
+    "NL": "Europe/Amsterdam", "GB": "Europe/London", "BR": "America/Sao_Paulo",
+    "CL": "America/Santiago", "UY": "America/Montevideo", "PY": "America/Asuncion",
+    "BO": "America/La_Paz", "PE": "America/Lima", "EC": "America/Guayaquil",
+    "CO": "America/Bogota", "MX": "America/Mexico_City", "CA": "America/Toronto",
+    "AU": "Australia/Sydney", "IL": "Asia/Jerusalem", "ZA": "Africa/Johannesburg",
+}
 
 # ─────────────────────────────────────────────
 # DHL EXPRESS CLIENT (MyDHL API)
@@ -56,9 +86,39 @@ class DHLClient(CarrierBase):
             os.getenv("DHL_ACCOUNT_NUMBER_IMPO")
             or os.getenv("DHL_ACCOUNT_NUMBER_IMPORT")
         )
-        self.environment    = os.getenv("DHL_ENVIRONMENT", "sandbox").lower()
-        self.base_url       = self.SANDBOX_URL if self.environment == "sandbox" else self.PROD_URL
+        entorno = os.getenv("DHL_ENVIRONMENT", "sandbox").strip().lower()
+        # Fallar CERRADO: antes un typo como `sandox` seleccionaba producción.
+        # Nunca una variable mal escrita puede convertir una prueba en costo real.
+        self.environment = entorno if entorno in {"sandbox", "production"} else "invalid"
+        self.configuration_error = (
+            None if self.environment != "invalid" else
+            "DHL_ENVIRONMENT debe ser 'sandbox' o 'production'. No se llamó a DHL."
+        )
+        self.base_url = (
+            self.PROD_URL if self.environment == "production" else self.SANDBOX_URL
+        )
         self.product_code   = os.getenv("DHL_PRODUCT_CODE", self.PRODUCTO_DEFAULT)
+
+    def _error_configuracion(self) -> str | None:
+        if self.configuration_error:
+            return self.configuration_error
+        if not (self.api_key and self.api_secret):
+            return "Faltan credenciales de DHL."
+        return None
+
+    @staticmethod
+    def _zona_origen(pais: str) -> tuple[ZoneInfo | None, str | None]:
+        iso = (pais or "AR").strip().upper()[:2]
+        nombre = TZ_POR_PAIS.get(iso)
+        if not nombre:
+            return None, (
+                f"Todavía no está configurada la zona horaria de {iso} para DHL. "
+                "Pedinos que la validemos antes de agendar."
+            )
+        try:
+            return ZoneInfo(nombre), None
+        except ZoneInfoNotFoundError:
+            return None, "El servidor no tiene disponible la base de zonas horarias."
 
     def _cuenta_para(self, origen: dict, destino: dict) -> tuple:
         """
@@ -146,17 +206,40 @@ class DHLClient(CarrierBase):
         if not precios:
             return {"encontrado": False, "error": "Producto DHL sin precio"}
 
+        # MyDHL puede devolver BASEC/PULCL/BILLC en cualquier orden. BILLC es
+        # la moneda e importe de facturación de NUESTRA cuenta; usar [0]
+        # podía tomar una base informativa distinta de lo que luego cobra DHL.
+        precio_facturado = next(
+            (p for p in precios
+             if str(p.get("currencyType") or "").strip().upper() == "BILLC"),
+            None,
+        )
+        # Respuestas antiguas/mocks traen un único totalPrice sin currencyType.
+        # Ese caso es inequívoco; con varios precios y sin BILLC se falla cerrado.
+        if precio_facturado is None and len(precios) == 1:
+            precio_facturado = precios[0]
+        if precio_facturado is None:
+            return {"encontrado": False,
+                    "error": "DHL no indicó el precio de facturación (BILLC)."}
+        try:
+            costo = float(precio_facturado.get("price"))
+        except (TypeError, ValueError):
+            costo = 0.0
+        if not math.isfinite(costo) or costo <= 0:
+            return {"encontrado": False,
+                    "error": "DHL devolvió un precio de facturación inválido."}
+
         return {
             "encontrado": True,
-            "costo": float(precios[0].get("price", 0)),
-            "moneda": precios[0].get("priceCurrency", "USD"),
+            "costo": costo,
+            "moneda": precio_facturado.get("priceCurrency", "USD"),
             "servicio": prod.get("productName", "DHL Express Worldwide"),
             "dias_estimados": str(
                 prod.get("deliveryCapabilities", {}).get("totalTransitDays", "2-4")
             ),
         }
 
-    def _fecha_envio(self) -> str:
+    def _fecha_envio(self, origen_pais: str = "AR") -> str:
         """
         plannedShippingDateAndTime para el POST: YYYY-MM-DDTHH:MM:SSGMT-03:00.
 
@@ -166,8 +249,18 @@ class DHLClient(CarrierBase):
         ejemplo de /rates, que es el endpoint que estamos llamando. Si DHL
         devuelve "not well formatted", probar con espacio antes de GMT.
         """
-        d = datetime.now(TZ_AR) + timedelta(days=1)
-        return d.strftime("%Y-%m-%dT13:00:00GMT-03:00")
+        zona, error = self._zona_origen(origen_pais)
+        # El catálogo de países y TZ_POR_PAIS se actualizan juntos. Si por un
+        # despliegue incompleto faltara una zona, no inventamos el huso: esta
+        # excepción se convierte en un error legible antes de llamar a DHL.
+        if error:
+            raise ValueError(error)
+        d = datetime.now(zona) + timedelta(days=1)
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        offset = d.strftime("%z")
+        offset = f"{offset[:3]}:{offset[3:]}"
+        return d.strftime("%Y-%m-%dT13:00:00GMT") + offset
 
     @staticmethod
     def _direccion(d: dict, por_defecto_ciudad: str = "") -> dict:
@@ -208,15 +301,22 @@ class DHLClient(CarrierBase):
         Devuelve el MISMO contrato que get_rates(): la respuesta del POST usa
         el mismo schema que el GET, así que el parseo se comparte.
         """
-        if not self.api_key or not self.api_secret:
-            return {"encontrado": False, "error": "Credenciales DHL no configuradas"}
+        if error_config := self._error_configuracion():
+            return {"encontrado": False, "error": error_config}
         if not paquetes:
             return {"encontrado": False, "error": "Sin bultos para cotizar"}
+        if len(paquetes) > MAX_DHL_PACKAGES:
+            return {"encontrado": False,
+                    "error": f"DHL admite como máximo {MAX_DHL_PACKAGES} bultos por envío."}
 
         cuenta, error_cuenta = self._cuenta_para(origen, destino)
         if error_cuenta:
             print(f"[dhl] {error_cuenta}")
             return {"encontrado": False, "error": error_cuenta}
+
+        zona_origen, error_zona = self._zona_origen(origen.get("country", "AR"))
+        if error_zona:
+            return {"encontrado": False, "error": error_zona}
 
         ciudad_destino = (destino.get("city") or "").strip()
         if not ciudad_destino:
@@ -231,7 +331,7 @@ class DHLClient(CarrierBase):
                 "receiverDetails": self._direccion(destino),
             },
             "accounts": [{"typeCode": "shipper", "number": str(cuenta)}],
-            "plannedShippingDateAndTime": self._fecha_envio(),
+            "plannedShippingDateAndTime": self._fecha_envio(origen.get("country", "AR")),
             "unitOfMeasurement": "metric",
             # boolean de verdad: en el GET viajaba como el string "true".
             "isCustomsDeclarable": True,
@@ -291,8 +391,8 @@ class DHLClient(CarrierBase):
         if paquetes:
             paquete = paquetes[0]
 
-        if not self.api_key or not self.api_secret:
-            return {"encontrado": False, "error": "Credenciales DHL no configuradas"}
+        if error_config := self._error_configuracion():
+            return {"encontrado": False, "error": error_config}
 
         # Identificador propio de esta llamada. Cuando le reclames un error a
         # soporte de DHL te lo van a pedir para buscar el request de su lado,
@@ -303,6 +403,10 @@ class DHLClient(CarrierBase):
         if error_cuenta:
             print(f"[dhl] {error_cuenta}")
             return {"encontrado": False, "error": error_cuenta}
+
+        zona_origen, error_zona = self._zona_origen(origen.get("country", "AR"))
+        if error_zona:
+            return {"encontrado": False, "error": error_zona}
 
         try:
             url = f"{self.base_url}/rates"
@@ -315,16 +419,22 @@ class DHLClient(CarrierBase):
                 "destinationCityName": destino.get("city", ""),
                 "destinationPostalCode": destino.get("postal_code", ""),
                 "weight": paquete.get("peso_kg", 0.5),
-                "length": int(paquete.get("largo", 30)),
-                "width":  int(paquete.get("ancho", 20)),
-                "height": int(paquete.get("alto", 10)),
+                # El wizard usa *_cm; el cotizador rápido usa las claves
+                # cortas. Aceptar ambos evita cotizar 30×20×10 y emitir luego
+                # las medidas reales, una diferencia directa de facturación.
+                # Nunca truncar hacia abajo: 48,9 cm no puede cotizarse como
+                # 48 y emitirse después con 48,9. Redondear hacia arriba evita
+                # subcotizar peso volumétrico.
+                "length": math.ceil(float(paquete.get("largo_cm") or paquete.get("largo") or 30)),
+                "width":  math.ceil(float(paquete.get("ancho_cm") or paquete.get("ancho") or 20)),
+                "height": math.ceil(float(paquete.get("alto_cm") or paquete.get("alto") or 10)),
                 # OBLIGATORIO según el OpenAPI oficial (required: true). Antes
                 # iba en None y el filtro de abajo lo borraba, con el comentario
                 # "DHL usa la fecha del día si se omite" — la spec dice lo
                 # contrario y sin este parámetro DHL contesta 400 SIEMPRE.
                 # Formato YYYY-MM-DD, no ISO con hora.
                 "plannedShippingDate": (
-                    datetime.now(TZ_AR).date() + timedelta(days=1)
+                    datetime.now(zona_origen).date() + timedelta(days=1)
                 ).isoformat(),
                 # Si la fecha cae domingo o feriado, DHL devuelve los productos
                 # del próximo día hábil en vez de una lista vacía.
@@ -365,12 +475,11 @@ class DHLClient(CarrierBase):
     @staticmethod
     def _contacto(d: dict, por_defecto_nombre: str = "") -> dict:
         """
-        contactInformation del POST /shipments. DHL exige phone y email con
-        formato válido: si el cliente no cargó teléfono, mandar vacío hace
-        que rechace el envío entero, así que hay fallback.
+        contactInformation del POST /shipments. El caller valida teléfono y
+        nombre antes de emitir: nunca se inventa un dato de contacto.
         """
         return {
-            "phone": (d.get("telefono") or "0000000000").strip()[:25],
+            "phone": (d.get("telefono") or "").strip()[:25],
             "companyName": (d.get("empresa") or d.get("nombre")
                             or por_defecto_nombre or "N/A").strip()[:60],
             "fullName": (d.get("nombre") or por_defecto_nombre or "N/A").strip()[:45],
@@ -428,11 +537,26 @@ class DHLClient(CarrierBase):
         NO es idempotente: dos llamadas emiten dos guías facturadas. Quien
         llame tiene que traer su propia reserva (igual que FedEx).
         """
-        if not (self.api_key and self.api_secret):
-            return {"encontrado": False, "error": "Faltan credenciales de DHL."}
+        if error_config := self._error_configuracion():
+            return {"encontrado": False, "error": error_config}
 
         shipper = datos.get("shipper") or {}
         recipient = datos.get("recipient") or {}
+        for etiqueta, parte in (("remitente", shipper),
+                                ("destinatario", recipient)):
+            requeridos = {
+                "nombre": parte.get("nombre"),
+                "teléfono": parte.get("telefono"),
+                "dirección": parte.get("calle") or parte.get("direccion"),
+                "ciudad": parte.get("ciudad") or parte.get("city"),
+                "país": parte.get("pais") or parte.get("country"),
+            }
+            faltan = [campo for campo, valor in requeridos.items()
+                      if not str(valor or "").strip()]
+            if faltan:
+                return {"encontrado": False, "error":
+                        f"Completá {', '.join(faltan)} del {etiqueta} "
+                        "antes de emitir con DHL."}
         bultos = datos.get("bultos") or []
         if not bultos:
             package = datos.get("package") or {}
@@ -442,6 +566,13 @@ class DHLClient(CarrierBase):
                 "largo": package.get("largo", 30), "ancho": package.get("ancho", 20),
                 "alto": package.get("alto", 10),
                 "unidades": commodity.get("cantidad", 1),
+                # Contrato legado package+commodity: hasta ahora la cantidad
+                # servía a la vez para cajas y unidades comerciales. Se deja
+                # ese comportamiento como fallback; los callers nuevos deben
+                # enviar unidades_aduana de forma explícita cuando difieran.
+                "unidades_aduana": commodity.get(
+                    "unidades_aduana", commodity.get("cantidad", 1)
+                ),
                 "valor_unitario_usd": commodity.get("valor_unitario_usd", 100),
                 "descripcion_en": commodity.get("descripcion", "Merchandise"),
                 "hs_code": commodity.get("hs_code", ""),
@@ -460,28 +591,56 @@ class DHLClient(CarrierBase):
         # importación, que es justo lo que va a hacer WAIMAO.
         pais_origen_envio = (shipper.get("pais") or "AR").upper()[:2]
 
-        # Una pieza por unidad, igual que en FedEx: N cajas idénticas viajan
-        # como N piezas, cada una con su etiqueta.
+        # Las cajas físicas y las unidades comerciales NO son equivalentes:
+        # una caja puede contener 8 camisas. `packages` representa cajas;
+        # exportDeclaration representa las unidades que declara la factura.
+        # Para solicitudes históricas sin `unidades_aduana`, ambas cantidades
+        # siguen coincidiendo y el payload conserva el comportamiento anterior.
         piezas, line_items, valor_total = [], [], 0.0
+        total_cajas = 0
         for i, b in enumerate(bultos, start=1):
-            unidades = max(int(b.get("unidades") or b.get("cantidad") or 1), 1)
-            valor_u = float(b.get("valor_unitario_usd") or 0)
-            for _ in range(unidades):
+            try:
+                cajas = int(b.get("unidades") or b.get("cantidad") or 1)
+                unidades_aduana_raw = b.get("unidades_aduana")
+                unidades_aduana = int(
+                    cajas if unidades_aduana_raw in (None, "") else unidades_aduana_raw
+                )
+                valor_u = float(b.get("valor_unitario_usd") or 0)
+                peso_caja = float(b.get("peso_kg") or 0.5)
+            except (TypeError, ValueError):
+                return {"encontrado": False,
+                        "error": "Revisá cajas, peso, valor y unidades aduaneras."}
+            if cajas < 1 or total_cajas + cajas > MAX_DHL_PACKAGES:
+                return {"encontrado": False,
+                        "error": f"DHL admite como máximo {MAX_DHL_PACKAGES} bultos por envío."}
+            if not 1 <= unidades_aduana <= MAX_DHL_CUSTOMS_UNITS:
+                return {"encontrado": False,
+                        "error": ("Las unidades aduaneras deben estar entre 1 y "
+                                  f"{MAX_DHL_CUSTOMS_UNITS} por renglón.")}
+            if not math.isfinite(peso_caja) or not 0 < peso_caja <= MAX_DHL_PACKAGE_KG:
+                return {"encontrado": False,
+                        "error": f"Cada bulto DHL debe pesar hasta {MAX_DHL_PACKAGE_KG:g} kg."}
+            total_cajas += cajas
+            peso_linea = round(peso_caja * cajas, 3)
+            for _ in range(cajas):
                 piezas.append({
-                    "weight": round(float(b.get("peso_kg") or 0.5), 3),
+                    "weight": round(peso_caja, 3),
                     "dimensions": {
                         "length": round(float(b.get("largo_cm") or b.get("largo") or 30), 3),
                         "width": round(float(b.get("ancho_cm") or b.get("ancho") or 20), 3),
                         "height": round(float(b.get("alto_cm") or b.get("alto") or 10), 3),
                     },
                 })
-            valor_total += valor_u * unidades
+            valor_total += valor_u * unidades_aduana
             line_items.append({
                 "number": i,
                 "description": (b.get("descripcion_en") or b.get("producto_alias")
                                 or "Merchandise")[:75],
                 "price": round(valor_u, 2),
-                "quantity": {"value": unidades, "unitOfMeasurement": "PCS"},
+                "quantity": {
+                    "value": unidades_aduana,
+                    "unitOfMeasurement": "PCS",
+                },
                 "commodityCodes": ([{"typeCode": "outbound",
                                      "value": str(b["hs_code"]).replace(".", "")[:18]}]
                                    if b.get("hs_code") else []),
@@ -493,14 +652,21 @@ class DHLClient(CarrierBase):
                     b.get("pais_origen") or pais_origen_envio
                 ).upper()[:2],
                 "weight": {
-                    "netValue": round(float(b.get("peso_kg") or 0.5), 3),
-                    "grossValue": round(float(b.get("peso_kg") or 0.5), 3),
+                    # Peso de todo el renglon comercial. Las dimensiones y el
+                    # peso POR CAJA ya viven, por separado, en `packages`.
+                    "netValue": peso_linea,
+                    "grossValue": peso_linea,
                 },
             })
 
-        msg_ref = f"tauro-ship-{uuid.uuid4().hex[:20]}"
+        # El caller productivo persiste esta referencia ANTES del POST. Si el
+        # proceso muere sin leer la respuesta, TAURO puede buscar exactamente
+        # la operación en MyDHL sin habilitar un reintento a ciegas.
+        msg_ref = str(
+            datos.get("message_reference") or f"tauro-ship-{uuid.uuid4().hex[:20]}"
+        )[:36]
         cuerpo = {
-            "plannedShippingDateAndTime": self._fecha_envio(),
+            "plannedShippingDateAndTime": self._fecha_envio(shipper.get("pais", "AR")),
             "pickup": {"isRequested": False},
             "productCode": self.product_code,
             "accounts": [{"typeCode": "shipper", "number": cuenta}],
@@ -517,6 +683,10 @@ class DHLClient(CarrierBase):
                 "receiverDetails": {
                     "postalAddress": self._direccion_envio(recipient),
                     "contactInformation": self._contacto(recipient),
+                    # MyDHL admite números regulatorios tanto del shipper como
+                    # del recipient. Para importaciones de WAIMAO, no perder el
+                    # identificador fiscal que el cliente completó en el portal.
+                    **self._registro_exportador(recipient),
                 },
             },
             "content": {
@@ -566,18 +736,31 @@ class DHLClient(CarrierBase):
                   f"VERIFICAR en MyDHL si la guía salió antes de reintentar.")
             return {"encontrado": False,
                     "error": "Error de comunicación con DHL. Verificá en MyDHL "
-                             "antes de reintentar."}
+                             "antes de reintentar.",
+                    "incierto": True, "message_reference": msg_ref}
 
         if resp.status_code not in (200, 201):
             print(f"[dhl] POST /shipments error {resp.status_code} (ref {msg_ref}): "
                   f"{resp.text[:400]}")
+            # Un timeout HTTP o un error del servidor puede llegar después de
+            # que DHL haya persistido la guía. No es seguro liberar la reserva
+            # ni reintentar: la referencia permite reconciliar en MyDHL.
+            if resp.status_code == 408 or 500 <= resp.status_code <= 599:
+                return {
+                    "encontrado": False,
+                    "error": "DHL no confirmó la emisión. Verificá en MyDHL "
+                             "antes de reintentar.",
+                    "incierto": True,
+                    "message_reference": msg_ref,
+                }
             return {"encontrado": False, "error": self._error_legible(resp)}
 
         try:
             data = resp.json()
             tracking = str(data.get("shipmentTrackingNumber") or "")
             if not tracking:
-                return {"encontrado": False, "error": "DHL no devolvió tracking."}
+                return {"encontrado": False, "error": "DHL no devolvió tracking.",
+                        "incierto": True, "message_reference": msg_ref}
 
             # El label viene en base64 dentro de documents (typeCode "label").
             label_b64 = ""
@@ -590,6 +773,10 @@ class DHLClient(CarrierBase):
                 import base64
                 try:
                     label_pdf = base64.b64decode(label_b64)
+                    if not label_pdf.startswith(b"%PDF"):
+                        print(f"[dhl] guía {tracking} emitida pero el documento "
+                              "devuelto no es PDF")
+                        label_pdf = None
                 except Exception as e:
                     print(f"[dhl] guía {tracking} emitida pero el label no decodifica: {e}")
 
@@ -600,21 +787,23 @@ class DHLClient(CarrierBase):
                 "servicio": "DHL Express Worldwide",
                 "label_pdf": label_pdf,
                 "label_b64": label_b64,
+                "message_reference": msg_ref,
             }
         except Exception as e:
             # La guía PUEDE existir aunque no podamos leer la respuesta.
             print(f"[dhl] respuesta ilegible tras emitir (ref {msg_ref}): {e}")
             return {"encontrado": False,
                     "error": "DHL respondió algo inesperado. Verificá en MyDHL "
-                             "si la guía se emitió."}
+                             "si la guía se emitió.",
+                    "incierto": True, "message_reference": msg_ref}
 
     def track(self, tracking_number: str) -> dict:
         """Estado de un envío DHL. Devuelve {encontrado, estado, descripcion, eventos}."""
         tracking_number = str(tracking_number or "").strip()
         if not tracking_number:
             return {"encontrado": False, "error": "tracking vacío"}
-        if not (self.api_key and self.api_secret):
-            return {"encontrado": False, "error": "Faltan credenciales de DHL."}
+        if error_config := self._error_configuracion():
+            return {"encontrado": False, "error": error_config}
         try:
             resp = requests.get(
                 f"{self.base_url}/shipments/{tracking_number}/tracking",
@@ -649,14 +838,27 @@ class DHLClient(CarrierBase):
 
         El payload está calcado del ejemplo oficial que mandó DHL
         (Pickup.txt, 09/2025) — con NUESTRA cuenta, no la 741582719 del
-        ejemplo, que es de un tercero. Ojo con la fecha: acá va con offset
-        "-03:00" (así viene en el ejemplo), NO el formato "GMT-03:00" de
-        /shipments. Son distintos a propósito de DHL, no nuestro.
+        ejemplo, que es de un tercero. Ojo con la fecha: acá va con el offset
+        local del ORIGEN (por ejemplo -03:00 AR, +08:00 CN), sin el literal
+        "GMT" que usa /shipments. Son contratos distintos de DHL.
         """
-        if not (self.api_key and self.api_secret):
-            return {"encontrado": False, "error": "Faltan credenciales de DHL."}
+        if error_config := self._error_configuracion():
+            return {"encontrado": False, "error": error_config}
 
         origen = datos.get("origen") or {}
+        requeridos_origen = {
+            "nombre": origen.get("nombre"),
+            "teléfono": origen.get("telefono"),
+            "dirección": origen.get("calle"),
+            "ciudad": origen.get("ciudad"),
+            "país": origen.get("pais"),
+        }
+        faltan_origen = [campo for campo, valor in requeridos_origen.items()
+                         if not str(valor or "").strip()]
+        if faltan_origen:
+            return {"encontrado": False, "error":
+                    "Completá " + ", ".join(faltan_origen) +
+                    " de la dirección de retiro antes de pedir DHL."}
         cuenta, error = self._cuenta_para(
             {"country": origen.get("pais", "AR")}, {"country": ""})
         if error:
@@ -666,8 +868,75 @@ class DHLClient(CarrierBase):
         ready = (datos.get("ready_time") or "09:00").strip()
         close = (datos.get("close_time") or "17:00").strip()
 
+        zona, error_zona = self._zona_origen(origen.get("pais", "AR"))
+        if error_zona:
+            return {"encontrado": False, "error": error_zona}
+        try:
+            hora_local = datetime.strptime(
+                f"{fecha} {ready}", "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=zona)
+        except ValueError:
+            return {"encontrado": False, "error": "Fecha u horario de retiro inválido."}
+        offset = hora_local.strftime("%z")
+        offset = f"{offset[:3]}:{offset[3:]}"
+
+        # Desde una guía llegan las piezas exactas. En carga manual sólo
+        # conocemos peso TOTAL + cantidad: se reparte el total, nunca se
+        # repite entero en cada caja (4,5 kg / 3 = 3 cajas de 1,5 kg).
+        paquetes_entrada = datos.get("paquetes") or []
+        paquetes = []
+        if paquetes_entrada:
+            peso_total = 0.0
+            for p in paquetes_entrada:
+                try:
+                    unidades = int(p.get("unidades") or p.get("cantidad") or 1)
+                    peso_pieza = float(p.get("peso_kg") or p.get("weight") or 1)
+                except (TypeError, ValueError):
+                    return {"encontrado": False,
+                            "error": "Revisá la cantidad y el peso de los bultos del retiro."}
+                if unidades < 1 or len(paquetes) + unidades > MAX_DHL_PACKAGES:
+                    return {"encontrado": False,
+                            "error": f"DHL admite como máximo {MAX_DHL_PACKAGES} bultos por retiro."}
+                if not math.isfinite(peso_pieza) or not 0 < peso_pieza <= MAX_DHL_PACKAGE_KG:
+                    return {"encontrado": False,
+                            "error": f"Cada bulto DHL debe pesar hasta {MAX_DHL_PACKAGE_KG:g} kg."}
+                peso_total += peso_pieza * unidades
+                if peso_total > MAX_DHL_PICKUP_KG:
+                    return {"encontrado": False,
+                            "error": f"El retiro supera {MAX_DHL_PICKUP_KG:g} kg totales."}
+                for _ in range(unidades):
+                    paquetes.append({
+                        "weight": round(peso_pieza, 3),
+                        "dimensions": {
+                            "length": round(float(p.get("largo_cm") or p.get("largo") or 30), 3),
+                            "width": round(float(p.get("ancho_cm") or p.get("ancho") or 20), 3),
+                            "height": round(float(p.get("alto_cm") or p.get("alto") or 15), 3),
+                        },
+                    })
+        else:
+            try:
+                cantidad = int(datos.get("bultos") or 1)
+                peso_total = float(datos.get("peso_kg") or 1)
+            except (TypeError, ValueError):
+                return {"encontrado": False,
+                        "error": "Revisá la cantidad y el peso total del retiro."}
+            if not 1 <= cantidad <= MAX_DHL_PACKAGES:
+                return {"encontrado": False,
+                        "error": f"DHL admite como máximo {MAX_DHL_PACKAGES} bultos por retiro."}
+            if not math.isfinite(peso_total) or not 0 < peso_total <= MAX_DHL_PICKUP_KG:
+                return {"encontrado": False,
+                        "error": f"El retiro debe pesar hasta {MAX_DHL_PICKUP_KG:g} kg totales."}
+            peso_por_bulto = round(peso_total / cantidad, 3)
+            if peso_por_bulto > MAX_DHL_PACKAGE_KG:
+                return {"encontrado": False,
+                        "error": f"Cada bulto DHL debe pesar hasta {MAX_DHL_PACKAGE_KG:g} kg."}
+            paquetes = [{
+                "weight": peso_por_bulto,
+                "dimensions": {"length": 30, "width": 20, "height": 15},
+            } for _ in range(cantidad)]
+
         cuerpo = {
-            "plannedPickupDateAndTime": f"{fecha}T{ready}:00-03:00",
+            "plannedPickupDateAndTime": f"{fecha}T{ready}:00{offset}",
             "closeTime": close,
             "accounts": [{"typeCode": "shipper", "number": cuenta}],
             "customerDetails": {
@@ -679,7 +948,7 @@ class DHLClient(CarrierBase):
                         "addressLine1": (origen.get("calle") or "")[:45],
                     },
                     "contactInformation": {
-                        "phone": (origen.get("telefono") or "0000000000")[:25],
+                        "phone": (origen.get("telefono") or "")[:25],
                         "companyName": (origen.get("empresa")
                                         or origen.get("nombre") or "N/A")[:60],
                         "fullName": (origen.get("nombre") or "N/A")[:45],
@@ -690,17 +959,16 @@ class DHLClient(CarrierBase):
                 "productCode": self.product_code,
                 "isCustomsDeclarable": True,
                 "unitOfMeasurement": "metric",
-                "packages": [{
-                    "weight": round(float(datos.get("peso_kg") or 1), 3),
-                    "dimensions": {"length": 30, "width": 20, "height": 15},
-                } for _ in range(max(int(datos.get("bultos") or 1), 1))],
+                "packages": paquetes,
             }],
         }
         if (datos.get("instrucciones") or "").strip():
             cuerpo["specialInstructions"] = [
                 {"value": str(datos["instrucciones"])[:75]}]
 
-        msg_ref = f"tauro-pickup-{uuid.uuid4().hex[:18]}"
+        msg_ref = str(
+            datos.get("message_reference") or f"tauro-pickup-{uuid.uuid4().hex[:18]}"
+        )[:36]
         try:
             resp = requests.post(
                 f"{self.base_url}/pickups",
@@ -717,11 +985,24 @@ class DHLClient(CarrierBase):
         except Exception as e:
             print(f"[dhl] EXCEPCIÓN agendando pickup (ref {msg_ref}): {e}")
             return {"encontrado": False,
-                    "error": "Error de comunicación con DHL al agendar."}
+                    "error": "Error de comunicación con DHL al agendar. "
+                             "Verificá en MyDHL antes de volver a pedirla.",
+                    "incierto": True, "message_reference": msg_ref}
 
         if resp.status_code not in (200, 201):
             print(f"[dhl] POST /pickups error {resp.status_code} "
                   f"(ref {msg_ref}): {resp.text[:400]}")
+            # Igual que una guía, un retiro puede haberse creado aunque el
+            # gateway termine respondiendo 408/5xx. Marcarlo como incierto
+            # evita agendar dos recolecciones por un reintento automático.
+            if resp.status_code == 408 or 500 <= resp.status_code <= 599:
+                return {
+                    "encontrado": False,
+                    "error": "DHL no confirmó la recolección. Verificá en MyDHL "
+                             "antes de volver a pedirla.",
+                    "incierto": True,
+                    "message_reference": msg_ref,
+                }
             return {"encontrado": False, "error": self._error_legible(resp)}
 
         try:
@@ -729,17 +1010,20 @@ class DHLClient(CarrierBase):
             codigos = data.get("dispatchConfirmationNumbers") or []
             if not codigos:
                 return {"encontrado": False,
-                        "error": "DHL no devolvió número de confirmación."}
+                        "error": "DHL no devolvió número de confirmación.",
+                        "incierto": True, "message_reference": msg_ref}
             return {
                 "encontrado": True,
                 "confirmation_code": str(codigos[0]),
                 # DHL no informa estación en la respuesta; se guarda vacío y
                 # cancel_pickup no la necesita (usa sólo el código).
                 "ubicacion": "",
+                "message_reference": msg_ref,
             }
         except Exception as e:
             return {"encontrado": False,
-                    "error": f"Respuesta de DHL ilegible: {e}"}
+                    "error": f"Respuesta de DHL ilegible: {e}. Verificá en MyDHL.",
+                    "incierto": True, "message_reference": msg_ref}
 
     def cancel_pickup(self, confirmation_code: str, fecha: str = "",
                       ubicacion: str = "") -> dict:
@@ -751,8 +1035,8 @@ class DHLClient(CarrierBase):
         NUNCA ejecutada en vivo — la primera cancelación real hay que mirarla,
         mismo criterio que la primera guía.
         """
-        if not (self.api_key and self.api_secret):
-            return {"ok": False, "error": "Faltan credenciales de DHL."}
+        if error_config := self._error_configuracion():
+            return {"ok": False, "error": error_config}
         codigo = (confirmation_code or "").strip()
         if not codigo:
             return {"ok": False, "error": "Sin código de confirmación."}

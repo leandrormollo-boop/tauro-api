@@ -38,24 +38,30 @@ PASOS_EMBUDO = [
         "clave": "esperando_guia",
         "titulo": "Esperando guía",
         "detalle": "Ya las pediste, las emite Tauro",
-        "url": "/portal/envios",
+        "url": "/portal/envios?paso=esperando_guia",
         "accion_de": "tauro",
     },
     {
         "clave": "guia_lista",
         "titulo": "Guías listas",
-        "detalle": "Para descargar y despachar",
-        "url": "/portal/envios",
+        "detalle": "Para descargar y entregar al courier",
+        "url": "/portal/envios?paso=guia_lista",
         "accion_de": "cliente",
     },
     {
         "clave": "despachados",
-        "titulo": "Despachados",
+        "titulo": "Enviados",
         "detalle": "Ya viajan a destino",
-        "url": "/portal/envios",
+        "url": "/portal/envios?paso=despachados",
         "accion_de": None,
     },
 ]
+
+
+# Tres filas dejan visibles título, filtros, listado y paginación dentro de
+# una pantalla de notebook de 720 px. El historial completo sigue disponible:
+# sólo se divide en páginas, nunca se recorta.
+ENVIOS_POR_PAGINA = 3
 
 
 def paso_de_estado(estado: str) -> str | None:
@@ -71,7 +77,7 @@ def paso_de_estado(estado: str) -> str | None:
     reconoce, porque un estado sin mapear desaparece sin dar error.
     """
     estado = (estado or "").upper()
-    if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO"):
+    if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO", "VERIFICAR_COURIER"):
         # Los tres significan lo mismo para el cliente: la pelota la tiene
         # Tauro. Mismo criterio que usa la bandeja del admin.
         return "esperando_guia"
@@ -85,6 +91,104 @@ def paso_de_estado(estado: str) -> str | None:
         return None  # no espera acción de nadie
     print(f"[panel] estado sin mapear en el embudo: {estado!r}")
     return None
+
+
+def _pagina_pedida(valor) -> int:
+    """Normaliza una página de query string sin convertir una URL mala en 422."""
+    try:
+        return max(1, int(valor))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _paginas_visibles(actual: int, total: int) -> list[int | None]:
+    """Primera, última y una ventana corta; ``None`` representa una elipsis."""
+    if total <= 7:
+        return list(range(1, total + 1))
+
+    numeros = {1, total}
+    numeros.update(range(max(2, actual - 2), min(total, actual + 2) + 1))
+    visibles: list[int | None] = []
+    anterior = 0
+    for numero in sorted(numeros):
+        if anterior and numero - anterior > 1:
+            visibles.append(None)
+        visibles.append(numero)
+        anterior = numero
+    return visibles
+
+
+def preparar_historial_envios(
+    solicitudes,
+    tipo: str = "",
+    paso: str = "",
+    pagina=1,
+    por_pagina: int = ENVIOS_POR_PAGINA,
+) -> dict:
+    """Filtra y pagina el historial del cliente con una única regla de UI.
+
+    ``solicitudes`` ya debe venir aislado por cliente. El filtro de tipo se
+    aplica antes de contar los pasos; el filtro de paso se aplica antes de
+    paginar. Así los números, las filas y las páginas siempre describen el
+    mismo conjunto.
+    """
+    from servicios.couriers_urls import es_nacional
+
+    historial = list(solicitudes or [])
+    tiene_historial = bool(historial)
+
+    tipo = (tipo or "").strip().lower()
+    if tipo not in {"nacional", "internacional"}:
+        tipo = ""
+
+    por_tipo = historial
+    if tipo == "nacional":
+        por_tipo = [s for s in historial if es_nacional(s.get("courier"))]
+    elif tipo == "internacional":
+        por_tipo = [s for s in historial if not es_nacional(s.get("courier"))]
+
+    total_sin_filtrar = len(por_tipo)
+    conteos: dict[str, int] = {}
+    for solicitud in por_tipo:
+        clave = paso_de_estado(solicitud.get("estado"))
+        if clave:
+            conteos[clave] = conteos.get(clave, 0) + 1
+    chips = [
+        {**definicion, "cantidad": conteos.get(definicion["clave"], 0)}
+        for definicion in PASOS_EMBUDO
+        if definicion["clave"] != "por_armar"
+    ]
+
+    paso = (paso or "").strip().lower()
+    if paso in {chip["clave"] for chip in chips}:
+        filtradas = [
+            s for s in por_tipo if paso_de_estado(s.get("estado")) == paso
+        ]
+    else:
+        paso = ""
+        filtradas = por_tipo
+
+    por_pagina = max(1, int(por_pagina or ENVIOS_POR_PAGINA))
+    total_resultados = len(filtradas)
+    total_paginas = max(1, (total_resultados + por_pagina - 1) // por_pagina)
+    pagina_actual = min(_pagina_pedida(pagina), total_paginas)
+    inicio = (pagina_actual - 1) * por_pagina
+    fin = min(inicio + por_pagina, total_resultados)
+
+    return {
+        "solicitudes": filtradas[inicio:fin],
+        "tipo_filtro": tipo,
+        "paso_filtro": paso,
+        "chips": chips,
+        "total_sin_filtrar": total_sin_filtrar,
+        "total_resultados": total_resultados,
+        "pagina_actual": pagina_actual,
+        "total_paginas": total_paginas,
+        "paginas_visibles": _paginas_visibles(pagina_actual, total_paginas),
+        "pagina_desde": inicio + 1 if total_resultados else 0,
+        "pagina_hasta": fin,
+        "tiene_historial": tiene_historial,
+    }
 
 
 def embudo_envios(cliente_id: str) -> list[dict]:
@@ -184,12 +288,14 @@ def checklist_arranque(cliente_id: str) -> dict:
     pasos = [
         {
             "clave": "producto",
-            "titulo": "Cargá tu primer producto",
-            "detalle": "Con su descripción y código de aduana, para no reescribirlo en cada envío",
+            "titulo": "Guardá productos frecuentes",
+            "detalle": "Opcional: sirve para integraciones o para no repetir datos",
             "url": "/portal/catalogo",
             "cta": "Ir al catálogo",
             "hecho": productos > 0,
-            "opcional": False,
+            # Un revendedor puede operar cargando cada caja manualmente. El
+            # catálogo sólo acelera cargas repetidas e integraciones.
+            "opcional": True,
         },
         {
             "clave": "direccion",

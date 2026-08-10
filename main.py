@@ -222,10 +222,22 @@ async def headers_de_seguridad(request: Request, call_next):
     return response
 
 # Inicializar base de datos PostgreSQL al arrancar
+_db_init_error = None
 try:
     init_db()
 except Exception as _db_err:
+    _db_init_error = str(_db_err)
     print(f"[startup] DB init error: {_db_err}")
+    # En producción no alcanza con dejar /health en 503: si el proceso sigue
+    # vivo, antes de que Railway descarte el candidato puede arrancar jobs,
+    # threads o llamadas a couriers con un schema incompleto. Fallar el boot
+    # impide cualquier side effect del release defectuoso y conserva la
+    # versión sana anterior. Sin DATABASE_URL (desarrollo/tests), se mantiene
+    # el import tolerante para poder trabajar offline.
+    if os.getenv("DATABASE_URL"):
+        raise RuntimeError(
+            "El schema de PostgreSQL no quedó listo; se aborta el arranque."
+        ) from _db_err
 
 # Migrar api_key → api_key_hash UNA vez, en el arranque y no en el primer
 # request. La migración hace ALTER TABLE (lock exclusivo sobre `clientes`)
@@ -449,6 +461,17 @@ def health_check():
     A propósito NO toca la DB: un parpadeo de Postgres no debe hacer que
     Railway reinicie la app en loop.
     """
+    # Si Railway sí configuró DATABASE_URL pero la migración del release
+    # falló (por ejemplo por trackings históricos duplicados), el proceso no
+    # puede declararse sano: servir el código nuevo sobre un schema viejo
+    # rompería emisión y conciliación. El healthcheck 503 mantiene la versión
+    # anterior atendiendo hasta resolver la migración.
+    if os.getenv("DATABASE_URL") and _db_init_error:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "service": "tauro-api",
+                     "detail": "database_schema_not_ready"},
+        )
     return {"status": "ok", "service": "tauro-api", "version": "1.0.0"}
 
 
@@ -823,7 +846,16 @@ def job_actualizar_precios_fedex():
 # SCHEDULER
 # ─────────────────────────────────────────────
 
-CRON_DIA = os.getenv("CRON_DIA", "monday")
+_CRON_DIAS = {
+    "monday": "mon", "tuesday": "tue", "wednesday": "wed",
+    "thursday": "thu", "friday": "fri", "saturday": "sat", "sunday": "sun",
+    "mon": "mon", "tue": "tue", "wed": "wed", "thu": "thu",
+    "fri": "fri", "sat": "sat", "sun": "sun",
+}
+_cron_dia_raw = os.getenv("CRON_DIA", "mon").strip().lower()
+CRON_DIA = _CRON_DIAS.get(_cron_dia_raw, "mon")
+if _cron_dia_raw not in _CRON_DIAS:
+    print(f"[scheduler] CRON_DIA={_cron_dia_raw!r} inválido; se usa 'mon'.")
 CRON_HORA = int(os.getenv("CRON_HORA", 6))
 
 scheduler = BackgroundScheduler(timezone="America/Argentina/Buenos_Aires")

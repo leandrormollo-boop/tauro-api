@@ -14,6 +14,10 @@ from core.database import get_conn
 ESTADOS_SOLICITUD = [
     "SOLICITADO",
     "EN_PROCESO",
+    # El courier pudo haber recibido una operación irreversible, pero TAURO
+    # no recibió una respuesta concluyente. No se vuelve a emitir hasta que
+    # una persona concilie la Message-Reference en el portal del courier.
+    "VERIFICAR_COURIER",
     "GUIA_LISTA",
     "DESPACHADO",
     "CANCELADO",
@@ -35,7 +39,8 @@ def _clean(value: Optional[str]) -> Optional[str]:
 def _sin_label(row: dict) -> dict:
     """Reemplaza el PDF (bytea) por un booleano en los listados, para no cargar
     los bytes del label en cada fila de la tabla."""
-    row["tiene_label"] = bool(row.get("label_pdf"))
+    if "tiene_label" not in row:
+        row["tiene_label"] = bool(row.get("label_pdf"))
     row.pop("label_pdf", None)
     return row
 
@@ -168,20 +173,35 @@ def crear_solicitud_guia(
             return dict(cur.fetchone())
 
 
-def listar_solicitudes_cliente(cliente_id: str, limite: int = 100) -> list[dict]:
-    """Solicitudes de guía de un cliente, últimas primero."""
+def listar_solicitudes_cliente(
+    cliente_id: str, limite: Optional[int] = 100
+) -> list[dict]:
+    """Solicitudes de guía de un cliente, últimas primero.
+
+    ``limite=None`` devuelve el historial completo. Las vistas de resumen
+    deben pasar un número explícito para no traer filas innecesarias.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT *
+            # Columnas de listado: nunca traer el BYTEA de la guía. En el
+            # historial completo eso podría transferir cientos de PDFs sólo
+            # para dibujar un tilde en cada fila.
+            query = """
+                SELECT id, cliente_id, estado, producto_alias, cantidad,
+                       destino_pais, dest_nombre, dest_ciudad, observaciones,
+                       peso_kg, valor_declarado_usd, precio_tauro_ars,
+                       precio_tauro_usd, precio_cliente_final_ars, tracking,
+                       guia_url, created_at, courier, bultos,
+                       (label_pdf IS NOT NULL) AS tiene_label
                 FROM solicitudes_guia
                 WHERE cliente_id = %s
                 ORDER BY created_at DESC
-                LIMIT %s
-                """,
-                (cliente_id.strip().upper(), limite),
-            )
+            """
+            params = [cliente_id.strip().upper()]
+            if limite is not None:
+                query += " LIMIT %s"
+                params.append(max(1, int(limite)))
+            cur.execute(query, tuple(params))
             return [_sin_label(dict(r)) for r in cur.fetchall()]
 
 
@@ -218,13 +238,23 @@ def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT s.*, c.nombre AS cliente_nombre, c.email AS cliente_email
+                SELECT s.*, c.nombre AS cliente_nombre, c.email AS cliente_email,
+                       (s.estado='VERIFICAR_COURIER' OR
+                        (s.estado='EMITIENDO' AND s.tracking IS NULL AND
+                         s.courier_message_reference IS NOT NULL AND
+                         s.updated_at <= NOW() - INTERVAL '10 minutes'))
+                         AS puede_conciliar_courier,
+                       (s.estado='EMITIENDO' AND s.tracking IS NULL AND
+                        s.courier_message_reference IS NULL AND
+                        s.updated_at <= NOW() - INTERVAL '10 minutes')
+                         AS puede_liberar_reserva
                 FROM solicitudes_guia s
                 JOIN clientes c ON c.cliente_id = s.cliente_id
                 {where}
                 ORDER BY
                     CASE s.estado
                         WHEN 'SOLICITADO' THEN 1
+                        WHEN 'VERIFICAR_COURIER' THEN 1
                         WHEN 'EN_PROCESO' THEN 2
                         WHEN 'GUIA_LISTA' THEN 3
                         WHEN 'DESPACHADO' THEN 4
@@ -272,6 +302,8 @@ def actualizar_solicitud_guia(
                     UPDATE solicitudes_guia
                     SET estado=%s, tracking=%s, guia_url=%s, updated_at=NOW()
                     WHERE id=%s
+                      AND estado NOT IN ('EMITIENDO', 'VERIFICAR_COURIER')
+                    RETURNING id
                     """,
                     (estado, _clean(tracking), _clean(guia_url), solicitud_id),
                 )
@@ -286,8 +318,15 @@ def actualizar_solicitud_guia(
                         guia_url = COALESCE(NULLIF(%s, ''), guia_url),
                         updated_at=NOW()
                     WHERE id=%s
+                      AND estado NOT IN ('EMITIENDO', 'VERIFICAR_COURIER')
+                    RETURNING id
                     """,
                     (estado, _clean(tracking), _clean(guia_url), solicitud_id),
+                )
+            if cur.fetchone() is None:
+                raise ValueError(
+                    "La solicitud se está emitiendo o requiere conciliación con el courier. "
+                    "Usá la acción específica de verificación antes de cambiarla."
                 )
 
 
@@ -322,7 +361,8 @@ def editar_solicitud_pre_emision(solicitud_id: int, campos: dict) -> None:
                 f"""
                 UPDATE solicitudes_guia
                 SET {sets}, updated_at=NOW()
-                WHERE id=%s AND tracking IS NULL AND estado <> %s
+                WHERE id=%s AND tracking IS NULL
+                  AND estado NOT IN (%s, 'VERIFICAR_COURIER')
                 RETURNING id
                 """,
                 (*limpios.values(), solicitud_id, ESTADO_EMITIENDO),
@@ -341,7 +381,7 @@ def contar_solicitudes_pendientes() -> int:
                 """
                 SELECT COUNT(*) AS n
                 FROM solicitudes_guia
-                WHERE estado IN ('SOLICITADO', 'EN_PROCESO')
+                WHERE estado IN ('SOLICITADO', 'EN_PROCESO', 'VERIFICAR_COURIER')
                 """
             )
             row = cur.fetchone()
@@ -388,18 +428,25 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
 
 
 def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[bytes],
-                          courier: str = "FEDEX") -> None:
+                          courier: str = "FEDEX",
+                          message_reference: Optional[str] = None) -> None:
     """Persiste la guía emitida: tracking, label PDF y estado GUIA_LISTA."""
+    tracking = (tracking or "").strip()[:120]
+    if not tracking:
+        raise ValueError("El courier no devolvió un tracking válido.")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE solicitudes_guia
                 SET estado='GUIA_LISTA', tracking=%s, label_pdf=%s, courier=%s,
+                    courier_message_reference=COALESCE(%s, courier_message_reference),
+                    courier_error=NULL, cargo_pendiente=TRUE, cargo_error=NULL,
                     guia_generada_at=NOW(), updated_at=NOW()
                 WHERE id=%s
                 """,
-                (tracking, psycopg2.Binary(label_pdf) if label_pdf else None, courier, solicitud_id),
+                (tracking, psycopg2.Binary(label_pdf) if label_pdf else None,
+                 courier, _clean(message_reference), solicitud_id),
             )
     # DÉBITO AUTOMÁTICO (decisión de Leandro 28/07): la guía emitida carga
     # sola su costo a la cuenta corriente del cliente. Es idempotente (índice
@@ -408,8 +455,28 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
     # en el peor caso, se carga a mano y el log lo dice.
     try:
         from servicios.cuenta_corriente import cargar_guia_emitida
-        cargar_guia_emitida(solicitud_id)
+        if cargar_guia_emitida(solicitud_id) is not True:
+            raise RuntimeError("No se pudo garantizar el cargo de la guía emitida")
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE solicitudes_guia
+                    SET cargo_pendiente=FALSE, cargo_error=NULL, updated_at=NOW()
+                    WHERE id=%s
+                """, (solicitud_id,))
     except Exception as e:
+        error_cargo = str(e)[:500]
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE solicitudes_guia
+                        SET cargo_pendiente=TRUE, cargo_error=%s, updated_at=NOW()
+                        WHERE id=%s
+                    """, (error_cargo, solicitud_id))
+        except Exception as persistencia_error:
+            print(f"[solicitudes] tampoco pude persistir el cargo pendiente "
+                  f"de {solicitud_id}: {persistencia_error}")
         print(f"[solicitudes] guía {tracking} emitida pero el cargo automático "
               f"falló ({e}): FACTURAR A MANO la solicitud {solicitud_id}")
 
@@ -426,6 +493,26 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
         args=(solicitud_id, tracking, courier),
         daemon=True,
     ).start()
+
+
+def adjuntar_label_guia(solicitud_id: int, label_pdf: bytes) -> dict:
+    """Adjunta el PDF recuperado sin tocar tracking, estado ni cargo."""
+    contenido = bytes(label_pdf or b"")
+    if not contenido.startswith(b"%PDF"):
+        return {"ok": False, "error": "El archivo no es una etiqueta PDF válida."}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET label_pdf=%s, updated_at=NOW()
+                WHERE id=%s AND tracking IS NOT NULL
+                RETURNING tracking
+            """, (psycopg2.Binary(contenido), solicitud_id))
+            fila = cur.fetchone()
+            if not fila:
+                return {"ok": False, "error":
+                        "La solicitud todavía no tiene una guía confirmada."}
+    return {"ok": True, "tracking": fila.get("tracking")}
 
 
 def _avisar_tienda_origen(solicitud_id: int, tracking: str, courier: str) -> None:
@@ -618,42 +705,250 @@ def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
     """
     cliente_id = (cliente_id or "").strip().upper()
 
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT s.cliente_id, s.tracking, s.estado,
-                       c.puede_emitir, c.tope_deuda_ars
-                FROM solicitudes_guia s
-                JOIN clientes c ON c.cliente_id = s.cliente_id
-                WHERE s.id = %s
-            """, (solicitud_id,))
-            fila = cur.fetchone()
+    reserva = _reservar_credito_cliente(solicitud_id, cliente_id)
+    if not reserva.get("ok"):
+        return reserva
 
-    if not fila or fila["cliente_id"] != cliente_id:
-        return {"ok": False, "error": "Esa solicitud no existe o no es tuya."}
-    if fila["tracking"]:
-        return {"ok": False, "error": "Esa solicitud ya tiene guía emitida."}
-    if not fila["puede_emitir"]:
-        return {"ok": False, "error": "Tu cuenta no tiene habilitada la emisión "
-                                      "directa. Reenviá la solicitud a Tauro y la "
-                                      "emitimos nosotros."}
-
-    tope = fila["tope_deuda_ars"]
-    if tope is not None and float(tope) >= 0:
-        from servicios.cuenta_corriente import get_facturado_real, saldo
-        deuda = saldo(cliente_id, get_facturado_real(cliente_id))["saldo_pendiente_ars"]
-        if deuda > float(tope):
+    # Entre armar la solicitud y emitirla DHL puede cambiar la tarifa. La
+    # reserva evita dos clicks simultáneos; si cambia el precio, actualizamos
+    # la solicitud, liberamos sin llamar a /shipments y exigimos un segundo
+    # click sobre el importe nuevo.
+    sol = obtener_solicitud(solicitud_id)
+    if sol and (sol.get("courier") or "").upper() == "DHL":
+        try:
+            recotizacion = _recotizar_dhl_antes_de_emitir(sol)
+        except Exception as e:
+            # Toda esta etapa sucede ANTES del POST irreversible a DHL. Una
+            # fila legacy mal formada o un error de parseo no puede dejar la
+            # reserva EMITIENDO tomada para siempre.
+            print(f"[solicitudes] no pude preparar la recotizacion DHL "
+                  f"de {solicitud_id}: {e}")
+            _liberar_reserva(solicitud_id)
             return {"ok": False, "error":
-                    f"Tu saldo pendiente (ARS {deuda:,.0f}) supera el límite "
-                    f"de tu cuenta (ARS {float(tope):,.0f}). Registrá un pago "
-                    f"para seguir emitiendo, o reenviá la solicitud a Tauro."}
+                    "No pudimos validar los datos para recotizar con DHL. "
+                    "No emitimos ni cobramos nada; revisa los bultos o pedi ayuda a Tauro."}
+        if not recotizacion.get("ok"):
+            _liberar_reserva(solicitud_id)
+            return recotizacion
 
     print(f"[solicitudes] emisión del CLIENTE {cliente_id} para la solicitud "
           f"{solicitud_id} (autorizada: flag + tope OK)")
-    return generar_guia(solicitud_id)
+    return generar_guia(solicitud_id, ya_reservada=True)
 
 
-def generar_guia(solicitud_id: int) -> dict:
+def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
+    """Verifica que `costo DHL + regla del cliente` siga siendo el aceptado."""
+    bultos = sol.get("bultos") or []
+    if isinstance(bultos, str):
+        try:
+            bultos = json.loads(bultos)
+        except (TypeError, ValueError):
+            bultos = []
+
+    if bultos:
+        # Se pasa como carga manual aun si nació del catálogo: la solicitud
+        # congeló la invoice, medidas y valor de ESTE envío y eso es lo que
+        # debe volver a cotizarse.
+        filas = [{
+            "producto": "",
+            "cantidad": max(int(b.get("cantidad") or 1), 1),
+            "peso_kg": b.get("peso_kg"), "largo_cm": b.get("largo_cm"),
+            "ancho_cm": b.get("ancho_cm"), "alto_cm": b.get("alto_cm"),
+            "descripcion_en": b.get("descripcion_en") or "Merchandise",
+            "valor_unitario_usd": b.get("valor_unitario_usd") or 1,
+            # Cantidad comercial declarada en aduana. Es independiente de
+            # `cantidad`, que representa cajas fisicas del envio.
+            "unidades_aduana": max(int(
+                b.get("unidades_aduana") or b.get("cantidad") or 1
+            ), 1),
+            "hs_code": b.get("hs_code") or "",
+            "pais_origen": b.get("pais_origen") or sol.get("remitente_pais") or "AR",
+        } for b in bultos]
+    else:
+        cantidad = max(int(sol.get("cantidad") or 1), 1)
+        total = float(sol.get("valor_declarado_usd") or 1)
+        filas = [{
+            "producto": "", "cantidad": cantidad,
+            # En el legacy peso_kg es total; cada pieza debe recuperar su peso.
+            "peso_kg": float(sol.get("peso_kg") or 1) / cantidad,
+            "largo_cm": sol.get("largo_cm") or 30,
+            "ancho_cm": sol.get("ancho_cm") or 20,
+            "alto_cm": sol.get("alto_cm") or 10,
+            "descripcion_en": sol.get("producto_alias") or "Merchandise",
+            "valor_unitario_usd": total / cantidad,
+            "pais_origen": sol.get("remitente_pais") or "AR",
+        }]
+
+    try:
+        from servicios.api_b2b import cotizar_couriers_cliente
+        resultado = cotizar_couriers_cliente(
+            sol["cliente_id"], sol.get("destino_pais") or "", filas,
+            destino_real={
+                "cp": sol.get("dest_zip") or "", "ciudad": sol.get("dest_ciudad") or "",
+                "estado": sol.get("dest_estado") or "",
+            },
+            origen_real={
+                "pais": sol.get("remitente_pais") or "AR",
+                "ciudad": sol.get("remitente_ciudad") or "",
+                "cp": sol.get("remitente_zip") or "",
+                "estado": sol.get("remitente_estado") or "",
+            },
+        )
+    except Exception as e:
+        print(f"[solicitudes] no pude recotizar DHL antes de emitir {sol['id']}: {e}")
+        return {"ok": False, "error":
+                "No pudimos confirmar la tarifa actual de DHL. No emitimos ni cobramos nada; "
+                "probá de nuevo en unos minutos."}
+
+    opcion = next((o for o in (resultado.get("opciones") or [])
+                   if (o.get("id") or "").lower() == "dhl"), None)
+    if not opcion:
+        return {"ok": False, "error":
+                "DHL no devolvió una tarifa para este envío. No emitimos ni cobramos nada."}
+
+    anterior = float(sol.get("precio_tauro_ars") or 0)
+    actual = float(opcion["precio_ars"])
+    if abs(actual - anterior) <= 0.5:
+        return {"ok": True}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET precio_tauro_ars=%s, precio_tauro_usd=%s,
+                    servicio_courier=%s, updated_at=NOW()
+                WHERE id=%s AND tracking IS NULL
+            """, (actual, opcion.get("precio_usd"), opcion.get("servicio"), sol["id"]))
+
+    anterior_txt = f"{anterior:,.0f}".replace(",", ".")
+    actual_txt = f"{actual:,.0f}".replace(",", ".")
+    return {"ok": False, "precio_cambio": True, "error":
+            f"La tarifa DHL cambió de $ {anterior_txt} a $ {actual_txt}. "
+            "Revisá el nuevo importe y volvé a emitir; todavía no generamos ni cobramos nada."}
+
+
+def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
+    """Autoriza y reserva guía + crédito en una sola sección crítica.
+
+    El lock de la fila del cliente serializa emisiones distintas de la misma
+    cuenta. Además de la deuda contabilizada suma guías que están emitiéndose,
+    en verificación o con cargo pendiente: dos clicks sobre solicitudes
+    distintas ya no pueden gastar el mismo límite simultáneamente.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT s.cliente_id, s.tracking, s.estado, s.precio_tauro_ars,
+                       s.courier, c.activo,
+                       CASE
+                         WHEN LOWER(COALESCE(s.courier, '')) = 'dhl'
+                         THEN COALESCE(cc.puede_emitir, FALSE)
+                         WHEN UPPER(COALESCE(s.courier, '')) = 'ENVIA'
+                         THEN COALESCE(c.puede_emitir, FALSE)
+                         ELSE FALSE
+                       END AS puede_emitir,
+                       c.tope_deuda_ars
+                FROM solicitudes_guia s
+                JOIN clientes c ON c.cliente_id = s.cliente_id
+                LEFT JOIN cliente_courier_config cc
+                  ON cc.cliente_id = s.cliente_id
+                 AND cc.courier = LOWER(COALESCE(s.courier, ''))
+                WHERE s.id = %s
+                FOR UPDATE OF c, s
+            """, (solicitud_id,))
+            fila = cur.fetchone()
+
+            if not fila or fila["cliente_id"] != cliente_id:
+                return {"ok": False, "error": "Esa solicitud no existe o no es tuya."}
+            if fila["tracking"]:
+                return {"ok": False, "error": "Esa solicitud ya tiene guía emitida."}
+            if fila["estado"] == "VERIFICAR_COURIER":
+                return {"ok": False, "error":
+                        "La emisión anterior se está verificando con el courier. "
+                        "No vuelvas a emitirla: Tauro te avisa cuando la concilie."}
+            if fila["estado"] == ESTADO_EMITIENDO:
+                return {"ok": False, "error":
+                        "Ya hay una emisión en curso para esta solicitud."}
+            if not fila["activo"]:
+                return {"ok": False, "error":
+                        "Tu cuenta está desactivada. No se puede emitir ni "
+                        "generar cargos hasta que Tauro la reactive."}
+            if (fila.get("courier") or "").strip().lower() == "dhl":
+                from servicios.configuracion_couriers_cliente import estado_integracion
+                if not estado_integracion("dhl")["operativa"]:
+                    return {"ok": False, "error":
+                            "DHL no está habilitado en producción en este momento. "
+                            "No emitimos ni generamos ningún cargo; escribile a Tauro."}
+            if not fila["puede_emitir"]:
+                return {"ok": False, "error":
+                        "Tu cuenta no tiene habilitada la emisión directa. "
+                        "Reenviá la solicitud a Tauro y la emitimos nosotros."}
+
+            tope = fila["tope_deuda_ars"]
+            if tope is not None and float(tope) >= 0:
+                # Una sola consulta/snapshot para deuda y reservas. Antes se
+                # abrian conexiones separadas para facturado y pagos, por lo
+                # que una aprobacion concurrente podia dejar una mezcla de
+                # momentos distintos. Ademas no se vuelve a reservar un
+                # cargo_pendiente que ya tenga asiento en `envios`.
+                cur.execute("""
+                    SELECT
+                        COALESCE((
+                            SELECT SUM(e.monto_ars)
+                            FROM envios e
+                            WHERE e.cliente_id=%s
+                              AND e.estado NOT IN ('CANCELADO', 'NC')
+                        ), 0) - COALESCE((
+                            SELECT SUM(p.monto_ars)
+                            FROM pagos p
+                            WHERE p.cliente_id=%s
+                              AND COALESCE(p.estado, 'APROBADO')='APROBADO'
+                        ), 0) AS deuda,
+                        COALESCE((
+                            SELECT SUM(s2.precio_tauro_ars)
+                            FROM solicitudes_guia s2
+                            WHERE s2.cliente_id=%s AND s2.id<>%s AND (
+                                (s2.tracking IS NULL AND s2.estado IN
+                                    ('EMITIENDO', 'VERIFICAR_COURIER'))
+                                OR (
+                                    s2.cargo_pendiente=TRUE
+                                    AND NOT EXISTS (
+                                        SELECT 1 FROM envios e2
+                                        WHERE e2.solicitud_id=s2.id
+                                    )
+                                )
+                            )
+                        ), 0) AS reservado
+                """, (cliente_id, cliente_id, cliente_id, solicitud_id))
+                resumen_credito = cur.fetchone() or {}
+                deuda = float(resumen_credito.get("deuda") or 0)
+                reservado = float(resumen_credito.get("reservado") or 0)
+                nueva = float(fila.get("precio_tauro_ars") or 0)
+                proyectado = deuda + reservado + nueva
+                if proyectado > float(tope):
+                    proyectado_txt = f"{proyectado:,.0f}".replace(",", ".")
+                    tope_txt = f"{float(tope):,.0f}".replace(",", ".")
+                    return {"ok": False, "error":
+                            f"Esta guía llevaría el saldo comprometido a ARS "
+                            f"{proyectado_txt}, por encima del límite de tu cuenta "
+                            f"(ARS {tope_txt}). Registrá un pago o pedile "
+                            "a Tauro que revise el límite."}
+
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET estado='EMITIENDO', updated_at=NOW()
+                WHERE id=%s AND tracking IS NULL
+                  AND estado NOT IN ('EMITIENDO', 'VERIFICAR_COURIER', 'CANCELADO')
+                RETURNING id
+            """, (solicitud_id,))
+            if cur.fetchone() is None:
+                return {"ok": False, "error":
+                        "La solicitud cambió de estado. Actualizá la pantalla antes de emitir."}
+        conn.commit()
+    return {"ok": True}
+
+
+def generar_guia(solicitud_id: int, ya_reservada: bool = False) -> dict:
     """
     Despachador de emisión: mira el courier de la solicitud y emite por
     el canal que corresponde. FEDEX = cuenta propia (internacional);
@@ -666,11 +961,15 @@ def generar_guia(solicitud_id: int) -> dict:
     courier = (sol.get("courier") or "FEDEX").upper()
 
     if courier == "ENVIA":
-        return generar_guia_envia(sol)
+        return (generar_guia_envia(sol, ya_reservada=True)
+                if ya_reservada else generar_guia_envia(sol))
     # Registro de couriers internacionales: sumar uno nuevo es agregarlo acá
     # y darle un cliente con create_shipment del mismo contrato.
     if courier in ("FEDEX", "DHL", "UPS"):
-        return generar_guia_internacional(solicitud_id, courier=courier)
+        return (generar_guia_internacional(
+                    solicitud_id, courier=courier, ya_reservada=True,
+                ) if ya_reservada else
+                generar_guia_internacional(solicitud_id, courier=courier))
 
     # NUNCA caer a FedEx por descarte. Antes esto era un `else` y cualquier
     # courier desconocido —DHL, UPS— se emitía con una etiqueta de FedEx:
@@ -689,7 +988,7 @@ def generar_guia(solicitud_id: int) -> dict:
     }
 
 
-def generar_guia_envia(sol: dict) -> dict:
+def generar_guia_envia(sol: dict, ya_reservada: bool = False) -> dict:
     """
     Emite una guía NACIONAL vía envia.com con el carrier/servicio que
     eligió el cliente al crear la solicitud. Cuidado: debita el wallet
@@ -697,6 +996,12 @@ def generar_guia_envia(sol: dict) -> dict:
     """
     if sol.get("estado") == "CANCELADO":
         return {"ok": False, "error": "La solicitud está cancelada."}
+    if sol.get("estado") == "VERIFICAR_COURIER":
+        referencia = sol.get("courier_message_reference") or "sin referencia visible"
+        return {"ok": False, "error": (
+            "La emisión anterior tuvo una respuesta incierta. No la vuelvas a "
+            f"emitir: Tauro debe verificarla con el courier (ref. {referencia})."
+        )}
     if sol.get("tracking") and sol.get("label_pdf"):
         return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
 
@@ -705,7 +1010,7 @@ def generar_guia_envia(sol: dict) -> dict:
     # y envia.com emitía DOS guías debitando DOS veces el wallet prepago.
     # El UPDATE condicional garantiza que de N intentos exactamente uno
     # sigue; el resto se va con este mensaje.
-    if not _reservar_para_emitir(sol["id"]):
+    if not ya_reservada and not _reservar_para_emitir(sol["id"]):
         return {"ok": False, "error": "Esta guía ya se está emitiendo. Esperá unos "
                                       "segundos y refrescá."}
 
@@ -818,9 +1123,9 @@ def _reservar_para_emitir(solicitud_id: int) -> bool:
     simultáneos exactamente uno modifica la fila. El que obtiene la fila
     puede llamar al courier; los demás se van con las manos vacías.
 
-    La ventana de 10 minutos es la red por si el proceso muere en el
-    medio (deploy, reinicio): pasado ese rato la solicitud vuelve a
-    quedar disponible en vez de bloquearse para siempre.
+    No vence sola: si el proceso muere después de enviar el POST, no sabemos
+    si el courier creó la guía. Una persona debe conciliarla antes de resetear
+    el estado; desbloquear por tiempo habilitaría un duplicado facturado.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -829,8 +1134,8 @@ def _reservar_para_emitir(solicitud_id: int) -> bool:
                 SET estado = 'EMITIENDO', updated_at = NOW()
                 WHERE id = %s
                   AND tracking IS NULL
-                  AND (estado <> 'EMITIENDO'
-                       OR updated_at < NOW() - INTERVAL '10 minutes')
+                  AND estado <> 'VERIFICAR_COURIER'
+                  AND estado <> 'EMITIENDO'
                 RETURNING id
             """, (solicitud_id,))
             gano = cur.fetchone() is not None
@@ -844,7 +1149,9 @@ def _liberar_reserva(solicitud_id: int, estado: str = "SOLICITADO") -> None:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    UPDATE solicitudes_guia SET estado = %s, updated_at = NOW()
+                    UPDATE solicitudes_guia
+                    SET estado = %s, courier_message_reference=NULL,
+                        courier_error=NULL, updated_at = NOW()
                     WHERE id = %s AND estado = 'EMITIENDO' AND tracking IS NULL
                 """, (estado, solicitud_id))
             conn.commit()
@@ -852,7 +1159,187 @@ def _liberar_reserva(solicitud_id: int, estado: str = "SOLICITADO") -> None:
         print(f"[guia] no pude liberar la reserva de {solicitud_id}: {e}")
 
 
-def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dict:
+def _marcar_verificacion_courier(solicitud_id: int, resultado: dict) -> None:
+    """Bloquea un reintento cuando el POST pudo haber creado una guía real."""
+    referencia = _clean(resultado.get("message_reference"))
+    error = _clean(resultado.get("error"))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET estado='VERIFICAR_COURIER', courier_message_reference=%s,
+                    courier_error=%s, updated_at=NOW()
+                WHERE id=%s AND tracking IS NULL
+            """, (referencia, error[:500] if error else None, solicitud_id))
+        conn.commit()
+
+
+def _persistir_referencia_courier(solicitud_id: int, referencia: str) -> bool:
+    """Guarda la referencia DHL antes de la operación irreversible."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET courier_message_reference=%s, courier_error=NULL,
+                    updated_at=NOW()
+                WHERE id=%s AND estado='EMITIENDO' AND tracking IS NULL
+                RETURNING id
+            """, (_clean(referencia), solicitud_id))
+            guardada = cur.fetchone() is not None
+        conn.commit()
+    return guardada
+
+
+def resolver_verificacion_courier(
+    solicitud_id: int,
+    resultado: str,
+    tracking: str = "",
+    label_pdf: Optional[bytes] = None,
+) -> dict:
+    """Concilia una emisión incierta después de revisarla en el courier.
+
+    ``CREADA`` exige tracking y el PDF recuperado del courier, y pasa por
+    ``guardar_guia_generada`` para crear el cargo idempotente. ``NO_CREADA``
+    libera la solicitud para un nuevo intento. No existe una transición
+    genérica desde VERIFICAR_COURIER: ésta es la única salida auditable.
+    """
+    decision = (resultado or "").strip().upper()
+    if decision not in {"CREADA", "NO_CREADA"}:
+        return {"ok": False, "error": "Resultado de conciliación inválido."}
+
+    if decision == "NO_CREADA":
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE solicitudes_guia
+                    SET estado='SOLICITADO', courier_message_reference=NULL,
+                        courier_error=NULL, updated_at=NOW()
+                    WHERE id=%s AND tracking IS NULL
+                      AND (estado='VERIFICAR_COURIER' OR
+                           (estado='EMITIENDO' AND
+                            courier_message_reference IS NOT NULL AND
+                            updated_at <= NOW() - INTERVAL '10 minutes'))
+                    RETURNING id
+                """, (solicitud_id,))
+                if cur.fetchone() is None:
+                    return {"ok": False, "error":
+                            "La solicitud ya no está pendiente de verificación."}
+        return {"ok": True, "estado": "SOLICITADO"}
+
+    tracking = (tracking or "").strip()[:120]
+    if not tracking:
+        return {"ok": False, "error":
+                "Ingresá el tracking que encontraste en el courier."}
+    if not label_pdf or not bytes(label_pdf).startswith(b"%PDF"):
+        return {"ok": False, "error":
+                "Adjuntá la etiqueta PDF recuperada del courier."}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # Una emisión puede quedar EMITIENDO si el proceso muere después
+            # de persistir la referencia y antes de leer la respuesta. A los
+            # 10 minutos ya no hay un request HTTP vivo (timeout 60 s), por lo
+            # que se habilita la misma conciliación manual, nunca un reintento.
+            cur.execute("""
+                SELECT courier, courier_message_reference
+                FROM solicitudes_guia
+                WHERE id=%s AND tracking IS NULL
+                  AND (estado='VERIFICAR_COURIER' OR
+                       (estado='EMITIENDO' AND
+                        courier_message_reference IS NOT NULL AND
+                        updated_at <= NOW() - INTERVAL '10 minutes'))
+                FOR UPDATE
+            """, (solicitud_id,))
+            fila = cur.fetchone()
+            if not fila:
+                return {"ok": False, "error":
+                        "La solicitud ya no está pendiente de verificación."}
+            courier_confirmado = (fila.get("courier") or "DHL").strip().upper()
+            # Mensaje claro antes de que el índice único haga fallar el UPDATE.
+            # La comparación es por courier: dos proveedores podrían compartir
+            # por casualidad un formato numérico de tracking.
+            cur.execute("""
+                SELECT id FROM solicitudes_guia
+                WHERE id<>%s AND UPPER(courier)=UPPER(%s)
+                  AND UPPER(BTRIM(tracking))=UPPER(BTRIM(%s))
+                LIMIT 1
+            """, (solicitud_id, courier_confirmado, tracking))
+            if cur.fetchone():
+                return {"ok": False, "error":
+                        f"El tracking {tracking} ya está asociado a otra solicitud de "
+                        f"{courier_confirmado}."}
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET estado='EMITIENDO', updated_at=NOW()
+                WHERE id=%s AND tracking IS NULL
+                RETURNING courier, courier_message_reference
+            """, (solicitud_id,))
+            fila = cur.fetchone()
+            if not fila:
+                return {"ok": False, "error":
+                        "La solicitud cambió mientras se conciliaba; actualizá la pantalla."}
+
+    try:
+        guardar_guia_generada(
+            solicitud_id,
+            tracking,
+            bytes(label_pdf),
+            courier=(fila.get("courier") or "DHL").upper(),
+            message_reference=fila.get("courier_message_reference"),
+        )
+    except Exception as e:
+        # La guía ya fue confirmada como real. Volver a VERIFICAR no habilita
+        # la emisión: ese estado sólo ofrece esta misma conciliación, de modo
+        # que el operador puede reintentar el guardado sin SQL ni doble guía.
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE solicitudes_guia
+                        SET estado='VERIFICAR_COURIER', courier_error=%s,
+                            updated_at=NOW()
+                        WHERE id=%s AND estado='EMITIENDO' AND tracking IS NULL
+                    """, (f"Guía {tracking} confirmada; falló el guardado local: {e}"[:500],
+                          solicitud_id))
+        except Exception as persistencia_error:
+            print(f"[solicitudes] tampoco pude restaurar la conciliación de "
+                  f"{solicitud_id}: {persistencia_error}")
+        print(f"[solicitudes] conciliación de guía {solicitud_id} no pudo "
+              f"guardarse (tracking {tracking}): {e}")
+        return {"ok": False, "error":
+                f"La guía existe (tracking {tracking}) pero no pudimos guardarla. "
+                "No la vuelvas a emitir; corregí el problema y repetí la conciliación."}
+    return {"ok": True, "estado": "GUIA_LISTA", "tracking": tracking}
+
+
+def liberar_reserva_sin_operacion_courier(solicitud_id: int) -> dict:
+    """Recupera una reserva vieja que nunca llegó a llamar al courier.
+
+    La Message-Reference se persiste antes del POST irreversible. Por eso una
+    fila EMITIENDO de más de diez minutos, sin tracking NI referencia, quedó
+    detenida en validación/recotización y puede volver a SOLICITADO sin riesgo
+    de duplicar una guía real. Si existe referencia, esta acción falla cerrada
+    y obliga a conciliar en el courier.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE solicitudes_guia
+                SET estado='SOLICITADO', courier_error=NULL, updated_at=NOW()
+                WHERE id=%s AND estado='EMITIENDO' AND tracking IS NULL
+                  AND courier_message_reference IS NULL
+                  AND updated_at <= NOW() - INTERVAL '10 minutes'
+                RETURNING id
+            """, (solicitud_id,))
+            if cur.fetchone() is None:
+                return {"ok": False, "error":
+                        "La reserva todavía puede estar activa o requiere verificación "
+                        "en el courier. Actualizá la pantalla."}
+    return {"ok": True, "estado": "SOLICITADO"}
+
+
+def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
+                               ya_reservada: bool = False) -> dict:
     """
     Emite la guía real en FedEx para una solicitud y guarda tracking + label PDF.
     Devuelve {ok, tracking, tiene_label} o {ok: False, error}.
@@ -862,6 +1349,12 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
         return {"ok": False, "error": "Solicitud no encontrada."}
     if sol.get("estado") == "CANCELADO":
         return {"ok": False, "error": "La solicitud está cancelada."}
+    if sol.get("estado") == "VERIFICAR_COURIER":
+        referencia = sol.get("courier_message_reference") or "sin referencia visible"
+        return {"ok": False, "error": (
+            "La emisión anterior tuvo una respuesta incierta. No la vuelvas a "
+            f"emitir: Tauro debe verificarla con el courier (ref. {referencia})."
+        )}
     if sol.get("tracking"):
         return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
 
@@ -876,7 +1369,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
     #
     # El UPDATE condicional lo resuelve de raíz: la base decide quién
     # gana, y el que pierde ni llega a llamar al courier.
-    if not _reservar_para_emitir(solicitud_id):
+    if not ya_reservada and not _reservar_para_emitir(solicitud_id):
         return {"ok": False,
                 "error": "Ya hay una emisión en curso para esta solicitud. "
                          "Esperá unos segundos y refrescá la pantalla."}
@@ -890,6 +1383,22 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
             bultos = _json.loads(bultos)
         except Exception:
             bultos = []
+    if not isinstance(bultos, list):
+        bultos = []
+    bultos = [b for b in bultos if isinstance(b, dict)]
+
+    def _entero_positivo(valor, default=1):
+        try:
+            return max(int(valor), 1)
+        except (TypeError, ValueError):
+            return max(int(default), 1)
+
+    def _numero_positivo(valor, default):
+        try:
+            numero = float(valor)
+            return numero if numero > 0 else float(default)
+        except (TypeError, ValueError):
+            return float(default)
 
     # Producto del catálogo → HS code y descripción en inglés para la aduana.
     hs_code, descripcion_en = "", "Merchandise"
@@ -912,6 +1421,8 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
         "nombre": (sol.get("remitente_contacto") or sol.get("remitente_nombre")
                    or sol.get("cliente_nombre") or sol["cliente_id"]),
         "empresa": sol.get("remitente_nombre") or sol.get("cliente_nombre") or "",
+        "documento": sol.get("remitente_documento") or "",
+        "email": sol.get("remitente_email") or "",
         "telefono": sol.get("remitente_telefono") or sol.get("cliente_telefono") or "",
         "calle": sol.get("remitente_direccion") or sol.get("cliente_direccion") or "",
         "ciudad": sol.get("remitente_ciudad") or sol.get("cliente_ciudad") or "Buenos Aires",
@@ -922,6 +1433,8 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
     recipient = {
         "nombre": sol.get("dest_contacto") or sol.get("dest_nombre") or "",
         "empresa": sol.get("dest_nombre") or "",
+        "documento": sol.get("dest_documento") or "",
+        "email": sol.get("dest_email") or "",
         "telefono": sol.get("dest_telefono") or "",
         "calle": sol.get("dest_direccion") or "",
         "ciudad": sol.get("dest_ciudad") or "",
@@ -942,7 +1455,10 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
                 "ancho": b.get("ancho_cm") or 20,
                 "alto": b.get("alto_cm") or 10,
                 "valor_unitario_usd": b.get("valor_unitario_usd") or 100,
-                "unidades": max(int(b.get("cantidad") or 1), 1),
+                "unidades": _entero_positivo(b.get("cantidad") or 1),
+                "unidades_aduana": _entero_positivo(
+                    b.get("unidades_aduana") or b.get("cantidad") or 1
+                ),
                 "hs_code": b.get("hs_code") or "",
                 "descripcion_en": b.get("descripcion_en") or "Merchandise",
                 # El de la invoice si el cliente lo declaró; si no, el país
@@ -957,10 +1473,12 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
         # OJO: valor_declarado_usd viene TOTALIZADO (unitario × cantidad) desde
         # el portal. create_shipment vuelve a multiplicar unitario × cantidad,
         # así que acá se pasa el UNITARIO real para no declarar de más en aduana.
-        cantidad_sol = max(int(sol.get("cantidad") or 1), 1)
-        valor_total_sol = float(sol.get("valor_declarado_usd") or 100)
+        cantidad_sol = _entero_positivo(sol.get("cantidad") or 1)
+        valor_total_sol = _numero_positivo(sol.get("valor_declarado_usd"), 100)
         datos_envio["package"] = {
-            "peso_kg": sol.get("peso_kg") or 0.5,
+            # El campo legacy guarda el peso TOTAL. create_shipment repite
+            # esta pieza `cantidad` veces, por eso necesita el peso unitario.
+            "peso_kg": _numero_positivo(sol.get("peso_kg"), 0.5) / cantidad_sol,
             "largo": sol.get("largo_cm") or 30,
             "ancho": sol.get("ancho_cm") or 20,
             "alto": sol.get("alto_cm") or 10,
@@ -982,6 +1500,15 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
     # arriba se comparte y sumar un courier no duplica esta función.
     courier = (courier or "FEDEX").upper()
     if courier == "DHL":
+        lineas_aduana = (datos_envio.get("bultos") or
+                          [datos_envio.get("commodity") or {}])
+        if any(not str(linea.get("hs_code") or "").strip()
+               for linea in lineas_aduana):
+            _liberar_reserva(solicitud_id)
+            return {"ok": False, "error":
+                    "Falta el HS code de la mercadería. No llamamos a DHL ni "
+                    "generamos ningún cargo; completalo antes de emitir."}
+    if courier == "DHL":
         from core.dhl_client import DHLClient
         cliente_courier = DHLClient()
     elif courier == "UPS":
@@ -991,14 +1518,46 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
         from core.fedex_client import FedExClient
         cliente_courier = FedExClient()
 
+    referencia_previa = None
+    if courier == "DHL":
+        referencia_previa = (
+            f"tauro-dhl-ship-{solicitud_id}-{uuid.uuid4().hex[:12]}"
+        )
+        try:
+            if not _persistir_referencia_courier(solicitud_id, referencia_previa):
+                return {"ok": False, "error":
+                        "La solicitud cambió de estado antes de emitir. "
+                        "Actualizá la pantalla; no llamamos a DHL."}
+        except Exception as e:
+            print(f"[guia] no pude persistir la referencia DHL de "
+                  f"{solicitud_id}: {e}")
+            _liberar_reserva(solicitud_id)
+            return {"ok": False, "error":
+                    "No pudimos preparar la emisión segura. No llamamos a DHL "
+                    "ni generamos ningún cargo."}
+        datos_envio["message_reference"] = referencia_previa
+
     try:
         resultado = cliente_courier.create_shipment(datos_envio)
     except Exception as e:
-        _liberar_reserva(solicitud_id)
         print(f"[guia] excepción emitiendo la solicitud {solicitud_id} en {courier}: {e}")
-        return {"ok": False, "error": f"No pudimos emitir la guía: {e}"}
+        incierto = {"incierto": True, "message_reference": referencia_previa,
+                    "error": f"La respuesta de {courier} fue incierta: {e}"}
+        _marcar_verificacion_courier(solicitud_id, incierto)
+        return {"ok": False, "error":
+                f"No pudimos confirmar la emisión en {courier}. Tauro la va a "
+                "verificar; no vuelvas a emitir."}
 
     if not resultado.get("encontrado"):
+        if resultado.get("incierto"):
+            # Un timeout no significa rechazo: DHL puede haber emitido y
+            # perdido la respuesta. Bloquear el reintento evita dos guías
+            # facturadas para la misma solicitud.
+            _marcar_verificacion_courier(solicitud_id, resultado)
+            return {"ok": False,
+                    "error": (resultado.get("error") or
+                              "La respuesta del courier fue incierta.") +
+                             " Tauro la va a verificar; no vuelvas a emitir."}
         _liberar_reserva(solicitud_id)
         return {"ok": False,
                 "error": resultado.get("error", f"{courier} no emitió la guía.")}
@@ -1013,6 +1572,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX") -> dic
         try:
             guardar_guia_generada(
                 solicitud_id, tracking, resultado.get("label_pdf"), courier=courier,
+                message_reference=resultado.get("message_reference"),
             )
             guardado = True
             break

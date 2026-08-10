@@ -7,40 +7,85 @@
         <div>
             <div class="eyebrow">Administración</div>
             <h1>Mi cuenta corriente</h1>
-            <p>Todo lo facturado y pagado con Tauro, en un solo lugar.</p>
+            <p>Cargos, facturas y pagos con Tauro, en un solo lugar.</p>
         </div>
         <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Descargar Excel</a>
     </div>
 </div>
 
 {% if request.query_params.get('ok') %}
-    <div class="msg ok">Recibimos tu pago. Lo verificamos y se acredita en tu saldo — lo vas a ver marcado "en verificación" mientras tanto.</div>
+    <div class="msg ok">Recibimos el comprobante. El pago está en revisión y no modifica el saldo hasta que Tauro lo apruebe.</div>
 {% endif %}
 {% if request.query_params.get('error') %}
     <div class="msg error">{{ request.query_params.get('error') }}</div>
 {% endif %}
 
-<div class="grid-3" style="margin-bottom:16px;">
+<div class="account-summary-grid">
     <div class="stat-card">
         <div class="label">Facturado</div>
-        <div class="value">$ {{ "{:,.0f}".format(saldo.facturado_ars).replace(",", ".") }}</div>
+        <div class="value">$ {{ "{:,.0f}".format(resumen_facturacion.facturado_ars).replace(",", ".") }}</div>
     </div>
     <div class="stat-card">
-        <div class="label">Pagado</div>
+        <div class="label">Pendiente de facturación</div>
+        <div class="value {% if resumen_facturacion.pendiente_ars > 0 %}warn{% endif %}">$ {{ "{:,.0f}".format(resumen_facturacion.pendiente_ars).replace(",", ".") }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="label">Pagos aplicados</div>
         <div class="value">$ {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</div>
     </div>
     <div class="stat-card">
-        <div class="label">Saldo pendiente</div>
-        <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% endif %}">
-            $ {{ "{:,.0f}".format(saldo.saldo_pendiente_ars).replace(",", ".") }}
+        <div class="label">{% if saldo.saldo_pendiente_ars > 0 %}A pagar{% elif saldo.saldo_pendiente_ars < 0 %}Saldo a favor{% else %}Estado{% endif %}</div>
+        <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% elif saldo.saldo_pendiente_ars < 0 %}ok{% endif %}">
+            {% if saldo.saldo_pendiente_ars == 0 %}
+                Al día
+            {% else %}
+                $ {{ "{:,.0f}".format(saldo.saldo_pendiente_ars|abs).replace(",", ".") }}
+            {% endif %}
         </div>
     </div>
 </div>
 
+{# ── Informar un pago ─────────────────────────────────────
+   La acción queda junto al resumen para que el cliente no tenga que recorrer
+   todo el historial antes de encontrarla. #}
+<details class="card account-payment-card" id="informar-pago">
+    <summary>
+        <span>
+            <strong>Informar un pago</strong>
+            <small>Subí el comprobante para que Tauro lo verifique</small>
+        </span>
+        <span class="account-payment-action">Cargar comprobante</span>
+    </summary>
+    <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data">
+        <div class="form-grid-3">
+            <div class="form-group">
+                <label for="pago-monto">Monto (ARS) *</label>
+                <input type="text" name="monto" id="pago-monto" required inputmode="decimal">
+            </div>
+            <div class="form-group">
+                <label for="pago-metodo">Método</label>
+                <input type="text" name="metodo" id="pago-metodo" placeholder="Transferencia" value="Transferencia">
+            </div>
+            <div class="form-group">
+                <label for="pago-ref">Referencia / operación</label>
+                <input type="text" name="referencia" id="pago-ref" placeholder="Nº de operación del banco">
+            </div>
+        </div>
+        <div class="account-payment-file-row">
+            <div class="form-group">
+                <label for="pago-file">Comprobante (JPG, PNG o PDF · máx. 8 MB) *</label>
+                <input type="file" name="comprobante" id="pago-file" required
+                       accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
+            </div>
+            <button type="submit" class="btn btn-primary">Enviar para verificación</button>
+        </div>
+    </form>
+</details>
+
 {% if movimientos %}
 <div class="card">
     <div class="table-wrap">
-        <table>
+        <table class="account-table">
             <thead>
                 <tr>
                     <th>Fecha</th>
@@ -55,11 +100,13 @@
                     <td class="mono">{{ m.fecha or '—' }}</td>
                     <td>
                         {% if m.tipo == 'PAGO' %}
-                            <span class="badge ok">Pago</span>
+                            <span class="badge ok">Aplicado</span>
                         {% elif m.tipo == 'PAGO_PENDIENTE' %}
                             {# Informado con comprobante, esperando que TAURO lo
                                verifique. Se ve pero NO está en el saldo. #}
-                            <span class="badge warn">Pago en verificación</span>
+                            <span class="badge warn">En revisión</span>
+                        {% elif m.tipo == 'PENDIENTE_FACTURA' %}
+                            <span class="badge warn">Pendiente de facturación</span>
                         {% else %}
                             <span class="badge">Factura</span>
                         {% endif %}
@@ -73,8 +120,13 @@
                     </td>
                     {# Los pagos vienen en negativo desde movimientos(): acá se
                        muestran en verde y con el signo que el cliente espera. #}
-                    <td class="mono" style="text-align:right;{% if m.monto_ars < 0 %}color:var(--ok,#3ddc97);{% endif %}">
-                        {% if m.monto_ars < 0 %}−{% endif %}$ {{ "{:,.0f}".format(m.monto_ars|abs).replace(",", ".") }}
+                    <td class="mono account-movement-amount {% if m.tipo == 'PAGO' %}applied{% elif m.tipo == 'PAGO_PENDIENTE' %}pending{% endif %}">
+                        {% if m.tipo == 'PAGO_PENDIENTE' %}
+                            $ {{ "{:,.0f}".format(m.monto_ars|abs).replace(",", ".") }}
+                            <small>Todavía no impacta el saldo</small>
+                        {% else %}
+                            {% if m.monto_ars < 0 %}−{% endif %}$ {{ "{:,.0f}".format(m.monto_ars|abs).replace(",", ".") }}
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -88,41 +140,4 @@
     tu primer envío, el cargo va a aparecer acá solo.</p>
 </div>
 {% endif %}
-
-{# ── Informar un pago ─────────────────────────────────────
-   El cliente avisa que pagó y sube el comprobante. Queda "en verificación"
-   hasta que TAURO lo aprueba: recién ahí entra al saldo. #}
-<div class="card" id="informar-pago" style="margin-top:16px;">
-    <div class="card-head">
-        <div>
-            <h3>Informar un pago</h3>
-            <p>Subí el comprobante (foto o PDF) y lo acreditamos en tu cuenta.</p>
-        </div>
-    </div>
-    <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data">
-        <div class="form-grid-3">
-            <div class="form-group">
-                <label for="pago-monto">Monto (ARS) *</label>
-                <input type="text" name="monto" id="pago-monto" required
-                       inputmode="decimal">
-            </div>
-            <div class="form-group">
-                <label for="pago-metodo">Método</label>
-                <input type="text" name="metodo" id="pago-metodo"
-                       placeholder="Transferencia" value="Transferencia">
-            </div>
-            <div class="form-group">
-                <label for="pago-ref">Referencia / operación</label>
-                <input type="text" name="referencia" id="pago-ref"
-                       placeholder="Nº de operación del banco">
-            </div>
-        </div>
-        <div class="form-group">
-            <label for="pago-file">Comprobante (JPG, PNG o PDF · máx 8 MB) *</label>
-            <input type="file" name="comprobante" id="pago-file" required
-                   accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
-        </div>
-        <button type="submit" class="btn btn-primary">Enviar pago para verificación</button>
-    </form>
-</div>
 {% endblock %}

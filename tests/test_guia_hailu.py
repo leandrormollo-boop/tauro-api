@@ -27,9 +27,11 @@ from servicios.api_b2b import _piezas_del_catalogo  # noqa: E402
 
 CAJA_HAILU = {
     "peso_kg": 3.9, "largo_cm": 48, "ancho_cm": 47, "alto_cm": 20,
-    "cantidad": 1,
+    # Una caja física contiene ocho unidades comerciales. DHL debe recibir
+    # 1 package, pero la invoice tiene que declarar 8 PCS a USD 15 cada una.
+    "cantidad": 1, "unidades_aduana": 8,
     "descripcion_en": "8 SHIRTS 60% POLYESTER 40% COTTON WOVEN",
-    "valor_unitario_usd": 120.0, "hs_code": "6205.30", "pais_origen": "CN",
+    "valor_unitario_usd": 15.0, "hs_code": "6205.30", "pais_origen": "CN",
 }
 
 SHIPPER = {
@@ -68,6 +70,8 @@ def test_el_portal_acepta_la_caja_tal_como_viene_en_la_guia():
     assert piezas[0] == {"peso_kg": 3.9, "largo_cm": 48.0,
                          "ancho_cm": 47.0, "alto_cm": 20.0}
     assert det[0]["descripcion_en"].startswith("8 SHIRTS 60% POLYESTER")
+    assert det[0]["cantidad"] == 1
+    assert det[0]["unidades_aduana"] == 8
 
 
 def test_empresa_y_contacto_van_separados_como_en_la_web_de_dhl():
@@ -94,11 +98,13 @@ def test_la_caja_llega_con_sus_medidas_reales():
 
 
 def test_la_invoice_lleva_composicion_pais_y_valor():
-    li = _cuerpo_dhl()["content"]["exportDeclaration"]["lineItems"][0]
+    contenido = _cuerpo_dhl()["content"]
+    li = contenido["exportDeclaration"]["lineItems"][0]
     assert "60% POLYESTER 40% COTTON" in li["description"]
     assert li["manufacturerCountry"] == "CN"
-    assert li["price"] == 120.0
-    assert li["quantity"]["value"] == 1
+    assert li["price"] == 15.0
+    assert li["quantity"]["value"] == 8
+    assert contenido["declaredValue"] == 120.0
 
 
 def test_cn_a_mx_usa_la_cuenta_de_impo():

@@ -146,10 +146,13 @@ def validar_token(token: str) -> Optional[str]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT cliente_id FROM sessions
-                WHERE token = %s
-                  AND usado = FALSE
-                  AND expira_at > %s
+                SELECT s.cliente_id
+                FROM sessions s
+                JOIN clientes c ON c.cliente_id = s.cliente_id
+                WHERE s.token = %s
+                  AND s.usado = FALSE
+                  AND s.expira_at > %s
+                  AND c.activo = TRUE
                 """,
                 (token, ahora),
             )
@@ -171,8 +174,12 @@ def consumir_magic_token(token: str) -> Optional[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE sessions SET usado = TRUE
-                WHERE token = %s AND usado = FALSE AND expira_at > %s
+                UPDATE sessions s SET usado = TRUE
+                WHERE s.token = %s AND s.usado = FALSE AND s.expira_at > %s
+                  AND EXISTS (
+                      SELECT 1 FROM clientes c
+                      WHERE c.cliente_id=s.cliente_id AND c.activo=TRUE
+                  )
                 RETURNING cliente_id, email
                 """,
                 (token, ahora),

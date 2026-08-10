@@ -48,6 +48,10 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_valor REAL;
 -- tope (sólo el flag manda).
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS puede_emitir BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tope_deuda_ars REAL;
+-- Recolecciones también generan una operación real en la cuenta del courier.
+-- Se habilitan por cliente y permanecen apagadas por defecto, separadas del
+-- permiso de emisión de guías.
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS puede_recolectar BOOLEAN NOT NULL DEFAULT FALSE;
 -- Quién paga los impuestos de destino (decisión de Leandro 01/08/2026).
 -- El CLIENTE elige, y lo deja predefinido en su cuenta: Prete Rosso los
 -- paga siempre, así que no lo tilda envío por envío. Se puede pisar por
@@ -65,6 +69,44 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tax_paga TEXT NOT NULL D
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS courier_default TEXT NOT NULL DEFAULT '';
 -- Password hasheado con bcrypt (login email + password)
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
+-- Autogestión y pricing por cliente + courier. Sin fila no se habilita
+-- ninguna operación: cotizar, emitir y pedir pickups son opt-in explícito.
+-- Hoy sólo DHL está habilitable; FedEx/UPS siguen pendientes.
+-- Una fila existente permite, por ejemplo, MELCIOR DHL + ARS 14.000 sin tocar
+-- lo que ve o paga ese mismo cliente en FedEx.
+CREATE TABLE IF NOT EXISTS cliente_courier_config (
+    cliente_id        TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    courier           TEXT NOT NULL,
+    puede_cotizar     BOOLEAN NOT NULL DEFAULT FALSE,
+    puede_emitir      BOOLEAN NOT NULL DEFAULT FALSE,
+    puede_recolectar  BOOLEAN NOT NULL DEFAULT FALSE,
+    markup_tipo       TEXT,
+    markup_valor      NUMERIC(14,4),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (cliente_id, courier),
+    CHECK (courier IN ('fedex', 'dhl', 'ups')),
+    CHECK (NOT puede_emitir OR puede_cotizar),
+    CHECK (courier IN ('fedex', 'dhl') OR NOT puede_recolectar),
+    CONSTRAINT ck_cliente_courier_markup CHECK (
+        (markup_tipo IS NULL AND markup_valor IS NULL)
+        OR (
+            markup_tipo IS NOT NULL
+            AND markup_tipo IN ('PCT', 'FIJO_ARS', 'MULTIPLICADOR')
+            AND markup_valor IS NOT NULL
+            AND markup_valor::text NOT IN ('NaN', 'Infinity', '-Infinity')
+            AND (
+                (markup_tipo = 'MULTIPLICADOR' AND markup_valor >= 1)
+                OR (markup_tipo IN ('PCT', 'FIJO_ARS') AND markup_valor >= 0)
+            )
+        )
+    )
+);
+ALTER TABLE IF EXISTS cliente_courier_config
+    ALTER COLUMN puede_cotizar SET DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_cliente_courier_config_cliente
+    ON cliente_courier_config(cliente_id);
 
 -- ── Libreta de direcciones del portal ──────────────────────
 CREATE TABLE IF NOT EXISTS direcciones (
@@ -151,10 +193,6 @@ ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'APROBA
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante BYTEA;
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT;
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT;
--- Factura emitida con su PDF adjunto (cargada por el admin).
-ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_pdf BYTEA;
-ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_nombre TEXT;
-
 -- Historial de salud para la página de estado pública (/estado). El
 -- centinela (cada 15 min) suma acá: checks del día y cuántos fallaron.
 CREATE TABLE IF NOT EXISTS salud_historial (
@@ -189,6 +227,10 @@ CREATE TABLE IF NOT EXISTS envios (
     tracking     TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Factura emitida con su PDF adjunto (cargada por el admin). Estos ALTER van
+-- después del CREATE para que una base nueva también reciba las columnas.
+ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_pdf BYTEA;
+ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_nombre TEXT;
 CREATE INDEX IF NOT EXISTS idx_envios_cliente ON envios(cliente_id);
 -- Cargo automático: cuando se emite una guía, el débito entra solo a la
 -- cuenta corriente (decisión de Leandro 28/07 — antes era doble carga manual
@@ -276,10 +318,22 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_cliente
     ON solicitudes_guia(cliente_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_estado
     ON solicitudes_guia(estado, created_at DESC);
+-- Instalaciones anteriores a la columna de auditoría deben migrar antes de
+-- que emisión/conciliación la use. El CREATE TABLE no modifica una tabla ya
+-- existente, por eso este ALTER idempotente es obligatorio en producción.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS updated_at
+    TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 -- Guía emitida (FedEx Ship API): número, label PDF y courier.
 -- El label se guarda como BYTEA en Postgres (el filesystem de Railway es efímero).
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS courier TEXT NOT NULL DEFAULT 'FEDEX';
+-- Una guía real no puede quedar asociada a dos solicitudes del mismo courier.
+-- Si una base histórica trae duplicados, esta migración debe frenar para que
+-- se concilien antes del piloto; continuar sin la garantía permitiría cobrar
+-- dos veces el mismo tracking.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_solicitudes_guia_courier_tracking
+    ON solicitudes_guia (UPPER(courier), UPPER(BTRIM(tracking)))
+    WHERE tracking IS NOT NULL AND BTRIM(tracking) <> '';
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS label_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS guia_generada_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_alias TEXT;
@@ -315,6 +369,58 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS tax_paga TEXT;
 -- de TAURO en vez del shipper real del envío.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_contacto TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS dest_contacto TEXT;
+-- Conciliación de operaciones irreversibles. Si el courier recibe el POST
+-- pero la respuesta se pierde, la solicitud queda bloqueada con su referencia
+-- hasta que TAURO compruebe en el portal del courier si la guía existe.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS courier_message_reference TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS courier_error TEXT;
+-- La guía puede existir aunque falle el asiento de cuenta corriente. Este
+-- flag convierte el antiguo print("FACTURAR A MANO") en una tarea persistente.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS cargo_pendiente BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS cargo_error TEXT;
+
+-- ── Recolecciones de couriers ──────────────────────────────
+-- Esquema canónico: no se crea ni se modifica desde el primer request. Las
+-- operaciones externas no son idempotentes, por eso los estados transitorios
+-- y los índices parciales forman parte de la garantía anti duplicados.
+CREATE TABLE IF NOT EXISTS recolecciones (
+    id                         SERIAL PRIMARY KEY,
+    cliente_id                 TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    courier                    TEXT NOT NULL DEFAULT 'FEDEX',
+    fecha                      DATE NOT NULL,
+    ready_time                 TEXT NOT NULL DEFAULT '09:00',
+    close_time                 TEXT NOT NULL DEFAULT '17:00',
+    bultos                     INTEGER NOT NULL DEFAULT 1,
+    peso_kg                    REAL NOT NULL DEFAULT 1,
+    direccion                  TEXT,
+    instrucciones              TEXT,
+    estado                     TEXT NOT NULL DEFAULT 'AGENDADA',
+    confirmation_code          TEXT,
+    ubicacion                  TEXT,
+    solicitud_id               INTEGER REFERENCES solicitudes_guia(id),
+    courier_message_reference  TEXT,
+    error_operativo            TEXT,
+    created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS solicitud_id
+    INTEGER REFERENCES solicitudes_guia(id);
+ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS courier_message_reference TEXT;
+ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS error_operativo TEXT;
+ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS updated_at
+    TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE INDEX IF NOT EXISTS ix_recolecciones_cliente
+    ON recolecciones (cliente_id, fecha DESC);
+-- Un cliente no puede reservar dos visitas para el mismo día mientras una
+-- creación/cancelación siga abierta o la respuesta del courier sea incierta.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recoleccion_cliente_fecha_abierta_v2
+    ON recolecciones (cliente_id, fecha)
+    WHERE estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER');
+-- La misma guía tampoco puede tener dos retiros abiertos en días distintos.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recoleccion_solicitud_abierta_v2
+    ON recolecciones (solicitud_id)
+    WHERE solicitud_id IS NOT NULL
+      AND estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER');
 
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (

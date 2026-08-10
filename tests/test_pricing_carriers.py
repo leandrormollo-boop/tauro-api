@@ -118,13 +118,13 @@ ENVIO = dict(origen={"country": "AR"}, destino={"country": "US"},
 
 def test_el_portal_cobra_el_monto_fijo_del_cliente():
     """
-    WAIMAO: costo + $100.000. Costo USD 130,18 × 1450 = ARS 188.761.
-    Precio final = 288.761. Nada de markup de la web acá.
+    WAIMAO: costo + $95.000. Costo USD 130,18 × 1450 = ARS 188.761.
+    Precio final = 283.761. Nada de markup de la web acá.
     """
     from servicios.carriers import cotizar_carriers_cliente
     r = _cotizar(cotizar_carriers_cliente, **ENVIO,
-                 pricing_cliente={"tipo": "FIJO_ARS", "valor": 100000.0})[0]
-    assert r["precio_ars"] == round(130.18 * 1450) + 100000
+                 pricing_cliente={"tipo": "FIJO_ARS", "valor": 95000.0})[0]
+    assert r["precio_ars"] == round(130.18 * 1450) + 95000
 
 
 def test_cada_cliente_su_precio_con_el_mismo_costo():
@@ -145,9 +145,65 @@ def test_el_portal_no_devuelve_el_costo_ni_el_margen():
     """
     from servicios.carriers import cotizar_carriers_cliente
     r = _cotizar(cotizar_carriers_cliente, **ENVIO,
-                 pricing_cliente={"tipo": "FIJO_ARS", "valor": 100000.0})[0]
+                 pricing_cliente={"tipo": "FIJO_ARS", "valor": 95000.0})[0]
     filtradas = [k for k in r if k.startswith(("costo", "margen", "markup"))]
     assert not filtradas, f"el portal filtra el costo de TAURO: {filtradas}"
+
+
+def test_moneda_no_soportada_falla_cerrado_y_no_calcula_precio():
+    """EUR 130 nunca puede interpretarse como ARS 130 + el fijo de WAIMAO."""
+    from servicios import carriers as C
+
+    class Euro:
+        def get_rates(self, _o, _d, _p):
+            return {"encontrado": True, "costo": 130, "moneda": "EUR",
+                    "servicio": "EXPRESS", "dias_estimados": "2"}
+
+    configuracion = [{
+        "id": "dhl", "nombre": "DHL Express", "servicio": "Express",
+        "logo": "/d.svg", "requisitos": ("FAKE_KEY",), "cliente": Euro,
+    }]
+    with mock.patch.dict(os.environ, {"FAKE_KEY": "1"}, clear=True), \
+         mock.patch.object(C, "CARRIERS", configuracion):
+        costos = C.costos_carriers(
+            origen={"country": "CN"}, destino={"country": "AR"},
+            paquete={"peso_kg": 1},
+        )
+        portal = C.cotizar_carriers_cliente(
+            origen={"country": "CN"}, destino={"country": "AR"},
+            paquete={"peso_kg": 1}, dolar=1500,
+            pricing_cliente={"tipo": "FIJO_ARS", "valor": 95000},
+        )
+
+    assert costos[0]["estado"] == "sin_tarifa"
+    assert portal[0]["estado"] == "sin_tarifa"
+    assert "precio_ars" not in portal[0]
+
+
+def test_costo_cero_negativo_o_nan_falla_antes_del_pricing():
+    from servicios import carriers as C
+
+    for invalido in (0, -3, float("nan")):
+        class ImporteInvalido:
+            def get_rates(self, _o, _d, _p):
+                return {"encontrado": True, "costo": invalido, "moneda": "USD",
+                        "servicio": "EXPRESS", "dias_estimados": "2"}
+
+        configuracion = [{
+            "id": "dhl", "nombre": "DHL Express", "servicio": "Express",
+            "logo": "/d.svg", "requisitos": ("FAKE_KEY",),
+            "cliente": ImporteInvalido,
+        }]
+        with mock.patch.dict(os.environ, {"FAKE_KEY": "1"}, clear=True), \
+             mock.patch.object(C, "CARRIERS", configuracion):
+            salida = C.cotizar_carriers_cliente(
+                origen={"country": "CN"}, destino={"country": "AR"},
+                paquete={"peso_kg": 1}, dolar=1500,
+                pricing_cliente={"tipo": "FIJO_ARS", "valor": 95000},
+            )
+
+        assert salida[0]["estado"] == "sin_tarifa"
+        assert "precio_ars" not in salida[0]
 
 
 def test_la_web_y_el_portal_dan_precios_distintos():
@@ -158,7 +214,7 @@ def test_la_web_y_el_portal_dan_precios_distintos():
     from servicios.carriers import cotizar_carriers, cotizar_carriers_cliente
     web = _cotizar(cotizar_carriers, **ENVIO, markup_pct=20.0)[0]
     portal = _cotizar(cotizar_carriers_cliente, **ENVIO,
-                      pricing_cliente={"tipo": "FIJO_ARS", "valor": 100000.0})[0]
+                      pricing_cliente={"tipo": "FIJO_ARS", "valor": 95000.0})[0]
     assert web["precio_ars"] != portal["precio_ars"]
 
 

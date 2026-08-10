@@ -5,32 +5,19 @@
 {# .wizard-compacto: compacta el alto para que CADA PASO entre en una
    pantalla y ancla el stepper y la navegación. Ver el bloque WIZARD DE
    UN PASO POR PANTALLA en static/css/tauro.css. #}
-<div class="wizard-compacto">
+<div class="wizard-compacto" id="shipment-wizard" data-step="1"
+     data-initial-step="{{ form.initial_step or 1 }}">
 <div class="page-title page-title-row">
     <div>
         <div class="eyebrow">Operaciones</div>
         <h1>Nuevo envío</h1>
-        <p>Completá remitente, destinatario y paquete. Tauro revisa la solicitud y genera la guía.</p>
+        <p>Completá remitente, destinatario y paquete. Revisamos la solicitud antes de emitir.</p>
     </div>
-    <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Libreta de direcciones</a>
+    <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Administrar remitentes</a>
 </div>
 
 {% if error %}
     <div class="msg error">{{ error }}</div>
-{% endif %}
-
-{# El catálogo es OPCIONAL (Leandro, 06/08): acelera la carga y es lo que
-   usa la integración por API, pero desde el portal se puede declarar la caja
-   a mano. Antes este aviso venía con el submit DESHABILITADO, así que un
-   cliente nuevo no podía crear ni un envío hasta que Tauro le aprobara el
-   catálogo. Ahora es informativo. #}
-{% if not productos %}
-    <div class="msg">
-        Todavía no tenés productos en el catálogo, pero podés seguir igual:
-        cargá el peso y las medidas de la caja a mano más abajo.
-        <a href="/portal/catalogo">Cargarlos en el catálogo →</a> te ahorra
-        tipearlos en cada envío y es lo que usa la integración con tu tienda.
-    </div>
 {% endif %}
 
 {# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
@@ -90,11 +77,14 @@
     <!-- Nacional: carrier/servicio elegido en el comparador del precio en vivo -->
     {# Courier internacional elegido. Si queda vacío el submit no adivina:
        falla pidiendo que se elija, en vez de cobrar el primero de la lista. #}
-    <input type="hidden" name="intl_courier" id="intl_courier" value="">
-    <input type="hidden" name="nac_carrier" id="nac_carrier" value="">
-    <input type="hidden" name="nac_servicio" id="nac_servicio" value="">
+    <input type="hidden" name="intl_courier" id="intl_courier" value="{{ form.intl_courier or '' }}">
+    {# Importe que el cliente VIO y aceptó. El servidor vuelve a cotizar y,
+       si cambió, no crea la solicitud hasta que confirme el nuevo valor. #}
+    <input type="hidden" name="precio_cotizado_ars" id="precio_cotizado_ars" value="{{ form.precio_cotizado_ars or '' }}">
+    <input type="hidden" name="nac_carrier" id="nac_carrier" value="{{ form.nac_carrier or '' }}">
+    <input type="hidden" name="nac_servicio" id="nac_servicio" value="{{ form.nac_servicio or '' }}">
     <div class="card">
-        <div class="form-section">
+        <div class="form-section shipment-step shipment-step-sender">
             <h4><span class="n">1</span> Remitente <span class="badge muted">Origen</span></h4>
 
             {# El remitente se ELIGE de la libreta y después se puede EDITAR.
@@ -103,6 +93,22 @@
                vez, había que ir a la libreta, crearlo y volver. Y como el país
                de ORIGEN del envío sale de acá, tampoco se podía cotizar desde
                otro país sin pasar por la libreta. #}
+            <details class="remitente-collapsible" {% if not remitente or error %}open{% endif %}>
+                <summary>
+                    <span class="remitente-summary-copy">
+                        <span>{% if remitente %}Remitente cargado{% else %}Falta cargar el remitente{% endif %}</span>
+                        <strong id="rem-summary-name">{{ form.rem_nombre or (remitente.nombre if remitente else 'Nuevo remitente') }}</strong>
+                        <small id="rem-summary-address">
+                            {% if form.rem_direccion or (remitente and remitente.direccion) %}
+                                {{ form.rem_direccion or remitente.direccion }} · {{ form.rem_ciudad or remitente.ciudad }} {{ form.rem_zip or remitente.cp }} · {{ form.rem_pais or remitente.pais }}
+                            {% else %}
+                                Completá los datos de origen
+                            {% endif %}
+                        </small>
+                    </span>
+                    <span class="remitente-summary-action">Editar o cambiar</span>
+                </summary>
+                <div class="remitente-editor">
             {% if remitentes %}
                 <div class="form-group">
                     <label>Traer de la libreta</label>
@@ -132,7 +138,7 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="rem_nombre">Empresa / razón social</label>
-                    <input type="text" name="rem_nombre" id="rem_nombre" value="{{ form.rem_nombre or (remitente.nombre if remitente else '') }}">
+                    <input type="text" name="rem_nombre" id="rem_nombre" required value="{{ form.rem_nombre or (remitente.nombre if remitente else '') }}">
                 </div>
                 <div class="form-group">
                     <label for="rem_contacto">Persona de contacto</label>
@@ -160,14 +166,14 @@
                 </div>
                 <div class="form-group">
                     <label for="rem_direccion">Dirección</label>
-                    <input type="text" name="rem_direccion" id="rem_direccion" value="{{ form.rem_direccion or (remitente.direccion if remitente else '') }}">
+                    <input type="text" name="rem_direccion" id="rem_direccion" required value="{{ form.rem_direccion or (remitente.direccion if remitente else '') }}">
                 </div>
             </div>
 
             <div class="form-grid-4">
                 <div class="form-group">
                     <label for="rem_pais">País de origen</label>
-                    <select name="rem_pais" id="rem_pais">
+                    <select name="rem_pais" id="rem_pais" data-searchable>
                         {% set pais_sel = form.rem_pais or (remitente.pais if remitente else 'AR') %}
                         {% for iso, nom in paises_destino %}
                             <option value="{{ iso }}" {% if pais_sel == iso %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
@@ -176,7 +182,7 @@
                 </div>
                 <div class="form-group">
                     <label for="rem_ciudad">Ciudad</label>
-                    <input type="text" name="rem_ciudad" id="rem_ciudad" value="{{ form.rem_ciudad or (remitente.ciudad if remitente else '') }}">
+                    <input type="text" name="rem_ciudad" id="rem_ciudad" required value="{{ form.rem_ciudad or (remitente.ciudad if remitente else '') }}">
                 </div>
                 <div class="form-group">
                     <label for="rem_estado">Provincia / Estado</label>
@@ -184,19 +190,22 @@
                 </div>
                 <div class="form-group">
                     <label for="rem_zip">Código postal</label>
-                    <input type="text" name="rem_zip" id="rem_zip" value="{{ form.rem_zip or (remitente.cp if remitente else '') }}">
+                    <input type="text" name="rem_zip" id="rem_zip" required value="{{ form.rem_zip or (remitente.cp if remitente else '') }}">
                 </div>
             </div>
+                </div>
+            </details>
         </div>
 
-        <div class="form-section">
+        <div class="form-section shipment-step shipment-step-recipient">
             <h4><span class="n">2</span> Destinatario <span class="badge warn">Entrega</span></h4>
 
             {% if destinatarios %}
                 <div class="form-group">
-                    <label>Destinatario guardado</label>
-                    <select name="destinatario_id" id="destinatario_id">
-                        <option value="">Cargar destinatario nuevo</option>
+                    <label>Elegir de Mis clientes</label>
+                    <select name="destinatario_id" id="destinatario_id" data-searchable
+                            data-search-placeholder="Buscar cliente, ciudad o país">
+                        <option value="">Cargar un destinatario nuevo</option>
                         {% for d in destinatarios %}
                             <option value="{{ d.id }}"
                                     data-nombre="{{ d.nombre }}"
@@ -209,10 +218,16 @@
                                     data-cp="{{ d.cp }}"
                                     data-pais="{{ d.pais }}"
                                     {% if form.destinatario_id|string == d.id|string %}selected{% endif %}>
-                                {{ d.label }} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
+                                {{ d.label }} · {{ d.nombre }} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
                             </option>
                         {% endfor %}
                     </select>
+                    <p class="field-help">Tu desplegable contiene sólo los clientes guardados en tu cuenta. <a href="/portal/clientes">Administrar Mis clientes →</a></p>
+                </div>
+            {% else %}
+                <div class="saved-client-empty">
+                    <span>No tenés clientes guardados todavía.</span>
+                    <a href="/portal/clientes?nuevo=1">Guardar un cliente habitual →</a>
                 </div>
             {% endif %}
 
@@ -254,7 +269,7 @@
             <div class="form-grid-4">
                 <div class="form-group">
                     <label for="destino_pais">País</label>
-                    <select name="destino_pais" id="destino_pais" required>
+                    <select name="destino_pais" id="destino_pais" data-searchable required>
                         <option value="">Seleccionar</option>
                         {# paises_destino viene como [(iso, nombre)] del catálogo
                            compartido: el cliente elige cualquier país, no sólo
@@ -263,7 +278,6 @@
                             <option value="{{ iso }}" {% if form.destino_pais == iso %}selected{% endif %}>{{ nombre_pais }} ({{ iso }})</option>
                         {% endfor %}
                     </select>
-                    <input type="hidden" name="dest_pais" id="dest_pais" value="{{ form.dest_pais or form.destino_pais or '' }}">
                 </div>
                 <div class="form-group">
                     <label for="dest_ciudad">Ciudad</label>
@@ -291,7 +305,7 @@
             </div>
         </div>
 
-        <div class="form-section" style="margin-bottom:0;">
+        <div class="form-section shipment-step shipment-step-package" style="margin-bottom:0;">
             <h4><span class="n">3</span> Cajas del envío <span class="badge ok">Catálogo</span></h4>
 
             <!-- Multi-bulto: una fila por producto; "Cajas" = cajas IGUALES de
@@ -319,6 +333,9 @@
                                 </option>
                             {% endfor %}
                         </select>
+                        {% if not productos %}
+                        <p class="field-help">El catálogo es opcional. Completá esta caja manualmente; sólo lo necesitás para automatizar cargas o integrar una tienda.</p>
+                        {% endif %}
                     </div>
 
                     <div class="bulto-fisico" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 44px; gap:10px;">
@@ -352,11 +369,17 @@
                        Obligatoria para la aduana: qué es, cuánto vale, HS y
                        dónde se fabricó. Para textiles el destino suele exigir
                        composición y tejido (punto/plano) en la descripción. #}
-                    <div class="bulto-invoice" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1.8fr 0.8fr 0.9fr 1fr; gap:10px;">
+                    <div class="bulto-invoice" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1.7fr 0.65fr 0.8fr 0.8fr 1fr; gap:10px;">
                         <div class="form-group">
                             <label>Contenido / descripción invoice (EN)</label>
                             <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75"
                                    value="{{ f.descripcion_en or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Unid. aduana</label>
+                            <input type="number" name="bulto_unidades_aduana"
+                                   class="bulto-unidades-aduana" min="1" max="9999" step="1"
+                                   value="{{ f.unidades_aduana or f.cantidad or 1 }}" required>
                         </div>
                         <div class="form-group">
                             <label>Valor unit. USD</label>
@@ -370,7 +393,7 @@
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
-                            <select name="bulto_pais_fab" class="bulto-pais-fab">
+                            <select name="bulto_pais_fab" class="bulto-pais-fab" data-searchable>
                                 <option value="">= origen del envío</option>
                                 {% for iso, nom in paises_destino %}
                                     <option value="{{ iso }}" {% if f.pais_origen == iso %}selected{% endif %}>{{ nom }}</option>
@@ -383,9 +406,14 @@
             </div>
             <button type="button" id="btn-add-bulto" class="btn-add-bulto">+ Añadir otra caja</button>
             <p style="font-size:12.5px;color:var(--fg-3);margin:8px 0 18px;">
-                "Cajas iguales" = cuántas cajas idénticas a esa. Cada caja sale con su propia etiqueta, todas bajo el mismo tracking. Textiles: incluí composición y tejido (punto/plano) en la descripción — el destino lo exige.
+                "Cajas iguales" define los paquetes físicos. "Unid. aduana" es la cantidad total de productos dentro de esas cajas (por ejemplo: 1 caja con 8 camisas). Cada caja sale con su propia etiqueta, todas bajo el mismo tracking.
             </p>
 
+            <details class="shipment-extra-options" {% if form.precio_cliente_final_ars or form.observaciones %}open{% endif %}>
+                <summary>
+                    <span><strong>Opciones adicionales</strong><small>Courier, impuestos, precio de reventa y notas</small></span>
+                </summary>
+                <div class="shipment-extra-body">
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="precio_cliente_final_ars">Precio final a tu cliente ARS <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label>
@@ -400,18 +428,18 @@
             <div class="form-group">
                 <label>Courier del envío</label>
                 <div id="courier-btns" style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button type="button" class="btn btn-ghost btn-sm" data-courier="fedex">
-                        FedEx <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
+                    <button type="button" class="btn btn-ghost btn-sm" data-courier="fedex" disabled title="API pendiente">
+                        FedEx · próximamente <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
                     </button>
                     <button type="button" class="btn btn-ghost btn-sm" data-courier="dhl">
                         DHL <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
                     </button>
-                    <button type="button" class="btn btn-ghost btn-sm" data-courier="ups">
-                        UPS <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
+                    <button type="button" class="btn btn-ghost btn-sm" data-courier="ups" disabled title="API pendiente">
+                        UPS · próximamente <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
                     </button>
                 </div>
                 <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                    Sin elegir, va el más barato de los que coticen.
+                    Hoy la operación automática está disponible únicamente con DHL.
                     {% if courier_default %}Tu cuenta tiene {{ courier_default|upper }} configurado.{% endif %}
                 </p>
             </div>
@@ -423,16 +451,17 @@
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="tax_paga">Impuestos de destino</label>
+                    {% set tax_sel = form.tax_paga or tax_paga_default %}
                     <select name="tax_paga" id="tax_paga">
-                        <option value="DESTINATARIO" {% if tax_paga_default != 'CLIENTE' %}selected{% endif %}>
+                        <option value="DESTINATARIO" {% if tax_sel != 'CLIENTE' %}selected{% endif %}>
                             Los paga quien recibe
                         </option>
-                        <option value="CLIENTE" {% if tax_paga_default == 'CLIENTE' %}selected{% endif %}>
+                        <option value="CLIENTE" {% if tax_sel == 'CLIENTE' %}selected{% endif %}>
                             Los pago yo — se suman a mi cuenta
                         </option>
                     </select>
                     <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                        Aranceles del país de destino. EEUU ya no tiene franquicia: toda caja paga.
+                        Los aranceles e impuestos dependen de la mercadería y del país de destino. No están incluidos salvo indicación expresa.
                     </p>
                 </div>
                 <div class="form-group">
@@ -440,6 +469,8 @@
                     <textarea name="observaciones" id="observaciones" rows="2" placeholder="Instrucciones para Tauro, referencia interna...">{{ form.observaciones or '' }}</textarea>
                 </div>
             </div>
+                </div>
+            </details>
         </div>
     </div>
 
@@ -450,7 +481,7 @@
         </div>
         <div class="submit-actions">
             <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
-            <button type="submit" class="btn btn-primary" {% if not remitente %}disabled{% endif %}>
+            <button type="submit" class="btn btn-primary">
                 Crear solicitud
             </button>
         </div>
@@ -508,9 +539,8 @@
 
       Object.entries(fieldMap).forEach(([dataKey, inputId]) => setField(inputId, option.dataset[dataKey]));
       setField("destino_pais", option.dataset.pais);
-      setField("dest_pais", option.dataset.pais);
       avisoLibreta(savedSelect,
-                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
+                   "✓ Cargado desde Mis clientes. Podés editar cualquier campo: " +
                    "los cambios valen sólo para este envío.");
       // setear .value no dispara "change": recotizamos a mano para que
       // el precio en vivo refleje el nuevo destino al instante.
@@ -518,15 +548,12 @@
     });
     if (savedSelect.value) {
       avisoLibreta(savedSelect,
-                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
+                   "✓ Cargado desde Mis clientes. Podés editar cualquier campo: " +
                    "los cambios valen sólo para este envío.");
     }
   }
 
   const countrySelect = document.getElementById("destino_pais");
-  if (countrySelect) {
-    countrySelect.addEventListener("change", () => setField("dest_pais", countrySelect.value));
-  }
 
   // ── Remitente: elegir de la libreta precarga los campos editables ──
   // Mismo patrón que el destinatario. Y como el país de ORIGEN del envío
@@ -543,6 +570,16 @@
     cp: "rem_zip",
     pais: "rem_pais",
   };
+  const remSummaryName = document.getElementById("rem-summary-name");
+  const remSummaryAddress = document.getElementById("rem-summary-address");
+  function actualizarResumenRemitente() {
+    const valor = (id) => ((document.getElementById(id) || {}).value || "").trim();
+    const nombre = valor("rem_nombre") || "Nuevo remitente";
+    const ubicacion = [valor("rem_direccion"), valor("rem_ciudad"), valor("rem_zip"), valor("rem_pais")]
+      .filter(Boolean).join(" · ");
+    if (remSummaryName) remSummaryName.textContent = nombre;
+    if (remSummaryAddress) remSummaryAddress.textContent = ubicacion || "Completá los datos de origen";
+  }
   if (remSelect) {
     remSelect.addEventListener("change", () => {
       const option = remSelect.options[remSelect.selectedIndex];
@@ -550,10 +587,12 @@
       if (!option || !option.value) {
         Object.values(remFieldMap).forEach((id) => setField(id, ""));
         avisoLibreta(remSelect, "");
+        actualizarResumenRemitente();
         if (typeof refreshLivePrice === "function") refreshLivePrice();
         return;
       }
       Object.entries(remFieldMap).forEach(([k, id]) => setField(id, option.dataset[k]));
+      actualizarResumenRemitente();
       avisoLibreta(remSelect,
                    "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
                    "los cambios valen sólo para este envío.");
@@ -565,6 +604,13 @@
                    "los cambios valen sólo para este envío.");
     }
   }
+  Object.values(remFieldMap).concat(["rem_contacto"]).forEach((id) => {
+    const campo = document.getElementById(id);
+    if (!campo) return;
+    campo.addEventListener("input", actualizarResumenRemitente);
+    campo.addEventListener("change", actualizarResumenRemitente);
+  });
+  actualizarResumenRemitente();
   const remPais = document.getElementById("rem_pais");
   if (remPais) {
     remPais.addEventListener("change", () => {
@@ -607,6 +653,7 @@
       return {
         producto: v(".bulto-producto"),
         cantidad: Math.max(parseInt(v(".bulto-cantidad") || "1", 10) || 1, 1),
+        unidades_aduana: Math.max(parseInt(v(".bulto-unidades-aduana") || v(".bulto-cantidad") || "1", 10) || 1, 1),
         peso_kg: v(".bulto-peso"),
         largo_cm: v(".bulto-largo"),
         ancho_cm: v(".bulto-ancho"),
@@ -622,6 +669,7 @@
   function wireBultoRow(row) {
     var sel = row.querySelector(".bulto-producto");
     var cant = row.querySelector(".bulto-cantidad");
+    var unidadesAduana = row.querySelector(".bulto-unidades-aduana");
     var quitar = row.querySelector(".bulto-quitar");
     if (sel) sel.addEventListener("change", refreshLivePrice);
     // Peso y medidas manuales también recotizan: el precio depende de la
@@ -636,6 +684,7 @@
         // última fila: no se quita, se limpia
         if (sel) sel.value = "";
         if (cant) cant.value = 1;
+        if (unidadesAduana) unidadesAduana.value = 1;
       } else {
         row.remove();
       }
@@ -648,8 +697,10 @@
     var nueva = base.cloneNode(true);
     var sel = nueva.querySelector(".bulto-producto");
     var cant = nueva.querySelector(".bulto-cantidad");
+    var unidadesAduana = nueva.querySelector(".bulto-unidades-aduana");
     if (sel) sel.value = producto || "";
     if (cant) cant.value = cantidad || 1;
+    if (unidadesAduana) unidadesAduana.value = cantidad || 1;
     bultosList.appendChild(nueva);
     wireBultoRow(nueva);
     return nueva;
@@ -696,8 +747,9 @@
   var intlOpciones = [];
   var intlNoDisp = [];
   var intlCourier = document.getElementById("intl_courier");
+  var precioCotizado = document.getElementById("precio_cotizado_ars");
   // Arranca con el courier configurado en la cuenta (WAIMAO → DHL).
-  var courierElegido = "{{ courier_default or '' }}";
+  var courierElegido = "{{ form.intl_courier or courier_default or '' }}";
   if (intlCourier && courierElegido) intlCourier.value = courierElegido;
 
   function pintarBotonesCourier() {
@@ -722,6 +774,7 @@
       : intlOpciones[0];   // sin elección: el más barato
 
     if (!op) {
+      if (precioCotizado) precioCotizado.value = "";
       // El elegido no cotizó ESTE envío. Nunca se muestra otro en su
       // lugar: el cliente pidió DHL y tiene que verlo, no descubrirlo
       // en el resumen de cuenta.
@@ -733,6 +786,7 @@
     // El hidden viaja en el submit: el servidor recotiza y busca ESTE
     // courier. Si no aparece, falla pidiendo elegir otro.
     if (intlCourier) intlCourier.value = op.id;
+    if (precioCotizado) precioCotizado.value = String(op.precio_ars);
     var t = "USD " + op.precio_usd;
     if (op.servicio) t += " · " + op.servicio;
     if (op.dias) t += " · " + op.dias + " días";
@@ -800,6 +854,7 @@
     // vació el form, un timer viejo no puede pintar un precio fantasma
     // encima del estado "idle" (y priceSeq++ invalida respuestas en vuelo).
     clearTimeout(priceTimer);
+    if (precioCotizado) precioCotizado.value = "";
     if (destino !== "AR") { nacCarrier.value = ""; nacServicio.value = ""; }
     if (!bultos.length || !destino) { priceSeq++; renderLivePrice("idle"); return; }
 
@@ -852,6 +907,7 @@
           origen_pais: (document.getElementById("rem_pais") || {}).value || "",
           origen_ciudad: (document.getElementById("rem_ciudad") || {}).value || "",
           origen_cp: (document.getElementById("rem_zip") || {}).value || "",
+          origen_estado: (document.getElementById("rem_estado") || {}).value || "",
         }),
       })
         .then(function (r) { return r.json(); })
@@ -866,10 +922,14 @@
   if (countrySelect) countrySelect.addEventListener("change", refreshLivePrice);
   ["dest_zip", "dest_ciudad", "dest_estado"].forEach(function (id) {
     var el = document.getElementById(id);
-    if (el) el.addEventListener("input", function () {
-      if (countrySelect.value === "AR") refreshLivePrice();
-    });
+    if (el) el.addEventListener("input", refreshLivePrice);
   });
+  ["rem_ciudad", "rem_zip", "rem_estado"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener("input", refreshLivePrice);
+  });
+  var originCountry = document.getElementById("rem_pais");
+  if (originCountry) originCountry.addEventListener("change", refreshLivePrice);
   refreshLivePrice();
 
   // ── Pegar pedido → precargar form ─────────────────────────
@@ -909,7 +969,6 @@
             for (var i = 0; i < countrySelect.options.length; i++) {
               if (countrySelect.options[i].value === d.pais_iso) {
                 countrySelect.value = d.pais_iso;
-                setField("dest_pais", d.pais_iso);
                 llenados++;
                 break;
               }
@@ -926,6 +985,10 @@
               var row = rows[i] || agregarBulto("", 1);
               var cant = row.querySelector(".bulto-cantidad");
               if (cant && p.cantidad) { cant.value = p.cantidad; llenados++; }
+              var unidades = row.querySelector(".bulto-unidades-aduana");
+              if (unidades && (p.unidades_aduana || p.cantidad)) {
+                unidades.value = p.unidades_aduana || p.cantidad;
+              }
             });
           }
           var aviso = "Listo: " + llenados + " campos precargados.";
@@ -952,8 +1015,10 @@
     var steps = document.querySelectorAll("#stepper-envio .step");
     var secs = document.querySelectorAll(".form-section");
     var barra = document.querySelector(".submit-bar");
+    var wizard = document.getElementById("shipment-wizard");
     if (!steps.length || !secs.length) return;
-    var actual = 0;
+    var initialStep = parseInt((wizard && wizard.dataset.initialStep) || "1", 10);
+    var actual = Math.max(0, Math.min((isNaN(initialStep) ? 1 : initialStep) - 1, secs.length - 1));
 
     function pintar() {
       secs.forEach(function (sec, i) {
@@ -966,6 +1031,7 @@
         st.style.cursor = "pointer";
       });
       if (barra) barra.style.display = (actual === secs.length - 1) ? "" : "none";
+      if (wizard) wizard.dataset.step = String(actual + 1);
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -978,6 +1044,9 @@
     }
 
     function ir(i) {
+      // El stepper puede volver a un paso terminado, pero no saltear uno
+      // futuro: cada pantalla se valida antes de avanzar a la siguiente.
+      if (i > actual + 1) i = actual + 1;
       if (i > actual && !validaPaso(actual)) return;
       actual = Math.max(0, Math.min(i, secs.length - 1));
       pintar();

@@ -4,9 +4,9 @@
 # Punto de la spec: "El cliente podrá crear recolecciones con todas estas
 # empresas internacionales que lo permitan".
 #
-# Modelo: la recolección es del CLIENTE (su dirección de remitente), no de
-# una guía puntual — el chofer pasa una vez y se lleva todo lo que haya.
-# Por eso vive en su propia tabla y no colgada de solicitudes_guia.
+# Modelo: puede ser manual (remitente predeterminado del cliente) o ligada a
+# una solicitud emitida. En ese caso se congelan el origen, courier y piezas
+# de ESA guía: esencial para importadores con proveedores distintos.
 #
 # OJO: agendar NO es idempotente (dos llamadas = dos visitas del chofer),
 # igual que emitir. Por eso hay reserva por (cliente, fecha): un cliente no
@@ -14,48 +14,65 @@
 # ============================================================
 from __future__ import annotations
 
+import json
+import math
+import threading
+import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+import psycopg2
+
 from core.database import get_conn
 
-ESTADOS = ["AGENDADA", "CANCELADA", "COMPLETADA"]
+ESTADOS = [
+    "AGENDANDO", "AGENDADA", "CANCELANDO", "VERIFICAR_COURIER",
+    "CANCELADA", "COMPLETADA",
+]
+
+MAX_BULTOS_RECOLECCION = 20
+MAX_PESO_RECOLECCION_KG = 1400.0
+MAX_KG_POR_BULTO = 70.0
 
 _tabla_lista = False
+_tabla_lock = threading.Lock()
 
 
 def _ensure_tabla() -> None:
+    """Comprueba la migración canónica, sin ejecutar DDL en tráfico real.
+
+    Antes cada worker hacía DROP/CREATE de índices en el primer request. En
+    múltiples réplicas eso podía bloquear o dejar pasar dos visitas. El
+    esquema y las garantías de unicidad se instalan exclusivamente desde
+    ``sql/schema.sql`` durante el arranque.
+    """
     global _tabla_lista
     if _tabla_lista:
         return
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS recolecciones (
-                    id                SERIAL PRIMARY KEY,
-                    cliente_id        TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
-                    courier           TEXT NOT NULL DEFAULT 'FEDEX',
-                    fecha             DATE NOT NULL,
-                    ready_time        TEXT NOT NULL DEFAULT '09:00',
-                    close_time        TEXT NOT NULL DEFAULT '17:00',
-                    bultos            INTEGER NOT NULL DEFAULT 1,
-                    peso_kg           REAL NOT NULL DEFAULT 1,
-                    direccion         TEXT,
-                    instrucciones     TEXT,
-                    estado            TEXT NOT NULL DEFAULT 'AGENDADA',
-                    confirmation_code TEXT,
-                    ubicacion         TEXT,
-                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS ix_recolecciones_cliente
-                    ON recolecciones (cliente_id, fecha DESC);
-                -- Una sola recolección activa por cliente y día: agendar dos
-                -- veces manda al chofer dos veces (y se paga dos veces).
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_recoleccion_activa
-                    ON recolecciones (cliente_id, fecha)
-                    WHERE estado = 'AGENDADA';
-            """)
-    _tabla_lista = True
+    with _tabla_lock:
+        if _tabla_lista:
+            return
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        to_regclass('public.recolecciones') AS tabla,
+                        to_regclass('public.uq_recoleccion_cliente_fecha_abierta_v2') AS idx_fecha,
+                        to_regclass('public.uq_recoleccion_solicitud_abierta_v2') AS idx_solicitud,
+                        EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_schema='public' AND table_name='recolecciones'
+                              AND column_name='updated_at'
+                        ) AS columna_updated
+                """)
+                estado = cur.fetchone() or {}
+                if not all((estado.get("tabla"), estado.get("idx_fecha"),
+                            estado.get("idx_solicitud"), estado.get("columna_updated"))):
+                    raise RuntimeError(
+                        "La migración de recolecciones no está completa; "
+                        "se bloqueó la operación para evitar retiros duplicados."
+                    )
+        _tabla_lista = True
 
 
 def _dias_habiles_validos(fecha_str: str) -> Optional[str]:
@@ -71,6 +88,19 @@ def _dias_habiles_validos(fecha_str: str) -> Optional[str]:
         return "Sólo se puede agendar hasta 14 días adelante."
     if f.weekday() >= 5:
         return "Los couriers no recolectan sábados ni domingos."
+    return None
+
+
+def _ventana_horaria_valida(ready_time: str, close_time: str) -> Optional[str]:
+    try:
+        inicio = datetime.strptime(ready_time, "%H:%M")
+        cierre = datetime.strptime(close_time, "%H:%M")
+    except ValueError:
+        return "El horario de recolección no es válido."
+    if cierre <= inicio:
+        return "El horario de cierre debe ser posterior al de inicio."
+    if (cierre - inicio).total_seconds() < 2 * 60 * 60:
+        return "La ventana de recolección debe ser de al menos 2 horas."
     return None
 
 
@@ -92,18 +122,133 @@ def _cliente_pickup(courier: str):
     return None
 
 
+def cliente_puede_recolectar(cliente_id: str, courier: str | None = None) -> bool:
+    """Permiso opt-in para crear operaciones reales de retiro.
+
+    Falla cerrado: si el cliente no existe, está inactivo o no puede leerse
+    la configuración, no se llama a ningún courier.
+    """
+    from servicios.configuracion_couriers_cliente import (
+        mapa_permisos, permiso_courier,
+    )
+
+    cliente_id = (cliente_id or "").strip().upper()
+    if not cliente_id:
+        return False
+    if courier:
+        return permiso_courier(cliente_id, courier, "recolectar")
+    return any(mapa_permisos(cliente_id, "recolectar").values())
+
+
+def datos_retiro_desde_solicitud(sol: dict) -> dict:
+    """Fuente única del retiro ligado a una guía: origen y cajas reales."""
+    bultos = sol.get("bultos") or []
+    if isinstance(bultos, str):
+        try:
+            bultos = json.loads(bultos)
+        except (TypeError, ValueError):
+            bultos = []
+
+    paquetes = []
+    if bultos:
+        for b in bultos:
+            paquetes.append({
+                "peso_kg": float(b.get("peso_kg") or 1),
+                "largo_cm": float(b.get("largo_cm") or 30),
+                "ancho_cm": float(b.get("ancho_cm") or 20),
+                "alto_cm": float(b.get("alto_cm") or 15),
+                "cantidad": max(int(b.get("cantidad") or 1), 1),
+            })
+    else:
+        cantidad = max(int(sol.get("cantidad") or 1), 1)
+        peso_total = max(float(sol.get("peso_kg") or 1), 0.001)
+        paquetes = [{
+            "peso_kg": round(peso_total / cantidad, 3),
+            "largo_cm": float(sol.get("largo_cm") or 30),
+            "ancho_cm": float(sol.get("ancho_cm") or 20),
+            "alto_cm": float(sol.get("alto_cm") or 15),
+            "cantidad": cantidad,
+        }]
+
+    cantidad_total = sum(int(p["cantidad"]) for p in paquetes)
+    peso_total = round(sum(float(p["peso_kg"]) * int(p["cantidad"])
+                           for p in paquetes), 3)
+    return {
+        "solicitud_id": sol.get("id"),
+        "courier": (sol.get("courier") or "FEDEX").strip().upper(),
+        "tracking": sol.get("tracking"),
+        "bultos": cantidad_total,
+        "peso_kg": peso_total,
+        "paquetes": paquetes,
+        "origen": {
+            "nombre": (sol.get("remitente_contacto") or
+                       sol.get("remitente_nombre") or sol.get("cliente_id") or ""),
+            "empresa": sol.get("remitente_nombre") or "",
+            "telefono": sol.get("remitente_telefono") or "",
+            "calle": sol.get("remitente_direccion") or "",
+            "ciudad": sol.get("remitente_ciudad") or "",
+            "estado": sol.get("remitente_estado") or "",
+            "zip": sol.get("remitente_zip") or "",
+            "pais": (sol.get("remitente_pais") or "AR").strip().upper()[:2],
+        },
+    }
+
+
 def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
           bultos: int, peso_kg: float, instrucciones: str = "",
-          courier: str = "FEDEX") -> dict:
+          courier: str = "FEDEX", solicitud_id: Optional[int] = None) -> dict:
     """
-    Agenda la recolección en el courier y la guarda. La dirección sale del
-    remitente predeterminado del cliente: es donde el chofer tiene que ir.
+    Agenda la recolección en el courier y la guarda. Si viene de una guía,
+    usa su origen y sus cajas; si es manual, el remitente predeterminado.
     """
     from servicios.direcciones import obtener_remitente_para_envio
 
     _ensure_tabla()
     cliente_id = (cliente_id or "").strip().upper()
     courier = (courier or "FEDEX").strip().upper()
+
+    retiro_envio = None
+    if solicitud_id:
+        # No confiar en courier/dirección/peso enviados por el navegador. La
+        # solicitud se resuelve otra vez con (id + cliente) y de ahí sale TODO.
+        from servicios.solicitudes_guia import obtener_solicitud_de_cliente
+        sol = obtener_solicitud_de_cliente(int(solicitud_id), cliente_id)
+        if not sol or not sol.get("tracking"):
+            return {"ok": False, "error":
+                    "Ese envío no existe, no es de tu cuenta o todavía no tiene guía."}
+        retiro_envio = datos_retiro_desde_solicitud(sol)
+        courier = retiro_envio["courier"]
+        bultos = retiro_envio["bultos"]
+        peso_kg = retiro_envio["peso_kg"]
+
+    try:
+        bultos = int(bultos)
+        peso_kg = float(peso_kg)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Revisá la cantidad de bultos y el peso total."}
+    if not 1 <= bultos <= MAX_BULTOS_RECOLECCION:
+        return {"ok": False, "error":
+                f"La recolección admite entre 1 y {MAX_BULTOS_RECOLECCION} bultos."}
+    if not math.isfinite(peso_kg) or not 0 < peso_kg <= MAX_PESO_RECOLECCION_KG:
+        return {"ok": False, "error":
+                f"El peso total debe ser mayor a 0 y no superar {MAX_PESO_RECOLECCION_KG:g} kg."}
+    if retiro_envio:
+        for paquete in retiro_envio.get("paquetes") or []:
+            try:
+                peso_bulto = float(paquete.get("peso_kg") or 0)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "La guía tiene un peso de bulto inválido."}
+            if not math.isfinite(peso_bulto) or not 0 < peso_bulto <= MAX_KG_POR_BULTO:
+                return {"ok": False, "error":
+                        f"Cada bulto debe pesar entre 0 y {MAX_KG_POR_BULTO:g} kg."}
+
+    # Este control vive en el servicio (no sólo en la pantalla): un POST
+    # armado a mano tampoco puede reservar una visita ni llamar al courier.
+    if not cliente_puede_recolectar(cliente_id, courier):
+        return {"ok": False, "error":
+                f"Las recolecciones de {courier} todavía no están habilitadas "
+                "para tu cuenta. "
+                "Escribinos y las activamos."}
 
     cliente_api = _cliente_pickup(courier)
     if cliente_api is None:
@@ -113,11 +258,28 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
     motivo = _dias_habiles_validos(fecha)
     if motivo:
         return {"ok": False, "error": motivo}
+    motivo = _ventana_horaria_valida(ready_time, close_time)
+    if motivo:
+        return {"ok": False, "error": motivo}
 
-    rem = obtener_remitente_para_envio(cliente_id, None)
+    rem = None
+    if retiro_envio:
+        origen = retiro_envio["origen"]
+        rem = {
+            "nombre": origen["nombre"], "alias": origen["empresa"],
+            "telefono": origen["telefono"], "direccion": origen["calle"],
+            "ciudad": origen["ciudad"], "estado": origen["estado"],
+            "cp": origen["zip"], "pais": origen["pais"],
+        }
+    else:
+        rem = obtener_remitente_para_envio(cliente_id, None)
     if not rem or not (rem.get("direccion") or "").strip():
         return {"ok": False, "error": "Necesitás una dirección de retiro cargada en "
                                       "tu libreta para pedir una recolección."}
+
+    referencia_previa = (
+        f"tauro-dhl-pick-{uuid.uuid4().hex[:20]}" if courier == "DHL" else None
+    )
 
     # Reserva ANTES de llamar al courier: si dos pedidos entran juntos, el
     # índice único deja pasar uno solo. Agendar no se puede deshacer solo.
@@ -127,39 +289,73 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
                 cur.execute("""
                     INSERT INTO recolecciones
                         (cliente_id, fecha, ready_time, close_time, bultos, peso_kg,
-                         direccion, instrucciones, estado, courier)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'AGENDADA', %s)
+                         direccion, instrucciones, estado, courier, solicitud_id,
+                         courier_message_reference)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'AGENDANDO', %s, %s, %s)
                     RETURNING id
                 """, (cliente_id, fecha, ready_time, close_time,
                       max(int(bultos or 1), 1), float(peso_kg or 1),
                       f"{rem.get('direccion','')}, {rem.get('ciudad','')}".strip(", "),
-                      (instrucciones or "")[:255], courier))
+                      (instrucciones or "")[:255], courier,
+                      int(solicitud_id) if solicitud_id else None,
+                      referencia_previa))
                 rec_id = cur.fetchone()["id"]
-            except Exception:
-                return {"ok": False, "error": "Ya tenés una recolección agendada para "
-                                              "ese día. Cancelala si querés cambiarla."}
+            except psycopg2.IntegrityError as e:
+                if e.pgcode != "23505":
+                    raise
+                return {"ok": False, "error":
+                        "Ya hay una recolección abierta para ese día o para ese envío. "
+                        "Cancelala o esperá a que Tauro termine de verificarla."}
 
-    resultado = cliente_api.create_pickup({
-        "origen": {
-            "nombre": rem.get("nombre") or cliente_id,
-            "empresa": rem.get("alias") or "",
-            "telefono": rem.get("telefono") or "",
-            "calle": rem.get("direccion") or "",
-            "ciudad": rem.get("ciudad") or "",
-            "estado": rem.get("estado") or "",
-            "zip": rem.get("cp") or "",
-            "pais": rem.get("pais") or "AR",
-        },
-        "fecha": fecha, "ready_time": ready_time, "close_time": close_time,
-        "peso_kg": peso_kg, "bultos": bultos, "instrucciones": instrucciones,
-    })
+    try:
+        resultado = cliente_api.create_pickup({
+            "origen": {
+                "nombre": rem.get("nombre") or cliente_id,
+                "empresa": rem.get("alias") or "",
+                "telefono": rem.get("telefono") or "",
+                "calle": rem.get("direccion") or "",
+                "ciudad": rem.get("ciudad") or "",
+                "estado": rem.get("estado") or "",
+                "zip": rem.get("cp") or "",
+                "pais": rem.get("pais") or "AR",
+            },
+            "fecha": fecha, "ready_time": ready_time, "close_time": close_time,
+            "peso_kg": peso_kg, "bultos": bultos, "instrucciones": instrucciones,
+            "paquetes": retiro_envio.get("paquetes") if retiro_envio else None,
+            "message_reference": referencia_previa,
+        })
+    except Exception as e:
+        print(f"[recolecciones] respuesta incierta de {courier} para reserva "
+              f"{rec_id}: {e}")
+        resultado = {"encontrado": False, "incierto": True,
+                     "error": f"No pudimos confirmar la recolección con {courier}."}
 
     if not resultado.get("encontrado"):
-        # El courier no la tomó: se borra la reserva para que pueda reintentar.
+        if resultado.get("incierto"):
+            # El courier PUDO haberla tomado. Se conserva la fila y el índice
+            # impide pedir otra visita hasta conciliar la Message-Reference.
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE recolecciones
+                        SET estado='VERIFICAR_COURIER',
+                            courier_message_reference=COALESCE(%s, courier_message_reference),
+                            error_operativo=%s, updated_at=NOW()
+                        WHERE id=%s AND estado='AGENDANDO'
+                    """, (resultado.get("message_reference"),
+                          str(resultado.get("error") or "")[:500], rec_id))
+            return {"ok": False, "incierto": True,
+                    "error": (resultado.get("error") or
+                              "La respuesta del courier fue incierta.") +
+                             " Tauro la va a verificar; no la pidas de nuevo."}
+
+        # Rechazo definitivo: se borra la reserva para que pueda corregir y
+        # reintentar. Un timeout nunca entra en esta rama.
         try:
             with get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("DELETE FROM recolecciones WHERE id = %s", (rec_id,))
+                    cur.execute("DELETE FROM recolecciones WHERE id = %s AND estado='AGENDANDO'",
+                                (rec_id,))
         except Exception as e:
             print(f"[recolecciones] no pude liberar la reserva {rec_id}: {e}")
         return {"ok": False, "error": resultado.get("error") or "El courier no pudo agendarla."}
@@ -167,9 +363,13 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                UPDATE recolecciones SET confirmation_code = %s, ubicacion = %s
-                WHERE id = %s
-            """, (resultado.get("confirmation_code"), resultado.get("ubicacion"), rec_id))
+                UPDATE recolecciones
+                SET estado='AGENDADA', confirmation_code = %s, ubicacion = %s,
+                    courier_message_reference = COALESCE(%s, courier_message_reference),
+                    error_operativo = NULL, updated_at=NOW()
+                WHERE id = %s AND estado='AGENDANDO'
+            """, (resultado.get("confirmation_code"), resultado.get("ubicacion"),
+                  resultado.get("message_reference"), rec_id))
 
     print(f"[recolecciones] {cliente_id} agendó {courier} para {fecha} "
           f"({resultado.get('confirmation_code')})")
@@ -193,11 +393,19 @@ def listar_admin(limite: int = 200) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT r.*, c.nombre AS cliente_nombre
+                SELECT r.*, c.nombre AS cliente_nombre,
+                       (r.estado='VERIFICAR_COURIER' OR
+                        (r.estado IN ('AGENDANDO', 'CANCELANDO') AND
+                         r.updated_at <= NOW() - INTERVAL '10 minutes')) AS puede_conciliar
                 FROM recolecciones r
                 LEFT JOIN clientes c ON c.cliente_id = r.cliente_id
-                WHERE r.estado = 'AGENDADA' AND r.fecha >= CURRENT_DATE - 1
-                ORDER BY r.fecha, r.id LIMIT %s
+                WHERE r.estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO',
+                                   'VERIFICAR_COURIER')
+                  AND (r.fecha >= CURRENT_DATE - 1 OR
+                       r.estado IN ('AGENDANDO', 'CANCELANDO', 'VERIFICAR_COURIER'))
+                ORDER BY CASE WHEN r.estado IN ('AGENDANDO', 'CANCELANDO',
+                                                 'VERIFICAR_COURIER') THEN 0 ELSE 1 END,
+                         r.fecha, r.id LIMIT %s
             """, (limite,))
             return [dict(r) for r in cur.fetchall()]
 
@@ -208,38 +416,124 @@ def cancelar(rec_id: int, cliente_id: Optional[str] = None) -> dict:
     del cliente (portal); sin él, es el admin.
     """
     _ensure_tabla()
+    # Reclamo atómico: sólo un request puede pasar AGENDADA → CANCELANDO.
+    # El segundo no llega al courier, aunque ambos clicks entren juntos.
     with get_conn() as conn:
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute("""
-                    SELECT * FROM recolecciones WHERE id = %s AND cliente_id = %s
+                    UPDATE recolecciones
+                    SET estado='CANCELANDO', error_operativo=NULL, updated_at=NOW()
+                    WHERE id=%s AND cliente_id=%s AND estado='AGENDADA'
+                    RETURNING *
                 """, (rec_id, cliente_id.strip().upper()))
             else:
-                cur.execute("SELECT * FROM recolecciones WHERE id = %s", (rec_id,))
+                cur.execute("""
+                    UPDATE recolecciones
+                    SET estado='CANCELANDO', error_operativo=NULL, updated_at=NOW()
+                    WHERE id=%s AND estado='AGENDADA'
+                    RETURNING *
+                """, (rec_id,))
             rec = cur.fetchone()
 
     if not rec:
-        return {"ok": False, "error": "Esa recolección no existe."}
-    if rec["estado"] != "AGENDADA":
-        return {"ok": False, "error": "Esa recolección ya no está agendada."}
+        return {"ok": False, "error":
+                "Esa recolección no existe, no es de tu cuenta o ya se está cancelando."}
 
-    if rec.get("confirmation_code"):
-        cliente_api = _cliente_pickup(rec.get("courier"))
-        if cliente_api is None:
-            return {"ok": False, "error": f"No sé cancelar recolecciones de "
-                                          f"{rec.get('courier')}."}
-        r = cliente_api.cancel_pickup(
-            rec["confirmation_code"], rec["fecha"].strftime("%Y-%m-%d"),
-            rec.get("ubicacion") or "")
-        if not r.get("ok"):
-            # Si el courier no la canceló, NO se marca cancelada acá: el
-            # chofer va a ir igual y el cliente tiene que saberlo.
-            return {"ok": False, "error": (r.get("error") or "") +
-                    " La recolección sigue activa en el courier."}
+    cliente_api = _cliente_pickup(rec.get("courier"))
+    if cliente_api is None:
+        # No hubo llamada externa: volver a AGENDADA es seguro.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE recolecciones SET estado='AGENDADA', updated_at=NOW()
+                    WHERE id=%s AND estado='CANCELANDO'
+                """, (rec_id,))
+        return {"ok": False, "error": f"No sé cancelar recolecciones de "
+                                      f"{rec.get('courier')}."}
+
+    if not rec.get("confirmation_code"):
+        r = {"ok": False, "error":
+             "La recolección no tiene código de confirmación del courier."}
+    else:
+        try:
+            r = cliente_api.cancel_pickup(
+                rec["confirmation_code"], rec["fecha"].strftime("%Y-%m-%d"),
+                rec.get("ubicacion") or "")
+        except Exception as e:
+            print(f"[recolecciones] cancelación incierta {rec_id}: {e}")
+            r = {"ok": False, "error": "No recibimos confirmación del courier."}
+
+    if not r.get("ok"):
+        # Después de enviar DELETE/PUT no sabemos con certeza si la
+        # cancelación llegó. No se habilita otro retiro: queda en conciliación.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE recolecciones
+                    SET estado='VERIFICAR_COURIER', error_operativo=%s, updated_at=NOW()
+                    WHERE id=%s AND estado='CANCELANDO'
+                """, (str(r.get("error") or "")[:500], rec_id))
+        return {"ok": False, "incierto": True,
+                "error": (r.get("error") or "El courier no confirmó la cancelación.") +
+                         " Tauro la va a verificar; no programes otro retiro."}
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("UPDATE recolecciones SET estado = 'CANCELADA' WHERE id = %s",
-                        (rec_id,))
+            cur.execute("""
+                UPDATE recolecciones
+                SET estado='CANCELADA', error_operativo=NULL, updated_at=NOW()
+                WHERE id=%s AND estado='CANCELANDO'
+            """, (rec_id,))
     print(f"[recolecciones] {rec_id} cancelada")
     return {"ok": True}
+
+
+def resolver_verificacion(rec_id: int, resultado: str,
+                          confirmation_code: str = "") -> dict:
+    """Cierra manualmente una respuesta incierta después de revisar MyDHL.
+
+    No llama al courier. El admin debe comprobar primero la Message-Reference
+    en el portal del proveedor y recién entonces marcar el retiro como activo
+    o como no creado/cancelado. La transición condicional evita resolver una
+    fila que cambió mientras se la estaba mirando.
+    """
+    _ensure_tabla()
+    destino = (resultado or "").strip().upper()
+    if destino not in {"AGENDADA", "CANCELADA"}:
+        return {"ok": False, "error": "Resultado de conciliación inválido."}
+
+    codigo = (confirmation_code or "").strip()[:120]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT confirmation_code, estado
+                FROM recolecciones
+                WHERE id=%s
+                  AND (estado='VERIFICAR_COURIER' OR
+                       (estado IN ('AGENDANDO', 'CANCELANDO') AND
+                        updated_at <= NOW() - INTERVAL '10 minutes'))
+                FOR UPDATE
+            """, (rec_id,))
+            actual = cur.fetchone()
+            if not actual:
+                return {"ok": False, "error":
+                        "La recolección no está pendiente de verificación o la operación "
+                        "todavía puede estar en curso. Esperá diez minutos y actualizá."}
+            if destino == "AGENDADA" and not (
+                codigo or str(actual.get("confirmation_code") or "").strip()
+            ):
+                return {"ok": False, "error":
+                        "Ingresá el código que encontraste en el courier para marcarla activa."}
+            cur.execute("""
+                UPDATE recolecciones
+                SET estado=%s,
+                    confirmation_code=COALESCE(NULLIF(%s, ''), confirmation_code),
+                    error_operativo=NULL, updated_at=NOW()
+                WHERE id=%s AND estado=%s
+                RETURNING id
+            """, (destino, codigo, rec_id, actual.get("estado")))
+            if cur.fetchone() is None:
+                return {"ok": False, "error":
+                        "La recolección cambió de estado; actualizá la pantalla."}
+    return {"ok": True, "estado": destino}

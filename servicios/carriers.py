@@ -11,6 +11,7 @@ core/dhl_client.py); esperan credenciales.
 """
 from __future__ import annotations
 
+import math
 import os
 
 from core.database import get_conn
@@ -209,14 +210,22 @@ def courier_default_cliente(cliente_id: str) -> str:
     cualquier problema, '': que no se pueda leer la preferencia no puede
     frenar el wizard.
     """
+    cliente_id = (cliente_id or "").strip().upper()
+    if not cliente_id:
+        return ""
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT courier_default FROM clientes WHERE cliente_id = %s",
-                            ((cliente_id or "").strip().upper(),))
+                            (cliente_id,))
                 fila = cur.fetchone()
         valor = (fila["courier_default"] if fila else "").strip().lower()
-        return valor if valor in {c["id"] for c in CARRIERS} else ""
+        if valor not in {c["id"] for c in CARRIERS}:
+            return ""
+        # Una preferencia vieja de FedEx/UPS no puede preseleccionar una API
+        # que hoy TAURO todavía no declaró operativa.
+        from servicios.configuracion_couriers_cliente import permiso_courier
+        return valor if permiso_courier(cliente_id, valor, "cotizar") else ""
     except Exception as e:
         print(f"[carriers] no pude leer el courier default de {cliente_id}: {e}")
         return ""
@@ -251,8 +260,20 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
     # `costo` es lo que el carrier nos cobra a NOSOTROS (tarifa ACCOUNT en
     # FedEx). `costo_lista` es el precio público (LIST) cuando el courier
     # lo informa — es el correcto para mostrar tachado.
-    es_usd = resultado.get("moneda", "USD") == "USD"
-    costo_real_ars = round(resultado["costo"] * dolar) if es_usd else round(resultado["costo"])
+    try:
+        costo_resultado = float(resultado.get("costo"))
+    except (TypeError, ValueError):
+        costo_resultado = 0.0
+    if not math.isfinite(costo_resultado) or costo_resultado <= 0:
+        raise ValueError("Costo de carrier inválido")
+    moneda = str(resultado.get("moneda") or "USD").strip().upper()
+    if moneda not in {"USD", "ARS"}:
+        # Nunca asumir que EUR/GBP/etc. son pesos. Sin una cotización FX
+        # explícita y auditada, fallar cerrado es la única forma de no vender
+        # un flete internacional casi gratis.
+        raise ValueError(f"Moneda de carrier no soportada: {moneda}")
+    es_usd = moneda == "USD"
+    costo_real_ars = round(costo_resultado * dolar) if es_usd else round(costo_resultado)
 
     # Ganancia FIJA: costo + monto. Gana la prioridad porque es una decisión
     # comercial explícita por courier (no se le encima el markup %).
@@ -260,7 +281,7 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
         precio_ars = round(costo_real_ars + margen_fijo_ars)
         return {"precio_ars": precio_ars, "precio_usd": round(precio_ars / dolar, 2)}
 
-    base = resultado.get("costo_lista") or resultado["costo"]
+    base = resultado.get("costo_lista") or costo_resultado
     if es_usd:
         lista_usd = base
         lista_ars = round(lista_usd * dolar)
@@ -312,7 +333,8 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
 
 
 def costos_carriers(origen: dict, destino: dict, paquete: dict,
-                    paquetes: list = None) -> list[dict]:
+                    paquetes: list = None,
+                    couriers_habilitados: set[str] | None = None) -> list[dict]:
     """
     ⚠️ CAPA INTERNA: devuelve LO QUE CADA COURIER NOS COBRA A NOSOTROS.
     NUNCA mandar esto tal cual a un cliente — de acá sale nuestro margen.
@@ -323,7 +345,7 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
       cotizar_carriers()         → web pública: costo + margen de vidriera
       cotizar_carriers_cliente() → portal: costo + el monto fijo de ESE cliente
                                    (Prete Rosso $11.000, Melcior $14.000,
-                                    WAIMAO $100.000)
+                                    WAIMAO $95.000)
 
     Antes había una sola función con el precio de la web cableado adentro.
     Enchufarla al portal le habría cobrado a WAIMAO el precio de vidriera en
@@ -333,6 +355,10 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
     además {costo, moneda, dias_estimados}.
     """
     salida: list[dict] = []
+    habilitados = (
+        {str(c).strip().lower() for c in couriers_habilitados}
+        if couriers_habilitados is not None else None
+    )
 
     for c in CARRIERS:
         base = {
@@ -341,6 +367,12 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
             "logo": c["logo"],
             "servicio": c["servicio"],
         }
+
+        # El permiso se controla ANTES de construir el cliente o tocar la API.
+        # Ocultarlo sólo en HTML permitiría saltarlo con un POST manual.
+        if habilitados is not None and c["id"] not in habilitados:
+            salida.append({**base, "estado": "no_habilitado"})
+            continue
 
         if not carrier_activo(c):
             salida.append({**base, "estado": "proximamente"})
@@ -374,15 +406,46 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
             salida.append({**base, "estado": "sin_tarifa", "error": resultado.get("error")})
             continue
 
+        moneda = str(resultado.get("moneda") or "USD").strip().upper()
+        if moneda not in {"USD", "ARS"}:
+            print(f"[carriers] {c['id']} devolvió moneda no soportada {moneda}; "
+                  "se descarta la tarifa")
+            salida.append({
+                **base, "estado": "sin_tarifa",
+                "error": "El courier devolvió una moneda que TAURO todavía no convierte.",
+            })
+            continue
+
+        try:
+            costo = float(resultado.get("costo"))
+        except (TypeError, ValueError):
+            costo = 0.0
+        if not math.isfinite(costo) or costo <= 0:
+            print(f"[carriers] {c['id']} devolvió un costo inválido; se descarta la tarifa")
+            salida.append({
+                **base, "estado": "sin_tarifa",
+                "error": "El courier devolvió un importe inválido.",
+            })
+            continue
+        costo_lista = resultado.get("costo_lista")
+        try:
+            costo_lista = float(costo_lista) if costo_lista is not None else None
+        except (TypeError, ValueError):
+            costo_lista = None
+        if costo_lista is not None and (
+            not math.isfinite(costo_lista) or costo_lista <= 0
+        ):
+            costo_lista = None
+
         # "INTERNATIONAL_PRIORITY" → "International Priority" (prolijo para la web)
         salida.append({
             **base,
             "estado": "cotizado",
             "servicio": (resultado.get("servicio") or c["servicio"]).replace("_", " ").title(),
             "dias_estimados": str(resultado.get("dias_estimados", "3-5")),
-            "costo": resultado["costo"],
-            "moneda": resultado.get("moneda", "USD"),
-            "costo_lista": resultado.get("costo_lista"),
+            "costo": costo,
+            "moneda": moneda,
+            "costo_lista": costo_lista,
         })
 
     return salida
@@ -470,12 +533,14 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
 
 def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
                              dolar: float, pricing_cliente: dict,
-                             paquetes: list = None) -> list[dict]:
+                             paquetes: list = None,
+                             pricing_por_courier: dict[str, dict] | None = None,
+                             couriers_habilitados: set[str] | None = None) -> list[dict]:
     """
     PRECIO DEL PORTAL: los 3 couriers con la regla de ESE cliente.
 
     `pricing_cliente` es lo que devuelve pricing.get_pricing_config(cliente):
-    {"tipo": "FIJO_ARS", "valor": 100000.0} para WAIMAO, por ejemplo.
+    {"tipo": "FIJO_ARS", "valor": 95000.0} para WAIMAO, por ejemplo.
 
     Devuelve SÓLO precios finales. Ninguna clave con el costo ni el margen:
     el cliente ve lo que le cobramos y nada más (regla de Leandro, 01/08/2026).
@@ -485,20 +550,33 @@ def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
 
     salida: list[dict] = []
 
-    for crudo in costos_carriers(origen, destino, paquete, paquetes):
+    for crudo in costos_carriers(
+        origen, destino, paquete, paquetes,
+        couriers_habilitados=couriers_habilitados,
+    ):
         base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
 
         if crudo["estado"] != "cotizado":
             salida.append({**base, "estado": crudo["estado"], "error": crudo.get("error")})
             continue
 
-        es_usd = crudo["moneda"] == "USD"
+        moneda = str(crudo.get("moneda") or "USD").strip().upper()
+        if moneda not in {"USD", "ARS"}:
+            salida.append({**base, "estado": "sin_tarifa",
+                           "error": "Moneda del courier no soportada."})
+            continue
+
+        es_usd = moneda == "USD"
         costo_ars = round(crudo["costo"] * dolar) if es_usd else round(crudo["costo"])
         costo_usd = crudo["costo"] if es_usd else round(crudo["costo"] / dolar, 2)
 
+        pricing_efectivo = (
+            (pricing_por_courier or {}).get(crudo["id"])
+            or pricing_cliente
+        )
         precio = aplicar_pricing(
             costo_usd=costo_usd, costo_ars=costo_ars,
-            dolar=dolar, pricing=pricing_cliente,
+            dolar=dolar, pricing=pricing_efectivo,
         )
 
         # Las claves se eligen a mano: aplicar_pricing devuelve además

@@ -26,6 +26,15 @@ def _cliente(cliente_id: str) -> str:
     return (cliente_id or "").strip().upper()
 
 
+def _pais(pais: str) -> str:
+    from servicios.paises import existe
+
+    iso = (pais or "AR").strip().upper()
+    if len(iso) != 2 or not existe(iso):
+        raise ValueError("País inválido.")
+    return iso
+
+
 def _normalizar_row(row: dict) -> dict:
     data = dict(row)
     data["label"] = data.get("alias") or data.get("nombre") or f"Dirección #{data.get('id')}"
@@ -91,20 +100,29 @@ def listar_direcciones(cliente_id: str, tipo: Optional[str] = None) -> list[dict
     return [_normalizar_row(r) for r in rows]
 
 
-def obtener_direccion(cliente_id: str, direccion_id: int) -> Optional[dict]:
+def obtener_direccion(
+    cliente_id: str,
+    direccion_id: int,
+    tipo: Optional[str] = None,
+) -> Optional[dict]:
     cliente_id = _cliente(cliente_id)
     if not direccion_id:
         return None
+    tipo_normalizado = _tipo(tipo) if tipo else None
+    where_tipo = " AND tipo = %s" if tipo_normalizado else ""
+    params = [cliente_id, direccion_id]
+    if tipo_normalizado:
+        params.append(tipo_normalizado)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT *
                 FROM direcciones
-                WHERE cliente_id = %s AND id = %s
+                WHERE cliente_id = %s AND id = %s{where_tipo}
                 LIMIT 1
                 """,
-                (cliente_id, direccion_id),
+                tuple(params),
             )
             row = cur.fetchone()
     return _normalizar_row(row) if row else None
@@ -141,7 +159,7 @@ def crear_direccion(
 ) -> dict:
     cliente_id = _cliente(cliente_id)
     tipo = _tipo(tipo)
-    pais = (pais or "AR").strip().upper()
+    pais = _pais(pais)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -201,16 +219,40 @@ def actualizar_direccion(
     pais: str = "AR",
     predeterminada: bool = False,
     notas: str = "",
+    tipo_actual: Optional[str] = None,
 ) -> Optional[dict]:
     """Actualiza una dirección del cliente. El WHERE por cliente_id garantiza
     que nadie edite direcciones ajenas. Devuelve la fila o None si no existe."""
     cliente_id = _cliente(cliente_id)
     tipo = _tipo(tipo)
-    pais = (pais or "AR").strip().upper()
+    tipo_actual = _tipo(tipo_actual) if tipo_actual else None
+    pais = _pais(pais)
+    where_tipo_actual = " AND tipo = %s" if tipo_actual else ""
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if predeterminada:
+            cur.execute(
+                f"""
+                UPDATE direcciones
+                SET tipo=%s, alias=%s, nombre=%s, documento=%s, email=%s,
+                    telefono=%s, direccion=%s, ciudad=%s, estado=%s, cp=%s,
+                    pais=%s, predeterminada=%s, notas=%s, updated_at=NOW()
+                WHERE id = %s AND cliente_id = %s{where_tipo_actual}
+                RETURNING *
+                """,
+                tuple([
+                    tipo, _clean(alias), nombre.strip(), _clean(documento),
+                    _clean(email), _clean(telefono), direccion.strip(),
+                    ciudad.strip(), _clean(estado), cp.strip(), pais,
+                    bool(predeterminada), _clean(notas),
+                    direccion_id, cliente_id,
+                ] + ([tipo_actual] if tipo_actual else [])),
+            )
+            row = cur.fetchone()
+            # Primero se comprueba/actualiza el target. Una edición ajena o
+            # inexistente no puede desmarcar la dirección predeterminada del
+            # cliente autenticado como efecto colateral.
+            if row and predeterminada:
                 cur.execute(
                     """
                     UPDATE direcciones
@@ -219,35 +261,26 @@ def actualizar_direccion(
                     """,
                     (cliente_id, tipo, direccion_id),
                 )
-            cur.execute(
-                """
-                UPDATE direcciones
-                SET tipo=%s, alias=%s, nombre=%s, documento=%s, email=%s,
-                    telefono=%s, direccion=%s, ciudad=%s, estado=%s, cp=%s,
-                    pais=%s, predeterminada=%s, notas=%s, updated_at=NOW()
-                WHERE id = %s AND cliente_id = %s
-                RETURNING *
-                """,
-                (
-                    tipo, _clean(alias), nombre.strip(), _clean(documento),
-                    _clean(email), _clean(telefono), direccion.strip(),
-                    ciudad.strip(), _clean(estado), cp.strip(), pais,
-                    bool(predeterminada), _clean(notas),
-                    direccion_id, cliente_id,
-                ),
-            )
-            row = cur.fetchone()
     return _normalizar_row(row) if row else None
 
 
-def eliminar_direccion(cliente_id: str, direccion_id: int) -> bool:
+def eliminar_direccion(
+    cliente_id: str,
+    direccion_id: int,
+    tipo: Optional[str] = None,
+) -> bool:
     """Borra una dirección del cliente (solo las propias). True si borró algo."""
     cliente_id = _cliente(cliente_id)
+    tipo_normalizado = _tipo(tipo) if tipo else None
+    where_tipo = " AND tipo = %s" if tipo_normalizado else ""
+    params = [direccion_id, cliente_id]
+    if tipo_normalizado:
+        params.append(tipo_normalizado)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM direcciones WHERE id = %s AND cliente_id = %s",
-                (direccion_id, cliente_id),
+                f"DELETE FROM direcciones WHERE id = %s AND cliente_id = %s{where_tipo}",
+                tuple(params),
             )
             return cur.rowcount > 0
 

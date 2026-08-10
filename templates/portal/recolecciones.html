@@ -44,14 +44,17 @@
                         <br><small style="color:var(--fg-3);">{{ (r.courier or 'FEDEX')|upper }}</small>
                     </td>
                     <td class="mono">{{ r.ready_time }} a {{ r.close_time }}</td>
-                    <td class="mono">{{ r.bultos }} × {{ '%g'|format(r.peso_kg) }} kg</td>
+                    <td class="mono">{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ '%g'|format(r.peso_kg) }} kg total</td>
                     <td style="font-size:13px;">{{ r.direccion or '—' }}
                         {% if r.confirmation_code %}
                         <br><small class="mono" style="color:var(--fg-3);">cód. {{ r.confirmation_code }}</small>
                         {% endif %}
                     </td>
                     <td>
-                        {% if r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
+                        {% if r.estado == 'AGENDANDO' %}<span class="badge warn">Confirmando con el courier</span>
+                        {% elif r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
+                        {% elif r.estado == 'CANCELANDO' %}<span class="badge warn">Cancelando con el courier</span>
+                        {% elif r.estado == 'VERIFICAR_COURIER' %}<span class="badge warn">Verificando con el courier</span>
                         {% elif r.estado == 'CANCELADA' %}<span class="badge">Cancelada</span>
                         {% else %}<span class="badge">{{ r.estado|title }}</span>{% endif %}
                     </td>
@@ -79,24 +82,32 @@
         </div>
     </div>
 
-    {% if not remitente or not remitente.direccion %}
+    {% if not puede_recolectar %}
+        <div class="msg warn">
+            La programación de recolecciones todavía no está habilitada para tu cuenta.
+            Escribinos y la activamos cuando coordinemos el courier y la dirección de retiro.
+        </div>
+    {% elif not remitente or not remitente.direccion %}
         <div class="msg warn">Primero cargá tu dirección de retiro en la
         <a href="/portal/direcciones">libreta</a> — es donde el chofer tiene que ir.</div>
     {% else %}
     <div style="background:rgba(167,139,250,.08);border-left:3px solid var(--brand,#a78bfa);
                 padding:11px 14px;border-radius:0 8px 8px 0;margin-bottom:16px;font-size:13px;">
-        <strong>Retiran en:</strong> {{ remitente.direccion }}{% if remitente.ciudad %}, {{ remitente.ciudad }}{% endif %}
-        <br><small style="color:var(--fg-3);">Es tu dirección de remitente. Se cambia desde la libreta.</small>
+        <strong>Retiran en:</strong> {{ remitente.direccion }}{% if remitente.ciudad %}, {{ remitente.ciudad }}{% endif %}{% if remitente.pais %} · {{ remitente.pais }}{% endif %}
+        <br><small style="color:var(--fg-3);">
+            {% if envio_pre %}Es el origen guardado en esta guía; no se reemplaza por la dirección general de tu cuenta.{% else %}Es tu dirección de remitente. Se cambia desde la libreta.{% endif %}
+        </small>
     </div>
 
     <form method="POST" action="/portal/recolecciones/nueva">
         {% if envio_pre %}
+        <input type="hidden" name="solicitud_id" value="{{ envio_pre.solicitud_id }}">
         {# Llegó desde "Mis envíos": el retiro es DE ese envío, así que
            courier, bultos y peso vienen puestos (editables igual). #}
         <div class="msg ok" style="margin-bottom:14px;">
-            Coordinando el retiro del envío <b>#{{ envio_pre.id }}</b>
+            Coordinando el retiro del envío <b>#{{ envio_pre.solicitud_id }}</b>
             ({{ envio_pre.courier }} · guía {{ envio_pre.tracking }}).
-            Ya te cargamos el courier y los bultos — revisá la fecha y listo.
+            Ya te cargamos el origen, el courier y las cajas exactas — revisá la fecha y listo.
         </div>
         {% endif %}
         {# El courier que va a pasar a buscar. Antes no se elegía y TODA
@@ -104,9 +115,14 @@
            equivocado tocaba el timbre. #}
         <div class="form-group">
             <label for="rec-courier">¿Quién pasa a buscar? *</label>
-            <select name="courier" id="rec-courier" required>
-                <option value="FEDEX" {% if envio_pre and envio_pre.courier == 'FEDEX' %}selected{% endif %}>FedEx</option>
-                <option value="DHL" {% if envio_pre and envio_pre.courier == 'DHL' %}selected{% endif %}>DHL Express</option>
+            <select name="courier" id="rec-courier" required {% if envio_pre %}disabled{% endif %}>
+                {% if envio_pre %}
+                <option value="{{ envio_pre.courier }}" selected>{{ envio_pre.courier }}</option>
+                {% else %}
+                {% for c in couriers_recoleccion %}
+                <option value="{{ c.id }}" {% if courier_default == c.id %}selected{% endif %}>{{ c.nombre }}</option>
+                {% endfor %}
+                {% endif %}
             </select>
             <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
                 Elegí el mismo courier de las guías que van a retirar.
@@ -135,11 +151,11 @@
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="rec-bultos">Cantidad de bultos</label>
-                <input type="number" name="bultos" id="rec-bultos" min="1" step="1" value="{{ envio_pre.bultos if envio_pre else 1 }}">
+                <input type="number" name="bultos" id="rec-bultos" min="1" max="20" step="1" value="{{ envio_pre.bultos if envio_pre else 1 }}" {% if envio_pre %}readonly{% endif %}>
             </div>
             <div class="form-group">
                 <label for="rec-peso">Peso total aproximado (kg)</label>
-                <input type="text" name="peso_kg" id="rec-peso" inputmode="decimal" value="{{ '%g'|format(envio_pre.peso_kg) if envio_pre else 1 }}">
+                <input type="number" name="peso_kg" id="rec-peso" min="0.001" max="1400" step="0.001" inputmode="decimal" value="{{ '%g'|format(envio_pre.peso_kg) if envio_pre else 1 }}" {% if envio_pre %}readonly{% endif %}>
             </div>
         </div>
 
