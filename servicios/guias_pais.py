@@ -391,13 +391,13 @@ Peso volumétrico = largo × ancho × alto (cm) ÷ 5000
 <div style="background:#131020;border:1px solid #241f38;border-radius:12px;padding:22px;margin:22px 0;">
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
     <label style="font-size:12px;color:#6f6a85;">LARGO (cm)
-      <input id="cv-l" type="number" min="0" step="0.5" placeholder="60" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+      <input id="cv-l" type="text" inputmode="decimal" data-numero="decimal" placeholder="60" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
     <label style="font-size:12px;color:#6f6a85;">ANCHO (cm)
-      <input id="cv-a" type="number" min="0" step="0.5" placeholder="40" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+      <input id="cv-a" type="text" inputmode="decimal" data-numero="decimal" placeholder="40" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
     <label style="font-size:12px;color:#6f6a85;">ALTO (cm)
-      <input id="cv-h" type="number" min="0" step="0.5" placeholder="40" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+      <input id="cv-h" type="text" inputmode="decimal" data-numero="decimal" placeholder="40" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
     <label style="font-size:12px;color:#6f6a85;">PESO REAL (kg)
-      <input id="cv-p" type="number" min="0" step="0.1" placeholder="10" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
+      <input id="cv-p" type="text" inputmode="decimal" data-numero="decimal" placeholder="10" style="width:100%;margin-top:5px;padding:10px;background:#0c0a14;border:1px solid #241f38;border-radius:8px;color:#fff;font-size:15px;box-sizing:border-box;"></label>
   </div>
   <div id="cv-out" style="margin-top:18px;font-size:15px;color:#6f6a85;">
     Completá las medidas y te mostramos el peso que te van a facturar.

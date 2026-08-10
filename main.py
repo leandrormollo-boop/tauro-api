@@ -30,6 +30,7 @@ from servicios.meta_ads import (
     meta_pixel_habilitado,
     obtener_meta_pixel_id,
 )
+from servicios.numeros_humanos import parse_configuracion_numerica
 
 load_dotenv()
 
@@ -650,7 +651,14 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
 
     from servicios.cotizador import dolar_ars
     dolar = dolar_ars()          # tabla `config`, la misma que usa el portal
-    markup_pct = float(os.getenv("WEB_MARKUP_PCT", "20"))
+    try:
+        markup_pct = float(
+            parse_configuracion_numerica(
+                "WEB_MARKUP_PCT", os.getenv("WEB_MARKUP_PCT", "20")
+            )
+        )
+    except (TypeError, ValueError):
+        markup_pct = 20.0
 
     # Compara FedEx, UPS y DHL. Cada carrier cotiza si tiene credenciales;
     # si no, sale con su logo en "próximamente". Ver servicios/carriers.py.

@@ -19,10 +19,12 @@
 <div class="card" style="max-width:480px;">
   <form method="POST" action="/admin/config">
     {% for item in config_items %}
+    {% set es_importe = item.parametro in ['COTIZACION_DOLAR_ARS', 'MARGEN_MINIMO_ALERTA_ARS', 'MARGEN_MINIMO_ARS'] or (item.parametro.startswith('WEB_MARGEN_FIJO_') and item.parametro.endswith('_ARS')) or (item.parametro.startswith('WEB_ADICIONAL_') and item.parametro.endswith('_ARS')) %}
+    {% set es_decimal = item.parametro.startswith('WEB_MARKUP_PCT') or item.parametro in ['WEB_DESC_FEDEX_PCT', 'WEB_MARGEN_MINIMO_PCT'] %}
     <div class="form-group">
       <label>{{ item.parametro }}</label>
       <input type="text" name="{{ item.parametro }}" value="{{ item.valor }}"
-             placeholder="{{ item.valor }}">
+             placeholder="{{ item.valor }}"{% if es_importe or es_decimal %} inputmode="decimal" data-numero="{{ 'monto' if es_importe else 'decimal' }}"{% endif %}>
     </div>
     {% endfor %}
 

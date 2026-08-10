@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import os
-import math
 import secrets
 import subprocess
 import sys
@@ -42,7 +41,13 @@ def _courier_valido(valor: str) -> str:
     v = (valor or "").strip().lower()
     return v if v in ("fedex", "dhl", "ups") else ""
 from servicios.pricing import (
-    PRICING_MODES, describir_pricing, parse_monto_ars, parse_pricing_value,
+    PRICING_MODES, describir_pricing, parse_pricing_value,
+)
+from servicios.numeros_humanos import (
+    decimal_a_texto,
+    parse_configuracion_numerica,
+    parse_float_formulario as _numero_form,
+    politica_configuracion_numerica,
 )
 from servicios.configuracion_couriers_cliente import (
     guardar_matriz_con_cursor,
@@ -933,7 +938,7 @@ def admin_cliente_nuevo(
     ciudad: str = Form(""),
     pais: str = Form("AR"),
     telefono: str = Form(""),
-    markup_pct: float = Form(25.0),
+    markup_pct: str = Form("25"),
     markup_tipo: str = Form("PCT"),
     markup_valor: str = Form(""),
     markup_nac_tipo: str = Form(""),
@@ -950,13 +955,18 @@ def admin_cliente_nuevo(
 
     cliente_id = cliente_id.strip().upper()
     try:
-        pricing = parse_pricing_value(markup_valor, markup_tipo, fallback_pct=markup_pct)
-        markup_pct_db = pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct
+        markup_pct_num = _numero_form(markup_pct, "Porcentaje general", minimo=0)
+        pricing = parse_pricing_value(
+            markup_valor, markup_tipo, fallback_pct=markup_pct_num
+        )
+        markup_pct_db = (
+            pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct_num
+        )
         # Margen nacional aparte (opcional): vacío = usa la regla internacional.
         nac_tipo, nac_valor = None, None
         if markup_nac_tipo.strip():
             nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
-                                      fallback_pct=markup_pct)
+                                      fallback_pct=markup_pct_num)
             nac_tipo, nac_valor = nac["tipo"], nac["valor"]
         # Hashear password si vino una
         from servicios.auth import hash_password
@@ -1230,9 +1240,13 @@ def admin_cliente_acceso_precios_guardar(
             raise ValueError(
                 "El courier preseleccionado debe estar habilitado para cotizar."
             )
-        tope_db = parse_monto_ars(tope_deuda_ars)
-        if tope_db is not None and (not math.isfinite(tope_db) or tope_db < 0):
-            raise ValueError("El tope de deuda debe ser un importe válido no negativo.")
+        tope_db = _numero_form(
+            tope_deuda_ars,
+            "Tope de deuda",
+            importe=True,
+            requerido=False,
+            minimo=0,
+        )
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -1343,7 +1357,7 @@ def admin_cliente_editar(
     ciudad: str = Form(""),
     pais: str = Form("AR"),
     telefono: str = Form(""),
-    markup_pct: float = Form(25.0),
+    markup_pct: str = Form("25"),
     markup_tipo: str = Form("PCT"),
     markup_valor: str = Form(""),
     markup_nac_tipo: str = Form(""),
@@ -1359,15 +1373,20 @@ def admin_cliente_editar(
         return _redirect_login()
 
     try:
-        pricing = parse_pricing_value(markup_valor, markup_tipo, fallback_pct=markup_pct)
-        markup_pct_db = pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct
+        markup_pct_num = _numero_form(markup_pct, "Porcentaje general", minimo=0)
+        pricing = parse_pricing_value(
+            markup_valor, markup_tipo, fallback_pct=markup_pct_num
+        )
+        markup_pct_db = (
+            pricing["valor"] if pricing["tipo"] == "PCT" else markup_pct_num
+        )
         # Margen nacional (opcional). Elegir "Igual que internacional" en el
         # form LIMPIA la regla nacional — sin esto no habría forma de volver
         # atrás una vez cargada.
         nac_tipo, nac_valor = None, None
         if markup_nac_tipo.strip():
             nac = parse_pricing_value(markup_nac_valor, markup_nac_tipo,
-                                      fallback_pct=markup_pct)
+                                      fallback_pct=markup_pct_num)
             nac_tipo, nac_valor = nac["tipo"], nac["valor"]
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -1453,7 +1472,7 @@ async def admin_envio_nuevo(
     cliente_id: str = Form(...),
     fecha: str = Form(...),
     nro_fc: str = Form(""),
-    monto_ars: float = Form(...),
+    monto_ars: str = Form(...),
     descripcion: str = Form(""),
     tracking: str = Form(""),
     estado: str = Form("ACTIVO"),
@@ -1464,12 +1483,15 @@ async def admin_envio_nuevo(
         return _redirect_login()
 
     try:
+        monto_num = _numero_form(
+            monto_ars, "Monto ARS", importe=True, minimo=0.01
+        )
         from servicios.cuenta_corriente import leer_comprobante_con_tope
         contenido_fc = await leer_comprobante_con_tope(factura_pdf)
         registrar_envio(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
-            monto_ars=monto_ars,
+            monto_ars=monto_num,
             nro_fc=nro_fc,
             estado=estado,
             descripcion=descripcion,
@@ -1775,21 +1797,30 @@ async def admin_pedido_editar(
         CAMPOS_EDITABLES_PRE_EMISION, editar_solicitud_pre_emision,
     )
 
-    form = await request.form()
-    campos = {}
-    for k in CAMPOS_EDITABLES_PRE_EMISION:
-        if k not in form:
-            continue
-        v = str(form.get(k) or "").strip()
-        if k in ("cantidad",):
-            campos[k] = max(int(v or 1), 1)
-        elif k in ("peso_kg", "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_usd"):
-            campos[k] = float((v or "0").replace(",", "."))
-        else:
-            campos[k] = v
     try:
+        form = await request.form()
+        campos = {}
+        for k in CAMPOS_EDITABLES_PRE_EMISION:
+            if k not in form:
+                continue
+            v = str(form.get(k) or "").strip()
+            if k in ("cantidad",):
+                cantidad = int(v or 1)
+                if cantidad < 1:
+                    raise ValueError("La cantidad de cajas debe ser mayor a cero.")
+                campos[k] = cantidad
+            elif k in ("peso_kg", "largo_cm", "ancho_cm", "alto_cm"):
+                campos[k] = _numero_form(
+                    v, k.replace("_", " ").title(), minimo=0.01
+                )
+            elif k == "valor_declarado_usd":
+                campos[k] = _numero_form(
+                    v, "Valor declarado", importe=True, minimo=0
+                )
+            else:
+                campos[k] = v
         editar_solicitud_pre_emision(solicitud_id, campos)
-    except ValueError as e:
+    except (TypeError, ValueError) as e:
         from urllib.parse import quote
         return RedirectResponse(
             url=f"/admin/pedidos/{solicitud_id}/editar?error={quote(str(e))}",
@@ -1971,7 +2002,7 @@ async def admin_pago_nuevo(
     request: Request,
     cliente_id: str = Form(...),
     fecha: str = Form(...),
-    monto_ars: float = Form(...),
+    monto_ars: str = Form(...),
     metodo: str = Form("transferencia"),
     referencia: str = Form(""),
     nota: str = Form(""),
@@ -1982,12 +2013,15 @@ async def admin_pago_nuevo(
         return _redirect_login()
 
     try:
+        monto_num = _numero_form(
+            monto_ars, "Monto ARS", importe=True, minimo=0.01
+        )
         from servicios.cuenta_corriente import leer_comprobante_con_tope
         contenido = await leer_comprobante_con_tope(comprobante)
         registrar_pago(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
-            monto_ars=monto_ars,
+            monto_ars=monto_num,
             metodo=metodo,
             referencia=referencia,
             nota=nota,
@@ -2124,6 +2158,10 @@ async def admin_envio_realizado_post(
     from servicios.solicitudes_guia import cargar_envio_externo
 
     try:
+        peso_num = _numero_form(peso_kg, "Peso", minimo=0.01)
+        precio_num = _numero_form(
+            precio_ars, "Precio al cliente", importe=True, minimo=0.01
+        )
         pdf = await leer_comprobante_con_tope(guia_pdf)
         resultado = cargar_envio_externo(
             cliente_id=cliente_id,
@@ -2133,9 +2171,9 @@ async def admin_envio_realizado_post(
             dest_direccion=dest_direccion,
             producto=producto,
             cantidad=cantidad,
-            peso_kg=float((peso_kg or "1").replace(",", ".")),
+            peso_kg=peso_num,
             tracking=tracking,
-            precio_tauro_ars=parse_monto_ars(precio_ars) or 0,
+            precio_tauro_ars=precio_num,
             label_pdf=pdf or None,
             observaciones=observaciones,
         )
@@ -2366,6 +2404,37 @@ async def admin_config_save(
     nuevo_param = data.pop("_nuevo_parametro", "").strip()
     nuevo_valor = data.pop("_nuevo_valor", "").strip()
 
+    try:
+        normalizados = {}
+        for param, valor in data.items():
+            crudo = str(valor).strip()
+            if politica_configuracion_numerica(param) and crudo:
+                crudo = decimal_a_texto(parse_configuracion_numerica(param, crudo))
+            normalizados[param] = crudo
+        data = normalizados
+
+        nuevo_param = nuevo_param.upper()
+        if nuevo_param and nuevo_valor and politica_configuracion_numerica(nuevo_param):
+            nuevo_valor = decimal_a_texto(
+                parse_configuracion_numerica(nuevo_param, nuevo_valor)
+            )
+    except ValueError as exc:
+        intentos = [
+            {"parametro": param, "valor": str(valor)} for param, valor in data.items()
+        ]
+        if nuevo_param:
+            intentos.append({"parametro": nuevo_param.upper(), "valor": nuevo_valor})
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/config.html",
+            context={
+                "seccion": "config",
+                "config_items": intentos,
+                "flash_error": str(exc),
+            },
+            status_code=422,
+        )
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             for param, valor in data.items():
@@ -2376,7 +2445,7 @@ async def admin_config_save(
             if nuevo_param and nuevo_valor:
                 cur.execute(
                     "INSERT INTO config (parametro, valor) VALUES (%s, %s) ON CONFLICT (parametro) DO UPDATE SET valor=EXCLUDED.valor",
-                    (nuevo_param.upper(), nuevo_valor),
+                    (nuevo_param, nuevo_valor),
                 )
 
     return RedirectResponse(url="/admin/config?ok=1", status_code=303)

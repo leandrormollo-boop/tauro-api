@@ -6,6 +6,57 @@ const { useState: useStateQ, useRef: useRefQ, useEffect: useEffectQ } = React;
 // (connect-src 'self') lo bloquearía en silencio. "" = mismo dominio.
 const API_URL = window.TAURO_API_URL || "";
 
+// Mismo contrato que `servicios/numeros_humanos.py`: la coma y el punto
+// pueden ser decimales; para importes, una agrupación de tres cifras también
+// puede ser miles. El servidor vuelve a validar: esto sólo evita que el
+// navegador transforme `5,5` en `5` antes de enviar.
+function parseHumanNumber(value, { money = false } = {}) {
+  let text = String(value ?? "").trim();
+  if (!text || !/^[+-]?[0-9.,]+$/.test(text)) return NaN;
+  let sign = "";
+  if (text[0] === "+" || text[0] === "-") {
+    sign = text[0];
+    text = text.slice(1);
+  }
+  const validGroups = (groups) => (
+    groups.length >= 2 && /^[0-9]{1,3}$/.test(groups[0]) &&
+    groups.slice(1).every((group) => /^[0-9]{3}$/.test(group))
+  );
+  const dots = (text.match(/\./g) || []).length;
+  const commas = (text.match(/,/g) || []).length;
+  let canonical;
+
+  if (dots && commas) {
+    const decimal = text.lastIndexOf(".") > text.lastIndexOf(",") ? "." : ",";
+    const thousands = decimal === "." ? "," : ".";
+    if (text.split(decimal).length !== 2) return NaN;
+    const [integer, fraction] = text.split(decimal);
+    const groups = integer.split(thousands);
+    if (!validGroups(groups) || !/^[0-9]+$/.test(fraction)) return NaN;
+    canonical = `${groups.join("")}.${fraction}`;
+  } else if (dots || commas) {
+    const separator = dots ? "." : ",";
+    const groups = text.split(separator);
+    if (groups.length > 2) {
+      if (!validGroups(groups)) return NaN;
+      canonical = groups.join("");
+    } else {
+      const [integer, fraction] = groups;
+      if (!/^[0-9]+$/.test(integer) || !/^[0-9]+$/.test(fraction)) return NaN;
+      if (fraction.length === 3 && Number(integer) !== 0) {
+        if (!money || integer.length > 3) return NaN;
+        canonical = integer + fraction;
+      } else {
+        canonical = `${integer}.${fraction}`;
+      }
+    }
+  } else {
+    canonical = text;
+  }
+  const parsed = Number(sign + canonical);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 // Fallback mientras carga /paises: nunca un desplegable vacío.
 const PAISES_FALLBACK = [
   { value: "AR", label: "Argentina" },
@@ -50,17 +101,28 @@ function QuoteWidget({ compact = false }) {
     setStep("calculating");
     setError(null);
     try {
+      const parsed = {
+        peso: parseHumanNumber(peso),
+        largo: parseHumanNumber(largo),
+        ancho: parseHumanNumber(ancho),
+        alto: parseHumanNumber(alto),
+        valor: parseHumanNumber(valor, { money: true }),
+      };
+      if (Object.values(parsed).some((n) => !Number.isFinite(n) || n <= 0)) {
+        throw new Error("Revisá peso, medidas y valor. Podés usar coma o punto.");
+      }
+      if (parsed.peso > 70) throw new Error("El peso máximo por caja es 70 kg.");
       const resp = await fetch(`${API_URL}/cotizar-web`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           origen_pais: origen,
           destino_pais: destino,
-          peso_kg: parseFloat(peso) || 1,
-          largo_cm: parseFloat(largo) || 30,
-          ancho_cm: parseFloat(ancho) || 20,
-          alto_cm: parseFloat(alto) || 10,
-          valor_declarado_usd: parseFloat(valor) || 100,
+          peso_kg: parsed.peso,
+          largo_cm: parsed.largo,
+          ancho_cm: parsed.ancho,
+          alto_cm: parsed.alto,
+          valor_declarado_usd: parsed.valor,
         }),
       });
       const data = await resp.json();
@@ -136,17 +198,17 @@ function QuoteWidget({ compact = false }) {
           </div>
 
           <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
-            <Field label="Peso (kg)" value={peso} onChange={setPeso} type="number" />
-            <Field label="Valor declarado (USD)" value={valor} onChange={setValor} type="number" />
+            <Field label="Peso (kg)" value={peso} onChange={setPeso} inputMode="decimal" />
+            <Field label="Valor declarado (USD)" value={valor} onChange={setValor} inputMode="decimal" />
           </div>
 
           <div style={{ marginBottom: 6, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Dimensiones (cm)
           </div>
           <div className="tweb-campos-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginBottom: 20 }}>
-            <Field label="Largo" value={largo} onChange={setLargo} type="number" />
-            <Field label="Ancho" value={ancho} onChange={setAncho} type="number" />
-            <Field label="Alto" value={alto} onChange={setAlto} type="number" />
+            <Field label="Largo" value={largo} onChange={setLargo} inputMode="decimal" />
+            <Field label="Ancho" value={ancho} onChange={setAncho} inputMode="decimal" />
+            <Field label="Alto" value={alto} onChange={setAlto} inputMode="decimal" />
           </div>
 
           {error && (
@@ -223,7 +285,7 @@ function EmailCapture({ destino, peso, carriers }) {
         body: JSON.stringify({
           email: email.trim(),
           destino,
-          peso_kg: parseFloat(peso) || 0,
+          peso_kg: parseHumanNumber(peso) || 0,
           carriers: (carriers || []).filter(c => c.estado === "cotizado"),
         }),
       });
@@ -286,7 +348,7 @@ function EmailCapture({ destino, peso, carriers }) {
   );
 }
 
-function Field({ label, value, onChange, type = "text" }) {
+function Field({ label, value, onChange, type = "text", inputMode }) {
   return (
     <label style={{ display: "block" }}>
       <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
@@ -294,6 +356,7 @@ function Field({ label, value, onChange, type = "text" }) {
       </div>
       <input
         type={type}
+        inputMode={inputMode}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         style={{

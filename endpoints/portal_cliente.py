@@ -46,7 +46,7 @@ from servicios.solicitudes_guia import (
 )
 from servicios.carriers import courier_default_cliente
 from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
-from servicios.pricing import parse_monto_ars
+from servicios.numeros_humanos import parse_float_formulario as _numero_form
 from servicios.panel_cliente import embudo_envios, preparar_historial_envios
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
@@ -519,8 +519,9 @@ def recoleccion_nueva(
     from servicios.recolecciones import crear
 
     try:
+        peso = _numero_form(peso_kg, "Peso total", minimo=0.001, maximo=1400)
         r = crear(cliente, fecha, ready_time, close_time, bultos,
-                  float((peso_kg or "1").replace(",", ".")), instrucciones,
+                  peso, instrucciones,
                   courier=courier, solicitud_id=solicitud_id)
     except Exception as e:
         print(f"[portal] error agendando recolección de {cliente}: {e}")
@@ -588,9 +589,9 @@ async def informar_pago(
 
     form = await request.form()
     try:
-        monto = parse_monto_ars(str(form.get("monto") or "")) or 0
-        if monto <= 0:
-            raise ValueError("El monto tiene que ser mayor a cero.")
+        monto = _numero_form(
+            str(form.get("monto") or ""), "Monto", importe=True, minimo=0.01
+        )
 
         archivo = form.get("comprobante")
         contenido = await leer_comprobante_con_tope(archivo)
@@ -671,10 +672,10 @@ def cotizar_post(
     request: Request,
     origen_pais: str = Form(...),
     destino_pais: str = Form(...),
-    peso_kg: float = Form(...),
-    largo_cm: float = Form(...),
-    ancho_cm: float = Form(...),
-    alto_cm: float = Form(...),
+    peso_kg: str = Form(...),
+    largo_cm: str = Form(...),
+    ancho_cm: str = Form(...),
+    alto_cm: str = Form(...),
     cliente: str = Depends(cliente_actual),
 ):
     error = None
@@ -683,14 +684,18 @@ def cotizar_post(
     resumen = None
 
     try:
+        peso_num = _numero_form(peso_kg, "Peso", minimo=0.1, maximo=70)
+        largo_num = _numero_form(largo_cm, "Largo", minimo=1)
+        ancho_num = _numero_form(ancho_cm, "Ancho", minimo=1)
+        alto_num = _numero_form(alto_cm, "Alto", minimo=1)
         comparacion = cotizar_referencia_couriers(
             cliente=cliente,
             origen_pais=origen_pais,
             destino_pais=destino_pais,
-            peso_kg=peso_kg,
-            largo_cm=largo_cm,
-            ancho_cm=ancho_cm,
-            alto_cm=alto_cm,
+            peso_kg=peso_num,
+            largo_cm=largo_num,
+            ancho_cm=ancho_num,
+            alto_cm=alto_num,
         )
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
@@ -1155,8 +1160,8 @@ def envio_nuevo_post(
     request: Request,
     destino_pais: str = Form(...),
     # Multi-bulto: arrays paralelos, una entrada por fila de caja del form.
-    # cantidad como str: un valor basura no debe tirar un 422 pelado, se
-    # normaliza a 1 más abajo.
+    # cantidad como str: un valor basura no debe tirar un 422 pelado; se
+    # valida dentro del wizard y se vuelve a mostrar con un mensaje claro.
     bulto_producto: list[str] = Form([]),
     bulto_cantidad: list[str] = Form([]),
     # Unidades COMERCIALES declaradas en aduana, independientes de las
@@ -1234,6 +1239,8 @@ def envio_nuevo_post(
     # Normalizar filas de bultos: pares (producto, cantidad) sin filas vacías.
     # Fallback legacy: producto_alias + cantidad sueltos = una sola fila.
     filas = []
+    filas_form = []
+    errores_numericos = []
     n_filas = max(len(bulto_producto or []), len(bulto_peso or []),
                   len(bulto_desc_en or []), len(bulto_unidades_aduana or []))
     for i in range(n_filas):
@@ -1246,15 +1253,57 @@ def envio_nuevo_post(
         # tiene ninguna de las dos cosas, es un renglón vacío y se saltea.
         if not alias and not (_campo(bulto_peso) or _campo(bulto_desc_en)):
             continue
+        fila_form = {
+            "producto": alias,
+            "cantidad": _campo(bulto_cantidad) or "1",
+            "unidades_aduana": _campo(bulto_unidades_aduana) or _campo(bulto_cantidad) or "1",
+            "peso_kg": _campo(bulto_peso),
+            "largo_cm": _campo(bulto_largo),
+            "ancho_cm": _campo(bulto_ancho),
+            "alto_cm": _campo(bulto_alto),
+            "descripcion_en": _campo(bulto_desc_en),
+            "valor_unitario_usd": _campo(bulto_valor_usd),
+            "hs_code": _campo(bulto_hs),
+            "pais_origen": _campo(bulto_pais_fab),
+        }
+        cantidad_valida = True
         try:
             cant = int(_campo(bulto_cantidad) or 1)
         except (TypeError, ValueError):
+            cantidad_valida = False
+            errores_numericos.append(
+                f"Caja {i + 1}: la cantidad de cajas debe ser un número entero."
+            )
             cant = 1
-        cant = max(cant, 1)
+        if not 1 <= cant <= 20:
+            cantidad_valida = False
+            errores_numericos.append(
+                f"Caja {i + 1}: la cantidad de cajas debe estar entre 1 y 20."
+            )
+            cant = min(max(cant, 1), 20)
+        unidades_validas = True
         try:
             unidades_aduana = int(_campo(bulto_unidades_aduana) or cant)
         except (TypeError, ValueError):
+            unidades_validas = False
+            errores_numericos.append(
+                f"Caja {i + 1}: las unidades de aduana deben ser un número entero."
+            )
             unidades_aduana = cant
+        if not 1 <= unidades_aduana <= 9999:
+            unidades_validas = False
+            errores_numericos.append(
+                f"Caja {i + 1}: las unidades de aduana deben estar entre 1 y 9999."
+            )
+            unidades_aduana = min(max(unidades_aduana, 1), 9999)
+        # Los enteros válidos vuelven al contrato histórico como `int`; los
+        # valores inválidos quedan crudos para que el formulario pueda
+        # mostrar exactamente qué debe corregir el cliente.
+        if cantidad_valida:
+            fila_form["cantidad"] = cant
+        if unidades_validas:
+            fila_form["unidades_aduana"] = unidades_aduana
+        filas_form.append(fila_form)
         fila = {
             "producto": alias,
             "cantidad": cant,
@@ -1263,12 +1312,21 @@ def envio_nuevo_post(
         # Caja manual: peso y medidas de ESTE envío (con catálogo, lo pisan).
         for lista, clave in ((bulto_peso, "peso_kg"), (bulto_largo, "largo_cm"),
                              (bulto_ancho, "ancho_cm"), (bulto_alto, "alto_cm")):
-            v = _campo(lista).replace(",", ".")
+            v = _campo(lista)
             if v:
                 try:
-                    fila[clave] = float(v)
-                except ValueError:
-                    pass
+                    etiquetas = {
+                        "peso_kg": "el peso", "largo_cm": "el largo",
+                        "ancho_cm": "el ancho", "alto_cm": "el alto",
+                    }
+                    fila[clave] = _numero_form(
+                        v, f"Caja {i + 1}: {etiquetas[clave]}",
+                        minimo=0.01 if clave == "peso_kg" else 1,
+                        maximo=70 if clave == "peso_kg" else None,
+                    )
+                    fila_form[clave] = fila[clave]
+                except ValueError as exc:
+                    errores_numericos.append(str(exc))
         # Overrides de invoice: sólo viajan los completados; el resto sale
         # del catálogo, como siempre.
         if _campo(bulto_desc_en):
@@ -1277,14 +1335,18 @@ def envio_nuevo_post(
             fila["hs_code"] = _campo(bulto_hs)
         if _campo(bulto_pais_fab):
             fila["pais_origen"] = _campo(bulto_pais_fab).upper()[:2]
-        v = _campo(bulto_valor_usd).replace(",", ".")
+        v = _campo(bulto_valor_usd)
         if v:
             try:
-                valor = float(v)
+                valor = _numero_form(
+                    v, f"Caja {i + 1}: el valor declarado", importe=True,
+                    minimo=0.01,
+                )
                 if valor > 0:
                     fila["valor_unitario_usd"] = round(valor, 2)
-            except ValueError:
-                pass   # un valor ilegible cae al catálogo, no rompe el envío
+                    fila_form["valor_unitario_usd"] = fila["valor_unitario_usd"]
+            except ValueError as exc:
+                errores_numericos.append(str(exc))
         filas.append(fila)
     # Form viejo cacheado (pre multi-bulto): ahí "cantidad" significaba
     # unidades dentro de UNA caja — se respeta esa semántica para que el
@@ -1295,7 +1357,7 @@ def envio_nuevo_post(
         filas = [{"producto": producto_alias.strip(), "cantidad": max(int(cantidad or 1), 1)}]
 
     form = {
-        "bultos": filas,
+        "bultos": filas_form,
         "producto_alias": producto_alias,
         "destino_pais": destino_pais,
         "cantidad": cantidad,
@@ -1392,6 +1454,8 @@ def envio_nuevo_post(
             raise ValueError("Elegí un país de destino válido.")
 
         error_step = 3
+        if errores_numericos:
+            raise ValueError(errores_numericos[0])
         if not filas:
             raise ValueError("Agregá al menos una caja al envío.")
 
@@ -1576,7 +1640,13 @@ def envio_nuevo_post(
                     f"{'la caja' if len(sin_hs) == 1 else 'las cajas'} {cajas}."
                 )
 
-        precio_final = parse_monto_ars(precio_cliente_final_ars)
+        precio_final = _numero_form(
+            precio_cliente_final_ars,
+            "Precio final a tu cliente",
+            importe=True,
+            requerido=False,
+            minimo=0,
+        )
 
         if guardar_destinatario:
             crear_direccion(
@@ -1894,18 +1964,26 @@ def tienda_politica(
     if dominio.strip().lower() not in {t["dominio"] for t in listar_tiendas(cliente)}:
         return RedirectResponse(url="/portal/tienda?error=Esa+tienda+no+es+tuya.", status_code=303)
 
-    def _num(v: str) -> float:
-        try:
-            return float(str(v).replace(",", ".").strip() or 0)
-        except ValueError:
-            return 0.0
-
-    r = guardar_config(
-        dominio=dominio, cliente_id=cliente, politica=politica,
-        markup_pct=_num(markup_pct), precio_fijo_ars=_num(precio_fijo_ars),
-        mostrar_tax=bool(mostrar_tax), tax_pct_default=_num(tax_pct_default),
-        etiqueta=etiqueta,
-    )
+    try:
+        markup_num = _numero_form(
+            markup_pct, "Porcentaje de ganancia", minimo=0, maximo=300
+        ) or 0
+        precio_fijo_num = _numero_form(
+            precio_fijo_ars, "Precio fijo", importe=True, minimo=0
+        ) or 0
+        tax_num = _numero_form(
+            tax_pct_default, "Porcentaje de impuestos", minimo=0, maximo=100
+        ) or 0
+        r = guardar_config(
+            dominio=dominio, cliente_id=cliente, politica=politica,
+            markup_pct=markup_num, precio_fijo_ars=precio_fijo_num,
+            mostrar_tax=bool(mostrar_tax), tax_pct_default=tax_num,
+            etiqueta=etiqueta,
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/portal/tienda?error={quote(str(exc))}", status_code=303
+        )
     if not r.get("ok"):
         return RedirectResponse(url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo guardar.'))}", status_code=303)
     return RedirectResponse(url="/portal/tienda?ok=politica", status_code=303)
@@ -2180,20 +2258,31 @@ def catalogo_add(
     alias_interno: str = Form(...),
     nombre_invoice: str = Form(...),
     hs_code: str = Form(...),
-    largo_cm: float = Form(...),
-    ancho_cm: float = Form(...),
-    alto_cm: float = Form(...),
-    peso_kg: float = Form(...),
-    valor_usd_default: float = Form(...),
+    largo_cm: str = Form(...),
+    ancho_cm: str = Form(...),
+    alto_cm: str = Form(...),
+    peso_kg: str = Form(...),
+    valor_usd_default: str = Form(...),
     tax_estimado_usd: str = Form("0"),
     alias_original: str = Form(""),  # presente = editar en vez de crear
     cliente: str = Depends(cliente_actual),
 ):
     try:
+        largo_num = _numero_form(largo_cm, "Largo", minimo=0.01)
+        ancho_num = _numero_form(ancho_cm, "Ancho", minimo=0.01)
+        alto_num = _numero_form(alto_cm, "Alto", minimo=0.01)
+        peso_num = _numero_form(peso_kg, "Peso", minimo=0.01)
+        valor_num = _numero_form(
+            valor_usd_default, "Valor declarado", importe=True, minimo=0
+        )
+        tax_num = _numero_form(
+            tax_estimado_usd, "Impuestos estimados", importe=True,
+            requerido=False, minimo=0,
+        ) or 0
         nuevo = ProductoNuevo(
             alias_interno=alias_interno, nombre_invoice=nombre_invoice,
-            hs_code=hs_code, largo_cm=largo_cm, ancho_cm=ancho_cm,
-            alto_cm=alto_cm, peso_kg=peso_kg, valor_usd_default=valor_usd_default,
+            hs_code=hs_code, largo_cm=largo_num, ancho_cm=ancho_num,
+            alto_cm=alto_num, peso_kg=peso_num, valor_usd_default=valor_num,
         )
         if alias_original.strip():
             if not actualizar_producto_cliente(cliente, alias_original, nuevo):
@@ -2202,8 +2291,7 @@ def catalogo_add(
             agregar_producto(cliente, nuevo)
         # Campo opcional, guardado aparte para no tocar el alta del catálogo.
         try:
-            guardar_tax_producto(cliente, alias_interno,
-                                 float(str(tax_estimado_usd).replace(",", ".") or 0))
+            guardar_tax_producto(cliente, alias_interno, tax_num)
         except Exception as e:
             print(f"[catalogo] no pude guardar el tax de {alias_interno}: {e}")
     except Exception as e:

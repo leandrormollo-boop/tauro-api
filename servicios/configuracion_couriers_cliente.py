@@ -12,7 +12,8 @@ import os
 from typing import Iterable
 
 from core.database import get_conn
-from servicios.pricing import PRICING_MODES, normalizar_pricing, parse_pricing_value
+from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
+from servicios.pricing import PRICING_MODES, normalizar_pricing
 
 
 COURIERS_CLIENTE = (
@@ -269,13 +270,13 @@ def parsear_fila(
         raw_valor = (markup_valor or "").strip()
         if not raw_valor:
             raise ValueError(f"{metadata['nombre']}: ingresá el valor de la ganancia.")
-        normalizado = raw_valor
-        if "," in normalizado:
-            normalizado = normalizado.replace(".", "").replace(",", ".")
-        elif tipo == "FIJO_ARS":
-            normalizado = normalizado.replace(".", "")
         try:
-            numero_crudo = float(normalizado)
+            numero = (
+                parse_importe_humano(raw_valor)
+                if tipo == "FIJO_ARS"
+                else parse_numero_humano(raw_valor)
+            )
+            numero_crudo = float(numero)
         except ValueError:
             raise ValueError(
                 f"{metadata['nombre']}: la ganancia debe ser un número válido."
@@ -286,11 +287,9 @@ def parsear_fila(
             raise ValueError(f"{metadata['nombre']}: el multiplicador no puede ser menor a 1.")
         if tipo in {"PCT", "FIJO_ARS"} and numero_crudo < 0:
             raise ValueError(f"{metadata['nombre']}: la ganancia no puede ser negativa.")
-        pricing = parse_pricing_value(markup_valor, tipo)
-        valor = float(pricing["valor"])
+        valor = numero_crudo
         if not math.isfinite(valor):
             raise ValueError(f"{metadata['nombre']}: la ganancia debe ser un número válido.")
-        tipo = pricing["tipo"]
     elif (markup_valor or "").strip():
         raise ValueError(
             f"{metadata['nombre']}: elegí un tipo de ganancia o dejá el valor vacío."

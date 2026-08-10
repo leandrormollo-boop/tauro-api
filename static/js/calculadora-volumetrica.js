@@ -3,11 +3,23 @@
 // script-src 'self' — nada de JavaScript incrustado en el HTML.
 (function () {
   var ids = ["cv-l", "cv-a", "cv-h", "cv-p"];
+  function decimal(id) {
+    var raw = String(document.getElementById(id).value || "").trim();
+    if (!/^[0-9]+([.,][0-9]+)?$/.test(raw)) return 0;
+    var partes = raw.split(/[.,]/);
+    // En pesos, 10.000 significa diez mil. En una medida sería ambiguo
+    // (10 o 10.000); igual que el servidor, no intentamos adivinarlo.
+    if (partes.length === 2 && partes[1].length === 3 && Number(partes[0]) !== 0) {
+      return 0;
+    }
+    var value = Number(raw.replace(",", "."));
+    return Number.isFinite(value) ? value : 0;
+  }
   function calc() {
-    var l = parseFloat(document.getElementById("cv-l").value) || 0;
-    var a = parseFloat(document.getElementById("cv-a").value) || 0;
-    var h = parseFloat(document.getElementById("cv-h").value) || 0;
-    var p = parseFloat(document.getElementById("cv-p").value) || 0;
+    var l = decimal("cv-l");
+    var a = decimal("cv-a");
+    var h = decimal("cv-h");
+    var p = decimal("cv-p");
     var out = document.getElementById("cv-out");
     if (!(l && a && h)) {
       out.innerHTML = "Completá las medidas y te mostramos el peso que te van a facturar.";
