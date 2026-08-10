@@ -278,11 +278,24 @@ def cotizar_referencia_couriers(
     for tarjeta in tarjetas:
         if tarjeta.get("estado") != "cotizado":
             # No exponer el error crudo: puede contener nombres de cuentas o
-            # variables internas. En la pantalla alcanza con el estado.
+            # variables internas. Sí distinguir un problema de autenticación
+            # productiva para que el cliente sepa que TAURO debe resolverlo.
+            error_interno = str(tarjeta.get("error") or "").lower()
+            if "http 401" in error_interno or "credenciales productivas" in error_interno:
+                motivo = "La conexión productiva necesita revisión de TAURO."
+            elif tarjeta.get("estado") == "no_habilitado":
+                motivo = "No está habilitado para tu cuenta."
+            elif tarjeta.get("estado") == "proximamente":
+                motivo = "La integración todavía no está disponible."
+            elif tarjeta.get("estado") == "sin_multibulto":
+                motivo = "No cotiza esta cantidad de bultos."
+            else:
+                motivo = "No devolvió tarifa para esta referencia."
             no_disponibles.append({
                 "id": tarjeta["id"],
                 "nombre": tarjeta["nombre"],
                 "estado": tarjeta.get("estado") or "sin_tarifa",
+                "motivo": motivo,
             })
             continue
 

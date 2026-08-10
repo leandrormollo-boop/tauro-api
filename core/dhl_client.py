@@ -158,6 +158,13 @@ class DHLClient(CarrierBase):
         cartel rojo que no dice nada: pasó exactamente eso emitiendo la guía #4
         el 06/08. Es la diferencia entre "no anda" y "el CP de destino no existe".
         """
+        # Un 401 no es una ruta sin cobertura: MyDHL rechazó la
+        # autenticación productiva. Devolver una causa segura y accionable
+        # permite que el portal avise a TAURO sin exponer la respuesta cruda,
+        # la cuenta ni ningún secreto.
+        if getattr(resp, "status_code", None) == 401:
+            return "DHL rechazó las credenciales productivas (HTTP 401)."
+
         try:
             j = resp.json()
         except Exception:

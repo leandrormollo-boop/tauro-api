@@ -175,6 +175,16 @@ def test_error_de_dhl_se_reporta_sin_inventar_tracking():
     assert "tracking" not in r
 
 
+def test_401_de_dhl_informa_credencial_productiva_sin_exponer_respuesta():
+    respuesta = mock.Mock(status_code=401, text='{"detail":"dato interno"}')
+    respuesta.json.return_value = {"detail": "dato interno"}
+
+    error = DHLClient._error_legible(respuesta)
+
+    assert error == "DHL rechazó las credenciales productivas (HTTP 401)."
+    assert "dato interno" not in error
+
+
 def test_respuesta_sin_tracking_no_se_da_por_buena():
     _, r = _emitir_capturando(respuesta={"documents": []})
     assert not r["encontrado"]

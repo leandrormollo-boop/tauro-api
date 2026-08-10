@@ -97,7 +97,10 @@ def test_un_courier_sin_tarifa_no_borra_al_otro_ni_filtra_el_error():
 
     assert [o["carrier_id"] for o in resultado["opciones"]] == ["fedex"]
     dhl = next(c for c in resultado["no_disponibles"] if c["id"] == "dhl")
-    assert dhl == {"id": "dhl", "nombre": "DHL Express", "estado": "sin_tarifa"}
+    assert dhl == {
+        "id": "dhl", "nombre": "DHL Express", "estado": "sin_tarifa",
+        "motivo": "No devolvió tarifa para esta referencia.",
+    }
     assert "error" not in repr(resultado["no_disponibles"]).lower()
     assert "account" not in repr(resultado["no_disponibles"]).lower()
 
@@ -113,6 +116,20 @@ def test_dhl_puede_cotizar_aunque_fedex_no_devuelva_tarifa():
 
     assert resultado["encontrado"] is True
     assert [o["carrier_id"] for o in resultado["opciones"]] == ["dhl"]
+
+
+def test_error_401_se_convierte_en_aviso_seguro_y_accionable():
+    tarjetas = _tarjetas_dos_couriers()
+    tarjetas[-1] = {
+        "id": "dhl", "nombre": "DHL Express", "logo": "/dhl.svg",
+        "servicio": "Express Worldwide", "estado": "sin_tarifa",
+        "error": "DHL rechazó las credenciales productivas (HTTP 401).",
+    }
+    resultado, _ = _cotizar_con(tarjetas)
+
+    dhl = next(c for c in resultado["no_disponibles"] if c["id"] == "dhl")
+    assert dhl["motivo"] == "La conexión productiva necesita revisión de TAURO."
+    assert "credencial" not in repr(dhl).lower()
 
 
 def test_si_ninguno_cotiza_el_resultado_es_neutral_y_sin_secretos():
@@ -176,3 +193,4 @@ def test_la_vista_no_esconde_dhl_despues_de_dos_opciones():
     assert "op.carrier_logo" in html
     assert 'class="quote-carrier-logo"' in html
     assert "no_disponibles" in html
+    assert "        {% endif %}\n\n        {% if no_disponibles %}" in html

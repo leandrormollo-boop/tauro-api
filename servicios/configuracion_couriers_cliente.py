@@ -96,10 +96,10 @@ def estado_integracion(courier: str) -> dict:
             }
         return {
             "operativa": True,
-            "estado": "Producción configurada",
+            "estado": "Configuración presente",
             "detalle": (
-                "Credenciales y cuentas DHL de producción presentes; "
-                "la disponibilidad se confirma en cada cotización."
+                "Credenciales y cuentas DHL cargadas. MyDHL valida el acceso "
+                "productivo en cada cotización."
             ),
         }
 

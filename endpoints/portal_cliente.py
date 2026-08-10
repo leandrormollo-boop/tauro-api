@@ -701,6 +701,15 @@ def cotizar_post(
         no_disponibles = comparacion["no_disponibles"]
         resumen = comparacion["resumen"]
         if not comparacion["encontrado"]:
+            estados = ",".join(
+                f"{item.get('id')}:{item.get('estado')}"
+                for item in no_disponibles
+            )
+            print(
+                f"[portal-cotizar] cliente={cliente} "
+                f"ruta={origen_pais.upper()}->{destino_pais.upper()} "
+                f"sin opciones ({estados or 'sin resultados'})"
+            )
             raise ValueError("Ningún courier devolvió una tarifa para esa referencia.")
     except Exception as e:
         error = str(e)

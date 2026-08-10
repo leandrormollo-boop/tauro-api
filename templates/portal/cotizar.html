@@ -120,19 +120,19 @@
                 {% endfor %}
             </div>
 
-            {% if no_disponibles %}
-            <div class="quote-unavailable" aria-label="Couriers sin tarifa para esta referencia">
-                {% for courier in no_disponibles %}
-                <span><strong>{{ courier.nombre }}</strong> no cotizó esta referencia</span>
-                {% endfor %}
-            </div>
-            {% endif %}
-
             <div class="quote-result-actions">
                 <p class="quote-result-note">Referencia: elegís el courier y volvemos a cotizar con la dirección completa.</p>
                 <a href="/portal/envios/nuevo?origen={{ form.origen_pais }}&amp;destino={{ destino_sel }}" class="btn btn-primary btn-sm">Crear envío con esta ruta</a>
             </div>
         </section>
+        {% endif %}
+
+        {% if no_disponibles %}
+        <div class="quote-unavailable" aria-label="Couriers sin tarifa para esta referencia">
+            {% for courier in no_disponibles %}
+            <span><strong>{{ courier.nombre }}</strong> — {{ courier.motivo or 'No cotizó esta referencia.' }}</span>
+            {% endfor %}
+        </div>
         {% endif %}
     </div>
 </div>
