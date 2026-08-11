@@ -70,6 +70,11 @@ class DHLClient(CarrierBase):
     # nuestros envíos llevan mercadería con valor declarado, no documentos.
     PRODUCTO_DEFAULT = "P"
 
+    # DHL Sistemas (11/08/2026): Data Staging 12 debe viajar en MyDHL JSON
+    # como valueAddedServices/serviceCode "PV". El antiguo código XML "PT"
+    # no es equivalente en este contrato y no debe volver a emitirse.
+    DATA_STAGING_SERVICE_CODE = "PV"
+
     def __init__(self):
         self.api_key        = os.getenv("DHL_API_KEY")
         self.api_secret     = os.getenv("DHL_API_SECRET")
@@ -158,6 +163,12 @@ class DHLClient(CarrierBase):
         cartel rojo que no dice nada: pasó exactamente eso emitiendo la guía #4
         el 06/08. Es la diferencia entre "no anda" y "el CP de destino no existe".
         """
+        if getattr(resp, "status_code", None) in (401, 403):
+            return (
+                "DHL rechazó las credenciales o el acceso productivo "
+                f"(HTTP {resp.status_code})."
+            )
+
         try:
             j = resp.json()
         except Exception:
@@ -263,6 +274,16 @@ class DHLClient(CarrierBase):
         return d.strftime("%Y-%m-%dT13:00:00GMT") + offset
 
     @staticmethod
+    def _codigo_postal(pais: str, valor) -> str:
+        """Convierte un CPA argentino al formato de cuatro dígitos de MyDHL."""
+        codigo = str(valor or "").strip().upper()
+        if str(pais or "").strip().upper()[:2] == "AR":
+            digitos = "".join(ch for ch in codigo if ch.isdigit())
+            if len(digitos) == 4:
+                return digitos
+        return codigo
+
+    @staticmethod
     def _direccion(d: dict, por_defecto_ciudad: str = "") -> dict:
         """
         Bloque de dirección del POST. `cityName` tiene minLength 1: mandarlo
@@ -279,14 +300,18 @@ class DHLClient(CarrierBase):
         "cityName: expected minLength 1, actual 0" de la guía #4 (06/08).
         """
         ciudad = (d.get("ciudad") or d.get("city") or por_defecto_ciudad or "").strip()
+        pais = str(d.get("pais") or d.get("country") or "").strip().upper()
         bloque = {
-            "postalCode": str(d.get("zip") or d.get("postal_code") or "").strip(),
+            "postalCode": DHLClient._codigo_postal(
+                pais, d.get("zip") or d.get("postal_code") or ""
+            ),
             "cityName": ciudad,
-            "countryCode": str(d.get("pais") or d.get("country") or "").strip().upper(),
+            "countryCode": pais,
         }
         estado = d.get("estado") or d.get("state")
-        if estado:
-            bloque["provinceCode"] = str(estado).strip()
+        codigo_estado = str(estado or "").strip().upper()
+        if len(codigo_estado) == 2 and codigo_estado.isalpha():
+            bloque["provinceCode"] = codigo_estado
         return bloque
 
     def get_rates_multibulto(self, origen: dict, destino: dict, paquetes: list) -> dict:
@@ -414,10 +439,14 @@ class DHLClient(CarrierBase):
                 "accountNumber": cuenta,
                 "originCountryCode": origen.get("country", "AR"),
                 "originCityName": origen.get("city", "BUENOS AIRES"),
-                "originPostalCode": origen.get("postal_code", "1043"),
+                "originPostalCode": self._codigo_postal(
+                    origen.get("country", "AR"), origen.get("postal_code", "1043")
+                ),
                 "destinationCountryCode": destino.get("country", "US"),
                 "destinationCityName": destino.get("city", ""),
-                "destinationPostalCode": destino.get("postal_code", ""),
+                "destinationPostalCode": self._codigo_postal(
+                    destino.get("country", "US"), destino.get("postal_code", "")
+                ),
                 "weight": paquete.get("peso_kg", 0.5),
                 # El wizard usa *_cm; el cotizador rápido usa las claves
                 # cortas. Aceptar ambos evita cotizar 30×20×10 y emitir luego
@@ -513,6 +542,20 @@ class DHLClient(CarrierBase):
             }],
         }
 
+    @staticmethod
+    def _cuit_argentino_valido(documento: object) -> bool:
+        """Valida los 11 dígitos y el verificador módulo 11 del CUIT."""
+        cuit = "".join(ch for ch in str(documento or "") if ch.isdigit())
+        if len(cuit) != 11:
+            return False
+        pesos = (5, 4, 3, 2, 7, 6, 5, 4, 3, 2)
+        verificador = 11 - sum(int(n) * p for n, p in zip(cuit[:10], pesos)) % 11
+        if verificador == 11:
+            verificador = 0
+        if verificador == 10:
+            return False
+        return verificador == int(cuit[-1])
+
     def _direccion_envio(self, d: dict) -> dict:
         """
         postalAddress del POST. Igual que en /rates pero con la calle, que
@@ -557,6 +600,20 @@ class DHLClient(CarrierBase):
                 return {"encontrado": False, "error":
                         f"Completá {', '.join(faltan)} del {etiqueta} "
                         "antes de emitir con DHL."}
+
+        # Requisito de certificación DHL: todo exportador argentino debe ir
+        # identificado con su CUIT en shipperDetails.registrationNumbers.
+        # Bloquear antes del POST evita emitir una guía/factura fiscalmente
+        # incompleta o con un número de documento que no sea un CUIT válido.
+        pais_shipper = (shipper.get("pais") or shipper.get("country") or "AR").upper()[:2]
+        if pais_shipper == "AR" and not self._cuit_argentino_valido(
+            shipper.get("documento")
+        ):
+            return {
+                "encontrado": False,
+                "error": ("Completá un CUIT argentino válido de 11 dígitos "
+                          "para el remitente antes de emitir con DHL."),
+            }
         bultos = datos.get("bultos") or []
         if not bultos:
             package = datos.get("package") or {}
@@ -670,6 +727,9 @@ class DHLClient(CarrierBase):
             "pickup": {"isRequested": False},
             "productCode": self.product_code,
             "accounts": [{"typeCode": "shipper", "number": cuenta}],
+            "valueAddedServices": [{
+                "serviceCode": self.DATA_STAGING_SERVICE_CODE,
+            }],
             "customerDetails": {
                 "shipperDetails": {
                     "postalAddress": self._direccion_envio(shipper),
@@ -712,7 +772,21 @@ class DHLClient(CarrierBase):
                 },
             },
             "outputImageProperties": {
-                "imageOptions": [{"typeCode": "label", "templateName": "ECOM26_84_A4_001"}],
+                # DHL Sistemas pide validar los dos documentos que genera la
+                # integración: la guía y la factura comercial. Pedir sólo el
+                # label hacía que la guía saliera, pero la invoice no volviera
+                # en `documents` y no hubiera evidencia para certificación ni
+                # para el cliente.
+                "encodingFormat": "pdf",
+                "imageOptions": [
+                    {"typeCode": "label", "templateName": "ECOM26_84_A4_001"},
+                    {
+                        "typeCode": "invoice",
+                        "templateName": "COMMERCIAL_INVOICE_P_10",
+                        "isRequested": True,
+                        "invoiceType": "commercial",
+                    },
+                ],
             },
         }
 
@@ -762,23 +836,37 @@ class DHLClient(CarrierBase):
                 return {"encontrado": False, "error": "DHL no devolvió tracking.",
                         "incierto": True, "message_reference": msg_ref}
 
-            # El label viene en base64 dentro de documents (typeCode "label").
+            # La guía y la factura comercial vienen en base64 dentro de
+            # `documents`. Se conservan por separado: una invoice nunca puede
+            # reemplazar accidentalmente al label ni viceversa.
             label_b64 = ""
+            invoice_b64 = ""
             for doc in (data.get("documents") or []):
-                if (doc.get("typeCode") or "").lower() == "label":
+                tipo = (doc.get("typeCode") or "").replace("_", "").lower()
+                if tipo == "label":
                     label_b64 = doc.get("content") or ""
-                    break
-            label_pdf = None
-            if label_b64:
-                import base64
+                elif tipo in {"invoice", "commercialinvoice"}:
+                    invoice_b64 = doc.get("content") or ""
+
+            import base64
+
+            def _decodificar_pdf(contenido_b64: str, nombre: str):
+                if not contenido_b64:
+                    return None
                 try:
-                    label_pdf = base64.b64decode(label_b64)
-                    if not label_pdf.startswith(b"%PDF"):
-                        print(f"[dhl] guía {tracking} emitida pero el documento "
-                              "devuelto no es PDF")
-                        label_pdf = None
+                    pdf = base64.b64decode(contenido_b64, validate=True)
+                    if not pdf.startswith(b"%PDF"):
+                        print(f"[dhl] guía {tracking} emitida pero {nombre} "
+                              "no es un PDF válido")
+                        return None
+                    return pdf
                 except Exception as e:
-                    print(f"[dhl] guía {tracking} emitida pero el label no decodifica: {e}")
+                    print(f"[dhl] guía {tracking} emitida pero {nombre} "
+                          f"no decodifica: {e}")
+                    return None
+
+            label_pdf = _decodificar_pdf(label_b64, "el label")
+            invoice_pdf = _decodificar_pdf(invoice_b64, "la factura comercial")
 
             print(f"[dhl] guía emitida: {tracking} (ref {msg_ref})")
             return {
@@ -787,6 +875,8 @@ class DHLClient(CarrierBase):
                 "servicio": "DHL Express Worldwide",
                 "label_pdf": label_pdf,
                 "label_b64": label_b64,
+                "invoice_pdf": invoice_pdf,
+                "invoice_b64": invoice_b64,
                 "message_reference": msg_ref,
             }
         except Exception as e:
@@ -935,6 +1025,33 @@ class DHLClient(CarrierBase):
                 "dimensions": {"length": 30, "width": 20, "height": 15},
             } for _ in range(cantidad)]
 
+        valor_declarado = datos.get("valor_declarado_usd")
+        if valor_declarado in (None, "") and paquetes_entrada:
+            try:
+                valor_declarado = 0.0
+                for p in paquetes_entrada:
+                    unidades_aduana = int(
+                        p.get("unidades_aduana")
+                        or p.get("unidades")
+                        or p.get("cantidad")
+                        or 1
+                    )
+                    valor_unitario = float(p.get("valor_unitario_usd") or 0)
+                    if not 1 <= unidades_aduana <= MAX_DHL_CUSTOMS_UNITS:
+                        raise ValueError("unidades aduaneras fuera de rango")
+                    if not math.isfinite(valor_unitario) or valor_unitario < 0:
+                        raise ValueError("valor unitario inválido")
+                    valor_declarado += valor_unitario * unidades_aduana
+            except (TypeError, ValueError):
+                return {"encontrado": False,
+                        "error": "Revisá el valor y las unidades aduaneras del retiro."}
+        try:
+            valor_declarado = float(valor_declarado or 1)
+        except (TypeError, ValueError):
+            valor_declarado = 1.0
+        if not math.isfinite(valor_declarado) or valor_declarado <= 0:
+            valor_declarado = 1.0
+
         cuerpo = {
             "plannedPickupDateAndTime": f"{fecha}T{ready}:00{offset}",
             "closeTime": close,
@@ -942,7 +1059,9 @@ class DHLClient(CarrierBase):
             "customerDetails": {
                 "shipperDetails": {
                     "postalAddress": {
-                        "postalCode": (origen.get("zip") or "").strip(),
+                        "postalCode": self._codigo_postal(
+                            origen.get("pais", "AR"), origen.get("zip") or ""
+                        ),
                         "cityName": (origen.get("ciudad") or "").strip(),
                         "countryCode": (origen.get("pais") or "AR").upper()[:2],
                         "addressLine1": (origen.get("calle") or "")[:45],
@@ -958,6 +1077,8 @@ class DHLClient(CarrierBase):
             "shipmentDetails": [{
                 "productCode": self.product_code,
                 "isCustomsDeclarable": True,
+                "declaredValue": round(valor_declarado, 2),
+                "declaredValueCurrency": "USD",
                 "unitOfMeasurement": "metric",
                 "packages": paquetes,
             }],

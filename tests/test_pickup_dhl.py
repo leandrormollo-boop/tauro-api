@@ -61,7 +61,25 @@ def test_payload_calcado_del_ejemplo_oficial():
     assert ship["contactInformation"]["companyName"] == "Waimao SRL"
     # 3 bultos = 3 packages, no 1 con quantity.
     assert len(body["shipmentDetails"][0]["packages"]) == 3
+    assert body["shipmentDetails"][0]["declaredValue"] == 1.0
+    assert body["shipmentDetails"][0]["declaredValueCurrency"] == "USD"
     assert body["specialInstructions"][0]["value"] == "tocar timbre 2B"
+
+
+def test_pickup_desde_guia_conserva_valor_declarado_y_cpa():
+    datos = dict(
+        DATOS,
+        origen=dict(ORIGEN, zip="C1043ABC"),
+        paquetes=[{
+            "peso_kg": 2, "largo_cm": 10, "ancho_cm": 10, "alto_cm": 10,
+            "cantidad": 1, "unidades_aduana": 8, "valor_unitario_usd": 15,
+        }],
+    )
+    with _capturar_post() as post:
+        _cliente().create_pickup(datos)
+    body = post.call_args.kwargs["json"]
+    assert body["customerDetails"]["shipperDetails"]["postalAddress"]["postalCode"] == "1043"
+    assert body["shipmentDetails"][0]["declaredValue"] == 120.0
 
 
 def test_origen_no_ar_usa_cuenta_impo():

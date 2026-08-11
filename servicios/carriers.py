@@ -49,6 +49,7 @@ CARRIERS = [
             "DHL_API_SECRET",
             ("DHL_ACCOUNT_NUMBER_EXPO", "DHL_ACCOUNT_NUMBER"),
         ),
+        "entorno_requerido": ("DHL_ENVIRONMENT", "production"),
         "cliente": DHLClient,
     },
 ]
@@ -79,7 +80,15 @@ def carrier_activo(carrier: dict) -> bool:
         nombres = (req,) if isinstance(req, str) else req
         return any(os.getenv(n) for n in nombres)
 
-    return all(presente(r) for r in carrier["requisitos"])
+    if not all(presente(r) for r in carrier["requisitos"]):
+        return False
+
+    entorno_requerido = carrier.get("entorno_requerido")
+    if entorno_requerido:
+        variable, esperado = entorno_requerido
+        if (os.getenv(variable) or "").strip().lower() != esperado:
+            return False
+    return True
 
 
 def _pricing_configurado() -> dict:

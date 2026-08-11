@@ -72,6 +72,10 @@ def test_con_permiso_reserva_y_llama_al_courier(monkeypatch):
 
     monkeypatch.setattr(rec, "_ensure_tabla", lambda: None)
     monkeypatch.setattr(rec, "cliente_puede_recolectar", lambda cliente, courier=None: True)
+    import servicios.configuracion_couriers_cliente as config_couriers
+    monkeypatch.setattr(
+        config_couriers, "estado_integracion", lambda courier: {"operativa": True}
+    )
     monkeypatch.setattr(rec, "_cliente_pickup", lambda nombre: courier)
     monkeypatch.setattr(rec, "get_conn", conexion)
     import servicios.direcciones as direcciones

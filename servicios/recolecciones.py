@@ -158,16 +158,23 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
                 "ancho_cm": float(b.get("ancho_cm") or 20),
                 "alto_cm": float(b.get("alto_cm") or 15),
                 "cantidad": max(int(b.get("cantidad") or 1), 1),
+                "unidades_aduana": max(
+                    int(b.get("unidades_aduana") or b.get("cantidad") or 1), 1
+                ),
+                "valor_unitario_usd": float(b.get("valor_unitario_usd") or 100),
             })
     else:
         cantidad = max(int(sol.get("cantidad") or 1), 1)
         peso_total = max(float(sol.get("peso_kg") or 1), 0.001)
+        valor_total = float(sol.get("valor_declarado_usd") or 100)
         paquetes = [{
             "peso_kg": round(peso_total / cantidad, 3),
             "largo_cm": float(sol.get("largo_cm") or 30),
             "ancho_cm": float(sol.get("ancho_cm") or 20),
             "alto_cm": float(sol.get("alto_cm") or 15),
             "cantidad": cantidad,
+            "unidades_aduana": cantidad,
+            "valor_unitario_usd": round(valor_total / cantidad, 2),
         }]
 
     cantidad_total = sum(int(p["cantidad"]) for p in paquetes)
@@ -249,6 +256,13 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
                 f"Las recolecciones de {courier} todavía no están habilitadas "
                 "para tu cuenta. "
                 "Escribinos y las activamos."}
+
+    if courier == "DHL":
+        from servicios.configuracion_couriers_cliente import estado_integracion
+        if not estado_integracion("dhl")["operativa"]:
+            return {"ok": False, "error":
+                    "DHL no está habilitado en producción. No se creó ninguna "
+                    "recolección real."}
 
     cliente_api = _cliente_pickup(courier)
     if cliente_api is None:

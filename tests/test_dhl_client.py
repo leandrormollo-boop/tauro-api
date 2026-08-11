@@ -86,6 +86,24 @@ def test_manda_todos_los_parametros_obligatorios():
     assert not faltan, f"faltan parámetros required:true del OpenAPI: {sorted(faltan)}"
 
 
+def test_normaliza_cpa_argentino_para_rates_y_direcciones():
+    origen = dict(ORIGEN, postal_code="C1043ABC")
+    resp = mock.Mock(status_code=200)
+    resp.json.return_value = {"products": [_producto("P", 120.0)]}
+    with mock.patch("core.dhl_client.requests.get", return_value=resp) as get:
+        _cliente().get_rates(origen, DESTINO, PAQUETE)
+
+    assert get.call_args.kwargs["params"]["originPostalCode"] == "1043"
+    direccion = DHLClient._direccion({
+        "pais": "AR", "zip": "C1043ABC", "ciudad": "CABA", "estado": "C",
+    })
+    assert direccion["postalCode"] == "1043"
+    assert "provinceCode" not in direccion
+    assert DHLClient._direccion({
+        "pais": "US", "zip": "10118", "ciudad": "NEW YORK", "estado": "ny",
+    })["provinceCode"] == "NY"
+
+
 def test_la_fecha_de_envio_va_y_es_futura_y_sin_hora():
     _, kw = _llamar([_producto("P", 120.0)])
     fecha = kw["params"]["plannedShippingDate"]
