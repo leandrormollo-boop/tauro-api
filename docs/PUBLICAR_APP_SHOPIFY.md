@@ -10,8 +10,12 @@ instale con un click. Actualizada 03/08/2026.
 Todo esto ya funciona y está verificado e2e en producción (28/07, Pesca Jacks):
 
 - OAuth completo (instalar / desinstalar / reinstalar), con `state` anti-CSRF y
-  HMAC verificado; dominio validado con regex estricta (sin open-redirect).
-- Scopes mínimos: `read_orders`, `read/write_merchant_managed_fulfillment_orders`.
+  HMAC verificado; dominio validado con regex estricta (sin open-redirect). Si
+  el navegador embebido bloquea la cookie de `state`, se instala sin vincular
+  y el dueño debe reclamarla luego desde su portal.
+- Scopes mínimos: `read_orders`, `write_merchant_managed_fulfillment_orders`
+  (`write` ya incluye lectura del mismo recurso y Shopify omite el `read` al
+  devolver los permisos otorgados).
   (Se sacó `write_shipping` el 03/08 — era del CarrierService, ya retirado.)
 - Webhooks de pedidos con firma verificada por tienda.
 - **Webhooks de privacidad obligatorios** (`customers/data_request`,
@@ -21,6 +25,8 @@ Todo esto ya funciona y está verificado e2e en producción (28/07, Pesca Jacks)
 - Venta → solicitud de guía automática (la guía NO se emite sola).
 - Cierre del círculo: al emitir la guía en TAURO, el pedido queda "enviado" en
   Shopify con el tracking y se avisa al comprador.
+- Llamadas activas al Admin API migradas a GraphQL 2026-07 (identidad de la
+  tienda, suscripción de webhooks y fulfillment/tracking).
 - Páginas legales YA servidas: taurosolutions.ar/privacidad y /terminos.
 
 > **Importante — NO es del checkout:** la app ya **no cotiza en el checkout**
@@ -39,7 +45,7 @@ Todo esto ya funciona y está verificado e2e en producción (28/07, Pesca Jacks)
 ### 2. Partner Dashboard (partners.shopify.com → Apps → TAURO → Configuration)
 - **App URL**: `https://taurosolutions.ar/shopify/install`
 - **Allowed redirection URL(s)**: `https://taurosolutions.ar/shopify/callback`
-- **Access scopes**: `read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders`
+- **Access scopes**: `read_orders,write_merchant_managed_fulfillment_orders`
   (exactamente los mismos que pide el OAuth, sin `write_shipping`).
 - **Compliance webhooks** (van SÍ o SÍ acá, no por API — Shopify los prueba):
   - customers/data_request → `https://taurosolutions.ar/shopify/webhook/customers/data_request`

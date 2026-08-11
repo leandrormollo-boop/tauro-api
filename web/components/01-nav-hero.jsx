@@ -39,7 +39,7 @@ function PartnersMeta() {
 
   const nombres = partners
     ? partners.map((p) => p.nombre.replace(" Express", ""))
-    : ["FedEx", "DHL"];
+    : ["DHL"];
 
   return (
     <div className="hero-meta-item">
@@ -54,7 +54,7 @@ function PartnersMeta() {
 /* ============================================================
    NAV
    ============================================================ */
-function Nav({ onCotizarClick }) {
+function Nav() {
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
@@ -82,11 +82,11 @@ function Nav({ onCotizarClick }) {
             <span className="tweb-txt-largo">Iniciar sesión</span>
             <span className="tweb-txt-corto">Ingresar</span>
           </a>
-          <button className="btn btn-primary" onClick={onCotizarClick} style={{ fontSize: 13, padding: "10px 18px" }}>
-            <span className="tweb-txt-largo">Cotizar envío</span>
-            <span className="tweb-txt-corto">Cotizar</span>
+          <a href="/portal/login" className="btn btn-primary" style={{ fontSize: 13, padding: "10px 18px" }}>
+            <span className="tweb-txt-largo">Conectá tu tienda</span>
+            <span className="tweb-txt-corto">Conectar</span>
             <ArrowRight size={14} />
-          </button>
+          </a>
         </div>
       </div>
     </nav>
@@ -178,35 +178,38 @@ function HeroSplit({ onCotizarClick }) {
           <div>
             <div className="chip fade-up" style={{ marginBottom: 28 }}>
               <span className="chip-dot pulse"></span>
-              Envíos a todo el mundo
+              Integraciones + logística
             </div>
             <h1 className="fade-up d1">
-              Logística sin <span className="accent">fronteras</span>,<br/>
-              decisiones <span className="accent">en tiempo real</span>.
+              Conectá.<br/>
+              <span className="accent">Centralizá.</span><br/>
+              Expandí.
             </h1>
+            <p className="hero-promise fade-up d2">
+              Tu logística en un solo portal.
+            </p>
             <p className="lead fade-up d2">
-              Movemos tu carga por aire, mar y tierra con visibilidad total.
-              Cotizá, despachá y trackeá todo desde un solo lugar — pensado para
-              empresas argentinas que exportan e importan.
+              Logística nacional e internacional conectada directamente a tu tienda.
+              <span className="hero-manual-note"> ¿No tenés tienda? Cargá tus envíos manualmente.</span>
             </p>
             <div className="hero-actions fade-up d3">
-              <button className="btn btn-primary btn-lg" onClick={onCotizarClick}>
-                Cotizar mi envío
+              <a href="/portal/login" className="btn btn-primary btn-lg">
+                Conectá tu tienda
                 <ArrowRight size={16} />
-              </button>
-              <a href="#proceso" className="btn btn-ghost btn-lg">
-                Cómo funciona
               </a>
+              <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>
+                Cotizá un envío
+              </button>
             </div>
             <div className="hero-meta fade-up d4">
               <PartnersMeta />
               <div className="hero-meta-item">
-                <div className="num">200+</div>
-                <div className="lbl">Destinos</div>
+                <div className="num">Manual</div>
+                <div className="lbl">También sin tienda</div>
               </div>
               <div className="hero-meta-item">
-                <div className="num">Inmediata</div>
-                <div className="lbl">Respuesta</div>
+                <div className="num">Portal</div>
+                <div className="lbl">Una sola operación</div>
               </div>
             </div>
           </div>
@@ -225,22 +228,25 @@ function HeroCentered({ onCotizarClick }) {
       <div className="hero-bg"><div className="grid-lines"></div><div className="glow" style={{ left: "50%", marginLeft: -300, right: "auto" }}></div></div>
       <div className="container" style={{ maxWidth: 980 }}>
         <div className="chip fade-up" style={{ marginBottom: 28 }}>
-          <span className="chip-dot pulse"></span> Envíos a todo el mundo
+          <span className="chip-dot pulse"></span> Integraciones + logística
         </div>
         <h1 className="fade-up d1" style={{ fontSize: "clamp(56px, 9vw, 120px)" }}>
-          Tu carga,<br/>
-          <span className="accent">a cualquier puerto</span>
-          <br/>del mundo.
+          Conectá.<br/>
+          <span className="accent">Centralizá.</span><br/>
+          Expandí.
         </h1>
-        <p className="lead fade-up d2" style={{ margin: "32px auto 40px", fontSize: 19 }}>
-          Soluciones logísticas internacionales para empresas y emprendedores argentinos.
-          Aire, mar y tierra — con seguimiento en tiempo real.
+        <p className="hero-promise fade-up d2" style={{ margin: "32px auto 12px" }}>
+          Tu logística en un solo portal.
+        </p>
+        <p className="lead fade-up d2" style={{ margin: "0 auto 40px", fontSize: 19 }}>
+          Logística nacional e internacional conectada directamente a tu tienda.
+          <span className="hero-manual-note"> También podés operar manualmente.</span>
         </p>
         <div className="hero-actions fade-up d3" style={{ justifyContent: "center" }}>
-          <button className="btn btn-primary btn-lg" onClick={onCotizarClick}>
-            Cotizar mi envío <ArrowRight size={16} />
-          </button>
-          <a href="#proceso" className="btn btn-ghost btn-lg">Ver demo</a>
+          <a href="/portal/login" className="btn btn-primary btn-lg">
+            Conectá tu tienda <ArrowRight size={16} />
+          </a>
+          <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
         </div>
         <div className="fade-up d4" style={{ marginTop: 80, maxWidth: 720, margin: "80px auto 0" }}>
           <QuoteWidget compact />
@@ -258,18 +264,19 @@ function HeroMinimal({ onCotizarClick }) {
         <div style={{ maxWidth: 900 }}>
           <div className="eyebrow fade-up" style={{ marginBottom: 32 }}>Tauro Solutions / 2026</div>
           <h1 className="fade-up d1" style={{ fontSize: "clamp(48px, 8vw, 112px)" }}>
-            Movemos lo que tu<br/>
-            negocio necesita,<br/>
-            <em style={{ color: "var(--accent)", fontWeight: 500 }}>donde sea.</em>
+            Conectá.<br/>
+            <em style={{ color: "var(--accent)", fontWeight: 500 }}>Centralizá.</em><br/>
+            Expandí.
           </h1>
           <div className="fade-up d2" style={{ display: "flex", gap: 64, marginTop: 80, alignItems: "flex-end", flexWrap: "wrap" }}>
             <p style={{ maxWidth: 420, color: "var(--fg-2)", fontSize: 17, lineHeight: 1.6, margin: 0 }}>
-              Logística internacional para empresas argentinas. Cotización instantánea,
-              despacho aduanero, tracking 24/7.
+              Tu logística en un solo portal. Logística nacional e internacional
+              conectada directamente a tu tienda, con carga manual disponible.
             </p>
-            <button className="btn btn-primary btn-lg" onClick={onCotizarClick}>
-              Empezar ahora <ArrowRight size={16} />
-            </button>
+            <a href="/portal/login" className="btn btn-primary btn-lg">
+              Conectá tu tienda <ArrowRight size={16} />
+            </a>
+            <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
           </div>
         </div>
       </div>

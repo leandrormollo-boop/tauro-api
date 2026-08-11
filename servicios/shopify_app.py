@@ -25,6 +25,7 @@ import json
 import os
 import re
 import secrets
+import time
 import urllib.parse
 from typing import Optional
 
@@ -61,12 +62,15 @@ API_VERSION = "2026-07"
 #     del envío lo pone el comerciante con sus tarifas de Shopify. Sin uso
 #     vivo, fuera.
 # Lo que queda es el mínimo: leer las órdenes y marcar el envío como cumplido
-# con su tracking.
-SCOPES = ("read_orders,"
-          "read_merchant_managed_fulfillment_orders,"
-          "write_merchant_managed_fulfillment_orders")
+# con su tracking. Shopify omite `read_x` del token cuando también se pidió
+# `write_x`, porque escribir ya incluye leer ese recurso.
+SCOPES = "read_orders,write_merchant_managed_fulfillment_orders"
 
 _tabla_lista = False
+
+
+class ShopifyWebhookVerificationError(RuntimeError):
+    """Shopify no permitió confirmar el estado de las suscripciones."""
 
 
 def _ensure_tabla() -> None:
@@ -222,19 +226,20 @@ def es_dueno_de_la_tienda(dominio: str, cliente_id: str) -> bool:
     if not email_cliente:
         return False
 
-    r = _api(dominio, inst["access_token"], "GET", "shop.json")
-    if r is None or r.status_code != 200:
+    data = _graphql(dominio, inst["access_token"], """
+        query TauroShopOwnership {
+          shop { email contactEmail }
+        }
+    """)
+    if data is None:
         print(f"[shopify] no pude verificar la propiedad de {dominio} "
-              f"(shop.json no respondió)")
+              f"(GraphQL no respondió)")
         return False
-    try:
-        shop = r.json().get("shop") or {}
-    except Exception:
-        return False
+    shop = data.get("shop") or {}
 
     # Shopify expone el mail de la cuenta y el de contacto: vale cualquiera.
     posibles = {str(shop.get(k) or "").strip().lower()
-                for k in ("email", "customer_email")}
+                for k in ("email", "contactEmail")}
     coincide = email_cliente in posibles
     print(f"[shopify] verificación de propiedad {dominio} ↔ {cliente_id}: "
           f"{'OK' if coincide else 'NO COINCIDE'}")
@@ -303,7 +308,64 @@ def desinstalar(dominio: str) -> None:
 
 # ── Llamadas a la API de la tienda ──────────────────────────
 
+def _graphql(dominio: str, token: str, query: str,
+             variables: dict | None = None) -> Optional[dict]:
+    """
+    Cliente mínimo del Admin GraphQL API.
+
+    Shopify considera legacy al REST Admin API y exige GraphQL para apps
+    públicas nuevas. El helper nunca devuelve cuerpos de error ni tokens al
+    log: esas respuestas pueden contener datos de la tienda.
+    """
+    url = f"https://{dominio}/admin/api/{API_VERSION}/graphql.json"
+    for intento in range(2):
+        try:
+            r = requests.post(
+                url,
+                headers={
+                    "X-Shopify-Access-Token": token,
+                    "Content-Type": "application/json",
+                },
+                json={"query": query, "variables": variables or {}},
+                timeout=25,
+            )
+        except Exception as e:
+            print(f"[shopify] GraphQL no disponible: {type(e).__name__}")
+            return None
+        if r.status_code == 429 and intento == 0:
+            time.sleep(1)
+            continue
+        if r.status_code != 200:
+            print(f"[shopify] GraphQL respondió HTTP {r.status_code}")
+            return None
+        try:
+            payload = r.json()
+        except Exception:
+            print("[shopify] GraphQL devolvió una respuesta no JSON")
+            return None
+        errores = payload.get("errors") or []
+        if not errores:
+            return payload.get("data") or {}
+
+        codigos = {
+            str((error.get("extensions") or {}).get("code") or "UNKNOWN")
+            for error in errores if isinstance(error, dict)
+        }
+        if "THROTTLED" in codigos and intento == 0:
+            time.sleep(1)
+            continue
+        mensajes = [
+            " ".join(str(error.get("message") or "").split())[:160]
+            for error in errores if isinstance(error, dict)
+        ]
+        print(f"[shopify] GraphQL error codes={sorted(codigos)} "
+              f"mensajes={mensajes[:2]}")
+        return None
+    return None
+
+
 def _api(dominio: str, token: str, metodo: str, path: str, payload: dict | None = None):
+    """Compatibilidad transitoria para limpiar CarrierService legado."""
     url = f"https://{dominio}/admin/api/{API_VERSION}/{path.lstrip('/')}"
     try:
         r = requests.request(
@@ -324,22 +386,65 @@ def registrar_webhooks(dominio: str, token: str) -> list[str]:
     """
     base = _base_url()
     topics = [
-        ("orders/create", f"{base}/integraciones/shopify/webhook"),
-        ("orders/updated", f"{base}/integraciones/shopify/webhook"),
-        ("app/uninstalled", f"{base}/shopify/webhook/desinstalada"),
+        ("orders/create", "ORDERS_CREATE", f"{base}/integraciones/shopify/webhook"),
+        ("orders/updated", "ORDERS_UPDATED", f"{base}/integraciones/shopify/webhook"),
+        ("app/uninstalled", "APP_UNINSTALLED", f"{base}/shopify/webhook/desinstalada"),
     ]
-    ok = []
-    for topic, address in topics:
-        r = _api(dominio, token, "POST", "webhooks.json", {
-            "webhook": {"topic": topic, "address": address, "format": "json"}
+    mutation = """
+        mutation TauroWebhookCreate(
+          $topic: WebhookSubscriptionTopic!,
+          $subscription: WebhookSubscriptionInput!
+        ) {
+          webhookSubscriptionCreate(
+            topic: $topic,
+            webhookSubscription: $subscription
+          ) {
+            webhookSubscription { id topic uri }
+            userErrors { field message }
+          }
+        }
+    """
+    consulta = """
+        query TauroWebhookSubscriptions {
+          webhookSubscriptions(first: 100) {
+            nodes { id topic uri }
+          }
+        }
+    """
+
+    def _actuales() -> Optional[set[tuple[str, str]]]:
+        data = _graphql(dominio, token, consulta)
+        if data is None:
+            return None
+        nodes = ((data.get("webhookSubscriptions") or {}).get("nodes") or [])
+        return {
+            (str(node.get("topic") or ""), str(node.get("uri") or ""))
+            for node in nodes
+        }
+
+    existentes = _actuales()
+    if existentes is None:
+        raise ShopifyWebhookVerificationError("No se pudieron leer los webhooks actuales.")
+
+    for topic, topic_gql, address in topics:
+        if (topic_gql, address) in existentes:
+            continue
+        data = _graphql(dominio, token, mutation, {
+            "topic": topic_gql,
+            "subscription": {"uri": address, "format": "JSON"},
         })
-        if r is not None and r.status_code in (200, 201):
-            ok.append(topic)
-        elif r is not None and r.status_code == 422 and "already been taken" in r.text:
-            ok.append(topic)  # ya existía: la reinstalación no debe fallar
-        else:
-            print(f"[shopify] webhook {topic} no quedó: {r.status_code if r else 'sin respuesta'}")
-    return ok
+        resultado = (data or {}).get("webhookSubscriptionCreate") or {}
+        errores = resultado.get("userErrors") or []
+        if not resultado.get("webhookSubscription") or errores:
+            print(f"[shopify] webhook {topic} no quedó por GraphQL")
+
+    verificados = _actuales()
+    if verificados is None:
+        raise ShopifyWebhookVerificationError("No se pudieron verificar los webhooks creados.")
+    return [
+        topic for topic, topic_gql, address in topics
+        if (topic_gql, address) in verificados
+    ]
 
 
 def registrar_carrier_service(dominio: str, token: str) -> Optional[str]:
@@ -455,37 +560,100 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
         return False
     token = inst["access_token"]
 
+    pedido_gid = str(pedido_externo_id or "").strip()
+    if pedido_gid.startswith("gid://shopify/Order/"):
+        if not re.fullmatch(r"gid://shopify/Order/\d+", pedido_gid):
+            return False
+    elif re.fullmatch(r"\d+", pedido_gid):
+        pedido_gid = f"gid://shopify/Order/{pedido_gid}"
+    else:
+        return False
+
     # 1) Qué se puede despachar de ese pedido
-    r = _api(dominio, token, "GET", f"orders/{pedido_externo_id}/fulfillment_orders.json")
-    if r is None or r.status_code != 200:
+    data = _graphql(dominio, token, """
+        query TauroFulfillmentOrders($orderId: ID!) {
+          order(id: $orderId) {
+            fulfillmentOrders(first: 50) { nodes { id status } }
+            fulfillments(first: 50) {
+              id
+              status
+              trackingInfo(first: 10) { number }
+            }
+          }
+        }
+    """, {"orderId": pedido_gid})
+    if data is None:
         print(f"[shopify] no pude leer fulfillment_orders de {pedido_externo_id}")
         return False
-    try:
-        fos = [fo for fo in r.json().get("fulfillment_orders", [])
-               if fo.get("status") in ("open", "in_progress")]
-    except Exception:
+    order = data.get("order") or {}
+    tracking_limpio = str(tracking or "").strip()
+    if not tracking_limpio:
         return False
+    for fulfillment in order.get("fulfillments") or []:
+        numeros = {
+            str(info.get("number") or "").strip()
+            for info in (fulfillment.get("trackingInfo") or [])
+        }
+        estado_fulfillment = str(fulfillment.get("status") or "").upper()
+        if (tracking_limpio in numeros
+                and estado_fulfillment not in ("CANCELLED", "FAILURE", "ERROR")):
+            print(f"[shopify] pedido {pedido_externo_id} ya tenía el tracking {tracking_limpio}")
+            return True
+
+    fos = [fo for fo in ((order.get("fulfillmentOrders") or {}).get("nodes") or [])
+           if str(fo.get("status") or "").upper() in ("OPEN", "IN_PROGRESS")]
     if not fos:
         return False
 
-    url_track = f"https://www.fedex.com/fedextrack/?trknbr={tracking}" if courier.upper() == "FEDEX" else None
+    courier_crudo = str(courier or "").strip()
+    courier_mayus = courier_crudo.upper()
+    tracking_url = None
+    if "DHL" in courier_mayus:
+        courier_shopify = "DHL Express"
+        tracking_url = (
+            "https://www.dhl.com/global-en/home/tracking.html?tracking-id="
+            + urllib.parse.quote(tracking_limpio, safe="")
+        )
+    elif "FEDEX" in courier_mayus:
+        courier_shopify = "FedEx"
+        tracking_url = (
+            "https://www.fedex.com/fedextrack/?trknbr="
+            + urllib.parse.quote(tracking_limpio, safe="")
+        )
+    elif "UPS" in courier_mayus:
+        courier_shopify = "UPS"
+        tracking_url = (
+            "https://www.ups.com/track?loc=es_AR&tracknum="
+            + urllib.parse.quote(tracking_limpio, safe="")
+        )
+    else:
+        courier_shopify = courier_crudo or "Otro"
 
-    r2 = _api(dominio, token, "POST", "fulfillments.json", {
+    resultado = _graphql(dominio, token, """
+        mutation TauroFulfillmentCreate($fulfillment: FulfillmentInput!) {
+          fulfillmentCreate(fulfillment: $fulfillment) {
+            fulfillment { id status }
+            userErrors { field message }
+          }
+        }
+    """, {
         "fulfillment": {
-            "line_items_by_fulfillment_order": [{"fulfillment_order_id": fo["id"]} for fo in fos],
-            "tracking_info": {
-                "number": tracking,
-                "company": courier,
-                **({"url": url_track} if url_track else {}),
+            "lineItemsByFulfillmentOrder": [
+                {"fulfillmentOrderId": fo["id"]} for fo in fos
+            ],
+            "trackingInfo": {
+                "number": tracking_limpio,
+                "company": courier_shopify,
+                **({"url": tracking_url} if tracking_url else {}),
             },
-            "notify_customer": True,
+            "notifyCustomer": True,
         }
     })
-    if r2 is not None and r2.status_code in (200, 201):
-        print(f"[shopify] pedido {pedido_externo_id} marcado enviado con tracking {tracking}")
+    creado = (resultado or {}).get("fulfillmentCreate") or {}
+    if creado.get("fulfillment") and not (creado.get("userErrors") or []):
+        print(f"[shopify] pedido {pedido_externo_id} marcado enviado con tracking {tracking_limpio}")
         return True
-    print(f"[shopify] no pude marcar enviado {pedido_externo_id}: "
-          f"{r2.status_code if r2 else 'sin respuesta'}")
+    print(f"[shopify] no pude marcar enviado {pedido_externo_id} por GraphQL")
     return False
 
 
