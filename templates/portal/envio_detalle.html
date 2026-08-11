@@ -60,6 +60,9 @@
         </div>
         {% if s.tiene_label %}
             <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-full">⬇ Descargar guía PDF</a>
+            {% if s.tiene_factura_comercial %}
+            <a href="/portal/envios/{{ s.id }}/factura-comercial.pdf" target="_blank" class="btn btn-ghost btn-full" style="margin-top:8px;">Factura comercial PDF</a>
+            {% endif %}
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
                 {% if s.bultos and s.bultos|length %}El PDF trae una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}Imprimí la etiqueta y pegala en la caja.{% endif %}
             </p>

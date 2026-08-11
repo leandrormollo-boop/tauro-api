@@ -67,6 +67,41 @@ def test_emite_y_devuelve_tracking_y_label():
     assert r["label_pdf"] and r["label_pdf"].startswith(b"%PDF")
 
 
+def test_pide_y_devuelve_factura_comercial_pdf():
+    respuesta = {
+        "shipmentTrackingNumber": "1234567890",
+        "documents": [
+            {"typeCode": "label", "content": "JVBERi0xLjQK"},
+            {"typeCode": "invoice", "content": "JVBERi0xLjQK"},
+        ],
+    }
+    cap, r = _emitir_capturando(respuesta=respuesta)
+
+    imagenes = cap["body"]["outputImageProperties"]
+    assert imagenes["encodingFormat"] == "pdf"
+    assert [opcion["typeCode"] for opcion in imagenes["imageOptions"]] == [
+        "label", "invoice",
+    ]
+    invoice = imagenes["imageOptions"][1]
+    assert invoice["isRequested"] is True
+    assert invoice["invoiceType"] == "commercial"
+    assert r["invoice_pdf"] and r["invoice_pdf"].startswith(b"%PDF")
+
+
+def test_documento_invoice_invalido_no_reemplaza_la_guia():
+    respuesta = {
+        "shipmentTrackingNumber": "1234567890",
+        "documents": [
+            {"typeCode": "label", "content": "JVBERi0xLjQK"},
+            {"typeCode": "invoice", "content": "bm8gZXMgcGRm"},
+        ],
+    }
+    _, r = _emitir_capturando(respuesta=respuesta)
+
+    assert r["label_pdf"].startswith(b"%PDF")
+    assert r["invoice_pdf"] is None
+
+
 def test_usa_la_referencia_que_el_servicio_persistio_antes_del_post():
     referencia = "tauro-dhl-ship-81-abcd1234"
     cap, r = _emitir_capturando({**ENVIO, "message_reference": referencia})
@@ -173,6 +208,15 @@ def test_error_de_dhl_se_reporta_sin_inventar_tracking():
     cap, r = _emitir_capturando(respuesta={"detail": "Invalid postal code"}, status=400)
     assert not r["encontrado"] and "Invalid postal code" in r["error"]
     assert "tracking" not in r
+
+
+def test_401_y_403_informan_acceso_sin_exponer_respuesta():
+    for status in (401, 403):
+        respuesta = mock.Mock(status_code=status, text='{"detail":"dato interno"}')
+        respuesta.json.return_value = {"detail": "dato interno"}
+        error = DHLClient._error_legible(respuesta)
+        assert f"HTTP {status}" in error
+        assert "dato interno" not in error
 
 
 def test_respuesta_sin_tracking_no_se_da_por_buena():

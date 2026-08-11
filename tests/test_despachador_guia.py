@@ -29,6 +29,8 @@ def _emitir(courier):
 
     with mock.patch.object(sg, "obtener_solicitud", return_value={"id": 1, "courier": courier}), \
          mock.patch.object(sg, "generar_guia_envia", return_value={"ok": True, "via": "envia"}), \
+         mock.patch("servicios.configuracion_couriers_cliente.estado_integracion",
+                    return_value={"operativa": True}), \
          mock.patch.object(sg, "generar_guia_internacional", side_effect=_fake_internacional):
         return sg.generar_guia(1)
 
