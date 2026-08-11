@@ -89,6 +89,13 @@ def test_genera_paquete_completo_sin_exponer_credenciales(monkeypatch, tmp_path)
         assert "secreto-test" not in serializado
         assert codigo["headers_sin_authorization"]["Message-Reference"]
         assert codigo["body"]["outputImageProperties"]["imageOptions"][1]["typeCode"] == "invoice"
+        assert codigo["body"]["valueAddedServices"] == [{"serviceCode": "PV"}]
+        registro = codigo["body"]["customerDetails"]["shipperDetails"]["registrationNumbers"]
+        assert registro == [{
+            "number": "20111111112",
+            "issuerCountryCode": "AR",
+            "typeCode": "VAT",
+        }]
         assert contenido.read("03_guia_dhl.pdf").startswith(b"%PDF")
         assert contenido.read("04_factura_comercial_dhl.pdf").startswith(b"%PDF")
 

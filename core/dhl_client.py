@@ -70,6 +70,11 @@ class DHLClient(CarrierBase):
     # nuestros envíos llevan mercadería con valor declarado, no documentos.
     PRODUCTO_DEFAULT = "P"
 
+    # DHL Sistemas (11/08/2026): Data Staging 12 debe viajar en MyDHL JSON
+    # como valueAddedServices/serviceCode "PV". El antiguo código XML "PT"
+    # no es equivalente en este contrato y no debe volver a emitirse.
+    DATA_STAGING_SERVICE_CODE = "PV"
+
     def __init__(self):
         self.api_key        = os.getenv("DHL_API_KEY")
         self.api_secret     = os.getenv("DHL_API_SECRET")
@@ -537,6 +542,20 @@ class DHLClient(CarrierBase):
             }],
         }
 
+    @staticmethod
+    def _cuit_argentino_valido(documento: object) -> bool:
+        """Valida los 11 dígitos y el verificador módulo 11 del CUIT."""
+        cuit = "".join(ch for ch in str(documento or "") if ch.isdigit())
+        if len(cuit) != 11:
+            return False
+        pesos = (5, 4, 3, 2, 7, 6, 5, 4, 3, 2)
+        verificador = 11 - sum(int(n) * p for n, p in zip(cuit[:10], pesos)) % 11
+        if verificador == 11:
+            verificador = 0
+        if verificador == 10:
+            return False
+        return verificador == int(cuit[-1])
+
     def _direccion_envio(self, d: dict) -> dict:
         """
         postalAddress del POST. Igual que en /rates pero con la calle, que
@@ -581,6 +600,20 @@ class DHLClient(CarrierBase):
                 return {"encontrado": False, "error":
                         f"Completá {', '.join(faltan)} del {etiqueta} "
                         "antes de emitir con DHL."}
+
+        # Requisito de certificación DHL: todo exportador argentino debe ir
+        # identificado con su CUIT en shipperDetails.registrationNumbers.
+        # Bloquear antes del POST evita emitir una guía/factura fiscalmente
+        # incompleta o con un número de documento que no sea un CUIT válido.
+        pais_shipper = (shipper.get("pais") or shipper.get("country") or "AR").upper()[:2]
+        if pais_shipper == "AR" and not self._cuit_argentino_valido(
+            shipper.get("documento")
+        ):
+            return {
+                "encontrado": False,
+                "error": ("Completá un CUIT argentino válido de 11 dígitos "
+                          "para el remitente antes de emitir con DHL."),
+            }
         bultos = datos.get("bultos") or []
         if not bultos:
             package = datos.get("package") or {}
@@ -694,6 +727,9 @@ class DHLClient(CarrierBase):
             "pickup": {"isRequested": False},
             "productCode": self.product_code,
             "accounts": [{"typeCode": "shipper", "number": cuenta}],
+            "valueAddedServices": [{
+                "serviceCode": self.DATA_STAGING_SERVICE_CODE,
+            }],
             "customerDetails": {
                 "shipperDetails": {
                     "postalAddress": self._direccion_envio(shipper),

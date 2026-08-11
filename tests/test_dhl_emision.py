@@ -19,7 +19,8 @@ ENVIO = {
     "shipper": {"nombre": "Prete Rosso", "empresa": "PRETE ROSSO S.A.",
                 "telefono": "1145678900", "email": "envios@prete.com",
                 "calle": "Nicasio Oroño 1680", "ciudad": "CABA",
-                "estado": "C", "zip": "1416", "pais": "AR"},
+                "estado": "C", "zip": "1416", "pais": "AR",
+                "documento": "20-12345678-6"},
     "recipient": {"nombre": "Michelle Bordelon", "telefono": "3103446337",
                   "calle": "5223 42nd Ave SW", "ciudad": "Seattle",
                   "estado": "WA", "zip": "98136", "pais": "US"},
@@ -88,6 +89,38 @@ def test_pide_y_devuelve_factura_comercial_pdf():
     assert r["invoice_pdf"] and r["invoice_pdf"].startswith(b"%PDF")
 
 
+def test_data_staging_12_viaja_como_pv_y_nunca_como_pt():
+    cap, r = _emitir_capturando()
+
+    assert r["encontrado"]
+    servicios = cap["body"]["valueAddedServices"]
+    assert servicios == [{"serviceCode": "PV"}]
+    assert all(servicio.get("serviceCode") != "PT" for servicio in servicios)
+
+
+def test_cuit_argentino_formateado_viaja_normalizado_como_vat():
+    cap, r = _emitir_capturando()
+
+    assert r["encontrado"]
+    registro = cap["body"]["customerDetails"]["shipperDetails"]["registrationNumbers"]
+    assert registro == [{
+        "number": "20123456786",
+        "issuerCountryCode": "AR",
+        "typeCode": "VAT",
+    }]
+
+
+@pytest.mark.parametrize("documento", ["", "20-12345678-5", "12345678"])
+def test_envio_desde_argentina_exige_cuit_valido_antes_del_post(documento):
+    envio = {**ENVIO, "shipper": {**ENVIO["shipper"], "documento": documento}}
+
+    with mock.patch("core.dhl_client.requests.post") as post:
+        r = _cliente().create_shipment(envio)
+
+    assert not r["encontrado"] and "CUIT argentino válido" in r["error"]
+    post.assert_not_called()
+
+
 def test_documento_invoice_invalido_no_reemplaza_la_guia():
     respuesta = {
         "shipmentTrackingNumber": "1234567890",
@@ -143,7 +176,8 @@ def test_el_camino_ingles_de_cotizacion_sigue_andando():
     envio = {
         **ENVIO,
         "shipper": {"nombre": "X", "telefono": "1", "calle": "Calle 1",
-                    "city": "CABA", "postal_code": "1414", "country": "AR"},
+                    "city": "CABA", "postal_code": "1414", "country": "AR",
+                    "documento": "20-12345678-6"},
         "recipient": {"nombre": "Y", "telefono": "2", "calle": "5th Av 1",
                       "city": "New York", "postal_code": "10001", "country": "US"},
     }
