@@ -163,7 +163,7 @@ function QuoteWidget({ compact = false }) {
 
       <div className="tweb-cot-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 12, flexWrap: "wrap" }}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 6 }}>Cotizador instantáneo</div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Cotizador de envíos</div>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600 }}>
             Calculá tu envío
           </div>
@@ -231,7 +231,7 @@ function QuoteWidget({ compact = false }) {
           </button>
 
           <div style={{ marginTop: 14, fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textAlign: "center" }}>
-            Comparamos FedEx, UPS y DHL · sin compromiso · respuesta en segundos
+            Mostramos las opciones habilitadas para la ruta ingresada
           </div>
         </>
       )}
@@ -242,7 +242,7 @@ function QuoteWidget({ compact = false }) {
             Tus opciones de envío
           </div>
           <div style={{ color: "var(--fg-3)", marginBottom: 18, fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            {peso}kg · Buenos Aires → {DESTINOS.find(d => d.value === destino)?.label || destino} · comparamos FedEx, UPS y DHL
+            {peso}kg · {paises.find((p) => p.value === origen)?.label || origen} → {paises.find((p) => p.value === destino)?.label || destino} · opciones disponibles
           </div>
 
           <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
@@ -503,7 +503,7 @@ function CarrierCard({ carrier, recomendado }) {
           letterSpacing: "0.06em", textTransform: "uppercase",
           padding: "2px 8px", borderRadius: 99,
         }}>
-          Mejor precio
+          Precio más bajo
         </div>
       )}
 

@@ -11,21 +11,21 @@ function WhyUs() {
           <div>
             <div className="eyebrow" style={{ marginBottom: 18 }}>04 — Por qué Tauro</div>
             <h2 style={{ fontSize: "clamp(36px, 4.5vw, 56px)", marginBottom: 24 }}>
-              Hecho en Argentina.<br/>
-              Pensado <span style={{ color: "var(--accent)", fontStyle: "italic", fontWeight: 500 }}>global</span>.
+              Tecnología argentina.<br/>
+              Operación <span style={{ color: "var(--accent)", fontStyle: "italic", fontWeight: 500 }}>conectada</span>.
             </h2>
             <p style={{ color: "var(--fg-2)", fontSize: 17, lineHeight: 1.65, marginBottom: 32 }}>
-              Somos un equipo argentino de logística y tecnología. Operamos tus
-              envíos internacionales vía FedEx con atención directa y una
-              plataforma propia que elimina la fricción del comercio exterior.
+              Somos un equipo argentino de logística y tecnología. Centralizamos
+              pedidos, envíos y seguimiento en una plataforma propia. Las funciones
+              de cotización, guías y recolecciones se habilitan por cliente y courier.
             </p>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 16 }}>
-            <BigStat n="200+" l="Destinos vía red FedEx" />
-            <BigStat n="B2B" l="Tarifas corporativas" accent />
-            <BigStat n="1:1" l="Atención directa, sin call center" />
-            <BigStat n="Online" l="Cotización al instante" />
+            <BigStat n="Portal" l="Una sola operación" />
+            <BigStat n="B2B" l="Precios por cliente" accent />
+            <BigStat n="1:1" l="Atención directa" />
+            <BigStat n="2 vías" l="Tienda o carga manual" />
           </div>
         </div>
       </div>
@@ -78,11 +78,11 @@ function Industries() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 48, flexWrap: "wrap", gap: 24 }}>
           <div>
             <div className="eyebrow" style={{ marginBottom: 16 }}>05 — Industrias</div>
-            <h2 style={{ fontSize: "clamp(32px, 4vw, 48px)" }}>Industrias que movemos.</h2>
+            <h2 style={{ fontSize: "clamp(32px, 4vw, 48px)" }}>Negocios que conectamos.</h2>
           </div>
           <p style={{ color: "var(--fg-2)", maxWidth: 380, margin: 0 }}>
-            Operamos con protocolos específicos para cada vertical — desde
-            cadena de frío hasta mercancía peligrosa.
+            Cada empresa conserva su propia configuración, su base de clientes
+            y las opciones logísticas habilitadas para su operación.
           </p>
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
@@ -140,20 +140,18 @@ function ContactCTA({ onCotizarClick }) {
               margin: "0 auto 28px",
               letterSpacing: "-0.03em",
             }}>
-              Hablemos de mover<br/>
-              tu próximo embarque.
+              Conectá tu tienda.<br/>
+              Centralizá tu operación.
             </h2>
             <p style={{ color: "var(--fg-2)", fontSize: 18, maxWidth: 580, margin: "0 auto 40px" }}>
-              Cotización gratis en menos de 60 segundos. O escribinos y te
-              respondemos antes de que termines tu café.
+              Integrá Shopify o cargá tus envíos manualmente. Cotizá y gestioná
+              cada operación desde el portal de TAURO.
             </p>
             <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
-              <button className="btn btn-primary btn-lg" onClick={onCotizarClick}>
-                Cotizar ahora <ArrowRight size={16}/>
-              </button>
-              <a href="mailto:cotizaciones@taurosolutions.ar" className="btn btn-ghost btn-lg">
-                Hablar con un experto
+              <a href="/portal/login" className="btn btn-primary btn-lg">
+                Conectá tu tienda <ArrowRight size={16}/>
               </a>
+              <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
             </div>
             <div style={{ marginTop: 56, display: "flex", justifyContent: "center", gap: 48, flexWrap: "wrap", fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-3)" }}>
               <span>cotizaciones@taurosolutions.ar</span>
@@ -180,17 +178,17 @@ function Footer() {
               <span>Tauro<span style={{ color: "var(--fg-3)", fontWeight: 400, marginLeft: 4 }}>solutions</span></span>
             </a>
             <p style={{ color: "var(--fg-3)", fontSize: 14, maxWidth: 320, marginTop: 16 }}>
-              Soluciones logísticas internacionales para empresas y emprendedores argentinos.
+              Tu logística en un solo portal. Conectá tu tienda o cargá tus envíos manualmente.
             </p>
           </div>
           <div>
             <h4>Servicios</h4>
             <ul>
-              <li><a href="#servicios">Carga Aérea</a></li>
-              <li><a href="#servicios">Carga Marítima</a></li>
-              <li><a href="#servicios">Carga Terrestre</a></li>
-              <li><a href="#servicios">Despacho Aduanero</a></li>
-              <li><a href="#servicios">Almacenaje</a></li>
+              <li><a href="/portal/login">Conectar tienda</a></li>
+              <li><a href="#servicios">Centralizar operación</a></li>
+              <li><a href="#servicios">Cotizar envíos</a></li>
+              <li><a href="/portal/login">Crear envíos</a></li>
+              <li><a href="#tracking">Seguir envíos</a></li>
             </ul>
           </div>
           <div>
