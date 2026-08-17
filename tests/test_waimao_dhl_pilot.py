@@ -5,6 +5,8 @@ import os
 from contextlib import contextmanager
 from unittest import mock
 
+import pytest
+
 from core.dhl_client import DHLClient
 from servicios import solicitudes_guia as sg
 from servicios.recolecciones import datos_retiro_desde_solicitud
@@ -219,6 +221,17 @@ def test_retiro_legacy_preserva_totales_no_divisibles_hasta_dhl():
     detalle = post.call_args.kwargs["json"]["shipmentDetails"][0]
     assert sum(p["weight"] for p in detalle["packages"]) == 1
     assert detalle["declaredValue"] == 100
+
+
+def test_retiro_legacy_rechaza_cantidad_gigante_antes_de_crear_listas():
+    with pytest.raises(ValueError, match="máximo es 20"):
+        datos_retiro_desde_solicitud({
+            "id": 79, "cliente_id": "WAIMAO", "courier": "DHL",
+            "tracking": "125", "remitente_pais": "AR",
+            "cantidad": 10**9, "peso_kg": 10**9,
+            "largo_cm": 10, "ancho_cm": 20, "alto_cm": 30,
+            "valor_declarado_usd": 10**9, "bultos": [],
+        })
 
 
 def test_timeout_de_pickup_queda_marcado_como_incierto():

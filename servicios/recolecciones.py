@@ -153,9 +153,13 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
             raise ValueError("Los datos guardados de las cajas no son válidos.") from None
     if bultos and not isinstance(bultos, list):
         raise ValueError("Los datos guardados de las cajas no son válidos.")
+    if len(bultos) > MAX_BULTOS_RECOLECCION:
+        raise ValueError(
+            f"La guía supera el máximo de {MAX_BULTOS_RECOLECCION} cajas por retiro."
+        )
 
-    def entero(valor, campo: str) -> int:
-        return parse_entero_formulario(valor, campo, minimo=1)
+    def entero(valor, campo: str, *, maximo: int | None = None) -> int:
+        return parse_entero_formulario(valor, campo, minimo=1, maximo=maximo)
 
     def numero(valor, campo: str, *, importe=False) -> float:
         return parse_float_formulario(valor, campo, importe=importe, minimo=0.001)
@@ -170,7 +174,10 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
                 "largo_cm": numero(b.get("largo_cm"), f"Caja {indice}: largo"),
                 "ancho_cm": numero(b.get("ancho_cm"), f"Caja {indice}: ancho"),
                 "alto_cm": numero(b.get("alto_cm"), f"Caja {indice}: alto"),
-                "cantidad": entero(b.get("cantidad"), f"Caja {indice}: cantidad"),
+                "cantidad": entero(
+                    b.get("cantidad"), f"Caja {indice}: cantidad",
+                    maximo=MAX_BULTOS_RECOLECCION,
+                ),
                 "unidades_aduana": entero(
                     b.get("unidades_aduana"), f"Caja {indice}: unidades de aduana",
                 ),
@@ -180,7 +187,11 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
                 ),
             })
     else:
-        cantidad = entero(sol.get("cantidad"), "Cantidad de cajas")
+        # El máximo se aplica ANTES de crear listas de tamaño `cantidad`.
+        cantidad = entero(
+            sol.get("cantidad"), "Cantidad de cajas",
+            maximo=MAX_BULTOS_RECOLECCION,
+        )
         peso_total = numero(sol.get("peso_kg"), "Peso total")
         valor_total = numero(sol.get("valor_declarado_usd"), "Valor declarado", importe=True)
 
@@ -218,6 +229,10 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
         } for indice in range(cantidad)]
 
     cantidad_total = sum(int(p["cantidad"]) for p in paquetes)
+    if cantidad_total > MAX_BULTOS_RECOLECCION:
+        raise ValueError(
+            f"La guía supera el máximo de {MAX_BULTOS_RECOLECCION} cajas por retiro."
+        )
     peso_total = round(sum(float(p["peso_kg"]) * int(p["cantidad"])
                            for p in paquetes), 3)
     from servicios.paises import normalizar as normalizar_pais
