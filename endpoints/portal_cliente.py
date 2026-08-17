@@ -12,7 +12,9 @@
 # ============================================================
 
 import os
+import secrets
 from datetime import datetime
+from decimal import Decimal
 from urllib.parse import quote, urlencode
 
 from core.database import get_conn
@@ -35,7 +37,8 @@ from servicios.cotizador import cotizar_referencia_couriers
 from servicios.cotizador_nacional import preparar_cotizacion_nacional
 from servicios.cuenta_corriente import (
     saldo, total_pagado, get_facturado_real, get_facturas_recientes,
-    movimientos, resumir_facturacion,
+    movimientos, resumir_facturacion, resumen_cuenta_por_ambito,
+    movimientos_cuenta_paginados,
 )
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
@@ -49,6 +52,7 @@ from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
 from servicios.numeros_humanos import (
     parse_entero_formulario as _entero_form,
     parse_float_formulario as _numero_form,
+    parse_importe_humano,
 )
 from servicios.paises import normalizar as normalizar_pais
 from servicios.provincias import opciones as opciones_provincias
@@ -89,6 +93,34 @@ templates.env.globals["ambito_envio"] = ambito_envio
 
 
 AMBITOS_PORTAL = {"nacional", "internacional"}
+AMBITOS_CUENTA = {"consolidado", "nacional", "internacional"}
+TIPOS_MOVIMIENTO_CUENTA = {"todos", "cargos", "pagos", "revision"}
+# Mantiene el resumen y una página completa de movimientos dentro del viewport
+# de escritorio; el resto queda accesible con paginación explícita.
+MOVIMIENTOS_CUENTA_POR_PAGINA = 3
+_IDEMPOTENCY_KEY_MIN_LEN = 32
+_IDEMPOTENCY_KEY_MAX_LEN = 128
+_IDEMPOTENCY_KEY_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+)
+
+
+def _nueva_idempotency_key() -> str:
+    """Token opaco por render; sólo deduplica, nunca identifica al cliente."""
+    return secrets.token_urlsafe(32)
+
+
+def _idempotency_key_form(valor) -> str:
+    """Valida el token del formulario sin usarlo para autorización u ownership."""
+    if not isinstance(valor, str) or not valor.strip():
+        raise ValueError("Falta la clave de operación del formulario. Recargá la página.")
+    clave = valor.strip()
+    if (
+        not (_IDEMPOTENCY_KEY_MIN_LEN <= len(clave) <= _IDEMPOTENCY_KEY_MAX_LEN)
+        or any(caracter not in _IDEMPOTENCY_KEY_CHARS for caracter in clave)
+    ):
+        raise ValueError("La clave de operación del formulario no es válida. Recargá la página.")
+    return clave
 
 
 def _ambito_portal(valor) -> str:
@@ -97,6 +129,47 @@ def _ambito_portal(valor) -> str:
         return ""
     normalizado = valor.strip().lower()
     return normalizado if normalizado in AMBITOS_PORTAL else ""
+
+
+def _ambito_cuenta(valor) -> str:
+    """Ámbito contable visible; un valor manipulado vuelve al total seguro."""
+    if not isinstance(valor, str):
+        return "consolidado"
+    normalizado = valor.strip().lower()
+    return normalizado if normalizado in AMBITOS_CUENTA else "consolidado"
+
+
+def _tipo_movimiento_cuenta(valor) -> str:
+    """Filtro cerrado para no pasar valores arbitrarios a la consulta."""
+    if not isinstance(valor, str):
+        return "todos"
+    normalizado = valor.strip().lower()
+    return normalizado if normalizado in TIPOS_MOVIMIENTO_CUENTA else "todos"
+
+
+def _pagina_cuenta(valor) -> int:
+    """Una query mal formada no debe convertir la cuenta en un error 422."""
+    try:
+        return max(1, int(valor))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _importe_cuenta_form(valor, campo: str, *, minimo: Decimal) -> Decimal:
+    """Dinero localizado para la cuenta, sin pasar por punto flotante."""
+    try:
+        monto = parse_importe_humano(valor)
+    except ValueError:
+        raise ValueError(
+            f"{campo}: ingresá un número válido, por ejemplo 100.000 o 100,000."
+        ) from None
+    if monto is None:
+        raise ValueError(f"{campo}: completá este valor.")
+    if monto < minimo:
+        raise ValueError(f"{campo}: el mínimo es {minimo}.")
+    if monto.as_tuple().exponent < -2:
+        raise ValueError(f"{campo}: usá como máximo dos decimales.")
+    return monto.quantize(Decimal("0.01"))
 
 
 def _ambito_post(valor) -> str:
@@ -620,19 +693,36 @@ def recoleccion_cancelar(rec_id: int, cliente: str = Depends(cliente_actual)):
 
 # ── Cuenta corriente ────────────────────────────────────────
 @router.get("/cuenta", response_class=HTMLResponse)
-def cuenta_corriente(request: Request, cliente: str = Depends(cliente_actual)):
+def cuenta_corriente(
+    request: Request,
+    ambito: str = "consolidado",
+    tipo: str = "todos",
+    pagina: str = "1",
+    cliente: str = Depends(cliente_actual),
+):
     """
     Timeline completo de facturas y pagos. La spec lo pide explícito: el
     cliente administra su cuenta corriente con TAURO desde el portal, no
     preguntando el saldo por WhatsApp.
     """
-    facturado = get_facturado_real(cliente)
-    saldo_data = saldo(cliente, total_facturado_ars=facturado)
-    # Esto ES el historial: no truncar movimientos viejos. Cada cargo conserva
-    # además si ya tiene número de factura o sigue pendiente de facturación.
-    facturas = get_facturas_recientes(cliente, limite=None)
-    movs = movimientos(cliente, facturas)
-    resumen_facturacion = resumir_facturacion(facturas)
+    ambito = _ambito_cuenta(ambito)
+    tipo = _tipo_movimiento_cuenta(tipo)
+    pagina_numero = _pagina_cuenta(pagina)
+
+    # Las dos consultas reciben exclusivamente el cliente autenticado. Ningún
+    # query param o campo del form puede elegir la cuenta de otra persona.
+    resumen = resumen_cuenta_por_ambito(cliente)
+    movs = movimientos_cuenta_paginados(
+        cliente, ambito, tipo, pagina_numero, MOVIMIENTOS_CUENTA_POR_PAGINA
+    )
+    consolidado = resumen["consolidado"]
+    # Compatibilidad con el saldo del menú lateral: reutiliza el total ya
+    # calculado y evita otra consulta a la base.
+    saldo_data = {
+        "facturado_ars": consolidado["debe_ars"],
+        "pagado_ars": consolidado["haber_ars"],
+        "saldo_pendiente_ars": consolidado["saldo_ars"],
+    }
 
     return templates.TemplateResponse(
         request=request, name="portal/cuenta.html",
@@ -640,7 +730,10 @@ def cuenta_corriente(request: Request, cliente: str = Depends(cliente_actual)):
             "cliente": cliente,
             "saldo": saldo_data,
             "movimientos": movs,
-            "resumen_facturacion": resumen_facturacion,
+            "resumen_cuenta": resumen,
+            "ambito_filtro": ambito,
+            "tipo_filtro": tipo,
+            "idempotency_key": _nueva_idempotency_key(),
         },
     )
 
@@ -660,10 +753,37 @@ async def informar_pago(
     from servicios.cuenta_corriente import leer_comprobante_con_tope, registrar_pago
 
     form = await request.form()
+    volver_ambito = _ambito_cuenta(form.get("volver_ambito"))
     try:
-        monto = _numero_form(
-            str(form.get("monto") or ""), "Monto", importe=True, minimo=0.01
+        idempotency_key = _idempotency_key_form(form.get("idempotency_key"))
+        monto = _importe_cuenta_form(
+            form.get("monto"), "Monto", minimo=Decimal("0.01")
         )
+
+        destino = str(form.get("destino_pago") or "SIN_IMPUTAR").strip().upper()
+        if destino not in {"SIN_IMPUTAR", "NACIONAL", "INTERNACIONAL", "DIVIDIR"}:
+            raise ValueError("Elegí un destino válido para el pago.")
+
+        aplicaciones = {}
+        if destino in {"NACIONAL", "INTERNACIONAL"}:
+            aplicaciones[destino] = monto
+        elif destino == "DIVIDIR":
+            monto_nacional = _importe_cuenta_form(
+                form.get("monto_nacional") or "0",
+                "Monto para Nacional", minimo=Decimal("0"),
+            )
+            monto_internacional = _importe_cuenta_form(
+                form.get("monto_internacional") or "0",
+                "Monto para Internacional", minimo=Decimal("0"),
+            )
+            if monto_nacional + monto_internacional <= 0:
+                raise ValueError("Indicá cuánto querés imputar a Nacional o Internacional.")
+            if monto_nacional + monto_internacional > monto:
+                raise ValueError("La suma a imputar no puede superar el monto total del pago.")
+            if monto_nacional:
+                aplicaciones["NACIONAL"] = monto_nacional
+            if monto_internacional:
+                aplicaciones["INTERNACIONAL"] = monto_internacional
 
         archivo = form.get("comprobante")
         contenido = await leer_comprobante_con_tope(archivo)
@@ -680,15 +800,23 @@ async def informar_pago(
             estado="PENDIENTE",
             comprobante=contenido,
             comprobante_nombre=getattr(archivo, "filename", "") or "",
+            aplicaciones=aplicaciones,
+            idempotency_key=idempotency_key,
         )
     except ValueError as e:
-        return RedirectResponse(url=f"/portal/cuenta?error={quote(str(e))}", status_code=303)
+        return RedirectResponse(
+            url=f"/portal/cuenta?ambito={volver_ambito}&error={quote(str(e))}",
+            status_code=303,
+        )
     except Exception as e:
         print(f"[portal] informar_pago falló para {cliente}: {e}")
         return RedirectResponse(
-            url=f"/portal/cuenta?error={quote('No pudimos guardar el pago. Probá de nuevo.')}",
+            url=(f"/portal/cuenta?ambito={volver_ambito}&error="
+                 f"{quote('No pudimos guardar el pago. Probá de nuevo.') }"),
             status_code=303)
-    return RedirectResponse(url="/portal/cuenta?ok=1", status_code=303)
+    return RedirectResponse(
+        url=f"/portal/cuenta?ambito={volver_ambito}&ok=1", status_code=303
+    )
 
 
 @router.get("/facturas/{envio_id}/pdf")
@@ -1130,6 +1258,10 @@ def envios_view(
 ):
     # Esta es la vista de historial, no un preview: no ocultar silenciosamente
     # los envíos anteriores al límite por defecto del servicio.
+    # Ya no hay una pantalla intermedia: el historial abre separado y las dos
+    # pestañas quedan siempre visibles. Internacional conserva el flujo que el
+    # portal tenía antes de incorporar operadores nacionales.
+    tipo = _ambito_portal(tipo) or "internacional"
     historial = listar_solicitudes_cliente(cliente, limite=None)
     vista = preparar_historial_envios(historial, tipo, paso, pagina)
 

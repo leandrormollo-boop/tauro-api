@@ -14,31 +14,47 @@
   </div>
 </div>
 
-<!-- Saldo rápido -->
-<div class="card-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom:24px;">
+<!-- Cuenta corriente por ámbito -->
+<div class="card-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom:16px;">
   <div class="stat-card">
     <div class="label">Pricing</div>
     <div class="value" style="font-size:22px;">{{ cliente.pricing_desc }}</div>
   </div>
+  {% for nombre, ledger in [
+    ('Consolidado', cuenta_ambitos.consolidado),
+    ('Nacional', cuenta_ambitos.nacional),
+    ('Internacional', cuenta_ambitos.internacional)
+  ] %}
   <div class="stat-card">
-    <div class="label">Facturado ARS</div>
-    <div class="value">$ {{ "{:,.0f}".format(saldo.facturado_ars) }}</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Pagado ARS</div>
-    <div class="value ok">$ {{ "{:,.0f}".format(saldo.pagado_ars) }}</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Saldo pendiente</div>
-    <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% elif saldo.saldo_pendiente_ars < 0 %}ok{% endif %}">
-      $ {{ "{:,.0f}".format(saldo.saldo_pendiente_ars) }}
+    <div class="label">{{ nombre }}</div>
+    <div class="value {% if ledger.saldo_ars > 0 %}warn{% elif ledger.saldo_ars < 0 %}ok{% endif %}">
+      $ {{ "{:,.2f}".format(ledger.saldo_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
     </div>
+    <small style="display:block;color:var(--fg-4);margin-top:8px;line-height:1.5;">
+      Debe $ {{ "{:,.2f}".format(ledger.debe_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
+      Haber $ {{ "{:,.2f}".format(ledger.haber_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
+      Facturado $ {{ "{:,.2f}".format(ledger.facturado_ars).replace(",", "X").replace(".", ",").replace("X", ".") }} · pendiente de FC $ {{ "{:,.2f}".format(ledger.pendiente_facturacion_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
+    </small>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:24px;">
+  <div class="stat-card">
+    <div class="label">Crédito sin imputar</div>
+    <div class="value ok">$ {{ "{:,.2f}".format(cuenta_ambitos.credito_sin_imputar_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+    <small style="color:var(--fg-4);">Pago aprobado todavía no asignado a Nacional o Internacional.</small>
+  </div>
+  <div class="stat-card">
+    <div class="label">Cargos sin clasificar</div>
+    <div class="value {% if cuenta_ambitos.cargos_sin_clasificar_ars > 0 %}warn{% endif %}">$ {{ "{:,.2f}".format(cuenta_ambitos.cargos_sin_clasificar_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+    <small style="color:var(--fg-4);">Quedan fuera de ambos subledgers hasta conciliarlos con evidencia.</small>
   </div>
 </div>
 
 <!-- Acciones rápidas -->
 <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-  <a href="/admin/envios/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-primary btn-sm">+ Cargar factura</a>
+  <a href="/admin/envios/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-primary btn-sm">+ Cargar cargo manual</a>
   <a href="/admin/pagos/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">+ Registrar pago</a>
   <button type="button" id="btn-reset-pwd" data-muestra="#reset-pwd-form"
           class="btn btn-ghost btn-sm">🔑 Resetear contraseña del portal</button>
@@ -67,10 +83,10 @@
 <div class="msg ok" style="margin-bottom:16px;">{{ flash_ok }}</div>
 {% endif %}
 
-<!-- Facturas -->
+<!-- Facturas y cargos -->
 <div class="card" style="margin-bottom:16px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <h3 style="margin:0;">Facturas / envíos</h3>
+    <h3 style="margin:0;">Facturas / cargos</h3>
     {% if pagination %}
     <small style="color:var(--fg-4);">
       {{ pagination.total_envios }} en total · página {{ pagination.page }} de {{ pagination.total_pages }}
@@ -85,6 +101,7 @@
           <th>Nro. FC</th>
           <th>Descripción</th>
           <th>Tracking</th>
+          <th>Ámbito</th>
           <th>Monto ARS</th>
           <th>Estado</th>
           <th></th>
@@ -97,22 +114,53 @@
           <td class="mono">{{ e.nro_fc or "—" }}</td>
           <td style="color:var(--fg-3)">{{ e.descripcion or "—" }}</td>
           <td class="mono" style="font-size:11px">{{ e.tracking or "—" }}</td>
-          <td class="mono">$ {{ "{:,.0f}".format(e.monto_ars) }}</td>
           <td>
-            <span class="badge {% if e.estado == 'ACTIVO' %}ok{% elif e.estado == 'CANCELADO' %}error{% else %}warn{% endif %}">
-              {{ e.estado }}
-            </span>
+            {% if e.ambito == 'NACIONAL' %}
+              <span class="badge ok">NACIONAL</span>
+            {% elif e.ambito == 'INTERNACIONAL' %}
+              <span class="badge">INTERNACIONAL</span>
+            {% else %}
+              <span class="badge warn">SIN CLASIFICAR</span>
+              {% if puede_clasificar_cargos %}
+              <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/clasificar"
+                    style="display:flex;gap:4px;margin-top:6px;align-items:center;"
+                    data-confirm="¿Confirmás el ámbito de este cargo histórico? Sólo hacelo con evidencia de la ruta.">
+                <select name="ambito" required aria-label="Clasificar ámbito" style="min-width:120px;">
+                  <option value="">Elegir…</option>
+                  <option value="NACIONAL">Nacional</option>
+                  <option value="INTERNACIONAL">Internacional</option>
+                </select>
+                <button type="submit" class="btn btn-sm btn-ghost">Clasificar</button>
+              </form>
+              {% else %}
+              <small style="display:block;color:var(--fg-4);margin-top:4px;">Requiere conciliación; la clasificación segura todavía no está habilitada.</small>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td class="mono">$ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
+          <td>
+            {% if e.estado == 'CANCELADO' %}
+              <span class="badge error">CANCELADO</span>
+            {% elif e.nro_fc %}
+              <span class="badge ok">FACTURADO</span>
+            {% else %}
+              <span class="badge warn">A FACTURAR</span>
+            {% endif %}
           </td>
           <td>
-            {% if e.estado == 'ACTIVO' %}
+            {% if e.estado == 'ACTIVO' and not e.nro_fc %}
+            <a href="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/facturar"
+               class="btn btn-sm btn-primary">Facturar</a>
             <form method="POST" action="/admin/envios/{{ e.id }}/cancelar" style="display:inline;">
               <button type="submit" class="btn btn-sm btn-ghost" style="color:var(--error)">Cancelar</button>
             </form>
+            {% elif e.nro_fc and e.tiene_factura_pdf %}
+            <a href="/admin/envios/{{ e.id }}/factura" class="btn btn-sm btn-ghost">Ver PDF</a>
             {% endif %}
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" style="color:var(--fg-4);text-align:center;padding:16px;">Sin facturas.</td></tr>
+        <tr><td colspan="8" style="color:var(--fg-4);text-align:center;padding:16px;">Sin cargos.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -146,6 +194,8 @@
           <th>Monto ARS</th>
           <th>Método</th>
           <th>Referencia</th>
+          <th>Imputación</th>
+          <th>Estado</th>
           <th>Nota</th>
         </tr>
       </thead>
@@ -153,13 +203,34 @@
         {% for p in pagos %}
         <tr>
           <td class="mono">{{ p.fecha.strftime("%d/%m/%Y") if p.fecha else "—" }}</td>
-          <td class="mono" style="color:var(--ok)">$ {{ "{:,.0f}".format(p.monto_ars) }}</td>
+          <td class="mono" style="color:var(--ok)">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>{{ p.metodo }}</td>
           <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}</td>
+          <td>
+            {% if p.estado == 'RECHAZADO' %}
+              <span style="color:var(--fg-4);">No aplica</span>
+            {% else %}
+              {% if p.monto_nacional > 0 %}
+                <span class="badge ok">N $ {{ "{:,.2f}".format(p.monto_nacional).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+              {% endif %}
+              {% if p.monto_internacional > 0 %}
+                <span class="badge">I $ {{ "{:,.2f}".format(p.monto_internacional).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+              {% endif %}
+              {% set remanente = p.monto_ars - p.monto_nacional - p.monto_internacional %}
+              {% if remanente > 0 %}
+                <span class="badge warn">SIN IMPUTAR $ {{ "{:,.2f}".format(remanente).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {% if p.estado == 'APROBADO' or not p.estado %}ok{% elif p.estado == 'RECHAZADO' %}error{% else %}warn{% endif %}">
+              {{ p.estado or 'APROBADO' }}
+            </span>
+          </td>
           <td style="color:var(--fg-3)">{{ p.nota or "—" }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="5" style="color:var(--fg-4);text-align:center;padding:16px;">Sin pagos.</td></tr>
+        <tr><td colspan="7" style="color:var(--fg-4);text-align:center;padding:16px;">Sin pagos.</td></tr>
         {% endfor %}
       </tbody>
     </table>

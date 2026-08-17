@@ -2,8 +2,10 @@
 
 Decisión de producto del 15/08/2026: el cliente nunca opera sobre una lista o
 cotización que mezcle envíos nacionales e internacionales. La cuenta corriente
-queda rotulada como consolidada hasta completar la aplicación de pagos por
-ámbito; no se simulan dos saldos usando dos veces el mismo comprobante.
+por ámbito ya está implementada en la rama de preparación, pero no se habilita
+en producción hasta migrar y conciliar la historia. Ningún comprobante se resta
+dos veces: las aplicaciones Nacional/Internacional comparten el mismo pago y su
+suma nunca puede superarlo.
 
 ## Regla canónica
 
@@ -56,33 +58,41 @@ validación propia y jamás podrá hacer fallback silencioso a otra empresa.
   entrada que consumirán sus adapters, pero no constituye una tarifa.
 - Internacional conserva el flujo vigente.
 - Cada tarjeta internacional transporta el courier elegido al wizard.
-- Mis envíos abre como selector de ámbito; no existe un listado operativo
-  “Todos”.
+- Mis envíos abre en Internacional y ofrece pestañas persistentes Nacional /
+  Internacional, con conteos, filtros y paginación propios. No existe un listado
+  operativo que mezcle ambos ámbitos.
 - Home separa actividad nacional e internacional.
 - `solicitudes_guia.ambito` se deriva de los países y el cargo automático lo
   copia a `envios.ambito`.
-- El backup genera `Envios_Nacionales` y `Envios_Internacionales`; la hoja
-  financiera se rotula `Cuenta_consolidada` hasta completar las aplicaciones
-  de pagos.
+- El backup genera `Envios_Nacionales`, `Envios_Internacionales`,
+  `Cuenta_Consolidada`, `Cuenta_Nacional` y `Cuenta_Internacional`; cuando
+  corresponde agrega hojas separadas para crédito sin imputar y cargos sin
+  clasificar.
 
 ## Cuenta corriente
 
-El saldo lateral seguirá siendo consolidado y debe estar rotulado como tal.
-La separación contable completa requiere `pagos_aplicaciones`: un comprobante
-puede aplicarse parcialmente a cargos nacionales e internacionales sin
-duplicar el crédito. Hasta implementar y conciliar esa tabla, no se deben
-mostrar dos saldos que resten el mismo pago.
+El saldo lateral sigue siendo consolidado. La vista de cuenta muestra, además,
+Debe, Haber y Saldo Nacional/Internacional, crédito aprobado todavía sin
+imputar y cargos que continúan en cuarentena. `pagos_aplicaciones` permite que
+un comprobante se aplique parcialmente a ambos ámbitos sin duplicar crédito;
+una solicitud del cliente recién impacta cuando TAURO aprueba el comprobante.
+
+La implementación está lista en código, no en la base productiva. Antes del
+despliegue deben ejecutarse el preflight, la migración monetaria, el backfill
+con evidencia y la reconciliación por cliente documentados en
+`docs/CUENTA_CORRIENTE_POR_AMBITO.md`.
 
 Migración segura:
 
-1. Agregar columnas nullable y dual-write para operaciones nuevas.
+1. Tomar un snapshot restaurable y ejecutar el preflight read-only.
 2. Clasificar historia por países/ruta; usar courier sólo como evidencia de
    nacionales legados.
 3. Dejar en cuarentena todo conflicto o fila sin evidencia.
-4. Crear aplicaciones de pagos con evidencia y validar que su suma nunca
-   exceda el comprobante.
-5. Recién entonces activar Cuenta nacional / Cuenta internacional, exports y
-   hojas separadas.
+4. Crear la estructura de aplicaciones y convertir dinero a `NUMERIC`.
+5. Mantener pagos históricos aprobados sin imputar hasta conciliarlos; validar
+   que la suma aplicada nunca exceda el comprobante.
+6. Reconciliar el consolidado anterior contra Nacional + Internacional +
+   cuarentena, y recién entonces habilitar la nueva vista en producción.
 
 ## Para conectar OCA y Andreani
 

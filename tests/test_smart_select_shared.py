@@ -20,8 +20,8 @@ ADMIN_BASE = (RAIZ / "templates" / "admin" / "base_admin.html").read_text(encodi
 def test_portal_y_admin_cargan_la_misma_version_de_la_ui_compartida():
     assert '/static/js/tauro-ui.js?v=8' in PORTAL_BASE
     assert '/static/js/tauro-ui.js?v=8' in ADMIN_BASE
-    assert '/static/css/tauro.css?v=23' in PORTAL_BASE
-    assert '/static/css/tauro.css?v=23' in ADMIN_BASE
+    assert '/static/css/tauro.css?v=24' in PORTAL_BASE
+    assert '/static/css/tauro.css?v=24' in ADMIN_BASE
 
 
 def test_smart_select_busca_por_atributo_o_por_cantidad_y_prioriza_prefijo():

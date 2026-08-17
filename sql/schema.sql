@@ -176,14 +176,80 @@ CREATE INDEX IF NOT EXISTS idx_productos_cliente ON productos(cliente_id);
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (
     id           SERIAL PRIMARY KEY,
-    cliente_id   TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    cliente_id   TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE RESTRICT,
     fecha        DATE NOT NULL,
-    monto_ars    REAL NOT NULL,
+    monto_ars    NUMERIC(14,2) NOT NULL,
     metodo       TEXT NOT NULL DEFAULT 'transferencia',
     referencia   TEXT,
     nota         TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Preserva el libro contable al borrar clientes. CREATE TABLE IF NOT EXISTS no
+-- modifica FKs legacy. Se identifican por tablas + columnas, no por nombre:
+-- una FK custom CASCADE también debe desaparecer. Si ya hay exactamente una
+-- canónica, validada y RESTRICT, el bloque no ejecuta ningún DDL.
+DO $$
+DECLARE
+    cantidad_exactas INTEGER;
+    todas_canonicas  BOOLEAN;
+    fk               RECORD;
+BEGIN
+    SELECT COUNT(*), COALESCE(BOOL_AND(
+               c.conname = 'pagos_cliente_id_fkey'
+               AND c.confdeltype = 'r'
+               AND c.convalidated
+           ), FALSE)
+      INTO cantidad_exactas, todas_canonicas
+      FROM pg_constraint c
+     WHERE c.contype = 'f'
+       AND c.conrelid = 'pagos'::regclass
+       AND c.confrelid = 'clientes'::regclass
+       AND c.conkey = ARRAY[(
+           SELECT a.attnum
+             FROM pg_attribute a
+            WHERE a.attrelid = 'pagos'::regclass
+              AND a.attname = 'cliente_id'
+              AND NOT a.attisdropped
+       )]::SMALLINT[]
+       AND c.confkey = ARRAY[(
+           SELECT a.attnum
+             FROM pg_attribute a
+            WHERE a.attrelid = 'clientes'::regclass
+              AND a.attname = 'cliente_id'
+              AND NOT a.attisdropped
+       )]::SMALLINT[];
+
+    IF cantidad_exactas <> 1 OR NOT todas_canonicas THEN
+        FOR fk IN
+            SELECT c.conrelid, c.conname
+              FROM pg_constraint c
+             WHERE c.contype = 'f'
+               AND c.conrelid = 'pagos'::regclass
+               AND c.confrelid = 'clientes'::regclass
+               AND c.conkey = ARRAY[(
+                   SELECT a.attnum FROM pg_attribute a
+                    WHERE a.attrelid = 'pagos'::regclass
+                      AND a.attname = 'cliente_id' AND NOT a.attisdropped
+               )]::SMALLINT[]
+               AND c.confkey = ARRAY[(
+                   SELECT a.attnum FROM pg_attribute a
+                    WHERE a.attrelid = 'clientes'::regclass
+                      AND a.attname = 'cliente_id' AND NOT a.attisdropped
+               )]::SMALLINT[]
+        LOOP
+            EXECUTE FORMAT(
+                'ALTER TABLE %s DROP CONSTRAINT %I',
+                fk.conrelid::regclass,
+                fk.conname
+            );
+        END LOOP;
+
+        ALTER TABLE pagos
+            ADD CONSTRAINT pagos_cliente_id_fkey
+            FOREIGN KEY (cliente_id) REFERENCES clientes(cliente_id)
+            ON DELETE RESTRICT;
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id);
 -- Pagos informados por el CLIENTE con comprobante (decisión de Leandro
 -- 28/07): entran como PENDIENTE y NO tocan el saldo hasta que el admin los
@@ -193,6 +259,131 @@ ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'APROBA
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante BYTEA;
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT;
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT;
+-- Token opaco de la operación de alta. NULL conserva compatibilidad con
+-- historia/importaciones; los flujos interactivos nuevos siempre lo envían.
+ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'pagos'::regclass
+          AND conname = 'ck_pagos_idempotency_key'
+    ) THEN
+        ALTER TABLE pagos ADD CONSTRAINT ck_pagos_idempotency_key
+            CHECK (
+                idempotency_key IS NULL
+                OR idempotency_key ~ '^[A-Za-z0-9_-]{32,128}$'
+            ) NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE pagos VALIDATE CONSTRAINT ck_pagos_idempotency_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pagos_cliente_idempotency
+    ON pagos(cliente_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+-- Aplicación contable explícita del pago por ÁMBITO. Un pago APROBADO puede
+-- distribuirse entre NACIONAL e INTERNACIONAL y conservar el resto como
+-- crédito sin imputar. Deliberadamente no hay backfill: los pagos históricos
+-- aprobados arrancan sin filas acá y, por lo tanto, 100% sin imputar.
+CREATE TABLE IF NOT EXISTS pagos_aplicaciones (
+    id          SERIAL PRIMARY KEY,
+    pago_id     INTEGER NOT NULL REFERENCES pagos(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+    ambito      TEXT NOT NULL,
+    monto_ars   NUMERIC(14,2) NOT NULL,
+    estado      TEXT NOT NULL DEFAULT 'APLICADA',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (pago_id, ambito),
+    CONSTRAINT ck_pagos_aplicaciones_ambito
+        CHECK (ambito IN ('NACIONAL', 'INTERNACIONAL')),
+    CONSTRAINT ck_pagos_aplicaciones_monto
+        CHECK (monto_ars > 0),
+    CONSTRAINT ck_pagos_aplicaciones_estado
+        CHECK (estado IN ('SOLICITADA', 'APLICADA'))
+);
+CREATE INDEX IF NOT EXISTS idx_pagos_aplicaciones_pago
+    ON pagos_aplicaciones(pago_id);
+
+-- Serializa todas las aplicaciones de un pago sobre la fila padre. Así dos
+-- decisiones concurrentes no pueden acreditar, entre ambas, más que el pago.
+-- Las solicitudes de un PENDIENTE se guardan, pero no son haber hasta que el
+-- admin las confirme al aprobar; aun así, tampoco pueden superar el pago.
+CREATE OR REPLACE FUNCTION validar_pago_aplicacion()
+RETURNS TRIGGER AS $$
+DECLARE
+    pago_monto NUMERIC(14,2);
+    pago_estado TEXT;
+    ya_aplicado NUMERIC(14,2);
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND (NEW.pago_id <> OLD.pago_id OR NEW.ambito <> OLD.ambito) THEN
+        RAISE EXCEPTION 'No se puede cambiar pago/ámbito de una aplicación; reemplácela';
+    END IF;
+
+    SELECT monto_ars::numeric, COALESCE(estado, 'APROBADO')
+      INTO pago_monto, pago_estado
+      FROM pagos
+     WHERE id = NEW.pago_id
+       FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'El pago % no existe', NEW.pago_id;
+    END IF;
+    IF NEW.estado = 'APLICADA' AND pago_estado <> 'APROBADO' THEN
+        RAISE EXCEPTION 'El pago % no está aprobado', NEW.pago_id;
+    END IF;
+    IF NEW.estado = 'SOLICITADA' AND pago_estado <> 'PENDIENTE' THEN
+        RAISE EXCEPTION 'Sólo un pago pendiente admite una imputación solicitada';
+    END IF;
+
+    SELECT COALESCE(SUM(monto_ars), 0)
+      INTO ya_aplicado
+     FROM pagos_aplicaciones
+     WHERE pago_id = NEW.pago_id
+       AND id <> COALESCE(NEW.id, -1);
+
+    IF ya_aplicado + NEW.monto_ars > pago_monto THEN
+        RAISE EXCEPTION
+            'Las aplicaciones (%) superan el monto (%) del pago %',
+            ya_aplicado + NEW.monto_ars, pago_monto, NEW.pago_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_pago_aplicacion ON pagos_aplicaciones;
+CREATE TRIGGER trg_validar_pago_aplicacion
+BEFORE INSERT OR UPDATE ON pagos_aplicaciones
+FOR EACH ROW EXECUTE FUNCTION validar_pago_aplicacion();
+
+-- Evita que una edición posterior achique o desapruebe un pago ya imputado.
+CREATE OR REPLACE FUNCTION validar_pago_con_aplicaciones()
+RETURNS TRIGGER AS $$
+DECLARE
+    aplicado NUMERIC(14,2);
+BEGIN
+    SELECT COALESCE(SUM(monto_ars), 0)
+      INTO aplicado
+      FROM pagos_aplicaciones
+     WHERE pago_id = OLD.id
+       AND estado = 'APLICADA';
+
+    IF aplicado > NEW.monto_ars::numeric THEN
+        RAISE EXCEPTION 'El pago % tiene % aplicado y no puede reducirse a %',
+            OLD.id, aplicado, NEW.monto_ars;
+    END IF;
+    IF aplicado > 0 AND COALESCE(NEW.estado, 'APROBADO') <> 'APROBADO' THEN
+        RAISE EXCEPTION 'El pago % tiene aplicaciones y debe seguir aprobado', OLD.id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_pago_con_aplicaciones ON pagos;
+CREATE TRIGGER trg_validar_pago_con_aplicaciones
+BEFORE UPDATE OF monto_ars, estado ON pagos
+FOR EACH ROW EXECUTE FUNCTION validar_pago_con_aplicaciones();
+
 -- Historial de salud para la página de estado pública (/estado). El
 -- centinela (cada 15 min) suma acá: checks del día y cuántos fallaron.
 CREATE TABLE IF NOT EXISTS salud_historial (
@@ -220,19 +411,126 @@ CREATE INDEX IF NOT EXISTS idx_leads_cotizacion_email_fecha
 -- ── Envíos / Facturas (ex ENVIOS 2026) ─────────────────────
 CREATE TABLE IF NOT EXISTS envios (
     id           SERIAL PRIMARY KEY,
-    cliente_id   TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    cliente_id   TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE RESTRICT,
     fecha        DATE NOT NULL,
     nro_fc       TEXT,
-    monto_ars    REAL NOT NULL DEFAULT 0,
+    monto_ars    NUMERIC(14,2) NOT NULL DEFAULT 0,
     estado       TEXT NOT NULL DEFAULT 'ACTIVO',  -- ACTIVO | CANCELADO | NC
     descripcion  TEXT,
     tracking     TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+DO $$
+DECLARE
+    cantidad_exactas INTEGER;
+    todas_canonicas  BOOLEAN;
+    fk               RECORD;
+BEGIN
+    SELECT COUNT(*), COALESCE(BOOL_AND(
+               c.conname = 'envios_cliente_id_fkey'
+               AND c.confdeltype = 'r'
+               AND c.convalidated
+           ), FALSE)
+      INTO cantidad_exactas, todas_canonicas
+      FROM pg_constraint c
+     WHERE c.contype = 'f'
+       AND c.conrelid = 'envios'::regclass
+       AND c.confrelid = 'clientes'::regclass
+       AND c.conkey = ARRAY[(
+           SELECT a.attnum
+             FROM pg_attribute a
+            WHERE a.attrelid = 'envios'::regclass
+              AND a.attname = 'cliente_id'
+              AND NOT a.attisdropped
+       )]::SMALLINT[]
+       AND c.confkey = ARRAY[(
+           SELECT a.attnum
+             FROM pg_attribute a
+            WHERE a.attrelid = 'clientes'::regclass
+              AND a.attname = 'cliente_id'
+              AND NOT a.attisdropped
+       )]::SMALLINT[];
+
+    IF cantidad_exactas <> 1 OR NOT todas_canonicas THEN
+        FOR fk IN
+            SELECT c.conrelid, c.conname
+              FROM pg_constraint c
+             WHERE c.contype = 'f'
+               AND c.conrelid = 'envios'::regclass
+               AND c.confrelid = 'clientes'::regclass
+               AND c.conkey = ARRAY[(
+                   SELECT a.attnum FROM pg_attribute a
+                    WHERE a.attrelid = 'envios'::regclass
+                      AND a.attname = 'cliente_id' AND NOT a.attisdropped
+               )]::SMALLINT[]
+               AND c.confkey = ARRAY[(
+                   SELECT a.attnum FROM pg_attribute a
+                    WHERE a.attrelid = 'clientes'::regclass
+                      AND a.attname = 'cliente_id' AND NOT a.attisdropped
+               )]::SMALLINT[]
+        LOOP
+            EXECUTE FORMAT(
+                'ALTER TABLE %s DROP CONSTRAINT %I',
+                fk.conrelid::regclass,
+                fk.conname
+            );
+        END LOOP;
+
+        ALTER TABLE envios
+            ADD CONSTRAINT envios_cliente_id_fkey
+            FOREIGN KEY (cliente_id) REFERENCES clientes(cliente_id)
+            ON DELETE RESTRICT;
+    END IF;
+END $$;
+-- Vacío significa cargo aún pendiente de facturación. Si se informa una FC,
+-- debe contener al menos un carácter alfanumérico después de normalizarla;
+-- valores como "---" no pueden eludir el índice único global.
+DO $$
+BEGIN
+    -- Nombre transitorio usado sólo durante desarrollo de este worktree.
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'envios'::regclass
+          AND conname = 'ck_envios_nro_fc_valido'
+    ) THEN
+        ALTER TABLE envios DROP CONSTRAINT ck_envios_nro_fc_valido;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'envios'::regclass
+          AND conname = 'ck_envios_nro_fc_valida'
+    ) THEN
+        ALTER TABLE envios ADD CONSTRAINT ck_envios_nro_fc_valida
+            CHECK (
+                nro_fc IS NULL
+                OR BTRIM(nro_fc) = ''
+                OR REGEXP_REPLACE(
+                    UPPER(BTRIM(nro_fc)), '[^A-Z0-9]', '', 'g'
+                ) <> ''
+            ) NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE envios VALIDATE CONSTRAINT ck_envios_nro_fc_valida;
 -- Factura emitida con su PDF adjunto (cargada por el admin). Estos ALTER van
 -- después del CREATE para que una base nueva también reciba las columnas.
 ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_pdf BYTEA;
 ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_nombre TEXT;
+ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'envios'::regclass
+          AND conname = 'ck_envios_idempotency_key'
+    ) THEN
+        ALTER TABLE envios ADD CONSTRAINT ck_envios_idempotency_key
+            CHECK (
+                idempotency_key IS NULL
+                OR idempotency_key ~ '^[A-Za-z0-9_-]{32,128}$'
+            ) NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE envios VALIDATE CONSTRAINT ck_envios_idempotency_key;
 CREATE INDEX IF NOT EXISTS idx_envios_cliente ON envios(cliente_id);
 -- Cargo automático: cuando se emite una guía, el débito entra solo a la
 -- cuenta corriente (decisión de Leandro 28/07 — antes era doble carga manual
@@ -245,6 +543,27 @@ ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS solicitud_id INTEGER;
 ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS ambito TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_envios_solicitud
     ON envios(solicitud_id) WHERE solicitud_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_envios_cliente_idempotency
+    ON envios(cliente_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+-- Una FC puede escribirse con espacios, guiones o distinta capitalización,
+-- pero sigue siendo la misma factura en toda TAURO. La creación del índice
+-- falla (intencionalmente) si el preflight detectó historia duplicada: no se
+-- elige ni borra una fila automáticamente. NC no es FC; tracking no participa.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_envios_fc_normalizada
+    ON envios (
+        (REGEXP_REPLACE(UPPER(BTRIM(nro_fc)), '[^A-Z0-9]', '', 'g'))
+    )
+    WHERE COALESCE(UPPER(BTRIM(estado)), '') <> 'NC'
+      AND REGEXP_REPLACE(UPPER(BTRIM(COALESCE(nro_fc, ''))), '[^A-Z0-9]', '', 'g') <> '';
+-- Sólo se retira el índice anterior, más débil, si el global existe. Aun si
+-- un runner continuara después de un error, nunca deja la tabla sin control.
+DO $$
+BEGIN
+    IF TO_REGCLASS('uq_envios_fc_normalizada') IS NOT NULL THEN
+        DROP INDEX IF EXISTS uq_envios_cliente_fc_normalizada;
+    END IF;
+END $$;
 -- Índice compuesto para queries de facturación (cliente + filtro de estado)
 CREATE INDEX IF NOT EXISTS idx_envios_cliente_estado ON envios(cliente_id, estado);
 CREATE INDEX IF NOT EXISTS idx_envios_cliente_ambito_fecha

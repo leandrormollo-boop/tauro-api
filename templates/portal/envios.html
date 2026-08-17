@@ -7,8 +7,8 @@
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Operaciones</div>
-            <h1>{% if tipo_filtro == 'nacional' %}🇦🇷 Mis envíos nacionales{% elif tipo_filtro == 'internacional' %}🌐 Mis envíos internacionales{% else %}Mis envíos{% endif %}</h1>
-            <p>{% if tipo_filtro == 'nacional' %}Operaciones dentro de Argentina, sin mezclar con tu actividad internacional.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones, separadas de tus envíos dentro de Argentina.{% else %}Elegí el ámbito para ver su historial y sus guías. La cuenta todavía se muestra consolidada.{% endif %}</p>
+            <h1><span aria-hidden="true">{% if tipo_filtro == 'nacional' %}🇦🇷{% else %}🌐{% endif %}</span> Mis envíos {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}</h1>
+            <p>{% if tipo_filtro == 'nacional' %}Operaciones dentro de Argentina, sin mezclar con tu actividad internacional.{% else %}Importaciones y exportaciones, separadas de tus envíos dentro de Argentina.{% endif %}</p>
         </div>
         <div class="envios-page-actions">
             {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para
@@ -23,33 +23,25 @@
     <div class="msg ok">{{ flash_ok }}</div>
 {% endif %}
 
-{% if not tipo_filtro %}
-<div class="scope-grid shipment-scope-grid" aria-label="Elegir historial de envíos">
-    <a href="/portal/envios?tipo=nacional" class="scope-card scope-card-national">
-        <span class="scope-icon" aria-hidden="true">🇦🇷</span>
-        <span class="scope-copy">
-            <small>Dentro de Argentina</small>
-            <strong>Envíos nacionales</strong>
-            <span>{{ total_nacionales }} envío{{ 's' if total_nacionales != 1 else '' }} · OCA y Andreani en integración</span>
-        </span>
-        <span class="scope-arrow" aria-hidden="true">→</span>
+{# Los dos ámbitos quedan siempre a un click, sin pantalla intermedia. El
+   filtro de estado se conserva al cambiar de pestaña y la página vuelve a 1. #}
+{% set con_paso = ("&paso=" ~ paso_filtro) if paso_filtro else "" %}
+<nav class="chips-tipo envios-scope-tabs" aria-label="Ámbito de los envíos">
+    <a href="/portal/envios?tipo=nacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="page"{% endif %}>
+        <span aria-hidden="true">🇦🇷</span> Nacionales <b>{{ total_nacionales }}</b>
     </a>
-    <a href="/portal/envios?tipo=internacional" class="scope-card scope-card-international">
-        <span class="scope-icon" aria-hidden="true">🌐</span>
-        <span class="scope-copy">
-            <small>Argentina y el mundo</small>
-            <strong>Envíos internacionales</strong>
-            <span>{{ total_internacionales }} envío{{ 's' if total_internacionales != 1 else '' }} · DHL según tu cuenta · otros pendientes</span>
-        </span>
-        <span class="scope-arrow" aria-hidden="true">→</span>
+    <a href="/portal/envios?tipo=internacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="page"{% endif %}>
+        <span aria-hidden="true">🌐</span> Internacionales <b>{{ total_internacionales }}</b>
     </a>
-</div>
+</nav>
+
 {% if total_sin_clasificar %}
 <div class="msg warn scope-unclassified">
     {{ total_sin_clasificar }} envío{{ 's' if total_sin_clasificar != 1 else '' }} histórico{{ 's' if total_sin_clasificar != 1 else '' }} necesita{{ 'n' if total_sin_clasificar != 1 else '' }} revisión de ámbito. No lo{{ 's' if total_sin_clasificar != 1 else '' }} mezclamos hasta clasificarlo{{ 's' if total_sin_clasificar != 1 else '' }}.
 </div>
 {% endif %}
-{% elif not total_sin_filtrar %}
+
+{% if not total_sin_filtrar %}
 <div class="card">
     <div class="empty" style="padding:48px 20px;">
         <img src="/static/img/logo-mark-white.png" alt="" style="height:40px;width:auto;opacity:.85;">
@@ -70,7 +62,7 @@
    internacional para que los dos se puedan combinar. #}
 {% set solo_tipo = ("?tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 {% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
-<div class="chips-embudo" role="navigation" aria-label="Filtrar por estado">
+<nav class="chips-embudo" aria-label="Filtrar por estado">
     <a href="/portal/envios{{ solo_tipo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
         <b>{{ total_sin_filtrar }}</b> Todos
     </a>
@@ -82,17 +74,7 @@
         <b>{{ c.cantidad }}</b> {{ c.titulo }}
     </a>
     {% endfor %}
-</div>
-
-{# División nacional / internacional (spec): mismo listado, filtrado.
-   Conserva el paso elegido para que un filtro no borre el otro. #}
-{% set solo_paso = ("?paso=" ~ paso_filtro) if paso_filtro else "" %}
-{% set con_paso = ("&paso=" ~ paso_filtro) if paso_filtro else "" %}
-<div class="chips-tipo" role="navigation" aria-label="Filtrar por alcance">
-    <a href="/portal/envios?tipo=nacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="true"{% endif %}>🇦🇷 Nacionales</a>
-    <a href="/portal/envios?tipo=internacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="true"{% endif %}>🌐 Internacionales</a>
-    <a href="/portal/envios" class="btn btn-sm btn-ghost">Cambiar ámbito</a>
-</div>
+</nav>
 
 {# Resumen de lo que estás viendo ahora — se recalcula con cada filtro, así
    sirve para responder "¿cuánto llevo gastado en lo despachado?". #}
@@ -202,7 +184,7 @@
         </table>
     </div>
     <div class="envios-card-footer">
-        <p class="table-note">Cargos y facturas en el resumen total: <a href="/portal/cuenta">Mi cuenta consolidada →</a></p>
+        <p class="table-note">Cargos y facturas: <a href="/portal/cuenta?ambito={{ tipo_filtro }}">Ver cuenta {{ tipo_filtro }} →</a></p>
         {% if total_paginas > 1 %}
         <nav class="envios-pagination" aria-label="Páginas de envíos">
             {% if pagina_actual > 1 %}
