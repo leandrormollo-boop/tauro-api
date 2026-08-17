@@ -1,23 +1,30 @@
 """
-El cotizador acepta CUALQUIER par de países.
+El cotizador internacional acepta cualquier par de países salvo AR → AR.
 
 Leandro (05/08/2026): "nuestro servicio permite país x a país b, país b a
 país x, país x a país x. Ejemplo: Arg-China, Chn-Arg, Arg-Arg, Chn-India".
 
-Ese último caso es el que rompe el modelo viejo: China → India, donde
-Argentina ni aparece. La tabla `rutas` guardaba pares cargados a mano, así
-que un país nuevo era un pedido al admin antes de poder cotizar. Ahora el
-catálogo es una constante y la cobertura la decide el courier.
+China → India es el caso que rompe el modelo viejo, porque Argentina ni
+aparece. La tabla `rutas` guardaba pares cargados a mano, así que un país
+nuevo era un pedido al admin antes de poder cotizar. Ahora el catálogo es
+una constante y la cobertura internacional la decide el courier; AR → AR se
+reserva para las conexiones nacionales directas de OCA y Andreani.
 """
 import os
 import sys
+import unicodedata
 from unittest import mock
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import main  # noqa: E402
 from main import CotizarWebRequest  # noqa: E402
-from servicios.paises import existe, opciones, referencia  # noqa: E402
+from servicios.paises import (  # noqa: E402
+    PAISES, existe, nombre, normalizar_iso2, opciones, referencia,
+)
+from servicios.rutas import pais_a_iso2  # noqa: E402
 
 
 def _cotizar(**kw):
@@ -43,11 +50,31 @@ def _cotizar(**kw):
     return visto, datos
 
 
-def test_los_cuatro_casos_que_nombro_leandro():
-    for origen, destino in (("AR", "CN"), ("CN", "AR"), ("AR", "AR"), ("CN", "IN")):
+def test_los_tres_casos_internacionales_que_nombro_leandro():
+    for origen, destino in (("AR", "CN"), ("CN", "AR"), ("CN", "IN")):
         visto, _ = _cotizar(origen_pais=origen, destino_pais=destino)
         assert visto["origen"]["country"] == origen
         assert visto["destino"]["country"] == destino
+
+
+def test_endpoint_normaliza_codigos_y_nombres_antes_de_llamar_carriers():
+    visto, datos = _cotizar(origen_pais=" china ", destino_pais=" us ")
+
+    assert visto["origen"]["country"] == "CN"
+    assert visto["destino"]["country"] == "US"
+    assert datos["origen_pais"] == "CN"
+    assert datos["destino_pais"] == "US"
+
+
+def test_argentina_a_argentina_va_al_futuro_circuito_nacional():
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        _cotizar(origen_pais=" argentina ", destino_pais=" ar ")
+
+    assert error.value.status_code == 409
+    assert "OCA" in error.value.detail
+    assert "Andreani" in error.value.detail
 
 
 def test_tercer_pais_a_tercer_pais():
@@ -87,3 +114,50 @@ def test_estan_los_origenes_de_importacion_que_nombro():
 def test_el_combo_viene_ordenado_por_nombre():
     nombres = [n for _, n in opciones()]
     assert nombres == sorted(nombres), "el desplegable sale desordenado"
+
+
+def _sin_acentos(valor: str) -> str:
+    return "".join(
+        caracter for caracter in unicodedata.normalize("NFD", valor)
+        if not unicodedata.combining(caracter)
+    )
+
+
+@pytest.mark.parametrize("iso,datos", PAISES.items())
+def test_normaliza_iso_y_todos_los_nombres_del_catalogo(iso, datos):
+    nombre_catalogo = datos[0]
+
+    assert normalizar_iso2(iso) == iso
+    assert normalizar_iso2(iso.lower()) == iso
+    assert normalizar_iso2(nombre_catalogo) == iso
+    assert normalizar_iso2(_sin_acentos(nombre_catalogo).lower()) == iso
+    assert pais_a_iso2(nombre_catalogo) == iso
+
+
+@pytest.mark.parametrize(
+    "valor",
+    [
+        "Estados Unidos", "USA", "EEUU", "EE.UU.", "United States",
+        "United States of America", "U.S.A.",
+    ],
+)
+def test_aliases_de_estados_unidos_siempre_son_us(valor):
+    assert normalizar_iso2(valor) == "US"
+    assert normalizar_iso2(valor) != "ES"
+
+
+@pytest.mark.parametrize(
+    "valor",
+    [None, "", "ZZ", "Estados Unicornio", "Estados Unidos del Sur"],
+)
+def test_pais_desconocido_falla_cerrado(valor):
+    assert normalizar_iso2(valor) == ""
+    assert existe(valor) is False
+    assert referencia(valor) == {}
+    assert nombre(valor) == ""
+
+
+def test_helpers_publicos_aceptan_nombre_o_alias():
+    assert existe("méxico") is True
+    assert nombre("USA") == "Estados Unidos"
+    assert referencia("United States")["country"] == "US"

@@ -473,8 +473,8 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT cliente_id, precio_tauro_ars, tracking, courier,
-                       producto_alias, destino_pais
+                SELECT cliente_id, precio_tauro_ars, tracking, courier, ambito,
+                       producto_alias, remitente_pais, destino_pais
                 FROM solicitudes_guia WHERE id = %s
             """, (solicitud_id,))
             sol = cur.fetchone()
@@ -491,20 +491,36 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
                     "el cargo no se generó"
                 )
 
+            from servicios.couriers_urls import ambito_envio
+            ambito = ambito_envio(dict(sol))
+            if ambito == "sin_clasificar":
+                raise ValueError(
+                    f"La solicitud {solicitud_id} no tiene una ruta suficiente "
+                    "para clasificar su cargo: requiere revisión"
+                )
+            ambito = ambito.upper()
+
             descripcion = (f"Guía {sol['tracking'] or 's/n'} · "
                            f"{sol['producto_alias'] or 'envío'} → {sol['destino_pais'] or ''} · "
                            f"{(sol['courier'] or 'FEDEX').upper()} · cargo automático")
             cur.execute("""
                 INSERT INTO envios
                     (cliente_id, fecha, nro_fc, monto_ars, estado, descripcion,
-                     tracking, solicitud_id)
-                VALUES (%s, CURRENT_DATE, '', %s, 'ACTIVO', %s, %s, %s)
+                     tracking, solicitud_id, ambito)
+                VALUES (%s, CURRENT_DATE, '', %s, 'ACTIVO', %s, %s, %s, %s)
                 ON CONFLICT (solicitud_id) WHERE solicitud_id IS NOT NULL
-                DO NOTHING
+                DO UPDATE SET ambito = COALESCE(envios.ambito, EXCLUDED.ambito)
+                WHERE envios.ambito IS NULL OR envios.ambito = EXCLUDED.ambito
                 RETURNING id
             """, (sol["cliente_id"].upper(), monto, descripcion,
-                  sol["tracking"] or "", solicitud_id))
+                  sol["tracking"] or "", solicitud_id, ambito))
             fila = cur.fetchone()
+
+            if not fila:
+                raise ValueError(
+                    f"El cargo de la solicitud {solicitud_id} ya existe en otro ámbito; "
+                    "requiere conciliación"
+                )
 
     if fila:
         print(f"[cta_cte] cargo automático: solicitud {solicitud_id} → "

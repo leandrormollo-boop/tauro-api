@@ -7,6 +7,8 @@ from servicios.numeros_humanos import (
     NumeroHumanoInvalido,
     decimal_a_texto,
     parse_configuracion_numerica,
+    parse_entero_formulario,
+    parse_entero_humano,
     parse_float_formulario,
     parse_importe_humano,
     parse_numero_humano,
@@ -159,6 +161,28 @@ def test_borde_de_formulario_distingue_vacio_opcional_y_requerido():
     assert parse_float_formulario("", "Impuesto", requerido=False) is None
     with pytest.raises(ValueError, match="completá este valor"):
         parse_float_formulario("", "Peso")
+
+
+@pytest.mark.parametrize(
+    ("espanol", "ingles", "esperado"),
+    [
+        ("1.000", "1,000", 1000),
+        ("1,0", "1.0", 1),
+    ],
+)
+def test_enteros_humanos_no_truncan_y_unifican_punto_coma(espanol, ingles, esperado):
+    assert parse_entero_humano(espanol) == esperado
+    assert parse_entero_humano(ingles) == esperado
+
+
+@pytest.mark.parametrize("texto", ["1,5", "1.5", "1,23", "0", "-1"])
+def test_enteros_humanos_rechazan_fracciones_y_rangos(texto):
+    if texto in {"1,5", "1.5", "1,23"}:
+        with pytest.raises(ValueError):
+            parse_entero_humano(texto)
+    else:
+        with pytest.raises(ValueError):
+            parse_entero_formulario(texto, "Cantidad", minimo=1)
 
 
 def test_config_financiera_comparte_la_misma_politica_segun_la_clave():

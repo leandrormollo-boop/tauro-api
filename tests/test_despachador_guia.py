@@ -27,14 +27,24 @@ def _emitir(courier):
         # que permite detectar que una solicitud DHL salga como FedEx.
         return {"ok": True, "via": courier.lower()}
 
-    with mock.patch.object(sg, "obtener_solicitud", return_value={"id": 1, "courier": courier}), \
-         mock.patch.object(sg, "generar_guia_envia", return_value={"ok": True, "via": "envia"}), \
-         mock.patch.object(sg, "generar_guia_internacional", side_effect=_fake_internacional):
+    solicitud = {
+        "id": 1, "courier": courier, "ambito": "INTERNACIONAL",
+        "remitente_pais": "AR", "destino_pais": "US",
+    }
+    with mock.patch.object(sg, "obtener_solicitud", return_value=solicitud), \
+         mock.patch.object(sg, "generar_guia_internacional", side_effect=_fake_internacional), \
+         mock.patch(
+             "servicios.configuracion_couriers_cliente.estado_integracion",
+             return_value={"operativa": True},
+         ):
         return sg.generar_guia(1)
 
 
-def test_envia_va_por_envia():
-    assert _emitir("ENVIA")["via"] == "envia"
+def test_envia_historico_no_se_emite():
+    resultado = _emitir("ENVIA")
+    assert resultado["ok"] is False
+    assert "integración nacional anterior fue retirada" in resultado["error"]
+    assert "cargo" in resultado["error"]
 
 
 def test_fedex_va_por_fedex():
@@ -70,3 +80,20 @@ def test_un_courier_inventado_no_se_emite():
     r = _emitir("ANDREANI")
     assert not r["ok"]
     assert "via" not in r
+
+
+def test_admin_no_emite_dhl_si_la_integracion_no_es_productiva():
+    with mock.patch.object(
+        sg, "obtener_solicitud", return_value={
+            "id": 1, "courier": "DHL", "ambito": "INTERNACIONAL",
+            "remitente_pais": "AR", "destino_pais": "US",
+        }
+    ), mock.patch(
+        "servicios.configuracion_couriers_cliente.estado_integracion",
+        return_value={"operativa": False},
+    ), mock.patch.object(sg, "generar_guia_internacional") as emitir:
+        resultado = sg.generar_guia(1)
+
+    assert resultado["ok"] is False
+    assert "No se emitió ninguna guía" in resultado["error"]
+    emitir.assert_not_called()

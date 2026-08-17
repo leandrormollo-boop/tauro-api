@@ -1,5 +1,6 @@
 /* global React */
 const { useState: useStateQ, useRef: useRefQ, useEffect: useEffectQ } = React;
+let selectFieldSeq = 0;
 
 // Same-origin: la web SIEMPRE se sirve desde la propia API. El viejo fallback
 // a http://localhost:8000 quedaba cross-origin en producción y la CSP
@@ -57,6 +58,36 @@ function parseHumanNumber(value, { money = false } = {}) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
+function normalizeSearchText(value) {
+  const text = String(value ?? "").toLocaleLowerCase("es");
+  return text.normalize
+    ? text.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    : text;
+}
+
+function rankedSelectOptions(options, query) {
+  const needle = normalizeSearchText(query).trim();
+  return options
+    .map((option, index) => {
+      const label = normalizeSearchText(option.label).trim();
+      const value = normalizeSearchText(option.value).trim();
+      let score = 0;
+      if (needle) {
+        if (label === needle || value === needle) score = 0;
+        else if (label.startsWith(needle)) score = 1;
+        else if (value.startsWith(needle)) score = 2;
+        else if (label.split(/\s+/).some((word) => word.startsWith(needle))) score = 3;
+        else if (label.includes(needle)) score = 4;
+        else if (value.includes(needle)) score = 5;
+        else score = 99;
+      }
+      return { option, index, score };
+    })
+    .filter((item) => item.score < 99)
+    .sort((a, b) => a.score - b.score || a.index - b.index)
+    .map((item) => item.option);
+}
+
 // Fallback mientras carga /paises: nunca un desplegable vacío.
 const PAISES_FALLBACK = [
   { value: "AR", label: "Argentina" },
@@ -66,12 +97,19 @@ const PAISES_FALLBACK = [
   { value: "ES", label: "España" },
 ];
 
+const MENSAJE_COTIZACION_NACIONAL =
+  "Los envíos dentro de Argentina se habilitarán con OCA y Andreani. " +
+  "Todavía no se pueden cotizar desde este formulario.";
+
+function normalizeCountry(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
 function QuoteWidget({ compact = false }) {
-  // TAURO opera los dos sentidos. `destino` es SIEMPRE el país del exterior:
-  // en una importación ese país es el origen y la caja entra a Argentina.
-  // TAURO cotiza CUALQUIER par: AR→CN, CN→AR, AR→AR y también CN→IN,
-  // donde Argentina ni aparece. Los botones de arriba son atajos que
-  // setean los dos combos; los combos son la verdad.
+  // Cotizador internacional en ambos sentidos y entre terceros países:
+  // AR→CN, CN→AR y CN→IN. AR→AR va por el circuito nacional OCA/Andreani
+  // y se bloquea también acá, antes del request. Los botones son atajos;
+  // los dos combos siguen siendo la fuente de verdad.
   const [origen, setOrigen] = useStateQ("AR");
   const [destino, setDestino] = useStateQ("US");
   const [paises, setPaises] = useStateQ(PAISES_FALLBACK);
@@ -98,9 +136,18 @@ function QuoteWidget({ compact = false }) {
   const [error, setError] = useStateQ(null);
 
   const calculate = async () => {
-    setStep("calculating");
     setError(null);
     try {
+      const origenIso = normalizeCountry(origen);
+      const destinoIso = normalizeCountry(destino);
+      const paisesValidos = new Set(paises.map((pais) => normalizeCountry(pais.value)));
+      if (!paisesValidos.has(origenIso) || !paisesValidos.has(destinoIso)) {
+        throw new Error("Elegí países válidos para origen y destino.");
+      }
+      if (origenIso === "AR" && destinoIso === "AR") {
+        throw new Error(MENSAJE_COTIZACION_NACIONAL);
+      }
+
       const parsed = {
         peso: parseHumanNumber(peso),
         largo: parseHumanNumber(largo),
@@ -112,12 +159,13 @@ function QuoteWidget({ compact = false }) {
         throw new Error("Revisá peso, medidas y valor. Podés usar coma o punto.");
       }
       if (parsed.peso > 70) throw new Error("El peso máximo por caja es 70 kg.");
+      setStep("calculating");
       const resp = await fetch(`${API_URL}/cotizar-web`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          origen_pais: origen,
-          destino_pais: destino,
+          origen_pais: origenIso,
+          destino_pais: destinoIso,
           peso_kg: parsed.peso,
           largo_cm: parsed.largo,
           ancho_cm: parsed.ancho,
@@ -177,8 +225,8 @@ function QuoteWidget({ compact = false }) {
 
       {step !== "result" && (
         <>
-          {/* Atajos: setean los dos combos de abajo. TAURO cotiza cualquier
-              par de países, así que los combos siguen libres después. */}
+          {/* Atajos del cotizador internacional: setean ambos combos. Los
+              combos siguen libres para rutas entre terceros países. */}
           <div className="tweb-sentido" role="group" aria-label="Atajos de sentido">
             <button type="button"
                     className={`btn ${origen === "AR" && destino !== "AR" ? "btn-primary" : "btn-ghost"}`}
@@ -199,7 +247,7 @@ function QuoteWidget({ compact = false }) {
 
           <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
             <Field label="Peso (kg)" value={peso} onChange={setPeso} inputMode="decimal" />
-            <Field label="Valor declarado (USD)" value={valor} onChange={setValor} inputMode="decimal" />
+            <Field label="Valor declarado (USD)" value={valor} onChange={setValor} inputMode="decimal" money />
           </div>
 
           <div style={{ marginBottom: 6, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -242,7 +290,7 @@ function QuoteWidget({ compact = false }) {
             Tus opciones de envío
           </div>
           <div style={{ color: "var(--fg-3)", marginBottom: 18, fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            {peso}kg · {paises.find((p) => p.value === origen)?.label || origen} → {paises.find((p) => p.value === destino)?.label || destino} · opciones disponibles
+            {peso}kg · {result.origen} → {result.destino} · opciones disponibles
           </div>
 
           <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
@@ -254,7 +302,12 @@ function QuoteWidget({ compact = false }) {
           {/* Captura de contacto DESPUÉS del precio, en el momento de máximo
               interés. El cotizador sigue gratis y sin login: esto es una
               oferta, no un peaje. */}
-          <EmailCapture destino={destino} peso={peso} carriers={result.carriers} />
+          <EmailCapture
+            origen={result.origen_pais}
+            destino={result.destino_pais}
+            peso={peso}
+            carriers={result.carriers}
+          />
 
           <a className="btn btn-primary" style={{ width: "100%" }} href="/portal/login">
             Crear este envío en el portal <ArrowRight size={14}/>
@@ -270,7 +323,7 @@ function QuoteWidget({ compact = false }) {
   );
 }
 
-function EmailCapture({ destino, peso, carriers }) {
+function EmailCapture({ origen, destino, peso, carriers }) {
   const [email, setEmail] = React.useState("");
   const [estado, setEstado] = React.useState("idle"); // idle | enviando | ok | error
   const [msg, setMsg] = React.useState("");
@@ -284,6 +337,7 @@ function EmailCapture({ destino, peso, carriers }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: email.trim(),
+          origen,
           destino,
           peso_kg: parseHumanNumber(peso) || 0,
           carriers: (carriers || []).filter(c => c.estado === "cotizado"),
@@ -348,7 +402,7 @@ function EmailCapture({ destino, peso, carriers }) {
   );
 }
 
-function Field({ label, value, onChange, type = "text", inputMode }) {
+function Field({ label, value, onChange, type = "text", inputMode, money = false }) {
   return (
     <label style={{ display: "block" }}>
       <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
@@ -372,48 +426,155 @@ function Field({ label, value, onChange, type = "text", inputMode }) {
           boxSizing: "border-box",
         }}
         onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
-        onBlur={(e) => (e.target.style.borderColor = "var(--line-soft)")}
+        onBlur={(e) => {
+          e.target.style.borderColor = "var(--line-soft)";
+          const parsed = parseHumanNumber(e.target.value, { money });
+          if (Number.isFinite(parsed)) onChange(String(parsed));
+        }}
       />
     </label>
   );
 }
 
-/* Desplegable propio de TAURO — mismo lenguaje visual que el portal:
-   botón con caret animado + panel flotante oscuro con tilde violeta.
-   Nada del picker nativo del navegador. */
+/* Combobox inteligente TAURO. Busca por nombre o ISO, prioriza coincidencias
+   al comienzo, permite recorrer sin confirmar y recién aplica con Enter/click. */
 function SelectField({ label, value, onChange, options }) {
   const [open, setOpen] = useStateQ(false);
+  const [query, setQuery] = useStateQ("");
+  const [activeIndex, setActiveIndex] = useStateQ(0);
+  const [openUp, setOpenUp] = useStateQ(false);
+  const [panelMaxHeight, setPanelMaxHeight] = useStateQ(280);
   const boxRef = useRefQ(null);
+  const buttonRef = useRefQ(null);
+  const searchRef = useRefQ(null);
+  const listIdRef = useRefQ(null);
+  if (!listIdRef.current) listIdRef.current = `tweb-select-${++selectFieldSeq}`;
   const seleccionada = options.find((o) => o.value === value) || options[0];
+  const filtered = rankedSelectOptions(options, query);
+
+  const close = (focusButton = false) => {
+    setOpen(false);
+    setQuery("");
+    if (focusButton) {
+      window.setTimeout(() => buttonRef.current?.focus({ preventScroll: true }), 0);
+    }
+  };
+
+  const openWith = (seed = "") => {
+    setQuery(seed);
+    setOpen(true);
+  };
+
+  const choose = (option) => {
+    if (!option) return;
+    onChange(option.value);
+    close(true);
+  };
 
   useEffectQ(() => {
     if (!open) return;
     const cerrar = (e) => {
-      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+      if (boxRef.current && !boxRef.current.contains(e.target)) close(false);
     };
     document.addEventListener("mousedown", cerrar);
     return () => document.removeEventListener("mousedown", cerrar);
   }, [open]);
 
-  const onKey = (e) => {
-    const i = options.findIndex((o) => o.value === value);
-    if (e.key === "ArrowDown") { e.preventDefault(); onChange(options[Math.min(i + 1, options.length - 1)].value); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); onChange(options[Math.max(i - 1, 0)].value); }
-    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); }
-    else if (e.key === "Escape") setOpen(false);
+  useEffectQ(() => {
+    if (!open) return;
+    if (query.trim()) {
+      setActiveIndex(0);
+      return;
+    }
+    const selectedIndex = filtered.findIndex((option) => option.value === value);
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0);
+  }, [open, query, options, value]);
+
+  useEffectQ(() => {
+    if (!open) return;
+    const place = () => {
+      const rect = boxRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportTop = window.visualViewport?.offsetTop || 0;
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const viewportBottom = viewportTop + viewportHeight;
+      const below = Math.max(0, viewportBottom - rect.bottom - 7);
+      const above = Math.max(0, rect.top - viewportTop - 7);
+      const shouldOpenUp = below < 240 && above > below;
+      setOpenUp(shouldOpenUp);
+      setPanelMaxHeight(Math.max(140, Math.min(280, shouldOpenUp ? above : below)));
+    };
+    place();
+    const viewport = window.visualViewport;
+    window.addEventListener("resize", place, { passive: true });
+    viewport?.addEventListener("resize", place, { passive: true });
+    viewport?.addEventListener("scroll", place, { passive: true });
+    const focusTimer = window.setTimeout(() => {
+      searchRef.current?.focus({ preventScroll: true });
+      searchRef.current?.select();
+    }, 0);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("resize", place);
+      viewport?.removeEventListener("resize", place);
+      viewport?.removeEventListener("scroll", place);
+    };
+  }, [open]);
+
+  useEffectQ(() => {
+    if (!open) return;
+    document.getElementById(`${listIdRef.current}-option-${activeIndex}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [open, activeIndex, query]);
+
+  const onButtonKey = (e) => {
+    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      openWith("");
+    } else if (e.key === "Escape") {
+      close(false);
+    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      openWith(e.key);
+    }
+  };
+
+  const onSearchKey = (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!filtered.length) return;
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((current) => (current + delta + filtered.length) % filtered.length);
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      if (filtered.length) setActiveIndex(e.key === "Home" ? 0 : filtered.length - 1);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      choose(filtered[activeIndex] || filtered[0]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close(true);
+    } else if (e.key === "Tab") {
+      close(false);
+    }
   };
 
   return (
-    <label style={{ display: "block" }}>
-      <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+    <div style={{ display: "block" }}>
+      <div id={`${listIdRef.current}-label`} style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
         {label}
       </div>
       <div ref={boxRef} style={{ position: "relative" }}>
         <button
+          ref={buttonRef}
           type="button"
-          onClick={() => setOpen((o) => !o)}
-          onKeyDown={onKey}
+          onClick={() => (open ? close(false) : openWith(""))}
+          onKeyDown={onButtonKey}
           className="tweb-select-btn"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listIdRef.current}
+          aria-labelledby={`${listIdRef.current}-label ${listIdRef.current}-value`}
           style={{
             width: "100%",
             display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
@@ -429,47 +590,63 @@ function SelectField({ label, value, onChange, options }) {
             transition: "border-color .15s, box-shadow .15s",
           }}
         >
-          <span>{seleccionada ? seleccionada.label : "Seleccionar"}</span>
+          <span id={`${listIdRef.current}-value`}>{seleccionada ? seleccionada.label : "Seleccionar"}</span>
           <svg width="11" height="7" viewBox="0 0 10 6" fill="none" aria-hidden="true"
                style={{ color: open ? "var(--accent-soft)" : "var(--fg-3)", transform: open ? "rotate(180deg)" : "none", transition: "transform .22s cubic-bezier(.2,.7,.3,1), color .15s", flexShrink: 0 }}>
             <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </button>
 
-        <div style={{
-          position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 40,
-          padding: 6,
-          background: "var(--bg-elev-2)",
-          border: "1px solid var(--line)",
-          borderRadius: 12,
-          boxShadow: "0 18px 50px rgba(0,0,0,.55)",
-          opacity: open ? 1 : 0,
-          transform: open ? "translateY(0) scale(1)" : "translateY(-6px) scale(.985)",
-          pointerEvents: open ? "auto" : "none",
-          transition: "opacity .16s ease, transform .18s cubic-bezier(.2,.7,.3,1)",
-        }}>
-          {options.map((o) => {
-            const sel = o.value === value;
-            return (
-              <div
-                key={o.value}
-                onClick={() => { onChange(o.value); setOpen(false); }}
-                className="tweb-select-opt"
-                style={{
-                  display: "flex", alignItems: "center", gap: 9,
-                  padding: "9px 11px", borderRadius: 8, fontSize: 13.5, cursor: "pointer",
-                  color: sel ? "var(--fg)" : "var(--fg-2)",
-                  background: sel ? "var(--accent-glow)" : "transparent",
-                }}
-              >
-                <span style={{ width: 14, flexShrink: 0, color: "var(--accent-soft)", fontSize: 11, opacity: sel ? 1 : 0 }}>✓</span>
-                <span>{o.label}</span>
-              </div>
-            );
-          })}
-        </div>
+        {open && (
+          <div
+            className={`tweb-select-panel${openUp ? " open-up" : ""}`}
+            style={{ maxHeight: panelMaxHeight }}
+          >
+            <div className="tweb-select-search-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8"/><path d="m20 20-4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+              <input
+                ref={searchRef}
+                type="search"
+                className="tweb-select-search"
+                value={query}
+                placeholder="Buscar país o código"
+                autoComplete="off"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="true"
+                aria-controls={listIdRef.current}
+                aria-activedescendant={filtered.length ? `${listIdRef.current}-option-${activeIndex}` : undefined}
+                onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }}
+                onKeyDown={onSearchKey}
+              />
+            </div>
+            <div id={listIdRef.current} className="tweb-select-options" role="listbox" aria-labelledby={`${listIdRef.current}-label`}>
+              {filtered.length ? filtered.map((o, index) => {
+                const sel = o.value === value;
+                const active = index === activeIndex;
+                return (
+                  <div
+                    id={`${listIdRef.current}-option-${index}`}
+                    key={o.value}
+                    role="option"
+                    aria-selected={sel}
+                    onMouseDown={(event) => { event.preventDefault(); }}
+                    onClick={(event) => { event.preventDefault(); choose(o); }}
+                    className={`tweb-select-opt${active ? " active" : ""}${sel ? " selected" : ""}`}
+                  >
+                    <span className="tweb-select-check" aria-hidden="true">✓</span>
+                    <span>{o.label}</span>
+                    <small>{o.value}</small>
+                  </div>
+                );
+              }) : (
+                <div className="tweb-select-empty">No encontramos resultados</div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-    </label>
+    </div>
   );
 }
 

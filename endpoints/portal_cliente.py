@@ -13,7 +13,7 @@
 
 import os
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from core.database import get_conn
 from typing import Optional
@@ -32,6 +32,7 @@ from servicios.catalogo import (
     actualizar_producto_cliente, eliminar_producto_cliente,
 )
 from servicios.cotizador import cotizar_referencia_couriers
+from servicios.cotizador_nacional import preparar_cotizacion_nacional
 from servicios.cuenta_corriente import (
     saldo, total_pagado, get_facturado_real, get_facturas_recientes,
     movimientos, resumir_facturacion,
@@ -39,14 +40,18 @@ from servicios.cuenta_corriente import (
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
 )
-from servicios.nacional import cotizar_nacional_cliente, nacional_activo
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
 )
 from servicios.carriers import courier_default_cliente
 from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
-from servicios.numeros_humanos import parse_float_formulario as _numero_form
+from servicios.numeros_humanos import (
+    parse_entero_formulario as _entero_form,
+    parse_float_formulario as _numero_form,
+)
+from servicios.paises import normalizar as normalizar_pais
+from servicios.provincias import opciones as opciones_provincias
 from servicios.panel_cliente import embudo_envios, preparar_historial_envios
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
@@ -77,9 +82,42 @@ templates = Jinja2Templates(directory="templates")
 
 # Helpers de courier disponibles en TODOS los templates del portal: la URL
 # de tracking y la división nacional/internacional salen de un solo lugar.
-from servicios.couriers_urls import es_nacional, url_tracking
+from servicios.couriers_urls import ambito_envio, es_nacional, url_tracking
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
+templates.env.globals["ambito_envio"] = ambito_envio
+
+
+AMBITOS_PORTAL = {"nacional", "internacional"}
+
+
+def _ambito_portal(valor) -> str:
+    """Normaliza el alcance elegido sin aceptar valores inventados."""
+    if not isinstance(valor, str):
+        return ""
+    normalizado = valor.strip().lower()
+    return normalizado if normalizado in AMBITOS_PORTAL else ""
+
+
+def _ambito_post(valor) -> str:
+    """Compatibilidad con invocaciones directas fuera de FastAPI.
+
+    En una llamada Python el default ``Form`` llega como metadata, mientras
+    que por HTTP FastAPI entrega el string. Los forms viejos sin el hidden
+    pertenecen al único flujo que existía entonces: internacional.
+    """
+    if not isinstance(valor, str):
+        return "internacional"
+    return _ambito_portal(valor)
+
+
+def _url_envio_por_ambito(ambito: str, **valores) -> str:
+    """Conserva el prellenado al pasar por el selector Nacional/Internacional."""
+    params = {"ambito": ambito}
+    for clave, valor in valores.items():
+        if valor not in (None, ""):
+            params[clave] = valor
+    return "/portal/envios/nuevo?" + urlencode(params)
 
 # Canal de ayuda (WhatsApp/mail) disponible en todos los templates. Se
 # evalúa por render porque el número puede cargarse en /admin/config sin
@@ -359,14 +397,25 @@ def logout(token: Optional[str] = Cookie(None)):
 def home(request: Request, cliente: str = Depends(cliente_actual)):
     facturado = get_facturado_real(cliente)
     saldo_data = saldo(cliente, total_facturado_ars=facturado)
-    solicitudes = listar_solicitudes_cliente(cliente, limite=5)
+    # Se separa antes de limitar: tomar sólo las últimas 12 globales puede
+    # ocultar nacionales más viejos y dibujar un falso "sin envíos".
+    historial = listar_solicitudes_cliente(cliente, limite=None)
+    solicitudes_nacionales = [
+        solicitud for solicitud in historial
+        if ambito_envio(solicitud) == "nacional"
+    ][:3]
+    solicitudes_internacionales = [
+        solicitud for solicitud in historial
+        if ambito_envio(solicitud) == "internacional"
+    ][:3]
 
     return templates.TemplateResponse(
         request=request, name="portal/home.html",
         context={
             "cliente": cliente,
             "saldo": saldo_data,
-            "solicitudes": solicitudes,
+            "solicitudes_nacionales": solicitudes_nacionales,
+            "solicitudes_internacionales": solicitudes_internacionales,
             # Sólo alimenta recordatorios compactos de acciones reales.
             "embudo": embudo_envios(cliente),
         },
@@ -377,10 +426,9 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
 @router.get("/track")
 def track_redirect(nro: str = "", cliente: str = Depends(cliente_actual)):
     """
-    El buscador del home estaba clavado a FedEx: un tracking de envia.com
-    pegado ahí abría FedEx y daba "no encontrado". Ahora se busca el número
-    entre los envíos DEL cliente para saber de qué courier es; si no está,
-    FedEx sigue siendo el default razonable (es el courier principal).
+    Resuelve el courier desde los envíos del cliente antes de abrir el
+    seguimiento. Esto mantiene operables también los trackings nacionales
+    históricos sin mezclar proveedores.
     """
     from servicios.couriers_urls import url_tracking
 
@@ -464,12 +512,27 @@ def recolecciones_view(
     ]
 
     envio_pre = None
+    envio_pre_error = None
     if envio:
         s = obtener_solicitud_de_cliente(envio, cliente)
         # Sólo precarga si la guía existe: sin guía todavía no hay nada que
         # el chofer pueda llevarse.
-        if s and s.get("tracking"):
-            envio_pre = datos_retiro_desde_solicitud(s)
+        if s and s.get("tracking") and ambito_envio(s) == "internacional":
+            try:
+                envio_pre = datos_retiro_desde_solicitud(s)
+            except ValueError as exc:
+                envio_pre_error = (
+                    f"No pudimos preparar el retiro de ese envío: {exc} "
+                    "Corregí los datos de la guía o escribinos antes de agendar."
+                )
+
+    dhl_requiere_envio = bool(
+        not envio_pre and permisos_pickup.get("dhl", False)
+    )
+    if not envio_pre:
+        couriers_recoleccion = [
+            c for c in couriers_recoleccion if c["id"] != "DHL"
+        ]
 
     puede_recolectar = bool(couriers_recoleccion)
     if envio_pre:
@@ -496,7 +559,9 @@ def recolecciones_view(
         request=request, name="portal/recolecciones.html",
         context={"cliente": cliente, "recolecciones": recolecciones,
                  "remitente": remitente, "envio_pre": envio_pre,
+                 "envio_pre_error": envio_pre_error,
                  "puede_recolectar": puede_recolectar,
+                 "dhl_requiere_envio": dhl_requiere_envio,
                  "couriers_recoleccion": couriers_recoleccion,
                  "courier_default": (courier_default_cliente(cliente) or "fedex").upper(),
                  "fecha_sugerida": sugerida.strftime("%Y-%m-%d"),
@@ -509,20 +574,27 @@ def recoleccion_nueva(
     fecha: str = Form(...),
     ready_time: str = Form("09:00"),
     close_time: str = Form("17:00"),
-    bultos: int = Form(1),
+    bultos: str = Form("1"),
     peso_kg: str = Form("1"),
     instrucciones: str = Form(""),
     courier: str = Form("FEDEX"),
-    solicitud_id: Optional[int] = Form(None),
+    solicitud_id: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
     from servicios.recolecciones import crear
 
     try:
+        bultos_num = _entero_form(bultos, "Cantidad de bultos", minimo=1, maximo=20)
+        solicitud_id_num = _entero_form(
+            solicitud_id, "Envío seleccionado", requerido=False, minimo=1
+        )
         peso = _numero_form(peso_kg, "Peso total", minimo=0.001, maximo=1400)
-        r = crear(cliente, fecha, ready_time, close_time, bultos,
+        r = crear(cliente, fecha, ready_time, close_time, bultos_num,
                   peso, instrucciones,
-                  courier=courier, solicitud_id=solicitud_id)
+                  courier=courier, solicitud_id=solicitud_id_num)
+    except ValueError as e:
+        print(f"[portal] error agendando recolección de {cliente}: {e}")
+        r = {"ok": False, "error": str(e)}
     except Exception as e:
         print(f"[portal] error agendando recolección de {cliente}: {e}")
         r = {"ok": False, "error": "No pudimos agendarla. Probá de nuevo o escribinos."}
@@ -651,16 +723,24 @@ def ver_comprobante_propio(pago_id: int, cliente: str = Depends(cliente_actual))
 
 # ── Cotizar ─────────────────────────────────────────────────
 @router.get("/cotizar", response_class=HTMLResponse)
-def cotizar_form(request: Request, cliente: str = Depends(cliente_actual)):
+def cotizar_form(
+    request: Request,
+    ambito: str = "",
+    cliente: str = Depends(cliente_actual),
+):
+    ambito = _ambito_portal(ambito)
     return templates.TemplateResponse(
         request=request, name="portal/cotizar.html",
         context={
             "cliente": cliente,
+            "ambito": ambito,
+            "provincias": opciones_provincias(),
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
             "resultado": None,
             "opciones": None,
             "no_disponibles": [],
+            "resultado_nacional": None,
             "error": None,
             "form": {},
         },
@@ -670,14 +750,102 @@ def cotizar_form(request: Request, cliente: str = Depends(cliente_actual)):
 @router.post("/cotizar", response_class=HTMLResponse)
 def cotizar_post(
     request: Request,
-    origen_pais: str = Form(...),
-    destino_pais: str = Form(...),
+    ambito: str = Form("internacional"),
+    # Son condicionalmente obligatorios: el formulario nacional deriva AR
+    # de sus provincias y el internacional exige ambos países. Dejarlos con
+    # default evita que FastAPI responda 422 antes de poder validar el ámbito.
+    origen_pais: str = Form(""),
+    destino_pais: str = Form(""),
     peso_kg: str = Form(...),
     largo_cm: str = Form(...),
     ancho_cm: str = Form(...),
     alto_cm: str = Form(...),
+    valor_declarado_usd: str = Form(""),
+    origen_provincia: str = Form(""),
+    origen_localidad: str = Form(""),
+    origen_cp: str = Form(""),
+    modalidad_origen: str = Form("domicilio"),
+    destino_provincia: str = Form(""),
+    destino_localidad: str = Form(""),
+    destino_cp: str = Form(""),
+    modalidad_destino: str = Form("domicilio"),
+    cantidad_bultos: str = Form("1"),
+    valor_declarado_ars: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
+    ambito_normalizado = _ambito_post(ambito)
+    if ambito_normalizado == "nacional":
+        form_nacional = {
+            "origen_provincia": origen_provincia,
+            "origen_localidad": origen_localidad,
+            "origen_cp": origen_cp,
+            "modalidad_origen": modalidad_origen,
+            "destino_provincia": destino_provincia,
+            "destino_localidad": destino_localidad,
+            "destino_cp": destino_cp,
+            "modalidad_destino": modalidad_destino,
+            "cantidad_bultos": cantidad_bultos,
+            "valor_declarado_ars": valor_declarado_ars,
+            "peso_kg": peso_kg,
+            "largo_cm": largo_cm,
+            "ancho_cm": ancho_cm,
+            "alto_cm": alto_cm,
+        }
+        resultado_nacional = None
+        error_nacional = None
+        try:
+            # Los hidden actuales mandan AR, pero un POST viejo puede no
+            # traerlos. En ambos casos la ruta nacional se deriva como AR→AR;
+            # si alguien fuerza otro país, se rechaza en vez de reclasificarlo.
+            origen_iso = normalizar_pais(origen_pais) if origen_pais else "AR"
+            destino_iso = normalizar_pais(destino_pais) if destino_pais else "AR"
+            if origen_iso != "AR" or destino_iso != "AR":
+                raise ValueError(
+                    "El cotizador nacional sólo admite origen y destino dentro de Argentina."
+                )
+            resultado_nacional = preparar_cotizacion_nacional(
+                origen_provincia=origen_provincia,
+                origen_localidad=origen_localidad,
+                origen_cp=origen_cp,
+                modalidad_origen=modalidad_origen,
+                destino_provincia=destino_provincia,
+                destino_localidad=destino_localidad,
+                destino_cp=destino_cp,
+                modalidad_destino=modalidad_destino,
+                cantidad_bultos=cantidad_bultos,
+                peso_kg=peso_kg,
+                largo_cm=largo_cm,
+                ancho_cm=ancho_cm,
+                alto_cm=alto_cm,
+                valor_declarado_ars=valor_declarado_ars,
+            )
+            print(
+                f"[portal-cotizar-nacional] cliente={cliente} "
+                f"ruta={resultado_nacional['origen']['provincia_codigo']}->"
+                f"{resultado_nacional['destino']['provincia_codigo']} "
+                "lista_para_adapters"
+            )
+        except ValueError as exc:
+            error_nacional = str(exc)
+
+        return templates.TemplateResponse(
+            request=request,
+            name="portal/cotizar.html",
+            context={
+                "cliente": cliente,
+                "ambito": "nacional",
+                "provincias": opciones_provincias(),
+                "resultado_nacional": resultado_nacional,
+                "error": error_nacional,
+                "form": form_nacional,
+            },
+        )
+
+    # Un ámbito manipulado no puede caer accidentalmente en los carriers
+    # internacionales: vuelve al selector sin consultar ninguna API.
+    if ambito_normalizado != "internacional":
+        return RedirectResponse(url="/portal/cotizar", status_code=303)
+
     error = None
     opciones = None
     no_disponibles = []
@@ -688,6 +856,9 @@ def cotizar_post(
         largo_num = _numero_form(largo_cm, "Largo", minimo=1)
         ancho_num = _numero_form(ancho_cm, "Ancho", minimo=1)
         alto_num = _numero_form(alto_cm, "Alto", minimo=1)
+        valor_usd_num = _numero_form(
+            valor_declarado_usd, "Valor declarado", importe=True, minimo=0.01,
+        )
         comparacion = cotizar_referencia_couriers(
             cliente=cliente,
             origen_pais=origen_pais,
@@ -696,11 +867,21 @@ def cotizar_post(
             largo_cm=largo_num,
             ancho_cm=ancho_num,
             alto_cm=alto_num,
+            valor_declarado_usd=valor_usd_num,
         )
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
         resumen = comparacion["resumen"]
         if not comparacion["encontrado"]:
+            estados = ",".join(
+                f"{item.get('id')}:{item.get('estado')}"
+                for item in no_disponibles
+            )
+            print(
+                f"[portal-cotizar] cliente={cliente} "
+                f"ruta={origen_pais.upper()}->{destino_pais.upper()} "
+                f"sin opciones ({estados or 'sin resultados'})"
+            )
             raise ValueError("Ningún courier devolvió una tarifa para esa referencia.")
     except Exception as e:
         error = str(e)
@@ -709,6 +890,7 @@ def cotizar_post(
         request=request, name="portal/cotizar.html",
         context={
             "cliente": cliente,
+            "ambito": "internacional",
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
             "opciones": opciones,
@@ -722,6 +904,7 @@ def cotizar_post(
                 "largo_cm": largo_cm,
                 "ancho_cm": ancho_cm,
                 "alto_cm": alto_cm,
+                "valor_declarado_usd": valor_declarado_usd,
             },
             # Para que cada tarjeta de opción linkee a "crear envío" con el
             # destino ya elegido.
@@ -803,25 +986,42 @@ async def api_precio_envio_multi(
                            "ciudad": rem.get("ciudad") or "",
                            "cp": rem.get("cp") or "",
                            "estado": rem.get("estado") or ""}
-        bultos = body.get("bultos") or []
+        if (normalizar_pais(origen_real["pais"]) == "AR"
+                and normalizar_pais(destino) == "AR"):
+            return JSONResponse({
+                "ok": False,
+                "motivo": "nacional_no_disponible",
+                "mensaje": (
+                    "Estamos conectando Andreani y OCA directamente. "
+                    "Todavía no se puede cotizar ni emitir un envío nacional."
+                ),
+            }, status_code=200)
+        bultos_entrada = body.get("bultos") or []
         # Sin truncar en silencio: si hay de más, obtener_precio_envio_multi
         # lo rechaza con motivo y el preview muestra lo MISMO que diría el submit.
-        bultos = [
-            {
+        if not isinstance(bultos_entrada, list):
+            raise ValueError("bultos inválidos")
+        bultos = []
+        for b in bultos_entrada:
+            if not isinstance(b, dict):
+                raise ValueError("bulto inválido")
+            if not (
+                str(b.get("producto") or "").strip()
+                or b.get("peso_kg") or b.get("descripcion_en")
+            ):
+                continue
+            bultos.append({
                 "producto": str(b.get("producto") or ""),
-                "cantidad": int(b.get("cantidad") or 1),
+                "cantidad": b.get("cantidad"),
+                "unidades_aduana": b.get("unidades_aduana"),
                 # Carga libre: el preview cotiza con lo tipeado, igual que
                 # el submit — peso, medidas y la invoice de esta caja.
                 **{k: b.get(k) for k in (
                     "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
                     "valor_unitario_usd", "descripcion_en", "hs_code",
-                    "pais_origen", "unidades_aduana",
+                    "pais_origen",
                 ) if b.get(k) not in (None, "")},
-            }
-            for b in bultos
-            if str(b.get("producto") or "").strip()
-               or b.get("peso_kg") or b.get("descripcion_en")
-        ]
+            })
     except Exception:
         return JSONResponse({"ok": False, "motivo": "body_invalido"}, status_code=200)
 
@@ -870,79 +1070,6 @@ async def api_precio_envio_multi(
         "dias_estimados": opciones[0].get("dias_estimados") if opciones else None,
         "peso_total_kg": precio.get("peso_total_kg"),
         "piezas_total": precio.get("piezas_total"),
-    })
-
-
-# ── API JSON: precio en vivo NACIONAL (AR→AR vía envia.com) ─
-@router.post("/api/precio-nacional")
-async def api_precio_nacional(
-    request: Request,
-    cliente: str = Depends(cliente_actual),
-):
-    """
-    Cotización nacional en vivo para el wizard: destino {cp, ciudad,
-    provincia} + bultos del catálogo → opciones de todos los couriers
-    nacionales con el markup del cliente aplicado.
-    """
-    if not nacional_activo():
-        return JSONResponse({"ok": False, "motivo": "nacional_inactivo"}, status_code=200)
-    try:
-        body = await request.json()
-        destino = {
-            "cp": str(body.get("cp") or "").strip(),
-            "ciudad": str(body.get("ciudad") or "").strip(),
-            "provincia": str(body.get("provincia") or "").strip(),
-        }
-        bultos = [
-            {"producto": str(b.get("producto") or ""), "cantidad": int(b.get("cantidad") or 1)}
-            for b in (body.get("bultos") or [])
-            if str(b.get("producto") or "").strip()
-        ]
-    except Exception:
-        return JSONResponse({"ok": False, "motivo": "body_invalido"}, status_code=200)
-
-    if not destino["cp"] or not destino["ciudad"] or not bultos:
-        return JSONResponse({"ok": False, "motivo": "faltan_datos"}, status_code=200)
-
-    remitente = obtener_remitente_para_envio(cliente)
-    if not remitente:
-        return JSONResponse({"ok": False, "motivo": "sin_remitente"}, status_code=200)
-    origen = {
-        "nombre": remitente.get("nombre"),
-        "email": remitente.get("email"),
-        "telefono": remitente.get("telefono"),
-        "direccion": remitente.get("direccion"),
-        "ciudad": remitente.get("ciudad"),
-        "provincia": remitente.get("estado") or "CABA",
-        "cp": remitente.get("cp"),
-    }
-
-    try:
-        precio = cotizar_nacional_cliente(cliente, origen, destino, bultos)
-    except Exception as e:
-        print(f"[portal] api_precio_nacional error: {e}")
-        return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
-
-    if not precio.get("encontrado"):
-        return JSONResponse(
-            {"ok": False, "motivo": precio.get("motivo") or "sin_cobertura"},
-            status_code=200,
-        )
-    return JSONResponse({
-        "ok": True,
-        "opciones": [
-            {
-                "carrier": o["carrier"],
-                "servicio": o["servicio"],
-                "nombre": f"{o['carrier_nombre']} · {o['servicio_nombre']}",
-                "precio_ars": o["precio_final_ars"],
-                "dias": o["dias_estimados"],
-            }
-            for o in precio["opciones"]
-        ],
-        "piezas_total": precio["piezas_total"],
-        "peso_total_kg": precio["peso_total_kg"],
-        "coti_id": precio["coti_id"],
     })
 
 
@@ -1011,7 +1138,10 @@ def envios_view(
     puede_emitir = any(permisos_emision.values())
     for solicitud in vista["solicitudes"]:
         solicitud["puede_emitir_cliente"] = bool(
-            permisos_emision.get((solicitud.get("courier") or "").lower(), False)
+            ambito_envio(solicitud) == "internacional"
+            and permisos_emision.get(
+                (solicitud.get("courier") or "").lower(), False
+            )
         )
 
     return templates.TemplateResponse(
@@ -1066,8 +1196,30 @@ def envio_nuevo_form(
     destinatario_id: Optional[int] = None,
     origen: str = "",
     destino: str = "",
+    ambito: str = "",
+    courier: str = "",
     cliente: str = Depends(cliente_actual),
 ):
+    ambito = _ambito_portal(ambito)
+    selector_valores = {
+        "pedido_tienda": pedido_tienda,
+        "destinatario_id": destinatario_id,
+        "origen": origen,
+        "destino": destino,
+        "courier": courier,
+    }
+    if not ambito or ambito == "nacional":
+        return templates.TemplateResponse(
+            request=request, name="portal/envio_nuevo.html",
+            context={
+                "cliente": cliente,
+                "ambito": ambito,
+                "nacional_url": _url_envio_por_ambito("nacional", **selector_valores),
+                "internacional_url": _url_envio_por_ambito("internacional", **selector_valores),
+                "volver_url": "/portal/envios/nuevo",
+            },
+        )
+
     # Si viene de un pedido de la tienda (Shopify/Tiendanube), prellenamos
     # el destinatario con lo que el comprador completó en el checkout.
     form: dict = {}
@@ -1076,9 +1228,10 @@ def envio_nuevo_form(
     # Si viene del cotizador ("tocá la opción para crear el envío"), el
     # destino elegido ya llega puesto — una promesa menos que romper.
     if destino.strip() and not pedido_tienda:
-        form["destino_pais"] = destino.strip().upper()[:3]
+        form["destino_pais"] = normalizar_pais(destino)
     if origen.strip() and not pedido_tienda:
-        form["rem_pais"] = origen.strip().upper()[:3]
+        form["rem_pais"] = normalizar_pais(origen)
+    courier = (courier or "").strip().lower()
 
     # Inicio directo desde "Mis clientes". El id nunca alcanza por sí solo:
     # se resuelve junto con el cliente autenticado, así una cuenta no puede
@@ -1133,10 +1286,13 @@ def envio_nuevo_form(
                 "pedido_tienda_id": p["id"],
             }
             pedido_info = p
+    if courier in {"dhl", "fedex", "ups"}:
+        form["intl_courier"] = courier
     return templates.TemplateResponse(
         request=request, name="portal/envio_nuevo.html",
         context={
             "cliente": cliente,
+            "ambito": "internacional",
             "productos": get_productos(cliente),
             "paises_destino": _paises_con_nacional(),
             "remitente": obtener_remitente_para_envio(cliente),
@@ -1158,6 +1314,7 @@ def envio_nuevo_form(
 @router.post("/envios/nuevo", response_class=HTMLResponse)
 def envio_nuevo_post(
     request: Request,
+    ambito: str = Form("internacional"),
     destino_pais: str = Form(...),
     # Multi-bulto: arrays paralelos, una entrada por fila de caja del form.
     # cantidad como str: un valor basura no debe tirar un 422 pelado; se
@@ -1181,7 +1338,7 @@ def envio_nuevo_post(
     bulto_pais_fab: list[str] = Form([]),
     # Legacy (por si queda un form viejo cacheado): un solo producto.
     producto_alias: str = Form(""),
-    cantidad: int = Form(1),
+    cantidad: str = Form("1"),
     # Internacional: courier elegido en el comparador en vivo (fedex/dhl/ups).
     intl_courier: str = Form(""),
     # Precio que estaba visible al confirmar. No se usa para cobrar (el
@@ -1190,9 +1347,6 @@ def envio_nuevo_post(
     # Quién paga los impuestos de destino EN ESTE envío. Viene con el default
     # del cliente ya seleccionado; acá se guarda lo que quedó elegido.
     tax_paga: str = Form(""),
-    # Nacional: carrier/servicio elegido en el comparador en vivo.
-    nac_carrier: str = Form(""),
-    nac_servicio: str = Form(""),
     remitente_id: str = Form(""),
     # Remitente EDITABLE (05/08): lo que quedó en los campos manda sobre lo
     # que vino de la libreta. Para una importación el remitente es el
@@ -1226,6 +1380,9 @@ def envio_nuevo_post(
     pedido_tienda_id: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
+    if _ambito_post(ambito) != "internacional":
+        return RedirectResponse(url="/portal/envios/nuevo?ambito=nacional", status_code=303)
+
     productos = get_productos(cliente)
     paises_destino = _paises_con_nacional()
     remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
@@ -1241,8 +1398,9 @@ def envio_nuevo_post(
     filas = []
     filas_form = []
     errores_numericos = []
-    n_filas = max(len(bulto_producto or []), len(bulto_peso or []),
-                  len(bulto_desc_en or []), len(bulto_unidades_aduana or []))
+    n_filas = max(len(bulto_producto or []), len(bulto_cantidad or []),
+                  len(bulto_peso or []), len(bulto_desc_en or []),
+                  len(bulto_unidades_aduana or []))
     for i in range(n_filas):
         def _campo(lista, idx=i):
             v = lista[idx] if idx < len(lista or []) else ""
@@ -1255,8 +1413,8 @@ def envio_nuevo_post(
             continue
         fila_form = {
             "producto": alias,
-            "cantidad": _campo(bulto_cantidad) or "1",
-            "unidades_aduana": _campo(bulto_unidades_aduana) or _campo(bulto_cantidad) or "1",
+            "cantidad": _campo(bulto_cantidad),
+            "unidades_aduana": _campo(bulto_unidades_aduana),
             "peso_kg": _campo(bulto_peso),
             "largo_cm": _campo(bulto_largo),
             "ancho_cm": _campo(bulto_ancho),
@@ -1268,34 +1426,28 @@ def envio_nuevo_post(
         }
         cantidad_valida = True
         try:
-            cant = int(_campo(bulto_cantidad) or 1)
-        except (TypeError, ValueError):
+            cant = _entero_form(
+                _campo(bulto_cantidad), f"Caja {i + 1}: la cantidad de cajas",
+                minimo=1, maximo=20,
+            )
+        except (TypeError, ValueError) as exc:
             cantidad_valida = False
             errores_numericos.append(
-                f"Caja {i + 1}: la cantidad de cajas debe ser un número entero."
+                str(exc)
             )
             cant = 1
-        if not 1 <= cant <= 20:
-            cantidad_valida = False
-            errores_numericos.append(
-                f"Caja {i + 1}: la cantidad de cajas debe estar entre 1 y 20."
-            )
-            cant = min(max(cant, 1), 20)
         unidades_validas = True
         try:
-            unidades_aduana = int(_campo(bulto_unidades_aduana) or cant)
-        except (TypeError, ValueError):
+            unidades_aduana = _entero_form(
+                _campo(bulto_unidades_aduana),
+                f"Caja {i + 1}: las unidades de aduana", minimo=1, maximo=9999,
+            )
+        except (TypeError, ValueError) as exc:
             unidades_validas = False
             errores_numericos.append(
-                f"Caja {i + 1}: las unidades de aduana deben ser un número entero."
+                str(exc)
             )
             unidades_aduana = cant
-        if not 1 <= unidades_aduana <= 9999:
-            unidades_validas = False
-            errores_numericos.append(
-                f"Caja {i + 1}: las unidades de aduana deben estar entre 1 y 9999."
-            )
-            unidades_aduana = min(max(unidades_aduana, 1), 9999)
         # Los enteros válidos vuelven al contrato histórico como `int`; los
         # valores inválidos quedan crudos para que el formulario pueda
         # mostrar exactamente qué debe corregir el cliente.
@@ -1334,7 +1486,13 @@ def envio_nuevo_post(
         if _campo(bulto_hs):
             fila["hs_code"] = _campo(bulto_hs)
         if _campo(bulto_pais_fab):
-            fila["pais_origen"] = _campo(bulto_pais_fab).upper()[:2]
+            pais_fabricacion = normalizar_pais(_campo(bulto_pais_fab))
+            if pais_fabricacion:
+                fila["pais_origen"] = pais_fabricacion
+            else:
+                errores_numericos.append(
+                    f"Caja {i + 1}: elegí un país de fabricación válido."
+                )
         v = _campo(bulto_valor_usd)
         if v:
             try:
@@ -1354,9 +1512,12 @@ def envio_nuevo_post(
     legacy_single = False
     if not filas and (producto_alias or "").strip():
         legacy_single = True
-        filas = [{"producto": producto_alias.strip(), "cantidad": max(int(cantidad or 1), 1)}]
+        filas = [{"producto": producto_alias.strip(), "cantidad": _entero_form(
+            cantidad, "Cantidad de cajas", minimo=1, maximo=20
+        )}]
 
     form = {
+        "ambito": "internacional",
         "bultos": filas_form,
         "producto_alias": producto_alias,
         "destino_pais": destino_pais,
@@ -1389,8 +1550,6 @@ def envio_nuevo_post(
         "intl_courier": intl_courier,
         "precio_cotizado_ars": precio_cotizado_ars,
         "tax_paga": tax_paga,
-        "nac_carrier": nac_carrier,
-        "nac_servicio": nac_servicio,
         # BUG corregido: sin esto, un error de validación re-renderizaba el
         # form con el hidden del pedido VACÍO — el vínculo con la venta de la
         # tienda se perdía, el pedido quedaba "pendiente" para siempre y se
@@ -1419,6 +1578,10 @@ def envio_nuevo_post(
                 "Faltan datos del remitente: nombre, dirección y ciudad como mínimo. "
                 "Completalos en el paso 1 o elegí uno de la libreta."
             )
+        paises_validos = {iso for iso, _nombre in paises_destino}
+        origen_pais = normalizar_pais(remitente.get("pais") or "")
+        if origen_pais not in paises_validos:
+            raise ValueError("Elegí un país de origen válido en el paso 1.")
 
         error_step = 2
         if destinatario_id:
@@ -1448,8 +1611,7 @@ def envio_nuevo_post(
         # Un único país canónico: el que el cliente ve y elige en pantalla.
         # Antes existía además un hidden `dest_pais`; si divergían se podía
         # cotizar una ruta y guardar/emitir otra.
-        destino_pais = (destino_pais or "").strip().upper()[:2]
-        paises_validos = {iso for iso, _nombre in paises_destino}
+        destino_pais = normalizar_pais(destino_pais)
         if destino_pais not in paises_validos:
             raise ValueError("Elegí un país de destino válido.")
 
@@ -1458,13 +1620,17 @@ def envio_nuevo_post(
             raise ValueError(errores_numericos[0])
         if not filas:
             raise ValueError("Agregá al menos una caja al envío.")
+        if origen_pais == "AR" and destino_pais == "AR":
+            raise ValueError(
+                "Los envíos nacionales se habilitarán con las conexiones "
+                "directas de Andreani y OCA. Todavía no están disponibles."
+            )
 
         # El catálogo es OPCIONAL (Leandro, 06/08): sirve para que la tienda
         # integre por API sin volver a declarar el producto en cada venta, pero
         # desde el portal el cliente puede cargar la caja a mano. Antes toda
         # fila exigía un producto aprobado, así que un cliente nuevo no podía
         # crear NI UN envío hasta que Tauro le validara el catálogo.
-        es_nacional_prev = destino_pais.strip().upper() == "AR"
         for i, fila in enumerate(filas, start=1):
             alias = (fila.get("producto") or "").strip()
             if alias:
@@ -1474,14 +1640,12 @@ def envio_nuevo_post(
                 continue
 
             # Carga manual: sin catálogo de dónde sacarlos, estos datos son
-            # obligatorios. Peso y medidas siempre (sin eso no hay peso
-            # facturable ni cotización); descripción y valor sólo en
-            # internacional, que es donde los pide la aduana.
+            # obligatorios. Este endpoint queda exclusivamente internacional
+            # hasta que Andreani/OCA directos estén integrados.
             obligatorios = [("peso_kg", "el peso"), ("largo_cm", "el largo"),
-                            ("ancho_cm", "el ancho"), ("alto_cm", "el alto")]
-            if not es_nacional_prev:
-                obligatorios += [("descripcion_en", "la descripción en inglés"),
-                                 ("valor_unitario_usd", "el valor declarado en USD")]
+                            ("ancho_cm", "el ancho"), ("alto_cm", "el alto"),
+                            ("descripcion_en", "la descripción en inglés"),
+                            ("valor_unitario_usd", "el valor declarado en USD")]
             faltan = [nombre for clave, nombre in obligatorios if not fila.get(clave)]
             if faltan:
                 donde = f"la caja {i}" if len(filas) > 1 else "la caja"
@@ -1491,57 +1655,16 @@ def envio_nuevo_post(
                 )
 
         courier_extra = {}
-        es_nacional = destino_pais.strip().upper() == "AR"
-        if es_nacional:
-            # ── Envío NACIONAL (AR→AR vía envia.com) ─────────
-            if not nacional_activo():
-                raise ValueError("Los envíos nacionales todavía no están habilitados.")
-            origen_nac = {
-                "nombre": remitente.get("nombre"),
-                "email": remitente.get("email"),
-                "telefono": remitente.get("telefono"),
-                "direccion": remitente.get("direccion"),
-                "ciudad": remitente.get("ciudad"),
-                "provincia": remitente.get("estado") or "CABA",
-                "cp": remitente.get("cp"),
-            }
-            destino_nac = {"cp": dest_zip, "ciudad": dest_ciudad, "provincia": dest_estado}
-            precio_n = cotizar_nacional_cliente(cliente, origen_nac, destino_nac, filas)
-            if not precio_n.get("encontrado"):
-                raise ValueError(f"No se pudo cotizar ese envío nacional ({precio_n.get('motivo')}).")
-            opciones_n = precio_n["opciones"]
-            elegido = next(
-                (o for o in opciones_n
-                 if o["carrier"] == nac_carrier.strip() and o["servicio"] == nac_servicio.strip()),
-                opciones_n[0],
-            )
-            bultos_detalle = precio_n["bultos"]
-            precio = {
-                "encontrado": True,
-                "ruta_id": "NACIONAL",
-                "coti_id": precio_n["coti_id"],
-                "peso_total_kg": precio_n["peso_total_kg"],
-                "valor_total_usd": round(
-                    sum(b["valor_unitario_usd"] * b.get("unidades_aduana", b["cantidad"])
-                        for b in bultos_detalle), 2
-                ),
-                "precio_ars": elegido["precio_final_ars"],
-                "precio_usd": elegido["precio_final_usd"],
-            }
-            courier_extra = {
-                "courier": "ENVIA",
-                "servicio_courier": f"{elegido['carrier']}/{elegido['servicio']}",
-            }
-        elif legacy_single:
+        if legacy_single:
             precio = obtener_precio_envio(
-                cliente, filas[0]["producto"], destino_pais, cantidad=filas[0]["cantidad"]
+                cliente, filas[0]["producto"], destino_pais,
+                cantidad=filas[0]["cantidad"], origen_pais=origen_pais,
             )
             bultos_detalle = None
         else:
             # La dirección real ya está en el scope (viene del form o de la
-            # libreta). La rama nacional de acá arriba ya la usaba; la
-            # internacional la tiraba y cotizaba contra el CP de referencia —
-            # el recargo por zona remota lo comía TAURO.
+            # libreta). Cotizar contra el CP real incluye recargos por zona
+            # remota en el importe que confirma el cliente.
             destino_real = {"cp": dest_zip, "ciudad": dest_ciudad, "estado": dest_estado}
             multi = cotizar_couriers_cliente(
                 cliente, destino_pais, filas,
@@ -1771,6 +1894,7 @@ def envio_nuevo_post(
             request=request, name="portal/envio_nuevo.html",
             context={
                 "cliente": cliente,
+                "ambito": "internacional",
                 "productos": productos,
                 "paises_destino": paises_destino,
                 "remitente": remitente_render,
@@ -1792,7 +1916,10 @@ def envio_nuevo_post(
         except Exception as e:
             print(f"[integraciones] no pude marcar convertido el pedido {pedido_tienda_id}: {e}")
 
-    return RedirectResponse(url="/portal/envios?ok=solicitado", status_code=303)
+    return RedirectResponse(
+        url="/portal/envios?tipo=internacional&ok=solicitado",
+        status_code=303,
+    )
 
 
 # ── Detalle de envío ────────────────────────────────────────
@@ -1809,7 +1936,10 @@ def envio_detalle(
         return RedirectResponse(url="/portal/envios", status_code=303)
 
     # ¿Este cliente puede emitir solo? Define si se muestra el botón.
-    puede_emitir = _cliente_puede_emitir_courier(cliente, s.get("courier") or "")
+    puede_emitir = bool(
+        ambito_envio(s) == "internacional"
+        and _cliente_puede_emitir_courier(cliente, s.get("courier") or "")
+    )
 
     return templates.TemplateResponse(
         request=request, name="portal/envio_detalle.html",

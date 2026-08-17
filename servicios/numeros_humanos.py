@@ -160,6 +160,50 @@ def parse_float_formulario(
     return resultado
 
 
+def parse_entero_humano(valor: Any) -> int | None:
+    """Parsea una cantidad entera sin truncar ni adivinar.
+
+    Comparte la convención de miles usada para importes: ``1.000`` y
+    ``1,000`` son mil. También admite ``1,0``/``1.0`` sólo porque representan
+    exactamente un entero. Cualquier fracción real (``1,5``), notación
+    inválida o valor no finito se rechaza; nunca se hace ``int(1.9) == 1``.
+    """
+
+    numero = parse_importe_humano(valor)
+    if numero is None:
+        return None
+    if numero != numero.to_integral_value():
+        raise NumeroHumanoInvalido("La cantidad debe ser un número entero.")
+    return int(numero)
+
+
+def parse_entero_formulario(
+    valor: Any,
+    campo: str,
+    *,
+    requerido: bool = True,
+    minimo: int | None = None,
+    maximo: int | None = None,
+) -> int | None:
+    """Borde visible para cantidades de formularios HTML y JSON internos."""
+
+    try:
+        numero = parse_entero_humano(valor)
+    except ValueError:
+        raise NumeroHumanoInvalido(
+            f"{campo}: ingresá un número entero válido, por ejemplo 1 o 1.000."
+        ) from None
+    if numero is None:
+        if requerido:
+            raise NumeroHumanoInvalido(f"{campo}: completá este valor.")
+        return None
+    if minimo is not None and numero < minimo:
+        raise NumeroHumanoInvalido(f"{campo}: el mínimo es {minimo}.")
+    if maximo is not None and numero > maximo:
+        raise NumeroHumanoInvalido(f"{campo}: el máximo es {maximo}.")
+    return numero
+
+
 def _parsear(valor: Any, *, tres_decimales_como_miles: bool) -> Decimal | None:
     directo = _numero_directo(valor)
     if directo is not _NO_DIRECTO:

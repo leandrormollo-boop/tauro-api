@@ -207,11 +207,13 @@ CREATE TABLE IF NOT EXISTS salud_historial (
 CREATE TABLE IF NOT EXISTS leads_cotizacion (
     id         SERIAL PRIMARY KEY,
     email      TEXT NOT NULL,
+    origen     TEXT,
     destino    TEXT,
     peso_kg    REAL,
     resumen    JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS origen TEXT;
 CREATE INDEX IF NOT EXISTS idx_leads_cotizacion_email_fecha
     ON leads_cotizacion (LOWER(email), created_at DESC);
 
@@ -238,10 +240,15 @@ CREATE INDEX IF NOT EXISTS idx_envios_cliente ON envios(cliente_id);
 -- guía, y el índice único garantiza que UNA guía debite UNA sola vez aunque
 -- el proceso se reinicie o la función se llame dos veces.
 ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS solicitud_id INTEGER;
+-- Ámbito contable del cargo. Nullable sólo para historia aún no conciliada;
+-- todo cargo automático nuevo lo copia de la solicitud que lo originó.
+ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS ambito TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_envios_solicitud
     ON envios(solicitud_id) WHERE solicitud_id IS NOT NULL;
 -- Índice compuesto para queries de facturación (cliente + filtro de estado)
 CREATE INDEX IF NOT EXISTS idx_envios_cliente_estado ON envios(cliente_id, estado);
+CREATE INDEX IF NOT EXISTS idx_envios_cliente_ambito_fecha
+    ON envios(cliente_id, ambito, fecha DESC);
 -- Índice por fecha para listados ordenados
 CREATE INDEX IF NOT EXISTS idx_envios_fecha_desc ON envios(fecha DESC);
 CREATE INDEX IF NOT EXISTS idx_pagos_fecha_desc ON pagos(fecha DESC);
@@ -268,6 +275,11 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
 ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS coti_id TEXT;
 ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS markup_tipo TEXT;
 ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS markup_valor REAL;
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS ambito TEXT;
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS origen_iso TEXT;
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS destino_iso TEXT;
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS courier TEXT;
+ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS servicio_courier TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cotizaciones_coti_id
     ON cotizaciones(coti_id)
     WHERE coti_id IS NOT NULL;
@@ -289,6 +301,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     remitente_estado         TEXT,
     remitente_zip            TEXT,
     remitente_pais           TEXT,
+    ambito                   TEXT,
     destino_pais             TEXT NOT NULL,
     dest_nombre              TEXT NOT NULL,
     dest_documento           TEXT,
@@ -346,9 +359,15 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_ciudad
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_estado TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_zip TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_pais TEXT;
+-- La ruta manda: AR→AR=NACIONAL; cualquier ruta entre países=INTERNACIONAL.
+-- No tiene DEFAULT para que una fila vieja sin evidencia no se disfrace.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS ambito TEXT;
+CREATE INDEX IF NOT EXISTS idx_solicitudes_cliente_ambito_fecha
+    ON solicitudes_guia(cliente_id, ambito, created_at DESC);
 
--- Envíos NACIONALES vía envia.com: courier='ENVIA' y acá se guarda
--- qué carrier/servicio eligió el cliente (ej: "oca/oca_SP").
+-- Código de servicio nativo del courier. Las filas nacionales históricas
+-- pueden conservar el formato compuesto legado (ej: "oca/oca_SP").
+-- No borrar ni reescribir esa historia al conectar Andreani/OCA directo.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS servicio_courier TEXT;
 
 -- Multi-bulto: lista JSON de cajas del envío. Cada elemento:

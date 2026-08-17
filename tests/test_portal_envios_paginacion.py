@@ -9,7 +9,14 @@ RAIZ = Path(__file__).resolve().parent.parent
 
 
 def _envio(numero: int, courier: str, estado: str) -> dict:
-    return {"id": numero, "courier": courier, "estado": estado}
+    nacional = courier in {"ENVIA", "ANDREANI"}
+    return {
+        "id": numero,
+        "courier": courier,
+        "estado": estado,
+        "remitente_pais": "AR",
+        "destino_pais": "AR" if nacional else "US",
+    }
 
 
 def _historial() -> list[dict]:
@@ -28,13 +35,15 @@ def test_historial_se_divide_en_paginas_sin_perder_filas():
     primera = preparar_historial_envios(_historial(), pagina=1)
     segunda = preparar_historial_envios(_historial(), pagina=2)
     tercera = preparar_historial_envios(_historial(), pagina=3)
+    cuarta = preparar_historial_envios(_historial(), pagina=4)
 
-    assert [s["id"] for s in primera["solicitudes"]] == [1, 2, 3]
-    assert [s["id"] for s in segunda["solicitudes"]] == [4, 5, 6]
-    assert [s["id"] for s in tercera["solicitudes"]] == [7]
+    assert [s["id"] for s in primera["solicitudes"]] == [1, 2]
+    assert [s["id"] for s in segunda["solicitudes"]] == [3, 4]
+    assert [s["id"] for s in tercera["solicitudes"]] == [5, 6]
+    assert [s["id"] for s in cuarta["solicitudes"]] == [7]
     assert primera["total_resultados"] == 7
-    assert primera["total_paginas"] == 3
-    assert (segunda["pagina_desde"], segunda["pagina_hasta"]) == (4, 6)
+    assert primera["total_paginas"] == 4
+    assert (segunda["pagina_desde"], segunda["pagina_hasta"]) == (3, 4)
 
 
 def test_filtros_todos_internacionales_y_nacionales_son_distintos():
@@ -62,6 +71,21 @@ def test_tipo_y_estado_se_combinan_antes_de_paginar():
     assert next(c for c in vista["chips"] if c["clave"] == "guia_lista")["cantidad"] == 1
 
 
+def test_el_ambito_lo_define_la_ruta_y_no_el_nombre_del_courier():
+    historial = [
+        {"id": 1, "courier": "DHL", "estado": "SOLICITADO",
+         "remitente_pais": "AR", "destino_pais": "AR"},
+        {"id": 2, "courier": "OCA", "estado": "SOLICITADO",
+         "remitente_pais": "US", "destino_pais": "AR"},
+    ]
+
+    nacionales = preparar_historial_envios(historial, tipo="nacional")
+    internacionales = preparar_historial_envios(historial, tipo="internacional")
+
+    assert [s["id"] for s in nacionales["solicitudes"]] == [1]
+    assert [s["id"] for s in internacionales["solicitudes"]] == [2]
+
+
 def test_pagina_invalida_o_fuera_de_rango_se_normaliza():
     invalida = preparar_historial_envios(_historial(), pagina="texto")
     negativa = preparar_historial_envios(_historial(), pagina=-5)
@@ -69,7 +93,7 @@ def test_pagina_invalida_o_fuera_de_rango_se_normaliza():
 
     assert invalida["pagina_actual"] == 1
     assert negativa["pagina_actual"] == 1
-    assert excesiva["pagina_actual"] == 3
+    assert excesiva["pagina_actual"] == 4
     assert [s["id"] for s in excesiva["solicitudes"]] == [7]
 
 
@@ -92,7 +116,9 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "&paso={{ paso_filtro }}" in html
     assert "Mostrando {{ pagina_desde }}–{{ pagina_hasta }}" in html
     assert "cotizado en esta página" in html
-    assert "{% if tiene_historial %}" in html
+    assert "{% if not tipo_filtro %}" in html
+    assert "Todos</a>" not in html
+    assert "Cambiar ámbito" in html
     assert "No hay envíos que coincidan con estos filtros" in html
     # Los links de tipo y de paso no incluyen `pagina`: cambiar un filtro
     # siempre vuelve a la primera hoja.

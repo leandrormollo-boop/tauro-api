@@ -2,6 +2,14 @@
 {% block title %}Cotizar{% endblock %}
 
 {% block content %}
+{% if not ambito %}
+    {% set flujo = 'cotizar' %}
+    {% set nacional_url = '/portal/cotizar?ambito=nacional' %}
+    {% set internacional_url = '/portal/cotizar?ambito=internacional' %}
+    {% include 'portal/_ambito_selector.html' %}
+{% elif ambito == 'nacional' %}
+    {% include 'portal/_cotizador_nacional.html' %}
+{% else %}
 <div class="quote-screen {% if opciones %}has-results{% endif %}">
     <header class="quote-screen-head">
         <div>
@@ -12,7 +20,7 @@
         {% if opciones %}
         <div class="quote-modify-actions">
             <button type="button" class="btn btn-ghost btn-sm" id="quote-modify">Modificar datos</button>
-            <noscript><a href="/portal/cotizar" class="btn btn-ghost btn-sm">Nueva cotización</a></noscript>
+            <noscript><a href="/portal/cotizar?ambito=internacional" class="btn btn-ghost btn-sm">Nueva cotización</a></noscript>
         </div>
         {% endif %}
     </header>
@@ -26,6 +34,7 @@
     <div class="quote-stage" id="quote-stage" aria-busy="false">
         <section class="card quote-form-card {% if opciones %}is-hidden{% endif %}" id="quote-form-panel">
             <form id="form-cotizar" method="POST" action="/portal/cotizar">
+                <input type="hidden" name="ambito" value="internacional">
                 <div class="quote-form-sections">
                     <div class="quote-form-block">
                         <div class="quote-block-head">
@@ -75,6 +84,10 @@
                                 <label for="alto_cm">Alto (cm)</label>
                                 <input type="text" name="alto_cm" id="alto_cm" inputmode="decimal" data-numero="decimal" required value="{{ form.alto_cm or '' }}">
                             </div>
+                            <div class="form-group quote-declared-value">
+                                <label for="valor_declarado_usd">Valor declarado (USD)</label>
+                                <input type="text" name="valor_declarado_usd" id="valor_declarado_usd" inputmode="decimal" data-numero="monto" required value="{{ form.valor_declarado_usd or '' }}" placeholder="Ej. 100">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -98,7 +111,7 @@
                 <div><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
                 <div><span>Peso facturable</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
                 <div><span>Real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
-                <div><span>Comparación</span><strong>{{ resultado.couriers_consultados }} couriers</strong></div>
+                <div><span>Valor declarado</span><strong>USD {{ '%g'|format(resultado.valor_declarado_usd) }}</strong></div>
             </div>
 
             <div class="quote-options quote-options-compact">
@@ -116,23 +129,26 @@
                     <div class="quote-price-foot">
                         <span>USD {{ op.precio_final_usd }} · {{ op.dias_estimados }} días</span>
                     </div>
+                    <a href="/portal/envios/nuevo?ambito=internacional&amp;courier={{ op.carrier_id }}&amp;origen={{ form.origen_pais }}&amp;destino={{ destino_sel }}"
+                       class="btn btn-primary btn-sm quote-select-carrier">
+                        Elegir {{ op.carrier_nombre }}
+                    </a>
                 </article>
                 {% endfor %}
             </div>
 
-            {% if no_disponibles %}
-            <div class="quote-unavailable" aria-label="Couriers sin tarifa para esta referencia">
-                {% for courier in no_disponibles %}
-                <span><strong>{{ courier.nombre }}</strong> no cotizó esta referencia</span>
-                {% endfor %}
-            </div>
-            {% endif %}
-
             <div class="quote-result-actions">
-                <p class="quote-result-note">Referencia: elegís el courier y volvemos a cotizar con la dirección completa.</p>
-                <a href="/portal/envios/nuevo?origen={{ form.origen_pais }}&amp;destino={{ destino_sel }}" class="btn btn-primary btn-sm">Crear envío con esta ruta</a>
+                <p class="quote-result-note">Elegí una opción. Conservamos el courier y volvemos a validar el precio con la dirección completa antes de crear la solicitud.</p>
             </div>
         </section>
+        {% endif %}
+
+        {% if no_disponibles %}
+        <div class="quote-unavailable" aria-label="Couriers sin tarifa para esta referencia">
+            {% for courier in no_disponibles %}
+            <span><strong>{{ courier.nombre }}</strong> — {{ courier.motivo or 'No cotizó esta referencia.' }}</span>
+            {% endfor %}
+        </div>
         {% endif %}
     </div>
 </div>
@@ -170,4 +186,5 @@
     }
 })();
 </script>
+{% endif %}
 {% endblock %}

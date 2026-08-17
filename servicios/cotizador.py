@@ -2,6 +2,7 @@
 # Servicio de cotización — PostgreSQL
 # ============================================================
 
+import math
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,7 @@ from modelos.cotizacion import (
 )
 from servicios.pricing import aplicar_pricing, normalizar_pricing, parse_monto_ars
 from servicios.rutas import get_ruta, pais_a_iso2, ciudad_a_state
+from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
 
 
 COTIZACION_VALIDA_HORAS = 24
@@ -122,7 +124,7 @@ def cotizar_opciones(
             "largo": input_data.largo_cm,
             "ancho": input_data.ancho_cm,
             "alto": input_data.alto_cm,
-            "valor_declarado_usd": input_data.valor_declarado_usd or 100,
+            "valor_declarado_usd": input_data.valor_declarado_usd,
             "hs_code": input_data.hs_code or "",
             "descripcion_en": input_data.descripcion_en or "Merchandise",
             "unidades": input_data.unidades or 1,
@@ -212,13 +214,14 @@ def cotizar_referencia_couriers(
     largo_cm: float,
     ancho_cm: float,
     alto_cm: float,
+    valor_declarado_usd: float,
 ) -> dict:
     """Compara una opción principal por courier para el cotizador rápido.
 
-    Esta pantalla no tiene todavía la dirección completa ni los datos de
-    aduana. Por eso usa la ciudad/CP de referencia de cada país y devuelve una
-    *estimación*; el wizard vuelve a cotizar con los datos reales antes de
-    crear la solicitud.
+    Esta pantalla ya exige peso, medidas y valor declarado, pero todavía no
+    tiene la dirección completa ni la descripción aduanera. Por eso usa la
+    ciudad/CP de referencia de cada país y devuelve una *estimación*; el wizard
+    vuelve a cotizar con todos los datos reales antes de crear la solicitud.
 
     Se apoya en la misma capa multi-courier que usa Nuevo envío, pero adapta
     su respuesta al contrato pequeño de la pantalla. No persiste en
@@ -227,19 +230,32 @@ def cotizar_referencia_couriers(
     """
     from servicios.carriers import cotizar_carriers_cliente
     from servicios.configuracion_couriers_cliente import configuracion_cotizacion
-    from servicios.paises import existe, referencia
+    from servicios.paises import normalizar_iso2, referencia
 
-    origen_iso = (origen_pais or "").strip().upper()
-    destino_iso = (destino_pais or "").strip().upper()
-    if not existe(origen_iso) or not existe(destino_iso):
+    origen_iso = normalizar_iso2(origen_pais)
+    destino_iso = normalizar_iso2(destino_pais)
+    if not origen_iso or not destino_iso:
         raise ValueError("Elegí países válidos para origen y destino.")
+    if origen_iso == "AR" and destino_iso == "AR":
+        raise ValueError(
+            "Los envíos nacionales se habilitarán cuando conectemos "
+            "Andreani y OCA directamente. Todavía no se puede cotizar ni emitir."
+        )
 
-    medidas = {
-        "peso_kg": float(peso_kg),
-        "largo": float(largo_cm),
-        "ancho": float(ancho_cm),
-        "alto": float(alto_cm),
-    }
+    try:
+        medidas = {
+            "peso_kg": float(peso_kg),
+            "largo": float(largo_cm),
+            "ancho": float(ancho_cm),
+            "alto": float(alto_cm),
+        }
+        valor_declarado = float(valor_declarado_usd)
+    except (TypeError, ValueError):
+        raise ValueError("El peso, las medidas y el valor declarado deben ser válidos.") from None
+    if any(not math.isfinite(valor) for valor in medidas.values()):
+        raise ValueError("El peso y las medidas deben ser números finitos.")
+    if not math.isfinite(valor_declarado) or valor_declarado <= 0:
+        raise ValueError("El valor declarado debe ser mayor a cero.")
     if any(valor <= 0 for valor in medidas.values()):
         raise ValueError("El peso y las tres medidas deben ser mayores a cero.")
     if medidas["peso_kg"] > 70:
@@ -263,7 +279,7 @@ def cotizar_referencia_couriers(
         destino=destino,
         paquete={
             **medidas,
-            "valor_declarado_usd": 100,
+            "valor_declarado_usd": valor_declarado,
             "descripcion_en": "Merchandise",
             "unidades": 1,
         },
@@ -278,11 +294,24 @@ def cotizar_referencia_couriers(
     for tarjeta in tarjetas:
         if tarjeta.get("estado") != "cotizado":
             # No exponer el error crudo: puede contener nombres de cuentas o
-            # variables internas. En la pantalla alcanza con el estado.
+            # variables internas. Sí distinguir un problema de autenticación
+            # productiva para que el cliente sepa que TAURO debe resolverlo.
+            error_interno = str(tarjeta.get("error") or "").lower()
+            if "http 401" in error_interno or "credenciales productivas" in error_interno:
+                motivo = "La conexión productiva necesita revisión de TAURO."
+            elif tarjeta.get("estado") == "no_habilitado":
+                motivo = "No está habilitado para tu cuenta."
+            elif tarjeta.get("estado") == "proximamente":
+                motivo = "La integración todavía no está disponible."
+            elif tarjeta.get("estado") == "sin_multibulto":
+                motivo = "No cotiza esta cantidad de bultos."
+            else:
+                motivo = "No devolvió tarifa para esta referencia."
             no_disponibles.append({
                 "id": tarjeta["id"],
                 "nombre": tarjeta["nombre"],
                 "estado": tarjeta.get("estado") or "sin_tarifa",
+                "motivo": motivo,
             })
             continue
 
@@ -313,6 +342,7 @@ def cotizar_referencia_couriers(
             "peso_usado_kg": peso_usado,
             "peso_real_kg": medidas["peso_kg"],
             "peso_volumetrico_kg": peso_volumetrico,
+            "valor_declarado_usd": valor_declarado,
             "couriers_consultados": len(tarjetas),
         },
     }
@@ -375,15 +405,41 @@ def cotizar_bultos(
     if not ruta:
         raise ValueError(f"Ruta '{ruta_id}' no existe o está inactiva")
 
+    if not isinstance(bultos, list) or not bultos:
+        raise ValueError("Completá al menos un bulto antes de cotizar.")
+
     piezas_fedex = []
     peso_real_total = 0.0
     peso_facturable_total = 0.0
     piezas_total = 0
-    for b in bultos:
-        unidades = max(int(b.get("unidades", 1) or 1), 1)
-        peso_caja = float(b.get("peso_kg", 0.5) or 0.5)
+    for indice, b in enumerate(bultos, start=1):
+        if not isinstance(b, dict):
+            raise ValueError(f"Bulto {indice}: los datos no tienen un formato válido.")
+        unidades = parse_entero_formulario(
+            b.get("unidades"), f"Bulto {indice}, cantidad", minimo=1, maximo=20
+        )
+        peso_caja = parse_float_formulario(
+            b.get("peso_kg"), f"Bulto {indice}, peso", minimo=0.001, maximo=70
+        )
+        largo = parse_float_formulario(
+            b.get("largo_cm"), f"Bulto {indice}, largo", minimo=0.001, maximo=330
+        )
+        ancho = parse_float_formulario(
+            b.get("ancho_cm"), f"Bulto {indice}, ancho", minimo=0.001, maximo=330
+        )
+        alto = parse_float_formulario(
+            b.get("alto_cm"), f"Bulto {indice}, alto", minimo=0.001, maximo=330
+        )
+        if largo + ancho + alto > 330:
+            raise ValueError(f"Bulto {indice}: la suma de las medidas no puede superar 330 cm.")
+        valor_unitario = parse_float_formulario(
+            b.get("valor_unitario_usd"),
+            f"Bulto {indice}, valor unitario",
+            importe=True,
+            minimo=0.001,
+        )
         vol = calcular_peso_volumetrico(
-            b.get("largo_cm", 30), b.get("ancho_cm", 20), b.get("alto_cm", 10)
+            largo, ancho, alto
         )
         peso_usado_caja = max(peso_caja, vol)
         piezas_total += unidades
@@ -391,10 +447,10 @@ def cotizar_bultos(
         peso_facturable_total += peso_usado_caja * unidades
         piezas_fedex.append({
             "peso_kg": peso_usado_caja,
-            "largo": b.get("largo_cm", 30),
-            "ancho": b.get("ancho_cm", 20),
-            "alto": b.get("alto_cm", 10),
-            "valor_unitario_usd": b.get("valor_unitario_usd", 100),
+            "largo": largo,
+            "ancho": ancho,
+            "alto": alto,
+            "valor_unitario_usd": valor_unitario,
             "unidades": unidades,
             "hs_code": b.get("hs_code", ""),
             "descripcion_en": b.get("descripcion_en", "Merchandise"),
@@ -531,7 +587,7 @@ def cotizar(
             "alto": input_data.alto_cm,
             # Valuación aduanera: usa el valor real del producto si vino;
             # si no, cae al default histórico (evita subdeclarar envíos caros).
-            "valor_declarado_usd": input_data.valor_declarado_usd or 100,
+            "valor_declarado_usd": input_data.valor_declarado_usd,
             "hs_code": input_data.hs_code or "",
             "descripcion_en": input_data.descripcion_en or "Merchandise",
             "unidades": input_data.unidades or 1,

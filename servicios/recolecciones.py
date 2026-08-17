@@ -19,11 +19,13 @@ import math
 import threading
 import uuid
 from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 import psycopg2
 
 from core.database import get_conn
+from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
 
 ESTADOS = [
     "AGENDANDO", "AGENDADA", "CANCELANDO", "VERIFICAR_COURIER",
@@ -142,37 +144,99 @@ def cliente_puede_recolectar(cliente_id: str, courier: str | None = None) -> boo
 
 def datos_retiro_desde_solicitud(sol: dict) -> dict:
     """Fuente única del retiro ligado a una guía: origen y cajas reales."""
-    bultos = sol.get("bultos") or []
+    bultos_crudos = sol.get("bultos")
+    bultos = bultos_crudos or []
     if isinstance(bultos, str):
         try:
             bultos = json.loads(bultos)
         except (TypeError, ValueError):
-            bultos = []
+            raise ValueError("Los datos guardados de las cajas no son válidos.") from None
+    if bultos and not isinstance(bultos, list):
+        raise ValueError("Los datos guardados de las cajas no son válidos.")
+    if len(bultos) > MAX_BULTOS_RECOLECCION:
+        raise ValueError(
+            f"La guía supera el máximo de {MAX_BULTOS_RECOLECCION} cajas por retiro."
+        )
+
+    def entero(valor, campo: str, *, maximo: int | None = None) -> int:
+        return parse_entero_formulario(valor, campo, minimo=1, maximo=maximo)
+
+    def numero(valor, campo: str, *, importe=False) -> float:
+        return parse_float_formulario(valor, campo, importe=importe, minimo=0.001)
 
     paquetes = []
     if bultos:
-        for b in bultos:
+        for indice, b in enumerate(bultos, start=1):
+            if not isinstance(b, dict):
+                raise ValueError(f"Caja {indice}: los datos guardados no son válidos.")
             paquetes.append({
-                "peso_kg": float(b.get("peso_kg") or 1),
-                "largo_cm": float(b.get("largo_cm") or 30),
-                "ancho_cm": float(b.get("ancho_cm") or 20),
-                "alto_cm": float(b.get("alto_cm") or 15),
-                "cantidad": max(int(b.get("cantidad") or 1), 1),
+                "peso_kg": numero(b.get("peso_kg"), f"Caja {indice}: peso"),
+                "largo_cm": numero(b.get("largo_cm"), f"Caja {indice}: largo"),
+                "ancho_cm": numero(b.get("ancho_cm"), f"Caja {indice}: ancho"),
+                "alto_cm": numero(b.get("alto_cm"), f"Caja {indice}: alto"),
+                "cantidad": entero(
+                    b.get("cantidad"), f"Caja {indice}: cantidad",
+                    maximo=MAX_BULTOS_RECOLECCION,
+                ),
+                "unidades_aduana": entero(
+                    b.get("unidades_aduana"), f"Caja {indice}: unidades de aduana",
+                ),
+                "valor_unitario_usd": numero(
+                    b.get("valor_unitario_usd"), f"Caja {indice}: valor declarado",
+                    importe=True,
+                ),
             })
     else:
-        cantidad = max(int(sol.get("cantidad") or 1), 1)
-        peso_total = max(float(sol.get("peso_kg") or 1), 0.001)
+        # El máximo se aplica ANTES de crear listas de tamaño `cantidad`.
+        cantidad = entero(
+            sol.get("cantidad"), "Cantidad de cajas",
+            maximo=MAX_BULTOS_RECOLECCION,
+        )
+        peso_total = numero(sol.get("peso_kg"), "Peso total")
+        valor_total = numero(sol.get("valor_declarado_usd"), "Valor declarado", importe=True)
+
+        def repartir(total: float, decimales: int, campo: str) -> list[float]:
+            """Distribuye el residuo sin cambiar el total guardado de la guía."""
+            escala = 10 ** decimales
+            unidades_total = int(
+                (Decimal(str(total)) * escala).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP,
+                )
+            )
+            base, residuo = divmod(unidades_total, cantidad)
+            if base < 1:
+                raise ValueError(
+                    f"{campo} es demasiado bajo para repartirlo entre {cantidad} cajas."
+                )
+            return [
+                (base + (1 if indice < residuo else 0)) / escala
+                for indice in range(cantidad)
+            ]
+
+        pesos = repartir(peso_total, 3, "El peso total")
+        valores = repartir(valor_total, 2, "El valor declarado")
+        largo = numero(sol.get("largo_cm"), "Largo")
+        ancho = numero(sol.get("ancho_cm"), "Ancho")
+        alto = numero(sol.get("alto_cm"), "Alto")
         paquetes = [{
-            "peso_kg": round(peso_total / cantidad, 3),
-            "largo_cm": float(sol.get("largo_cm") or 30),
-            "ancho_cm": float(sol.get("ancho_cm") or 20),
-            "alto_cm": float(sol.get("alto_cm") or 15),
-            "cantidad": cantidad,
-        }]
+            "peso_kg": pesos[indice],
+            "largo_cm": largo,
+            "ancho_cm": ancho,
+            "alto_cm": alto,
+            "cantidad": 1,
+            "unidades_aduana": 1,
+            "valor_unitario_usd": valores[indice],
+        } for indice in range(cantidad)]
 
     cantidad_total = sum(int(p["cantidad"]) for p in paquetes)
+    if cantidad_total > MAX_BULTOS_RECOLECCION:
+        raise ValueError(
+            f"La guía supera el máximo de {MAX_BULTOS_RECOLECCION} cajas por retiro."
+        )
     peso_total = round(sum(float(p["peso_kg"]) * int(p["cantidad"])
                            for p in paquetes), 3)
+    from servicios.paises import normalizar as normalizar_pais
+
     return {
         "solicitud_id": sol.get("id"),
         "courier": (sol.get("courier") or "FEDEX").strip().upper(),
@@ -189,7 +253,7 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
             "ciudad": sol.get("remitente_ciudad") or "",
             "estado": sol.get("remitente_estado") or "",
             "zip": sol.get("remitente_zip") or "",
-            "pais": (sol.get("remitente_pais") or "AR").strip().upper()[:2],
+            "pais": normalizar_pais(sol.get("remitente_pais") or "AR"),
         },
     }
 
@@ -216,27 +280,45 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
         if not sol or not sol.get("tracking"):
             return {"ok": False, "error":
                     "Ese envío no existe, no es de tu cuenta o todavía no tiene guía."}
-        retiro_envio = datos_retiro_desde_solicitud(sol)
+        from servicios.couriers_urls import ambito_envio
+        ambito = ambito_envio(sol)
+        if ambito != "internacional":
+            return {
+                "ok": False,
+                "error": (
+                    "Ese envío no está clasificado como internacional. "
+                    "Las recolecciones nacionales se habilitarán con las "
+                    "APIs directas de Andreani y OCA."
+                ),
+            }
+        try:
+            retiro_envio = datos_retiro_desde_solicitud(sol)
+        except ValueError as exc:
+            return {"ok": False, "error": (
+                f"La guía tiene datos numéricos inválidos: {exc}. "
+                "No llamamos al courier ni reservamos una recolección."
+            )}
         courier = retiro_envio["courier"]
         bultos = retiro_envio["bultos"]
         peso_kg = retiro_envio["peso_kg"]
 
     try:
-        bultos = int(bultos)
-        peso_kg = float(peso_kg)
-    except (TypeError, ValueError):
-        return {"ok": False, "error": "Revisá la cantidad de bultos y el peso total."}
-    if not 1 <= bultos <= MAX_BULTOS_RECOLECCION:
-        return {"ok": False, "error":
-                f"La recolección admite entre 1 y {MAX_BULTOS_RECOLECCION} bultos."}
-    if not math.isfinite(peso_kg) or not 0 < peso_kg <= MAX_PESO_RECOLECCION_KG:
-        return {"ok": False, "error":
-                f"El peso total debe ser mayor a 0 y no superar {MAX_PESO_RECOLECCION_KG:g} kg."}
+        bultos = parse_entero_formulario(
+            bultos, "Cantidad de bultos", minimo=1, maximo=MAX_BULTOS_RECOLECCION
+        )
+        peso_kg = parse_float_formulario(
+            peso_kg, "Peso total", minimo=0.001, maximo=MAX_PESO_RECOLECCION_KG
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     if retiro_envio:
         for paquete in retiro_envio.get("paquetes") or []:
             try:
-                peso_bulto = float(paquete.get("peso_kg") or 0)
-            except (TypeError, ValueError):
+                peso_bulto = parse_float_formulario(
+                    paquete.get("peso_kg"), "Peso de bulto", minimo=0.001,
+                    maximo=MAX_KG_POR_BULTO,
+                )
+            except ValueError:
                 return {"ok": False, "error": "La guía tiene un peso de bulto inválido."}
             if not math.isfinite(peso_bulto) or not 0 < peso_bulto <= MAX_KG_POR_BULTO:
                 return {"ok": False, "error":
@@ -249,6 +331,21 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
                 f"Las recolecciones de {courier} todavía no están habilitadas "
                 "para tu cuenta. "
                 "Escribinos y las activamos."}
+
+    # Defensa explícita además del permiso efectivo de la matriz: una
+    # confirmación de sandbox nunca puede guardarse como retiro real.
+    if courier == "DHL":
+        from servicios.configuracion_couriers_cliente import estado_integracion
+        if not estado_integracion("dhl")["operativa"]:
+            return {"ok": False, "error":
+                    "DHL no está habilitado en producción. No se creó ninguna "
+                    "recolección real."}
+
+    if courier == "DHL" and not retiro_envio:
+        return {"ok": False, "error": (
+            "Para pedir un retiro DHL, abrí una guía emitida desde Mis envíos "
+            "y elegí Retiro. Así usamos su origen, cajas, medidas y valor reales."
+        )}
 
     cliente_api = _cliente_pickup(courier)
     if cliente_api is None:
@@ -294,7 +391,7 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'AGENDANDO', %s, %s, %s)
                     RETURNING id
                 """, (cliente_id, fecha, ready_time, close_time,
-                      max(int(bultos or 1), 1), float(peso_kg or 1),
+                      bultos, peso_kg,
                       f"{rem.get('direccion','')}, {rem.get('ciudad','')}".strip(", "),
                       (instrucciones or "")[:255], courier,
                       int(solicitud_id) if solicitud_id else None,

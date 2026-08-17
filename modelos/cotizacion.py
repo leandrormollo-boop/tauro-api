@@ -4,6 +4,20 @@
 from pydantic import BaseModel, Field, validator
 from typing import Optional
 
+from servicios.numeros_humanos import parse_float_formulario
+
+
+def _decimal_api(valor):
+    """Acepta JSON numérico o texto localizado sin perder la validación final."""
+
+    return parse_float_formulario(valor, "Peso o medida")
+
+
+def _importe_api(valor):
+    return parse_float_formulario(
+        valor, "Valor declarado", importe=True, minimo=0.001,
+    )
+
 
 class CotizacionInput(BaseModel):
     """Input simplificado del cliente — usa ruta predefinida."""
@@ -12,12 +26,20 @@ class CotizacionInput(BaseModel):
     largo_cm: float = Field(..., gt=0, description="Largo del paquete")
     ancho_cm: float = Field(..., gt=0, description="Ancho del paquete")
     alto_cm: float = Field(..., gt=0, description="Alto del paquete")
-    # Datos para la valuación aduanera de FedEx (declaredValue / commodity).
-    # Opcionales: si no vienen, FedEx usa el default histórico de USD 100.
-    valor_declarado_usd: Optional[float] = Field(None, ge=0, description="Valor declarado por unidad (USD)")
+    # Dato obligatorio para la valuación aduanera. Nunca se inventa un monto
+    # porque puede cambiar tarifa, seguro y documentación del envío.
+    valor_declarado_usd: float = Field(..., gt=0, description="Valor declarado por unidad (USD)")
     hs_code: Optional[str] = Field(None, description="Código HS del producto")
     descripcion_en: Optional[str] = Field(None, description="Descripción en inglés para el commodity")
     unidades: int = Field(1, ge=1, description="Cantidad de piezas")
+
+    _normalizar_decimales = validator(
+        "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
+        pre=True, allow_reuse=True,
+    )(_decimal_api)
+    _normalizar_importe = validator(
+        "valor_declarado_usd", pre=True, allow_reuse=True,
+    )(_importe_api)
 
     @validator("alto_cm")
     def suma_dimensiones(cls, v, values):
@@ -40,6 +62,19 @@ class CotizacionAvanzada(BaseModel):
     largo_cm: float = Field(..., gt=0)
     ancho_cm: float = Field(..., gt=0)
     alto_cm: float = Field(..., gt=0)
+
+    _normalizar_decimales = validator(
+        "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
+        pre=True, allow_reuse=True,
+    )(_decimal_api)
+
+    @validator("alto_cm")
+    def suma_dimensiones(cls, v, values):
+        if all(k in values for k in ["largo_cm", "ancho_cm"]):
+            total = values["largo_cm"] + values["ancho_cm"] + v
+            if total > 330:
+                raise ValueError(f"Suma de dimensiones {total}cm supera el límite (330cm)")
+        return v
 
 
 class CotizacionOutput(BaseModel):

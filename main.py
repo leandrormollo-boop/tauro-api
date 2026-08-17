@@ -4,7 +4,7 @@ from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from apscheduler.schedulers.background import BackgroundScheduler
 import os
 from dotenv import load_dotenv
@@ -30,7 +30,30 @@ from servicios.meta_ads import (
     meta_pixel_habilitado,
     obtener_meta_pixel_id,
 )
-from servicios.numeros_humanos import parse_configuracion_numerica
+from servicios.numeros_humanos import (
+    parse_configuracion_numerica,
+    parse_float_formulario,
+)
+
+
+def _decimal_json(valor):
+    """Borde JSON común: 5,5 y 5.5 llegan al mismo valor validado."""
+
+    return parse_float_formulario(valor, "Peso o medida")
+
+
+def _decimal_json_no_negativo(valor):
+    return parse_float_formulario(valor, "Peso", minimo=0)
+
+
+def _importe_json_opcional(valor):
+    return parse_float_formulario(
+        valor, "Importe", importe=True, requerido=False, minimo=0,
+    )
+
+
+def _importe_json(valor):
+    return parse_float_formulario(valor, "Valor declarado", importe=True, minimo=0)
 
 load_dotenv()
 
@@ -313,9 +336,16 @@ def servir_css():
 
 class LeadCotizacionRequest(BaseModel):
     email: str = Field(..., max_length=160)
+    # Falla cerrado: un bundle viejo que no manda origen no puede guardar una
+    # ruta inventada como AR→destino. El cache-bust v7 entrega el contrato nuevo.
+    origen: str = Field(..., max_length=4)
     destino: str = Field("", max_length=4)
     peso_kg: float = Field(0, ge=0, le=100)
     carriers: list = Field(default_factory=list)
+
+    _normalizar_peso = validator(
+        "peso_kg", pre=True, allow_reuse=True,
+    )(_decimal_json_no_negativo)
 
 
 @app.post("/cotizacion-lead", tags=["public"])
@@ -332,7 +362,9 @@ def cotizacion_lead(body: LeadCotizacionRequest, request: Request):
         return JSONResponse({"ok": False, "error": "Demasiados pedidos. Probá en unos minutos."},
                             status_code=429)
     try:
-        return guardar_lead(body.email, body.destino, body.peso_kg, body.carriers)
+        return guardar_lead(
+            body.email, body.origen, body.destino, body.peso_kg, body.carriers,
+        )
     except Exception as e:
         print(f"[leads] error guardando lead: {e}")
         return JSONResponse({"ok": False, "error": "No pudimos guardar tu email. Probá de nuevo."},
@@ -416,24 +448,53 @@ class PedidoRequest(BaseModel):
     email_comprador: str
     precio_cliente_final_ars: Optional[float] = None
 
+    _normalizar_precio = validator(
+        "precio_cliente_final_ars", pre=True, allow_reuse=True,
+    )(_importe_json_opcional)
+
 
 class CotizarWebRequest(BaseModel):
-    # TAURO cotiza CUALQUIER par de países (Leandro 05/08): AR→CN, CN→AR,
-    # AR→AR y también CN→IN, donde Argentina ni aparece. `origen_pais` es lo
-    # que manda; `destino_pais` + `sentido` quedan por retrocompatibilidad
-    # con el widget viejo y con quien ya llame a este endpoint.
-    origen_pais: str = Field(default="", description="ISO-2 del origen. Vacío = se deduce del sentido")
-    destino_pais: str = Field(..., description="ISO-2 del destino (o del país del exterior si va sentido)")
+    # El cotizador web compara envíos INTERNACIONALES en ambos sentidos y
+    # también entre terceros países (AR→CN, CN→AR, CN→IN). AR→AR pertenece al
+    # circuito nacional de OCA/Andreani y se rechaza antes de llamar carriers.
+    # `origen_pais` es lo que manda; `destino_pais` + `sentido` quedan por
+    # retrocompatibilidad con el widget viejo y sus consumidores existentes.
+    origen_pais: str = Field(
+        default="",
+        description="ISO-2 del origen internacional. Vacío = se deduce del sentido",
+    )
+    destino_pais: str = Field(
+        ...,
+        description="ISO-2 del destino internacional (o del país exterior si va sentido)",
+    )
     peso_kg: float = Field(..., gt=0, le=70)
-    largo_cm: float = Field(..., gt=0)
-    ancho_cm: float = Field(..., gt=0)
-    alto_cm: float = Field(..., gt=0)
-    valor_declarado_usd: float = Field(default=100.0, gt=0)
+    largo_cm: float = Field(..., gt=0, le=330)
+    ancho_cm: float = Field(..., gt=0, le=330)
+    alto_cm: float = Field(..., gt=0, le=330)
+    valor_declarado_usd: float = Field(..., gt=0)
     # TAURO opera los dos sentidos. El campo es opcional y cae en exportación
     # para no romper a nadie que ya esté llamando este endpoint sin él.
     # Ojo: `destino_pais` es SIEMPRE el país del exterior; en una importación
     # ese país es el ORIGEN y el destino es Argentina.
     sentido: str = Field(default="exportacion", description="exportacion | importacion")
+
+    _normalizar_decimales = validator(
+        "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
+        pre=True, allow_reuse=True,
+    )(_decimal_json)
+    _normalizar_importe = validator(
+        "valor_declarado_usd", pre=True, allow_reuse=True,
+    )(_importe_json)
+
+    @validator("alto_cm")
+    def suma_dimensiones(cls, v, values):
+        if all(k in values for k in ("largo_cm", "ancho_cm")):
+            total = values["largo_cm"] + values["ancho_cm"] + v
+            if total > 330:
+                raise ValueError(
+                    f"La suma de las tres medidas ({total:g} cm) no puede superar 330 cm."
+                )
+        return v
 
 
 # ─────────────────────────────────────────────
@@ -586,8 +647,9 @@ def paises_disponibles():
 @app.post("/cotizar-web", tags=["public"])
 def cotizar_web(body: CotizarWebRequest, request: Request):
     """
-    Cotización pública para taurosolutions.ar — sin auth.
-    Llama directo a FedEx y aplica el markup web de Tauro.
+    Cotización internacional pública para taurosolutions.ar — sin auth.
+    Normaliza y valida ambos ISO-2 antes de comparar los couriers habilitados;
+    AR→AR se deriva al futuro circuito nacional directo de OCA/Andreani.
 
     RATE LIMIT (03/08): cada request cotiza EN VIVO contra los couriers —
     tarda segundos, ocupa un hilo del pool y consume cuota real. Sin límite,
@@ -614,25 +676,42 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
         "ES": {"city": "MADRID",     "state": "M",  "postal_code": "28001"},
     }
 
-    from servicios.paises import existe, nombre as nombre_pais, referencia
+    from servicios.paises import nombre as nombre_pais, normalizar_iso2, referencia
 
-    destino_iso = (body.destino_pais or "").strip().upper()
-    origen_iso = (body.origen_pais or "").strip().upper()
+    destino_entrada = (body.destino_pais or "").strip()
+    origen_entrada = (body.origen_pais or "").strip()
 
     # Sin origen explícito se deduce del sentido, que es como llamaba el
     # widget viejo: exportación = sale de Argentina; importación = entra.
-    if not origen_iso:
+    if not origen_entrada:
         if (body.sentido or "").lower().startswith("impo"):
-            origen_iso, destino_iso = destino_iso, "AR"
+            origen_entrada, destino_entrada = destino_entrada, "AR"
         else:
-            origen_iso = "AR"
+            origen_entrada = "AR"
 
-    for iso, cual in ((origen_iso, "origen"), (destino_iso, "destino")):
-        if not existe(iso):
+    origen_iso = normalizar_iso2(origen_entrada)
+    destino_iso = normalizar_iso2(destino_entrada)
+    for iso, entrada, cual in (
+        (origen_iso, origen_entrada, "origen"),
+        (destino_iso, destino_entrada, "destino"),
+    ):
+        if not iso:
             raise HTTPException(
                 status_code=400,
-                detail=f"País de {cual} '{iso}' no soportado todavía.",
+                detail=(
+                    f"País de {cual} '{str(entrada).strip().upper()}' "
+                    "no soportado todavía."
+                ),
             )
+
+    if origen_iso == "AR" and destino_iso == "AR":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Los envíos dentro de Argentina se habilitarán con OCA y "
+                "Andreani. Todavía no se pueden cotizar desde este formulario."
+            ),
+        )
 
     # Dirección de REFERENCIA de cada país: alcanza para una estimación
     # pública. En el portal, con destinatario cargado, se cotiza contra el
@@ -695,7 +774,24 @@ def cotizar(body: CotizarRequest, x_api_key: str = Header(default=None)):
     perfil = autenticar(x_api_key)
     cliente_id = perfil["cliente_id"]
 
-    resultado = obtener_precio_envio(cliente_id, body.producto_id, body.destino_pais)
+    from servicios.paises import normalizar_iso2
+    origen_iso = normalizar_iso2(perfil.get("pais") or "AR")
+    destino_iso = normalizar_iso2(body.destino_pais)
+    if not origen_iso or not destino_iso:
+        raise HTTPException(
+            status_code=400,
+            detail="El país de origen o destino no es válido.",
+        )
+    if origen_iso == "AR" and destino_iso == "AR":
+        raise HTTPException(
+            status_code=409,
+            detail=("Los envíos dentro de Argentina se habilitarán con las "
+                    "APIs directas de Andreani y OCA."),
+        )
+
+    resultado = obtener_precio_envio(
+        cliente_id, body.producto_id, destino_iso, origen_pais=origen_iso,
+    )
 
     if not resultado.get("encontrado"):
         raise HTTPException(
@@ -715,7 +811,7 @@ def cotizar(body: CotizarRequest, x_api_key: str = Header(default=None)):
     return {
         "status": "success",
         "producto_id": body.producto_id,
-        "destino_pais": body.destino_pais,
+        "destino_pais": destino_iso,
         "ruta_id": resultado["ruta_id"],
         "coti_id": resultado["coti_id"],
         "precio_ars": resultado["precio_ars"],
@@ -736,8 +832,31 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
     perfil = autenticar(x_api_key)
     cliente_id = perfil["cliente_id"]
 
+    from servicios.paises import normalizar_iso2
+    origen_iso = normalizar_iso2(perfil.get("pais") or "AR")
+    destino_iso = normalizar_iso2(body.destino_pais)
+    pais_direccion_iso = normalizar_iso2(body.pais)
+    if not origen_iso or not destino_iso or not pais_direccion_iso:
+        raise HTTPException(
+            status_code=400,
+            detail="El país de origen o destino no es válido.",
+        )
+    if pais_direccion_iso != destino_iso:
+        raise HTTPException(
+            status_code=400,
+            detail="El país de la dirección debe coincidir con el destino cotizado.",
+        )
+    if origen_iso == "AR" and destino_iso == "AR":
+        raise HTTPException(
+            status_code=409,
+            detail=("Los envíos dentro de Argentina se habilitarán con las "
+                    "APIs directas de Andreani y OCA."),
+        )
+
     # Validar que el precio exista
-    precio = obtener_precio_envio(cliente_id, body.producto_id, body.destino_pais)
+    precio = obtener_precio_envio(
+        cliente_id, body.producto_id, destino_iso, origen_pais=origen_iso,
+    )
     if not precio.get("encontrado"):
         raise HTTPException(
             status_code=404,
@@ -760,7 +879,7 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
         "remitente_direccion": perfil["direccion"],
         "remitente_cp": perfil["cp"],
         "remitente_ciudad": perfil["ciudad"],
-        "remitente_pais": perfil["pais"],
+        "remitente_pais": origen_iso,
         "remitente_telefono": perfil["telefono"],
         "remitente_email": perfil["email"],
 
@@ -770,7 +889,7 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
         "dest_ciudad": body.ciudad,
         "dest_estado": body.estado,
         "dest_zip": body.zip_code,
-        "dest_pais": body.pais,
+        "dest_pais": destino_iso,
         "dest_telefono": body.telefono,
         "dest_email": body.email_comprador,
 
@@ -808,7 +927,7 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
         cliente_id=cliente_id,
         producto_alias=producto["nombre_es"],
         cantidad=int(producto["unidades"] or 1),
-        destino_pais=body.destino_pais,
+        destino_pais=destino_iso,
         dest_nombre=body.nombre_comprador,
         dest_documento="",
         dest_email=body.email_comprador,
@@ -828,6 +947,7 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
         precio_tauro_ars=precio["precio_ars"],
         precio_tauro_usd=precio["precio_usd"],
         precio_cliente_final_ars=body.precio_cliente_final_ars,
+        remitente_pais=origen_iso,
     )
 
     return {

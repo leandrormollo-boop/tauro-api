@@ -57,7 +57,8 @@ def test_cotizador_no_apila_formulario_y_resultados_en_la_misma_vista():
     assert "result-box" not in html
     assert "Elegir →" not in html
     assert "Continuar →" not in html
-    assert "Crear envío con esta ruta" in html
+    assert "Elegir {{ op.carrier_nombre }}" in html
+    assert "courier={{ op.carrier_id }}" in html
     # Una opción compacta por courier. No truncar en dos: si UPS también
     # cotiza, DHL no puede quedar escondido dentro de otro desplegable.
     assert "{% for op in opciones %}" in html
@@ -65,6 +66,21 @@ def test_cotizador_no_apila_formulario_y_resultados_en_la_misma_vista():
     assert "opciones[2:]" not in html
     assert "Modificar datos" in html
     assert "result.focus({ preventScroll: true })" in html
+
+
+def test_cotizar_y_nuevo_envio_exigen_elegir_ambito_primero():
+    cotizar = _template("cotizar.html")
+    nuevo = _template("envio_nuevo.html")
+    selector = _template("_ambito_selector.html")
+
+    assert "{% if not ambito %}" in cotizar
+    assert "{% if not ambito %}" in nuevo
+    assert "🇦🇷" in selector
+    assert "🌐" in selector
+    assert "Envío nacional" in selector
+    assert "Envío internacional" in selector
+    assert 'name="ambito" value="internacional"' in cotizar
+    assert 'name="ambito" value="internacional"' in nuevo
 
 
 def test_cotizador_exige_elegir_destino_en_vez_de_tomar_el_primero():
@@ -145,7 +161,7 @@ def test_envios_distingue_cotizacion_de_cuenta_corriente():
     html = _template("envios.html")
     assert "Importe cotizado" in html
     assert "cotizado en esta página" in html
-    assert "Los cargos y las facturas aplicadas" in html
+    assert "Cargos y facturas en el resumen total" in html
     assert "Tu costo" not in html
 
 
@@ -157,7 +173,8 @@ def test_historial_de_envios_no_queda_truncado_en_cien():
 
 def test_tselect_busca_codigo_y_cierra_al_salir_del_componente():
     js = (RAIZ / "static" / "js" / "tauro-ui.js").read_text(encoding="utf-8")
-    assert 'opt.text + " " + opt.value' in js
+    assert 'normalizar(opt.text).trim()' in js
+    assert 'normalizar(opt.value).trim()' in js
     assert 'wrap.addEventListener("focusout"' in js
     assert 'wrap.classList.toggle("open-up"' in js
     assert 'wrap.style.setProperty("--tselect-space"' in js

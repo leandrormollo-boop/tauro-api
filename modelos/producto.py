@@ -5,8 +5,24 @@ import re
 from pydantic import BaseModel, Field, validator
 from typing import Optional
 
+from servicios.numeros_humanos import parse_float_formulario
+
 
 HS_CODE_REGEX = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
+
+
+def _decimal_producto(valor):
+    return parse_float_formulario(valor, "Peso o medida")
+
+
+def _importe_producto(valor):
+    return parse_float_formulario(valor, "Valor declarado", importe=True, minimo=0)
+
+
+def _importe_producto_opcional(valor):
+    return parse_float_formulario(
+        valor, "Valor unitario", importe=True, requerido=False, minimo=0,
+    )
 
 
 class Producto(BaseModel):
@@ -23,6 +39,14 @@ class Producto(BaseModel):
     peso_kg: float = Field(..., gt=0)
     valor_usd_default: float = Field(..., ge=0)
     activo: bool = True
+
+    _normalizar_decimales = validator(
+        "largo_cm", "ancho_cm", "alto_cm", "peso_kg",
+        pre=True, allow_reuse=True,
+    )(_decimal_producto)
+    _normalizar_importe = validator(
+        "valor_usd_default", pre=True, allow_reuse=True,
+    )(_importe_producto)
 
     @validator("hs_code")
     def validar_hs_code(cls, v):
@@ -57,6 +81,14 @@ class ProductoNuevo(BaseModel):
     peso_kg: float = Field(..., gt=0)
     valor_usd_default: float = Field(..., ge=0)
 
+    _normalizar_decimales = validator(
+        "largo_cm", "ancho_cm", "alto_cm", "peso_kg",
+        pre=True, allow_reuse=True,
+    )(_decimal_producto)
+    _normalizar_importe = validator(
+        "valor_usd_default", pre=True, allow_reuse=True,
+    )(_importe_producto)
+
 
 class ItemPedido(BaseModel):
     """Un item dentro de un pedido (referencia un producto del catálogo)."""
@@ -64,3 +96,7 @@ class ItemPedido(BaseModel):
     cantidad: int = Field(..., ge=1)
     valor_unitario_usd: Optional[float] = Field(None,
         description="Override del valor default (opcional)")
+
+    _normalizar_importe = validator(
+        "valor_unitario_usd", pre=True, allow_reuse=True,
+    )(_importe_producto_opcional)

@@ -1,0 +1,206 @@
+<div class="quote-screen national-quote-screen {% if resultado_nacional %}has-results{% endif %}">
+    <header class="quote-screen-head">
+        <div>
+            <span class="eyebrow national-eyebrow"><span aria-hidden="true">🇦🇷</span> Cotizador nacional</span>
+            <h1>{% if resultado_nacional %}Datos nacionales preparados{% else %}Cotizá entre provincias{% endif %}</h1>
+            <p>Elegí cualquier provincia de origen y cualquier provincia de destino. La cobertura se confirmará con cada correo.</p>
+        </div>
+        <a href="/portal/cotizar" class="btn btn-ghost btn-sm">Cambiar tipo de envío</a>
+    </header>
+
+    {% if error %}
+    <div class="msg error quote-error">
+        <strong>Revisá los datos nacionales.</strong> {{ error }}
+    </div>
+    {% endif %}
+
+    <div class="national-api-note" role="note">
+        <span class="badge warn">Preparado · APIs pendientes</span>
+        <p>Preparamos los datos sin inventar cobertura ni precios. OCA y Andreani se consultarán acá cuando carguemos sus credenciales y contratos.</p>
+    </div>
+
+    <div class="quote-stage national-quote-stage" id="national-quote-stage" aria-busy="false">
+        <section class="card quote-form-card national-quote-form {% if resultado_nacional %}is-hidden{% endif %}" id="national-quote-form-panel">
+            <form id="form-cotizar-nacional" method="POST" action="/portal/cotizar">
+                <input type="hidden" name="ambito" value="nacional">
+                <input type="hidden" name="origen_pais" value="AR">
+                <input type="hidden" name="destino_pais" value="AR">
+
+                <div class="national-route-grid">
+                    <fieldset class="national-endpoint">
+                        <legend><span>A</span><strong>Origen</strong><small>Desde cualquier provincia</small></legend>
+                        <div class="national-endpoint-fields">
+                            <div class="form-group national-province-field">
+                                <label for="origen_provincia">Provincia</label>
+                                <select name="origen_provincia" id="origen_provincia" data-searchable data-search-placeholder="Buscar provincia o código" required>
+                                    <option value="" disabled {% if not form.origen_provincia %}selected{% endif %}>Elegí provincia</option>
+                                    {% for codigo, nombre in provincias %}
+                                    <option value="{{ codigo }}" {% if codigo == form.origen_provincia %}selected{% endif %}>{{ nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group national-locality-field">
+                                <label for="origen_localidad">Localidad</label>
+                                <input type="text" name="origen_localidad" id="origen_localidad" required maxlength="100" autocomplete="section-origin address-level2" value="{{ form.origen_localidad or '' }}" placeholder="Ej. Rosario">
+                            </div>
+                            <div class="form-group national-postal-field">
+                                <label for="origen_cp">CP / CPA</label>
+                                <input type="text" name="origen_cp" id="origen_cp" required maxlength="11" autocomplete="section-origin postal-code" inputmode="text" value="{{ form.origen_cp or '' }}" placeholder="2000">
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <div class="national-route-arrow" aria-hidden="true">→</div>
+
+                    <fieldset class="national-endpoint">
+                        <legend><span>B</span><strong>Destino</strong><small>Hacia cualquier provincia</small></legend>
+                        <div class="national-endpoint-fields">
+                            <div class="form-group national-province-field">
+                                <label for="destino_provincia">Provincia</label>
+                                <select name="destino_provincia" id="destino_provincia" data-searchable data-search-placeholder="Buscar provincia o código" required>
+                                    <option value="" disabled {% if not form.destino_provincia %}selected{% endif %}>Elegí provincia</option>
+                                    {% for codigo, nombre in provincias %}
+                                    <option value="{{ codigo }}" {% if codigo == form.destino_provincia %}selected{% endif %}>{{ nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group national-locality-field">
+                                <label for="destino_localidad">Localidad</label>
+                                <input type="text" name="destino_localidad" id="destino_localidad" required maxlength="100" autocomplete="section-destination address-level2" value="{{ form.destino_localidad or '' }}" placeholder="Ej. Mendoza">
+                            </div>
+                            <div class="form-group national-postal-field">
+                                <label for="destino_cp">CP / CPA</label>
+                                <input type="text" name="destino_cp" id="destino_cp" required maxlength="11" autocomplete="section-destination postal-code" inputmode="text" value="{{ form.destino_cp or '' }}" placeholder="5500">
+                            </div>
+                        </div>
+                    </fieldset>
+                </div>
+
+                <div class="national-mode-row" aria-label="Modalidad del envío nacional">
+                    <div class="form-group">
+                        <label for="modalidad_origen">Cómo se despacha</label>
+                        <select name="modalidad_origen" id="modalidad_origen" required>
+                            <option value="domicilio" {% if (form.modalidad_origen or 'domicilio') == 'domicilio' %}selected{% endif %}>Retiro en domicilio</option>
+                            <option value="sucursal" {% if form.modalidad_origen == 'sucursal' %}selected{% endif %}>Lo llevo a sucursal</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="modalidad_destino">Cómo se entrega</label>
+                        <select name="modalidad_destino" id="modalidad_destino" required>
+                            <option value="domicilio" {% if (form.modalidad_destino or 'domicilio') == 'domicilio' %}selected{% endif %}>Entrega en domicilio</option>
+                            <option value="sucursal" {% if form.modalidad_destino == 'sucursal' %}selected{% endif %}>Retiro en sucursal</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="national-package-row">
+                    <div class="quote-block-head">
+                        <span>2</span>
+                        <div><strong>Bultos iguales</strong><small>Datos para comparar tarifas</small></div>
+                    </div>
+                    <div class="quote-package-grid national-package-grid">
+                        <div class="form-group">
+                            <label for="nac_cantidad_bultos">Cantidad</label>
+                            <input type="text" name="cantidad_bultos" id="nac_cantidad_bultos" inputmode="numeric" data-numero="entero" required value="{{ form.cantidad_bultos or '1' }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="nac_peso_kg">Kg por bulto</label>
+                            <input type="text" name="peso_kg" id="nac_peso_kg" inputmode="decimal" data-numero="decimal" required value="{{ form.peso_kg or '' }}" placeholder="Ej. 5,5">
+                        </div>
+                        <div class="form-group">
+                            <label for="nac_largo_cm">Largo (cm)</label>
+                            <input type="text" name="largo_cm" id="nac_largo_cm" inputmode="decimal" data-numero="decimal" required value="{{ form.largo_cm or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="nac_ancho_cm">Ancho (cm)</label>
+                            <input type="text" name="ancho_cm" id="nac_ancho_cm" inputmode="decimal" data-numero="decimal" required value="{{ form.ancho_cm or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="nac_alto_cm">Alto (cm)</label>
+                            <input type="text" name="alto_cm" id="nac_alto_cm" inputmode="decimal" data-numero="decimal" required value="{{ form.alto_cm or '' }}">
+                        </div>
+                        <div class="form-group national-declared-field">
+                            <label for="nac_valor_declarado_ars">Valor total (ARS)</label>
+                            <input type="text" name="valor_declarado_ars" id="nac_valor_declarado_ars" inputmode="decimal" data-numero="importe" required value="{{ form.valor_declarado_ars or '' }}" placeholder="Ej. 100.000">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="quote-submit-row national-submit-row">
+                    <p>CP de 4 dígitos o CPA completo. Esto no genera una guía, una reserva ni un cargo.</p>
+                    <button type="submit" class="btn btn-primary">Preparar cotización</button>
+                </div>
+            </form>
+        </section>
+
+        <div id="national-loading" class="dots-loader quote-loader" role="status" aria-live="polite" hidden>
+            <div class="matrix-pill"><div class="matrix"></div></div>
+            <p>Preparando ruta, modalidades y bultos…</p>
+        </div>
+
+        {% if resultado_nacional %}
+        <section id="national-result" class="national-ready-panel fade-up" tabindex="-1" aria-live="polite">
+            <div class="national-ready-head">
+                <div>
+                    <span class="badge ok">Datos preparados</span>
+                    <h2>{{ resultado_nacional.ruta }}</h2>
+                    <p>{{ resultado_nacional.origen.localidad_input }} {{ resultado_nacional.origen.cp_input }} → {{ resultado_nacional.destino.localidad_input }} {{ resultado_nacional.destino.cp_input }}</p>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" id="national-modify">Modificar datos</button>
+            </div>
+
+            <div class="national-ready-summary">
+                <div><span>Origen</span><strong>{{ resultado_nacional.origen.provincia_nombre }}</strong><small>{{ resultado_nacional.origen.localidad_input }} · {{ resultado_nacional.origen.cp_input }}</small></div>
+                <div><span>Destino</span><strong>{{ resultado_nacional.destino.provincia_nombre }}</strong><small>{{ resultado_nacional.destino.localidad_input }} · {{ resultado_nacional.destino.cp_input }}</small></div>
+                <div><span>Bultos</span><strong>{{ resultado_nacional.totales.cantidad_bultos }} · {{ resultado_nacional.totales.peso_kg }} kg</strong><small>{{ resultado_nacional.bultos[0].largo_cm }}×{{ resultado_nacional.bultos[0].ancho_cm }}×{{ resultado_nacional.bultos[0].alto_cm }} cm c/u</small></div>
+                <div><span>Modalidad</span><strong>{{ 'Domicilio' if resultado_nacional.modalidad.origen == 'domicilio' else 'Sucursal' }} → {{ 'Domicilio' if resultado_nacional.modalidad.destino == 'domicilio' else 'Sucursal' }}</strong><small>Se confirmará según contrato</small></div>
+            </div>
+
+            <div class="national-carrier-statuses" aria-label="Estado de los correos nacionales">
+                {% for carrier in resultado_nacional.carriers %}
+                <article>
+                    <div class="national-carrier-brand">{{ carrier.nombre }}</div>
+                    <div><strong>API pendiente</strong><small>{{ carrier.detalle }}</small></div>
+                </article>
+                {% endfor %}
+            </div>
+
+            <div class="msg warn national-ready-message">
+                <strong>La estructura ya está lista.</strong> {{ resultado_nacional.mensaje }} No cotizamos ni cobramos nada todavía.
+            </div>
+        </section>
+        {% endif %}
+    </div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var form = document.getElementById("form-cotizar-nacional");
+    var panel = document.getElementById("national-quote-form-panel");
+    var result = document.getElementById("national-result");
+    var loader = document.getElementById("national-loading");
+    var modify = document.getElementById("national-modify");
+    var stage = document.getElementById("national-quote-stage");
+
+    if (form) {
+        form.addEventListener("submit", function () {
+            panel.classList.add("is-hidden");
+            if (result) result.classList.add("is-hidden");
+            loader.hidden = false;
+            if (stage) stage.setAttribute("aria-busy", "true");
+        });
+    }
+    if (modify) {
+        modify.addEventListener("click", function () {
+            result.classList.add("is-hidden");
+            panel.classList.remove("is-hidden");
+            modify.hidden = true;
+            var province = document.getElementById("origen_provincia");
+            if (province) province.focus({ preventScroll: true });
+        });
+    }
+    if (result) {
+        window.setTimeout(function () { result.focus({ preventScroll: true }); }, 0);
+    }
+})();
+</script>

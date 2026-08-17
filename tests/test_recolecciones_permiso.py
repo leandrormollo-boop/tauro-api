@@ -65,13 +65,17 @@ def test_con_permiso_reserva_y_llama_al_courier(monkeypatch):
     courier = mock.Mock()
     courier.create_pickup.return_value = {
         "encontrado": True,
-        "confirmation_code": "DHL-71",
+        "confirmation_code": "FX-71",
         "ubicacion": "A1",
         "message_reference": "ref-71",
     }
 
     monkeypatch.setattr(rec, "_ensure_tabla", lambda: None)
     monkeypatch.setattr(rec, "cliente_puede_recolectar", lambda cliente, courier=None: True)
+    import servicios.configuracion_couriers_cliente as config_couriers
+    monkeypatch.setattr(
+        config_couriers, "estado_integracion", lambda _courier: {"operativa": True}
+    )
     monkeypatch.setattr(rec, "_cliente_pickup", lambda nombre: courier)
     monkeypatch.setattr(rec, "get_conn", conexion)
     import servicios.direcciones as direcciones
@@ -83,14 +87,63 @@ def test_con_permiso_reserva_y_llama_al_courier(monkeypatch):
 
     salida = rec.crear(
         "WAIMAO", _proximo_habil(), "09:00", "17:00", 2, 4,
+        courier="FEDEX",
+    )
+
+    assert salida == {"ok": True, "id": 71, "confirmation_code": "FX-71"}
+    courier.create_pickup.assert_called_once()
+    payload = courier.create_pickup.call_args.args[0]
+    assert payload["message_reference"] is None
+    assert any("INSERT INTO recolecciones" in query for query, _ in consultas)
+    insert = next(item for item in consultas if "INSERT INTO recolecciones" in item[0])
+    assert insert[1][-1] is None
+    assert any("SET estado='AGENDADA'" in query for query, _ in consultas)
+
+
+def test_dhl_manual_falla_antes_de_reservar_o_llamar(monkeypatch):
+    monkeypatch.setattr(rec, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(rec, "cliente_puede_recolectar", lambda *_args: True)
+    import servicios.configuracion_couriers_cliente as config_couriers
+    monkeypatch.setattr(
+        config_couriers, "estado_integracion", lambda _courier: {"operativa": True}
+    )
+    monkeypatch.setattr(
+        rec, "_cliente_pickup",
+        lambda _courier: (_ for _ in ()).throw(AssertionError("no llamar DHL")),
+    )
+    monkeypatch.setattr(
+        rec, "get_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("no reservar pickup")),
+    )
+
+    salida = rec.crear(
+        "WAIMAO", _proximo_habil(), "09:00", "17:00", 1, 1,
         courier="DHL",
     )
 
-    assert salida == {"ok": True, "id": 71, "confirmation_code": "DHL-71"}
-    courier.create_pickup.assert_called_once()
-    payload = courier.create_pickup.call_args.args[0]
-    assert payload["message_reference"].startswith("tauro-dhl-pick-")
-    assert any("INSERT INTO recolecciones" in query for query, _ in consultas)
-    insert = next(item for item in consultas if "INSERT INTO recolecciones" in item[0])
-    assert insert[1][-1] == payload["message_reference"]
-    assert any("SET estado='AGENDADA'" in query for query, _ in consultas)
+    assert salida["ok"] is False
+    assert "guía emitida" in salida["error"]
+
+
+def test_dhl_sandbox_no_reserva_ni_llama_pickup(monkeypatch):
+    monkeypatch.setattr(rec, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(rec, "cliente_puede_recolectar", lambda *_args: True)
+    import servicios.configuracion_couriers_cliente as config_couriers
+    monkeypatch.setattr(
+        config_couriers, "estado_integracion", lambda _courier: {"operativa": False}
+    )
+    monkeypatch.setattr(
+        rec, "_cliente_pickup",
+        lambda _courier: (_ for _ in ()).throw(AssertionError("no llamar DHL")),
+    )
+    monkeypatch.setattr(
+        rec, "get_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("no reservar pickup")),
+    )
+
+    salida = rec.crear(
+        "WAIMAO", _proximo_habil(), "09:00", "17:00", 1, 1, courier="DHL",
+    )
+
+    assert salida["ok"] is False
+    assert "producción" in salida["error"]

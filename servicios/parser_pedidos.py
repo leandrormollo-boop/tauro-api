@@ -17,6 +17,8 @@
 import re
 import unicodedata
 
+from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
+
 
 # ────────────────────────────────────────────────────────────
 # Regex compiladas (todas case-insensitive donde corresponde)
@@ -124,13 +126,16 @@ PAISES_ISO = {
 # Helpers
 # ────────────────────────────────────────────────────────────
 
-def _a_float(s):
-    """Convierte string numérico a float tolerando coma decimal argentina."""
-    if s is None:
-        return None
+def _a_float(s, *, importe=False):
+    """Convierte texto detectado con el mismo contrato que los formularios.
+
+    El parser de mails nunca debe adivinar un dato dudoso: deja ``None`` para
+    que el usuario lo vea y complete, en vez de transformar ``10.000`` en 10.
+    """
     try:
-        return float(str(s).strip().replace(",", "."))
-    except (ValueError, TypeError):
+        numero = parse_importe_humano(s) if importe else parse_numero_humano(s)
+        return float(numero) if numero is not None else None
+    except (TypeError, ValueError):
         return None
 
 
@@ -303,7 +308,7 @@ def _parsear_paquete(lineas):
             if not m:
                 m = RE_VALOR_MONEDA_DESPUES.search(linea)
             if m:
-                paq["valor_unitario_usd"] = _a_float(m.group(1))
+                paq["valor_unitario_usd"] = _a_float(m.group(1), importe=True)
                 consumida = True
 
         if not consumida:

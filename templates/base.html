@@ -8,8 +8,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
-    <link rel="stylesheet" href="/static/css/tauro.css?v=18">
-    <script src="/static/js/tauro-ui.js?v=4" defer></script>
+    <link rel="stylesheet" href="/static/css/tauro.css?v=23">
+    <script src="/static/js/tauro-ui.js?v=8" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png?v=2">
     <link rel="apple-touch-icon" href="/static/img/favicon-180.png">
 </head>
@@ -44,7 +44,7 @@
         {% set sal = saldo_menu(cliente, saldo if saldo is defined else None) %}
         {% if sal %}
         <a href="/portal/cuenta" class="side-saldo {% if sal.al_dia %}al-dia{% endif %}">
-            <span class="side-saldo-lbl">{% if sal.a_favor_ars %}A favor{% elif sal.al_dia %}Cuenta{% else %}Saldo pendiente{% endif %}</span>
+            <span class="side-saldo-lbl">{% if sal.a_favor_ars %}A favor · total{% elif sal.al_dia %}Cuenta total{% else %}Saldo total{% endif %}</span>
             <span class="side-saldo-n">
                 {% if sal.a_favor_ars %}
                     $ {{ "{:,.0f}".format(sal.a_favor_ars).replace(",", ".") }}
@@ -224,8 +224,8 @@ document.querySelectorAll("[data-set-tipo]").forEach(function (btn) {
   var openTracking = function () {
     var value = input.value.trim();
     if (value) {
-      // Página de tracking PROPIA: detecta el courier por el formato del
-      // número — un tracking de envia.com ya no se abre en FedEx por error.
+      // Página de tracking PROPIA: resuelve el courier antes de abrir el
+      // sitio externo, para no mezclar proveedores.
       window.open(
         "/portal/track?nro=" + encodeURIComponent(value),
         "_blank",

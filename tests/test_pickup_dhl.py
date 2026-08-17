@@ -23,6 +23,12 @@ ORIGEN = {"nombre": "WAIMAO", "empresa": "Waimao SRL", "telefono": "1133779002",
 
 DATOS = {"origen": ORIGEN, "fecha": "2026-08-10", "ready_time": "09:30",
          "close_time": "17:00", "peso_kg": 4.5, "bultos": 3,
+         "valor_declarado_usd": 1,
+         "paquetes": [{
+             "cantidad": 3, "unidades_aduana": 3, "peso_kg": 1.5,
+             "largo_cm": 30, "ancho_cm": 20, "alto_cm": 15,
+             "valor_unitario_usd": 1,
+         }],
          "instrucciones": "tocar timbre 2B"}
 
 
@@ -58,10 +64,37 @@ def test_payload_calcado_del_ejemplo_oficial():
     ship = body["customerDetails"]["shipperDetails"]
     assert ship["postalAddress"]["cityName"] == "CABA"
     assert ship["postalAddress"]["countryCode"] == "AR"
+    assert ship["postalAddress"]["postalCode"] == "1043"
     assert ship["contactInformation"]["companyName"] == "Waimao SRL"
     # 3 bultos = 3 packages, no 1 con quantity.
     assert len(body["shipmentDetails"][0]["packages"]) == 3
+    assert body["shipmentDetails"][0]["declaredValue"] == 1.0
+    assert body["shipmentDetails"][0]["declaredValueCurrency"] == "USD"
     assert body["specialInstructions"][0]["value"] == "tocar timbre 2B"
+
+
+def test_pickup_desde_guia_conserva_valor_declarado_real():
+    datos = dict(DATOS, valor_declarado_usd=None, paquetes=[{
+        "cantidad": 1, "unidades_aduana": 8, "peso_kg": 3.9,
+        "largo_cm": 48, "ancho_cm": 47, "alto_cm": 20,
+        "valor_unitario_usd": 15,
+    }])
+    with _capturar_post() as post:
+        _cliente().create_pickup(datos)
+
+    detalle = post.call_args.kwargs["json"]["shipmentDetails"][0]
+    assert detalle["declaredValue"] == 120.0
+
+
+def test_pickup_sin_guia_no_inventa_medidas_ni_valor():
+    manual = {k: v for k, v in DATOS.items()
+              if k not in {"paquetes", "valor_declarado_usd"}}
+    with _capturar_post() as post:
+        salida = _cliente().create_pickup(manual)
+
+    assert salida["encontrado"] is False
+    assert "guía emitida" in salida["error"]
+    post.assert_not_called()
 
 
 def test_origen_no_ar_usa_cuenta_impo():

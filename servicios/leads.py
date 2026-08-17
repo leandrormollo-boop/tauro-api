@@ -29,16 +29,20 @@ def _ensure_tabla() -> None:
                 CREATE TABLE IF NOT EXISTS leads_cotizacion (
                     id         SERIAL PRIMARY KEY,
                     email      TEXT NOT NULL,
+                    origen     TEXT,
                     destino    TEXT,
                     peso_kg    REAL,
                     resumen    JSONB,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
             """)
+            cur.execute(
+                "ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS origen TEXT"
+            )
     _tabla_lista = True
 
 
-def guardar_lead(email: str, destino: str, peso_kg: float,
+def guardar_lead(email: str, origen: str, destino: str, peso_kg: float,
                  carriers: list[dict]) -> dict:
     """
     Guarda el lead y le manda su cotización por mail. Devuelve {ok, error}.
@@ -50,6 +54,18 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
     email = (email or "").strip().lower()
     if not _EMAIL_RE.match(email):
         return {"ok": False, "error": "Ese email no parece válido."}
+
+    from servicios.paises import normalizar_iso2
+
+    origen = normalizar_iso2(origen or "AR")
+    destino = normalizar_iso2(destino)
+    if not origen or not destino:
+        return {"ok": False, "error": "La ruta de la cotización no es válida."}
+    if origen == "AR" and destino == "AR":
+        return {
+            "ok": False,
+            "error": "Los envíos nacionales todavía no se cotizan desde este formulario.",
+        }
 
     # UN MAIL POR DIRECCIÓN Y POR DÍA. El rate limit por IP no alcanza:
     # desde IPs rotativas esto es una primitiva para mandarle mails con
@@ -73,7 +89,6 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
     except Exception as e:
         print(f"[leads] no pude chequear el tope diario de {email}: {e}")
 
-    destino = (destino or "")[:4].upper()
     limpios = []
     for c in (carriers or [])[:5]:
         if not isinstance(c, dict) or c.get("estado") != "cotizado":
@@ -95,9 +110,9 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO leads_cotizacion (email, destino, peso_kg, resumen)
-                VALUES (%s, %s, %s, %s) RETURNING id
-            """, (email, destino, float(peso_kg or 0),
+                INSERT INTO leads_cotizacion (email, origen, destino, peso_kg, resumen)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+            """, (email, origen, destino, float(peso_kg or 0),
                   json.dumps(limpios, ensure_ascii=False)))
             lead_id = cur.fetchone()["id"]
 
@@ -119,9 +134,9 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
     </div>
   </div>
   <div style="padding:30px;">
-    <h2 style="margin:0 0 8px;font-size:19px;color:#1e1b2e;">Tu cotización a {destino}</h2>
+    <h2 style="margin:0 0 8px;font-size:19px;color:#1e1b2e;">Tu cotización {origen} → {destino}</h2>
     <p style="line-height:1.7;color:#4a4a58;margin:0 0 18px;">
-      Envío de <b>{peso_kg:g} kg</b> desde Argentina, puerta a puerta con
+      Envío de <b>{peso_kg:g} kg</b> desde {origen} hacia {destino}, puerta a puerta con
       despacho de aduana incluido:</p>
     <table style="width:100%;border-collapse:collapse;background:#faf9fc;border-radius:10px;overflow:hidden;">
       {filas}
@@ -139,7 +154,7 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
       contestamos en el día.</p>
   </div>
   <div style="background:#0c0a14;padding:16px;text-align:center;font-size:11px;color:#8b86a0;">
-    taurosolutions.ar · Logística internacional desde Argentina
+    taurosolutions.ar · Logística internacional
   </div>
 </div></body></html>"""
 
@@ -150,7 +165,11 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
     def _mandar_mails():
         try:
             from core.email_sender import _enviar_mail_a
-            _enviar_mail_a(email, f"Tu cotización de envío a {destino} · TAURO Solutions", cuerpo)
+            _enviar_mail_a(
+                email,
+                f"Tu cotización {origen} → {destino} · TAURO Solutions",
+                cuerpo,
+            )
         except Exception as e:
             print(f"[leads] lead {lead_id} guardado pero el mail al visitante falló: {e}")
         try:
@@ -160,8 +179,9 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
             mejor = min(limpios, key=lambda c: c["precio_ars"])
             _enviar_mail_a(
                 _os.getenv("LEADS_AVISO_EMAIL", "cotizaciones@taurosolutions.ar"),
-                f"🎣 Lead del cotizador: {email} → {destino}",
-                f"<p><b>{email}</b> cotizó {peso_kg:g} kg a <b>{destino}</b> y pidió "
+                f"🎣 Lead del cotizador: {email} · {origen} → {destino}",
+                f"<p><b>{email}</b> cotizó {peso_kg:g} kg de <b>{origen}</b> "
+                f"a <b>{destino}</b> y pidió "
                 f"la cotización por mail.<br>Mejor precio mostrado: "
                 f"{mejor['nombre']} $ {mejor['precio_ars']:,.0f} ARS.<br><br>"
                 f"Escribile mientras está caliente.</p>".replace(",", "."))
@@ -171,5 +191,8 @@ def guardar_lead(email: str, destino: str, peso_kg: float,
     import threading
     threading.Thread(target=_mandar_mails, daemon=True).start()
 
-    print(f"[leads] nuevo lead #{lead_id}: {email} → {destino} ({peso_kg}kg)")
+    print(
+        f"[leads] nuevo lead #{lead_id}: {email} · "
+        f"{origen} → {destino} ({peso_kg}kg)"
+    )
     return {"ok": True}

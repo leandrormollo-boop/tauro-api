@@ -250,10 +250,12 @@ def test_emision_dhl_fuera_de_produccion_se_bloquea_antes_de_reservar(
 
         def fetchone(self):
             return {
-                "cliente_id": "MELCIOR", "tracking": None,
-                "estado": "SOLICITADO", "precio_tauro_ars": 100_000,
-                "courier": "DHL", "activo": True, "puede_emitir": True,
-                "tope_deuda_ars": None,
+                    "cliente_id": "MELCIOR", "tracking": None,
+                    "estado": "SOLICITADO", "precio_tauro_ars": 100_000,
+                    "courier": "DHL", "activo": True, "puede_emitir": True,
+                    "ambito": "INTERNACIONAL", "remitente_pais": "AR",
+                    "destino_pais": "US",
+                    "tope_deuda_ars": None,
             }
 
     class ConexionFalsa:
@@ -280,7 +282,7 @@ def test_emision_resuelve_permiso_del_courier_dentro_del_lock():
     assert "LEFT JOIN cliente_courier_config" in fuente
     assert "cc.courier = LOWER" in fuente
     assert "THEN COALESCE(cc.puede_emitir, FALSE)" in fuente
-    assert "THEN COALESCE(c.puede_emitir, FALSE)" in fuente  # ENVIA nacional
+    assert "THEN COALESCE(c.puede_emitir, FALSE)" not in fuente
     assert "LOWER(COALESCE(s.courier, '')) = 'dhl'" in fuente
 
 

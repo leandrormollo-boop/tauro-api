@@ -18,6 +18,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from servicios.couriers_urls import ambito_envio
+
 # Identidad de marca en el archivo: violeta TAURO, no colores default.
 _VIOLETA = "5B3AD4"
 _HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
@@ -67,15 +69,21 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     solicitudes = listar_solicitudes_cliente(cliente_id, limite=None)
 
     def _nac_o_int(s: dict) -> str:
-        # Regla vigente: lo emitido por envia.com es nacional, el resto
-        # internacional. Si mañana entra un courier nacional directo,
-        # revisar también servicios/nacional.py.
-        return "Nacional" if (s.get("courier") or "").upper() == "ENVIA" else "Internacional"
+        ambito = ambito_envio(s)
+        return {
+            "nacional": "Nacional",
+            "internacional": "Internacional",
+        }.get(ambito, "Sin clasificar")
 
-    filas_envios = []
+    filas_por_ambito = {
+        "nacional": [],
+        "internacional": [],
+        "sin_clasificar": [],
+    }
     for s in solicitudes:
         creado = s.get("created_at")
-        filas_envios.append([
+        ambito = ambito_envio(s)
+        fila = [
             creado.strftime("%d/%m/%Y") if creado else "",
             s.get("estado") or "",
             _nac_o_int(s),
@@ -91,12 +99,19 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
             float(s.get("precio_tauro_ars") or 0),
             float(s.get("precio_tauro_usd") or 0),
             s.get("observaciones") or "",
-        ])
-    _hoja(wb, "Envíos", [
+        ]
+        filas_por_ambito.setdefault(ambito, filas_por_ambito["sin_clasificar"]).append(fila)
+
+    columnas_envio = [
         "Fecha", "Estado", "Tipo", "Courier", "Tracking", "Producto", "Cajas",
         "Destinatario", "Ciudad", "País", "Peso (kg)", "Valor declarado (USD)",
         "Costo (ARS)", "Costo (USD)", "Observaciones",
-    ], filas_envios)
+    ]
+    _hoja(wb, "Envios_Nacionales", columnas_envio, filas_por_ambito["nacional"])
+    _hoja(wb, "Envios_Internacionales", columnas_envio, filas_por_ambito["internacional"])
+    if filas_por_ambito["sin_clasificar"]:
+        _hoja(wb, "Envios_Sin_clasificar", columnas_envio,
+              filas_por_ambito["sin_clasificar"])
 
     # ── Cuenta corriente ────────────────────────────────────
     facturado = get_facturado_real(cliente_id)
@@ -118,7 +133,9 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     filas_cc.append(["", "", "TOTAL CARGOS", resumen_fc["total_cargos_ars"]])
     filas_cc.append(["", "", "TOTAL PAGADO", -s["pagado_ars"]])
     filas_cc.append(["", "", "SALDO PENDIENTE", s["saldo_pendiente_ars"]])
-    _hoja(wb, "Cuenta corriente",
+    # Sigue consolidada hasta implementar aplicaciones de pagos. Rotularla
+    # evita que alguien la confunda con uno de los dos ledgers futuros.
+    _hoja(wb, "Cuenta_consolidada",
           ["Fecha", "Tipo", "Concepto", "Monto (ARS)"], filas_cc)
 
     # ── Catálogo ────────────────────────────────────────────
@@ -138,12 +155,16 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     ws["A1"] = f"TAURO Solutions — backup de {cliente_id}"
     ws["A1"].font = Font(bold=True, size=14, color=_VIOLETA)
     ws["A2"] = f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-    ws["A4"] = "Envíos"
-    ws["B4"] = len(filas_envios)
-    ws["A5"] = "Saldo pendiente (ARS)"
-    ws["B5"] = s["saldo_pendiente_ars"]
-    ws["A6"] = "Productos en catálogo"
-    ws["B6"] = len(filas_prod)
+    ws["A4"] = "Envíos nacionales"
+    ws["B4"] = len(filas_por_ambito["nacional"])
+    ws["A5"] = "Envíos internacionales"
+    ws["B5"] = len(filas_por_ambito["internacional"])
+    ws["A6"] = "Históricos sin clasificar"
+    ws["B6"] = len(filas_por_ambito["sin_clasificar"])
+    ws["A7"] = "Saldo total consolidado (ARS)"
+    ws["B7"] = s["saldo_pendiente_ars"]
+    ws["A8"] = "Productos en catálogo"
+    ws["B8"] = len(filas_prod)
     ws.column_dimensions["A"].width = 26
 
     buf = io.BytesIO()

@@ -58,6 +58,7 @@ def _cotizar_con(tarjetas):
         resultado = cotizador.cotizar_referencia_couriers(
             cliente="MELCIOR", origen_pais="AR", destino_pais="US",
             peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+            valor_declarado_usd=250,
         )
     return resultado, capturado
 
@@ -70,6 +71,7 @@ def test_muestra_fedex_y_dhl_ordenados_por_precio():
     assert resultado["opciones"][0]["carrier_nombre"] == "DHL Express"
     assert resultado["opciones"][0]["carrier_logo"] == "/dhl.svg"
     assert resultado["resumen"]["couriers_consultados"] == 3
+    assert resultado["resumen"]["valor_declarado_usd"] == 250
 
 
 def test_envia_al_courier_las_medidas_reales_con_claves_canonicas():
@@ -79,7 +81,7 @@ def test_envia_al_courier_las_medidas_reales_con_claves_canonicas():
     assert capturado["destino"]["country"] == "US"
     assert capturado["paquete"] == {
         "peso_kg": 1.2, "largo": 40.0, "ancho": 30.0, "alto": 20.0,
-        "valor_declarado_usd": 100, "descripcion_en": "Merchandise",
+        "valor_declarado_usd": 250.0, "descripcion_en": "Merchandise",
         "unidades": 1,
     }
     assert resultado["resumen"]["peso_volumetrico_kg"] == 4.8
@@ -97,7 +99,10 @@ def test_un_courier_sin_tarifa_no_borra_al_otro_ni_filtra_el_error():
 
     assert [o["carrier_id"] for o in resultado["opciones"]] == ["fedex"]
     dhl = next(c for c in resultado["no_disponibles"] if c["id"] == "dhl")
-    assert dhl == {"id": "dhl", "nombre": "DHL Express", "estado": "sin_tarifa"}
+    assert dhl == {
+        "id": "dhl", "nombre": "DHL Express", "estado": "sin_tarifa",
+        "motivo": "No devolvió tarifa para esta referencia.",
+    }
     assert "error" not in repr(resultado["no_disponibles"]).lower()
     assert "account" not in repr(resultado["no_disponibles"]).lower()
 
@@ -113,6 +118,20 @@ def test_dhl_puede_cotizar_aunque_fedex_no_devuelva_tarifa():
 
     assert resultado["encontrado"] is True
     assert [o["carrier_id"] for o in resultado["opciones"]] == ["dhl"]
+
+
+def test_error_401_se_convierte_en_aviso_seguro_y_accionable():
+    tarjetas = _tarjetas_dos_couriers()
+    tarjetas[-1] = {
+        "id": "dhl", "nombre": "DHL Express", "logo": "/dhl.svg",
+        "servicio": "Express Worldwide", "estado": "sin_tarifa",
+        "error": "DHL rechazó las credenciales productivas (HTTP 401).",
+    }
+    resultado, _ = _cotizar_con(tarjetas)
+
+    dhl = next(c for c in resultado["no_disponibles"] if c["id"] == "dhl")
+    assert dhl["motivo"] == "La conexión productiva necesita revisión de TAURO."
+    assert "credencial" not in repr(dhl).lower()
 
 
 def test_si_ninguno_cotiza_el_resultado_es_neutral_y_sin_secretos():
@@ -152,10 +171,23 @@ def test_conserva_los_limites_del_formulario(campo, valor, mensaje):
     datos = dict(
         cliente="MELCIOR", origen_pais="AR", destino_pais="US",
         peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+        valor_declarado_usd=250,
     )
     datos[campo] = valor
     with pytest.raises(ValueError, match=mensaje):
         cotizador.cotizar_referencia_couriers(**datos)
+
+
+@pytest.mark.parametrize("valor", [None, "", 0, -1, float("nan")])
+def test_valor_declarado_invalido_no_consulta_carriers(valor):
+    with mock.patch("servicios.carriers.cotizar_carriers_cliente") as consultar:
+        with pytest.raises(ValueError, match="valor declarado"):
+            cotizador.cotizar_referencia_couriers(
+                cliente="MELCIOR", origen_pais="AR", destino_pais="US",
+                peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+                valor_declarado_usd=valor,
+            )
+    consultar.assert_not_called()
 
 
 def test_el_post_rapido_ya_no_esta_atado_a_fedex_ni_a_rutas_manual():
@@ -176,3 +208,4 @@ def test_la_vista_no_esconde_dhl_despues_de_dos_opciones():
     assert "op.carrier_logo" in html
     assert 'class="quote-carrier-logo"' in html
     assert "no_disponibles" in html
+    assert "        {% endif %}\n\n        {% if no_disponibles %}" in html

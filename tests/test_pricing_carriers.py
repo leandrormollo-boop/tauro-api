@@ -15,6 +15,19 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from servicios.carriers import _markup_de, _desc_fedex, _margen_fijo_de, _precios  # noqa: E402
+from servicios.carriers import carrier_activo  # noqa: E402
+
+
+def test_dhl_real_no_se_activa_con_credenciales_de_sandbox():
+    carrier = {
+        "requisitos": ("DHL_API_KEY", "DHL_API_SECRET"),
+        "entorno_requerido": ("DHL_ENVIRONMENT", "production"),
+    }
+    base = {"DHL_API_KEY": "k", "DHL_API_SECRET": "s"}
+    with mock.patch.dict(os.environ, {**base, "DHL_ENVIRONMENT": "sandbox"}, clear=True):
+        assert carrier_activo(carrier) is False
+    with mock.patch.dict(os.environ, {**base, "DHL_ENVIRONMENT": "production"}, clear=True):
+        assert carrier_activo(carrier) is True
 
 
 def test_dhl_ganancia_fija_es_costo_mas_el_monto():

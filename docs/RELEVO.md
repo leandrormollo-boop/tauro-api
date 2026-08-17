@@ -221,14 +221,19 @@ en memoria (con más de un worker el tope se multiplica) y el admin no tiene MFA
 
 ## Pendientes (en orden)
 
+La separación funcional y contable Nacional/Internacional está especificada
+en `docs/AMBITOS_NACIONAL_INTERNACIONAL.md`. El selector, historial y
+dual-write inicial ya están en el worktree; la imputación separada de pagos
+requiere migración y conciliación antes de mostrar dos saldos.
+
 1. **Técnico**: NADA bloqueante. Lo que queda depende de credenciales:
    - **Probar contra las APIs vivas** cuando entren las cuentas. La emisión
      de DHL y UPS está armada contra la documentación y cubierta por tests
      de payload, pero NUNCA se ejecutó contra el sandbox real. La primera
      guía de cada courier hay que mirarla de cerca (mismo criterio para la
      primera recolección: la Pickup API tampoco se probó viva).
-   - Recolecciones para couriers nacionales (hoy sólo FedEx; falta
-     investigar si envia.com expone pickup).
+   - Cotización, emisión y recolecciones nacionales mediante APIs directas
+     de Andreani/OCA. La integración agregadora anterior fue retirada.
    *(Cerrados el 02/08: open redirect, `state` del OAuth, ventas de tiendas
    sin vincular, reserva atómica en guías nacionales, recolecciones FedEx.
    El 03/08: los 8 hallazgos de la auditoría — ver la sección de arriba.)*

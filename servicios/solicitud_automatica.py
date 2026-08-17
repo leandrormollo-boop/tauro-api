@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Optional
 
 from core.database import get_conn
+from servicios.numeros_humanos import parse_entero_formulario
 
 
 def _motivo(pedido_id: int, texto: str) -> dict:
@@ -82,10 +83,22 @@ def crear_desde_pedido(pedido_id: int) -> dict:
     catalogo = {p.alias_interno.strip().upper(): p for p in get_productos(cliente)}
     filas, faltantes = [], []
     for it in (ped["items"] or []):
+        if not isinstance(it, dict):
+            return _motivo(pedido_id, "El pedido contiene un artículo con formato inválido.")
         sku = str(it.get("sku") or "").strip().upper()
-        cant = max(int(it.get("cantidad") or 1), 1)
+        try:
+            cant = parse_entero_formulario(
+                it.get("cantidad"), f"Cantidad del producto {sku or '(sin SKU)'}",
+                minimo=1, maximo=20,
+            )
+        except ValueError as exc:
+            return _motivo(pedido_id, str(exc))
         if sku and sku in catalogo:
-            filas.append({"producto": catalogo[sku].alias_interno, "cantidad": cant})
+            filas.append({
+                "producto": catalogo[sku].alias_interno,
+                "cantidad": cant,
+                "unidades_aduana": cant,
+            })
         else:
             faltantes.append(it.get("sku") or it.get("titulo") or "(sin SKU)")
 
@@ -105,9 +118,27 @@ def crear_desde_pedido(pedido_id: int) -> dict:
                        "No tenés un remitente cargado. Agregá tu dirección en la "
                        "libreta del portal y el envío se arma solo.")
 
+    from servicios.paises import normalizar as normalizar_pais
+
+    origen = normalizar_pais(remitente.get("pais") or "AR")
+    pais = normalizar_pais(pais)
+    if not origen or not pais:
+        return _motivo(
+            pedido_id,
+            "El pedido o el remitente tienen un país que TAURO no reconoce.",
+        )
+    if origen == "AR" and pais == "AR":
+        return _motivo(
+            pedido_id,
+            "El pedido es un envío nacional. Queda pendiente hasta que estén "
+            "conectadas las APIs directas de Andreani y OCA.",
+        )
+
     # ── Precio ──
     try:
-        precio = obtener_precio_envio_multi(cliente, pais, filas)
+        precio = obtener_precio_envio_multi(
+            cliente, pais, filas, origen_pais=origen,
+        )
     except Exception as e:
         return _motivo(pedido_id, f"No se pudo cotizar: {type(e).__name__}: {e}")
     if not precio.get("encontrado"):
