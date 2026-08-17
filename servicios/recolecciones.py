@@ -19,6 +19,7 @@ import math
 import threading
 import uuid
 from datetime import date, datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 import psycopg2
@@ -182,15 +183,39 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
         cantidad = entero(sol.get("cantidad"), "Cantidad de cajas")
         peso_total = numero(sol.get("peso_kg"), "Peso total")
         valor_total = numero(sol.get("valor_declarado_usd"), "Valor declarado", importe=True)
+
+        def repartir(total: float, decimales: int, campo: str) -> list[float]:
+            """Distribuye el residuo sin cambiar el total guardado de la guía."""
+            escala = 10 ** decimales
+            unidades_total = int(
+                (Decimal(str(total)) * escala).quantize(
+                    Decimal("1"), rounding=ROUND_HALF_UP,
+                )
+            )
+            base, residuo = divmod(unidades_total, cantidad)
+            if base < 1:
+                raise ValueError(
+                    f"{campo} es demasiado bajo para repartirlo entre {cantidad} cajas."
+                )
+            return [
+                (base + (1 if indice < residuo else 0)) / escala
+                for indice in range(cantidad)
+            ]
+
+        pesos = repartir(peso_total, 3, "El peso total")
+        valores = repartir(valor_total, 2, "El valor declarado")
+        largo = numero(sol.get("largo_cm"), "Largo")
+        ancho = numero(sol.get("ancho_cm"), "Ancho")
+        alto = numero(sol.get("alto_cm"), "Alto")
         paquetes = [{
-            "peso_kg": round(peso_total / cantidad, 3),
-            "largo_cm": numero(sol.get("largo_cm"), "Largo"),
-            "ancho_cm": numero(sol.get("ancho_cm"), "Ancho"),
-            "alto_cm": numero(sol.get("alto_cm"), "Alto"),
-            "cantidad": cantidad,
-            "unidades_aduana": cantidad,
-            "valor_unitario_usd": round(valor_total / cantidad, 2),
-        }]
+            "peso_kg": pesos[indice],
+            "largo_cm": largo,
+            "ancho_cm": ancho,
+            "alto_cm": alto,
+            "cantidad": 1,
+            "unidades_aduana": 1,
+            "valor_unitario_usd": valores[indice],
+        } for indice in range(cantidad)]
 
     cantidad_total = sum(int(p["cantidad"]) for p in paquetes)
     peso_total = round(sum(float(p["peso_kg"]) * int(p["cantidad"])

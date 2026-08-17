@@ -191,6 +191,36 @@ def test_retiro_ligado_a_guia_usa_el_proveedor_no_la_cuenta_general():
     assert salida["bultos"] == 2 and salida["peso_kg"] == 7.8
 
 
+def test_retiro_legacy_preserva_totales_no_divisibles_hasta_dhl():
+    retiro = datos_retiro_desde_solicitud({
+        "id": 78, "cliente_id": "WAIMAO", "courier": "DHL", "tracking": "124",
+        "remitente_nombre": "WAIMAO", "remitente_contacto": "Lean",
+        "remitente_telefono": "1145678900", "remitente_direccion": "Calle 1",
+        "remitente_ciudad": "CABA", "remitente_zip": "1000",
+        "remitente_pais": "AR", "cantidad": 3, "peso_kg": 1,
+        "largo_cm": 10, "ancho_cm": 20, "alto_cm": 30,
+        "valor_declarado_usd": 100, "bultos": [],
+    })
+
+    assert [p["peso_kg"] for p in retiro["paquetes"]] == [0.334, 0.333, 0.333]
+    assert [p["valor_unitario_usd"] for p in retiro["paquetes"]] == [33.34, 33.33, 33.33]
+    assert sum(p["peso_kg"] for p in retiro["paquetes"]) == 1
+    assert sum(p["valor_unitario_usd"] for p in retiro["paquetes"]) == 100
+
+    datos = {
+        "origen": retiro["origen"], "fecha": "2026-08-18",
+        "ready_time": "09:00", "close_time": "17:00",
+        "paquetes": retiro["paquetes"],
+    }
+    with mock.patch("core.dhl_client.requests.post", return_value=_respuesta()) as post:
+        salida = _dhl().create_pickup(datos)
+
+    assert salida["encontrado"] is True
+    detalle = post.call_args.kwargs["json"]["shipmentDetails"][0]
+    assert sum(p["weight"] for p in detalle["packages"]) == 1
+    assert detalle["declaredValue"] == 100
+
+
 def test_timeout_de_pickup_queda_marcado_como_incierto():
     datos = {
         "origen": {"nombre": "WAIMAO", "telefono": "1145678900",
