@@ -1,5 +1,7 @@
 {% extends "base.html" %}
+{% set courier_codigo = (s.courier or "FEDEX")|upper %}
 {% set courier_nombre = (s.courier or "FedEx")|upper|title if (s.courier or "FEDEX")|upper != "FEDEX" else "FedEx" %}
+{% set ambito = ambito_envio(s) %}
 {% block title %}Envío #{{ s.id }}{% endblock %}
 
 {% block content %}
@@ -9,11 +11,11 @@
 
 <div class="page-title page-title-row">
     <div>
-        <div class="eyebrow">Envío #{{ s.id }}</div>
+        <div class="eyebrow">{% if ambito == 'nacional' %}🇦🇷 Nacional{% elif ambito == 'internacional' %}🌐 Internacional{% else %}Ámbito en revisión{% endif %} · Envío #{{ s.id }}</div>
         <h1>{{ s.dest_nombre }} · {{ s.dest_ciudad or s.destino_pais }}</h1>
         <p>Creado el {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "—" }}.</p>
     </div>
-    <a href="/portal/envios" class="btn btn-ghost btn-sm">← Mis envíos</a>
+    <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos {{ ambito if ambito != 'sin_clasificar' else '' }}</a>
 </div>
 
 {% if s.estado == "CANCELADO" %}
@@ -21,7 +23,7 @@
 {% else %}
 {% if s.estado == "VERIFICAR_COURIER" %}
     <div class="msg warn" style="margin-bottom:16px;">
-        DHL pudo haber recibido la emisión, pero no devolvió una confirmación concluyente.
+        {{ courier_nombre }} pudo haber recibido la emisión, pero no devolvió una confirmación concluyente.
         No vuelvas a emitir: Tauro la está verificando y te avisa cuando quede conciliada.
     </div>
 {% endif %}
@@ -37,7 +39,9 @@
     </div>
     <p style="text-align:center;color:var(--fg-3);font-size:13px;margin-top:4px;">
         {% if s.estado == "SOLICITADO" %}
-            {% if puede_emitir %}Tu solicitud está lista: emití la guía con el botón de abajo, o no hagas nada y la emite Tauro.{% else %}Recibimos tu solicitud. Tauro está generando la guía — te avisamos apenas esté lista.{% endif %}
+            {% if ambito == 'nacional' %}La emisión nacional se habilitará cuando conectemos OCA y Andreani. No se emitió ni se generó ningún cargo.
+            {% elif ambito == 'sin_clasificar' %}El origen y el destino necesitan revisión antes de emitir. No se generó ningún cargo.
+            {% elif puede_emitir %}Tu solicitud está lista: emití la guía con el botón de abajo, o no hagas nada y la emite Tauro.{% else %}Recibimos tu solicitud. Tauro está generando la guía — te avisamos apenas esté lista.{% endif %}
         {% elif s.estado == "EN_PROCESO" %}
             Estamos preparando tu guía con {{ courier_nombre }}. Te avisamos apenas esté lista.
         {% elif s.estado == "GUIA_LISTA" %}
@@ -63,13 +67,17 @@
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
                 {% if s.bultos and s.bultos|length %}El PDF trae una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}Imprimí la etiqueta y pegala en la caja.{% endif %}
             </p>
-            {% if s.estado == 'GUIA_LISTA' %}
+            {% if ambito == 'internacional' and s.estado == 'GUIA_LISTA' and courier_codigo != 'ENVIA' %}
             {# El paso que sigue a tener la etiqueta: que pasen a buscarla.
                Llega al form con courier/bultos/peso de este envío puestos. #}
             <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-full" style="margin-top:8px;">
                 🚚 Coordinar retiro con {{ courier_nombre }}
             </a>
             {% endif %}
+        {% elif courier_codigo == 'ENVIA' %}
+            <div class="empty" style="padding:14px;">
+                Esta solicitud nacional es histórica. La integración anterior fue retirada y no puede emitirse desde el portal.
+            </div>
         {% elif not s.tracking and puede_emitir and s.estado != 'VERIFICAR_COURIER' %}
             {# Emisión habilitada para este cliente (flag + tope de deuda se
                validan de nuevo en el servidor: el botón es sólo la puerta). #}
@@ -86,7 +94,13 @@
                 entra a tu cuenta corriente. Si preferís, Tauro la emite por vos.
             </p>
         {% else %}
+            {% if ambito == 'nacional' %}
+            <div class="empty" style="padding:14px;">La guía nacional todavía no puede emitirse: se habilitará con las conexiones directas de OCA y Andreani.</div>
+            {% elif ambito == 'sin_clasificar' %}
+            <div class="empty" style="padding:14px;">Antes de emitir necesitamos revisar el país de origen y de destino de esta solicitud.</div>
+            {% else %}
             <div class="empty" style="padding:14px;">Todavía no hay guía emitida. Aparece acá apenas Tauro la genera.</div>
+            {% endif %}
         {% endif %}
     </div>
 

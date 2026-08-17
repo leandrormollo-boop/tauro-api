@@ -1,9 +1,8 @@
 # ============================================================
 # Un solo lugar para "¿a dónde apunta el tracking de este courier?"
 # ============================================================
-# Antes esta lógica vivía copiada en tres templates, todos con la misma
-# regla implícita "no-ENVIA = FedEx". Cuando entren UPS/DHL (los clientes
-# ya están escritos, falta credencial) o un courier nacional directo,
+# Antes esta lógica vivía copiada en tres templates y todo proveedor no
+# reconocido terminaba apuntando a FedEx. Cuando entra un courier nuevo,
 # había que acordarse de tocar los tres. Ahora es una función registrada
 # como global de Jinja: se toca acá y cambia en todas las pantallas.
 # ============================================================
@@ -22,9 +21,9 @@ _URLS = {
     "CORREO": "https://www.correoargentino.com.ar/formularios/e-commerce?id={t}",
 }
 
-# Lo emitido por envia.com (y el día de mañana por los nacionales directos)
-# es la pata NACIONAL; el resto es internacional. La división en listados
-# sale de acá, no de reglas sueltas en cada template.
+# ENVIA queda únicamente como identificador de filas históricas. Andreani,
+# OCA y Correo son los proveedores nacionales directos. La división de los
+# listados sale de acá, no de reglas sueltas en cada template.
 _NACIONALES = {"ENVIA", "ANDREANI", "OCA", "CORREO"}
 
 
@@ -41,9 +40,49 @@ def es_nacional(courier: str) -> bool:
     return (courier or "FEDEX").strip().upper() in _NACIONALES
 
 
+def ambito_envio(envio: dict) -> str:
+    """Clasifica por la ruta real; el courier no define nacionalidad.
+
+    Las filas nuevas siempre tienen ambos países. El fallback por courier se
+    conserva únicamente para historia nacional anterior a esa información.
+    Si no hay evidencia suficiente, la fila queda en cuarentena en vez de
+    aparecer mezclada como internacional.
+    """
+    from servicios.paises import normalizar as normalizar_pais
+
+    origen = normalizar_pais(
+        envio.get("ambito_origen")
+        or envio.get("origen_iso")
+        or envio.get("remitente_pais")
+        or ""
+    )
+    destino = normalizar_pais(
+        envio.get("ambito_destino")
+        or envio.get("destino_iso")
+        or envio.get("destino_pais")
+        or ""
+    )
+    por_ruta = None
+    if origen and destino:
+        por_ruta = "nacional" if origen == "AR" and destino == "AR" else "internacional"
+
+    persistido = str(envio.get("ambito") or "").strip().lower()
+    if persistido in {"nacional", "internacional"}:
+        # Una inconsistencia no se tapa eligiendo una de las dos fuentes: se
+        # aísla hasta revisar la fila. La ruta es la evidencia canónica.
+        if por_ruta and persistido != por_ruta:
+            return "sin_clasificar"
+        return persistido
+    if por_ruta:
+        return por_ruta
+    if es_nacional(envio.get("courier")):
+        return "nacional"
+    return "sin_clasificar"
+
+
 # Nombre lindo para mostrar (el chip "ver detalle en …").
 _NOMBRES = {
-    "FEDEX": "FedEx", "DHL": "DHL", "UPS": "UPS", "ENVIA": "Envía",
+    "FEDEX": "FedEx", "DHL": "DHL", "UPS": "UPS", "ENVIA": "Nacional histórico",
     "ANDREANI": "Andreani", "OCA": "OCA", "CORREO": "Correo Argentino",
 }
 

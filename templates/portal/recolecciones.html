@@ -82,7 +82,16 @@
         </div>
     </div>
 
-    {% if not puede_recolectar %}
+    {% if envio_pre_error %}
+        <div class="msg warn">{{ envio_pre_error }}</div>
+    {% elif not puede_recolectar and dhl_requiere_envio %}
+        <div class="msg warn">
+            Para coordinar un retiro DHL, primero emití la guía. Después entrá en
+            <a href="/portal/envios?ambito=internacional"><b>Mis envíos internacionales</b></a>
+            y elegí <b>Retiro</b> en esa guía. Así usamos automáticamente el origen,
+            las cajas, las medidas y el valor declarado correctos.
+        </div>
+    {% elif not puede_recolectar %}
         <div class="msg warn">
             La programación de recolecciones todavía no está habilitada para tu cuenta.
             Escribinos y la activamos cuando coordinemos el courier y la dirección de retiro.
@@ -91,6 +100,12 @@
         <div class="msg warn">Primero cargá tu dirección de retiro en la
         <a href="/portal/direcciones">libreta</a> — es donde el chofer tiene que ir.</div>
     {% else %}
+    {% if dhl_requiere_envio %}
+    <div class="msg" style="margin-bottom:14px;">
+        ¿La guía es DHL? Programá el retiro desde <a href="/portal/envios?ambito=internacional">Mis envíos</a>
+        para conservar sus cajas y su dirección exacta.
+    </div>
+    {% endif %}
     <div style="background:rgba(167,139,250,.08);border-left:3px solid var(--brand,#a78bfa);
                 padding:11px 14px;border-radius:0 8px 8px 0;margin-bottom:16px;font-size:13px;">
         <strong>Retiran en:</strong> {{ remitente.direccion }}{% if remitente.ciudad %}, {{ remitente.ciudad }}{% endif %}{% if remitente.pais %} · {{ remitente.pais }}{% endif %}
@@ -151,7 +166,7 @@
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="rec-bultos">Cantidad de bultos</label>
-                <input type="number" name="bultos" id="rec-bultos" min="1" max="20" step="1" value="{{ envio_pre.bultos if envio_pre else 1 }}" {% if envio_pre %}readonly{% endif %}>
+                <input type="text" name="bultos" id="rec-bultos" inputmode="numeric" data-numero="entero" value="{{ envio_pre.bultos if envio_pre else 1 }}" {% if envio_pre %}readonly{% endif %}>
             </div>
             <div class="form-group">
                 <label for="rec-peso">Peso total aproximado (kg)</label>

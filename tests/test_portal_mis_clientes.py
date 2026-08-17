@@ -73,7 +73,8 @@ def test_inicio_desde_cliente_propietario_precarga_la_ficha(monkeypatch):
 
     monkeypatch.setattr(pc, "obtener_direccion", obtener)
     respuesta = pc.envio_nuevo_form(
-        _request(), destinatario_id=77, cliente="MELCIOR"
+        _request(), destinatario_id=77, cliente="MELCIOR",
+        ambito="internacional",
     )
     form = respuesta["context"]["form"]
 
@@ -87,7 +88,8 @@ def test_inicio_desde_cliente_propietario_precarga_la_ficha(monkeypatch):
 def test_id_ajeno_o_inexistente_no_precarga_ni_revela_existencia(monkeypatch):
     _preparar_form(monkeypatch, None)
     respuesta = pc.envio_nuevo_form(
-        _request(), destinatario_id=999, cliente="MELCIOR"
+        _request(), destinatario_id=999, cliente="MELCIOR",
+        ambito="internacional",
     )
 
     assert "destinatario_id" not in respuesta["context"]["form"]
@@ -235,7 +237,7 @@ def test_error_del_paquete_conserva_remitente_manual_y_vuelve_al_paso_tres(monke
         bulto_producto=[], bulto_cantidad=[], bulto_peso=[], bulto_largo=[],
         bulto_ancho=[], bulto_alto=[], bulto_desc_en=[], bulto_valor_usd=[],
         bulto_hs=[], bulto_pais_fab=[], producto_alias="", cantidad=1,
-        intl_courier="dhl", tax_paga="CLIENTE", nac_carrier="", nac_servicio="",
+        intl_courier="dhl", tax_paga="CLIENTE",
         remitente_id="", rem_nombre="Yiwu Hailu Garment", rem_contacto="Jeff Jang",
         rem_documento="CN-TAX-8", rem_email="jeff@example.cn", rem_telefono="+86 10",
         rem_direccion="88 Fabric Road", rem_ciudad="Yiwu", rem_estado="Zhejiang",

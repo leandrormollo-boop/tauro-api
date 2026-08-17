@@ -58,6 +58,7 @@ def _cotizar_con(tarjetas):
         resultado = cotizador.cotizar_referencia_couriers(
             cliente="MELCIOR", origen_pais="AR", destino_pais="US",
             peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+            valor_declarado_usd=250,
         )
     return resultado, capturado
 
@@ -70,6 +71,7 @@ def test_muestra_fedex_y_dhl_ordenados_por_precio():
     assert resultado["opciones"][0]["carrier_nombre"] == "DHL Express"
     assert resultado["opciones"][0]["carrier_logo"] == "/dhl.svg"
     assert resultado["resumen"]["couriers_consultados"] == 3
+    assert resultado["resumen"]["valor_declarado_usd"] == 250
 
 
 def test_envia_al_courier_las_medidas_reales_con_claves_canonicas():
@@ -79,7 +81,7 @@ def test_envia_al_courier_las_medidas_reales_con_claves_canonicas():
     assert capturado["destino"]["country"] == "US"
     assert capturado["paquete"] == {
         "peso_kg": 1.2, "largo": 40.0, "ancho": 30.0, "alto": 20.0,
-        "valor_declarado_usd": 100, "descripcion_en": "Merchandise",
+        "valor_declarado_usd": 250.0, "descripcion_en": "Merchandise",
         "unidades": 1,
     }
     assert resultado["resumen"]["peso_volumetrico_kg"] == 4.8
@@ -169,10 +171,23 @@ def test_conserva_los_limites_del_formulario(campo, valor, mensaje):
     datos = dict(
         cliente="MELCIOR", origen_pais="AR", destino_pais="US",
         peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+        valor_declarado_usd=250,
     )
     datos[campo] = valor
     with pytest.raises(ValueError, match=mensaje):
         cotizador.cotizar_referencia_couriers(**datos)
+
+
+@pytest.mark.parametrize("valor", [None, "", 0, -1, float("nan")])
+def test_valor_declarado_invalido_no_consulta_carriers(valor):
+    with mock.patch("servicios.carriers.cotizar_carriers_cliente") as consultar:
+        with pytest.raises(ValueError, match="valor declarado"):
+            cotizador.cotizar_referencia_couriers(
+                cliente="MELCIOR", origen_pais="AR", destino_pais="US",
+                peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+                valor_declarado_usd=valor,
+            )
+    consultar.assert_not_called()
 
 
 def test_el_post_rapido_ya_no_esta_atado_a_fedex_ni_a_rutas_manual():

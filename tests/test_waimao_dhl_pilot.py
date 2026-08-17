@@ -86,7 +86,8 @@ def test_pickup_chino_usa_hora_local_y_cajas_exactas():
         "fecha": "2026-08-11", "ready_time": "09:30", "close_time": "17:00",
         "paquetes": [{
             "peso_kg": 3.9, "largo_cm": 48, "ancho_cm": 47,
-            "alto_cm": 20, "cantidad": 2,
+            "alto_cm": 20, "cantidad": 2, "unidades_aduana": 8,
+            "valor_unitario_usd": 15,
         }],
     }
     with mock.patch("core.dhl_client.requests.post", return_value=_respuesta()) as post:
@@ -103,7 +104,7 @@ def test_pickup_chino_usa_hora_local_y_cajas_exactas():
     ]
 
 
-def test_pickup_manual_reparte_el_peso_total_una_sola_vez():
+def test_pickup_manual_no_inventa_piezas_ni_llama_dhl():
     datos = {
         "origen": {"nombre": "WAIMAO", "telefono": "1145678900",
                    "calle": "Calle 1", "ciudad": "CABA",
@@ -112,11 +113,11 @@ def test_pickup_manual_reparte_el_peso_total_una_sola_vez():
         "peso_kg": 4.5, "bultos": 3,
     }
     with mock.patch("core.dhl_client.requests.post", return_value=_respuesta()) as post:
-        _dhl().create_pickup(datos)
+        salida = _dhl().create_pickup(datos)
 
-    paquetes = post.call_args.kwargs["json"]["shipmentDetails"][0]["packages"]
-    assert [p["weight"] for p in paquetes] == [1.5, 1.5, 1.5]
-    assert sum(p["weight"] for p in paquetes) == 4.5
+    assert salida["encontrado"] is False
+    assert "guía emitida" in salida["error"]
+    post.assert_not_called()
 
 
 def test_post_manipulado_no_expande_millones_de_cajas():
@@ -138,7 +139,11 @@ def test_pickup_manipulado_con_mas_de_20_bultos_no_llama_dhl():
                    "calle": "Calle 1", "ciudad": "CABA",
                    "zip": "1000", "pais": "AR"},
         "fecha": "2026-08-11", "ready_time": "09:00", "close_time": "17:00",
-        "peso_kg": 21, "bultos": 21,
+        "paquetes": [{
+            "cantidad": 21, "unidades_aduana": 21, "peso_kg": 1,
+            "largo_cm": 10, "ancho_cm": 10, "alto_cm": 10,
+            "valor_unitario_usd": 1,
+        }],
     }
     with mock.patch("core.dhl_client.requests.post") as post:
         salida = _dhl().create_pickup(datos)
@@ -174,8 +179,9 @@ def test_retiro_ligado_a_guia_usa_el_proveedor_no_la_cuenta_general():
         "remitente_telefono": "+86 10", "remitente_direccion": "88 Fabric Road",
         "remitente_ciudad": "YIWU", "remitente_estado": "Zhejiang",
         "remitente_zip": "322000", "remitente_pais": "CN",
-        "bultos": [{"cantidad": 2, "peso_kg": 3.9, "largo_cm": 48,
-                    "ancho_cm": 47, "alto_cm": 20}],
+        "bultos": [{"cantidad": 2, "unidades_aduana": 8,
+                    "valor_unitario_usd": 15, "peso_kg": 3.9,
+                    "largo_cm": 48, "ancho_cm": 47, "alto_cm": 20}],
     })
 
     assert salida["origen"]["empresa"] == "Yiwu Hailu Garment"
@@ -191,7 +197,11 @@ def test_timeout_de_pickup_queda_marcado_como_incierto():
                    "calle": "Calle 1", "ciudad": "CABA",
                    "zip": "1000", "pais": "AR"},
         "fecha": "2026-08-11", "ready_time": "09:00", "close_time": "17:00",
-        "peso_kg": 1, "bultos": 1,
+        "paquetes": [{
+            "cantidad": 1, "unidades_aduana": 1, "peso_kg": 1,
+            "largo_cm": 10, "ancho_cm": 10, "alto_cm": 10,
+            "valor_unitario_usd": 1,
+        }],
     }
     with mock.patch("core.dhl_client.requests.post", side_effect=TimeoutError("timeout")):
         salida = _dhl().create_pickup(datos)
@@ -327,7 +337,7 @@ def test_si_dhl_cambia_la_tarifa_no_crea_hasta_nueva_confirmacion(monkeypatch):
         bulto_desc_en=["SHIRTS"], bulto_valor_usd=["15"],
         bulto_hs=["620530"], bulto_pais_fab=["CN"], producto_alias="", cantidad=1,
         intl_courier="dhl", precio_cotizado_ars="190000", tax_paga="DESTINATARIO",
-        nac_carrier="", nac_servicio="", remitente_id="",
+        remitente_id="",
         rem_nombre="Yiwu Hailu Garment", rem_contacto="Jeff Jang",
         rem_documento="CN-TAX-9", rem_email="jeff@hailu.cn", rem_telefono="+86 10",
         rem_direccion="88 Fabric Road", rem_ciudad="YIWU", rem_estado="Zhejiang",
@@ -355,6 +365,8 @@ def test_el_limite_suma_deuda_reservas_y_la_nueva_guia(monkeypatch):
             self.respuestas = iter([
                 {"cliente_id": "WAIMAO", "tracking": None, "estado": "SOLICITADO",
                  "precio_tauro_ars": 95_000, "activo": True, "puede_emitir": True,
+                 "courier": "DHL", "ambito": "INTERNACIONAL",
+                 "remitente_pais": "AR", "destino_pais": "US",
                  "tope_deuda_ars": 250_000},
                 {"deuda": 100_000, "reservado": 80_000},
             ])
@@ -374,6 +386,10 @@ def test_el_limite_suma_deuda_reservas_y_la_nueva_guia(monkeypatch):
         yield Conn()
 
     monkeypatch.setattr(sg, "get_conn", conexion)
+    monkeypatch.setattr(
+        "servicios.configuracion_couriers_cliente.estado_integracion",
+        lambda _courier: {"operativa": True},
+    )
     salida = sg._reservar_credito_cliente(9, "WAIMAO")
 
     assert not salida["ok"]

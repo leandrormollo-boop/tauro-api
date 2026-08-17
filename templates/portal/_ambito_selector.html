@@ -1,0 +1,29 @@
+<section class="scope-screen" aria-labelledby="scope-title">
+    <header class="scope-head">
+        <span class="eyebrow">{{ 'Cotizador' if flujo == 'cotizar' else 'Nuevo envío' }}</span>
+        <h1 id="scope-title">¿Qué tipo de envío vas a gestionar?</h1>
+        <p>Elegí el ámbito primero. Tarifas, guía e historial se mantienen separados desde el inicio.</p>
+    </header>
+
+    <div class="scope-grid">
+        <a href="{{ nacional_url }}" class="scope-card scope-card-national">
+            <span class="scope-icon" aria-hidden="true">🇦🇷</span>
+            <span class="scope-copy">
+                <small>Dentro de Argentina</small>
+                <strong>Envío nacional</strong>
+                <span>Cotizador provincia a provincia · APIs en integración</span>
+            </span>
+            <span class="scope-arrow" aria-hidden="true">→</span>
+        </a>
+
+        <a href="{{ internacional_url }}" class="scope-card scope-card-international">
+            <span class="scope-icon" aria-hidden="true">🌐</span>
+            <span class="scope-copy">
+                <small>Argentina y el mundo</small>
+                <strong>Envío internacional</strong>
+                <span>DHL según tu cuenta · FedEx y UPS pendientes</span>
+            </span>
+            <span class="scope-arrow" aria-hidden="true">→</span>
+        </a>
+    </div>
+</section>

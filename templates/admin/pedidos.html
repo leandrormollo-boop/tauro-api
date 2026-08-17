@@ -42,6 +42,7 @@
       {% for s in solicitudes %}
         {% set conciliar_courier = s.puede_conciliar_courier %}
         {% set liberar_reserva = s.puede_liberar_reserva %}
+        {% set ambito_sol = ambito_envio(s) %}
         <tr>
           <td class="mono">
             #{{ s.id }}<br>
@@ -111,6 +112,20 @@
             {% elif s.estado == 'EMITIENDO' %}
               <span class="badge warn">Emitiendo ahora</span>
               <small style="display:block;color:var(--warn);margin-top:6px;">No cambiar ni reemitir.</small>
+            {% elif (s.courier or '')|upper == 'ENVIA' %}
+              <span class="badge warn">Integración retirada</span>
+              <small style="display:block;color:var(--warn);margin-top:6px;">
+                Solicitud nacional histórica. No se puede emitir ni generar cargos desde TAURO.
+              </small>
+            {% elif ambito_sol != 'internacional' %}
+              <span class="badge warn">Ámbito en revisión</span>
+              <small style="display:block;color:var(--warn);margin-top:6px;">
+                {% if ambito_sol == 'nacional' %}
+                  La emisión nacional espera las APIs directas de Andreani y OCA.
+                {% else %}
+                  Revisá origen y destino antes de habilitar una emisión.
+                {% endif %}
+              </small>
             {% else %}
               {# El courier sale de la SOLICITUD, no cableado: el cliente elige
                  en el portal y el admin tiene que ver por dónde va a salir de

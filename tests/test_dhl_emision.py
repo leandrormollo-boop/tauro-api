@@ -29,6 +29,12 @@ ENVIO = {
                 "pais_origen": "AR"}],
 }
 
+PICKUP_PACKAGES = [{
+    "cantidad": 1, "unidades_aduana": 1, "peso_kg": 1.4,
+    "largo_cm": 33, "ancho_cm": 33, "alto_cm": 22,
+    "valor_unitario_usd": 100,
+}]
+
 
 def _cliente():
     c = DHLClient()
@@ -175,14 +181,15 @@ def test_error_de_dhl_se_reporta_sin_inventar_tracking():
     assert "tracking" not in r
 
 
-def test_401_de_dhl_informa_credencial_productiva_sin_exponer_respuesta():
-    respuesta = mock.Mock(status_code=401, text='{"detail":"dato interno"}')
-    respuesta.json.return_value = {"detail": "dato interno"}
+def test_401_y_403_de_dhl_informan_acceso_productivo_sin_exponer_respuesta():
+    for status in (401, 403):
+        respuesta = mock.Mock(status_code=status, text='{"detail":"dato interno"}')
+        respuesta.json.return_value = {"detail": "dato interno"}
 
-    error = DHLClient._error_legible(respuesta)
+        error = DHLClient._error_legible(respuesta)
 
-    assert error == "DHL rechazó las credenciales productivas (HTTP 401)."
-    assert "dato interno" not in error
+        assert f"HTTP {status}" in error
+        assert "dato interno" not in error
 
 
 def test_respuesta_sin_tracking_no_se_da_por_buena():
@@ -217,7 +224,7 @@ def test_http_transitorio_de_pickup_es_incierto_y_conserva_referencia(status):
             "telefono": "1145678900", "ciudad": "CABA", "zip": "1416", "pais": "AR",
         },
         "fecha": "2026-08-11", "ready_time": "09:00", "close_time": "17:00",
-        "peso_kg": 1.4, "bultos": 1,
+        "paquetes": PICKUP_PACKAGES,
     }
     with mock.patch("core.dhl_client.requests.post", return_value=respuesta):
         r = _cliente().create_pickup(datos)
@@ -236,7 +243,7 @@ def test_pickup_usa_la_referencia_persistida_antes_del_post():
                    "calle": "Calle 1", "ciudad": "CABA",
                    "zip": "1000", "pais": "AR"},
         "fecha": "2026-08-11", "ready_time": "09:00", "close_time": "17:00",
-        "peso_kg": 1, "bultos": 1,
+        "paquetes": PICKUP_PACKAGES,
         "message_reference": "tauro-dhl-pick-abcd1234",
     }
     with mock.patch("core.dhl_client.requests.post", return_value=respuesta) as post:

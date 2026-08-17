@@ -95,7 +95,7 @@
       </div>
       <div class="form-group">
         <label>Regla de pricing *</label>
-        <select name="markup_tipo" required>
+        <select name="markup_tipo" id="markup_tipo" required>
           {% for value, label in pricing_modes.items() %}
             <option value="{{ value }}" {% if (cliente and (cliente.markup_tipo or 'PCT') == value) or (not cliente and value == 'PCT') %}selected{% endif %}>
               {{ label }}
@@ -108,7 +108,7 @@
     <div class="form-group">
       <label>Valor de la regla *</label>
       <input type="hidden" name="markup_pct" value="{{ cliente.markup_pct if cliente else '25' }}">
-      <input type="text" name="markup_valor" required inputmode="decimal" data-numero="pricing"
+      <input type="text" name="markup_valor" required inputmode="decimal" data-numero="pricing" data-pricing-select="markup_tipo"
              value="{% if cliente and cliente.markup_valor is not none %}{{ cliente.markup_valor }}{% elif cliente %}{{ cliente.markup_pct }}{% else %}25{% endif %}"
              placeholder="25 para %, 9100 para fijo ARS, 1.30 para multiplicador">
       <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
@@ -116,12 +116,11 @@
       </p>
     </div>
 
-    {# Margen NACIONAL aparte: el +$14.500 que va bien en un FedEx a Miami
-       casi triplica un Andreani de $8.000. Vacío = usa la regla de arriba. #}
+    {# Regla reservada para los adaptadores directos Andreani/OCA. #}
     <div class="form-grid-2">
       <div class="form-group">
-        <label>Pricing NACIONAL (opcional)</label>
-        <select name="markup_nac_tipo">
+        <label>Pricing nacional futuro (opcional)</label>
+        <select name="markup_nac_tipo" id="markup_nac_tipo">
           <option value="" {% if not cliente or not cliente.markup_nac_tipo %}selected{% endif %}>
             Igual que internacional
           </option>
@@ -134,11 +133,11 @@
       </div>
       <div class="form-group">
         <label>Valor nacional</label>
-        <input type="text" name="markup_nac_valor" inputmode="decimal" data-numero="pricing"
+        <input type="text" name="markup_nac_valor" inputmode="decimal" data-numero="pricing" data-pricing-select="markup_nac_tipo"
                value="{% if cliente and cliente.markup_nac_valor is not none %}{{ cliente.markup_nac_valor }}{% endif %}"
                placeholder="ej: 3500 para +ARS 3.500 por envío nacional">
         <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
-          Sólo aplica a envíos dentro de Argentina. Si queda vacío, usa la regla internacional.
+          Se aplicará cuando conectemos Andreani/OCA directamente. Hoy no habilita cotizaciones ni guías nacionales.
         </p>
       </div>
     </div>

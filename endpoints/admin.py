@@ -46,6 +46,7 @@ from servicios.pricing import (
 from servicios.numeros_humanos import (
     decimal_a_texto,
     parse_configuracion_numerica,
+    parse_entero_formulario as _entero_form,
     parse_float_formulario as _numero_form,
     politica_configuracion_numerica,
 )
@@ -77,9 +78,10 @@ from servicios.rate_limit import check_rate, reset_rate, client_ip
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
 
-from servicios.couriers_urls import es_nacional, url_tracking
+from servicios.couriers_urls import ambito_envio, es_nacional, url_tracking
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
+templates.env.globals["ambito_envio"] = ambito_envio
 
 
 def _pendientes_admin() -> int:
@@ -669,19 +671,21 @@ def admin_comercial_cuenta_nueva(
 def admin_comercial_descubrir(
     request: Request,
     brief: str = Form(...),
-    limite: int = Form(10),
+    limite: str = Form("10"),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
     try:
+        limite_num = _entero_form("10" if not str(limite).strip() else limite,
+                                  "Máximo de candidatos", minimo=1, maximo=20)
         from servicios.crm_comercial import encolar_trabajo
         from servicios.auditoria import registrar_desde_request
 
-        job_id = encolar_trabajo("DESCUBRIR", payload={"brief": brief[:3000], "limite": max(1, min(limite, 20))})
+        job_id = encolar_trabajo("DESCUBRIR", payload={"brief": brief[:3000], "limite": limite_num})
         registrar_desde_request(
             request, event="crm.descubrimiento_encolado", actor_type="admin",
-            actor_ref="admin", metadata={"job_id": job_id, "limite": max(1, min(limite, 20))},
+            actor_ref="admin", metadata={"job_id": job_id, "limite": limite_num},
         )
         return _redirect_comercial("descubrimiento-encolado")
     except Exception as exc:
@@ -1805,10 +1809,7 @@ async def admin_pedido_editar(
                 continue
             v = str(form.get(k) or "").strip()
             if k in ("cantidad",):
-                cantidad = int(v or 1)
-                if cantidad < 1:
-                    raise ValueError("La cantidad de cajas debe ser mayor a cero.")
-                campos[k] = cantidad
+                campos[k] = _entero_form(v, "Cantidad de cajas", minimo=1)
             elif k in ("peso_kg", "largo_cm", "ancho_cm", "alto_cm"):
                 campos[k] = _numero_form(
                     v, k.replace("_", " ").title(), minimo=0.01
@@ -1834,8 +1835,7 @@ def admin_pedido_generar_guia(
     solicitud_id: int,
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Emite la guía real (FedEx internacional o envia.com nacional según
-    el courier de la solicitud) y guarda el label PDF."""
+    """Emite la guía real por el courier habilitado de la solicitud."""
     if not _is_auth(admin_token):
         return _redirect_login()
 
@@ -1913,7 +1913,9 @@ def admin_tracking_fedex(
                 "No se puede reiniciar el checkpoint mientras hay una corrida en curso."
                 if error == "reset_running" else
                 "FedEx está en sandbox: podés simular, pero no escribir ESTADO hasta pasar a production/prod."
-                if error == "sandbox_requires_dry_run" else None
+                if error == "sandbox_requires_dry_run" else
+                "El límite debe ser un número entero positivo."
+                if error == "limit_invalido" else None
             ),
         },
     )
@@ -1933,10 +1935,13 @@ def admin_tracking_fedex_run(
     mode = mode if mode in {"initial", "resume"} else "resume"
     target = target if target in {"source", "test"} else "test"
     try:
-        parsed_limit = int(limit) if str(limit).strip() else 0
+        parsed_limit = _entero_form(
+            limit, "Límite de trackings únicos", requerido=False, minimo=1
+        )
     except ValueError:
-        parsed_limit = 0
-    parsed_limit = parsed_limit if parsed_limit > 0 else None
+        return RedirectResponse(
+            url="/admin/tracking-fedex?error=limit_invalido", status_code=303
+        )
     dry_run_bool = dry_run == "1"
     if target == "source" and not dry_run_bool and fedex_environment() == "sandbox":
         return RedirectResponse(url="/admin/tracking-fedex?error=sandbox_requires_dry_run", status_code=303)
@@ -2136,7 +2141,7 @@ async def admin_envio_realizado_post(
     destino_pais: str = Form(...),
     dest_direccion: str = Form(""),
     producto: str = Form(...),
-    cantidad: int = Form(1),
+    cantidad: str = Form("1"),
     peso_kg: str = Form("1"),
     tracking: str = Form(...),
     precio_ars: str = Form(...),
@@ -2158,6 +2163,7 @@ async def admin_envio_realizado_post(
     from servicios.solicitudes_guia import cargar_envio_externo
 
     try:
+        cantidad_num = _entero_form(cantidad, "Cajas", minimo=1)
         peso_num = _numero_form(peso_kg, "Peso", minimo=0.01)
         precio_num = _numero_form(
             precio_ars, "Precio al cliente", importe=True, minimo=0.01
@@ -2170,7 +2176,7 @@ async def admin_envio_realizado_post(
             destino_pais=destino_pais,
             dest_direccion=dest_direccion,
             producto=producto,
-            cantidad=cantidad,
+            cantidad=cantidad_num,
             peso_kg=peso_num,
             tracking=tracking,
             precio_tauro_ars=precio_num,
@@ -2303,12 +2309,18 @@ def admin_ruta_nueva(
     destino_pais: str = Form(...),
     destino_ciudad: str = Form(...),
     destino_zip: str = Form(...),
-    dias_estimados: int = Form(5),
+    dias_estimados: str = Form("5"),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
 
+    try:
+        dias_num = _entero_form(dias_estimados, "Días estimados", minimo=1)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/admin/rutas?error={quote(str(exc))}", status_code=303
+        )
     ruta = Ruta(
         ruta_id=ruta_id.strip().upper(),
         origen_pais=origen_pais.strip().upper(),
@@ -2317,7 +2329,7 @@ def admin_ruta_nueva(
         destino_pais=destino_pais.strip().upper(),
         destino_ciudad=destino_ciudad.strip().upper(),
         destino_zip=destino_zip.strip(),
-        dias_estimados=dias_estimados,
+        dias_estimados=dias_num,
         activa=True,
     )
     upsert_ruta(ruta)

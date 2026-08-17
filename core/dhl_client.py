@@ -162,8 +162,11 @@ class DHLClient(CarrierBase):
         # autenticación productiva. Devolver una causa segura y accionable
         # permite que el portal avise a TAURO sin exponer la respuesta cruda,
         # la cuenta ni ningún secreto.
-        if getattr(resp, "status_code", None) == 401:
-            return "DHL rechazó las credenciales productivas (HTTP 401)."
+        if getattr(resp, "status_code", None) in (401, 403):
+            return (
+                "DHL rechazó las credenciales o el acceso productivo "
+                f"(HTTP {resp.status_code})."
+            )
 
         try:
             j = resp.json()
@@ -270,6 +273,21 @@ class DHLClient(CarrierBase):
         return d.strftime("%Y-%m-%dT13:00:00GMT") + offset
 
     @staticmethod
+    def _codigo_postal(pais: str, valor) -> str:
+        """Normaliza el CPA argentino al formato de 4 dígitos de MyDHL.
+
+        El portal acepta tanto `1043` como el CPA completo `C1043ABC`, pero
+        MyDHL Rates/Shipments rechaza la letra y exige `9999(4)`. Para otros
+        países se conserva el valor sin reinterpretarlo.
+        """
+        codigo = str(valor or "").strip().upper()
+        if str(pais or "").strip().upper()[:2] == "AR":
+            digitos = "".join(ch for ch in codigo if ch.isdigit())
+            if len(digitos) == 4:
+                return digitos
+        return codigo
+
+    @staticmethod
     def _direccion(d: dict, por_defecto_ciudad: str = "") -> dict:
         """
         Bloque de dirección del POST. `cityName` tiene minLength 1: mandarlo
@@ -286,14 +304,21 @@ class DHLClient(CarrierBase):
         "cityName: expected minLength 1, actual 0" de la guía #4 (06/08).
         """
         ciudad = (d.get("ciudad") or d.get("city") or por_defecto_ciudad or "").strip()
+        pais = str(d.get("pais") or d.get("country") or "").strip().upper()
         bloque = {
-            "postalCode": str(d.get("zip") or d.get("postal_code") or "").strip(),
+            "postalCode": DHLClient._codigo_postal(
+                pais, d.get("zip") or d.get("postal_code") or ""
+            ),
             "cityName": ciudad,
-            "countryCode": str(d.get("pais") or d.get("country") or "").strip().upper(),
+            "countryCode": pais,
         }
         estado = d.get("estado") or d.get("state")
-        if estado:
-            bloque["provinceCode"] = str(estado).strip()
+        # MyDHL exige minLength 2. Argentina suele venir como la letra única
+        # del CPA (C/B/X...), que no es un provinceCode válido; al ser opcional
+        # se omite en vez de provocar un rechazo de toda la guía.
+        codigo_estado = str(estado or "").strip().upper()
+        if len(codigo_estado) == 2 and codigo_estado.isalpha():
+            bloque["provinceCode"] = codigo_estado
         return bloque
 
     def get_rates_multibulto(self, origen: dict, destino: dict, paquetes: list) -> dict:
@@ -421,10 +446,14 @@ class DHLClient(CarrierBase):
                 "accountNumber": cuenta,
                 "originCountryCode": origen.get("country", "AR"),
                 "originCityName": origen.get("city", "BUENOS AIRES"),
-                "originPostalCode": origen.get("postal_code", "1043"),
+                "originPostalCode": self._codigo_postal(
+                    origen.get("country", "AR"), origen.get("postal_code", "1043")
+                ),
                 "destinationCountryCode": destino.get("country", "US"),
                 "destinationCityName": destino.get("city", ""),
-                "destinationPostalCode": destino.get("postal_code", ""),
+                "destinationPostalCode": self._codigo_postal(
+                    destino.get("country", "US"), destino.get("postal_code", "")
+                ),
                 "weight": paquete.get("peso_kg", 0.5),
                 # El wizard usa *_cm; el cotizador rápido usa las claves
                 # cortas. Aceptar ambos evita cotizar 30×20×10 y emitir luego
@@ -887,60 +916,75 @@ class DHLClient(CarrierBase):
         offset = hora_local.strftime("%z")
         offset = f"{offset[:3]}:{offset[3:]}"
 
-        # Desde una guía llegan las piezas exactas. En carga manual sólo
-        # conocemos peso TOTAL + cantidad: se reparte el total, nunca se
-        # repite entero en cada caja (4,5 kg / 3 = 3 cajas de 1,5 kg).
-        paquetes_entrada = datos.get("paquetes") or []
+        # Un retiro DHL siempre nace de una guía emitida. Ahí están las piezas,
+        # medidas y declaración reales; inventarlas acá podría mandar a DHL un
+        # retiro distinto del shipment que ya aceptó.
+        paquetes_entrada = datos.get("paquetes")
+        if not isinstance(paquetes_entrada, list) or not paquetes_entrada:
+            return {"encontrado": False, "error":
+                    "Para pedir un retiro DHL elegí una guía emitida con sus "
+                    "cajas, medidas y valor declarado."}
         paquetes = []
-        if paquetes_entrada:
-            peso_total = 0.0
-            for p in paquetes_entrada:
-                try:
-                    unidades = int(p.get("unidades") or p.get("cantidad") or 1)
-                    peso_pieza = float(p.get("peso_kg") or p.get("weight") or 1)
-                except (TypeError, ValueError):
-                    return {"encontrado": False,
-                            "error": "Revisá la cantidad y el peso de los bultos del retiro."}
-                if unidades < 1 or len(paquetes) + unidades > MAX_DHL_PACKAGES:
-                    return {"encontrado": False,
-                            "error": f"DHL admite como máximo {MAX_DHL_PACKAGES} bultos por retiro."}
-                if not math.isfinite(peso_pieza) or not 0 < peso_pieza <= MAX_DHL_PACKAGE_KG:
-                    return {"encontrado": False,
-                            "error": f"Cada bulto DHL debe pesar hasta {MAX_DHL_PACKAGE_KG:g} kg."}
-                peso_total += peso_pieza * unidades
-                if peso_total > MAX_DHL_PICKUP_KG:
-                    return {"encontrado": False,
-                            "error": f"El retiro supera {MAX_DHL_PICKUP_KG:g} kg totales."}
-                for _ in range(unidades):
-                    paquetes.append({
-                        "weight": round(peso_pieza, 3),
-                        "dimensions": {
-                            "length": round(float(p.get("largo_cm") or p.get("largo") or 30), 3),
-                            "width": round(float(p.get("ancho_cm") or p.get("ancho") or 20), 3),
-                            "height": round(float(p.get("alto_cm") or p.get("alto") or 15), 3),
-                        },
-                    })
-        else:
+        peso_total = 0.0
+        for p in paquetes_entrada:
+            if not isinstance(p, dict):
+                return {"encontrado": False,
+                        "error": "Revisá los datos de los bultos del retiro."}
             try:
-                cantidad = int(datos.get("bultos") or 1)
-                peso_total = float(datos.get("peso_kg") or 1)
+                unidades = int(p.get("unidades") or p.get("cantidad"))
+                peso_pieza = float(p.get("peso_kg") or p.get("weight"))
+                largo = float(p.get("largo_cm") or p.get("largo"))
+                ancho = float(p.get("ancho_cm") or p.get("ancho"))
+                alto = float(p.get("alto_cm") or p.get("alto"))
             except (TypeError, ValueError):
                 return {"encontrado": False,
-                        "error": "Revisá la cantidad y el peso total del retiro."}
-            if not 1 <= cantidad <= MAX_DHL_PACKAGES:
+                        "error": "Revisá la cantidad, el peso y las medidas de los bultos del retiro."}
+            if unidades < 1 or len(paquetes) + unidades > MAX_DHL_PACKAGES:
                 return {"encontrado": False,
                         "error": f"DHL admite como máximo {MAX_DHL_PACKAGES} bultos por retiro."}
-            if not math.isfinite(peso_total) or not 0 < peso_total <= MAX_DHL_PICKUP_KG:
-                return {"encontrado": False,
-                        "error": f"El retiro debe pesar hasta {MAX_DHL_PICKUP_KG:g} kg totales."}
-            peso_por_bulto = round(peso_total / cantidad, 3)
-            if peso_por_bulto > MAX_DHL_PACKAGE_KG:
+            if not math.isfinite(peso_pieza) or not 0 < peso_pieza <= MAX_DHL_PACKAGE_KG:
                 return {"encontrado": False,
                         "error": f"Cada bulto DHL debe pesar hasta {MAX_DHL_PACKAGE_KG:g} kg."}
-            paquetes = [{
-                "weight": peso_por_bulto,
-                "dimensions": {"length": 30, "width": 20, "height": 15},
-            } for _ in range(cantidad)]
+            if any(not math.isfinite(v) or v <= 0 for v in (largo, ancho, alto)):
+                return {"encontrado": False,
+                        "error": "Las tres medidas de cada bulto DHL deben ser mayores a cero."}
+            peso_total += peso_pieza * unidades
+            if peso_total > MAX_DHL_PICKUP_KG:
+                return {"encontrado": False,
+                        "error": f"El retiro supera {MAX_DHL_PICKUP_KG:g} kg totales."}
+            for _ in range(unidades):
+                paquetes.append({
+                    "weight": round(peso_pieza, 3),
+                    "dimensions": {
+                        "length": round(largo, 3),
+                        "width": round(ancho, 3),
+                        "height": round(alto, 3),
+                    },
+                })
+
+        valor_declarado = datos.get("valor_declarado_usd")
+        if valor_declarado in (None, "") and paquetes_entrada:
+            try:
+                valor_declarado = 0.0
+                for p in paquetes_entrada:
+                    unidades_aduana = int(p.get("unidades_aduana"))
+                    valor_unitario = float(p.get("valor_unitario_usd"))
+                    if not 1 <= unidades_aduana <= MAX_DHL_CUSTOMS_UNITS:
+                        raise ValueError("unidades aduaneras fuera de rango")
+                    if not math.isfinite(valor_unitario) or valor_unitario <= 0:
+                        raise ValueError("valor unitario inválido")
+                    valor_declarado += valor_unitario * unidades_aduana
+            except (TypeError, ValueError):
+                return {"encontrado": False,
+                        "error": "Revisá el valor y las unidades aduaneras del retiro."}
+        try:
+            valor_declarado = float(valor_declarado)
+        except (TypeError, ValueError):
+            return {"encontrado": False,
+                    "error": "Revisá el valor declarado de los bultos del retiro."}
+        if not math.isfinite(valor_declarado) or valor_declarado <= 0:
+            return {"encontrado": False,
+                    "error": "El valor declarado del retiro debe ser mayor a cero."}
 
         cuerpo = {
             "plannedPickupDateAndTime": f"{fecha}T{ready}:00{offset}",
@@ -949,7 +993,9 @@ class DHLClient(CarrierBase):
             "customerDetails": {
                 "shipperDetails": {
                     "postalAddress": {
-                        "postalCode": (origen.get("zip") or "").strip(),
+                        "postalCode": self._codigo_postal(
+                            origen.get("pais", "AR"), origen.get("zip") or ""
+                        ),
                         "cityName": (origen.get("ciudad") or "").strip(),
                         "countryCode": (origen.get("pais") or "AR").upper()[:2],
                         "addressLine1": (origen.get("calle") or "")[:45],
@@ -965,6 +1011,10 @@ class DHLClient(CarrierBase):
             "shipmentDetails": [{
                 "productCode": self.product_code,
                 "isCustomsDeclarable": True,
+                # Obligatorios cuando isCustomsDeclarable=true. Son los mismos
+                # datos reales de la guía: nunca un mínimo técnico inventado.
+                "declaredValue": round(valor_declarado, 2),
+                "declaredValueCurrency": "USD",
                 "unitOfMeasurement": "metric",
                 "packages": paquetes,
             }],

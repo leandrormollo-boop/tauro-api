@@ -9,6 +9,8 @@ from typing import Optional
 import psycopg2
 
 from core.database import get_conn
+from servicios.couriers_urls import ambito_envio
+from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
 
 
 ESTADOS_SOLICITUD = [
@@ -29,6 +31,61 @@ ESTADOS_SOLICITUD = [
 # sistema solo.
 ESTADO_EMITIENDO = "EMITIENDO"
 ESTADOS_VALIDOS = ESTADOS_SOLICITUD + [ESTADO_EMITIENDO]
+
+
+def _error_ambito_no_emitible(solicitud: dict) -> Optional[str]:
+    """Falla cerrado antes de cualquier operación irreversible.
+
+    Hoy las únicas APIs de emisión implementadas son internacionales. Una
+    solicitud nacional, histórica o con países contradictorios no puede
+    llegar al courier y recién fallar cuando se intenta registrar el cargo.
+    """
+    from servicios.paises import normalizar_iso2
+
+    origen_iso = normalizar_iso2(
+        solicitud.get("ambito_origen")
+        or solicitud.get("origen_iso")
+        or solicitud.get("remitente_pais")
+    )
+    destino_iso = normalizar_iso2(
+        solicitud.get("ambito_destino")
+        or solicitud.get("destino_iso")
+        or solicitud.get("destino_pais")
+    )
+    if not origen_iso or not destino_iso:
+        return (
+            "El ámbito de esta solicitud necesita revisión porque el origen y "
+            "el destino no son países reconocidos. No se emitió ni se generó "
+            "ningún cargo."
+        )
+
+    # `ambito_envio` también protege contradicciones entre la ruta y el valor
+    # persistido. Le entregamos ISO canónicos para que un nombre completo
+    # histórico (por ejemplo ESTADOS UNIDOS) jamás se lea como sus primeras
+    # dos letras.
+    solicitud_normalizada = {
+        **solicitud,
+        "ambito_origen": origen_iso,
+        "origen_iso": origen_iso,
+        "remitente_pais": origen_iso,
+        "ambito_destino": destino_iso,
+        "destino_iso": destino_iso,
+        "destino_pais": destino_iso,
+    }
+    ambito = ambito_envio(solicitud_normalizada)
+    if ambito == "internacional":
+        return None
+    if ambito == "nacional":
+        return (
+            "Los envíos nacionales todavía no se emiten desde TAURO. "
+            "Se habilitarán con las conexiones directas de Andreani y OCA; "
+            "no se emitió ni se generó ningún cargo."
+        )
+    return (
+        "El ámbito de esta solicitud necesita revisión porque el origen y "
+        "el destino no permiten clasificarla con seguridad. No se emitió ni "
+        "se generó ningún cargo."
+    )
 
 
 def _clean(value: Optional[str]) -> Optional[str]:
@@ -96,7 +153,15 @@ def crear_solicitud_guia(
     Los campos legacy (producto_alias, cantidad, peso/dims/valor) guardan el
     primer bulto + totales para que listados y admin sigan andando."""
     cliente_id = cliente_id.strip().upper()
-    cantidad = max(int(cantidad or 1), 1)
+    cantidad = parse_entero_formulario(
+        cantidad, "Cantidad de cajas", minimo=1, maximo=20,
+    )
+    from servicios.paises import normalizar_iso2
+    origen_iso = normalizar_iso2(_clean(remitente_pais) or "AR")
+    destino_iso = normalizar_iso2(destino_pais)
+    if not origen_iso or not destino_iso:
+        raise ValueError("Origen y destino deben ser países válidos para clasificar el envío.")
+    ambito = "NACIONAL" if origen_iso == "AR" and destino_iso == "AR" else "INTERNACIONAL"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -107,6 +172,7 @@ def crear_solicitud_guia(
                     remitente_alias, remitente_nombre, remitente_documento,
                     remitente_email, remitente_telefono, remitente_direccion,
                     remitente_ciudad, remitente_estado, remitente_zip, remitente_pais,
+                    ambito,
                     dest_nombre, dest_documento, dest_email, dest_telefono,
                     dest_direccion, dest_ciudad, dest_estado, dest_zip,
                     observaciones, peso_kg, largo_cm, ancho_cm, alto_cm,
@@ -117,7 +183,7 @@ def crear_solicitud_guia(
                 )
                 VALUES (
                     %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
@@ -132,7 +198,7 @@ def crear_solicitud_guia(
                     cliente_id,
                     producto_alias.strip(),
                     cantidad,
-                    destino_pais.strip().upper(),
+                    destino_iso,
                     _clean(remitente_alias),
                     _clean(remitente_nombre),
                     _clean(remitente_documento),
@@ -142,7 +208,8 @@ def crear_solicitud_guia(
                     _clean(remitente_ciudad),
                     _clean(remitente_estado),
                     _clean(remitente_zip),
-                    _clean(remitente_pais) or "AR",
+                    origen_iso,
+                    ambito,
                     dest_nombre.strip(),
                     _clean(dest_documento),
                     _clean(dest_email),
@@ -188,7 +255,7 @@ def listar_solicitudes_cliente(
             # para dibujar un tilde en cada fila.
             query = """
                 SELECT id, cliente_id, estado, producto_alias, cantidad,
-                       destino_pais, dest_nombre, dest_ciudad, observaciones,
+                       remitente_pais, ambito, destino_pais, dest_nombre, dest_ciudad, observaciones,
                        peso_kg, valor_declarado_usd, precio_tauro_ars,
                        precio_tauro_usd, precio_cliente_final_ars, tracking,
                        guia_url, created_at, courier, bultos,
@@ -674,6 +741,7 @@ def cargar_envio_externo(
             coti_id=f"EXT-{uuid.uuid4().hex[:10]}",
             precio_tauro_ars=float(precio_tauro_ars),
             precio_tauro_usd=round(float(precio_tauro_ars) / dolar, 2) if dolar else 0,
+            remitente_pais="AR",
         )
     except Exception as e:
         return {"ok": False, "error": f"No se pudo crear el envío: {e}"}
@@ -738,42 +806,95 @@ def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
 
 def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
     """Verifica que `costo DHL + regla del cliente` siga siendo el aceptado."""
-    bultos = sol.get("bultos") or []
+    bultos_crudos = sol.get("bultos")
+    bultos = bultos_crudos or []
     if isinstance(bultos, str):
         try:
             bultos = json.loads(bultos)
         except (TypeError, ValueError):
-            bultos = []
+            raise ValueError("Los bultos guardados no tienen un formato válido.") from None
+    if bultos and not isinstance(bultos, list):
+        raise ValueError("Los bultos guardados no tienen un formato válido.")
 
     if bultos:
         # Se pasa como carga manual aun si nació del catálogo: la solicitud
         # congeló la invoice, medidas y valor de ESTE envío y eso es lo que
         # debe volver a cotizarse.
-        filas = [{
-            "producto": "",
-            "cantidad": max(int(b.get("cantidad") or 1), 1),
-            "peso_kg": b.get("peso_kg"), "largo_cm": b.get("largo_cm"),
-            "ancho_cm": b.get("ancho_cm"), "alto_cm": b.get("alto_cm"),
-            "descripcion_en": b.get("descripcion_en") or "Merchandise",
-            "valor_unitario_usd": b.get("valor_unitario_usd") or 1,
-            # Cantidad comercial declarada en aduana. Es independiente de
-            # `cantidad`, que representa cajas fisicas del envio.
-            "unidades_aduana": max(int(
-                b.get("unidades_aduana") or b.get("cantidad") or 1
-            ), 1),
-            "hs_code": b.get("hs_code") or "",
-            "pais_origen": b.get("pais_origen") or sol.get("remitente_pais") or "AR",
-        } for b in bultos]
+        filas = []
+        for indice, bulto in enumerate(bultos, start=1):
+            if not isinstance(bulto, dict):
+                raise ValueError(f"Bulto {indice}: los datos no tienen un formato válido.")
+            cantidad = parse_entero_formulario(
+                bulto.get("cantidad"), f"Bulto {indice}, cantidad", minimo=1, maximo=20
+            )
+            # `unidades_aduana` no existía en solicitudes históricas. Sólo en
+            # ese caso se recupera la cantidad física; un valor presente pero
+            # inválido jamás se reemplaza silenciosamente.
+            unidades_crudas = bulto.get("unidades_aduana")
+            unidades = (
+                cantidad
+                if unidades_crudas in (None, "")
+                else parse_entero_formulario(
+                    unidades_crudas, f"Bulto {indice}, unidades aduaneras", minimo=1
+                )
+            )
+            filas.append({
+                "producto": "",
+                "cantidad": cantidad,
+                "peso_kg": parse_float_formulario(
+                    bulto.get("peso_kg"), f"Bulto {indice}, peso", minimo=0.001
+                ),
+                "largo_cm": parse_float_formulario(
+                    bulto.get("largo_cm"), f"Bulto {indice}, largo", minimo=0.001
+                ),
+                "ancho_cm": parse_float_formulario(
+                    bulto.get("ancho_cm"), f"Bulto {indice}, ancho", minimo=0.001
+                ),
+                "alto_cm": parse_float_formulario(
+                    bulto.get("alto_cm"), f"Bulto {indice}, alto", minimo=0.001
+                ),
+                "descripcion_en": bulto.get("descripcion_en") or "Merchandise",
+                "valor_unitario_usd": parse_float_formulario(
+                    bulto.get("valor_unitario_usd"),
+                    f"Bulto {indice}, valor unitario",
+                    importe=True,
+                    minimo=0.001,
+                ),
+                "unidades_aduana": unidades,
+                "hs_code": bulto.get("hs_code") or "",
+                "pais_origen": (
+                    bulto.get("pais_origen") or sol.get("remitente_pais") or "AR"
+                ),
+            })
     else:
-        cantidad = max(int(sol.get("cantidad") or 1), 1)
-        total = float(sol.get("valor_declarado_usd") or 1)
+        cantidad = parse_entero_formulario(
+            sol.get("cantidad"), "Cantidad de cajas", minimo=1, maximo=20
+        )
+        total = parse_float_formulario(
+            sol.get("valor_declarado_usd"),
+            "Valor declarado",
+            importe=True,
+            minimo=0.001,
+        )
+        peso_total = parse_float_formulario(
+            sol.get("peso_kg"), "Peso total", minimo=0.001
+        )
         filas = [{
             "producto": "", "cantidad": cantidad,
+            # Los registros legacy sólo tenían una cantidad. En ese contrato
+            # era, a la vez, la cantidad física y la comercial declarada.
+            "unidades_aduana": cantidad,
             # En el legacy peso_kg es total; cada pieza debe recuperar su peso.
-            "peso_kg": float(sol.get("peso_kg") or 1) / cantidad,
-            "largo_cm": sol.get("largo_cm") or 30,
-            "ancho_cm": sol.get("ancho_cm") or 20,
-            "alto_cm": sol.get("alto_cm") or 10,
+            "peso_kg": peso_total / cantidad,
+            "largo_cm": parse_float_formulario(
+                sol.get("largo_cm"), "Largo", minimo=0.001
+            ),
+            "ancho_cm": parse_float_formulario(
+                sol.get("ancho_cm"), "Ancho", minimo=0.001
+            ),
+            "alto_cm": parse_float_formulario(
+                sol.get("alto_cm"), "Alto", minimo=0.001
+            ),
             "descripcion_en": sol.get("producto_alias") or "Merchandise",
             "valor_unitario_usd": total / cantidad,
             "pais_origen": sol.get("remitente_pais") or "AR",
@@ -806,8 +927,12 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
         return {"ok": False, "error":
                 "DHL no devolvió una tarifa para este envío. No emitimos ni cobramos nada."}
 
-    anterior = float(sol.get("precio_tauro_ars") or 0)
-    actual = float(opcion["precio_ars"])
+    anterior = parse_float_formulario(
+        sol.get("precio_tauro_ars"), "Precio aceptado", importe=True, minimo=0.001
+    )
+    actual = parse_float_formulario(
+        opcion.get("precio_ars"), "Precio DHL actual", importe=True, minimo=0.001
+    )
     if abs(actual - anterior) <= 0.5:
         return {"ok": True}
 
@@ -839,12 +964,11 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT s.cliente_id, s.tracking, s.estado, s.precio_tauro_ars,
-                       s.courier, c.activo,
+                       s.courier, s.ambito, s.remitente_pais, s.destino_pais,
+                       c.activo,
                        CASE
                          WHEN LOWER(COALESCE(s.courier, '')) = 'dhl'
                          THEN COALESCE(cc.puede_emitir, FALSE)
-                         WHEN UPPER(COALESCE(s.courier, '')) = 'ENVIA'
-                         THEN COALESCE(c.puede_emitir, FALSE)
                          ELSE FALSE
                        END AS puede_emitir,
                        c.tope_deuda_ars
@@ -869,6 +993,9 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
             if fila["estado"] == ESTADO_EMITIENDO:
                 return {"ok": False, "error":
                         "Ya hay una emisión en curso para esta solicitud."}
+            error_ambito = _error_ambito_no_emitible(fila)
+            if error_ambito:
+                return {"ok": False, "error": error_ambito}
             if not fila["activo"]:
                 return {"ok": False, "error":
                         "Tu cuenta está desactivada. No se puede emitir ni "
@@ -950,19 +1077,44 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
 
 def generar_guia(solicitud_id: int, ya_reservada: bool = False) -> dict:
     """
-    Despachador de emisión: mira el courier de la solicitud y emite por
-    el canal que corresponde. FEDEX = cuenta propia (internacional);
-    ENVIA = envia.com (nacionales AR, debita el wallet prepago).
+    Despachador de emisión internacional. Las integraciones nacionales
+    directas de Andreani/OCA se incorporarán como adaptadores propios.
     """
     sol = obtener_solicitud(solicitud_id)
     if not sol:
         return {"ok": False, "error": "Solicitud no encontrada."}
 
     courier = (sol.get("courier") or "FEDEX").upper()
-
     if courier == "ENVIA":
-        return (generar_guia_envia(sol, ya_reservada=True)
-                if ya_reservada else generar_guia_envia(sol))
+        return {
+            "ok": False,
+            "error": (
+                "La integración nacional anterior fue retirada. Esta solicitud "
+                "histórica no se emitió ni generó ningún cargo. Revisala en el "
+                "admin antes de cancelarla o migrarla manualmente."
+            ),
+        }
+
+    error_ambito = _error_ambito_no_emitible(sol)
+    if error_ambito:
+        return {"ok": False, "error": error_ambito}
+
+    # El admin también pasa por una guarda productiva. El cliente ya la
+    # verifica dentro de _reservar_credito_cliente(), pero el botón del admin
+    # llegaba directo a este despachador y podía emitir contra sandbox si las
+    # variables existían. Una guía de prueba nunca debe terminar guardada ni
+    # debitada como una operación real.
+    if courier == "DHL" and not ya_reservada:
+        from servicios.configuracion_couriers_cliente import estado_integracion
+        if not estado_integracion("dhl")["operativa"]:
+            return {
+                "ok": False,
+                "error": (
+                    "DHL no está habilitado en producción. No se emitió ninguna "
+                    "guía ni se generó ningún cargo."
+                ),
+            }
+
     # Registro de couriers internacionales: sumar uno nuevo es agregarlo acá
     # y darle un cliente con create_shipment del mismo contrato.
     if courier in ("FEDEX", "DHL", "UPS"):
@@ -982,136 +1134,8 @@ def generar_guia(solicitud_id: int, ya_reservada: bool = False) -> dict:
         "ok": False,
         "error": (
             f"Todavía no emitimos guías de {courier} desde el sistema. "
-            f"La cotización de {courier} sí funciona; la emisión está en "
-            f"desarrollo. Emitila a mano o elegí otro courier."
+            "No se emitió ni se generó ningún cargo."
         ),
-    }
-
-
-def generar_guia_envia(sol: dict, ya_reservada: bool = False) -> dict:
-    """
-    Emite una guía NACIONAL vía envia.com con el carrier/servicio que
-    eligió el cliente al crear la solicitud. Cuidado: debita el wallet
-    prepago de envia — si no hay saldo, envia rechaza y lo informamos.
-    """
-    if sol.get("estado") == "CANCELADO":
-        return {"ok": False, "error": "La solicitud está cancelada."}
-    if sol.get("estado") == "VERIFICAR_COURIER":
-        referencia = sol.get("courier_message_reference") or "sin referencia visible"
-        return {"ok": False, "error": (
-            "La emisión anterior tuvo una respuesta incierta. No la vuelvas a "
-            f"emitir: Tauro debe verificarla con el courier (ref. {referencia})."
-        )}
-    if sol.get("tracking") and sol.get("label_pdf"):
-        return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
-
-    # RESERVA ATÓMICA — el mismo candado que FedEx. Sin esto, dos clicks
-    # simultáneos pasaban los chequeos de arriba (ambos leen tracking NULL)
-    # y envia.com emitía DOS guías debitando DOS veces el wallet prepago.
-    # El UPDATE condicional garantiza que de N intentos exactamente uno
-    # sigue; el resto se va con este mensaje.
-    if not ya_reservada and not _reservar_para_emitir(sol["id"]):
-        return {"ok": False, "error": "Esta guía ya se está emitiendo. Esperá unos "
-                                      "segundos y refrescá."}
-
-    servicio_courier = (sol.get("servicio_courier") or "").strip()
-    if "/" not in servicio_courier:
-        _liberar_reserva(sol["id"])
-        return {"ok": False, "error": "La solicitud no tiene carrier/servicio nacional elegido."}
-    carrier, servicio = servicio_courier.split("/", 1)
-
-    bultos = sol.get("bultos") or []
-    if isinstance(bultos, str):
-        try:
-            import json as _json
-            bultos = _json.loads(bultos)
-        except Exception:
-            bultos = []
-
-    origen = {
-        # personName = el CONTACTO del envío; companyName = la razón social
-        # DEL REMITENTE (guía HAILU: "Yiwu Hailu Garment" + "JEFF JANG").
-        # Antes empresa era el cliente de TAURO — la guía salía a nombre de
-        # WAIMAO en vez del shipper real.
-        "nombre": (sol.get("remitente_contacto") or sol.get("remitente_nombre")
-                   or sol.get("cliente_nombre") or sol["cliente_id"]),
-        "empresa": sol.get("remitente_nombre") or sol.get("cliente_nombre") or "",
-        "email": sol.get("remitente_email") or "",
-        "telefono": sol.get("remitente_telefono") or sol.get("cliente_telefono") or "",
-        "direccion": sol.get("remitente_direccion") or sol.get("cliente_direccion") or "",
-        "ciudad": sol.get("remitente_ciudad") or sol.get("cliente_ciudad") or "Buenos Aires",
-        "provincia": sol.get("remitente_estado") or "CABA",
-        "cp": sol.get("remitente_zip") or sol.get("cliente_cp") or "",
-    }
-    destino = {
-        "nombre": sol.get("dest_contacto") or sol.get("dest_nombre") or "",
-        "empresa": sol.get("dest_nombre") or "",
-        "email": sol.get("dest_email") or "",
-        "telefono": sol.get("dest_telefono") or "",
-        "direccion": sol.get("dest_direccion") or "",
-        "ciudad": sol.get("dest_ciudad") or "",
-        "provincia": sol.get("dest_estado") or "",
-        "cp": sol.get("dest_zip") or "",
-    }
-
-    from servicios.cotizador import _get_dolar_ars
-    dolar = _get_dolar_ars()
-    piezas = [
-        {
-            "descripcion": b.get("descripcion_en") or b.get("producto_alias") or "Merchandise",
-            "cantidad": max(int(b.get("cantidad") or 1), 1),
-            "largo_cm": b.get("largo_cm") or 30,
-            "ancho_cm": b.get("ancho_cm") or 20,
-            "alto_cm": b.get("alto_cm") or 10,
-            "peso_kg": b.get("peso_kg") or 0.5,
-            "valor_declarado_ars": round(float(b.get("valor_unitario_usd") or 0) * dolar, 2),
-        }
-        for b in bultos
-    ] or [{
-        "descripcion": sol.get("producto_alias") or "Merchandise",
-        "cantidad": sol.get("cantidad") or 1,
-        "largo_cm": sol.get("largo_cm") or 30,
-        "ancho_cm": sol.get("ancho_cm") or 20,
-        "alto_cm": sol.get("alto_cm") or 10,
-        "peso_kg": sol.get("peso_kg") or 0.5,
-        "valor_declarado_ars": round(float(sol.get("valor_declarado_usd") or 0) * dolar, 2),
-    }]
-
-    from core.envia_client import EnviaClient
-    try:
-        resultado = EnviaClient().create_shipment_nacional(
-            origen=origen, destino=destino, bultos=piezas,
-            carrier=carrier, servicio=servicio,
-        )
-    except Exception as e:
-        # Excepción ≠ rechazo: no sabemos si envia emitió o no. Se libera la
-        # reserva (la ventana de 10 min igual la liberaría) y se avisa fuerte
-        # para verificar el wallet antes de reintentar.
-        _liberar_reserva(sol["id"])
-        print(f"[solicitudes] EXCEPCIÓN emitiendo en envia para {sol['id']}: {e}. "
-              f"VERIFICAR en envia.com si la guía salió antes de reintentar.")
-        return {"ok": False, "error": "Error de comunicación con el courier. "
-                                      "Verificá en envia.com antes de reintentar."}
-    if not resultado.get("encontrado"):
-        _liberar_reserva(sol["id"])
-        return {"ok": False, "error": resultado.get("error", "envia.com no emitió la guía.")}
-
-    guardar_guia_generada(
-        sol["id"],
-        resultado["tracking"],
-        resultado.get("label_pdf"),
-        courier="ENVIA",
-    )
-    # Si el PDF no se pudo bajar, al menos dejamos el link de envia.
-    if not resultado.get("label_pdf") and resultado.get("label_url"):
-        actualizar_solicitud_guia(
-            sol["id"], estado="GUIA_LISTA",
-            tracking=resultado["tracking"], guia_url=resultado["label_url"],
-        )
-    return {
-        "ok": True,
-        "tracking": resultado["tracking"],
-        "tiene_label": bool(resultado.get("label_pdf")),
     }
 
 
@@ -1358,6 +1382,10 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     if sol.get("tracking"):
         return {"ok": False, "error": "Esta solicitud ya tiene una guía generada."}
 
+    error_ambito = _error_ambito_no_emitible(sol)
+    if error_ambito:
+        return {"ok": False, "error": error_ambito}
+
     # RESERVA ATÓMICA antes de tocar FedEx.
     #
     # Emitir una guía es irreversible: crea un envío real en el courier.
@@ -1387,18 +1415,11 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         bultos = []
     bultos = [b for b in bultos if isinstance(b, dict)]
 
-    def _entero_positivo(valor, default=1):
-        try:
-            return max(int(valor), 1)
-        except (TypeError, ValueError):
-            return max(int(default), 1)
+    def _entero_requerido(valor, campo: str) -> int:
+        return parse_entero_formulario(valor, campo, minimo=1)
 
-    def _numero_positivo(valor, default):
-        try:
-            numero = float(valor)
-            return numero if numero > 0 else float(default)
-        except (TypeError, ValueError):
-            return float(default)
+    def _numero_requerido(valor, campo: str, *, importe: bool = False) -> float:
+        return parse_float_formulario(valor, campo, importe=importe, minimo=0.001)
 
     # Producto del catálogo → HS code y descripción en inglés para la aduana.
     hs_code, descripcion_en = "", "Merchandise"
@@ -1411,7 +1432,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     except Exception as e:
         print(f"[guia] no se pudo leer el producto: {e}")
 
-    from servicios.rutas import pais_a_iso2
+    from servicios.paises import normalizar_iso2
 
     shipper = {
         # personName = el CONTACTO del envío; companyName = la razón social
@@ -1428,7 +1449,9 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         "ciudad": sol.get("remitente_ciudad") or sol.get("cliente_ciudad") or "Buenos Aires",
         "estado": sol.get("remitente_estado") or "",
         "zip": sol.get("remitente_zip") or sol.get("cliente_cp") or "",
-        "pais": pais_a_iso2(sol.get("remitente_pais") or sol.get("cliente_pais") or "AR"),
+        "pais": normalizar_iso2(
+            sol.get("remitente_pais") or sol.get("cliente_pais") or "AR"
+        ),
     }
     recipient = {
         "nombre": sol.get("dest_contacto") or sol.get("dest_nombre") or "",
@@ -1440,56 +1463,65 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         "ciudad": sol.get("dest_ciudad") or "",
         "estado": sol.get("dest_estado") or "",
         "zip": sol.get("dest_zip") or "",
-        "pais": pais_a_iso2(sol.get("destino_pais") or "US"),
+        "pais": normalizar_iso2(sol.get("destino_pais") or "US"),
     }
     datos_envio = {
         "shipper": shipper,
         "recipient": recipient,
     }
-    if bultos:
-        # Multi-bulto: cada caja del envío como pieza propia, con su label.
-        datos_envio["bultos"] = [
-            {
-                "peso_kg": b.get("peso_kg") or 0.5,
-                "largo": b.get("largo_cm") or 30,
-                "ancho": b.get("ancho_cm") or 20,
-                "alto": b.get("alto_cm") or 10,
-                "valor_unitario_usd": b.get("valor_unitario_usd") or 100,
-                "unidades": _entero_positivo(b.get("cantidad") or 1),
-                "unidades_aduana": _entero_positivo(
-                    b.get("unidades_aduana") or b.get("cantidad") or 1
-                ),
-                "hs_code": b.get("hs_code") or "",
-                "descripcion_en": b.get("descripcion_en") or "Merchandise",
-                # El de la invoice si el cliente lo declaró; si no, el país
-                # de ORIGEN del envío (Leandro 01/08: sale de China → CN).
-                # "AR" fijo declaraba como argentina una importación china.
-                "pais_origen": (b.get("pais_origen")
-                                or sol.get("remitente_pais") or "AR"),
-            }
-            for b in bultos
-        ]
-    else:
+    try:
+        if bultos:
+            # Multi-bulto: cada caja del envío como pieza propia, con su label.
+            # Los datos ya guardados pueden ser antiguos, pero nunca se los
+            # sustituye por valores "razonables": emitir sería irreversible.
+            datos_envio["bultos"] = [
+                {
+                    "peso_kg": _numero_requerido(b.get("peso_kg"), f"Caja {i}: peso"),
+                    "largo": _numero_requerido(b.get("largo_cm"), f"Caja {i}: largo"),
+                    "ancho": _numero_requerido(b.get("ancho_cm"), f"Caja {i}: ancho"),
+                    "alto": _numero_requerido(b.get("alto_cm"), f"Caja {i}: alto"),
+                    "valor_unitario_usd": _numero_requerido(
+                        b.get("valor_unitario_usd"), f"Caja {i}: valor declarado", importe=True
+                    ),
+                    "unidades": _entero_requerido(b.get("cantidad"), f"Caja {i}: cantidad"),
+                    "unidades_aduana": _entero_requerido(
+                        b.get("unidades_aduana"), f"Caja {i}: unidades de aduana"
+                    ),
+                    "hs_code": b.get("hs_code") or "",
+                    "descripcion_en": b.get("descripcion_en") or "Merchandise",
+                    "pais_origen": (b.get("pais_origen")
+                                    or sol.get("remitente_pais") or "AR"),
+                }
+                for i, b in enumerate(bultos, start=1)
+            ]
+        else:
         # OJO: valor_declarado_usd viene TOTALIZADO (unitario × cantidad) desde
         # el portal. create_shipment vuelve a multiplicar unitario × cantidad,
         # así que acá se pasa el UNITARIO real para no declarar de más en aduana.
-        cantidad_sol = _entero_positivo(sol.get("cantidad") or 1)
-        valor_total_sol = _numero_positivo(sol.get("valor_declarado_usd"), 100)
-        datos_envio["package"] = {
+            cantidad_sol = _entero_requerido(sol.get("cantidad"), "Cantidad de cajas")
+            valor_total_sol = _numero_requerido(
+                sol.get("valor_declarado_usd"), "Valor declarado", importe=True
+            )
+            datos_envio["package"] = {
             # El campo legacy guarda el peso TOTAL. create_shipment repite
             # esta pieza `cantidad` veces, por eso necesita el peso unitario.
-            "peso_kg": _numero_positivo(sol.get("peso_kg"), 0.5) / cantidad_sol,
-            "largo": sol.get("largo_cm") or 30,
-            "ancho": sol.get("ancho_cm") or 20,
-            "alto": sol.get("alto_cm") or 10,
-        }
-        datos_envio["commodity"] = {
-            "descripcion": descripcion_en,
-            "hs_code": hs_code,
-            "cantidad": cantidad_sol,
-            "valor_unitario_usd": round(valor_total_sol / cantidad_sol, 2),
-            "pais_origen": sol.get("remitente_pais") or "AR",
-        }
+                "peso_kg": _numero_requerido(sol.get("peso_kg"), "Peso") / cantidad_sol,
+                "largo": _numero_requerido(sol.get("largo_cm"), "Largo"),
+                "ancho": _numero_requerido(sol.get("ancho_cm"), "Ancho"),
+                "alto": _numero_requerido(sol.get("alto_cm"), "Alto"),
+            }
+            datos_envio["commodity"] = {
+                "descripcion": descripcion_en,
+                "hs_code": hs_code,
+                "cantidad": cantidad_sol,
+                "valor_unitario_usd": round(valor_total_sol / cantidad_sol, 2),
+                "pais_origen": sol.get("remitente_pais") or "AR",
+            }
+    except ValueError as exc:
+        _liberar_reserva(solicitud_id)
+        return {"ok": False, "error": (
+            f"Datos numéricos inválidos: {exc}. No llamamos al courier ni generamos ningún cargo."
+        )}
 
     # Quién paga los impuestos en ESTE envío: se decidió al crearlo y se
     # congeló ahí. Sin esto FedEx vuelve al SENDER fijo con la cuenta de TAURO.
@@ -1605,6 +1637,10 @@ def generar_guia_fedex(solicitud_id: int) -> dict:
 
 def generar_guia_dhl(solicitud_id: int) -> dict:
     """Emisión por DHL Express — mismo camino que FedEx, otro cliente."""
+    from servicios.configuracion_couriers_cliente import estado_integracion
+    if not estado_integracion("dhl")["operativa"]:
+        return {"ok": False, "error":
+                "DHL no está habilitado en producción. No se emitió ninguna guía."}
     return generar_guia_internacional(solicitud_id, courier="DHL")
 
 

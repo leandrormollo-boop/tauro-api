@@ -11,14 +11,23 @@ from modelos.cotizacion import CotizacionInput
 from servicios.auth import get_markup_pct
 from servicios.catalogo import get_producto
 from servicios.cotizador import cotizar, cotizar_bultos, _get_dolar_ars
-from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
-from servicios.rutas import get_rutas_activas, pais_a_iso2
+from servicios.numeros_humanos import (
+    parse_entero_humano,
+    parse_importe_humano,
+    parse_numero_humano,
+)
+from servicios.paises import normalizar as normalizar_pais
+from servicios.rutas import get_rutas_activas
 
 # Límites multi-bulto: FedEx IP admite hasta 70 kg por pieza; el tope de
 # cajas por envío es una guarda operativa nuestra (no de FedEx).
 MAX_KG_POR_CAJA = 70
 MAX_CAJAS_POR_ENVIO = 20
 MAX_UNIDADES_ADUANA_POR_RENGLON = 9999
+MOTIVO_NACIONAL_NO_DISPONIBLE = (
+    "nacional_no_disponible: los envíos dentro de Argentina se habilitarán "
+    "con las APIs directas de Andreani y OCA"
+)
 
 # ── API keys: hasheadas, nunca en claro ─────────────────────
 # La clave se guarda como sha256(clave). Un dump de la base (backup robado,
@@ -121,22 +130,28 @@ def obtener_cliente_por_api_key(api_key: str) -> dict:
 
 
 def _normalizar_pais(valor: str) -> str:
-    return pais_a_iso2((valor or "").strip().upper())
+    return normalizar_pais(valor)
 
 
-def buscar_ruta_para_destino(destino_pais: str):
-    """Busca una ruta activa desde Argentina hacia el destino pedido."""
+def buscar_ruta_para_destino(destino_pais: str, origen_pais: str = "AR"):
+    """Busca una ruta internacional activa para el par exacto.
+
+    No reutiliza una ruta que comparta solamente el destino: CN→AR no puede
+    cotizarse con una tarifa US→AR. AR→AR queda fuera del motor internacional
+    mientras Andreani/OCA no estén conectados.
+    """
+    origen_iso = _normalizar_pais(origen_pais)
     destino_iso = _normalizar_pais(destino_pais)
+    if not origen_iso or not destino_iso:
+        return None
+    if origen_iso == "AR" and destino_iso == "AR":
+        return None
     for ruta in get_rutas_activas():
-        origen_iso = _normalizar_pais(ruta.origen_pais)
+        ruta_origen_iso = _normalizar_pais(ruta.origen_pais)
         ruta_destino_iso = _normalizar_pais(ruta.destino_pais)
-        if origen_iso == "AR" and ruta_destino_iso == destino_iso:
+        if ruta_origen_iso == origen_iso and ruta_destino_iso == destino_iso:
             return ruta
 
-    # Fallback: si no hay origen Argentina, usar cualquier ruta activa al destino.
-    for ruta in get_rutas_activas():
-        if _normalizar_pais(ruta.destino_pais) == destino_iso:
-            return ruta
     return None
 
 
@@ -160,7 +175,8 @@ def obtener_datos_producto(cliente_id: str, producto_id: str) -> dict:
 
 
 def obtener_precio_envio_multi(
-    cliente_id: str, destino_pais: str, bultos: list, destino_real: dict = None
+    cliente_id: str, destino_pais: str, bultos: list, destino_real: dict = None,
+    origen_pais: str = "AR",
 ) -> dict:
     """
     Cotiza un envío MULTI-BULTO en vivo: lista de cajas del catálogo
@@ -169,6 +185,12 @@ def obtener_precio_envio_multi(
     calcula por caja; FedEx tarifa el conjunto y se aplica el pricing del
     cliente al total.
     """
+    origen_iso = _normalizar_pais(origen_pais)
+    destino_iso = _normalizar_pais(destino_pais)
+    if not origen_iso or not destino_iso:
+        return {"encontrado": False, "motivo": "pais_no_soportado"}
+    if origen_iso == "AR" and destino_iso == "AR":
+        return {"encontrado": False, "motivo": MOTIVO_NACIONAL_NO_DISPONIBLE}
     if not bultos:
         return {"encontrado": False, "motivo": "sin_bultos"}
     # Guarda temprana: cada fila es al menos una caja, así que más filas que
@@ -179,7 +201,7 @@ def obtener_precio_envio_multi(
             "motivo": f"peso_excedido: máximo {MAX_CAJAS_POR_ENVIO} cajas por envío. Dividí en dos envíos.",
         }
 
-    ruta = buscar_ruta_para_destino(destino_pais)
+    ruta = buscar_ruta_para_destino(destino_iso, origen_iso)
     if not ruta:
         return {"encontrado": False, "motivo": "ruta_no_encontrada"}
 
@@ -187,13 +209,19 @@ def obtener_precio_envio_multi(
     total_cajas = 0
     valor_total_usd = 0.0
     for b in bultos:
+        if not isinstance(b, dict):
+            return {"encontrado": False,
+                    "motivo": "caja_incompleta: cada caja debe tener datos válidos"}
         alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
         try:
-            cantidad = int(b.get("cantidad") or 1)
-            unidades_aduana = int(b.get("unidades_aduana") or cantidad)
+            cantidad = parse_entero_humano(b.get("cantidad"))
+            unidades_aduana = parse_entero_humano(b.get("unidades_aduana"))
         except (TypeError, ValueError):
             return {"encontrado": False,
                     "motivo": "caja_incompleta: cajas y unidades aduaneras deben ser numeros enteros"}
+        if cantidad is None or unidades_aduana is None:
+            return {"encontrado": False,
+                    "motivo": "caja_incompleta: cajas y unidades aduaneras son obligatorias"}
         if cantidad < 1 or total_cajas + cantidad > MAX_CAJAS_POR_ENVIO:
             return {
                 "encontrado": False,
@@ -288,22 +316,35 @@ def obtener_precio_envio_multi(
 
 
 def obtener_precio_envio(
-    cliente_id: str, producto_id: str, destino_pais: str, cantidad: int = 1
+    cliente_id: str, producto_id: str, destino_pais: str, cantidad: int = 1,
+    origen_pais: str = "AR",
 ) -> dict:
     """
     Cotiza producto + destino en vivo con FedEx y markup del cliente.
     cantidad multiplica peso y valor declarado (todo viaja como un solo bulto
     hasta que soportemos multi-pieza). FedEx IP admite hasta 70kg por pieza.
     """
+    origen_iso = _normalizar_pais(origen_pais)
+    destino_iso = _normalizar_pais(destino_pais)
+    if not origen_iso or not destino_iso:
+        return {"encontrado": False, "motivo": "pais_no_soportado"}
+    if origen_iso == "AR" and destino_iso == "AR":
+        return {"encontrado": False, "motivo": MOTIVO_NACIONAL_NO_DISPONIBLE}
+
     producto = get_producto(cliente_id, producto_id)
     if not producto or not producto.activo:
         return {"encontrado": False, "motivo": "producto_no_encontrado"}
 
-    ruta = buscar_ruta_para_destino(destino_pais)
+    ruta = buscar_ruta_para_destino(destino_iso, origen_iso)
     if not ruta:
         return {"encontrado": False, "motivo": "ruta_no_encontrada"}
 
-    cantidad = max(int(cantidad or 1), 1)
+    try:
+        cantidad = parse_entero_humano(cantidad)
+    except (TypeError, ValueError):
+        return {"encontrado": False, "motivo": "cantidad_invalida"}
+    if cantidad is None or cantidad < 1:
+        return {"encontrado": False, "motivo": "cantidad_invalida"}
     peso_total = round(producto.peso_kg * cantidad, 2)
     if peso_total > 70:
         return {
@@ -376,12 +417,21 @@ def cotizar_couriers_cliente(
     """
     from servicios.carriers import cotizar_carriers_cliente
     from servicios.cotizador import dolar_ars
-    from servicios.paises import existe, referencia
+    from servicios.paises import referencia
     from servicios.configuracion_couriers_cliente import configuracion_cotizacion
 
-    destino_iso = (destino_pais or "").strip().upper()
-    if not existe(destino_iso):
-        return {"encontrado": False, "motivo": f"pais_no_soportado: {destino_iso}"}
+    destino_iso = _normalizar_pais(destino_pais)
+    if not destino_iso:
+        return {"encontrado": False, "motivo": "pais_no_soportado: destino"}
+
+    origen_iso = _normalizar_pais(
+        (origen_real or {}).get("pais")
+        or (origen_real or {}).get("country") or "AR"
+    )
+    if not origen_iso:
+        return {"encontrado": False, "motivo": "pais_no_soportado: origen"}
+    if origen_iso == "AR" and destino_iso == "AR":
+        return {"encontrado": False, "motivo": MOTIVO_NACIONAL_NO_DISPONIBLE}
 
     # Validación de productos y bultos: misma que el resto del portal, para
     # que el preview diga exactamente lo mismo que el submit.
@@ -401,11 +451,6 @@ def cotizar_couriers_cliente(
             "postal_code": cp or base.get("postal_code", ""),
             "state": (real.get("estado") or real.get("state") or "").strip(),
         }
-
-    origen_iso = ((origen_real or {}).get("pais")
-                  or (origen_real or {}).get("country") or "AR").strip().upper()
-    if not existe(origen_iso):
-        origen_iso = "AR"
 
     acceso_couriers = configuracion_cotizacion(cliente_id)
     tarjetas = cotizar_carriers_cliente(
@@ -469,13 +514,18 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
 
     piezas, detalle, total_cajas = [], [], 0
     for b in bultos:
+        if not isinstance(b, dict):
+            return [], [], "caja_incompleta: cada caja debe tener datos válidos"
         alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
         try:
-            cantidad = int(b.get("cantidad") or 1)
-            unidades_aduana = int(b.get("unidades_aduana") or cantidad)
+            cantidad = parse_entero_humano(b.get("cantidad"))
+            unidades_aduana = parse_entero_humano(b.get("unidades_aduana"))
         except (TypeError, ValueError):
             return [], [], ("caja_incompleta: cajas y unidades aduaneras "
                             "deben ser numeros enteros")
+        if cantidad is None or unidades_aduana is None:
+            return [], [], ("caja_incompleta: cajas y unidades aduaneras "
+                            "son obligatorias")
         # Validar ANTES de expandir `range(cantidad)`: un POST manipulado no
         # puede obligar al proceso a materializar millones de cajas para recién
         # después descubrir que superaba el máximo operativo.

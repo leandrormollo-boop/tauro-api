@@ -18,6 +18,8 @@ def test_limite_credito_usa_un_snapshot_y_no_duplica_cargo_ya_asentado(monkeypat
                     "tracking": None,
                     "estado": "SOLICITADO",
                     "precio_tauro_ars": 95_000,
+                    "courier": "DHL", "ambito": "INTERNACIONAL",
+                    "remitente_pais": "AR", "destino_pais": "US",
                     "activo": True,
                     "puede_emitir": True,
                     "tope_deuda_ars": 250_000,
@@ -49,6 +51,10 @@ def test_limite_credito_usa_un_snapshot_y_no_duplica_cargo_ya_asentado(monkeypat
         yield Conn()
 
     monkeypatch.setattr(sg, "get_conn", conexion)
+    monkeypatch.setattr(
+        "servicios.configuracion_couriers_cliente.estado_integracion",
+        lambda _courier: {"operativa": True},
+    )
 
     salida = sg._reservar_credito_cliente(9, "WAIMAO")
 
@@ -100,9 +106,11 @@ def test_cuenta_desactivada_no_puede_emitir_con_sesion_vieja(monkeypatch):
         def __exit__(self, *_): return None
         def execute(self, sql, params=None): consultas.append(" ".join(sql.split()))
         def fetchone(self):
-            return {"cliente_id": "WAIMAO", "tracking": None,
-                    "estado": "SOLICITADO", "precio_tauro_ars": 95_000,
-                    "activo": False, "puede_emitir": True,
+                return {"cliente_id": "WAIMAO", "tracking": None,
+                        "estado": "SOLICITADO", "precio_tauro_ars": 95_000,
+                        "courier": "DHL", "ambito": "INTERNACIONAL",
+                        "remitente_pais": "AR", "destino_pais": "US",
+                        "activo": False, "puede_emitir": True,
                     "tope_deuda_ars": None}
 
     class Conn:

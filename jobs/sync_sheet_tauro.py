@@ -20,6 +20,8 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
+from servicios.couriers_urls import ambito_envio
+
 # El de "TAURO 2026" (documentado en CONTEXTO_PROYECTO.md / memoria).
 SHEET_ID_DEFAULT = "1-c83aUq5LOUM5RkFrcaZaPhPDz3mC3Mf1blecJcrPGg"
 PESTANA = "PLATAFORMA"
@@ -52,6 +54,7 @@ def sincronizar() -> None:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT created_at, cliente_id, estado, courier, tracking,
+                       ambito, remitente_pais,
                        producto_alias, cantidad, dest_nombre, dest_ciudad,
                        destino_pais, peso_kg, valor_declarado_usd,
                        precio_tauro_ars, precio_tauro_usd
@@ -68,7 +71,10 @@ def sincronizar() -> None:
             s["created_at"].strftime("%d/%m/%Y") if s["created_at"] else "",
             s["cliente_id"] or "",
             s["estado"] or "",
-            "Nacional" if courier == "ENVIA" else "Internacional",
+            {
+                "nacional": "Nacional",
+                "internacional": "Internacional",
+            }.get(ambito_envio(dict(s)), "Sin clasificar"),
             courier,
             s["tracking"] or "",
             s["producto_alias"] or "",

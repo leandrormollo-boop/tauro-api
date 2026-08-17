@@ -34,7 +34,13 @@ CIUDAD_A_STATE = {
 
 
 def pais_a_iso2(nombre: str) -> str:
-    return PAIS_A_ISO.get((nombre or "").strip().upper(), (nombre or "").strip().upper())
+    # Una sola fuente de verdad para todos los países del catálogo. El
+    # fallback conserva compatibilidad con rutas históricas no catalogadas,
+    # pero los flujos nuevos validan y fallan cerrado antes del courier.
+    from servicios.paises import normalizar_iso2
+
+    crudo = (nombre or "").strip().upper()
+    return normalizar_iso2(nombre) or PAIS_A_ISO.get(crudo, crudo)
 
 
 def ciudad_a_state(ciudad: str) -> str:

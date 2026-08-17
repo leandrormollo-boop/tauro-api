@@ -90,71 +90,43 @@
     </section>
 </div>
 
-<section class="card home-shipments-card">
-    <div class="card-head">
-        <div>
-            <div class="eyebrow">Actividad reciente</div>
-            <h3>Últimos envíos</h3>
-            <p>Un resumen de tus solicitudes más recientes.</p>
-        </div>
-        <a href="/portal/envios" class="btn btn-ghost btn-sm">Ver todos</a>
+{% set estados = {
+    "SOLICITADO": ("warn", "Solicitud recibida"),
+    "EN_PROCESO": ("warn", "En preparación"),
+    "EMITIENDO": ("warn", "Generando guía"),
+    "VERIFICAR_COURIER": ("warn", "Verificando"),
+    "GUIA_LISTA": ("ok", "Guía lista"),
+    "DESPACHADO": ("ok", "Enviado"),
+    "ENTREGADO": ("ok", "Entregado"),
+    "CANCELADO": ("muted", "Cancelado")
+} %}
+{% macro actividad_ambito(icono, titulo, ambito, solicitudes) %}
+<section class="card home-scope-card">
+    <div class="home-scope-head">
+        <div><span aria-hidden="true">{{ icono }}</span><strong>{{ titulo }}</strong></div>
+        <a href="/portal/envios?tipo={{ ambito }}">Ver historial →</a>
     </div>
-
     {% if solicitudes %}
-    {% set estados = {
-        "SOLICITADO": ("warn", "Solicitud recibida", "Lo prepara Tauro"),
-        "EN_PROCESO": ("warn", "En preparación", "Lo prepara Tauro"),
-        "EMITIENDO": ("warn", "Generando guía", "Lo prepara Tauro"),
-        "VERIFICAR_COURIER": ("warn", "Verificando con el courier", "No vuelvas a emitir"),
-        "GUIA_LISTA": ("ok", "Guía lista", "Revisá y descargá la guía"),
-        "DESPACHADO": ("ok", "Enviado", "En tránsito con el courier"),
-        "ENTREGADO": ("ok", "Entregado", "Completado"),
-        "CANCELADO": ("muted", "Cancelado", "Sin acciones pendientes")
-    } %}
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th>Fecha</th>
-                    <th>Destino</th>
-                    <th>Estado</th>
-                    <th>Siguiente paso</th>
-                    <th>Tracking</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for s in solicitudes %}
-                {% set estado = estados.get(s.estado, ("muted", (s.estado or "—").replace("_", " ").capitalize(), "Ver detalle")) %}
-                <tr>
-                    <td class="mono">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</td>
-                    <td>
-                        <strong>{{ s.dest_ciudad or s.dest_nombre or "—" }}</strong>
-                        <br><small style="color:var(--fg-3);">{{ s.destino_pais or "—" }}</small>
-                    </td>
-                    <td><span class="badge {{ estado[0] }}">{{ estado[1] }}</span></td>
-                    <td class="home-next-step">{{ estado[2] }}</td>
-                    <td class="mono">
-                        {% if s.tracking %}
-                            {% set turl = url_tracking(s.courier, s.tracking) %}
-                            <a href="{{ turl }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
-                        {% else %}—{% endif %}
-                    </td>
-                    <td><a href="/portal/envios/{{ s.id }}" class="btn btn-ghost btn-sm">Detalle</a></td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
+    <div class="home-scope-list">
+        {% for s in solicitudes %}
+        {% set estado = estados.get(s.estado, ("muted", (s.estado or "—").replace("_", " ").capitalize())) %}
+        <a href="/portal/envios/{{ s.id }}" class="home-scope-row">
+            <span><strong>{{ s.dest_ciudad or s.dest_nombre or "—" }}</strong><small>{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }} · {{ (s.courier or '—')|upper }}</small></span>
+            <span class="badge {{ estado[0] }}">{{ estado[1] }}</span>
+        </a>
+        {% endfor %}
     </div>
     {% else %}
-    <div class="empty home-empty">
-        <img src="/static/img/logo-mark-white.png" alt="">
-        <p>Todavía no tenés envíos. Podés crear uno o cotizar primero.</p>
-        <div class="home-empty-actions">
-            <a href="/portal/envios/nuevo" class="btn btn-primary btn-sm">Nuevo envío</a>
-            <a href="/portal/cotizar" class="btn btn-ghost btn-sm">Cotizar</a>
-        </div>
+    <div class="home-scope-empty">
+        <span>Sin envíos {{ titulo|lower }} todavía.</span>
+        <a href="/portal/cotizar?ambito={{ ambito }}" class="btn btn-ghost btn-sm">Cotizar</a>
     </div>
     {% endif %}
 </section>
+{% endmacro %}
+
+<div class="home-scope-activity" aria-label="Actividad reciente separada por ámbito">
+    {{ actividad_ambito('🇦🇷', 'Nacionales', 'nacional', solicitudes_nacionales) }}
+    {{ actividad_ambito('🌐', 'Internacionales', 'internacional', solicitudes_internacionales) }}
+</div>
 {% endblock %}

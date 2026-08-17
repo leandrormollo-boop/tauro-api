@@ -4,7 +4,7 @@ Ultima actualizacion: 2026-06-03
 
 ## Resumen del proyecto
 
-Tauro Solutions es una plataforma B2B de logistica internacional para clientes/ecommerce. La idea es ofrecer algo similar a Envia/Boxfly: clientes con login, cotizacion, carga de productos, creacion/gestion de guias y un panel admin de Tauro para operar todo.
+Tauro Solutions es una plataforma B2B de logística internacional para clientes y ecommerce: login, cotización, carga de productos, creación y gestión de guías, y un panel admin de Tauro para operar todo.
 
 Importante: diferenciar bien tres superficies:
 
@@ -62,6 +62,11 @@ Commits previos relevantes:
 - `4ab05f7 feat: usar postgres en api b2b`
 
 ## Modelo funcional deseado
+
+> Actualización 15/08/2026: el contrato vigente para separar 🇦🇷 Nacional y
+> 🌐 Internacional está en `docs/AMBITOS_NACIONAL_INTERNACIONAL.md`. La ruta,
+> no el courier, define el ámbito; no volver a crear listados o saldos
+> operativos mezclados.
 
 El cotizador publico es una cosa distinta al dashboard del cliente.
 

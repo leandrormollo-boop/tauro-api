@@ -96,7 +96,7 @@
         </div>
         <div>
           <div class="pricing-cell">
-            <select name="{{ c.id }}_markup_tipo" class="js-markup-tipo" data-target="{{ c.id }}-markup" data-api-ready="{{ '1' if c.integracion_implementada else '0' }}" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Tipo de ganancia">
+            <select id="{{ c.id }}-markup-tipo" name="{{ c.id }}_markup_tipo" class="js-markup-tipo" data-target="{{ c.id }}-markup" data-api-ready="{{ '1' if c.integracion_implementada else '0' }}" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Tipo de ganancia">
               <option value="" {% if not c.markup_tipo %}selected{% endif %}>Usar regla general</option>
               <option value="FIJO_ARS" {% if c.markup_tipo == 'FIJO_ARS' %}selected{% endif %}>+ importe fijo (ARS)</option>
               <option value="PCT" {% if c.markup_tipo == 'PCT' %}selected{% endif %}>+ porcentaje</option>
@@ -105,7 +105,7 @@
             <input id="{{ c.id }}-markup" type="text" name="{{ c.id }}_markup_valor"
                    value="{% if c.markup_valor is not none %}{{ '%g'|format(c.markup_valor|float) }}{% endif %}"
                    placeholder="{% if c.id == 'dhl' %}14.000{% else %}Valor{% endif %}"
-                   inputmode="decimal" data-numero="pricing" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
+                   inputmode="decimal" data-numero="pricing" data-pricing-select="{{ c.id }}-markup-tipo" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
           </div>
           {% if not c.markup_tipo %}<div class="inherit-note">Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}</div>{% endif %}
         </div>

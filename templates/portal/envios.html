@@ -7,14 +7,14 @@
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Operaciones</div>
-            <h1>Mis envíos</h1>
-            <p>Todos los envíos que generaste con Tauro: estado, tracking y guías.</p>
+            <h1>{% if tipo_filtro == 'nacional' %}🇦🇷 Mis envíos nacionales{% elif tipo_filtro == 'internacional' %}🌐 Mis envíos internacionales{% else %}Mis envíos{% endif %}</h1>
+            <p>{% if tipo_filtro == 'nacional' %}Operaciones dentro de Argentina, sin mezclar con tu actividad internacional.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones, separadas de tus envíos dentro de Argentina.{% else %}Elegí el ámbito para ver su historial y sus guías. La cuenta todavía se muestra consolidada.{% endif %}</p>
         </div>
         <div class="envios-page-actions">
             {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para
                controlarlo en su propia planilla. #}
-            <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Descargar Excel</a>
-            <a href="/portal/envios/nuevo" class="btn btn-primary">Nuevo envío</a>
+            <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Respaldo Excel</a>
+            <a href="/portal/envios/nuevo{% if tipo_filtro %}?ambito={{ tipo_filtro }}{% endif %}" class="btn btn-primary">Nuevo envío</a>
         </div>
     </div>
 </div>
@@ -23,7 +23,45 @@
     <div class="msg ok">{{ flash_ok }}</div>
 {% endif %}
 
-{% if tiene_historial %}
+{% if not tipo_filtro %}
+<div class="scope-grid shipment-scope-grid" aria-label="Elegir historial de envíos">
+    <a href="/portal/envios?tipo=nacional" class="scope-card scope-card-national">
+        <span class="scope-icon" aria-hidden="true">🇦🇷</span>
+        <span class="scope-copy">
+            <small>Dentro de Argentina</small>
+            <strong>Envíos nacionales</strong>
+            <span>{{ total_nacionales }} envío{{ 's' if total_nacionales != 1 else '' }} · OCA y Andreani en integración</span>
+        </span>
+        <span class="scope-arrow" aria-hidden="true">→</span>
+    </a>
+    <a href="/portal/envios?tipo=internacional" class="scope-card scope-card-international">
+        <span class="scope-icon" aria-hidden="true">🌐</span>
+        <span class="scope-copy">
+            <small>Argentina y el mundo</small>
+            <strong>Envíos internacionales</strong>
+            <span>{{ total_internacionales }} envío{{ 's' if total_internacionales != 1 else '' }} · DHL según tu cuenta · otros pendientes</span>
+        </span>
+        <span class="scope-arrow" aria-hidden="true">→</span>
+    </a>
+</div>
+{% if total_sin_clasificar %}
+<div class="msg warn scope-unclassified">
+    {{ total_sin_clasificar }} envío{{ 's' if total_sin_clasificar != 1 else '' }} histórico{{ 's' if total_sin_clasificar != 1 else '' }} necesita{{ 'n' if total_sin_clasificar != 1 else '' }} revisión de ámbito. No lo{{ 's' if total_sin_clasificar != 1 else '' }} mezclamos hasta clasificarlo{{ 's' if total_sin_clasificar != 1 else '' }}.
+</div>
+{% endif %}
+{% elif not total_sin_filtrar %}
+<div class="card">
+    <div class="empty" style="padding:48px 20px;">
+        <img src="/static/img/logo-mark-white.png" alt="" style="height:40px;width:auto;opacity:.85;">
+        <p style="color:var(--fg-2);font-size:15px;margin:14px 0 4px;font-weight:600;">Todavía no hiciste envíos {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}</p>
+        <p style="font-size:13px;margin-bottom:18px;">Cuando crees el primero lo vas a ver acá, con tracking y guía.</p>
+        <div class="home-empty-actions">
+            <a href="/portal/envios/nuevo?ambito={{ tipo_filtro }}" class="btn btn-primary">Nuevo envío</a>
+            <a href="/portal/cotizar?ambito={{ tipo_filtro }}" class="btn btn-ghost">Cotizar</a>
+        </div>
+    </div>
+</div>
+{% else %}
 {# ── Contadores del embudo, chicos y filtrantes ────────────────
    Acá el protagonista es la tabla, no los contadores: van en una fila
    fina arriba y cada uno FILTRA la lista (en el escritorio son grandes
@@ -51,9 +89,9 @@
 {% set solo_paso = ("?paso=" ~ paso_filtro) if paso_filtro else "" %}
 {% set con_paso = ("&paso=" ~ paso_filtro) if paso_filtro else "" %}
 <div class="chips-tipo" role="navigation" aria-label="Filtrar por alcance">
-    <a href="/portal/envios{{ solo_paso }}" class="btn btn-sm {% if not tipo_filtro %}btn-primary{% else %}btn-ghost{% endif %}"{% if not tipo_filtro %} aria-current="true"{% endif %}>Todos</a>
-    <a href="/portal/envios?tipo=internacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="true"{% endif %}>Internacionales</a>
-    <a href="/portal/envios?tipo=nacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="true"{% endif %}>Nacionales</a>
+    <a href="/portal/envios?tipo=nacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="true"{% endif %}>🇦🇷 Nacionales</a>
+    <a href="/portal/envios?tipo=internacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="true"{% endif %}>🌐 Internacionales</a>
+    <a href="/portal/envios" class="btn btn-sm btn-ghost">Cambiar ámbito</a>
 </div>
 
 {# Resumen de lo que estás viendo ahora — se recalcula con cada filtro, así
@@ -71,7 +109,7 @@
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
     <div class="msg envios-empty-filter">No hay envíos que coincidan con estos filtros.
-        <a href="/portal/envios">Quitar filtros</a>
+        <a href="/portal/envios?tipo={{ tipo_filtro }}">Quitar filtro de estado</a>
     </div>
 {% else %}
 <div class="card envios-card">
@@ -116,7 +154,7 @@
                     </td>
                     <td data-label="Servicio y estado" class="envio-service-cell">
                         <span class="service-head">
-                            <span><strong>{{ (s.courier or 'FEDEX')|upper }}</strong> · {{ 'Nacional' if es_nacional(s.courier) else 'Internacional' }}</span>
+                            <span><strong>{{ (s.courier or '—')|upper }}</strong> · {{ 'Nacional' if tipo_filtro == 'nacional' else 'Internacional' }}</span>
                             <span class="badge {{ b[0] }}">{{ b[1] }}</span>
                         </span>
                         {% if s.tracking %}
@@ -140,12 +178,12 @@
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-sm">Guía PDF</a>
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}
-                                {% if s.estado == 'GUIA_LISTA' %}
+                                {% if tipo_filtro == 'internacional' and s.estado == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-sm">Retiro</a>
                                 {% endif %}
                             {% elif s.guia_url %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>
-                            {% elif s.puede_emitir_cliente and not s.tracking and s.estado not in ('CANCELADO', 'EMITIENDO', 'VERIFICAR_COURIER') %}
+                            {% elif (s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente and not s.tracking and s.estado not in ('CANCELADO', 'EMITIENDO', 'VERIFICAR_COURIER') %}
                                 {# Estaba SOLO en el detalle, un click adentro, así que
                                    desde acá parecía que el cliente no podía emitir. El
                                    servidor revalida las tres llaves (es suya, flag,
@@ -164,7 +202,7 @@
         </table>
     </div>
     <div class="envios-card-footer">
-        <p class="table-note">Los cargos y las facturas aplicadas: <a href="/portal/cuenta">Mi cuenta →</a></p>
+        <p class="table-note">Cargos y facturas en el resumen total: <a href="/portal/cuenta">Mi cuenta consolidada →</a></p>
         {% if total_paginas > 1 %}
         <nav class="envios-pagination" aria-label="Páginas de envíos">
             {% if pagina_actual > 1 %}
@@ -195,15 +233,6 @@
     </div>
 </div>
 {% endif %}
-{% else %}
-<div class="card">
-    <div class="empty" style="padding:48px 20px;">
-        <img src="/static/img/logo-mark-white.png" alt="" style="height:40px;width:auto;opacity:.85;">
-        <p style="color:var(--fg-2);font-size:15px;margin:14px 0 4px;font-weight:600;">Todavía no hiciste envíos</p>
-        <p style="font-size:13px;margin-bottom:18px;">Cuando crees tu primer envío lo vas a ver acá, con tracking y guía.</p>
-        <a href="/portal/envios/nuevo" class="btn btn-primary">Hacer mi primer envío</a>
-    </div>
-</div>
 {% endif %}
 </section>
 {% endblock %}

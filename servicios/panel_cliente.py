@@ -2,9 +2,8 @@
 Panel del cliente: los dos bloques que responden "¿qué falta?" y "¿qué pasó?"
 en el escritorio del portal.
 
-La idea la tomamos del portal de envia.com (auditado 29/07/2026): no es más
-lindo que el nuestro, es más EXPLÍCITO. Dos cosas hacen la diferencia y son
-las que replicamos acá:
+El panel toma referencias de portales logísticos líderes y prioriza que cada
+paso operativo sea explícito. Dos cosas hacen la diferencia:
 
   1. Un checklist de arranque con progreso real, para que el cliente nuevo
      nunca se quede pensando "¿y ahora qué hago?".
@@ -58,10 +57,10 @@ PASOS_EMBUDO = [
 ]
 
 
-# Tres filas dejan visibles título, filtros, listado y paginación dentro de
-# una pantalla de notebook de 720 px. El historial completo sigue disponible:
-# sólo se divide en páginas, nunca se recorta.
-ENVIOS_POR_PAGINA = 3
+# Dos filas dejan visibles título, filtros, listado y paginación incluso en
+# un teléfono bajo. El historial completo sigue disponible: sólo se divide
+# en páginas, nunca se recorta.
+ENVIOS_POR_PAGINA = 2
 
 
 def paso_de_estado(estado: str) -> str | None:
@@ -132,7 +131,7 @@ def preparar_historial_envios(
     paginar. Así los números, las filas y las páginas siempre describen el
     mismo conjunto.
     """
-    from servicios.couriers_urls import es_nacional
+    from servicios.couriers_urls import ambito_envio
 
     historial = list(solicitudes or [])
     tiene_historial = bool(historial)
@@ -143,9 +142,9 @@ def preparar_historial_envios(
 
     por_tipo = historial
     if tipo == "nacional":
-        por_tipo = [s for s in historial if es_nacional(s.get("courier"))]
+        por_tipo = [s for s in historial if ambito_envio(s) == "nacional"]
     elif tipo == "internacional":
-        por_tipo = [s for s in historial if not es_nacional(s.get("courier"))]
+        por_tipo = [s for s in historial if ambito_envio(s) == "internacional"]
 
     total_sin_filtrar = len(por_tipo)
     conteos: dict[str, int] = {}
@@ -188,6 +187,9 @@ def preparar_historial_envios(
         "pagina_desde": inicio + 1 if total_resultados else 0,
         "pagina_hasta": fin,
         "tiene_historial": tiene_historial,
+        "total_nacionales": sum(ambito_envio(s) == "nacional" for s in historial),
+        "total_internacionales": sum(ambito_envio(s) == "internacional" for s in historial),
+        "total_sin_clasificar": sum(ambito_envio(s) == "sin_clasificar" for s in historial),
     }
 
 

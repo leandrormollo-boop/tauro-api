@@ -57,7 +57,8 @@ def test_lo_declarado_manda_sobre_el_catalogo():
     # la regla es la misma.
     _, det, err = b2b._piezas_del_catalogo("X", [{
         "peso_kg": 3.9, "largo_cm": 48, "ancho_cm": 47, "alto_cm": 20,
-        "cantidad": 1, "descripcion_en": "SHIRTS 60% POLYESTER 40% COTTON",
+        "cantidad": 1, "unidades_aduana": 8,
+        "descripcion_en": "SHIRTS 60% POLYESTER 40% COTTON",
         "valor_unitario_usd": 120, "hs_code": "6205.30", "pais_origen": "CN",
     }])
     assert not err

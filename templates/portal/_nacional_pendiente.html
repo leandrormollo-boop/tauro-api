@@ -1,0 +1,30 @@
+<section class="scope-screen national-pending" aria-labelledby="national-title">
+    <header class="scope-head scope-head-inline">
+        <div>
+            <span class="scope-kicker"><span aria-hidden="true">🇦🇷</span> Envíos dentro de Argentina</span>
+            <h1 id="national-title">Envíos nacionales</h1>
+            <p>El cotizador provincia a provincia ya está preparado. La emisión de guía, PDF y retiro se habilitarán con las APIs directas.</p>
+        </div>
+        <a href="{{ volver_url }}" class="btn btn-ghost btn-sm">Cambiar tipo de envío</a>
+    </header>
+
+    <div class="national-status-card">
+        <div class="national-status-copy">
+            <span class="badge warn">Integración en curso</span>
+            <h2>OCA y Andreani todavía no emiten desde el portal</h2>
+            <p>Ya podés preparar una ruta desde cualquier provincia hacia cualquier provincia en el cotizador. No habilitamos este formulario de guía hasta poder emitir y descargar un PDF real.</p>
+            <a href="/portal/cotizar?ambito=nacional" class="btn btn-ghost btn-sm" style="margin-top:10px;">Ir al cotizador nacional</a>
+        </div>
+        <div class="national-carriers" aria-label="Próximas integraciones nacionales">
+            <span>OCA <small>API pendiente</small></span>
+            <span>Andreani <small>API pendiente</small></span>
+        </div>
+    </div>
+
+    <div class="scope-flow-preview" aria-label="Flujo nacional previsto">
+        <span><b>1</b> Cotizás</span>
+        <span><b>2</b> Elegís correo</span>
+        <span><b>3</b> Completás lo específico</span>
+        <span><b>4</b> Descargás la guía</span>
+    </div>
+</section>

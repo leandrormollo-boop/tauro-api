@@ -2,6 +2,12 @@
 {% block title %}Crear envío{% endblock %}
 
 {% block content %}
+{% if not ambito %}
+    {% set flujo = 'crear' %}
+    {% include 'portal/_ambito_selector.html' %}
+{% elif ambito == 'nacional' %}
+    {% include 'portal/_nacional_pendiente.html' %}
+{% else %}
 {# .wizard-compacto: compacta el alto para que CADA PASO entre en una
    pantalla y ancla el stepper y la navegación. Ver el bloque WIZARD DE
    UN PASO POR PANTALLA en static/css/tauro.css. #}
@@ -9,8 +15,11 @@
      data-initial-step="{{ form.initial_step or 1 }}">
 <div class="page-title page-title-row">
     <div>
-        <div class="eyebrow">Operaciones</div>
-        <h1>Nuevo envío</h1>
+        <div class="eyebrow"><span aria-hidden="true">🌐</span> Envío internacional</div>
+        <h1>Nuevo envío internacional</h1>
+        {% if form.intl_courier %}
+        <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
+        {% endif %}
         <p>Completá remitente, destinatario y paquete. Revisamos la solicitud antes de emitir.</p>
     </div>
     <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Administrar remitentes</a>
@@ -73,16 +82,14 @@
 </div>
 {% endif %}
 <form method="POST" action="/portal/envios/nuevo">
+    <input type="hidden" name="ambito" value="internacional">
     <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
-    <!-- Nacional: carrier/servicio elegido en el comparador del precio en vivo -->
     {# Courier internacional elegido. Si queda vacío el submit no adivina:
        falla pidiendo que se elija, en vez de cobrar el primero de la lista. #}
     <input type="hidden" name="intl_courier" id="intl_courier" value="{{ form.intl_courier or '' }}">
     {# Importe que el cliente VIO y aceptó. El servidor vuelve a cotizar y,
        si cambió, no crea la solicitud hasta que confirme el nuevo valor. #}
     <input type="hidden" name="precio_cotizado_ars" id="precio_cotizado_ars" value="{{ form.precio_cotizado_ars or '' }}">
-    <input type="hidden" name="nac_carrier" id="nac_carrier" value="{{ form.nac_carrier or '' }}">
-    <input type="hidden" name="nac_servicio" id="nac_servicio" value="{{ form.nac_servicio or '' }}">
     <div class="card">
         <div class="form-section shipment-step shipment-step-sender">
             <h4><span class="n">1</span> Remitente <span class="badge muted">Origen</span></h4>
@@ -311,7 +318,7 @@
             <!-- Multi-bulto: una fila por producto; "Cajas" = cajas IGUALES de
                  ese producto. Cada caja viaja como pieza con su propio label. -->
             <div id="bultos-list">
-                {% set filas = form.bultos if form.bultos else [{"producto": form.producto_alias, "cantidad": form.cantidad or 1}] %}
+                {% set filas = form.bultos if form.bultos else [{"producto": form.producto_alias, "cantidad": form.cantidad or 1, "unidades_aduana": form.cantidad or 1}] %}
                 {% for f in filas %}
                 <div class="bulto-row" data-bulto>
                     {# Catálogo OPCIONAL: precarga la fila, no es requisito.
@@ -357,7 +364,7 @@
                         </div>
                         <div class="form-group">
                             <label>Cajas iguales</label>
-                            <input type="number" name="bulto_cantidad" class="bulto-cantidad" min="1" max="20" step="1" value="{{ f.cantidad or 1 }}" required>
+                            <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
                         </div>
                         <div class="form-group bulto-quitar-wrap">
                             <label aria-hidden="true">&nbsp;</label>
@@ -377,9 +384,9 @@
                         </div>
                         <div class="form-group">
                             <label>Unid. aduana</label>
-                            <input type="number" name="bulto_unidades_aduana"
-                                   class="bulto-unidades-aduana" min="1" max="9999" step="1"
-                                   value="{{ f.unidades_aduana or f.cantidad or 1 }}" required>
+                            <input type="text" name="bulto_unidades_aduana"
+                                   class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero"
+                                   min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group">
                             <label>Valor unit. USD</label>
@@ -655,8 +662,8 @@
         // Viajan crudos: el servidor aplica la misma validación estricta del
         // submit. `parseInt("10,000")` devolvía 10 en la vista previa aunque
         // el envío real rechazaba ese texto, generando dos precios distintos.
-        cantidad: v(".bulto-cantidad") || "1",
-        unidades_aduana: v(".bulto-unidades-aduana") || v(".bulto-cantidad") || "1",
+        cantidad: v(".bulto-cantidad"),
+        unidades_aduana: v(".bulto-unidades-aduana"),
         peso_kg: v(".bulto-peso"),
         largo_cm: v(".bulto-largo"),
         ancho_cm: v(".bulto-ancho"),
@@ -815,40 +822,6 @@
   });
   pintarBotonesCourier();
 
-  var nacCarrier = document.getElementById("nac_carrier");
-  var nacServicio = document.getElementById("nac_servicio");
-  var nacOpciones = [];
-
-  function aplicarNacSel(i) {
-    var o = nacOpciones[i];
-    if (!o) return;
-    nacCarrier.value = o.carrier;
-    nacServicio.value = o.servicio;
-    var p = document.getElementById("nac-precio");
-    if (p) p.textContent = fmtARS(o.precio_ars);
-    var d = document.getElementById("nac-dias");
-    if (d) d.textContent = o.dias || "";
-  }
-
-  function renderNacional(data) {
-    nacOpciones = data.opciones || [];
-    if (!nacOpciones.length) { renderLivePrice("err", { motivo: "sin_cobertura" }); return; }
-    var sel = "<select id='nac-opcion' style='margin-top:6px;font-size:12.5px;padding:7px 28px 7px 10px;'>" +
-      nacOpciones.map(function (o, i) {
-        return "<option value='" + i + "'>" + o.nombre + " — " + fmtARS(o.precio_ars) + "</option>";
-      }).join("") + "</select>";
-    liveBox.innerHTML =
-      "<div class='precio-vivo'>" +
-        "<span id='nac-precio' class='monto t-metal'>" + fmtARS(nacOpciones[0].precio_ars) + "</span>" +
-        "<span class='moneda'>ARS</span>" +
-      "</div>" +
-      "<span class='precio-detalle' id='nac-dias'>" + (nacOpciones[0].dias || "") + "</span>" + sel;
-    aplicarNacSel(0);
-    document.getElementById("nac-opcion").addEventListener("change", function () {
-      aplicarNacSel(parseInt(this.value, 10) || 0);
-    });
-  }
-
   function refreshLivePrice() {
     if (!liveBox || !countrySelect) return;
     var bultos = leerBultos();
@@ -858,34 +831,15 @@
     // encima del estado "idle" (y priceSeq++ invalida respuestas en vuelo).
     clearTimeout(priceTimer);
     if (precioCotizado) precioCotizado.value = "";
-    if (destino !== "AR") { nacCarrier.value = ""; nacServicio.value = ""; }
     if (!bultos.length || !destino) { priceSeq++; renderLivePrice("idle"); return; }
 
-    if (destino === "AR") {
-      // Nacional: necesita CP + ciudad del destinatario para cotizar
-      var cp = (document.getElementById("dest_zip") || {}).value || "";
-      var ciudad = (document.getElementById("dest_ciudad") || {}).value || "";
-      var prov = (document.getElementById("dest_estado") || {}).value || "";
-      if (!cp.trim() || !ciudad.trim()) {
-        priceSeq++;
-        liveBox.innerHTML = "<strong>Completá ciudad y CP del destino</strong><span>Ahí comparo los couriers nacionales.</span>";
-        return;
-      }
-      priceTimer = setTimeout(function () {
-        var seq = ++priceSeq;
-        renderLivePrice("loading");
-        fetch("/portal/api/precio-nacional", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cp: cp, ciudad: ciudad, provincia: prov, bultos: bultos }),
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (seq !== priceSeq) return;
-            if (data.ok) renderNacional(data); else renderLivePrice("err", data);
-          })
-          .catch(function () { if (seq === priceSeq) renderLivePrice("err"); });
-      }, 450);
+    var origen = (document.getElementById("rem_pais") || {}).value || "AR";
+    if (origen === "AR" && destino === "AR") {
+      priceSeq++;
+      if (intlCourier) intlCourier.value = "";
+      liveBox.innerHTML =
+        "<strong>Envíos nacionales en preparación</strong>" +
+        "<span>Estamos conectando Andreani y OCA directamente. Todavía no se puede cotizar ni emitir.</span>";
       return;
     }
 
@@ -1084,4 +1038,5 @@
   })();
 </script>
 </div>
+{% endif %}
 {% endblock %}
