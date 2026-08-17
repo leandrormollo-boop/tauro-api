@@ -6,7 +6,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "fontBody": "Inter",
   "density": "regular",
   "heroVariant": "split",
-  "headline": "Logística sin fronteras, decisiones en tiempo real.",
+  "headline": "Conectá. Centralizá. Expandí.",
   "showWhatsapp": true
 }/*EDITMODE-END*/;
 
@@ -46,9 +46,9 @@ function App() {
 
   return (
     <>
-      <Nav onCotizarClick={scrollToQuote} />
+      <Nav />
       <Hero variant={t.heroVariant} onCotizarClick={scrollToQuote} t={t} />
-      <Services />
+      <Services onCotizarClick={scrollToQuote} />
       <Tracking />
       <Process />
       <WhyUs />

@@ -5,63 +5,84 @@
    ============================================================ */
 const SERVICES = [
   {
-    id: "aereo",
-    Icon: IconPlane,
-    name: "Carga Aérea",
-    tagline: "Cuando el tiempo importa.",
-    desc: "Vuelos directos y consolidados a más de 40 países. Tránsito de 3 a 5 días.",
-    bullets: ["Carga general y perecederos", "Vuelos charter on-demand", "Express y courier internacional"],
-    span: "Tránsito 3–5 días",
-  },
-  {
-    id: "maritimo",
-    Icon: IconShip,
-    name: "Carga Marítima",
-    tagline: "Volumen sin límite.",
-    desc: "FCL y LCL desde y hacia los principales puertos del mundo. Tarifas competitivas para grandes volúmenes.",
-    bullets: ["Contenedores 20' / 40' / HC", "Carga consolidada (LCL)", "Reefer y carga proyecto"],
-    span: "Tránsito 22–35 días",
-  },
-  {
-    id: "terrestre",
-    Icon: IconTruck,
-    name: "Carga Terrestre",
-    tagline: "Mercosur sin escalas.",
-    desc: "Camiones propios y aliados para Argentina, Brasil, Chile, Uruguay, Paraguay y Bolivia.",
-    bullets: ["FTL y LTL", "Cross-docking en frontera", "Cadena de frío"],
-    span: "Tránsito 2–10 días",
-  },
-  {
-    id: "aduana",
-    Icon: IconShield,
-    name: "Despacho Aduanero",
-    tagline: "Sin sorpresas en frontera.",
-    desc: "Despachantes propios habilitados para gestionar exportaciones e importaciones sin demoras.",
-    bullets: ["Clasificación arancelaria", "Régimen general y simplificado", "Asesoría en tratados de libre comercio"],
-    span: "Con despachantes asociados",
-  },
-  {
-    id: "almacen",
+    id: "conecta",
     Icon: IconWarehouse,
-    name: "Almacenaje & Fulfillment",
-    tagline: "Tu stock listo para mover.",
-    desc: "Depósitos fiscales y de uso público en zonas estratégicas. Picking, packing y distribución última milla.",
-    bullets: ["Depósito fiscal", "Pick & pack", "Distribución última milla"],
-    span: "Consultá disponibilidad",
+    name: "Conectá",
+    tagline: "Conectá tu tienda.",
+    desc: "Vinculá Shopify con TAURO para recibir pedidos en el portal. Si vendés por otros canales, también podés cargar cada envío manualmente.",
+    bullets: ["Pedidos de Shopify en el portal", "Carga manual para ventas externas", "Datos listos para preparar el envío"],
+    span: "Tienda + manual",
+    cta: "Conectá tu tienda",
+    href: "/portal/login",
+  },
+  {
+    id: "centraliza",
+    Icon: IconShip,
+    name: "Centralizá",
+    tagline: "Centralizá tu operación.",
+    desc: "Reuní clientes habituales, productos, solicitudes y documentación en una misma cuenta, con la información disponible para cada nuevo envío.",
+    bullets: ["Base propia de clientes", "Productos opcionales", "Todos tus envíos organizados"],
+    span: "Un solo portal",
+    cta: "Ingresá al portal",
+    href: "/portal/login",
+  },
+  {
+    id: "cotiza",
+    Icon: IconPlane,
+    name: "Cotizá",
+    tagline: "Cotizá con claridad.",
+    desc: "Ingresá origen, destino, peso y medidas. El portal muestra las opciones habilitadas para tu cuenta antes de crear el envío.",
+    bullets: ["Precio configurado por cliente", "Peso real y volumétrico", "Opciones disponibles por ruta"],
+    span: "Datos claros",
+    cta: "Cotizá un envío",
+    action: "quote",
+  },
+  {
+    id: "automatiza",
+    Icon: IconTruck,
+    name: "Automatizá",
+    tagline: "Automatizá lo repetitivo.",
+    desc: "Con los permisos habilitados para tu cuenta, prepará guías y coordiná recolecciones desde la misma operación.",
+    bullets: ["Datos reutilizables", "Guías según habilitación", "Recolecciones vinculadas al envío"],
+    span: "Según tu cuenta",
+    cta: "Ingresá al portal",
+    href: "/portal/login",
+  },
+  {
+    id: "segui",
+    Icon: IconShield,
+    name: "Seguí",
+    tagline: "Seguí cada movimiento.",
+    desc: "Consultá solicitudes, guías, seguimiento y cuenta corriente desde tu portal, con acceso al detalle oficial del courier.",
+    bullets: ["Historial de envíos", "Acceso a guías y tracking", "Pagos, facturas y saldo"],
+    span: "Control de cuenta",
+    cta: "Seguí un envío",
+    href: "#tracking",
+  },
+  {
+    id: "expandi",
+    Icon: IconPlane,
+    name: "Expandí",
+    tagline: "Expandí con control.",
+    desc: "Usá una misma operación para tus envíos nacionales e internacionales y sumá canales a medida que tu negocio crece.",
+    bullets: ["Operación nacional e internacional", "Carga manual o desde tienda", "Configuración por cliente"],
+    span: "Operación escalable",
+    cta: "Cotizá un envío",
+    action: "quote",
   },
 ];
 
-function Services() {
-  const [active, setActive] = React.useState("aereo");
+function Services({ onCotizarClick }) {
+  const [active, setActive] = React.useState("conecta");
   const current = SERVICES.find((s) => s.id === active);
 
   return (
     <section id="servicios" data-screen-label="Servicios">
       <div className="container">
         <div className="section-head">
-          <div className="eyebrow">01 — Servicios</div>
-          <h2>Una sola plataforma<br/>para toda tu logística internacional.</h2>
-          <p>Desde la cotización hasta la entrega final, gestionamos cada modo y cada eslabón con la misma rigurosidad.</p>
+          <div className="eyebrow">01 — Operación conectada</div>
+          <h2>Seis acciones.<br/>Una sola operación.</h2>
+          <p>Conectá, centralizá, cotizá, automatizá, seguí y expandí desde el portal de TAURO.</p>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 32, alignItems: "stretch" }} className="services-grid">
@@ -124,8 +145,16 @@ function Services() {
               </div>
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 32, flexWrap: "wrap" }}>
-              <button className="btn btn-primary">Cotizar {current.name.toLowerCase()} <ArrowRight size={14}/></button>
-              <button className="btn btn-ghost">Ver casos de éxito</button>
+              {current.action === "quote" ? (
+                <button className="btn btn-primary" onClick={onCotizarClick}>
+                  {current.cta} <ArrowRight size={14}/>
+                </button>
+              ) : (
+                <a className="btn btn-primary" href={current.href}>
+                  {current.cta} <ArrowRight size={14}/>
+                </a>
+              )}
+              <a className="btn btn-ghost" href="#proceso">Cómo funciona</a>
             </div>
           </div>
         </div>
@@ -194,12 +223,11 @@ function Tracking() {
           <div>
             <div className="eyebrow" style={{ marginBottom: 16 }}>02 — Tracking</div>
             <h2 style={{ fontSize: "clamp(36px, 4.5vw, 52px)", marginBottom: 20 }}>
-              Sabés exactamente<br/>dónde está tu carga.
+              Seguí cada envío<br/>desde un mismo lugar.
             </h2>
             <p style={{ color: "var(--fg-2)", fontSize: 17, lineHeight: 1.6, marginBottom: 24 }}>
-              Ingresá tu número de seguimiento y te decimos por dónde va tu
-              envío — reconocemos el courier automáticamente, sin llamadas ni
-              "esperá y te aviso".
+              Ingresá tu número de seguimiento para consultar el estado disponible
+              y acceder al detalle oficial del courier desde un mismo lugar.
             </p>
 
             <form onSubmit={rastrear} style={{ display: "flex", gap: 10, marginBottom: 14 }}>
@@ -229,7 +257,7 @@ function Tracking() {
             )}
 
             <div style={{ display: "flex", gap: 28, marginTop: 18 }}>
-              <Stat n="FedEx · DHL · UPS" l="Couriers reconocidos"/>
+              <Stat n="En un lugar" l="Seguimiento de envíos"/>
               <Stat n="Portal" l="Acceso para clientes"/>
             </div>
           </div>
@@ -247,7 +275,7 @@ function Tracking() {
               </div>
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: res ? "var(--accent)" : "var(--ok)" }}>
                 <span style={{ width: 6, height: 6, background: res ? "var(--accent)" : "var(--ok)", borderRadius: "50%" }} className="pulse"/>
-                {res ? "EN VIVO" : "DEMO"}
+                {res ? "RESULTADO" : "DEMO"}
               </div>
             </div>
 
@@ -417,7 +445,7 @@ function ResultadoReal({ res, nro }) {
             {res.fecha && <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)" }}>{res.fecha}</div>}
           </div>
           <div style={{ fontSize: 13, color: "var(--fg-2)", marginTop: 4 }}>
-            Para el detalle en tránsito, aduana y entrega, mirá el seguimiento en vivo del courier.
+            Para los hitos de tránsito, aduana y entrega, consultá el detalle actualizado del courier.
           </div>
         </div>
       </div>
@@ -463,10 +491,9 @@ function Stat({ n, l }) {
    PROCESS — How it works
    ============================================================ */
 const STEPS = [
-  { n: "01", t: "Cotizá online", d: "Origen, destino, peso. Tarifa real en menos de 60 segundos, sin formularios eternos." },
-  { n: "02", t: "Reservá y documentá", d: "Cargás los datos una vez y armamos con vos la documentación del envío." },
-  { n: "03", t: "Nosotros movemos", d: "Recogida, consolidación, transporte internacional, despacho aduanero. Vos seguís en tu negocio." },
-  { n: "04", t: "Trackeás en vivo", d: "Status del envío, alertas en cada hito y entrega confirmada con prueba digital." },
+  { n: "01", t: "Conectá o cargá", d: "Vinculá Shopify o ingresá el envío manualmente. Elegí un cliente guardado para completar sus datos." },
+  { n: "02", t: "Cotizá y generá", d: "Cargá peso y medidas, revisá la opción habilitada para tu cuenta y prepará la solicitud de guía." },
+  { n: "03", t: "Seguí y controlá", d: "Consultá el envío, accedé al tracking y mantené organizada tu cuenta corriente desde el portal." },
 ];
 
 function Process() {
@@ -475,11 +502,11 @@ function Process() {
       <div className="container">
         <div className="section-head">
           <div className="eyebrow">03 — Cómo funciona</div>
-          <h2>Cuatro pasos.<br/>Sin sorpresas.</h2>
-          <p>Diseñamos el proceso para que dediques minutos, no días, a coordinar tu logística.</p>
+          <h2>Tres pasos.<br/>Una operación clara.</h2>
+          <p>Elegí cómo cargar tus datos y avanzá desde el mismo portal.</p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 0, border: "1px solid var(--line-soft)", borderRadius: 16, overflow: "hidden" }} className="process-grid">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0, border: "1px solid var(--line-soft)", borderRadius: 16, overflow: "hidden" }} className="process-grid">
           {STEPS.map((s, i) => (
             <div key={s.n} style={{
               padding: 32,
@@ -491,7 +518,7 @@ function Process() {
             }}>
               <div>
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--accent)", marginBottom: 24, letterSpacing: "0.08em" }}>
-                  STEP / {s.n}
+                  PASO / {s.n}
                 </div>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 600, lineHeight: 1.2, marginBottom: 14 }}>
                   {s.t}
@@ -513,10 +540,9 @@ function Process() {
       </div>
       <style>{`
         @media (max-width: 880px) {
-          .process-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; }
-          .process-grid > div:nth-child(2) { border-right: none !important; }
-          .process-grid > div:nth-child(odd) { border-right: 1px solid var(--line-soft) !important; }
-          .process-grid > div:nth-child(1), .process-grid > div:nth-child(2) { border-bottom: 1px solid var(--line-soft); }
+          .process-grid { grid-template-columns: minmax(0, 1fr) !important; }
+          .process-grid > div { border-right: none !important; }
+          .process-grid > div:not(:last-child) { border-bottom: 1px solid var(--line-soft); }
         }
       `}</style>
     </section>

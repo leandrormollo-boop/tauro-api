@@ -30,5 +30,5 @@ def test_widget_envia_isos_normalizados():
 def test_html_publico_referencia_el_bundle_actual():
     html = WEB_HTML.read_text(encoding="utf-8")
 
-    assert '/static/js/app.js?v=9' in html
+    assert '/static/js/app.js?v=10' in html
     assert '/static/js/app.js?v=5' not in html

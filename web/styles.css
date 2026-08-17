@@ -296,8 +296,24 @@ body.density-spacious .card { padding: 36px; }
   font-size: 18px;
   color: var(--fg-2);
   max-width: 520px;
-  margin: 28px 0 36px;
+  margin: 10px 0 36px;
   line-height: 1.6;
+}
+.hero p.hero-promise {
+  max-width: 520px;
+  margin: 24px 0 0;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: clamp(21px, 2vw, 28px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.hero-manual-note {
+  display: block;
+  margin-top: 8px;
+  color: var(--fg-3);
+  font-size: 15px;
 }
 .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; }
 .hero-meta {

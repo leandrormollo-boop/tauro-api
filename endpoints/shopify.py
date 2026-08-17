@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from servicios.shopify_app import (
     app_configurada, url_instalacion, validar_hmac_query, dominio_valido,
     canjear_token, guardar_instalacion, registrar_webhooks, vincular_cliente,
-    desinstalar, nuevo_state,
+    desinstalar, nuevo_state, ShopifyWebhookVerificationError,
 )
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
@@ -93,6 +93,12 @@ def install(request: Request, shop: str = ""):
             "la dirección: /shopify/install?shop=tutienda.myshopify.com",
             '<a href="https://taurosolutions.ar/portal/tienda" target="_top">Ir a mi portal</a>',
         )
+
+    # Reintento explícito después de una autorización incompleta. No hacemos
+    # llamadas al Admin API desde cada apertura del panel: este link inicia
+    # nuevamente OAuth y sólo Shopify puede completar el callback firmado.
+    if request.query_params.get("reautorizar") == "1":
+        return _redirect_oauth(shop)
 
     # Si la tienda YA instaló la app, Shopify abre esta misma URL cada vez
     # que el comerciante hace click en TAURO desde su admin. Mandarlo de
@@ -306,49 +312,84 @@ def callback(request: Request):
     # `state`: comparado contra la cookie que pusimos al arrancar el flujo.
     # MISMATCH (cookie presente pero distinta) = alguien metió su propio
     # flujo en el medio: se corta. Cookie AUSENTE = probablemente la app se
-    # abrió embebida y el navegador bloqueó la cookie de terceros; ahí se
-    # continúa con aviso, porque el HMAC de arriba ya probó que el callback
-    # lo firmó Shopify — cortar acá rompería la reautorización embebida sin
-    # ganar seguridad real (el link público de instalación existe igual).
+    # abrió embebida y el navegador bloqueó la cookie de terceros. Se permite
+    # completar la instalación porque el HMAC prueba que Shopify la firmó,
+    # pero NO se vincula a la sesión TAURO: sin state no hay prueba de que esa
+    # sesión haya iniciado este OAuth. El dueño la reclama luego en su portal.
     state_cookie = request.cookies.get("shopify_state") or ""
-    if state_cookie and params.get("state") != state_cookie:
-        return _pagina("La instalación expiró",
-                       "Por seguridad, empezá de nuevo desde el link de instalación.",
-                       f'<a href="/shopify/install?shop={shop}">Reintentar instalación</a>',
-                       status=400)
-    if not state_cookie:
+    state_verificado = bool(state_cookie and params.get("state") == state_cookie)
+    if state_cookie and not state_verificado:
+        respuesta = _pagina("La instalación expiró",
+                            "Por seguridad, empezá de nuevo desde el link de instalación.",
+                            f'<a href="/shopify/install?shop={shop}">Reintentar instalación</a>',
+                            status=400)
+        respuesta.delete_cookie("shopify_state")
+        return respuesta
+    if not state_verificado:
         print(f"[shopify] callback de {shop} sin cookie de state (contexto "
-              f"embebido probable); HMAC válido, se continúa")
+              f"embebido probable); HMAC válido, se instala SIN autovincular")
 
     data = canjear_token(shop, code)
     if not data or not data.get("access_token"):
         return _pagina("No pudimos conectar", "Shopify no nos dio el permiso. Probá de nuevo.", status=502)
 
-    guardar_instalacion(shop, data["access_token"], data.get("scope", ""))
-    topics = registrar_webhooks(shop, data["access_token"])
+    from servicios.shopify_app import SCOPES
+    scopes_requeridos = {scope.strip() for scope in SCOPES.split(",") if scope.strip()}
+    scopes_otorgados = {
+        scope.strip() for scope in str(data.get("scope") or "").split(",")
+        if scope.strip()
+    }
+    faltantes = scopes_requeridos - scopes_otorgados
+    if faltantes:
+        print(f"[shopify] {shop} no otorgó scopes mínimos: {sorted(faltantes)}")
+        respuesta = _pagina(
+            "Faltan permisos de Shopify",
+            "Shopify no confirmó todos los permisos necesarios para recibir ventas y "
+            "devolver el tracking. Volvé a instalar la app desde tu tienda.",
+            f'<a href="/shopify/install?shop={shop}">Reintentar instalación</a>',
+            status=502,
+        )
+        respuesta.delete_cookie("shopify_state")
+        return respuesta
 
-    # La app YA NO cotiza el envío en el checkout (decisión del 28/07): su
-    # trabajo es recibir la venta y cargarla como solicitud en el portal. Si
-    # quedó un carrier service de la etapa anterior, se da de baja acá —
-    # dejarlo vivo haría que el comprador siga viendo una tarifa que ya no
-    # mantenemos.
-    from servicios.shopify_app import dar_de_baja_carrier_service
+    guardar_instalacion(shop, data["access_token"], data.get("scope", ""))
     try:
-        dar_de_baja_carrier_service(shop, data["access_token"])
-    except Exception as e:
-        print(f"[shopify] no pude dar de baja el carrier service de {shop}: {e}")
+        topics = registrar_webhooks(shop, data["access_token"])
+    except ShopifyWebhookVerificationError:
+        respuesta = _pagina(
+            "No pudimos verificar Shopify",
+            "La conexión no respondió a tiempo. Guardamos la autorización sin "
+            "vincular la tienda; reintentá en unos minutos.",
+            f'<a href="/shopify/install?shop={shop}&reautorizar=1">Reintentar conexión</a>',
+            status=503,
+        )
+        respuesta.delete_cookie("shopify_state")
+        return respuesta
+    esperados = {"orders/create", "orders/updated", "app/uninstalled"}
+    if set(topics) != esperados:
+        respuesta = _pagina(
+            "Conexión incompleta",
+            "Shopify autorizó la app, pero no confirmó todos los avisos automáticos. "
+            "No vinculamos la tienda para evitar que se pierdan ventas. Reintentá en "
+            "unos minutos.",
+            f'<a href="/shopify/install?shop={shop}&reautorizar=1">Reintentar instalación</a>',
+            status=503,
+        )
+        respuesta.delete_cookie("shopify_state")
+        return respuesta
 
     # Si el comerciante instaló con su sesión del portal abierta (el caso
     # normal), la tienda queda atada a su cuenta acá mismo. Si no, la
     # reclama después desde /portal/tienda.
     dueno = None
-    try:
-        from servicios.auth import validar_token
-        dueno = validar_token(request.cookies.get("token") or "")
-        if dueno:
-            vincular_cliente(shop, dueno)
-    except Exception as e:
-        print(f"[shopify] no pude vincular {shop} al instalar: {e}")
+    if state_verificado:
+        try:
+            from servicios.auth import validar_token
+            dueno = validar_token(request.cookies.get("token") or "")
+            if dueno:
+                vincular_cliente(shop, dueno)
+        except Exception as e:
+            print(f"[shopify] no pude vincular {shop} al instalar: {e}")
 
     print(f"[shopify] instalada {shop} · webhooks {topics} · "
           f"cliente {dueno or 'sin vincular'}")
@@ -356,12 +397,14 @@ def callback(request: Request):
     extra = ("El precio del envío en tu checkout lo seguís manejando vos con "
              "tus tarifas de Shopify. Nosotros tomamos la venta apenas entra y "
              "te la dejamos lista en el portal para generar la guía.")
-    return _pagina(
+    respuesta = _pagina(
         "¡Tienda conectada!",
         f"Listo: desde ahora cada venta con envío aparece en tu portal TAURO "
         f"lista para generar la guía con un click. {extra}",
         '<a href="https://taurosolutions.ar/portal/tienda">Ver mis pedidos</a>',
     )
+    respuesta.delete_cookie("shopify_state")
+    return respuesta
 
 
 @router.post("/tarifas")
