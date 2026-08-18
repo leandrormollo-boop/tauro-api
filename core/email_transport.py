@@ -20,6 +20,7 @@ import ssl
 
 
 _EMAIL_RE = re.compile(r"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+$", re.IGNORECASE)
+OPERATIONS_EMAIL = "operaciones@taurosolutions.ar"
 
 
 def canonical_email_address(value: str) -> str:
@@ -66,14 +67,16 @@ def email_config_status() -> dict[str, object]:
     password = os.getenv("EMAIL_PASSWORD") or ""
     visible = (os.getenv("EMAIL_FROM") or "").strip()
     _nombre, visible_address = parseaddr(visible)
+    visible_canonico = canonical_email_address(visible_address)
     return {
         # Es un preflight de variables, no un health check contra SMTP. Exigir
         # también el remitente visible evita mostrar verde cuando Gmail no
         # tiene una identidad utilizable para el mensaje.
         "configured": bool(
             login and password and _EMAIL_RE.fullmatch(login)
-            and visible_address and _EMAIL_RE.fullmatch(visible_address)
+            and visible_canonico == OPERATIONS_EMAIL
         ),
+        "sender_address": visible_canonico,
         "sender_domain": (
             visible_address.rsplit("@", 1)[-1].lower()
             if "@" in visible_address
@@ -104,12 +107,17 @@ def _recipient_address(value: str) -> str:
     return canonical_email_address(value)
 
 
-def _visible_sender(login: str) -> str:
+def operations_visible_sender() -> str:
+    """Identidad visible obligatoria de todo correo transaccional TAURO."""
     raw = (os.getenv("EMAIL_FROM") or "").strip()
     name, address = parseaddr(raw)
-    if _EMAIL_RE.fullmatch(address or "") and "\r" not in raw and "\n" not in raw:
-        return formataddr((name or "TAURO Solutions", address))
-    return formataddr(("TAURO Solutions", login))
+    if (
+        canonical_email_address(address) == OPERATIONS_EMAIL
+        and "\r" not in raw
+        and "\n" not in raw
+    ):
+        return formataddr((name or "TAURO Operaciones", OPERATIONS_EMAIL))
+    return ""
 
 
 def _message_id(dedupe_key: str = "") -> str:
@@ -140,6 +148,9 @@ def send_transactional_email(
     password = os.getenv("EMAIL_PASSWORD") or ""
     if not login or not password or not _EMAIL_RE.fullmatch(login):
         return EmailDeliveryResult(False, "SMTP_NOT_CONFIGURED")
+    visible_sender = operations_visible_sender()
+    if not visible_sender:
+        return EmailDeliveryResult(False, "SMTP_SENDER_NOT_CONFIGURED")
 
     address = _recipient_address(recipient)
     if not address:
@@ -151,7 +162,7 @@ def send_transactional_email(
 
     message_id = _message_id(dedupe_key)
     msg = EmailMessage()
-    msg["From"] = _visible_sender(login)
+    msg["From"] = visible_sender
     msg["To"] = address
     msg["Subject"] = subject
     msg["Date"] = format_datetime(datetime.now(timezone.utc))

@@ -43,8 +43,8 @@ class _SMTPFake:
 def _configurar(monkeypatch):
     monkeypatch.setenv("EMAIL_REMITENTE", "smtp@taurosolutions.ar")
     monkeypatch.setenv("EMAIL_PASSWORD", "secret")
-    monkeypatch.setenv("EMAIL_FROM", "TAURO Solutions <cotizaciones@taurosolutions.ar>")
-    monkeypatch.setenv("EMAIL_REPLY_TO", "soporte@taurosolutions.ar")
+    monkeypatch.setenv("EMAIL_FROM", "TAURO Operaciones <operaciones@taurosolutions.ar>")
+    monkeypatch.setenv("EMAIL_REPLY_TO", "operaciones@taurosolutions.ar")
 
 
 def test_sin_credenciales_no_intenta_conectar(monkeypatch):
@@ -73,10 +73,14 @@ def test_diagnostico_exige_remitente_visible_valido(monkeypatch):
     monkeypatch.delenv("EMAIL_FROM", raising=False)
     assert email_transport.email_config_status()["configured"] is False
 
-    monkeypatch.setenv("EMAIL_FROM", "TAURO Solutions <cotizaciones@taurosolutions.ar>")
+    monkeypatch.setenv("EMAIL_FROM", "TAURO Operaciones <operaciones@taurosolutions.ar>")
     estado = email_transport.email_config_status()
     assert estado["configured"] is True
+    assert estado["sender_address"] == "operaciones@taurosolutions.ar"
     assert estado["sender_domain"] == "taurosolutions.ar"
+
+    monkeypatch.setenv("EMAIL_FROM", "TAURO Cotizaciones <cotizaciones@taurosolutions.ar>")
+    assert email_transport.email_config_status()["configured"] is False
 
 
 def test_envia_multipart_con_tls_timeout_y_headers(monkeypatch):
@@ -106,8 +110,8 @@ def test_envia_multipart_con_tls_timeout_y_headers(monkeypatch):
     assert smtp.ehlo_calls == 2
     assert smtp.logged == ("smtp@taurosolutions.ar", "secret")
     assert smtp.envelope == ("smtp@taurosolutions.ar", ["cliente@example.com"])
-    assert smtp.message["From"] == "TAURO Solutions <cotizaciones@taurosolutions.ar>"
-    assert smtp.message["Reply-To"] == "soporte@taurosolutions.ar"
+    assert smtp.message["From"] == "TAURO Operaciones <operaciones@taurosolutions.ar>"
+    assert smtp.message["Reply-To"] == "operaciones@taurosolutions.ar"
     assert smtp.message["Date"]
     assert smtp.message["Message-ID"] == result.message_id
     assert smtp.message.is_multipart()
@@ -125,6 +129,26 @@ def test_rechaza_destinatario_con_inyeccion_de_cabeceras(monkeypatch):
     )
     assert result.accepted is False
     assert result.code == "INVALID_RECIPIENT"
+
+
+def test_no_envia_desde_un_alias_distinto_de_operaciones(monkeypatch):
+    _configurar(monkeypatch)
+    monkeypatch.setenv("EMAIL_FROM", "TAURO <cotizaciones@taurosolutions.ar>")
+    monkeypatch.setattr(
+        email_transport.smtplib,
+        "SMTP",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no conectar")),
+    )
+
+    result = email_transport.send_transactional_email(
+        recipient="cliente@example.com",
+        subject="Prueba",
+        text_body="Texto",
+        html_body="<p>Texto</p>",
+    )
+
+    assert result.accepted is False
+    assert result.code == "SMTP_SENDER_NOT_CONFIGURED"
 
 
 def test_identidad_email_es_unica_y_no_reinterpreta_display_names_o_comentarios():

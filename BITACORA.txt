@@ -11,6 +11,23 @@ Formato:
 2026-08-18 · Lean + Codex (Sol)
 ────────────────────────────────────────────────────────────
 
+✅ IDENTIDAD ÚNICA DE CORREO: operaciones@taurosolutions.ar (LOCAL).
+
+QUÉ SE HIZO
+  - Todo correo transaccional exige como remitente visible
+    `TAURO Operaciones <operaciones@taurosolutions.ar>`.
+  - Una configuración con otro alias falla cerrada antes de tocar SMTP.
+  - Cotizaciones y recuperos responden a la casilla de Operaciones.
+  - Admin muestra la dirección visible exacta, no sólo el dominio.
+
+QUÉ FALTA
+  - Autorizar/verificar el alias “Enviar como” y la contraseña de aplicación
+    de Google Workspace en Railway; luego smoke controlado a una casilla propia.
+
+────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
 ✅ PRESUPUESTO TAURO POR EMAIL CON ENTREGA VERIFICABLE (LOCAL, SIN DESPLEGAR).
 
 QUÉ SE HIZO

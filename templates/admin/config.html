@@ -52,7 +52,7 @@
     </div>
   </div>
   <p style="margin:12px 0 0;color:var(--fg-3);font-size:12px;line-height:1.6;">
-    Remitente: <b>{{ email_status.sender_domain or 'sin dominio' }}</b> · servidor {{ email_status.host }}:{{ email_status.port }}.
+    Remitente: <b>{{ email_status.sender_address or 'sin configurar' }}</b> · servidor {{ email_status.host }}:{{ email_status.port }}.
     “Variables presentes” no prueba autenticación ni entregabilidad. “Aceptado” confirma recepción del servidor de correo; la llegada a Inbox también depende de alias autorizado, SPF, DKIM, DMARC y filtros del destinatario.
   </p>
   {% if not email_status.configured %}

@@ -4,13 +4,14 @@ import smtplib
 def _from_visible(remitente: str) -> str:
     """
     El remitente que VE el destinatario. EMAIL_FROM permite mandar como un
-    alias del dominio (ej: "TAURO Solutions <cotizaciones@taurosolutions.ar>")
+    alias operativo del dominio: "TAURO Operaciones
+    <operaciones@taurosolutions.ar>".
     mientras el login SMTP sigue siendo la cuenta real (EMAIL_REMITENTE).
     En Google Workspace el alias tiene que estar dado de alta en el usuario
     ("Enviar como") o Gmail lo pisa con la cuenta real.
     """
-    import os
-    return os.getenv("EMAIL_FROM", "").strip() or remitente
+    from core.email_transport import operations_visible_sender
+    return operations_visible_sender()
 
 
 import os
@@ -168,8 +169,13 @@ def _enviar_mail(asunto: str, cuerpo_html: str, pdf_bytes: bytes = None, nombre_
         print("[email] Variables EMAIL_REMITENTE / EMAIL_PASSWORD / EMAIL_DESTINO no configuradas.")
         return False
 
+    visible_sender = _from_visible(remitente)
+    if not visible_sender:
+        print("[email] EMAIL_FROM debe ser operaciones@taurosolutions.ar y estar autorizado.")
+        return False
+
     msg = MIMEMultipart("mixed")
-    msg["From"] = _from_visible(remitente)
+    msg["From"] = visible_sender
     msg["To"] = destinatario
     msg["Subject"] = asunto
 
@@ -504,8 +510,13 @@ def enviar_notificacion_estado(
         print(f"[email] Notificación de estado no enviada (SMTP o destino faltante) — solicitud {solicitud_id}")
         return False
 
+    visible_sender = _from_visible(remitente)
+    if not visible_sender:
+        print("[email] EMAIL_FROM debe ser operaciones@taurosolutions.ar y estar autorizado.")
+        return False
+
     msg = MIMEMultipart("mixed")
-    msg["From"] = _from_visible(remitente)
+    msg["From"] = visible_sender
     msg["To"] = email_destino
     msg["Subject"] = asunto
     msg.attach(MIMEText(cuerpo, "html", "utf-8"))

@@ -452,7 +452,7 @@ def guardar_lead(email: str, quote_id: str) -> dict:
         subject=asunto,
         text_body=texto,
         html_body=html,
-        reply_to="cotizaciones@taurosolutions.ar",
+        reply_to=(os.getenv("EMAIL_REPLY_TO") or "operaciones@taurosolutions.ar"),
         dedupe_key=f"cotizacion:{cotizacion['quote_id']}:{email}",
     )
     resultado_incierto = (

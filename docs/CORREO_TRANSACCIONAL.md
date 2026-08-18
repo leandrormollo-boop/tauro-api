@@ -13,10 +13,10 @@
 
 ```text
 BASE_URL=https://taurosolutions.ar
-EMAIL_REMITENTE=usuario-real-de-google-workspace@taurosolutions.ar
+EMAIL_REMITENTE=operaciones@taurosolutions.ar
 EMAIL_PASSWORD=app-password-de-google
-EMAIL_FROM=TAURO Solutions <cotizaciones@taurosolutions.ar>
-EMAIL_REPLY_TO=cotizaciones@taurosolutions.ar
+EMAIL_FROM=TAURO Operaciones <operaciones@taurosolutions.ar>
+EMAIL_REPLY_TO=operaciones@taurosolutions.ar
 ```
 
 Opcionales:
@@ -30,7 +30,7 @@ EMAIL_ADMIN_RECOVERY_MAX_HORA=6
 COTIZACION_WEB_VIGENCIA_HORAS=24
 ```
 
-`EMAIL_FROM` debe estar autorizado en Gmail/Workspace como **Enviar como** para el usuario de `EMAIL_REMITENTE`. Nunca guardar la contraseña en la tabla `config`, el repositorio, Postman, logs o capturas.
+`EMAIL_FROM` es deliberadamente estricto: la aplicación rechaza el envío si no resuelve exactamente a `operaciones@taurosolutions.ar`. Esa identidad debe estar autorizada en Gmail/Workspace como **Enviar como** para el usuario de `EMAIL_REMITENTE`; Gmail no debe reescribirla con la cuenta personal. Nunca guardar la contraseña en la tabla `config`, el repositorio, Postman, logs o capturas.
 
 ## Diagnóstico
 
