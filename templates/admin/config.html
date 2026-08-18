@@ -16,14 +16,60 @@
   </p>
 </div>
 
+<div class="card" style="max-width:720px;margin-bottom:16px;">
+  <div class="eyebrow">Correo transaccional</div>
+  <h2 style="margin:6px 0 12px;font-size:18px;">Entrega de cotizaciones y contraseñas</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;">
+    <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
+      <div style="font-size:11px;color:var(--fg-4);">VARIABLES SMTP</div>
+      <b style="display:block;margin-top:5px;color:{{ '#46d69b' if email_status.configured else '#ff7474' }};">
+        {{ 'Presentes' if email_status.configured else 'Falta configurar' }}
+      </b>
+    </div>
+    <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
+      <div style="font-size:11px;color:var(--fg-4);">ACEPTADOS · 24 H</div>
+      <b style="display:block;margin-top:5px;">{{ email_status.enviados_24h }}</b>
+    </div>
+    <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
+      <div style="font-size:11px;color:var(--fg-4);">FALLIDOS · 24 H</div>
+      <b style="display:block;margin-top:5px;color:{{ '#ff7474' if email_status.fallidos_24h else 'inherit' }};">{{ email_status.fallidos_24h }}</b>
+    </div>
+    <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
+      <div style="font-size:11px;color:var(--fg-4);">EN PROCESO</div>
+      <b style="display:block;margin-top:5px;">{{ email_status.procesando }}</b>
+    </div>
+    <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
+      <div style="font-size:11px;color:var(--fg-4);">COTIZACIONES A REVISAR</div>
+      <b style="display:block;margin-top:5px;color:{{ '#ffb45e' if email_status.requieren_verificacion else 'inherit' }};">
+        {{ email_status.requieren_verificacion }}
+      </b>
+    </div>
+    <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
+      <div style="font-size:11px;color:var(--fg-4);">RECUPEROS A REVISAR</div>
+      <b style="display:block;margin-top:5px;color:{{ '#ffb45e' if email_status.reset_requieren_verificacion else 'inherit' }};">
+        {{ email_status.reset_requieren_verificacion }}
+      </b>
+    </div>
+  </div>
+  <p style="margin:12px 0 0;color:var(--fg-3);font-size:12px;line-height:1.6;">
+    Remitente: <b>{{ email_status.sender_domain or 'sin dominio' }}</b> · servidor {{ email_status.host }}:{{ email_status.port }}.
+    “Variables presentes” no prueba autenticación ni entregabilidad. “Aceptado” confirma recepción del servidor de correo; la llegada a Inbox también depende de alias autorizado, SPF, DKIM, DMARC y filtros del destinatario.
+  </p>
+  {% if not email_status.configured %}
+  <div class="msg error" style="margin-top:12px;">
+    Cargá <b>EMAIL_REMITENTE</b>, <b>EMAIL_PASSWORD</b> y un <b>EMAIL_FROM</b> autorizado en Railway. Hasta entonces la web nunca informará falsamente que el mail fue enviado.
+  </div>
+  {% endif %}
+</div>
+
 <div class="card" style="max-width:480px;">
   <form method="POST" action="/admin/config">
     {% for item in config_items %}
     {% set es_importe = item.parametro in ['COTIZACION_DOLAR_ARS', 'MARGEN_MINIMO_ALERTA_ARS', 'MARGEN_MINIMO_ARS'] or (item.parametro.startswith('WEB_MARGEN_FIJO_') and item.parametro.endswith('_ARS')) or (item.parametro.startswith('WEB_ADICIONAL_') and item.parametro.endswith('_ARS')) %}
     {% set es_decimal = item.parametro.startswith('WEB_MARKUP_PCT') or item.parametro in ['WEB_DESC_FEDEX_PCT', 'WEB_MARGEN_MINIMO_PCT'] %}
     <div class="form-group">
-      <label>{{ item.parametro }}</label>
-      <input type="text" name="{{ item.parametro }}" value="{{ item.valor }}"
+      <label for="config-item-{{ loop.index }}">{{ item.parametro }}</label>
+      <input type="text" id="config-item-{{ loop.index }}" name="{{ item.parametro }}" value="{{ item.valor }}"
              placeholder="{{ item.valor }}"{% if es_importe or es_decimal %} inputmode="decimal" data-numero="{{ 'monto' if es_importe else 'decimal' }}"{% endif %}>
     </div>
     {% endfor %}
@@ -36,12 +82,12 @@
     </p>
     <div class="form-grid-2">
       <div class="form-group">
-        <label>Nombre</label>
-        <input type="text" name="_nuevo_parametro" placeholder="NUEVO_PARAM">
+        <label for="config-nuevo-parametro">Nombre</label>
+        <input type="text" id="config-nuevo-parametro" name="_nuevo_parametro" placeholder="NUEVO_PARAM">
       </div>
       <div class="form-group">
-        <label>Valor</label>
-        <input type="text" name="_nuevo_valor" placeholder="valor">
+        <label for="config-nuevo-valor">Valor</label>
+        <input type="text" id="config-nuevo-valor" name="_nuevo_valor" placeholder="valor">
       </div>
     </div>
 

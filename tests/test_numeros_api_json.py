@@ -57,11 +57,18 @@ def test_producto_y_pedido_aceptan_importes_es_en_sin_cambiar_el_valor():
     assert pedido.precio_cliente_final_ars == 100_000
 
 
-def test_lead_acepta_peso_con_coma_y_un_invalido_no_cae_en_default():
+def test_lead_acepta_solo_referencia_del_snapshot_y_no_precios_del_browser():
     lead = LeadCotizacionRequest(
-        email="cliente@example.com", origen="AR", destino="US", peso_kg="5,5",
+        email="cliente@example.com",
+        quote_id="Q-abcdefghijklmnopqrstuvwxyz123456",
     )
-    assert lead.peso_kg == 5.5
+    assert lead.quote_id.startswith("Q-")
+    with pytest.raises(ValidationError):
+        LeadCotizacionRequest(
+            email="cliente@example.com",
+            quote_id="Q-abcdefghijklmnopqrstuvwxyz123456",
+            carriers=[{"precio_ars": 1}],
+        )
     with pytest.raises(ValidationError):
         CotizarWebRequest(
             origen_pais="AR", destino_pais="US", peso_kg="5,foo",

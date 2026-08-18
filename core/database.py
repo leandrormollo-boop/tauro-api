@@ -137,7 +137,59 @@ SELECT
             AND confdeltype = 'r' AND convalidated
         ), FALSE)
         FROM fk_envios
-    ) AS fk_envios_cliente_restrict
+    ) AS fk_envios_cliente_restrict,
+    TO_REGCLASS('password_reset_tokens') IS NOT NULL
+        AS password_reset_tokens_existe,
+    TO_REGCLASS('password_reset_requests') IS NOT NULL
+        AS password_reset_requests_existe,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('password_reset_requests')
+          AND c.conname = 'ck_password_reset_request_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%VERIFICAR_EMAIL%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%PROCESANDO%'
+    ) AS password_reset_estado_correcto,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS('uq_password_reset_request_activa')
+          AND i.indrelid = TO_REGCLASS('password_reset_requests')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+          AND i.indpred IS NOT NULL
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%pendiente%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%procesando%'
+    ) AS password_reset_indice_activo_correcto,
+    TO_REGCLASS('cotizaciones_web') IS NOT NULL
+        AS cotizaciones_web_existe,
+    TO_REGCLASS('leads_cotizacion') IS NOT NULL
+        AS leads_cotizacion_existe,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('leads_cotizacion')
+          AND c.conname = 'ck_leads_cotizacion_email_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%VERIFICAR_EMAIL%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%ENVIADO%'
+    ) AS leads_email_estado_correcto,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS('uq_lead_cotizacion_email')
+          AND i.indrelid = TO_REGCLASS('leads_cotizacion')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+          AND i.indpred IS NOT NULL
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%cotizacion_id%'
+    ) AS leads_dedupe_indice_correcto,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('leads_cotizacion')
+          AND c.confrelid = TO_REGCLASS('cotizaciones_web')
+          AND c.contype = 'f' AND c.confdeltype = 'r' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%cotizacion_id%'
+    ) AS leads_cotizacion_fk_restrict
 """
 
 _READINESS_CONTABLE_CAMPOS = (
@@ -150,11 +202,20 @@ _READINESS_CONTABLE_CAMPOS = (
     "check_fc_valida",
     "fk_pagos_cliente_restrict",
     "fk_envios_cliente_restrict",
+    "password_reset_tokens_existe",
+    "password_reset_requests_existe",
+    "password_reset_estado_correcto",
+    "password_reset_indice_activo_correcto",
+    "cotizaciones_web_existe",
+    "leads_cotizacion_existe",
+    "leads_email_estado_correcto",
+    "leads_dedupe_indice_correcto",
+    "leads_cotizacion_fk_restrict",
 )
 
 
 def _verificar_readiness_contable(cur) -> dict[str, bool]:
-    """Audita el schema financiero con una consulta; nunca migra ni repara."""
+    """Audita contratos críticos con una consulta; nunca migra ni repara."""
     cur.execute(_READINESS_CONTABLE_SQL)
     fila = cur.fetchone()
     if not fila:
@@ -166,7 +227,7 @@ def _verificar_readiness_contable(cur) -> dict[str, bool]:
     ]
     if fallas:
         raise RuntimeError(
-            "Schema contable no listo: " + ", ".join(fallas)
+            "Schema crítico no listo: " + ", ".join(fallas)
         )
     return {campo: True for campo in _READINESS_CONTABLE_CAMPOS}
 

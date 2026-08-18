@@ -1,9 +1,10 @@
 # ============================================================
 # Endpoints del Portal del Cliente
 # ============================================================
-# /portal/login           - Form de email
-# /portal/login/send      - POST: manda link mágico
-# /portal/auth?token=X    - Valida token, setea cookie
+# /portal/login           - Login por email/ID + contraseña
+# /portal/password/forgot - Solicita restablecimiento por email
+# /portal/password/reset  - Valida link y guarda contraseña nueva
+# /portal/auth?token=X    - Canjea magic links antiguos aún vigentes
 # /portal/logout          - Cierra sesión
 # /portal/home            - Saldo + últimos envíos (requiere auth)
 # /portal/cotizar         - Form de cotización (GET) + ejecuta (POST)
@@ -11,11 +12,13 @@
 # /portal/catalogo        - Productos del cliente (GET) + agregar (POST)
 # ============================================================
 
+import hashlib
 import os
+import re
 import secrets
 from datetime import datetime
 from decimal import Decimal
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 from core.database import get_conn
 from typing import Optional
@@ -26,9 +29,15 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 
 from servicios.auth import (
-    buscar_cliente_por_email, generar_token, validar_token,
-    revocar_token, link_magico_url,
+    generar_token, validar_token, revocar_token,
     autenticar_cliente, consumir_magic_token,
+    buscar_cliente_para_password_reset, consumir_password_reset_token,
+    password_reset_token_valido,
+    validar_nueva_password,
+)
+from servicios.password_reset_queue import (
+    encolar_password_reset,
+    uniformar_password_reset_inexistente,
 )
 from servicios.rate_limit import check_rate, reset_rate, client_ip
 from servicios.catalogo import (
@@ -78,10 +87,6 @@ from servicios.direcciones import (
     obtener_remitente_para_envio,
 )
 from modelos.producto import ProductoNuevo
-
-# Email sender — para link mágico de login
-from core.email_sender import enviar_link_magico
-
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 templates = Jinja2Templates(directory="templates")
@@ -264,6 +269,34 @@ BASE_URL = os.getenv("BASE_URL")
 # desarrollo local por HTTP con SESSION_COOKIE_SECURE=0.
 COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") != "0"
 SESSION_DAYS_INT = 7  # idéntico a SESSION_DAYS en servicios.auth
+PASSWORD_RESET_MENSAJE = (
+    "Si la cuenta existe y el correo pudo enviarse, vas a recibir un link "
+    "para crear una nueva contraseña. Revisá también Spam o Promociones."
+)
+
+
+def _password_reset_base_url() -> str:
+    """El link sensible sólo puede apuntar a un dominio oficial por HTTPS."""
+    raw = (BASE_URL or "https://taurosolutions.ar").strip().rstrip("/")
+    parsed = urlparse(raw)
+    try:
+        port = parsed.port
+    except ValueError:
+        return "https://taurosolutions.ar"
+    if (
+        parsed.scheme == "https"
+        and (parsed.hostname or "").lower() in {
+            "taurosolutions.ar", "www.taurosolutions.ar",
+        }
+        and not parsed.username
+        and not parsed.password
+        and port in (None, 443)
+        and parsed.path in ("", "/")
+        and not parsed.query
+        and not parsed.fragment
+    ):
+        return raw
+    return "https://taurosolutions.ar"
 
 
 def _id_opt(value: str) -> Optional[int]:
@@ -288,15 +321,56 @@ def cliente_actual(token: Optional[str] = Cookie(None)) -> str:
 
 
 # ── Login ───────────────────────────────────────────────────
+_QUOTE_ID_PORTAL_RE = re.compile(r"^Q-[A-Za-z0-9_-]{20,64}$")
+
+
+def _quote_id_portal(valor: str) -> str:
+    if not isinstance(valor, str):
+        return ""
+    valor = (valor or "").strip()
+    return valor if _QUOTE_ID_PORTAL_RE.fullmatch(valor) else ""
+
+
+def _destino_post_login(quote_id: str) -> str:
+    """Único retorno especial permitido: un snapshot vigente de TAURO."""
+    quote_id = _quote_id_portal(quote_id)
+    if not quote_id:
+        return "/portal/home"
+    try:
+        from servicios.leads import obtener_cotizacion
+        existe = obtener_cotizacion(quote_id, exigir_vigente=True)
+    except Exception:
+        existe = None
+    if not existe:
+        return "/portal/home"
+    return (
+        "/portal/envios/nuevo?ambito=internacional&quote_id="
+        + quote(quote_id, safe="")
+    )
+
+
 @router.get("/login", response_class=HTMLResponse)
-def login_form(request: Request, token: Optional[str] = Cookie(None)):
+def login_form(
+    request: Request,
+    token: Optional[str] = Cookie(None),
+    password_reset: Optional[str] = None,
+    quote_id: str = "",
+):
     # Si ya hay sesión activa, directo al portal — así el botón
     # "Iniciar sesión" de la web abre el escritorio sin fricción.
     if token and validar_token(token):
-        return RedirectResponse(url="/portal/home", status_code=303)
+        return RedirectResponse(url=_destino_post_login(quote_id), status_code=303)
+    quote_id = _quote_id_portal(quote_id)
     return templates.TemplateResponse(
         request=request, name="portal/login.html",
-        context={"mensaje": None},
+        context={
+            "mensaje": (
+                "Contraseña actualizada. Ya podés ingresar con la nueva."
+                if password_reset == "ok" else None
+            ),
+            "tipo_msg": "ok" if password_reset == "ok" else None,
+            "quote_id": quote_id,
+        },
     )
 
 
@@ -305,6 +379,7 @@ def login_submit(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    quote_id: str = Form(""),
 ):
     """
     Login con EMAIL o ID DE CLIENTE + contraseña. El campo se sigue llamando
@@ -319,21 +394,22 @@ def login_submit(
                 "mensaje": "Demasiados intentos. Esperá unos minutos e intentá de nuevo.",
                 "tipo_msg": "error",
                 "email_prefill": email,
+                "quote_id": _quote_id_portal(quote_id),
             },
             status_code=429,
         )
     auth = autenticar_cliente(email, password)
     if auth and auth.get("sin_password"):
-        # Cuenta recién creada sin contraseña: decirlo, no fingir un error
-        # de tipeo. El camino es el link mágico (o que Tauro le asigne una).
+        # Cuenta recién creada sin contraseña: el mismo flujo de recupero
+        # permite crearla sin que Tauro tenga que conocerla.
         return templates.TemplateResponse(
             request=request, name="portal/login.html",
             context={
                 "mensaje": "Tu cuenta todavía no tiene contraseña. Usá "
-                           "«Entrar sin contraseña» acá abajo y te mandamos un "
-                           "link de acceso, o pedile a Tauro que te asigne una.",
+                           "«Restablecer contraseña» para crearla desde tu email.",
                 "tipo_msg": "error",
                 "email_prefill": email,
+                "quote_id": _quote_id_portal(quote_id),
             },
             status_code=401,
         )
@@ -347,6 +423,7 @@ def login_submit(
                 "mensaje": "Usuario o contraseña incorrectos.",
                 "tipo_msg": "error",
                 "email_prefill": email,
+                "quote_id": _quote_id_portal(quote_id),
             },
             status_code=401,
         )
@@ -357,7 +434,7 @@ def login_submit(
                             actor_ref=auth["cliente_id"], success=True, status_code=303)
     # La sesión guarda el email real aunque hayan entrado con el ID.
     token = generar_token(auth["email"], auth["cliente_id"])
-    response = RedirectResponse(url="/portal/home", status_code=303)
+    response = RedirectResponse(url=_destino_post_login(quote_id), status_code=303)
     response.set_cookie(
         key="token", value=token,
         httponly=True, max_age=60 * 60 * 24 * SESSION_DAYS_INT,
@@ -367,72 +444,239 @@ def login_submit(
     return response
 
 
-@router.post("/login/send", response_class=HTMLResponse)
-def login_send(request: Request, email: str = Form(...)):
-    """Magic link — para recuperación de contraseña / clientes sin password seteado."""
+def _password_reset_rate_ref(identificador: str) -> str:
+    """Clave irreversible sólo para rate-limit; nunca se persiste ni loguea."""
+    normalizado = (identificador or "").strip().casefold()
+    return hashlib.sha256(normalizado.encode("utf-8")).hexdigest()
+
+
+def _auditar_password_reset(request: Request, evento: str, *, success: bool,
+                            status_code: int, estado: str) -> None:
+    """Audita sólo estado operativo; jamás email, ID, token ni contraseña."""
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event=evento,
+        actor_type="anonimo",
+        actor_ref=None,
+        success=success,
+        status_code=status_code,
+        metadata={"estado": estado},
+    )
+
+
+@router.post("/password/forgot", response_class=HTMLResponse)
+def password_forgot(
+    request: Request,
+    identificador: str = Form(...),
+    quote_id: str = Form(""),
+):
+    """Solicita un restablecimiento sin revelar si la cuenta existe.
+
+    La respuesta visible es la misma exista o no la cuenta. El request nunca
+    crea tokens ni espera SMTP: sólo deja un trabajo durable para el worker.
+    """
+    quote_id = _quote_id_portal(quote_id)
     ip = client_ip(request)
-    if not check_rate(f"magic:{ip}", max_attempts=5, window_seconds=900):
+    if not check_rate(f"password_forgot_ip:{ip}", max_attempts=5, window_seconds=3600):
+        _auditar_password_reset(
+            request, "portal.password_reset.request", success=False,
+            status_code=429, estado="rate_ip",
+        )
         return templates.TemplateResponse(
             request=request, name="portal/login.html",
-            context={"mensaje": "Demasiados pedidos de link. Esperá unos minutos.", "tipo_msg": "error"},
+            context={
+                "mensaje": "Recibimos varios pedidos. Esperá unos minutos antes de intentar otra vez.",
+                "tipo_msg": "error",
+                "email_prefill": identificador,
+                "quote_id": quote_id,
+            },
             status_code=429,
         )
 
-    # También acá vale el ID de cliente: si no trae arroba, se busca el
-    # email registrado de esa cuenta y el link viaja a ESE buzón (el que
-    # está en la ficha — nunca a una dirección tipeada por un tercero).
-    email = (email or "").strip()
-    if email and "@" not in email:
-        try:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT email FROM clientes WHERE cliente_id = %s AND activo = TRUE",
-                        (email.upper(),))
-                    fila = cur.fetchone()
-                    if fila and fila.get("email"):
-                        email = str(fila["email"]).strip().lower()
-        except Exception as e:
-            print(f"[login] lookup por ID falló: {e}")
-
-    cliente = buscar_cliente_por_email(email)
-    if not cliente:
+    rate_ref = _password_reset_rate_ref(identificador)
+    if not check_rate(
+        f"password_forgot_account:{rate_ref}", max_attempts=3, window_seconds=3600
+    ):
+        _auditar_password_reset(
+            request, "portal.password_reset.request", success=False,
+            status_code=200, estado="rate_account",
+        )
         return templates.TemplateResponse(
             request=request, name="portal/login.html",
-            context={"mensaje": "Usuario no registrado. Contactá a Tauro.", "tipo_msg": "error"},
+            context={
+                "mensaje": PASSWORD_RESET_MENSAJE,
+                "tipo_msg": "ok",
+                "quote_id": quote_id,
+            },
         )
 
-    token = generar_token(email, cliente)
-    # El token que autentica viaja en este link. NO derivarlo del Host del
-    # request (envenenable): fallback fijo al dominio oficial, igual que el
-    # admin. Así un Host falso nunca puede desviar el magic link a otro lado.
-    base_url = BASE_URL or "https://taurosolutions.ar"
-    link = link_magico_url(base_url, token)
-
-    # DEV explícito: mostrar el link en pantalla para poder entrar sin SMTP.
-    # El default (ENV no seteada) trata como producción: nunca expone el token.
-    es_dev = os.getenv("ENV", "").strip().upper() == "DEV"
-    if es_dev:
-        print(f"[login] magic link DEV para {email} → {cliente}")
-    else:
-        # Nunca imprimir el token de sesión en logs de producción.
-        print(f"[login] magic link solicitado para {cliente}")
-
+    estado = "cuenta_no_encontrada"
+    encolado = False
     try:
-        enviar_link_magico(email, link, cliente)
-    except Exception as e:
-        print(f"[login] Error enviando email: {e}")
+        cuenta = buscar_cliente_para_password_reset(identificador)
+        if cuenta:
+            resultado = encolar_password_reset(cuenta["cliente_id"], quote_id)
+            encolado = resultado.accepted
+            estado = resultado.code.lower()
+        else:
+            # Mismo número de operaciones DB que el camino real, sin guardar
+            # el identificador ni crear un trabajo. Reduce el canal lateral de
+            # tiempo sin introducir PII en la cola.
+            uniformar_password_reset_inexistente(rate_ref)
+    except Exception as exc:
+        # Sólo el tipo ayuda a operar; no imprimir mensaje ni identificador.
+        print(f"[password-reset] solicitud falló: {type(exc).__name__}")
+        encolado = False
+        estado = "error_interno"
 
+    _auditar_password_reset(
+        request, "portal.password_reset.request", success=encolado,
+        status_code=200, estado=estado,
+    )
     return templates.TemplateResponse(
         request=request, name="portal/login.html",
         context={
-            "mensaje": f"Link generado para {email}. " + (
-                "Hacé click en el botón de abajo para entrar." if es_dev else "Revisá tu inbox."
-            ),
+            "mensaje": PASSWORD_RESET_MENSAJE,
             "tipo_msg": "ok",
-            "dev_link": link if es_dev else None,
+            "quote_id": quote_id,
         },
     )
+
+
+def _respuesta_password_reset(
+    request: Request,
+    *,
+    token: str = "",
+    token_valido: bool,
+    fragment_mode: bool = False,
+    quote_id: str = "",
+    mensaje: Optional[str] = None,
+    status_code: int = 200,
+):
+    respuesta = templates.TemplateResponse(
+        request=request,
+        name="portal/password_reset.html",
+        context={
+            "token": token if token_valido else "",
+            "token_valido": token_valido,
+            "fragment_mode": fragment_mode,
+            "quote_id": _quote_id_portal(quote_id),
+            "mensaje": mensaje,
+        },
+        status_code=status_code,
+    )
+    # El secreto llega en el fragmento (que HTTP nunca recibe) y el JS lo
+    # elimina del historial antes de mostrar el formulario.
+    respuesta.headers["Referrer-Policy"] = "no-referrer"
+    respuesta.headers["Cache-Control"] = "no-store, max-age=0"
+    respuesta.headers["Pragma"] = "no-cache"
+    return respuesta
+
+
+@router.get("/password/reset", response_class=HTMLResponse)
+def password_reset_form(request: Request):
+    """Bootstrap sin secreto: el fragmento nunca llega al servidor/logs."""
+    return _respuesta_password_reset(
+        request, token="", token_valido=False, fragment_mode=True,
+        mensaje="El link no es válido o ya venció.", status_code=200,
+    )
+
+
+@router.post("/password/reset", response_class=HTMLResponse)
+def password_reset_submit(
+    request: Request,
+    token: str = Form(...),
+    password: str = Form(...),
+    password_confirmacion: str = Form(...),
+    quote_id: str = Form(""),
+):
+    quote_id = _quote_id_portal(quote_id)
+    ip = client_ip(request)
+    if not check_rate(f"password_reset_submit:{ip}", max_attempts=8, window_seconds=900):
+        _auditar_password_reset(
+            request, "portal.password_reset.consume", success=False,
+            status_code=429, estado="rate_ip",
+        )
+        return _respuesta_password_reset(
+            request, token="", token_valido=False,
+            mensaje="Demasiados intentos. Solicitá un link nuevo más tarde.",
+            quote_id=quote_id,
+            status_code=429,
+        )
+
+    try:
+        token_valido = password_reset_token_valido(token)
+    except Exception as exc:
+        print(f"[password-reset] lectura falló: {type(exc).__name__}")
+        token_valido = False
+    if not token_valido:
+        _auditar_password_reset(
+            request, "portal.password_reset.consume", success=False,
+            status_code=400, estado="token_invalido",
+        )
+        return _respuesta_password_reset(
+            request, token="", token_valido=False,
+            mensaje="El link no es válido o ya venció.", status_code=400,
+            quote_id=quote_id,
+        )
+
+    error_password = validar_nueva_password(password, password_confirmacion)
+    if error_password:
+        _auditar_password_reset(
+            request, "portal.password_reset.consume", success=False,
+            status_code=400, estado="password_invalida",
+        )
+        return _respuesta_password_reset(
+            request, token=token, token_valido=True,
+            mensaje=error_password, status_code=400, quote_id=quote_id,
+        )
+
+    try:
+        consumido = consumir_password_reset_token(token, password)
+    except Exception as exc:
+        print(f"[password-reset] canje falló: {type(exc).__name__}")
+        consumido = False
+        estado = "error_interno"
+    else:
+        estado = "completado" if consumido else "token_invalido"
+
+    if not consumido:
+        _auditar_password_reset(
+            request, "portal.password_reset.consume", success=False,
+            status_code=400, estado=estado,
+        )
+        return _respuesta_password_reset(
+            request, token="", token_valido=False,
+            mensaje="El link no es válido o ya venció.", status_code=400,
+            quote_id=quote_id,
+        )
+
+    reset_rate(f"password_reset_submit:{ip}")
+    _auditar_password_reset(
+        request, "portal.password_reset.consume", success=True,
+        status_code=303, estado="completado",
+    )
+    query = {"password_reset": "ok"}
+    if quote_id:
+        query["quote_id"] = quote_id
+    response = RedirectResponse(
+        url=f"/portal/login?{urlencode(query)}", status_code=303,
+    )
+    # Una contraseña nueva revoca todas las sesiones en DB; también limpiar
+    # la cookie local evita que el navegador siga presentando el token viejo.
+    response.delete_cookie("token")
+    return response
+
+
+@router.post("/login/send", response_class=HTMLResponse)
+def login_send(request: Request, email: str = Form(...)):
+    """Compatibilidad del formulario viejo, sin emitir nuevos magic-login.
+
+    Cualquier cliente o marcador que conserve esta ruta recibe el mismo flujo
+    real y anti-enumeración de restablecimiento.
+    """
+    return password_forgot(request, email, "")
 
 
 @router.get("/auth")
@@ -488,7 +732,7 @@ MANIFEST_PORTAL = {
     "short_name": "TAURO",
     "description": (
         "Portal de clientes de Tauro Solutions: cotizá, emití y seguí "
-        "tus envíos nacionales e internacionales."
+        "tus envíos internacionales; organizá por separado los nacionales."
     ),
     "lang": "es-AR",
     "dir": "ltr",
@@ -1412,8 +1656,12 @@ def envio_nuevo_form(
     destino: str = "",
     ambito: str = "",
     courier: str = "",
+    quote_id: str = "",
     cliente: str = Depends(cliente_actual),
 ):
+    quote_id = _quote_id_portal(quote_id)
+    if quote_id and not (ambito or "").strip():
+        ambito = "internacional"
     ambito = _ambito_portal(ambito)
     selector_valores = {
         "pedido_tienda": pedido_tienda,
@@ -1421,6 +1669,7 @@ def envio_nuevo_form(
         "origen": origen,
         "destino": destino,
         "courier": courier,
+        "quote_id": quote_id,
     }
     if not ambito or ambito == "nacional":
         return templates.TemplateResponse(
@@ -1438,7 +1687,42 @@ def envio_nuevo_form(
     # el destinatario con lo que el comprador completó en el checkout.
     form: dict = {}
     pedido_info = None
+    cotizacion_web = None
     error = None
+    if quote_id and not pedido_tienda:
+        try:
+            from servicios.leads import obtener_cotizacion
+            cotizacion_web = obtener_cotizacion(quote_id, exigir_vigente=True)
+        except Exception:
+            cotizacion_web = None
+        if cotizacion_web:
+            recomendada = next(
+                (o for o in cotizacion_web["opciones"] if o.get("recomendada")),
+                cotizacion_web["opciones"][0],
+            )
+            form.update({
+                "rem_pais": cotizacion_web["origen"],
+                "destino_pais": cotizacion_web["destino"],
+                "intl_courier": recomendada["id"],
+                "precio_cotizado_ars": recomendada["precio_ars"],
+                "observaciones": f"Cotización web {cotizacion_web['referencia']}",
+                "bultos": [{
+                    "producto": "",
+                    "cantidad": 1,
+                    "unidades_aduana": 1,
+                    "peso_kg": cotizacion_web["peso_kg"],
+                    "largo_cm": cotizacion_web["largo_cm"],
+                    "ancho_cm": cotizacion_web["ancho_cm"],
+                    "alto_cm": cotizacion_web["alto_cm"],
+                    "valor_unitario_usd": cotizacion_web["valor_declarado_usd"],
+                    "descripcion_en": "",
+                    "hs_code": "",
+                    "pais_origen": cotizacion_web["origen"],
+                }],
+            })
+            courier = courier or recomendada["id"]
+        else:
+            error = "La cotización venció o ya no está disponible. Cotizá nuevamente."
     # Si viene del cotizador ("tocá la opción para crear el envío"), el
     # destino elegido ya llega puesto — una promesa menos que romper.
     if destino.strip() and not pedido_tienda:
@@ -1514,6 +1798,7 @@ def envio_nuevo_form(
             "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
             "form": form,
             "pedido_tienda": pedido_info,
+            "cotizacion_web": cotizacion_web,
             # Arranca con lo que el cliente dejó configurado en su ficha; el
             # selector del wizard sólo sirve para pisarlo en este envío.
             "tax_paga_default": tax_paga_cliente(cliente),

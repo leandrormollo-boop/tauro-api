@@ -189,7 +189,7 @@ function HeroSplit({ onCotizarClick }) {
               Tu logística en un solo portal.
             </p>
             <p className="lead fade-up d2">
-              Logística nacional e internacional conectada directamente a tu tienda.
+              Logística internacional conectada directamente a tu tienda y portal.
               <span className="hero-manual-note"> ¿No tenés tienda? Cargá tus envíos manualmente.</span>
             </p>
             <div className="hero-actions fade-up d3">
@@ -239,7 +239,7 @@ function HeroCentered({ onCotizarClick }) {
           Tu logística en un solo portal.
         </p>
         <p className="lead fade-up d2" style={{ margin: "0 auto 40px", fontSize: 19 }}>
-          Logística nacional e internacional conectada directamente a tu tienda.
+          Logística internacional conectada directamente a tu tienda y portal.
           <span className="hero-manual-note"> También podés operar manualmente.</span>
         </p>
         <div className="hero-actions fade-up d3" style={{ justifyContent: "center" }}>
@@ -270,8 +270,8 @@ function HeroMinimal({ onCotizarClick }) {
           </h1>
           <div className="fade-up d2" style={{ display: "flex", gap: 64, marginTop: 80, alignItems: "flex-end", flexWrap: "wrap" }}>
             <p style={{ maxWidth: 420, color: "var(--fg-2)", fontSize: 17, lineHeight: 1.6, margin: 0 }}>
-              Tu logística en un solo portal. Logística nacional e internacional
-              conectada directamente a tu tienda, con carga manual disponible.
+              Tu logística en un solo portal. Logística internacional conectada
+              directamente a tu tienda, con carga manual disponible.
             </p>
             <a href="/portal/login" className="btn btn-primary btn-lg">
               Conectá tu tienda <ArrowRight size={16} />

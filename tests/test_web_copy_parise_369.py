@@ -19,7 +19,7 @@ def _word_count(text: str) -> int:
 def test_arquitectura_3_6_9_es_exacta_y_visible():
     copy_3 = "Conectá. Centralizá. Expandí."
     copy_6 = "Tu logística en un solo portal."
-    copy_9 = "Logística nacional e internacional conectada directamente a tu tienda."
+    copy_9 = "Logística internacional conectada directamente a tu tienda y portal."
 
     assert _word_count(copy_3) == 3
     assert _word_count(copy_6) == 6
@@ -77,12 +77,13 @@ def test_seo_social_y_datos_estructurados_quedan_alineados():
     description = re.search(r'<meta name="description" content="([^"]+)"', HTML).group(1)
     assert 120 <= len(description) <= 160
     assert "Shopify" in description
-    assert "envíos nacionales e internacionales" in description
+    assert "envíos internacionales" in description
+    assert "envíos nacionales" not in description
     assert '<link rel="canonical" href="https://taurosolutions.ar/"' in HTML
     assert 'property="og:title" content="Conectá. Centralizá. Expandí. | Tauro Solutions"' in HTML
     assert 'name="twitter:card" content="summary_large_image"' in HTML
     assert 'styles.css?v=12' in HTML
-    assert '/static/js/app.js?v=10' in HTML
+    assert '/static/js/app.js?v=12' in HTML
 
     structured = re.search(
         r'<script type="application/ld\+json">\s*(\{.*?\})\s*</script>',

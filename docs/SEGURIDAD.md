@@ -90,7 +90,17 @@ sólo con `ENV=DEV`.
   correcta (no se lo puede "quemar" con un intento de contraseña basura).
   Alta con `scripts/generar_totp_admin.py`.
 - Cookies de sesión `HttpOnly`, `SameSite=Lax`, `Secure` (`COOKIE_SECURE=1`).
-- Magic links de un solo uso con vencimiento.
+- Los magic links de portal ya no se emiten; `/portal/auth` sólo conserva el
+  canje de un uso para enlaces antiguos que todavía no vencieron.
+- Restablecimiento real del portal (preparado en código; requiere despliegue):
+  pedido en cola durable, token aleatorio de 32 bytes guardado sólo como
+  SHA-256, vencimiento de 30 minutos, activación recién después de aceptación
+  SMTP, un solo uso y
+  revocación atómica de todas las sesiones al cambiar la contraseña. La
+  respuesta pública no confirma si una cuenta existe y la auditoría no guarda
+  email, ID, token ni contraseña. El link usa `#token=` y el navegador limpia
+  el fragmento antes de mostrar el formulario: el bearer no entra en access
+  logs, query strings ni Referer.
 
 ### API keys — hasheadas
 
@@ -110,7 +120,9 @@ y `password_hash`.
 |---|---|---|
 | `POST /portal/login` | 8 | 5 min |
 | `POST /admin/login` | 5 | 5 min |
-| magic link | 5 | 15 min |
+| recuperar password portal (IP) | 5 | 1 h |
+| recuperar password portal (identificador hasheado) | 3 | 1 h |
+| canjear password portal (IP) | 8 | 15 min |
 | recuperar password admin | 3 | 1 h |
 | `POST /cotizar-web` | 30 | 5 min |
 | `POST /cotizacion-lead` | 5 | 15 min |

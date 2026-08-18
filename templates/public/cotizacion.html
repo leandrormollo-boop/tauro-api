@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{{ cotizacion.referencia }} · TAURO Solutions</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0c0a14;--card:#17131f;--line:#30283e;--fg:#f6f3fb;--muted:#aaa3b5;--accent:#a78bfa;--ok:#55d99b}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 80% 0,#261d3c 0,transparent 38%),var(--bg);color:var(--fg);font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}.wrap{width:min(760px,calc(100% - 28px));margin:0 auto;padding:26px 0 48px}.brand{font-weight:850;letter-spacing:.09em}.brand span{color:var(--accent)}.card{margin-top:22px;background:linear-gradient(145deg,rgba(255,255,255,.04),rgba(255,255,255,.015));border:1px solid var(--line);border-radius:22px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.3)}.head{padding:26px;border-bottom:1px solid var(--line)}.chip{display:inline-flex;padding:6px 10px;border-radius:999px;border:1px solid #594879;color:#d8ccff;font-size:10px;font-weight:800;letter-spacing:.08em}.eyebrow{margin-top:20px;color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}h1{font-size:clamp(26px,6vw,40px);margin:8px 0}.meta,.terms{color:var(--muted);font-size:13px;line-height:1.65}.body{padding:26px}.facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:22px}.fact,.option{border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.02);padding:15px}.label{color:#888093;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.value{margin-top:5px;font-weight:750}.options{display:grid;gap:10px}.option{display:flex;align-items:center;justify-content:space-between;gap:16px}.carrier{font-weight:850}.service{margin-top:4px;color:var(--muted);font-size:12px}.best{color:var(--ok);font-size:10px;font-weight:800}.price{text-align:right;white-space:nowrap;font-size:17px;font-weight:850}.usd{margin-top:4px;color:var(--muted);font-size:11px}.terms{margin-top:20px;padding:15px 16px;background:#171226;border-left:3px solid #7c5cf6;border-radius:8px}.actions{display:flex;gap:10px;margin-top:22px}.btn{display:inline-flex;justify-content:center;align-items:center;padding:13px 20px;border-radius:999px;text-decoration:none;font-size:13px;font-weight:800}.primary{background:#7c5cf6;color:#fff}.ghost{border:1px solid var(--line);color:var(--fg)}.foot{margin-top:22px;color:#726b7e;text-align:center;font-size:11px}@media(max-width:560px){.wrap{padding-top:18px}.head,.body{padding:20px}.facts{grid-template-columns:1fr}.option{align-items:flex-start}.actions{flex-direction:column}.btn{width:100%}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="brand">TAURO <span>SOLUTIONS</span></div>
+    <article class="card">
+      <header class="head">
+        <span class="chip">{{ 'ESTIMACIÓN VENCIDA' if cotizacion.expirada else 'ESTIMACIÓN ONLINE' }}</span>
+        <div class="eyebrow">Presupuesto de envío</div>
+        <h1>{{ cotizacion.origen_nombre }} → {{ cotizacion.destino_nombre }}</h1>
+        <div class="meta">Ref. {{ cotizacion.referencia }} · Emitida {{ cotizacion.emitida_texto }} · Vigente hasta {{ cotizacion.vigente_texto }}</div>
+      </header>
+      <div class="body">
+        {% if cotizacion.expirada %}
+        <div class="terms" style="margin-top:0;margin-bottom:20px;border-left-color:#e0a54f;"><b>Esta estimación ya venció.</b> Conservamos la copia como referencia, pero los importes deben cotizarse nuevamente antes de crear el envío.</div>
+        {% endif %}
+        <section class="facts">
+          <div class="fact"><div class="label">Paquete</div><div class="value">{{ cotizacion.peso_texto }} kg · {{ cotizacion.medidas_texto }} cm</div></div>
+          <div class="fact"><div class="label">Valor declarado</div><div class="value">USD {{ cotizacion.valor_texto }}</div></div>
+        </section>
+        <section class="options">
+          {% for opcion in cotizacion.opciones %}
+          <div class="option">
+            <div><div class="carrier">{{ opcion.nombre }} {% if opcion.recomendada %}<span class="best">· PRECIO MÁS BAJO</span>{% endif %}</div><div class="service">{{ opcion.servicio }} · {{ opcion.dias_texto }}</div></div>
+            <div class="price">ARS {{ opcion.precio_ars_texto }}<div class="usd">USD {{ opcion.precio_usd_texto }}</div></div>
+          </div>
+          {% endfor %}
+        </section>
+        <div class="terms"><b>Importante:</b> esta estimación usa ciudades y códigos postales de referencia. El precio final se vuelve a validar con direcciones, medidas, peso facturable y disponibilidad reales al crear el envío. Derechos, impuestos, seguros y recargos extraordinarios sólo se incluyen cuando se indican expresamente.</div>
+        <div class="actions"><a class="btn primary" href="{{ '/web#cotizador' if cotizacion.expirada else '/portal/login?quote_id=' ~ cotizacion.quote_id }}">{{ 'Cotizar nuevamente' if cotizacion.expirada else 'Crear este envío' }}</a><a class="btn ghost" href="mailto:cotizaciones@taurosolutions.ar?subject=Cotización%20{{ cotizacion.referencia }}">Consultar a TAURO</a></div>
+      </div>
+    </article>
+    <div class="foot">TAURO Solutions · Logística internacional clara y simple</div>
+  </main>
+</body>
+</html>

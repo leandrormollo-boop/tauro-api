@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 import subprocess
@@ -417,32 +418,50 @@ def admin_login(request: Request, password: str = Form(...),
 # reinicio de Railway invalidaría todos los links en vuelo, y el momento
 # en que más se necesita esto es justamente cuando algo se reinició.
 _RECUPERO_MINUTOS = 15
+_RECUPERO_MAX_HORA_DEFAULT = 6
 
 
-def _ensure_tabla_recupero() -> None:
-    from core.database import get_conn
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS admin_recupero (
-                    token   TEXT PRIMARY KEY,
-                    vence   TIMESTAMPTZ NOT NULL,
-                    usado   BOOLEAN NOT NULL DEFAULT FALSE,
-                    creado  TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
-            """)
-        conn.commit()
+class AdminRecoveryRateLimited(RuntimeError):
+    """El cupo durable de correos de acceso admin fue alcanzado."""
+
+
+def _recupero_max_hora() -> int:
+    try:
+        valor = int(
+            (os.getenv("EMAIL_ADMIN_RECOVERY_MAX_HORA") or "").strip()
+            or _RECUPERO_MAX_HORA_DEFAULT
+        )
+    except (TypeError, ValueError):
+        valor = _RECUPERO_MAX_HORA_DEFAULT
+    return min(max(valor, 1), 100)
+
+
+def _hash_token_recupero(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
 
 
 def _guardar_token_recupero(token: str) -> None:
     from core.database import get_conn
-    _ensure_tabla_recupero()
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # El límite en memoria por IP es sólo una primera barrera. Este
+            # lock + conteo persiste entre workers/reinicios y no depende de
+            # headers de proxy que un cliente directo podría falsificar.
+            cur.execute("SELECT pg_advisory_xact_lock(846733291)")
+            cur.execute(
+                "SELECT COUNT(*) AS total FROM admin_recupero "
+                "WHERE creado >= NOW() - interval '1 hour'"
+            )
+            fila = cur.fetchone()
+            usados = int((fila or {}).get("total") or 0)
+            if usados >= _recupero_max_hora():
+                raise AdminRecoveryRateLimited(
+                    "cupo durable de recupero admin alcanzado"
+                )
             cur.execute(
                 "INSERT INTO admin_recupero (token, vence) "
                 "VALUES (%s, now() + interval '%s minutes')",
-                (token, _RECUPERO_MINUTOS),
+                (_hash_token_recupero(token), _RECUPERO_MINUTOS),
             )
             # Limpieza oportunista de los vencidos.
             cur.execute("DELETE FROM admin_recupero WHERE vence < now() - interval '1 day'")
@@ -452,14 +471,15 @@ def _guardar_token_recupero(token: str) -> None:
 def _canjear_token_recupero(token: str) -> bool:
     """True sólo la primera vez que se usa un token válido y vigente."""
     from core.database import get_conn
-    _ensure_tabla_recupero()
+    if not token or len(token) < 32:
+        return False
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE admin_recupero SET usado = TRUE
                 WHERE token = %s AND usado = FALSE AND vence > now()
                 RETURNING token
-            """, (token,))
+            """, (_hash_token_recupero(token),))
             ok = cur.fetchone() is not None
         conn.commit()
     return ok
@@ -470,7 +490,10 @@ def _borrar_token_recupero(token: str) -> None:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM admin_recupero WHERE token = %s", (token,))
+                cur.execute(
+                    "DELETE FROM admin_recupero WHERE token = %s",
+                    (_hash_token_recupero(token),),
+                )
             conn.commit()
     except Exception as e:
         print(f"[admin] no pude borrar el token de recuperación: {e}")
@@ -518,6 +541,12 @@ def admin_recuperar(request: Request):
     token = secrets.token_urlsafe(32)
     try:
         _guardar_token_recupero(token)
+    except AdminRecoveryRateLimited:
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "Ya pediste varios links. Esperá un rato."},
+            status_code=429,
+        )
     except Exception as e:
         print(f"[admin] no pude guardar el token de recuperación: {e}")
         return templates.TemplateResponse(
@@ -528,7 +557,7 @@ def admin_recuperar(request: Request):
         )
 
     base = (os.getenv("BASE_URL") or "https://taurosolutions.ar").rstrip("/")
-    link = f"{base}/admin/recuperar/{token}"
+    link = f"{base}/admin/recuperar#token={token}"
     try:
         from core.email_sender import enviar_link_magico
         enviado = enviar_link_magico(destino, link, "equipo Tauro",
@@ -555,9 +584,22 @@ def admin_recuperar(request: Request):
     )
 
 
-@router.get("/recuperar/{token}")
-def admin_recuperar_usar(token: str):
-    """Canjea el link por una sesión de admin. Un solo uso."""
+@router.get("/recuperar", response_class=HTMLResponse)
+def admin_recuperar_form(request: Request):
+    """Recibe el fragmento sólo en el navegador y limpia la barra."""
+    response = templates.TemplateResponse(
+        request=request,
+        name="admin/recuperar.html",
+        context={},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@router.post("/recuperar/canjear")
+def admin_recuperar_usar(token: str = Form(...)):
+    """Canjea el secreto enviado en el body por una sesión de admin."""
     try:
         valido = _canjear_token_recupero(token)
     except Exception as e:
@@ -2754,11 +2796,15 @@ def admin_config(
         return _redirect_login()
 
     config_items = _get_config()
+    from servicios.leads import estado_entregas_email
+
+    email_status = estado_entregas_email()
     return templates.TemplateResponse(
         request=request, name="admin/config.html",
         context={
             "seccion": "config",
             "config_items": config_items,
+            "email_status": email_status,
             "flash_ok": "Configuración guardada." if ok else None,
         },
     )
@@ -2793,6 +2839,8 @@ async def admin_config_save(
                 parse_configuracion_numerica(nuevo_param, nuevo_valor)
             )
     except ValueError as exc:
+        from servicios.leads import estado_entregas_email
+
         intentos = [
             {"parametro": param, "valor": str(valor)} for param, valor in data.items()
         ]
@@ -2804,6 +2852,7 @@ async def admin_config_save(
             context={
                 "seccion": "config",
                 "config_items": intentos,
+                "email_status": estado_entregas_email(),
                 "flash_error": str(exc),
             },
             status_code=422,

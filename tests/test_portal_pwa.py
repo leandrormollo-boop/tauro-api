@@ -103,6 +103,10 @@ def test_manifest_valido_e_identidad_estable():
     assert data["display"] == "standalone"
     assert data["start_url"] == "/portal/home"
     assert data["scope"] == "/portal/"
+    descripcion = data["description"].lower()
+    assert "cotizá, emití y seguí tus envíos nacionales" not in descripcion
+    assert "envíos internacionales" in descripcion
+    assert "organizá por separado los nacionales" in descripcion
     # id estable: si cambia, los teléfonos quedan con dos apps distintas.
     assert data["id"] == "/portal/"
     assert data["start_url"].startswith(data["scope"])

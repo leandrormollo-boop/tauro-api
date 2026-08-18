@@ -142,6 +142,83 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_cliente ON sessions(cliente_id);
 
+-- ── Restablecimiento de contraseña del portal ──
+-- El secreto que viaja por email NUNCA se persiste: sólo guardamos su
+-- SHA-256. `email_enviado_at` funciona como seguro fail-closed: hasta que el
+-- SMTP confirma el envío, el token existe pero no puede canjearse.
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash       TEXT PRIMARY KEY,
+    cliente_id       TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    creado_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expira_at        TIMESTAMPTZ NOT NULL,
+    email_enviado_at TIMESTAMPTZ,
+    usado_at         TIMESTAMPTZ,
+    CHECK (char_length(token_hash) = 64),
+    CHECK (expira_at > creado_at)
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_cliente_activo
+    ON password_reset_tokens (cliente_id, expira_at DESC)
+    WHERE usado_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_password_reset_expira
+    ON password_reset_tokens (expira_at);
+
+-- El request web nunca espera SMTP. Encola sólo la identidad interna del
+-- cliente; opcionalmente conserva una referencia pública de cotización para
+-- retomar el flujo. El worker genera el secreto en memoria y el email no se
+-- persiste.
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+    id                  BIGSERIAL PRIMARY KEY,
+    cliente_id          TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    quote_id            TEXT,
+    estado              TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos            INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_id            TEXT,
+    claimed_at          TIMESTAMPTZ,
+    ultimo_error_code   TEXT,
+    email_message_id    TEXT,
+    creado_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    enviado_at          TIMESTAMPTZ,
+    CONSTRAINT ck_password_reset_request_estado CHECK (
+        estado IN ('PENDIENTE','PROCESANDO','ENVIADO','FALLIDO','VERIFICAR_EMAIL')
+    ),
+    CONSTRAINT ck_password_reset_request_intentos CHECK (intentos BETWEEN 0 AND 3),
+    CONSTRAINT ck_password_reset_request_claim CHECK (
+        (estado = 'PROCESANDO' AND claim_id IS NOT NULL AND claimed_at IS NOT NULL)
+        OR
+        (estado <> 'PROCESANDO' AND claim_id IS NULL AND claimed_at IS NULL)
+    )
+);
+ALTER TABLE password_reset_requests
+    ADD COLUMN IF NOT EXISTS quote_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_password_reset_request_activa
+    ON password_reset_requests (cliente_id)
+    WHERE estado IN ('PENDIENTE','PROCESANDO');
+CREATE INDEX IF NOT EXISTS idx_password_reset_request_cola
+    ON password_reset_requests (proximo_intento_at, creado_at, id)
+    WHERE estado = 'PENDIENTE';
+CREATE INDEX IF NOT EXISTS idx_password_reset_request_claim
+    ON password_reset_requests (claimed_at)
+    WHERE estado = 'PROCESANDO';
+
+-- Acceso de emergencia del panel admin. La columna histórica se conserva
+-- como `token`, pero sólo almacena SHA-256 hexadecimal; el secreto nunca va
+-- a PostgreSQL ni a la ruta HTTP.
+CREATE TABLE IF NOT EXISTS admin_recupero (
+    token   TEXT PRIMARY KEY,
+    vence   TIMESTAMPTZ NOT NULL,
+    usado   BOOLEAN NOT NULL DEFAULT FALSE,
+    creado  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Invalida y elimina los bearer legacy que alguna versión guardó en claro.
+DELETE FROM admin_recupero
+ WHERE token !~ '^[0-9a-f]{64}$';
+CREATE INDEX IF NOT EXISTS idx_admin_recupero_vence
+    ON admin_recupero (vence);
+CREATE INDEX IF NOT EXISTS idx_admin_recupero_creado
+    ON admin_recupero (creado);
+
 -- ── Rutas predefinidas (ex RUTAS_DEFAULT) ──────────────────
 CREATE TABLE IF NOT EXISTS rutas (
     ruta_id        TEXT PRIMARY KEY,      -- ej "AR-US"
@@ -392,9 +469,44 @@ CREATE TABLE IF NOT EXISTS salud_historial (
     fallos  INTEGER NOT NULL DEFAULT 0
 );
 
--- ── Leads del cotizador publico ────────────────────────────
--- Antes se creaba dentro del primer request. Queda en el schema para que el
--- CRM pueda leerla desde el arranque y para que la migracion sea auditable.
+-- ── Cotizaciones públicas y entrega por correo ─────────────
+-- El navegador recibe un identificador opaco y nunca vuelve a enviar precios.
+-- El presupuesto por mail/web se reconstruye desde este snapshot del servidor.
+CREATE TABLE IF NOT EXISTS cotizaciones_web (
+    id                  BIGSERIAL PRIMARY KEY,
+    public_id           TEXT NOT NULL UNIQUE,
+    referencia          TEXT NOT NULL UNIQUE,
+    origen              CHAR(2) NOT NULL,
+    destino             CHAR(2) NOT NULL,
+    peso_kg             NUMERIC(10,3) NOT NULL,
+    largo_cm            NUMERIC(10,2) NOT NULL,
+    ancho_cm            NUMERIC(10,2) NOT NULL,
+    alto_cm             NUMERIC(10,2) NOT NULL,
+    valor_declarado_usd NUMERIC(14,2) NOT NULL,
+    recomendado         TEXT NOT NULL DEFAULT '',
+    resumen             JSONB NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    vigente_hasta       TIMESTAMPTZ NOT NULL,
+    CHECK (public_id ~ '^Q-[A-Za-z0-9_-]{20,64}$'),
+    CHECK (referencia ~ '^TW-[0-9]{8}-[A-F0-9]{6}$'),
+    CHECK (origen ~ '^[A-Z]{2}$' AND destino ~ '^[A-Z]{2}$'),
+    CHECK (NOT (origen = 'AR' AND destino = 'AR')),
+    CHECK (peso_kg > 0 AND largo_cm > 0 AND ancho_cm > 0 AND alto_cm > 0),
+    CHECK (valor_declarado_usd > 0),
+    CHECK (vigente_hasta > created_at),
+    CHECK (
+        CASE WHEN jsonb_typeof(resumen) = 'array'
+             THEN jsonb_array_length(resumen) > 0
+             ELSE FALSE
+        END
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_cotizaciones_web_vigencia
+    ON cotizaciones_web (vigente_hasta DESC);
+
+-- El lead conserva el pedido de entrega y su estado real. ENVIADO significa
+-- exclusivamente que SMTP aceptó el mensaje; LEGACY identifica filas previas
+-- a esta migración, cuyo resultado no se puede reconstruir honestamente.
 CREATE TABLE IF NOT EXISTS leads_cotizacion (
     id         SERIAL PRIMARY KEY,
     email      TEXT NOT NULL,
@@ -405,8 +517,51 @@ CREATE TABLE IF NOT EXISTS leads_cotizacion (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS origen TEXT;
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS cotizacion_id BIGINT
+    REFERENCES cotizaciones_web(id) ON DELETE RESTRICT;
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS email_estado TEXT NOT NULL DEFAULT 'PENDIENTE';
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS email_intentos INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS email_error_codigo TEXT;
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS email_claim TEXT;
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS email_message_id TEXT;
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS email_enviado_at TIMESTAMPTZ;
+ALTER TABLE leads_cotizacion ADD COLUMN IF NOT EXISTS email_actualizado_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+UPDATE leads_cotizacion
+   SET email_estado = 'LEGACY'
+ WHERE cotizacion_id IS NULL AND email_estado = 'PENDIENTE';
+DO $$
+DECLARE
+    definicion TEXT;
+BEGIN
+    SELECT PG_GET_CONSTRAINTDEF(oid)
+      INTO definicion
+      FROM pg_constraint
+     WHERE conname = 'ck_leads_cotizacion_email_estado'
+       AND conrelid = 'leads_cotizacion'::regclass;
+    IF definicion IS NOT NULL AND definicion NOT ILIKE '%VERIFICAR_EMAIL%' THEN
+        ALTER TABLE leads_cotizacion
+            DROP CONSTRAINT ck_leads_cotizacion_email_estado;
+        definicion := NULL;
+    END IF;
+    IF definicion IS NULL THEN
+        ALTER TABLE leads_cotizacion
+            ADD CONSTRAINT ck_leads_cotizacion_email_estado
+            CHECK (email_estado IN (
+                'PENDIENTE','ENVIANDO','ENVIADO','FALLIDO',
+                'VERIFICAR_EMAIL','LEGACY'
+            ));
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_leads_cotizacion_email_fecha
     ON leads_cotizacion (LOWER(email), created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_cotizacion_email_estado_fecha
+    ON leads_cotizacion (LOWER(email), email_actualizado_at DESC, email_estado);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_lead_cotizacion_email
+    ON leads_cotizacion (cotizacion_id, LOWER(email))
+    WHERE cotizacion_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_leads_cotizacion_estado
+    ON leads_cotizacion (email_estado, email_actualizado_at)
+    WHERE email_estado IN ('PENDIENTE','ENVIANDO','FALLIDO');
 
 -- ── Envíos / Facturas (ex ENVIOS 2026) ─────────────────────
 CREATE TABLE IF NOT EXISTS envios (

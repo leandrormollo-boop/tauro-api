@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>Presupuesto {{ cotizacion.referencia }} · TAURO Solutions</title>
+</head>
+<body style="margin:0;padding:0;background:#f1f0f5;color:#17131f;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+    Estimación {{ cotizacion.referencia }}: {{ cotizacion.origen_nombre }} → {{ cotizacion.destino_nombre }}.
+  </div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f1f0f5;border-collapse:collapse;">
+    <tr><td align="center" style="padding:24px 12px;">
+      <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:100%;max-width:640px;background:#ffffff;border-collapse:separate;border-spacing:0;border-radius:18px;overflow:hidden;box-shadow:0 12px 40px rgba(25,17,42,.12);">
+        <tr>
+          <td style="padding:28px 30px;background:#0c0a14;border-bottom:3px solid #7c5cf6;">
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+              <tr>
+                <td style="font-family:Arial,Helvetica,sans-serif;color:#ffffff;font-size:23px;font-weight:800;letter-spacing:.08em;">
+                  TAURO <span style="color:#a78bfa;">SOLUTIONS</span>
+                </td>
+                <td align="right">
+                  <span style="display:inline-block;padding:6px 10px;border:1px solid #51456d;border-radius:999px;color:#d8ccff;font-family:Arial,Helvetica,sans-serif;font-size:10px;font-weight:700;letter-spacing:.08em;">ESTIMACIÓN ONLINE</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:30px;font-family:Arial,Helvetica,sans-serif;">
+            <p style="margin:0 0 8px;color:#7c5cf6;font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;">Presupuesto de envío</p>
+            <h1 style="margin:0 0 8px;color:#17131f;font-size:25px;line-height:1.25;">{{ cotizacion.origen_nombre }} → {{ cotizacion.destino_nombre }}</h1>
+            <p style="margin:0 0 24px;color:#6d6878;font-size:13px;line-height:1.6;">
+              Referencia <b style="color:#17131f;">{{ cotizacion.referencia }}</b> · Emitida {{ cotizacion.emitida_texto }} · Vigente hasta {{ cotizacion.vigente_texto }}
+            </p>
+
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 22px;border:1px solid #e6e2ee;border-radius:12px;background:#faf9fc;">
+              <tr>
+                <td width="50%" style="padding:15px 16px;border-right:1px solid #e6e2ee;">
+                  <div style="color:#6d6878;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Paquete</div>
+                  <div style="margin-top:5px;color:#17131f;font-size:14px;font-weight:700;">{{ cotizacion.peso_texto }} kg · {{ cotizacion.medidas_texto }} cm</div>
+                </td>
+                <td width="50%" style="padding:15px 16px;">
+                  <div style="color:#6d6878;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Valor declarado</div>
+                  <div style="margin-top:5px;color:#17131f;font-size:14px;font-weight:700;">USD {{ cotizacion.valor_texto }}</div>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 10px;color:#17131f;font-size:14px;font-weight:800;">Opciones disponibles</p>
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e6e2ee;border-radius:12px;border-collapse:separate;border-spacing:0;overflow:hidden;">
+              {% for opcion in cotizacion.opciones %}
+              <tr>
+                <td style="padding:14px 16px;{% if not loop.last %}border-bottom:1px solid #ece9f2;{% endif %}">
+                  <div style="color:#17131f;font-size:14px;font-weight:800;">{{ opcion.nombre }}{% if opcion.recomendada %} <span style="color:#24a46d;font-size:10px;letter-spacing:.05em;">· PRECIO MÁS BAJO</span>{% endif %}</div>
+                  <div style="margin-top:4px;color:#777181;font-size:12px;">{{ opcion.servicio }} · {{ opcion.dias_texto }}</div>
+                </td>
+                <td align="right" style="padding:14px 16px;white-space:nowrap;{% if not loop.last %}border-bottom:1px solid #ece9f2;{% endif %}">
+                  <div style="color:#17131f;font-size:16px;font-weight:800;">ARS {{ opcion.precio_ars_texto }}</div>
+                  <div style="margin-top:3px;color:#6d6878;font-size:11px;">USD {{ opcion.precio_usd_texto }}</div>
+                </td>
+              </tr>
+              {% endfor %}
+            </table>
+
+            <div style="margin:20px 0;padding:15px 16px;border-left:3px solid #7c5cf6;background:#f7f4ff;color:#5f586c;font-size:12px;line-height:1.65;">
+              <b style="color:#2b2535;">Importante:</b> esta es una estimación con ciudades y códigos postales de referencia. El precio final se vuelve a validar con las direcciones, medidas, peso facturable y disponibilidad reales al crear el envío. Derechos, impuestos, seguros y recargos extraordinarios sólo están incluidos cuando se indiquen expresamente.
+            </div>
+
+            <table role="presentation" cellspacing="0" cellpadding="0" align="center" style="margin:24px auto;">
+              <tr><td align="center" bgcolor="#6746d9" style="border-radius:999px;">
+                <a href="{{ cotizacion.url }}" style="display:inline-block;padding:14px 28px;border:1px solid #6746d9;border-radius:999px;background:#6746d9;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;font-family:Arial,Helvetica,sans-serif;">Ver mi cotización</a>
+              </td></tr>
+            </table>
+            <p style="margin:0;color:#6d6878;font-size:12px;line-height:1.65;text-align:center;">¿Querés avanzar o revisar aduana? Respondé este correo y te ayudamos.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:18px 24px;background:#0c0a14;color:#918aa0;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.6;text-align:center;">
+            TAURO Solutions · Logística internacional clara y simple<br>
+            <span style="color:#aaa3b5;">taurosolutions.ar</span>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

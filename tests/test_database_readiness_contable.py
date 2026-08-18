@@ -47,8 +47,14 @@ def test_readiness_contable_usa_una_consulta_de_catalogo_y_acepta_schema_listo()
     assert "ck_envios_nro_fc_valida" in sql
     assert sql.count("SELECT COUNT(*) = 1") == 2
     assert sql.count("confdeltype = 'r' AND convalidated") == 2
+    assert "c.confdeltype = 'r' AND c.convalidated" in sql
     assert "c.conkey = ARRAY[(" in sql
     assert "c.confkey = ARRAY[(" in sql
+    assert "TO_REGCLASS('password_reset_requests')" in sql
+    assert "uq_password_reset_request_activa" in sql
+    assert "TO_REGCLASS('cotizaciones_web')" in sql
+    assert "uq_lead_cotizacion_email" in sql
+    assert "VERIFICAR_EMAIL" in sql
 
 
 @pytest.mark.parametrize("campo", database._READINESS_CONTABLE_CAMPOS)

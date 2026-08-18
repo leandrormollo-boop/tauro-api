@@ -45,7 +45,13 @@ def _cotizar(**kw):
     with mock.patch.object(main, "cotizar_carriers", fake), \
          mock.patch("servicios.cotizador.dolar_ars", return_value=1450.0), \
          mock.patch("servicios.rate_limit.check_rate", return_value=True), \
-         mock.patch("servicios.rate_limit.client_ip", return_value="1.2.3.4"):
+         mock.patch("servicios.rate_limit.client_ip", return_value="1.2.3.4"), \
+         mock.patch("servicios.leads.guardar_cotizacion", return_value={
+             "quote_id": "Q-abcdefghijklmnopqrstuvwxyz123456",
+             "referencia": "TW-20260818-ABC123",
+             "emitida_en": "2026-08-18T12:00:00-03:00",
+             "vigente_hasta": "2026-08-19T12:00:00-03:00",
+         }):
         datos = main.cotizar_web(CotizarWebRequest(**cuerpo), req)
     return visto, datos
 

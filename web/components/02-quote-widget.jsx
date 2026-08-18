@@ -186,7 +186,7 @@ function QuoteWidget({ compact = false }) {
   const reset = () => { setStep("form"); setResult(null); setError(null); };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div id="cotizador" style={{ position: "relative", scrollMarginTop: 88 }}>
       {/* Chip de marca 3D — flota sobre el borde superior derecho del cotizador,
           en el mismo lenguaje metálico+neón de los precios. */}
       <div className="tweb-brand-tag" aria-hidden="true">
@@ -260,7 +260,7 @@ function QuoteWidget({ compact = false }) {
           </div>
 
           {error && (
-            <div style={{ marginBottom: 12, padding: "10px 12px", background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.3)", borderRadius: 8, fontSize: 13, color: "#ff6b6b" }}>
+            <div role="alert" style={{ marginBottom: 12, padding: "10px 12px", background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.3)", borderRadius: 8, fontSize: 13, color: "#ff6b6b" }}>
               {error}
             </div>
           )}
@@ -285,7 +285,7 @@ function QuoteWidget({ compact = false }) {
       )}
 
       {step === "result" && result && (
-        <div className="fade-up">
+        <div className="fade-up" role="status" aria-live="polite">
           <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600, marginBottom: 2 }}>
             Tus opciones de envío
           </div>
@@ -303,13 +303,12 @@ function QuoteWidget({ compact = false }) {
               interés. El cotizador sigue gratis y sin login: esto es una
               oferta, no un peaje. */}
           <EmailCapture
-            origen={result.origen_pais}
-            destino={result.destino_pais}
-            peso={peso}
-            carriers={result.carriers}
+            quoteId={result.quote_id}
+            referencia={result.referencia}
           />
 
-          <a className="btn btn-primary" style={{ width: "100%" }} href="/portal/login">
+          <a className="btn btn-primary" style={{ width: "100%" }}
+             href={`/portal/login?quote_id=${encodeURIComponent(result.quote_id)}`}>
             Crear este envío en el portal <ArrowRight size={14}/>
           </a>
           <a className="btn btn-ghost" style={{ width: "100%", marginTop: 10 }}
@@ -323,9 +322,9 @@ function QuoteWidget({ compact = false }) {
   );
 }
 
-function EmailCapture({ origen, destino, peso, carriers }) {
+function EmailCapture({ quoteId, referencia }) {
   const [email, setEmail] = React.useState("");
-  const [estado, setEstado] = React.useState("idle"); // idle | enviando | ok | error
+  const [estado, setEstado] = React.useState("idle"); // idle | enviando | ok | pendiente | error
   const [msg, setMsg] = React.useState("");
 
   const enviar = async () => {
@@ -337,15 +336,15 @@ function EmailCapture({ origen, destino, peso, carriers }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: email.trim(),
-          origen,
-          destino,
-          peso_kg: parseHumanNumber(peso) || 0,
-          carriers: (carriers || []).filter(c => c.estado === "cotizado"),
+          quote_id: quoteId,
         }),
       });
       const d = await r.json();
       if (d.ok) {
         setEstado("ok");
+      } else if (["pendiente", "procesando", "verificar", "limitado"].includes(d.estado)) {
+        setEstado("pendiente");
+        setMsg(d.error || "La cotización quedó guardada y estamos procesando el correo.");
       } else {
         setEstado("error");
         setMsg(d.error || "No pudimos mandarla. Probá de nuevo.");
@@ -358,12 +357,24 @@ function EmailCapture({ origen, destino, peso, carriers }) {
 
   if (estado === "ok") {
     return (
-      <div style={{
+      <div role="status" aria-live="polite" style={{
         marginBottom: 14, padding: "12px 14px", borderRadius: 10,
         background: "rgba(46,194,126,0.08)", border: "1px solid rgba(46,194,126,0.3)",
         fontSize: 13, color: "#2ec27e", textAlign: "center",
       }}>
-        ✓ Listo — te mandamos la cotización a {email}. Revisá tu correo.
+        ✓ Enviamos el presupuesto {referencia} a {email}. Si no aparece en unos minutos, revisá Spam o Promociones.
+      </div>
+    );
+  }
+
+  if (estado === "pendiente") {
+    return (
+      <div role="status" aria-live="polite" style={{
+        marginBottom: 14, padding: "12px 14px", borderRadius: 10,
+        background: "rgba(224,165,79,0.09)", border: "1px solid rgba(224,165,79,0.35)",
+        fontSize: 13, color: "#e0b66d", textAlign: "center",
+      }}>
+        {msg}
       </div>
     );
   }
@@ -374,19 +385,27 @@ function EmailCapture({ origen, destino, peso, carriers }) {
       background: "rgba(255,255,255,0.02)", border: "1px solid var(--line-soft)",
     }}>
       <div style={{ fontSize: 12, color: "var(--fg-3)", marginBottom: 8, fontFamily: "var(--font-mono)" }}>
-        ¿Querés guardar esta cotización? Te la mandamos por mail.
+        ¿Querés guardar el presupuesto {referencia}? Te lo mandamos por mail.
       </div>
+      <label htmlFor="quote-email" style={{
+        display: "block", fontSize: 12, color: "var(--fg-2)", marginBottom: 6,
+      }}>
+        Email donde querés recibirlo
+      </label>
       <div style={{ display: "flex", gap: 8 }}>
         <input
+          id="quote-email"
           type="email"
           value={email}
           placeholder="tu@email.com"
+          autoComplete="email"
+          aria-describedby={estado === "error" ? "quote-email-error" : undefined}
           onChange={(e) => { setEmail(e.target.value); if (estado === "error") setEstado("idle"); }}
           onKeyDown={(e) => { if (e.key === "Enter") enviar(); }}
           style={{
             flex: 1, minWidth: 0, padding: "10px 12px",
             background: "var(--bg)", border: "1px solid var(--line-soft)",
-            borderRadius: 8, color: "var(--fg)", fontSize: 13,
+            borderRadius: 8, color: "var(--fg)", fontSize: 16,
           }}
         />
         <button className="btn btn-ghost" onClick={enviar}
@@ -396,7 +415,7 @@ function EmailCapture({ origen, destino, peso, carriers }) {
         </button>
       </div>
       {estado === "error" && (
-        <div style={{ marginTop: 8, fontSize: 12, color: "#ff6b6b" }}>{msg}</div>
+        <div id="quote-email-error" role="alert" style={{ marginTop: 8, fontSize: 12, color: "#ff6b6b" }}>{msg}</div>
       )}
     </div>
   );

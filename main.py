@@ -336,16 +336,12 @@ def servir_css():
 
 class LeadCotizacionRequest(BaseModel):
     email: str = Field(..., max_length=160)
-    # Falla cerrado: un bundle viejo que no manda origen no puede guardar una
-    # ruta inventada como AR→destino. El cache-bust v7 entrega el contrato nuevo.
-    origen: str = Field(..., max_length=4)
-    destino: str = Field("", max_length=4)
-    peso_kg: float = Field(0, ge=0, le=100)
-    carriers: list = Field(default_factory=list)
+    # El navegador ya no reenvía precios ni carriers. Sólo presenta la
+    # referencia opaca del snapshot creado por /cotizar-web.
+    quote_id: str = Field(..., min_length=22, max_length=70)
 
-    _normalizar_peso = validator(
-        "peso_kg", pre=True, allow_reuse=True,
-    )(_decimal_json_no_negativo)
+    class Config:
+        extra = "forbid"
 
 
 @app.post("/cotizacion-lead", tags=["public"])
@@ -355,20 +351,54 @@ def cotizacion_lead(body: LeadCotizacionRequest, request: Request):
     el precio — el cotizador sigue gratis y sin login, ese diferencial no se
     toca. Rate limit porque es público y manda mails.
     """
+    import hashlib
+
+    from core.email_transport import canonical_email_address
     from servicios.leads import guardar_lead
     from servicios.rate_limit import check_rate, client_ip
 
     if not check_rate(f"lead:{client_ip(request)}", max_attempts=5, window_seconds=900):
         return JSONResponse({"ok": False, "error": "Demasiados pedidos. Probá en unos minutos."},
                             status_code=429)
-    try:
-        return guardar_lead(
-            body.email, body.origen, body.destino, body.peso_kg, body.carriers,
+    email_canonico = canonical_email_address(body.email)
+    if not email_canonico:
+        return JSONResponse(
+            {"ok": False, "error": "Ese email no parece válido."},
+            status_code=400,
         )
+    identidad = hashlib.sha256(email_canonico.encode("utf-8")).hexdigest()[:24]
+    if not check_rate(f"lead_email:{identidad}", max_attempts=5, window_seconds=3600):
+        return JSONResponse(
+            {"ok": False, "error": "Ese correo ya hizo varios intentos. Probá más tarde."},
+            status_code=429,
+        )
+    try:
+        return guardar_lead(email_canonico, body.quote_id)
     except Exception as e:
-        print(f"[leads] error guardando lead: {e}")
-        return JSONResponse({"ok": False, "error": "No pudimos guardar tu email. Probá de nuevo."},
+        print(f"[leads] error procesando cotización: {type(e).__name__}")
+        return JSONResponse({"ok": False, "error": "No pudimos enviar la cotización. Probá de nuevo."},
                             status_code=200)
+
+
+@app.get("/cotizacion/{quote_id}", response_class=HTMLResponse, include_in_schema=False)
+def cotizacion_publica(quote_id: str):
+    """Copia web imprimible de la estimación enviada por correo."""
+    from servicios.leads import obtener_cotizacion, renderizar_cotizacion_publica
+
+    cotizacion = obtener_cotizacion(quote_id)
+    if not cotizacion:
+        return HTMLResponse(
+            "<html><body style='background:#0c0a14;color:#fff;font-family:Arial;"
+            "padding:48px;text-align:center'><h1>Cotización no encontrada</h1>"
+            "<p>Volvé al cotizador para generar una nueva.</p>"
+            "<a style='color:#a78bfa' href='/web'>Ir al cotizador</a></body></html>",
+            status_code=404,
+            headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"},
+        )
+    return HTMLResponse(
+        renderizar_cotizacion_publica(cotizacion),
+        headers={"Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow"},
+    )
 
 
 @app.get("/guias", include_in_schema=False)
@@ -753,6 +783,20 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
     # Recomendado = el más barato de los que cotizaron.
     recomendado = min(cotizados, key=lambda c: c["precio_usd"])["id"]
 
+    from servicios.leads import guardar_cotizacion
+
+    snapshot = guardar_cotizacion(
+        origen=origen_iso,
+        destino=destino_iso,
+        peso_kg=body.peso_kg,
+        largo_cm=body.largo_cm,
+        ancho_cm=body.ancho_cm,
+        alto_cm=body.alto_cm,
+        valor_declarado_usd=body.valor_declarado_usd,
+        carriers=carriers,
+        recomendado=recomendado,
+    )
+
     return {
         "status": "success",
         "origen": f"{nombre_pais(origen_iso)} ({origen_iso})",
@@ -762,6 +806,10 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
         "peso_kg": body.peso_kg,
         "recomendado": recomendado,
         "carriers": carriers,
+        "quote_id": snapshot["quote_id"],
+        "referencia": snapshot["referencia"],
+        "emitida_en": snapshot["emitida_en"],
+        "vigente_hasta": snapshot["vigente_hasta"],
     }
 
 
@@ -995,6 +1043,30 @@ scheduler.add_job(
     minute=0,
 )
 
+# Entrega de presupuestos: sólo reintenta fallos SMTP transitorios y nunca
+# filas legacy, rechazadas o vencidas. El primer intento sigue siendo síncrono
+# para que la web no diga “enviado” antes de la aceptación real.
+from servicios.leads import procesar_reintentos_email
+scheduler.add_job(
+    procesar_reintentos_email,
+    trigger="interval",
+    minutes=5,
+    max_instances=1,
+    coalesce=True,
+)
+
+# Recuperación de contraseña: el request público sólo encola. Este worker
+# genera el token en memoria y espera la aceptación SMTP fuera del request,
+# por lo que una cuenta existente e inexistente reciben la misma respuesta.
+from servicios.password_reset_queue import procesar_password_reset_requests
+scheduler.add_job(
+    procesar_password_reset_requests,
+    trigger="interval",
+    minutes=1,
+    max_instances=1,
+    coalesce=True,
+)
+
 # Job diario: limpiar sesiones expiradas a las 3am
 from jobs.limpiar_sessions import limpiar_sessions_expiradas
 scheduler.add_job(
@@ -1018,6 +1090,36 @@ def job_limpiar_auditoria():
 
 
 scheduler.add_job(job_limpiar_auditoria, trigger="cron", hour=3, minute=30)
+
+
+# Retención de PII del cotizador y snapshots huérfanos. Nunca elimina una
+# cotización todavía referenciada por un lead conservado.
+def job_limpiar_cotizaciones_email():
+    try:
+        from servicios.leads import limpiar_retencion_cotizaciones
+        from servicios.password_reset_queue import limpiar_retencion_password_reset
+        resultado = limpiar_retencion_cotizaciones()
+        reset = limpiar_retencion_password_reset()
+        if any(resultado.values()) or any(reset.values()):
+            print(
+                "[scheduler] correo: "
+                f"{resultado['leads_eliminados']} leads y "
+                f"{resultado['cotizaciones_eliminadas']} cotizaciones, "
+                f"{reset['solicitudes_eliminadas']} recuperos y "
+                f"{reset['tokens_eliminados']} tokens podados"
+            )
+    except Exception as e:
+        print(f"[scheduler] poda de correo falló: {type(e).__name__}")
+
+
+scheduler.add_job(
+    job_limpiar_cotizaciones_email,
+    trigger="cron",
+    hour=3,
+    minute=45,
+    max_instances=1,
+    coalesce=True,
+)
 
 
 # Dólar oficial automático: el tipo de cambio mueve TODOS los precios. En vez

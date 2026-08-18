@@ -29,6 +29,15 @@
     <div class="msg error">{{ error }}</div>
 {% endif %}
 
+{% if cotizacion_web %}
+    <div class="msg ok" role="status">
+        Precargamos la cotización <b>{{ cotizacion_web.referencia }}</b>:
+        {{ cotizacion_web.origen }} → {{ cotizacion_web.destino }} con
+        {{ form.intl_courier|upper }}. Completá las direcciones y la información
+        aduanera; el precio se valida nuevamente antes de crear la solicitud.
+    </div>
+{% endif %}
+
 {# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
    (es un atajo, no el camino principal) y ni aparece cuando el envío ya
    viene de una venta de la tienda: ahí no hay nada que pegar. #}

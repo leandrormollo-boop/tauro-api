@@ -8,6 +8,57 @@ Formato:
   YYYY-MM-DD · QUIÉN · QUÉ HICIMOS · POR QUÉ
 
 ────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
+✅ PRESUPUESTO TAURO POR EMAIL CON ENTREGA VERIFICABLE (LOCAL, SIN DESPLEGAR).
+
+QUÉ SE HIZO
+  - Cada cotización pública queda guardada con referencia, vigencia, ruta,
+    paquete y opciones calculadas por el servidor.
+  - El navegador sólo manda email + quote_id: ya no puede alterar precios.
+  - Email TAURO HTML + texto, copia web imprimible y condiciones precisas.
+  - La pantalla confirma envío sólo después de aceptación SMTP; sólo los
+    rechazos 4xx confirmados se reintentan. Timeouts/caídas quedan marcados
+    para revisión, sin duplicar correos a ciegas.
+  - Límite durable de un presupuesto por destinatario cada 24 h y retención
+    automática de PII/snapshots vencidos.
+  - Diagnóstico seguro en Admin → Configuración, sin mostrar credenciales.
+  - Transporte TLS común con timeout y códigos operativos sin PII.
+
+POR QUÉ
+  - Antes se respondía “te mandamos la cotización” desde un hilo daemon aunque
+    SMTP fallara, y un fallo bloqueaba el reintento durante 24 horas.
+
+QUÉ FALTA
+  - Configurar/validar SMTP, alias, SPF, DKIM y DMARC en staging; luego hacer
+    una prueba controlada a una casilla propia antes del release productivo.
+
+────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
+✅ RESTABLECIMIENTO REAL DE CONTRASEÑA DEL PORTAL (LOCAL, SIN DESPLEGAR).
+
+QUÉ SE HIZO
+  - El pedido se encola y la respuesta web nunca espera ni toca SMTP.
+  - Link de 30 minutos y un uso; el secreto se guarda sólo como SHA-256 y
+    viaja en `#token=`, fuera de queries, access logs y Referer.
+  - El token queda inactivo hasta que SMTP confirma el correo (fail-closed).
+  - Formulario TAURO para crear y confirmar una contraseña nueva.
+  - Al completar se cambia bcrypt y se revocan todas las sesiones en la misma
+    transacción.
+  - Respuesta anti-enumeración, doble rate-limit y auditoría sin PII/token.
+  - Tests focales sin conexión SMTP real.
+
+POR QUÉ
+  - El botón anterior no restablecía una contraseña: enviaba un magic-login
+    y mostraba éxito incluso cuando el remitente devolvía False.
+
+QUÉ FALTA
+  - Validar SMTP y el worker en staging antes de cualquier release productivo.
+
+────────────────────────────────────────────────────────────
 2026-08-18 · Lean + Claude (Fable)
 ────────────────────────────────────────────────────────────
 

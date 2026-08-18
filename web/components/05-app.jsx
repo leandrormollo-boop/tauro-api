@@ -39,9 +39,7 @@ function App() {
   }, [t.density]);
 
   const scrollToQuote = () => {
-    document.querySelector("#servicios")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    // actually scroll to top hero quote
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    document.querySelector("#cotizador")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
