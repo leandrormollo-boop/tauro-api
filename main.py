@@ -636,6 +636,20 @@ def partners_activos():
     return {"partners": carriers_activos()}
 
 
+@app.get("/operadores", tags=["public"])
+def operadores_publicos():
+    """Mapa seguro del producto: no expone credenciales, cuentas ni errores.
+
+    La web puede explicar qué integraciones existen o están en proceso sin
+    confundir "hay código" con "este cliente está habilitado".
+    """
+    from servicios.carrier_contract import Ambito, public_catalog
+    return {
+        "internacionales": public_catalog(Ambito.INTERNACIONAL),
+        "nacionales": public_catalog(Ambito.NACIONAL),
+    }
+
+
 @app.get("/api/rastrear", tags=["public"])
 def api_rastrear(nro: str, request: Request):
     """

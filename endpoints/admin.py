@@ -59,6 +59,7 @@ from servicios.configuracion_couriers_cliente import (
     parsear_fila,
     resumen_auditoria,
 )
+from servicios.carrier_contract import CARRIER_SPECS
 from servicios.solicitudes_guia import (
     ESTADOS_SOLICITUD,
     actualizar_solicitud_guia,
@@ -1380,12 +1381,18 @@ def admin_cliente_acceso_precios_form(
         matriz = None
     if not matriz:
         return RedirectResponse(url="/admin/clientes", status_code=303)
+    ids_matriz = {fila["id"] for fila in matriz["couriers"]}
+    futuros_couriers = tuple(
+        spec for spec in CARRIER_SPECS
+        if spec.id not in ids_matriz
+    )
     return templates.TemplateResponse(
         request=request,
         name="admin/cliente_acceso_precios.html",
         context={
             "seccion": "clientes",
             "matriz": matriz,
+            "futuros_couriers": futuros_couriers,
             "pricing_modes": PRICING_MODES,
             "flash_ok": (
                 f"Configuración de {matriz['nombre']} actualizada."
@@ -1534,6 +1541,10 @@ def admin_cliente_acceso_precios_guardar(
             context={
                 "seccion": "clientes",
                 "matriz": matriz,
+                "futuros_couriers": tuple(
+                    spec for spec in CARRIER_SPECS
+                    if spec.id not in {fila["id"] for fila in matriz["couriers"]}
+                ),
                 "pricing_modes": PRICING_MODES,
                 "flash_error": str(exc),
             },

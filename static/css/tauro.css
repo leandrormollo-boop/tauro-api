@@ -1850,6 +1850,41 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 
 /* Cotizador nacional: una sola entrada canónica provincia→provincia.
    Los adapters de OCA/Andreani consumirán este contrato sin duplicar UI. */
+.quote-operator-strip {
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin:0 0 12px;padding:8px 10px;border:1px solid var(--line-soft);
+  border-radius:10px;background:rgba(255,255,255,.018);
+}
+.quote-operator-strip-title {
+  color:var(--fg-4);font-family:var(--font-mono);font-size:9px;
+  letter-spacing:.07em;text-transform:uppercase;white-space:nowrap;
+}
+.quote-operator-strip > div { display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap; }
+.quote-operator-chip {
+  display:inline-flex;align-items:center;gap:5px;padding:4px 7px;
+  border:1px solid var(--line-soft);border-radius:999px;color:var(--fg-3);
+  font-size:10px;white-space:nowrap;
+}
+.quote-operator-chip i { width:6px;height:6px;border-radius:50%;background:var(--fg-4); }
+.quote-operator-chip.ready i { background:var(--ok);box-shadow:0 0 7px rgba(46,194,126,.55); }
+.quote-operator-chip small { color:var(--fg-4);font-size:8px;text-transform:uppercase;letter-spacing:.04em; }
+@media (max-width:640px) {
+  .quote-operator-strip { display:block; }
+  .quote-operator-strip-title { display:block;margin-bottom:6px; }
+  .quote-operator-strip > div {
+    display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:6px;justify-items:stretch;
+  }
+  .quote-operator-chip {
+    display:grid;grid-template-columns:6px minmax(0,1fr);
+    grid-template-rows:auto auto;column-gap:5px;row-gap:1px;
+    align-items:center;white-space:normal;
+  }
+  .quote-operator-chip i { grid-row:1 / 3; }
+  .quote-operator-chip small {
+    display:block;grid-column:2;font-size:7px;line-height:1.15;
+  }
+}
 .national-eyebrow { color: var(--ok) !important; }
 .national-eyebrow::before { background: var(--ok) !important; box-shadow: 0 0 9px rgba(46,194,126,.3) !important; }
 .national-api-note {

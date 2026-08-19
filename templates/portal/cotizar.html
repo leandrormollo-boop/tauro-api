@@ -25,6 +25,18 @@
         {% endif %}
     </header>
 
+    <div class="quote-operator-strip" aria-label="Estado de integraciones internacionales">
+        <span class="quote-operator-strip-title">Operadores internacionales</span>
+        <div>
+            {% for operador in operadores_internacionales %}
+            <span class="quote-operator-chip {{ 'ready' if operador.estado == 'disponible_segun_cuenta' else 'pending' }}">
+                <i aria-hidden="true"></i>{{ operador.nombre }}
+                <small>{{ operador.estado_label }}</small>
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+
     {% if error %}
     <div class="msg error quote-error">
         <strong>No pudimos cotizar ese envío.</strong> {{ error }}

@@ -12,32 +12,30 @@ import os
 from typing import Iterable
 
 from core.database import get_conn
+from servicios.carrier_contract import Ambito, Capacidad, carrier_spec, public_catalog
 from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
 from servicios.pricing import PRICING_MODES, normalizar_pricing
 
 
-COURIERS_CLIENTE = (
-    {
-        "id": "fedex",
-        "nombre": "FedEx",
-        "logo": "/static/img/carriers/fedex.svg",
-        "permite_recoleccion": True,
-        "integracion_implementada": False,
-    },
-    {
-        "id": "dhl",
-        "nombre": "DHL Express",
-        "logo": "/static/img/carriers/dhl.svg",
-        "permite_recoleccion": True,
-        "integracion_implementada": True,
-    },
-    {
-        "id": "ups",
-        "nombre": "UPS",
-        "logo": "/static/img/carriers/ups.svg",
-        "permite_recoleccion": False,
-        "integracion_implementada": False,
-    },
+def _metadata_operable(courier_id: str) -> dict:
+    """Proyecta el contrato central al formulario operativo actual."""
+    spec = carrier_spec(courier_id)
+    if spec is None:  # Error de programación: nunca habilitar a ciegas.
+        raise RuntimeError(f"Falta CarrierSpec para {courier_id}.")
+    return {
+        "id": spec.id,
+        "nombre": spec.nombre,
+        "logo": spec.logo,
+        "permite_recoleccion": Capacidad.RECOLECTAR in spec.capacidades,
+        "integracion_implementada": not spec.pendiente,
+    }
+
+
+# La tabla productiva hoy admite estos tres IDs. El orden se conserva para no
+# mover la matriz del admin; estado, nombre, logo y capacidades vienen de la
+# única fuente de verdad compartida con portal y web.
+COURIERS_CLIENTE = tuple(
+    _metadata_operable(courier_id) for courier_id in ("fedex", "dhl", "ups")
 )
 COURIER_IDS = frozenset(c["id"] for c in COURIERS_CLIENTE)
 
@@ -231,6 +229,43 @@ def obtener_matriz(cliente_id: str) -> dict | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             return leer_matriz_con_cursor(cur, cliente_id)
+
+
+def catalogo_cliente(cliente_id: str, ambito: Ambito | str) -> tuple[dict, ...]:
+    """Estado seguro y efectivo de cada operador para una cuenta.
+
+    Sólo marca ``disponible_segun_cuenta`` cuando la integración global está
+    configurada y el permiso explícito de cotización está activo. Nunca expone
+    credenciales, pricing ni el motivo técnico interno.
+    """
+    catalogo = [dict(item) for item in public_catalog(ambito)]
+    matriz = obtener_matriz(cliente_id)
+    filas = {
+        fila["id"]: fila for fila in (matriz or {}).get("couriers", ())
+    }
+    for item in catalogo:
+        if item["estado"] == "integracion_pendiente":
+            continue
+        fila = filas.get(item["id"])
+        if fila and fila.get("puede_cotizar"):
+            item.update({
+                "estado": "disponible_segun_cuenta",
+                "estado_label": "Disponible para tu cuenta",
+                "estado_corto": "Disponible",
+            })
+        elif fila and fila.get("integracion_disponible"):
+            item.update({
+                "estado": "requiere_habilitacion",
+                "estado_label": "Requiere habilitación de TAURO",
+                "estado_corto": "Sin habilitar",
+            })
+        else:
+            item.update({
+                "estado": "configuracion_pendiente",
+                "estado_label": "Configuración productiva pendiente",
+                "estado_corto": "Configuración pendiente",
+            })
+    return tuple(catalogo)
 
 
 def parsear_fila(

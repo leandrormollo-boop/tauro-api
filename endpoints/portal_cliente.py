@@ -59,6 +59,7 @@ from servicios.solicitudes_guia import (
     obtener_solicitud_de_cliente, contar_guias_listas,
 )
 from servicios.carriers import courier_default_cliente
+from servicios.carrier_contract import Ambito, public_catalog
 from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
 from servicios.numeros_humanos import (
     parse_entero_formulario as _entero_form,
@@ -110,6 +111,19 @@ _IDEMPOTENCY_KEY_MAX_LEN = 128
 _IDEMPOTENCY_KEY_CHARS = frozenset(
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 )
+
+
+def _operadores_cliente(cliente: str, ambito: Ambito) -> tuple[dict, ...]:
+    """Catálogo efectivo; ante error nunca promete que un courier funciona."""
+    try:
+        from servicios.configuracion_couriers_cliente import catalogo_cliente
+
+        return catalogo_cliente(cliente, ambito)
+    except Exception as exc:
+        print(
+            f"[portal-operadores] catálogo no disponible: {type(exc).__name__}"
+        )
+        return public_catalog(ambito)
 
 
 def _nueva_idempotency_key() -> str:
@@ -1194,6 +1208,9 @@ def cotizar_form(
             "resultado": None,
             "opciones": None,
             "no_disponibles": [],
+            "operadores_internacionales": _operadores_cliente(
+                cliente, Ambito.INTERNACIONAL
+            ),
             "resultado_nacional": None,
             "error": None,
             "form": {},
@@ -1350,6 +1367,9 @@ def cotizar_post(
             "opciones": opciones,
             "resultado": resumen,
             "no_disponibles": no_disponibles,
+            "operadores_internacionales": _operadores_cliente(
+                cliente, Ambito.INTERNACIONAL
+            ),
             "error": error,
             "form": {
                 "origen_pais": origen_pais,

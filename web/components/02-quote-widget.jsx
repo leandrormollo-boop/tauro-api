@@ -105,6 +105,62 @@ function normalizeCountry(value) {
   return String(value ?? "").trim().toUpperCase();
 }
 
+function OperatorStatus() {
+  const [catalog, setCatalog] = useStateQ(null);
+
+  useEffectQ(() => {
+    let alive = true;
+    fetch(`${API_URL}/operadores`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => { if (alive && data) setCatalog(data); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  if (!catalog) return null;
+  const groups = [
+    ["Internacional", catalog.internacionales || []],
+    ["Nacional", catalog.nacionales || []],
+  ];
+  return (
+    <div className="tweb-operator-status" aria-label="Estado de integraciones logísticas" style={{
+      display: "grid", gap: 6, marginBottom: 14, padding: "9px 10px",
+      border: "1px solid var(--line-soft)", borderRadius: 10,
+      background: "rgba(255,255,255,.015)",
+    }}>
+      {groups.map(([label, operators]) => (
+        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ minWidth: 74, color: "var(--fg-4)", fontFamily: "var(--font-mono)", fontSize: 9, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</span>
+          {operators.map((operator) => {
+            const ready = operator.estado === "disponible_segun_cuenta";
+            const prepared = operator.estado === "integracion_preparada";
+            return (
+              <span key={operator.id} title={operator.estado_label} style={{
+                display: "inline-flex", alignItems: "center", gap: 5,
+                padding: "3px 7px", border: "1px solid var(--line-soft)",
+                borderRadius: 99, color: "var(--fg-3)", fontSize: 10,
+              }}>
+                <i aria-hidden="true" style={{
+                  width: 6, height: 6, borderRadius: 99,
+                  background: ready ? "#2ec27e" : prepared ? "#a78bfa" : "var(--fg-4)",
+                  boxShadow: ready ? "0 0 7px rgba(46,194,126,.55)" : "none",
+                }}/>
+                {operator.nombre}
+                <small style={{
+                  color: "var(--fg-4)", fontFamily: "var(--font-mono)",
+                  fontSize: 7, letterSpacing: ".03em", textTransform: "uppercase",
+                }}>
+                  {operator.estado_corto || operator.estado_label}
+                </small>
+              </span>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function QuoteWidget({ compact = false }) {
   // Cotizador internacional en ambos sentidos y entre terceros países:
   // AR→CN, CN→AR y CN→IN. AR→AR va por el circuito nacional OCA/Andreani
@@ -222,6 +278,8 @@ function QuoteWidget({ compact = false }) {
           </button>
         )}
       </div>
+
+      <OperatorStatus />
 
       {step !== "result" && (
         <>
