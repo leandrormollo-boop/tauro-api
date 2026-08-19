@@ -11,6 +11,26 @@ Formato:
 2026-08-18 · Lean + Codex (Sol)
 ────────────────────────────────────────────────────────────
 
+✅ CASILLA DE INTEGRACIONES CREADA EN GOOGLE WORKSPACE.
+
+QUÉ SE HIZO
+  - Se creó `integraciones@taurosolutions.ar` como alias sin licencia adicional
+    del buzón principal de TAURO.
+  - Google Admin confirmó la actualización y Gmail la expone como perfil
+    `TAURO Integraciones <integraciones@taurosolutions.ar>` para enviar correos.
+  - Los CTA públicos “Conectá tu tienda” quedaron vinculados a esa dirección
+    en el commit local 03460a9; no se modificó el remitente predeterminado.
+  - Control aplicado: ruta Sol/high, aprobación explícita, snapshot previo y
+    verificación posterior en Google Admin y Gmail, sin registrar secretos.
+
+QUÉ FALTA
+  - Integrar y desplegar la rama de email/web con aprobación de producción.
+  - Hacer un smoke controlado de recepción y envío después de la propagación.
+
+────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
 ✅ IDENTIDAD ÚNICA DE CORREO: operaciones@taurosolutions.ar (LOCAL).
 
 QUÉ SE HIZO
