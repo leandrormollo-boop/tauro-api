@@ -1,4 +1,7 @@
 /* global React */
+
+const INTEGRACIONES_EMAIL = "integraciones@taurosolutions.ar";
+const INTEGRACIONES_MAILTO = `mailto:${INTEGRACIONES_EMAIL}?subject=${encodeURIComponent("Quiero integrar mi tienda con TAURO")}&body=${encodeURIComponent("Hola equipo de Integraciones,\n\nQuiero conectar mi tienda con TAURO.\n\nPlataforma (Shopify/Tiendanube/otra):\nURL de la tienda:\nNombre y empresa:\nTeléfono de contacto:\n")}`;
 const { useState, useEffect, useRef } = React;
 
 /* ============================================================
@@ -82,7 +85,7 @@ function Nav() {
             <span className="tweb-txt-largo">Iniciar sesión</span>
             <span className="tweb-txt-corto">Ingresar</span>
           </a>
-          <a href="/portal/login" className="btn btn-primary" style={{ fontSize: 13, padding: "10px 18px" }}>
+          <a href={INTEGRACIONES_MAILTO} className="btn btn-primary" style={{ fontSize: 13, padding: "10px 18px" }}>
             <span className="tweb-txt-largo">Conectá tu tienda</span>
             <span className="tweb-txt-corto">Conectar</span>
             <ArrowRight size={14} />
@@ -193,7 +196,7 @@ function HeroSplit({ onCotizarClick }) {
               <span className="hero-manual-note"> ¿No tenés tienda? Cargá tus envíos manualmente.</span>
             </p>
             <div className="hero-actions fade-up d3">
-              <a href="/portal/login" className="btn btn-primary btn-lg">
+              <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
                 Conectá tu tienda
                 <ArrowRight size={16} />
               </a>
@@ -243,7 +246,7 @@ function HeroCentered({ onCotizarClick }) {
           <span className="hero-manual-note"> También podés operar manualmente.</span>
         </p>
         <div className="hero-actions fade-up d3" style={{ justifyContent: "center" }}>
-          <a href="/portal/login" className="btn btn-primary btn-lg">
+          <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
             Conectá tu tienda <ArrowRight size={16} />
           </a>
           <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
@@ -273,7 +276,7 @@ function HeroMinimal({ onCotizarClick }) {
               Tu logística en un solo portal. Logística internacional conectada
               directamente a tu tienda, con carga manual disponible.
             </p>
-            <a href="/portal/login" className="btn btn-primary btn-lg">
+            <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
               Conectá tu tienda <ArrowRight size={16} />
             </a>
             <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>

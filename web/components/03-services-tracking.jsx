@@ -13,7 +13,7 @@ const SERVICES = [
     bullets: ["Pedidos de Shopify en el portal", "Carga manual para ventas externas", "Datos listos para preparar el envío"],
     span: "Tienda + manual",
     cta: "Conectá tu tienda",
-    href: "/portal/login",
+    href: INTEGRACIONES_MAILTO,
   },
   {
     id: "centraliza",

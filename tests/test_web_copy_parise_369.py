@@ -83,7 +83,7 @@ def test_seo_social_y_datos_estructurados_quedan_alineados():
     assert 'property="og:title" content="Conectá. Centralizá. Expandí. | Tauro Solutions"' in HTML
     assert 'name="twitter:card" content="summary_large_image"' in HTML
     assert 'styles.css?v=12' in HTML
-    assert '/static/js/app.js?v=12' in HTML
+    assert '/static/js/app.js?v=13' in HTML
 
     structured = re.search(
         r'<script type="application/ld\+json">\s*(\{.*?\})\s*</script>',
