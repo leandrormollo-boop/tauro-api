@@ -20,7 +20,9 @@ from urllib.parse import quote, urlencode
 from core.database import get_conn
 from typing import Optional
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
+)
 from fastapi.templating import Jinja2Templates
 
 from servicios.auth import (
@@ -463,6 +465,86 @@ def logout(token: Optional[str] = Cookie(None)):
     response = RedirectResponse(url="/portal/login", status_code=303)
     response.delete_cookie("token")
     return response
+
+
+# ── PWA del portal ──────────────────────────────────────────
+# El portal instalable: manifest + service worker + pantalla offline.
+# Las TRES rutas son públicas y no tocan datos de nadie. El service worker
+# sólo puede precachear la pantalla offline neutra; todo lo autenticado es
+# red-only y hereda el Cache-Control no-store del middleware de seguridad
+# (main.headers_de_seguridad), que también cubre estas rutas nuevas.
+
+_RAIZ_PROYECTO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_SW_PATH = os.path.join(_RAIZ_PROYECTO, "static", "js", "portal-sw.js")
+
+# Cache-bust de los íconos: subir si se regeneran los PNG de static/img/pwa.
+_PWA_ICONOS_V = "1"
+
+# `id`, `scope` y `start_url` son la IDENTIDAD de la app instalada: si
+# cambian, los teléfonos quedan con dos "TAURO" distintas. No moverlos.
+MANIFEST_PORTAL = {
+    "id": "/portal/",
+    "name": "TAURO",
+    "short_name": "TAURO",
+    "description": (
+        "Portal de clientes de Tauro Solutions: cotizá, emití y seguí "
+        "tus envíos nacionales e internacionales."
+    ),
+    "lang": "es-AR",
+    "dir": "ltr",
+    "start_url": "/portal/home",
+    "scope": "/portal/",
+    "display": "standalone",
+    "background_color": "#0c0a14",
+    "theme_color": "#0c0a14",
+    "icons": [
+        {
+            "src": f"/static/img/pwa/icon-192.png?v={_PWA_ICONOS_V}",
+            "sizes": "192x192", "type": "image/png", "purpose": "any",
+        },
+        {
+            "src": f"/static/img/pwa/icon-512.png?v={_PWA_ICONOS_V}",
+            "sizes": "512x512", "type": "image/png", "purpose": "any",
+        },
+        {
+            "src": f"/static/img/pwa/icon-maskable-192.png?v={_PWA_ICONOS_V}",
+            "sizes": "192x192", "type": "image/png", "purpose": "maskable",
+        },
+        {
+            "src": f"/static/img/pwa/icon-maskable-512.png?v={_PWA_ICONOS_V}",
+            "sizes": "512x512", "type": "image/png", "purpose": "maskable",
+        },
+    ],
+}
+
+
+@router.get("/manifest.webmanifest", include_in_schema=False)
+def manifest_pwa():
+    """Manifest de la app. Media type propio para que Chrome lo tome."""
+    return JSONResponse(MANIFEST_PORTAL, media_type="application/manifest+json")
+
+
+@router.get("/sw.js", include_in_schema=False)
+def service_worker_portal():
+    """
+    El service worker se sirve DESDE /portal/sw.js para que su alcance
+    máximo sea /portal/: nunca puede controlar el admin ni la web pública.
+    El no-store del middleware hace que el navegador revise actualizaciones
+    del worker en cada navegación, sin quedarse pegado a una versión vieja.
+    """
+    return FileResponse(_SW_PATH, media_type="application/javascript")
+
+
+@router.get("/offline", response_class=HTMLResponse, include_in_schema=False)
+def offline_pwa(request: Request):
+    """
+    Pantalla offline: pública y neutra A PROPÓSITO. Es lo único que el
+    service worker precachea, así que no puede requerir sesión ni contener
+    datos de clientes — instalarla no expone nada después de un logout.
+    """
+    return templates.TemplateResponse(
+        request=request, name="portal/offline.html", context={},
+    )
 
 
 # ── Home ────────────────────────────────────────────────────

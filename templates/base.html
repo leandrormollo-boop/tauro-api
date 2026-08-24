@@ -2,16 +2,26 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}Portal{% endblock %} · Tauro Solutions</title>
     <meta name="robots" content="noindex">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
-    <link rel="stylesheet" href="/static/css/tauro.css?v=24">
+    <link rel="stylesheet" href="/static/css/tauro.css?v=25">
     <script src="/static/js/tauro-ui.js?v=8" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png?v=2">
     <link rel="apple-touch-icon" href="/static/img/favicon-180.png">
+    {# ── PWA del portal: manifest + meta móviles/standalone. base.html es
+       EXCLUSIVO del portal (el admin usa base_admin.html y la web pública
+       es estática), así que sólo el portal se vuelve app instalable. #}
+    <link rel="manifest" href="/portal/manifest.webmanifest">
+    <meta name="theme-color" content="#0c0a14">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="TAURO">
+    <script src="/static/js/portal-pwa.js?v=1" defer></script>
 </head>
 <body>
 {% if cliente %}
@@ -158,6 +168,51 @@
             Tauro Solutions · Logística internacional · 2026
         </footer>
     </div>
+</div>
+
+{# ── Barra móvil inferior (PWA): los cinco accesos de siempre al alcance
+   del pulgar. Sólo existe en el shell autenticado — nunca en login — y el
+   CSS la limita a móvil (≤900px) y la oculta al imprimir. #}
+<nav class="tabbar" aria-label="Accesos rápidos del portal">
+    <a href="/portal/home" class="tabbar-item{% if path.endswith('/home') %} active{% endif %}"{% if path.endswith('/home') %} aria-current="page"{% endif %}>
+        <svg class="tabbar-ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
+        <span class="tabbar-lbl">Inicio</span>
+    </a>
+    <a href="/portal/cotizar" class="tabbar-item{% if '/cotizar' in path %} active{% endif %}"{% if '/cotizar' in path %} aria-current="page"{% endif %}>
+        <svg class="tabbar-ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
+        <span class="tabbar-lbl">Cotizar</span>
+    </a>
+    <a href="/portal/envios/nuevo" class="tabbar-item tabbar-cta{% if '/envios/nuevo' in path %} active{% endif %}"{% if '/envios/nuevo' in path %} aria-current="page"{% endif %}>
+        <span class="tabbar-cta-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+        <span class="tabbar-lbl">Nuevo envío</span>
+    </a>
+    <a href="/portal/envios" class="tabbar-item{% if '/envios' in path and '/envios/nuevo' not in path %} active{% endif %}"{% if '/envios' in path and '/envios/nuevo' not in path %} aria-current="page"{% endif %}>
+        <svg class="tabbar-ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8.5 12 3 3 8.5v7L12 21l9-5.5z"/><path d="M3.3 8.7 12 14l8.7-5.3M12 21v-7"/></svg>
+        <span class="tabbar-lbl">Mis envíos</span>
+        {% if pend.envios %}<span class="tabbar-badge" aria-label="{{ pend.envios }} guía(s) lista(s) para descargar">{{ pend.envios }}</span>{% endif %}
+    </a>
+    <a href="/portal/cuenta" class="tabbar-item{% if '/cuenta' in path %} active{% endif %}"{% if '/cuenta' in path %} aria-current="page"{% endif %}>
+        <svg class="tabbar-ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+        <span class="tabbar-lbl">Cuenta</span>
+    </a>
+</nav>
+
+{# ── CTA de instalación (PWA): la maneja portal-pwa.js. Arranca oculta y
+   sólo aparece si el navegador ofrece instalar (Android/Chrome) o con la
+   guía manual de iPhone/iPad; nunca cuando ya corre standalone. #}
+<div id="pwa-banner" class="pwa-banner" role="region" aria-label="Instalar la app del portal" hidden>
+    <div class="pwa-banner-txt">
+        <strong>Llevá el portal TAURO en tu teléfono</strong>
+        <span id="pwa-guia-ios" hidden>
+            En Safari: tocá Compartir
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4"/><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/></svg>
+            y elegí «Agregar a inicio».
+        </span>
+    </div>
+    <button type="button" id="pwa-instalar" class="btn btn-primary btn-sm" hidden>Instalar</button>
+    <button type="button" id="pwa-cerrar" class="pwa-banner-cerrar" aria-label="No volver a mostrar">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
 </div>
 {% else %}
 </main>

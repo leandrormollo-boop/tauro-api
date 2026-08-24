@@ -8,6 +8,40 @@ Formato:
   YYYY-MM-DD · QUIÉN · QUÉ HICIMOS · POR QUÉ
 
 ────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Claude (Fable)
+────────────────────────────────────────────────────────────
+
+✅ El PORTAL DE CLIENTES ahora es una PWA instalable (Android/iPhone).
+   El admin y la web pública quedan afuera a propósito en esta fase.
+
+QUÉ SE HIZO
+  - Manifest "TAURO" (id/scope /portal/, start_url /portal/home, es-AR,
+    standalone) + íconos 192/512 any y maskable desde el isotipo existente.
+  - Service worker en /portal/sw.js: RED-ONLY para todo lo autenticado,
+    precachea SOLO la pantalla offline pública (/portal/offline), limpia
+    únicamente cachés viejos tauro-portal-* y se actualiza en la carga
+    siguiente (SKIP_WAITING), nunca a mitad de un formulario.
+  - Pantalla offline neutra y autocontenida con reintento automático.
+  - static/js/portal-pwa.js: registro del SW + CTA de instalación
+    (beforeinstallprompt en Android; guía Compartir→Agregar a inicio en
+    iOS; oculta si ya corre standalone). Sin push ni permisos todavía.
+  - Barra móvil inferior (Inicio/Cotizar/Nuevo envío/Mis envíos/Cuenta)
+    en el shell autenticado: safe-area, sin tapar submit-bar/paso-nav,
+    ausente en login, escritorio e impresión. tauro.css → v25 (portal y
+    admin a la par, como exige test_smart_select_shared).
+  - Tests: tests/test_portal_pwa.py (22 tests, ASGI crudo sin httpx) que
+    fijan el contrato de seguridad del SW (allowlist/denylist de caché),
+    headers no-store, offline neutra, la tabbar y los pies del wizard.
+
+POR QUÉ
+  - Un SW que cachee HTML autenticado es una fuga (saldo/envíos legibles
+    post-logout): el contrato red-only quedó vigilado por tests.
+
+QUÉ FALTA
+  - Validación manual en dispositivos reales (Lighthouse + DevTools),
+    ver docs/PWA_PORTAL.md. Push notifications: fase futura.
+
+────────────────────────────────────────────────────────────
 2026-04-29 · Lean + Claude (CEO) + Codex + Gemini
 ────────────────────────────────────────────────────────────
 
