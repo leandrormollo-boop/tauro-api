@@ -34,7 +34,9 @@ WITH esperadas(tabla, columna, precision_esperada, escala_esperada) AS (
         ('solicitudes_guia', 'precio_tauro_ars', 14, 2),
         ('solicitudes_guia', 'precio_tauro_usd', 14, 2),
         ('solicitudes_guia', 'precio_cliente_final_ars', 14, 2),
-        ('clientes', 'markup_valor', 14, 4)
+        ('clientes', 'markup_valor', 14, 4),
+        ('clientes', 'markup_nac_valor', 14, 4),
+        ('clientes', 'tope_deuda_ars', 14, 2)
 )
 SELECT e.tabla,
        e.columna,

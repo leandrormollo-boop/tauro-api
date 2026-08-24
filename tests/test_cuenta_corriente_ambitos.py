@@ -27,6 +27,28 @@ def test_schema_aplicaciones_es_explicito_concurrente_y_sin_backfill():
     assert "INSERT INTO pagos_aplicaciones SELECT" not in schema
 
 
+def test_migracion_decimal_incluye_tope_deuda_y_markup_nacional():
+    schema = (RAIZ / "sql" / "schema.sql").read_text(encoding="utf-8")
+    migracion = (RAIZ / "scripts" / "migrar_dinero_numeric.sql").read_text(
+        encoding="utf-8"
+    )
+    preflight = (RAIZ / "scripts" / "preflight_cuenta_ambitos.sql").read_text(
+        encoding="utf-8"
+    )
+    postflight = (RAIZ / "scripts" / "postflight_cuenta_ambitos.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "markup_nac_valor NUMERIC(14,4)" in schema
+    assert "tope_deuda_ars NUMERIC(14,2)" in schema
+    assert "['clientes','markup_nac_valor','14,4']" in migracion
+    assert "['clientes','tope_deuda_ars','14,2']" in migracion
+    assert "('clientes', 'markup_nac_valor')" in preflight
+    assert "('clientes', 'tope_deuda_ars')" in preflight
+    assert "('clientes', 'markup_nac_valor', 14, 4)" in postflight
+    assert "('clientes', 'tope_deuda_ars', 14, 2)" in postflight
+
+
 def test_schema_idempotencia_y_fc_unica_global_normalizada_con_preflight():
     schema = (RAIZ / "sql" / "schema.sql").read_text(encoding="utf-8")
     preflight = (RAIZ / "scripts" / "preflight_cuenta_ambitos.sql").read_text(
