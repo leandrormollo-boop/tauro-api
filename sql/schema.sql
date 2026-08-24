@@ -40,14 +40,14 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_valor REAL;
 -- el precio. Si estas columnas están vacías, el envío nacional usa la regla
 -- internacional de siempre — nada se rompe para los clientes ya cargados.
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_tipo TEXT;
-ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_valor REAL;
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_nac_valor NUMERIC(14,4);
 -- Emisión por el cliente (decisión de Leandro 28/07): apagada por defecto,
 -- se habilita POR CLIENTE. Emitir cuesta plata real e irreversible, y con
 -- tope_deuda_ars el cliente moroso no puede seguir generando costo: si su
 -- saldo pendiente supera el tope, emite TAURO o se pone al día. NULL = sin
 -- tope (sólo el flag manda).
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS puede_emitir BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tope_deuda_ars REAL;
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tope_deuda_ars NUMERIC(14,2);
 -- Recolecciones también generan una operación real en la cuenta del courier.
 -- Se habilitan por cliente y permanecen apagadas por defecto, separadas del
 -- permiso de emisión de guías.

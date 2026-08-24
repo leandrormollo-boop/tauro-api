@@ -13,7 +13,9 @@ WHERE table_schema = 'public'
   AND (table_name, column_name) IN (
     ('pagos', 'monto_ars'),
     ('envios', 'monto_ars'),
-    ('solicitudes_guia', 'precio_tauro_ars')
+    ('solicitudes_guia', 'precio_tauro_ars'),
+    ('clientes', 'markup_nac_valor'),
+    ('clientes', 'tope_deuda_ars')
   )
 ORDER BY table_name, column_name;
 
