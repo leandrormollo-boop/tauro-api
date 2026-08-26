@@ -2696,6 +2696,25 @@ def tienda_pedido_descartar(
     return RedirectResponse(url="/portal/tienda?ok=descartado", status_code=303)
 
 
+@router.post("/tienda/sincronizar-catalogo")
+def tienda_sincronizar_catalogo(cliente: str = Depends(cliente_actual)):
+    """Reimporta el catálogo desde Shopify a pedido del cliente. El alta ya
+    ocurre sola al instalar; esto es para volver a traer productos nuevos."""
+    try:
+        from servicios.shopify_catalogo import sincronizar_para_cliente
+        r = sincronizar_para_cliente(cliente)
+    except Exception as e:
+        print(f"[portal] error sincronizando catálogo de {cliente}: {e}")
+        r = {"ok": False, "error": "No pudimos sincronizar ahora. Probá de nuevo."}
+    if not r.get("ok"):
+        return RedirectResponse(
+            url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo sincronizar.'))}",
+            status_code=303)
+    msg = (f"Catálogo sincronizado: {r.get('creados', 0)} nuevos, "
+           f"{r.get('actualizados', 0)} actualizados.")
+    return RedirectResponse(url=f"/portal/tienda?ok={quote(msg)}", status_code=303)
+
+
 # ── Mis clientes (destinatarios frecuentes) ─────────────────
 @router.get("/clientes", response_class=HTMLResponse)
 def clientes_view(

@@ -244,11 +244,14 @@ CREATE TABLE IF NOT EXISTS productos (
     alto_cm          REAL NOT NULL,
     peso_kg          REAL NOT NULL,
     valor_usd_default REAL NOT NULL DEFAULT 0,
+    imagen_url       TEXT,                            -- miniatura data: URI (import Shopify)
     activo           BOOLEAN NOT NULL DEFAULT FALSE,  -- pendiente validación Tauro
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(cliente_id, alias_interno)
 );
 CREATE INDEX IF NOT EXISTS idx_productos_cliente ON productos(cliente_id);
+-- Miniatura del producto (data: URI). Se llena sola al importar de Shopify.
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;
 
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (

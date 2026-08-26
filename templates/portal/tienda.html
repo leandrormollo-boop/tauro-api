@@ -16,7 +16,7 @@
     {% elif flash_ok == 'descartado' %}Pedido descartado.
     {% elif flash_ok == 'desconectada' %}Tienda desconectada.
     {% elif flash_ok == 'politica' %}Listo — así va a ver el envío tu comprador de ahora en más.
-    {% else %}Listo.{% endif %}
+    {% else %}{{ flash_ok }}{% endif %}
 </div>{% endif %}
 {% if flash_error %}<div class="msg error">{{ flash_error }}</div>{% endif %}
 
@@ -193,6 +193,12 @@
             </form>
         </div>
         {% endfor %}
+        <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <form method="POST" action="/portal/tienda/sincronizar-catalogo">
+                <button type="submit" class="btn btn-ghost btn-sm">↻ Sincronizar productos de Shopify</button>
+            </form>
+            <span class="sub" style="margin:0;font-size:12px;">Trae tus productos (nombre, SKU, peso y foto) a <a href="/portal/catalogo">tu catálogo</a>. Al conectar por la app oficial ya se cargan solos.</span>
+        </div>
     {% else %}
         <p class="sub" style="margin:0;">Todavía no conectaste ninguna tienda.</p>
     {% endif %}

@@ -9,26 +9,55 @@ from core.database import get_conn
 from modelos.producto import Producto, ProductoNuevo
 
 
-def _row_a_producto(r: dict) -> Optional[Producto]:
+_imagen_col_lista = False
+
+
+def _ensure_imagen_col() -> None:
+    """Agrega la columna `imagen_url` si la base es vieja. Idempotente."""
+    global _imagen_col_lista
+    if _imagen_col_lista:
+        return
     try:
-        return Producto(
-            cliente=str(r["cliente_id"]).strip().upper(),
-            alias_interno=str(r["alias_interno"]).strip(),
-            nombre_invoice=str(r["nombre_invoice"]).strip(),
-            hs_code=str(r["hs_code"]).strip(),
-            largo_cm=float(r["largo_cm"] or 0),
-            ancho_cm=float(r["ancho_cm"] or 0),
-            alto_cm=float(r["alto_cm"] or 0),
-            peso_kg=float(r["peso_kg"] or 0),
-            valor_usd_default=float(r["valor_usd_default"] or 0),
-            activo=bool(r["activo"]),
-        )
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE productos ADD COLUMN IF NOT EXISTS imagen_url TEXT")
+            conn.commit()
+    except Exception as e:
+        print(f"[catalogo] no pude asegurar la columna imagen_url: {e}")
+    _imagen_col_lista = True
+
+
+def _row_a_producto(r: dict) -> Optional[Producto]:
+    campos = dict(
+        cliente=str(r["cliente_id"]).strip().upper(),
+        alias_interno=str(r["alias_interno"]).strip(),
+        nombre_invoice=str(r["nombre_invoice"]).strip(),
+        hs_code=str(r["hs_code"] or "").strip(),
+        largo_cm=float(r["largo_cm"] or 0),
+        ancho_cm=float(r["ancho_cm"] or 0),
+        alto_cm=float(r["alto_cm"] or 0),
+        peso_kg=float(r["peso_kg"] or 0),
+        valor_usd_default=float(r["valor_usd_default"] or 0),
+        activo=bool(r["activo"]),
+        imagen_url=(r.get("imagen_url") if isinstance(r, dict) else None),
+    )
+    try:
+        return Producto(**campos)
     except Exception:
-        return None
+        # Producto importado de Shopify todavía sin completar (sin medidas ni
+        # HS): no pasa la validación estricta, pero igual tiene que verse en
+        # el catálogo para que el cliente lo complete. `construct` arma el
+        # objeto sin validar — sólo lo usamos para mostrar, nunca para emitir
+        # (esos productos quedan activo=FALSE y no cotizan).
+        try:
+            return Producto.construct(**campos)
+        except Exception:
+            return None
 
 
 def get_productos(cliente: str, solo_activos: bool = True) -> List[Producto]:
     """Productos del catálogo de un cliente."""
+    _ensure_imagen_col()
     cliente = cliente.strip().upper()
     query = "SELECT * FROM productos WHERE cliente_id = %s"
     params = [cliente]
@@ -244,3 +273,53 @@ def rechazar_producto(producto_id: int) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM productos WHERE id = %s", (producto_id,))
+
+
+def upsert_producto_importado(
+    cliente: str,
+    sku: str,
+    nombre_invoice: str,
+    peso_kg: float = 0.0,
+    imagen_url: Optional[str] = None,
+) -> str:
+    """
+    Alta/actualización de un producto traído de la tienda (Shopify).
+
+    Se guarda con `alias_interno = SKU` (la llave con la que se cruzan las
+    ventas) y queda `activo=FALSE`: la foto y el nombre ya están, pero le
+    faltan los datos aduaneros (medidas, HS, valor) que ninguna tienda tiene.
+    El cliente los completa una sola vez y recién ahí Tauro lo valida.
+
+    En un re-sync NO se pisa lo que el cliente ya cargó: sólo se refresca la
+    miniatura (y el peso si todavía estaba en 0). Devuelve 'creado' o
+    'actualizado'.
+    """
+    _ensure_imagen_col()
+    cliente = cliente.strip().upper()
+    sku = (sku or "").strip()
+    if not sku:
+        raise ValueError("Producto sin SKU: no se puede importar (la venta se cruza por SKU).")
+    nombre = (nombre_invoice or sku).strip()[:120] or sku
+    peso = float(peso_kg or 0)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO productos
+                    (cliente_id, alias_interno, nombre_invoice, hs_code,
+                     largo_cm, ancho_cm, alto_cm, peso_kg, valor_usd_default,
+                     imagen_url, activo)
+                VALUES (%s, %s, %s, '', 0, 0, 0, %s, 0, %s, FALSE)
+                ON CONFLICT (cliente_id, alias_interno) DO UPDATE SET
+                    imagen_url = COALESCE(EXCLUDED.imagen_url, productos.imagen_url),
+                    peso_kg    = CASE WHEN productos.peso_kg = 0
+                                      THEN EXCLUDED.peso_kg ELSE productos.peso_kg END
+                RETURNING (xmax = 0) AS insertado
+                """,
+                (cliente, sku, nombre, peso, imagen_url),
+            )
+            fila = cur.fetchone()
+        conn.commit()
+    insertado = bool(fila["insertado"]) if fila else False
+    return "creado" if insertado else "actualizado"

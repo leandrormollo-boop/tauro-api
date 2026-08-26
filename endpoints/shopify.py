@@ -391,6 +391,20 @@ def callback(request: Request):
         except Exception as e:
             print(f"[shopify] no pude vincular {shop} al instalar: {e}")
 
+    # Importar el catálogo de la tienda en segundo plano: apenas conecta, el
+    # cliente encuentra sus productos ya cargados (nombre, SKU, peso, foto).
+    # Va en un hilo porque bajar productos + miniaturas tarda y el callback
+    # tiene que responder rápido.
+    if dueno:
+        try:
+            import threading
+            from servicios.shopify_catalogo import importar_catalogo
+            threading.Thread(
+                target=importar_catalogo, args=(shop, dueno), daemon=True,
+            ).start()
+        except Exception as e:
+            print(f"[shopify] no pude lanzar la importación de catálogo de {shop}: {e}")
+
     print(f"[shopify] instalada {shop} · webhooks {topics} · "
           f"cliente {dueno or 'sin vincular'}")
 

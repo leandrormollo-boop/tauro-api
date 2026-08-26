@@ -39,6 +39,9 @@ class Producto(BaseModel):
     peso_kg: float = Field(..., gt=0)
     valor_usd_default: float = Field(..., ge=0)
     activo: bool = True
+    # Miniatura del producto (data: URI). Se llena sola al importar de
+    # Shopify; sirve para que el cliente lo identifique de un vistazo.
+    imagen_url: Optional[str] = None
 
     _normalizar_decimales = validator(
         "largo_cm", "ancho_cm", "alto_cm", "peso_kg",

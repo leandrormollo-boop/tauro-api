@@ -54,6 +54,7 @@
         <table>
             <thead>
                 <tr>
+                    <th></th>
                     <th>Alias</th>
                     <th>Invoice (EN)</th>
                     <th>HS code</th>
@@ -71,6 +72,16 @@
                     data-ancho="{{ '%g'|format(p.ancho_cm) }}" data-alto="{{ '%g'|format(p.alto_cm) }}"
                     data-peso="{{ '%g'|format(p.peso_kg) }}" data-valor="{{ '%g'|format(p.valor_usd_default) }}"
                     data-tax="{{ '%g'|format(taxes.get(p.alias_interno, 0)) }}">
+                    <td class="thumb-cell">
+                        {% if p.imagen_url %}
+                            <img src="{{ p.imagen_url }}" alt="{{ p.alias_interno }}"
+                                 style="width:44px;height:44px;object-fit:cover;border-radius:8px;background:var(--bg-2);">
+                        {% else %}
+                            <span style="display:inline-flex;width:44px;height:44px;border-radius:8px;
+                                         background:var(--bg-2);align-items:center;justify-content:center;
+                                         color:var(--fg-3);font-size:16px;">📦</span>
+                        {% endif %}
+                    </td>
                     <td><strong>{{ p.alias_interno }}</strong></td>
                     <td>{{ p.nombre_invoice }}</td>
                     <td class="mono">{{ p.hs_code }}</td>
@@ -81,8 +92,11 @@
                     <td class="num precio-unidad" data-prod="{{ p.alias_interno }}"
                         data-aprobado="{{ 1 if p.activo else 0 }}">—</td>
                     <td>
+                        {% set incompleto = (not p.hs_code) or (p.largo_cm|float <= 0) or (p.valor_usd_default|float <= 0) %}
                         {% if p.activo %}
                             <span class="badge ok">Aprobado</span>
+                        {% elif incompleto %}
+                            <span class="badge warn" title="Importado de tu tienda. Completá medidas, HS code y valor para poder despacharlo.">Falta completar</span>
                         {% else %}
                             <span class="badge warn">En revisión</span>
                         {% endif %}
