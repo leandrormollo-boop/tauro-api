@@ -9,6 +9,7 @@
 
 <div class="card" style="max-width:560px;">
   <form method="POST" action="/admin/envios/nuevo" enctype="multipart/form-data">
+    <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 
     <div class="form-group">
       <label>Cliente *</label>
@@ -25,36 +26,47 @@
     <div class="form-grid-2">
       <div class="form-group">
         <label>Fecha *</label>
-        <input type="date" name="fecha" required value="{{ today }}">
+        <input type="date" name="fecha" required value="{{ form_data.fecha if form_data else today }}">
       </div>
       <div class="form-group">
         <label>Nro. Factura</label>
-        <input type="text" name="nro_fc" placeholder="0106-00001234">
+        <input type="text" name="nro_fc" value="{{ form_data.nro_fc if form_data else '' }}" placeholder="0106-00001234">
       </div>
     </div>
 
     <div class="form-group">
       <label>Monto ARS *</label>
-      <input type="text" name="monto_ars" required inputmode="decimal" data-numero="monto" placeholder="150.000 o 150,000">
+      <input type="text" name="monto_ars" required inputmode="decimal" data-numero="monto"
+             value="{{ form_data.monto_ars if form_data else '' }}" placeholder="150.000 o 150,000">
+    </div>
+
+    <div class="form-group">
+      <label>Ámbito contable *</label>
+      <select name="ambito" required>
+        <option value="">— Seleccioná —</option>
+        <option value="NACIONAL" {% if form_data and form_data.ambito == 'NACIONAL' %}selected{% endif %}>Nacional</option>
+        <option value="INTERNACIONAL" {% if form_data and form_data.ambito == 'INTERNACIONAL' %}selected{% endif %}>Internacional</option>
+      </select>
+      <small style="color:var(--fg-4);">Debe coincidir con la ruta del envío; el courier no define el ámbito.</small>
     </div>
 
     <div class="form-group">
       <label>Descripción</label>
-      <input type="text" name="descripcion" placeholder="Envío FEDEX a USA · 3 piezas">
+      <input type="text" name="descripcion" value="{{ form_data.descripcion if form_data else '' }}" placeholder="Envío FEDEX a USA · 3 piezas">
     </div>
 
     <div class="form-group">
       <label>Tracking</label>
-      <input type="text" name="tracking" placeholder="7489270349280">
+      <input type="text" name="tracking" value="{{ form_data.tracking if form_data else '' }}" placeholder="7489270349280">
     </div>
 
     <div class="form-group">
       <label>Estado</label>
       <select name="estado">
-        <option value="ACTIVO">Activo</option>
-        <option value="CANCELADO">Cancelado</option>
-        <option value="NC">Nota de crédito (NC)</option>
+        <option value="ACTIVO" {% if not form_data or form_data.estado == 'ACTIVO' %}selected{% endif %}>Activo</option>
+        <option value="CANCELADO" {% if form_data and form_data.estado == 'CANCELADO' %}selected{% endif %}>Cancelado</option>
       </select>
+      <small style="color:var(--fg-4);">Las notas de crédito no se cargan como facturas.</small>
     </div>
 
     <div class="form-group">

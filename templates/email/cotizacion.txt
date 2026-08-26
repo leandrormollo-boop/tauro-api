@@ -1,0 +1,22 @@
+TAURO SOLUTIONS
+Estimación online {{ cotizacion.referencia }}
+
+Ruta: {{ cotizacion.origen_nombre }} → {{ cotizacion.destino_nombre }}
+Emitida: {{ cotizacion.emitida_texto }}
+Vigente hasta: {{ cotizacion.vigente_texto }}
+
+Paquete: {{ cotizacion.peso_texto }} kg · {{ cotizacion.medidas_texto }} cm
+Valor declarado: USD {{ cotizacion.valor_texto }}
+
+OPCIONES DISPONIBLES
+{% for opcion in cotizacion.opciones -%}
+- {{ opcion.nombre }} · {{ opcion.servicio }} · {{ opcion.dias_texto }}
+  ARS {{ opcion.precio_ars_texto }} · USD {{ opcion.precio_usd_texto }}{% if opcion.recomendada %} · Precio más bajo{% endif %}
+{% endfor %}
+
+Importante: esta es una estimación con ciudades y códigos postales de referencia. El precio final se vuelve a validar con las direcciones, medidas, peso facturable y disponibilidad reales al crear el envío. Derechos, impuestos, seguros y recargos extraordinarios sólo están incluidos cuando se indiquen expresamente.
+
+Abrí tu cotización: {{ cotizacion.url }}
+
+¿Querés avanzar o revisar aduana? Respondé este correo y te ayudamos.
+TAURO Solutions · taurosolutions.ar

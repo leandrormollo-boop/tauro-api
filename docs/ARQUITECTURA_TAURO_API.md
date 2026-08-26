@@ -2,6 +2,14 @@
 
 *Tauro Solutions — Abril 2026*
 
+> **Documento histórico.** Describe el MVP inicial basado en Google Sheets y
+> FedEx; no es la arquitectura productiva actual ni autoriza operaciones.
+> Para nuevas integraciones usar
+> [`PLATAFORMA_MULTIOPERADOR.md`](PLATAFORMA_MULTIOPERADOR.md),
+> [`AMBITOS_NACIONAL_INTERNACIONAL.md`](AMBITOS_NACIONAL_INTERNACIONAL.md) y
+> los contratos ejecutables de `servicios/carrier_contract.py` y
+> `servicios/carrier_adapter.py`.
+
 ---
 
 ## 1. Modelo de negocio

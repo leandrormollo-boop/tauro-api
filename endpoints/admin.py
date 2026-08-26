@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 import subprocess
@@ -14,6 +15,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 
@@ -23,7 +25,7 @@ from fastapi.templating import Jinja2Templates
 
 from core.database import get_conn
 from servicios.cuenta_corriente import (
-    registrar_pago, registrar_envio, cancelar_envio,
+    registrar_pago, registrar_envio, facturar_cargo, cancelar_envio,
     get_envios_cliente, get_pagos,
     get_facturado_real, total_pagado, saldo,
     get_resumen_clientes_bulk,
@@ -48,6 +50,7 @@ from servicios.numeros_humanos import (
     parse_configuracion_numerica,
     parse_entero_formulario as _entero_form,
     parse_float_formulario as _numero_form,
+    parse_importe_humano,
     politica_configuracion_numerica,
 )
 from servicios.configuracion_couriers_cliente import (
@@ -56,6 +59,7 @@ from servicios.configuracion_couriers_cliente import (
     parsear_fila,
     resumen_auditoria,
 )
+from servicios.carrier_contract import CARRIER_SPECS
 from servicios.solicitudes_guia import (
     ESTADOS_SOLICITUD,
     actualizar_solicitud_guia,
@@ -77,6 +81,97 @@ from servicios.rate_limit import check_rate, reset_rate, client_ip
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
+
+AMBITOS_CONTABLES = {"NACIONAL", "INTERNACIONAL"}
+MODOS_IMPUTACION = {"SIN_IMPUTAR", "NACIONAL", "INTERNACIONAL", "DIVIDIR"}
+_IDEMPOTENCY_KEY_MIN_LEN = 32
+_IDEMPOTENCY_KEY_MAX_LEN = 128
+_IDEMPOTENCY_KEY_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+)
+
+
+def _nueva_idempotency_key() -> str:
+    """Token opaco por render; sólo deduplica, nunca identifica al cliente."""
+    return secrets.token_urlsafe(32)
+
+
+def _idempotency_key_form(valor) -> str:
+    """Valida el token del formulario sin usarlo para autorización u ownership."""
+    if not isinstance(valor, str) or not valor.strip():
+        raise ValueError("Falta la clave de operación del formulario. Recargá la página.")
+    clave = valor.strip()
+    if (
+        not (_IDEMPOTENCY_KEY_MIN_LEN <= len(clave) <= _IDEMPOTENCY_KEY_MAX_LEN)
+        or any(caracter not in _IDEMPOTENCY_KEY_CHARS for caracter in clave)
+    ):
+        raise ValueError("La clave de operación del formulario no es válida. Recargá la página.")
+    return clave
+
+
+def _idempotency_key_para_reintento(valor) -> str:
+    """Conserva una clave válida tras un error; reemplaza una manipulada."""
+    try:
+        return _idempotency_key_form(valor)
+    except ValueError:
+        return _nueva_idempotency_key()
+
+
+def _ambito_contable_form(valor: str) -> str:
+    ambito = str(valor or "").strip().upper()
+    if ambito not in AMBITOS_CONTABLES:
+        raise ValueError("Elegí un ámbito contable: Nacional o Internacional.")
+    return ambito
+
+
+def _importe_contable_form(valor, campo: str, *, permitir_cero: bool = False) -> Decimal:
+    """Parsea dinero localizado y conserva Decimal hasta llegar a PostgreSQL."""
+    try:
+        monto = parse_importe_humano(valor)
+    except ValueError:
+        raise ValueError(
+            f"{campo}: ingresá un número válido, por ejemplo 100.000 o 100,000."
+        ) from None
+    if monto is None:
+        raise ValueError(f"{campo}: completá este valor.")
+    if not monto.is_finite() or monto < 0 or (monto == 0 and not permitir_cero):
+        raise ValueError(f"{campo}: el monto debe ser mayor que cero.")
+    if monto.as_tuple().exponent < -2:
+        raise ValueError(f"{campo}: usá como máximo dos decimales.")
+    return monto.quantize(Decimal("0.01"))
+
+
+def _aplicaciones_pago_form(
+    monto_total,
+    imputacion: str,
+    monto_nacional: str = "",
+    monto_internacional: str = "",
+) -> dict[str, Decimal]:
+    """Convierte la elección humana en la asignación exacta que valida el servicio."""
+    total = _importe_contable_form(monto_total, "Monto ARS")
+    # En invocaciones Python directas (tests/CLI), FastAPI deja el objeto Form
+    # como default. Por HTTP siempre llega un string.
+    modo = (
+        str(imputacion or "").strip().upper()
+        if isinstance(imputacion, str)
+        else "SIN_IMPUTAR"
+    )
+    if modo not in MODOS_IMPUTACION:
+        raise ValueError("Elegí cómo imputar el pago.")
+    if modo == "SIN_IMPUTAR":
+        return {}
+    if modo in AMBITOS_CONTABLES:
+        return {modo: total}
+
+    nacional = _importe_contable_form(monto_nacional, "Monto nacional")
+    internacional = _importe_contable_form(
+        monto_internacional, "Monto internacional"
+    )
+    if nacional + internacional > total:
+        raise ValueError(
+            "La imputación nacional e internacional no puede superar el pago."
+        )
+    return {"NACIONAL": nacional, "INTERNACIONAL": internacional}
 
 from servicios.couriers_urls import ambito_envio, es_nacional, url_tracking
 templates.env.globals["url_tracking"] = url_tracking
@@ -324,32 +419,50 @@ def admin_login(request: Request, password: str = Form(...),
 # reinicio de Railway invalidaría todos los links en vuelo, y el momento
 # en que más se necesita esto es justamente cuando algo se reinició.
 _RECUPERO_MINUTOS = 15
+_RECUPERO_MAX_HORA_DEFAULT = 6
 
 
-def _ensure_tabla_recupero() -> None:
-    from core.database import get_conn
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS admin_recupero (
-                    token   TEXT PRIMARY KEY,
-                    vence   TIMESTAMPTZ NOT NULL,
-                    usado   BOOLEAN NOT NULL DEFAULT FALSE,
-                    creado  TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
-            """)
-        conn.commit()
+class AdminRecoveryRateLimited(RuntimeError):
+    """El cupo durable de correos de acceso admin fue alcanzado."""
+
+
+def _recupero_max_hora() -> int:
+    try:
+        valor = int(
+            (os.getenv("EMAIL_ADMIN_RECOVERY_MAX_HORA") or "").strip()
+            or _RECUPERO_MAX_HORA_DEFAULT
+        )
+    except (TypeError, ValueError):
+        valor = _RECUPERO_MAX_HORA_DEFAULT
+    return min(max(valor, 1), 100)
+
+
+def _hash_token_recupero(token: str) -> str:
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
 
 
 def _guardar_token_recupero(token: str) -> None:
     from core.database import get_conn
-    _ensure_tabla_recupero()
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # El límite en memoria por IP es sólo una primera barrera. Este
+            # lock + conteo persiste entre workers/reinicios y no depende de
+            # headers de proxy que un cliente directo podría falsificar.
+            cur.execute("SELECT pg_advisory_xact_lock(846733291)")
+            cur.execute(
+                "SELECT COUNT(*) AS total FROM admin_recupero "
+                "WHERE creado >= NOW() - interval '1 hour'"
+            )
+            fila = cur.fetchone()
+            usados = int((fila or {}).get("total") or 0)
+            if usados >= _recupero_max_hora():
+                raise AdminRecoveryRateLimited(
+                    "cupo durable de recupero admin alcanzado"
+                )
             cur.execute(
                 "INSERT INTO admin_recupero (token, vence) "
                 "VALUES (%s, now() + interval '%s minutes')",
-                (token, _RECUPERO_MINUTOS),
+                (_hash_token_recupero(token), _RECUPERO_MINUTOS),
             )
             # Limpieza oportunista de los vencidos.
             cur.execute("DELETE FROM admin_recupero WHERE vence < now() - interval '1 day'")
@@ -359,14 +472,15 @@ def _guardar_token_recupero(token: str) -> None:
 def _canjear_token_recupero(token: str) -> bool:
     """True sólo la primera vez que se usa un token válido y vigente."""
     from core.database import get_conn
-    _ensure_tabla_recupero()
+    if not token or len(token) < 32:
+        return False
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE admin_recupero SET usado = TRUE
                 WHERE token = %s AND usado = FALSE AND vence > now()
                 RETURNING token
-            """, (token,))
+            """, (_hash_token_recupero(token),))
             ok = cur.fetchone() is not None
         conn.commit()
     return ok
@@ -377,7 +491,10 @@ def _borrar_token_recupero(token: str) -> None:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM admin_recupero WHERE token = %s", (token,))
+                cur.execute(
+                    "DELETE FROM admin_recupero WHERE token = %s",
+                    (_hash_token_recupero(token),),
+                )
             conn.commit()
     except Exception as e:
         print(f"[admin] no pude borrar el token de recuperación: {e}")
@@ -425,6 +542,12 @@ def admin_recuperar(request: Request):
     token = secrets.token_urlsafe(32)
     try:
         _guardar_token_recupero(token)
+    except AdminRecoveryRateLimited:
+        return templates.TemplateResponse(
+            request=request, name="admin/login.html",
+            context={"error": "Ya pediste varios links. Esperá un rato."},
+            status_code=429,
+        )
     except Exception as e:
         print(f"[admin] no pude guardar el token de recuperación: {e}")
         return templates.TemplateResponse(
@@ -435,7 +558,7 @@ def admin_recuperar(request: Request):
         )
 
     base = (os.getenv("BASE_URL") or "https://taurosolutions.ar").rstrip("/")
-    link = f"{base}/admin/recuperar/{token}"
+    link = f"{base}/admin/recuperar#token={token}"
     try:
         from core.email_sender import enviar_link_magico
         enviado = enviar_link_magico(destino, link, "equipo Tauro",
@@ -462,9 +585,22 @@ def admin_recuperar(request: Request):
     )
 
 
-@router.get("/recuperar/{token}")
-def admin_recuperar_usar(token: str):
-    """Canjea el link por una sesión de admin. Un solo uso."""
+@router.get("/recuperar", response_class=HTMLResponse)
+def admin_recuperar_form(request: Request):
+    """Recibe el fragmento sólo en el navegador y limpia la barra."""
+    response = templates.TemplateResponse(
+        request=request,
+        name="admin/recuperar.html",
+        context={},
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
+@router.post("/recuperar/canjear")
+def admin_recuperar_usar(token: str = Form(...)):
+    """Canjea el secreto enviado en el body por una sesión de admin."""
     try:
         valido = _canjear_token_recupero(token)
     except Exception as e:
@@ -1096,23 +1232,58 @@ def admin_cliente_detail(
 
             # Envíos paginados
             cur.execute(
-                "SELECT * FROM envios WHERE cliente_id = %s "
-                "ORDER BY fecha DESC, id DESC LIMIT %s OFFSET %s",
+                """
+                SELECT id, cliente_id, fecha, nro_fc, monto_ars, estado,
+                       descripcion, tracking, created_at, factura_nombre,
+                       solicitud_id, ambito,
+                       (factura_pdf IS NOT NULL) AS tiene_factura_pdf
+                FROM envios
+                WHERE cliente_id = %s
+                ORDER BY fecha DESC, id DESC
+                LIMIT %s OFFSET %s
+                """,
                 (cliente_id, PAGE_SIZE, offset),
             )
             envios = [dict(r) for r in cur.fetchall()]
 
-            # Pagos (suelen ser pocos, no paginamos)
+            # Pagos con su imputación en una sola consulta (sin N+1).
             cur.execute(
-                "SELECT * FROM pagos WHERE cliente_id = %s ORDER BY fecha DESC LIMIT 200",
+                """
+                SELECT
+                    p.*,
+                    COALESCE(SUM(pa.monto_ars) FILTER (
+                        WHERE pa.ambito = 'NACIONAL'
+                          AND pa.estado = CASE
+                              WHEN p.estado = 'PENDIENTE' THEN 'SOLICITADA'
+                              ELSE 'APLICADA'
+                          END
+                    ), 0) AS monto_nacional,
+                    COALESCE(SUM(pa.monto_ars) FILTER (
+                        WHERE pa.ambito = 'INTERNACIONAL'
+                          AND pa.estado = CASE
+                              WHEN p.estado = 'PENDIENTE' THEN 'SOLICITADA'
+                              ELSE 'APLICADA'
+                          END
+                    ), 0) AS monto_internacional
+                FROM pagos p
+                LEFT JOIN pagos_aplicaciones pa ON pa.pago_id = p.id
+                WHERE p.cliente_id = %s
+                GROUP BY p.id
+                ORDER BY p.fecha DESC, p.id DESC
+                LIMIT 200
+                """,
                 (cliente_id,),
             )
             pagos = [dict(r) for r in cur.fetchall()]
 
     cliente = dict(row)
     cliente["pricing_desc"] = describir_pricing(cliente)
-    facturado = get_facturado_real(cliente_id)
-    saldo_data = saldo(cliente_id, facturado)
+    from servicios import cuenta_corriente as cuenta_corriente_service
+
+    cuenta_ambitos = cuenta_corriente_service.resumen_cuenta_por_ambito(cliente_id)
+    puede_clasificar_cargos = callable(
+        getattr(cuenta_corriente_service, "clasificar_cargo_sin_ambito", None)
+    )
 
     flash_ok = None
     if ok == "creado":
@@ -1140,12 +1311,56 @@ def admin_cliente_detail(
         context={
             "seccion": "clientes",
             "cliente": cliente,
-            "saldo": saldo_data,
+            "cuenta_ambitos": cuenta_ambitos,
             "envios": envios,
             "pagos": pagos,
+            "puede_clasificar_cargos": puede_clasificar_cargos,
             "pagination": pagination,
             "flash_ok": flash_ok,
         },
+    )
+
+
+@router.post("/clientes/{cliente_id}/envios/{envio_id}/clasificar")
+def admin_clasificar_cargo(
+    cliente_id: str,
+    envio_id: int,
+    ambito: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Clasifica sólo un cargo histórico sin ámbito y con ownership validado."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    from servicios import cuenta_corriente as cuenta_corriente_service
+
+    clasificar = getattr(
+        cuenta_corriente_service, "clasificar_cargo_sin_ambito", None
+    )
+    if not callable(clasificar):
+        return Response(
+            content="La clasificación histórica todavía no está habilitada.",
+            status_code=409,
+            media_type="text/plain",
+        )
+    try:
+        cambio = clasificar(
+            envio_id=envio_id,
+            cliente_id=cliente_id.strip().upper(),
+            ambito=_ambito_contable_form(ambito),
+            actor_tipo="admin",
+            actor_ref="admin",
+        )
+    except ValueError as exc:
+        return Response(content=str(exc), status_code=400, media_type="text/plain")
+    if not cambio:
+        return Response(
+            content="El cargo no existe, pertenece a otro cliente o ya está clasificado.",
+            status_code=409,
+            media_type="text/plain",
+        )
+    return RedirectResponse(
+        url=f"/admin/clientes/{cliente_id.strip().upper()}", status_code=303
     )
 
 
@@ -1166,12 +1381,18 @@ def admin_cliente_acceso_precios_form(
         matriz = None
     if not matriz:
         return RedirectResponse(url="/admin/clientes", status_code=303)
+    ids_matriz = {fila["id"] for fila in matriz["couriers"]}
+    futuros_couriers = tuple(
+        spec for spec in CARRIER_SPECS
+        if spec.id not in ids_matriz
+    )
     return templates.TemplateResponse(
         request=request,
         name="admin/cliente_acceso_precios.html",
         context={
             "seccion": "clientes",
             "matriz": matriz,
+            "futuros_couriers": futuros_couriers,
             "pricing_modes": PRICING_MODES,
             "flash_ok": (
                 f"Configuración de {matriz['nombre']} actualizada."
@@ -1320,6 +1541,10 @@ def admin_cliente_acceso_precios_guardar(
             context={
                 "seccion": "clientes",
                 "matriz": matriz,
+                "futuros_couriers": tuple(
+                    spec for spec in CARRIER_SPECS
+                    if spec.id not in {fila["id"] for fila in matriz["couriers"]}
+                ),
                 "pricing_modes": PRICING_MODES,
                 "flash_error": str(exc),
             },
@@ -1466,6 +1691,7 @@ def admin_envio_form(
             "clientes": clientes,
             "today": today,
             "preselect_cliente": (cliente or "").upper(),
+            "idempotency_key": _nueva_idempotency_key(),
         },
     )
 
@@ -1477,6 +1703,10 @@ async def admin_envio_nuevo(
     fecha: str = Form(...),
     nro_fc: str = Form(""),
     monto_ars: str = Form(...),
+    ambito: str = Form(...),
+    # Default vacío permite que un form abierto antes del deploy reciba un
+    # error humano y una clave nueva, en vez del JSON 422 de FastAPI.
+    idempotency_key: str = Form(""),
     descripcion: str = Form(""),
     tracking: str = Form(""),
     estado: str = Form("ACTIVO"),
@@ -1487,21 +1717,28 @@ async def admin_envio_nuevo(
         return _redirect_login()
 
     try:
-        monto_num = _numero_form(
-            monto_ars, "Monto ARS", importe=True, minimo=0.01
-        )
+        idempotency_key_normalizada = _idempotency_key_form(idempotency_key)
+        monto_num = _importe_contable_form(monto_ars, "Monto ARS")
+        ambito_normalizado = _ambito_contable_form(ambito)
+        estado_normalizado = str(estado or "").strip().upper()
+        if estado_normalizado not in {"ACTIVO", "CANCELADO"}:
+            raise ValueError(
+                "El alta manual admite cargos activos o cancelados; una NC no es una factura."
+            )
         from servicios.cuenta_corriente import leer_comprobante_con_tope
         contenido_fc = await leer_comprobante_con_tope(factura_pdf)
         registrar_envio(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
             monto_ars=monto_num,
+            ambito=ambito_normalizado,
             nro_fc=nro_fc,
-            estado=estado,
+            estado=estado_normalizado,
             descripcion=descripcion,
             tracking=tracking,
             factura_pdf=contenido_fc or None,
             factura_nombre=(factura_pdf.filename if factura_pdf else "") or "",
+            idempotency_key=idempotency_key_normalizada,
         )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
     except Exception as e:
@@ -1515,6 +1752,16 @@ async def admin_envio_nuevo(
                 "today": today,
                 "preselect_cliente": cliente_id.upper(),
                 "flash_error": str(e),
+                "idempotency_key": _idempotency_key_para_reintento(idempotency_key),
+                "form_data": {
+                    "fecha": fecha,
+                    "nro_fc": nro_fc,
+                    "monto_ars": monto_ars,
+                    "ambito": str(ambito or "").strip().upper(),
+                    "descripcion": descripcion,
+                    "tracking": tracking,
+                    "estado": str(estado or "").strip().upper(),
+                },
             },
         )
 
@@ -1532,6 +1779,110 @@ def admin_ver_factura(envio_id: int, admin_token: Optional[str] = Cookie(None)):
                     headers={"Content-Disposition": f'inline; filename="{nombre}"'})
 
 
+def _cargo_para_facturar(cliente_id: str, envio_id: int):
+    """Carga un cargo por su dueño; nunca confía sólo en el id de la URL."""
+    cliente_normalizado = str(cliente_id or "").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, cliente_id, fecha, nro_fc, monto_ars, estado,
+                       descripcion, tracking, ambito, factura_pdf IS NOT NULL AS tiene_pdf
+                FROM envios
+                WHERE id = %s AND cliente_id = %s
+                """,
+                (envio_id, cliente_normalizado),
+            )
+            fila = cur.fetchone()
+    return dict(fila) if fila else None
+
+
+@router.get(
+    "/clientes/{cliente_id}/envios/{envio_id}/facturar",
+    response_class=HTMLResponse,
+)
+def admin_facturar_cargo_form(
+    request: Request,
+    cliente_id: str,
+    envio_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Adjunta la FC al débito existente, sin crear un segundo cargo."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    cliente_normalizado = cliente_id.strip().upper()
+    cargo = _cargo_para_facturar(cliente_normalizado, envio_id)
+    if not cargo:
+        return Response(content="Cargo no encontrado.", status_code=404)
+    if str(cargo.get("estado") or "").upper() != "ACTIVO":
+        return Response(content="El cargo no está activo.", status_code=409)
+    if str(cargo.get("nro_fc") or "").strip():
+        return Response(content="El cargo ya está facturado.", status_code=409)
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/facturar_cargo_form.html",
+        context={
+            "seccion": "clientes",
+            "cargo": cargo,
+            "cliente_id": cliente_normalizado,
+            "nro_fc": "",
+            "flash_error": None,
+        },
+    )
+
+
+@router.post("/clientes/{cliente_id}/envios/{envio_id}/facturar")
+async def admin_facturar_cargo(
+    request: Request,
+    cliente_id: str,
+    envio_id: int,
+    nro_fc: str = Form(...),
+    factura_pdf: UploadFile = File(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Factura atómicamente un cargo ya debitado en la cuenta del cliente."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    cliente_normalizado = cliente_id.strip().upper()
+    cargo = _cargo_para_facturar(cliente_normalizado, envio_id)
+    if not cargo:
+        return Response(content="Cargo no encontrado.", status_code=404)
+    try:
+        from servicios.cuenta_corriente import leer_comprobante_con_tope
+
+        contenido = await leer_comprobante_con_tope(factura_pdf)
+        resultado = facturar_cargo(
+            envio_id=envio_id,
+            cliente_id=cliente_normalizado,
+            nro_fc=nro_fc,
+            factura_pdf=contenido,
+            factura_nombre=(factura_pdf.filename or "") if factura_pdf else "",
+            actor_tipo="admin",
+            actor_ref="admin",
+        )
+        if not resultado:
+            return Response(
+                content="El cargo ya no está disponible para facturar.",
+                status_code=409,
+            )
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/facturar_cargo_form.html",
+            context={
+                "seccion": "clientes",
+                "cargo": cargo,
+                "cliente_id": cliente_normalizado,
+                "nro_fc": nro_fc,
+                "flash_error": str(exc),
+            },
+            status_code=400,
+        )
+    return RedirectResponse(
+        url=f"/admin/clientes/{cliente_normalizado}", status_code=303
+    )
+
+
 @router.post("/envios/{envio_id}/cancelar")
 def admin_envio_cancelar(
     envio_id: int,
@@ -1540,14 +1891,20 @@ def admin_envio_cancelar(
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    # Obtener cliente_id para redirigir
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT cliente_id FROM envios WHERE id=%s", (envio_id,))
-            row = cur.fetchone()
-
-    cancelar_envio(envio_id)
-    cliente_id = row["cliente_id"] if row else ""
+    resultado = cancelar_envio(
+        envio_id,
+        actor_tipo="admin",
+        actor_ref="admin",
+    )
+    if not resultado:
+        return Response(
+            content=(
+                "No se puede cancelar este cargo. Si ya tiene factura, "
+                "requiere una nota de crédito documentada."
+            ),
+            status_code=409,
+        )
+    cliente_id = resultado["cliente_id"]
     return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
 
 
@@ -1998,6 +2355,7 @@ def admin_pago_form(
             "clientes": clientes,
             "today": today,
             "preselect_cliente": (cliente or "").upper(),
+            "idempotency_key": _nueva_idempotency_key(),
         },
     )
 
@@ -2008,9 +2366,14 @@ async def admin_pago_nuevo(
     cliente_id: str = Form(...),
     fecha: str = Form(...),
     monto_ars: str = Form(...),
+    # Compatibilidad transitoria con tabs abiertas antes de agregar el hidden.
+    idempotency_key: str = Form(""),
     metodo: str = Form("transferencia"),
     referencia: str = Form(""),
     nota: str = Form(""),
+    imputacion: str = Form("SIN_IMPUTAR"),
+    monto_nacional: str = Form(""),
+    monto_internacional: str = Form(""),
     comprobante: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
@@ -2018,8 +2381,13 @@ async def admin_pago_nuevo(
         return _redirect_login()
 
     try:
-        monto_num = _numero_form(
-            monto_ars, "Monto ARS", importe=True, minimo=0.01
+        idempotency_key_normalizada = _idempotency_key_form(idempotency_key)
+        monto_num = _importe_contable_form(monto_ars, "Monto ARS")
+        aplicaciones = _aplicaciones_pago_form(
+            monto_num,
+            imputacion,
+            monto_nacional,
+            monto_internacional,
         )
         from servicios.cuenta_corriente import leer_comprobante_con_tope
         contenido = await leer_comprobante_con_tope(comprobante)
@@ -2033,8 +2401,12 @@ async def admin_pago_nuevo(
             # El admin carga APROBADO: impacta el saldo al instante. El
             # circuito PENDIENTE es sólo para pagos informados por clientes.
             estado="APROBADO",
+            aplicaciones=aplicaciones,
+            actor_tipo="admin",
+            actor_ref="admin",
             comprobante=contenido or None,
             comprobante_nombre=(comprobante.filename if comprobante else "") or "",
+            idempotency_key=idempotency_key_normalizada,
         )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
     except Exception as e:
@@ -2048,6 +2420,17 @@ async def admin_pago_nuevo(
                 "today": today,
                 "preselect_cliente": cliente_id.upper(),
                 "flash_error": str(e),
+                "idempotency_key": _idempotency_key_para_reintento(idempotency_key),
+                "form_data": {
+                    "fecha": fecha,
+                    "monto_ars": monto_ars,
+                    "metodo": metodo,
+                    "referencia": referencia,
+                    "nota": nota,
+                    "imputacion": str(imputacion or "").strip().upper(),
+                    "monto_nacional": monto_nacional,
+                    "monto_internacional": monto_internacional,
+                },
             },
         )
 
@@ -2227,6 +2610,9 @@ def admin_resolver_pago(
     request: Request,
     pago_id: int,
     decision: str = Form(...),
+    imputacion: str = Form("SIN_IMPUTAR"),
+    monto_nacional: str = Form(""),
+    monto_internacional: str = Form(""),
     admin_token: Optional[str] = Cookie(None),
 ):
     """
@@ -2236,16 +2622,45 @@ def admin_resolver_pago(
     if not _is_auth(admin_token):
         return _redirect_login()
     from servicios.cuenta_corriente import resolver_pago
-    aprobar = (decision == "aprobar")
-    cambio = resolver_pago(pago_id, aprobar=aprobar)
+
+    decision_normalizada = str(decision or "").strip().lower()
+    if decision_normalizada not in {"aprobar", "rechazar"}:
+        return Response(
+            content="Decisión inválida: usá aprobar o rechazar.",
+            status_code=400,
+            media_type="text/plain",
+        )
+
+    aprobar = decision_normalizada == "aprobar"
+    aplicaciones = None
+    if aprobar:
+        # El monto del pago se toma de la base, nunca de un hidden editable. El
+        # servicio vuelve a validar y bloquea la fila dentro de su transacción.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT monto_ars FROM pagos WHERE id = %s", (pago_id,))
+                pago = cur.fetchone()
+        if not pago:
+            return Response(content="Pago no encontrado.", status_code=404)
+        try:
+            aplicaciones = _aplicaciones_pago_form(
+                pago["monto_ars"],
+                imputacion,
+                monto_nacional,
+                monto_internacional,
+            )
+        except ValueError as exc:
+            return Response(content=str(exc), status_code=400, media_type="text/plain")
+
+    cambio = resolver_pago(
+        pago_id,
+        aprobar=aprobar,
+        aplicaciones=aplicaciones,
+        actor_tipo="admin",
+        actor_ref="admin",
+    )
     if not cambio:
         print(f"[admin] pago {pago_id}: ya estaba resuelto, no se toca")
-    elif cambio:
-        from servicios.auditoria import registrar_desde_request
-        registrar_desde_request(
-            request, event="admin.resolver_pago", actor_type="admin",
-            actor_ref=str(pago_id),
-            metadata={"pago_id": pago_id, "decision": "aprobado" if aprobar else "rechazado"})
     return RedirectResponse(url="/admin/pagos/pendientes", status_code=303)
 
 
@@ -2392,11 +2807,15 @@ def admin_config(
         return _redirect_login()
 
     config_items = _get_config()
+    from servicios.leads import estado_entregas_email
+
+    email_status = estado_entregas_email()
     return templates.TemplateResponse(
         request=request, name="admin/config.html",
         context={
             "seccion": "config",
             "config_items": config_items,
+            "email_status": email_status,
             "flash_ok": "Configuración guardada." if ok else None,
         },
     )
@@ -2431,6 +2850,8 @@ async def admin_config_save(
                 parse_configuracion_numerica(nuevo_param, nuevo_valor)
             )
     except ValueError as exc:
+        from servicios.leads import estado_entregas_email
+
         intentos = [
             {"parametro": param, "valor": str(valor)} for param, valor in data.items()
         ]
@@ -2442,6 +2863,7 @@ async def admin_config_save(
             context={
                 "seccion": "config",
                 "config_items": intentos,
+                "email_status": estado_entregas_email(),
                 "flash_error": str(exc),
             },
             status_code=422,

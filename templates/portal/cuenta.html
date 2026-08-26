@@ -1,63 +1,105 @@
 {% extends "base.html" %}
 {% block title %}Mi cuenta corriente{% endblock %}
 
+{% macro dinero(valor) -%}
+$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
+{%- endmacro %}
+
+{% macro estado_saldo(valor) -%}
+    {% if valor > 0 %}A pagar{% elif valor < 0 %}A favor{% else %}Al día{% endif %}
+{%- endmacro %}
+
+{% macro tarjeta_ambito(nombre, clave, ledger) -%}
+<a class="account-scope-card {% if ambito_filtro == clave %}is-active{% endif %}"
+   href="/portal/cuenta?ambito={{ clave }}&tipo={{ tipo_filtro }}"
+   {% if ambito_filtro == clave %}aria-current="page"{% endif %}>
+    <span class="account-scope-heading">{{ nombre }}</span>
+    <dl class="account-ledger-values">
+        <div><dt>Debe</dt><dd>{{ dinero(ledger.debe_ars) }}</dd></div>
+        <div><dt>Haber</dt><dd>{{ dinero(ledger.haber_ars) }}</dd></div>
+        <div>
+            <dt>Saldo</dt>
+            <dd class="{% if ledger.saldo_ars > 0 %}warn{% elif ledger.saldo_ars < 0 %}ok{% endif %}">
+                {{ dinero(ledger.saldo_ars|abs) }}
+                <small>{{ estado_saldo(ledger.saldo_ars) }}</small>
+            </dd>
+        </div>
+    </dl>
+    <span class="account-invoice-breakdown">
+        Facturado {{ dinero(ledger.facturado_ars) }} · A facturar {{ dinero(ledger.pendiente_facturacion_ars) }}
+    </span>
+</a>
+{%- endmacro %}
+
 {% block content %}
-<div class="page-title">
+{% set total = resumen_cuenta.consolidado %}
+<section class="account-page">
+<div class="page-title account-page-title">
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Administración</div>
             <h1>Mi cuenta corriente</h1>
-            <p>Resumen total consolidado de cargos, facturas y pagos con Tauro.</p>
+            <p>Cargos y pagos separados por ámbito, con el total siempre consolidado.</p>
         </div>
-        <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Descargar Excel</a>
+        <div class="account-title-actions">
+            <a href="#informar-pago" class="btn btn-primary" data-open-payment>Informar un pago</a>
+            <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Descargar Excel</a>
+        </div>
     </div>
 </div>
 
 {% if request.query_params.get('ok') %}
-    <div class="msg ok">Recibimos el comprobante. El pago está en revisión y no modifica el saldo hasta que Tauro lo apruebe.</div>
+    <div class="msg ok" role="status">Recibimos el comprobante. El pago está en revisión y no modifica el saldo hasta que Tauro lo apruebe.</div>
 {% endif %}
 {% if request.query_params.get('error') %}
-    <div class="msg error">{{ request.query_params.get('error') }}</div>
+    <div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>
 {% endif %}
 
-<div class="account-summary-grid">
-    <div class="stat-card">
-        <div class="label">Facturado</div>
-        <div class="value">$ {{ "{:,.0f}".format(resumen_facturacion.facturado_ars).replace(",", ".") }}</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">Pendiente de facturación</div>
-        <div class="value {% if resumen_facturacion.pendiente_ars > 0 %}warn{% endif %}">$ {{ "{:,.0f}".format(resumen_facturacion.pendiente_ars).replace(",", ".") }}</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">Pagos aplicados</div>
-        <div class="value">$ {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</div>
-    </div>
-    <div class="stat-card">
-        <div class="label">{% if saldo.saldo_pendiente_ars > 0 %}A pagar{% elif saldo.saldo_pendiente_ars < 0 %}Saldo a favor{% else %}Estado{% endif %}</div>
-        <div class="value {% if saldo.saldo_pendiente_ars > 0 %}warn{% elif saldo.saldo_pendiente_ars < 0 %}ok{% endif %}">
-            {% if saldo.saldo_pendiente_ars == 0 %}
-                Al día
-            {% else %}
-                $ {{ "{:,.0f}".format(saldo.saldo_pendiente_ars|abs).replace(",", ".") }}
-            {% endif %}
+<div class="account-overview" aria-label="Resumen de cuenta">
+    <article class="account-total-card">
+        <div>
+            <span class="account-total-label">Saldo total consolidado</span>
+            <strong class="account-total-value {% if total.saldo_ars > 0 %}warn{% elif total.saldo_ars < 0 %}ok{% endif %}">
+                {{ dinero(total.saldo_ars|abs) }}
+            </strong>
+            <span class="account-total-state">{{ estado_saldo(total.saldo_ars) }}</span>
         </div>
+        <dl class="account-total-breakdown">
+            <div><dt>Debe</dt><dd>{{ dinero(total.debe_ars) }}</dd></div>
+            <div><dt>Haber</dt><dd>{{ dinero(total.haber_ars) }}</dd></div>
+        </dl>
+    </article>
+
+    <div class="account-scope-grid">
+        {{ tarjeta_ambito("Nacional", "nacional", resumen_cuenta.nacional) }}
+        {{ tarjeta_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}
     </div>
+
+    <dl class="account-reconciliation" aria-label="Partidas pendientes de imputación o clasificación">
+        <div>
+            <dt>Crédito sin imputar</dt>
+            <dd>{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd>
+        </div>
+        <div>
+            <dt>Cargos sin clasificar</dt>
+            <dd>{{ dinero(resumen_cuenta.cargos_sin_clasificar_ars) }}</dd>
+        </div>
+    </dl>
 </div>
 
-{# ── Informar un pago ─────────────────────────────────────
-   La acción queda junto al resumen para que el cliente no tenga que recorrer
-   todo el historial antes de encontrarla. #}
 <details class="card account-payment-card" id="informar-pago">
     <summary>
         <span>
             <strong>Informar un pago</strong>
-            <small>Subí el comprobante para que Tauro lo verifique</small>
+            <small>Subí el comprobante e indicá dónde querés imputarlo</small>
         </span>
         <span class="account-payment-action">Cargar comprobante</span>
     </summary>
-    <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data">
-        <div class="form-grid-3">
+    <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data" id="payment-report-form">
+        <input type="hidden" name="volver_ambito" value="{{ ambito_filtro }}">
+        <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+        <p class="account-payment-notice">La imputación es una solicitud. El pago no modifica tus saldos hasta que Tauro apruebe el comprobante.</p>
+        <div class="form-grid-3 account-payment-basics">
             <div class="form-group">
                 <label for="pago-monto">Monto (ARS) *</label>
                 <input type="text" name="monto" id="pago-monto" required inputmode="decimal" data-numero="monto" placeholder="Ej. 100.000 o 100,000">
@@ -71,6 +113,28 @@
                 <input type="text" name="referencia" id="pago-ref" placeholder="Nº de operación del banco">
             </div>
         </div>
+
+        <fieldset class="account-allocation-options">
+            <legend>¿Dónde querés imputarlo?</legend>
+            <label><input type="radio" name="destino_pago" value="SIN_IMPUTAR" checked> <span>Sin imputar <small>Tauro lo revisa</small></span></label>
+            <label><input type="radio" name="destino_pago" value="NACIONAL"> <span>Nacional</span></label>
+            <label><input type="radio" name="destino_pago" value="INTERNACIONAL"> <span>Internacional</span></label>
+            <label><input type="radio" name="destino_pago" value="DIVIDIR"> <span>Dividir</span></label>
+        </fieldset>
+
+        <div class="account-split-allocation" id="split-allocation" hidden>
+            <div class="form-group">
+                <label for="pago-nacional">Monto para Nacional</label>
+                <input type="text" name="monto_nacional" id="pago-nacional" inputmode="decimal" data-numero="monto" value="0" disabled>
+            </div>
+            <div class="form-group">
+                <label for="pago-internacional">Monto para Internacional</label>
+                <input type="text" name="monto_internacional" id="pago-internacional" inputmode="decimal" data-numero="monto" value="0" disabled>
+            </div>
+            <p id="payment-unallocated" aria-live="polite">Queda sin imputar: $ 0</p>
+            <p id="payment-allocation-error" class="account-allocation-error" role="alert" aria-live="assertive" tabindex="-1" hidden></p>
+        </div>
+
         <div class="account-payment-file-row">
             <div class="form-group">
                 <label for="pago-file">Comprobante (JPG, PNG o PDF · máx. 8 MB) *</label>
@@ -82,62 +146,187 @@
     </form>
 </details>
 
-{% if movimientos %}
-<div class="card">
+<nav class="account-tabs" aria-label="Ámbito de la cuenta">
+    {% for clave, etiqueta in (("consolidado", "Consolidado"), ("nacional", "Nacional"), ("internacional", "Internacional")) %}
+    <a href="/portal/cuenta?ambito={{ clave }}&tipo={{ tipo_filtro }}"
+       class="{% if ambito_filtro == clave %}is-active{% endif %}"
+       {% if ambito_filtro == clave %}aria-current="page"{% endif %}>{{ etiqueta }}</a>
+    {% endfor %}
+</nav>
+
+<div class="account-history-head">
+    <nav class="account-movement-filters" aria-label="Filtrar movimientos">
+        {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Cargos"), ("pagos", "Pagos"), ("revision", "En revisión")) %}
+        <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ clave }}"
+           class="{% if tipo_filtro == clave %}is-active{% endif %}"
+           {% if tipo_filtro == clave %}aria-current="page"{% endif %}>{{ etiqueta }}</a>
+        {% endfor %}
+    </nav>
+    {% if movimientos.total_resultados %}
+    <p>Mostrando {{ movimientos.pagina_desde }}–{{ movimientos.pagina_hasta }} de {{ movimientos.total_resultados }}</p>
+    {% endif %}
+</div>
+
+{% set filas = movimientos["items"] %}
+{% if filas %}
+<div class="card account-history-card">
     <div class="table-wrap">
         <table class="account-table">
+            <caption class="sr-only">Movimientos de la cuenta {{ ambito_filtro }}</caption>
             <thead>
                 <tr>
-                    <th>Fecha</th>
-                    <th>Tipo</th>
-                    <th>Concepto</th>
-                    <th style="text-align:right;">Monto</th>
+                    <th scope="col">Fecha</th>
+                    <th scope="col">Detalle</th>
+                    {% if ambito_filtro == 'consolidado' %}<th scope="col">Ámbito</th>{% endif %}
+                    <th scope="col" class="amount-column">Debe</th>
+                    <th scope="col" class="amount-column">Haber</th>
                 </tr>
             </thead>
             <tbody>
-                {% for m in movimientos %}
+                {% for m in filas %}
                 <tr>
-                    <td class="mono">{{ m.fecha or '—' }}</td>
-                    <td>
-                        {% if m.tipo == 'PAGO' %}
-                            <span class="badge ok">Aplicado</span>
-                        {% elif m.tipo == 'PAGO_PENDIENTE' %}
-                            {# Informado con comprobante, esperando que TAURO lo
-                               verifique. Se ve pero NO está en el saldo. #}
+                    <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
+                    <td data-label="Detalle">
+                        <span class="account-movement-heading">
+                        {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}
                             <span class="badge warn">En revisión</span>
+                        {% elif m.tipo == 'PAGO' %}
+                            <span class="badge ok">Pago aplicado</span>
                         {% elif m.tipo == 'PENDIENTE_FACTURA' %}
-                            <span class="badge warn">Pendiente de facturación</span>
+                            <span class="badge warn">A facturar</span>
                         {% else %}
                             <span class="badge">Factura</span>
                         {% endif %}
-                    </td>
-                    <td>
                         {{ m.concepto or '—' }}
-                        {% if m.tipo == 'FC' and m.tiene_pdf %}
-                            <a href="/portal/facturas/{{ m.envio_id }}/pdf" target="_blank"
-                               style="font-size:12px;margin-left:6px;">ver factura ↗</a>
-                        {% endif %}
+                        </span>
+                        {% if m.referencia %}<small>Ref. {{ m.referencia }}</small>{% endif %}
+                        {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
+                        {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener" class="account-document-link">Ver comprobante o factura ↗</a>{% endif %}
                     </td>
-                    {# Los pagos vienen en negativo desde movimientos(): acá se
-                       muestran en verde y con el signo que el cliente espera. #}
-                    <td class="mono account-movement-amount {% if m.tipo == 'PAGO' %}applied{% elif m.tipo == 'PAGO_PENDIENTE' %}pending{% endif %}">
-                        {% if m.tipo == 'PAGO_PENDIENTE' %}
-                            $ {{ "{:,.0f}".format(m.monto_ars|abs).replace(",", ".") }}
-                            <small>Todavía no impacta el saldo</small>
-                        {% else %}
-                            {% if m.monto_ars < 0 %}−{% endif %}$ {{ "{:,.0f}".format(m.monto_ars|abs).replace(",", ".") }}
-                        {% endif %}
-                    </td>
+                    {% if ambito_filtro == 'consolidado' %}
+                    <td data-label="Ámbito"><span class="badge muted">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span></td>
+                    {% endif %}
+                    <td class="mono amount-column" data-label="Debe">{% if m.debe_ars %}{{ dinero(m.debe_ars) }}{% else %}—{% endif %}</td>
+                    <td class="mono amount-column account-movement-credit" data-label="Haber">{% if m.haber_ars %}{{ dinero(m.haber_ars) }}{% else %}—{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+
+    {% if movimientos.total_paginas > 1 %}
+    <nav class="account-pagination" aria-label="Páginas de movimientos">
+        {% if movimientos.pagina_actual > 1 %}
+        <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}&pagina={{ movimientos.pagina_actual - 1 }}" aria-label="Página anterior">‹</a>
+        {% else %}<span aria-disabled="true">‹</span>{% endif %}
+        {% for numero in movimientos.paginas_visibles %}
+            {% if numero %}
+            <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}&pagina={{ numero }}"
+               class="{% if numero == movimientos.pagina_actual %}is-active{% endif %}"
+               {% if numero == movimientos.pagina_actual %}aria-current="page"{% endif %}>{{ numero }}</a>
+            {% else %}<span aria-hidden="true">…</span>{% endif %}
+        {% endfor %}
+        {% if movimientos.pagina_actual < movimientos.total_paginas %}
+        <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}&pagina={{ movimientos.pagina_actual + 1 }}" aria-label="Página siguiente">›</a>
+        {% else %}<span aria-disabled="true">›</span>{% endif %}
+    </nav>
+    {% endif %}
 </div>
 {% else %}
-<div class="card" style="text-align:center;padding:34px;">
-    <p style="color:var(--fg-3);margin:0;">Todavía no hay movimientos. Cuando emitas
-    tu primer envío, el cargo va a aparecer acá solo.</p>
+<div class="card account-empty-state">
+    {% if tipo_filtro != 'todos' %}
+    <strong>No encontramos movimientos con estos filtros.</strong>
+    <a href="/portal/cuenta?ambito={{ ambito_filtro }}">Limpiar filtros</a>
+    {% elif ambito_filtro == 'nacional' %}
+    <strong>Todavía no tenés movimientos nacionales.</strong>
+    <a href="/portal/envios?tipo=nacional">Ver envíos nacionales</a>
+    {% elif ambito_filtro == 'internacional' %}
+    <strong>Todavía no tenés movimientos internacionales.</strong>
+    <a href="/portal/envios?tipo=internacional">Ver envíos internacionales</a>
+    {% else %}
+    <strong>Todavía no hay movimientos en tu cuenta.</strong>
+    <a href="/portal/envios/nuevo">Crear un envío</a>
+    {% endif %}
 </div>
 {% endif %}
+</section>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+  var form = document.getElementById("payment-report-form");
+  if (!form) return;
+  var paymentDetails = document.getElementById("informar-pago");
+  var paymentOpener = document.querySelector("[data-open-payment]");
+  var split = document.getElementById("split-allocation");
+  var total = document.getElementById("pago-monto");
+  var nacional = document.getElementById("pago-nacional");
+  var internacional = document.getElementById("pago-internacional");
+  var remainder = document.getElementById("payment-unallocated");
+  var allocationError = document.getElementById("payment-allocation-error");
+
+  function numberFromInput(value) {
+    value = String(value || "").trim().replace(/\s/g, "");
+    if (!value) return 0;
+    if (value.includes(".") && value.includes(",")) {
+      if (value.lastIndexOf(",") > value.lastIndexOf(".")) value = value.replace(/\./g, "").replace(",", ".");
+      else value = value.replace(/,/g, "");
+    } else if (/^\d{1,3}([.,]\d{3})+$/.test(value)) {
+      value = value.replace(/[.,]/g, "");
+    } else {
+      value = value.replace(",", ".");
+    }
+    var parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  function selectedDestination() {
+    return form.querySelector('[name="destino_pago"]:checked').value;
+  }
+
+  function openPayment(event) {
+    if (event) event.preventDefault();
+    paymentDetails.open = true;
+    total.focus();
+  }
+
+  function updateAllocation() {
+    var isSplit = selectedDestination() === "DIVIDIR";
+    split.hidden = !isSplit;
+    nacional.disabled = !isSplit;
+    internacional.disabled = !isSplit;
+    var totalValue = numberFromInput(total.value);
+    var allocated = numberFromInput(nacional.value) + numberFromInput(internacional.value);
+    var pending = Math.max(0, totalValue - allocated);
+    remainder.textContent = "Queda sin imputar: $ " + pending.toLocaleString("es-AR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    allocationError.hidden = true;
+    allocationError.textContent = "";
+  }
+
+  form.querySelectorAll('[name="destino_pago"]').forEach(function (radio) {
+    radio.addEventListener("change", updateAllocation);
+  });
+  paymentOpener.addEventListener("click", openPayment);
+  if (window.location.hash === "#informar-pago") openPayment();
+  [total, nacional, internacional].forEach(function (input) {
+    input.addEventListener("input", updateAllocation);
+  });
+  form.addEventListener("submit", function (event) {
+    if (selectedDestination() !== "DIVIDIR") return;
+    var totalValue = numberFromInput(total.value);
+    var allocated = numberFromInput(nacional.value) + numberFromInput(internacional.value);
+    if (allocated <= 0 || allocated > totalValue) {
+      event.preventDefault();
+      allocationError.textContent = allocated <= 0
+        ? "Indicá cuánto querés imputar a Nacional o Internacional."
+        : "La suma a imputar no puede superar el monto total del pago.";
+      allocationError.hidden = false;
+      allocationError.focus({ preventScroll: true });
+    }
+  });
+  updateAllocation();
+})();
+</script>
 {% endblock %}

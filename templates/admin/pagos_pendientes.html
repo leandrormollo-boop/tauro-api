@@ -20,7 +20,7 @@
           <th>Método</th>
           <th>Referencia</th>
           <th>Comprobante</th>
-          <th></th>
+          <th>Imputación y decisión</th>
         </tr>
       </thead>
       <tbody>
@@ -28,7 +28,7 @@
         <tr>
           <td class="mono">{{ p.created_at.strftime('%d/%m/%Y %H:%M') if p.created_at else '—' }}</td>
           <td><strong>{{ p.cliente_id }}</strong></td>
-          <td class="num mono">$ {{ "{:,.0f}".format(p.monto_ars).replace(",", ".") }}</td>
+          <td class="num mono">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>{{ p.metodo }}</td>
           <td class="mono">{{ p.referencia or '—' }}</td>
           <td>
@@ -39,15 +39,41 @@
               <span style="color:var(--fg-3);">sin adjunto</span>
             {% endif %}
           </td>
-          {% set monto_fmt = "{:,.0f}".format(p.monto_ars).replace(",", ".") %}
-          <td style="white-space:nowrap;">
-            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;"
+          {% set monto_fmt = "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") %}
+          {% set apps = p.aplicaciones or {} %}
+          {% set solicitado_nac = apps.get('NACIONAL') or p.monto_nacional or '' %}
+          {% set solicitado_int = apps.get('INTERNACIONAL') or p.monto_internacional or '' %}
+          {% if solicitado_nac and solicitado_int %}
+            {% set imputacion_solicitada = 'DIVIDIR' %}
+          {% elif solicitado_nac %}
+            {% set imputacion_solicitada = 'NACIONAL' %}
+          {% elif solicitado_int %}
+            {% set imputacion_solicitada = 'INTERNACIONAL' %}
+          {% else %}
+            {% set imputacion_solicitada = 'SIN_IMPUTAR' %}
+          {% endif %}
+          <td style="min-width:300px;">
+            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver"
                   data-confirm="¿Aprobar el pago de {{ p.cliente_id }} por $ {{ monto_fmt }}? Entra al saldo al instante.">
               <input type="hidden" name="decision" value="aprobar">
+              <label for="imputacion-{{ p.id }}" style="display:block;font-size:11px;color:var(--fg-4);">Revisar / reemplazar imputación</label>
+              <select id="imputacion-{{ p.id }}" name="imputacion" required style="margin:4px 0 6px;">
+                <option value="SIN_IMPUTAR" {% if imputacion_solicitada == 'SIN_IMPUTAR' %}selected{% endif %}>Sin imputar</option>
+                <option value="NACIONAL" {% if imputacion_solicitada == 'NACIONAL' %}selected{% endif %}>Todo a Nacional</option>
+                <option value="INTERNACIONAL" {% if imputacion_solicitada == 'INTERNACIONAL' %}selected{% endif %}>Todo a Internacional</option>
+                <option value="DIVIDIR" {% if imputacion_solicitada == 'DIVIDIR' %}selected{% endif %}>Dividir</option>
+              </select>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+                <input type="text" name="monto_nacional" inputmode="decimal" data-numero="monto"
+                       aria-label="Monto nacional" value="{{ solicitado_nac }}" placeholder="Nacional">
+                <input type="text" name="monto_internacional" inputmode="decimal" data-numero="monto"
+                       aria-label="Monto internacional" value="{{ solicitado_int }}" placeholder="Internacional">
+              </div>
+              <small style="display:block;color:var(--fg-4);margin-bottom:8px;">Si dividís, la suma no puede superar $ {{ monto_fmt }}; el resto queda sin imputar.</small>
               <button type="submit" class="btn btn-primary btn-sm">
-                Aprobar</button>
+                Aprobar e imputar</button>
             </form>
-            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="display:inline;"
+            <form method="POST" action="/admin/pagos/{{ p.id }}/resolver" style="margin-top:6px;"
                   data-confirm="¿Rechazar este pago? No cuenta para el saldo; el registro queda.">
               <input type="hidden" name="decision" value="rechazar">
               <button type="submit" class="btn btn-ghost btn-sm">

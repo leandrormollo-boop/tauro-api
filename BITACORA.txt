@@ -8,6 +8,128 @@ Formato:
   YYYY-MM-DD · QUIÉN · QUÉ HICIMOS · POR QUÉ
 
 ────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
+✅ CASILLA DE INTEGRACIONES CREADA EN GOOGLE WORKSPACE.
+
+QUÉ SE HIZO
+  - Se creó `integraciones@taurosolutions.ar` como alias sin licencia adicional
+    del buzón principal de TAURO.
+  - Google Admin confirmó la actualización y Gmail la expone como perfil
+    `TAURO Integraciones <integraciones@taurosolutions.ar>` para enviar correos.
+  - Los CTA públicos “Conectá tu tienda” quedaron vinculados a esa dirección
+    en el commit local 03460a9; no se modificó el remitente predeterminado.
+  - Control aplicado: ruta Sol/high, aprobación explícita, snapshot previo y
+    verificación posterior en Google Admin y Gmail, sin registrar secretos.
+
+QUÉ FALTA
+  - Integrar y desplegar la rama de email/web con aprobación de producción.
+  - Hacer un smoke controlado de recepción y envío después de la propagación.
+
+────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
+✅ IDENTIDAD ÚNICA DE CORREO: operaciones@taurosolutions.ar (LOCAL).
+
+QUÉ SE HIZO
+  - Todo correo transaccional exige como remitente visible
+    `TAURO Operaciones <operaciones@taurosolutions.ar>`.
+  - Una configuración con otro alias falla cerrada antes de tocar SMTP.
+  - Cotizaciones y recuperos responden a la casilla de Operaciones.
+  - Admin muestra la dirección visible exacta, no sólo el dominio.
+
+QUÉ FALTA
+  - Autorizar/verificar el alias “Enviar como” y la contraseña de aplicación
+    de Google Workspace en Railway; luego smoke controlado a una casilla propia.
+
+────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
+✅ PRESUPUESTO TAURO POR EMAIL CON ENTREGA VERIFICABLE (LOCAL, SIN DESPLEGAR).
+
+QUÉ SE HIZO
+  - Cada cotización pública queda guardada con referencia, vigencia, ruta,
+    paquete y opciones calculadas por el servidor.
+  - El navegador sólo manda email + quote_id: ya no puede alterar precios.
+  - Email TAURO HTML + texto, copia web imprimible y condiciones precisas.
+  - La pantalla confirma envío sólo después de aceptación SMTP; sólo los
+    rechazos 4xx confirmados se reintentan. Timeouts/caídas quedan marcados
+    para revisión, sin duplicar correos a ciegas.
+  - Límite durable de un presupuesto por destinatario cada 24 h y retención
+    automática de PII/snapshots vencidos.
+  - Diagnóstico seguro en Admin → Configuración, sin mostrar credenciales.
+  - Transporte TLS común con timeout y códigos operativos sin PII.
+
+POR QUÉ
+  - Antes se respondía “te mandamos la cotización” desde un hilo daemon aunque
+    SMTP fallara, y un fallo bloqueaba el reintento durante 24 horas.
+
+QUÉ FALTA
+  - Configurar/validar SMTP, alias, SPF, DKIM y DMARC en staging; luego hacer
+    una prueba controlada a una casilla propia antes del release productivo.
+
+────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Codex (Sol)
+────────────────────────────────────────────────────────────
+
+✅ RESTABLECIMIENTO REAL DE CONTRASEÑA DEL PORTAL (LOCAL, SIN DESPLEGAR).
+
+QUÉ SE HIZO
+  - El pedido se encola y la respuesta web nunca espera ni toca SMTP.
+  - Link de 30 minutos y un uso; el secreto se guarda sólo como SHA-256 y
+    viaja en `#token=`, fuera de queries, access logs y Referer.
+  - El token queda inactivo hasta que SMTP confirma el correo (fail-closed).
+  - Formulario TAURO para crear y confirmar una contraseña nueva.
+  - Al completar se cambia bcrypt y se revocan todas las sesiones en la misma
+    transacción.
+  - Respuesta anti-enumeración, doble rate-limit y auditoría sin PII/token.
+  - Tests focales sin conexión SMTP real.
+
+POR QUÉ
+  - El botón anterior no restablecía una contraseña: enviaba un magic-login
+    y mostraba éxito incluso cuando el remitente devolvía False.
+
+QUÉ FALTA
+  - Validar SMTP y el worker en staging antes de cualquier release productivo.
+
+────────────────────────────────────────────────────────────
+2026-08-18 · Lean + Claude (Fable)
+────────────────────────────────────────────────────────────
+
+✅ El PORTAL DE CLIENTES ahora es una PWA instalable (Android/iPhone).
+   El admin y la web pública quedan afuera a propósito en esta fase.
+
+QUÉ SE HIZO
+  - Manifest "TAURO" (id/scope /portal/, start_url /portal/home, es-AR,
+    standalone) + íconos 192/512 any y maskable desde el isotipo existente.
+  - Service worker en /portal/sw.js: RED-ONLY para todo lo autenticado,
+    precachea SOLO la pantalla offline pública (/portal/offline), limpia
+    únicamente cachés viejos tauro-portal-* y se actualiza en la carga
+    siguiente (SKIP_WAITING), nunca a mitad de un formulario.
+  - Pantalla offline neutra y autocontenida con reintento automático.
+  - static/js/portal-pwa.js: registro del SW + CTA de instalación
+    (beforeinstallprompt en Android; guía Compartir→Agregar a inicio en
+    iOS; oculta si ya corre standalone). Sin push ni permisos todavía.
+  - Barra móvil inferior (Inicio/Cotizar/Nuevo envío/Mis envíos/Cuenta)
+    en el shell autenticado: safe-area, sin tapar submit-bar/paso-nav,
+    ausente en login, escritorio e impresión. tauro.css → v25 (portal y
+    admin a la par, como exige test_smart_select_shared).
+  - Tests: tests/test_portal_pwa.py (22 tests, ASGI crudo sin httpx) que
+    fijan el contrato de seguridad del SW (allowlist/denylist de caché),
+    headers no-store, offline neutra, la tabbar y los pies del wizard.
+
+POR QUÉ
+  - Un SW que cachee HTML autenticado es una fuga (saldo/envíos legibles
+    post-logout): el contrato red-only quedó vigilado por tests.
+
+QUÉ FALTA
+  - Validación manual en dispositivos reales (Lighthouse + DevTools),
+    ver docs/PWA_PORTAL.md. Push notifications: fase futura.
+
+────────────────────────────────────────────────────────────
 2026-04-29 · Lean + Claude (CEO) + Codex + Gemini
 ────────────────────────────────────────────────────────────
 

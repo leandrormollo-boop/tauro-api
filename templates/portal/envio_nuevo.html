@@ -29,6 +29,15 @@
     <div class="msg error">{{ error }}</div>
 {% endif %}
 
+{% if cotizacion_web %}
+    <div class="msg ok" role="status">
+        Precargamos la cotización <b>{{ cotizacion_web.referencia }}</b>:
+        {{ cotizacion_web.origen }} → {{ cotizacion_web.destino }} con
+        {{ form.intl_courier|upper }}. Completá las direcciones y la información
+        aduanera; el precio se valida nuevamente antes de crear la solicitud.
+    </div>
+{% endif %}
+
 {# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
    (es un atajo, no el camino principal) y ni aparece cuando el envío ya
    viene de una venta de la tienda: ahí no hay nada que pegar. #}
@@ -487,6 +496,9 @@
             <span>El precio aparece acá al instante.</span>
         </div>
         <div class="submit-actions">
+            <button type="button" id="wizard-back-final" class="btn btn-ghost">
+                ← Atrás
+            </button>
             <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
             <button type="submit" class="btn btn-primary">
                 Crear solicitud
@@ -1018,6 +1030,10 @@
 
     // Botonera Atrás / Siguiente al pie de cada paso.
     secs.forEach(function (sec, i) {
+      // El último paso ya tiene su Atrás dentro de la barra de envío.
+      // Crear otra barra sticky en el mismo borde la superponía con
+      // Crear/Cancelar en celulares angostos.
+      if (i === secs.length - 1) return;
       var nav = document.createElement("div");
       // .paso-nav se pega al pie del paso: el botón para avanzar tiene que
       // estar SIEMPRE a la vista, si no el paso "queda a medias" igual.
@@ -1033,6 +1049,11 @@
         if (d) ir(actual + parseInt(d, 10));
       });
     });
+
+    var volverFinal = document.getElementById("wizard-back-final");
+    if (volverFinal) {
+      volverFinal.addEventListener("click", function () { ir(actual - 1); });
+    }
 
     pintar();
   })();

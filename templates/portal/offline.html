@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+{# ==========================================================
+   Pantalla OFFLINE del portal — pública y neutra a propósito.
+   Es lo ÚNICO que el service worker precachea, así que no puede
+   contener datos de sesión, saldos, envíos ni enlaces a recursos
+   privados, y tiene que renderizar SIN red: nada de /static ni
+   Google Fonts — estilos inline y tipografía del sistema.
+   Si cambia este archivo, subir VERSION en static/js/portal-sw.js
+   para que los teléfonos reinstalen el precache.
+   ========================================================== #}
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Sin conexión · Tauro Solutions</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0c0a14">
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0c0a14;
+    color: #f4f5f7;
+    font-family: "Helvetica Neue", system-ui, -apple-system, sans-serif;
+    text-align: center;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+  }
+  main { max-width: 430px; padding: 40px 24px; }
+  .marca {
+    font-weight: 700;
+    letter-spacing: .12em;
+    font-size: 14px;
+    color: #c4b0fc;
+    text-transform: uppercase;
+  }
+  .punto {
+    display: inline-block;
+    width: 9px; height: 9px;
+    margin-right: 7px;
+    border-radius: 999px;
+    background: #f5b800;
+    vertical-align: 1px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .punto { animation: latido 1.6s ease-in-out infinite; }
+    @keyframes latido { 50% { opacity: .35; } }
+  }
+  h1 { font-size: 30px; margin: 18px 0 10px; }
+  p { color: #b9bfc7; line-height: 1.65; margin: 0 0 12px; }
+  button {
+    margin-top: 16px;
+    padding: 13px 30px;
+    min-height: 48px;
+    border: 0;
+    border-radius: 10px;
+    background: #a78bfa;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { background: #c4b0fc; }
+  button:focus-visible { outline: 2px solid #f4f5f7; outline-offset: 3px; }
+  small { display: block; margin-top: 26px; color: #7a828c; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="marca"><span class="punto" aria-hidden="true"></span>Tauro Solutions</div>
+  <h1>Estás sin conexión</h1>
+  <p>Para cotizar, emitir envíos, ver tu cuenta o sincronizar datos
+     necesitás estar conectado a internet: tus precios y movimientos
+     se calculan siempre en vivo y nunca quedan guardados en este
+     dispositivo.</p>
+  <p id="estado-red" role="status">Cuando vuelva la conexión, reintentamos automáticamente.</p>
+  <button type="button" id="btn-reintentar">Reintentar ahora</button>
+  <small>Portal de clientes · Tauro Solutions</small>
+</main>
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+  "use strict";
+  function reintentar() { window.location.reload(); }
+  var boton = document.getElementById("btn-reintentar");
+  if (boton) boton.addEventListener("click", reintentar);
+  // Al recuperar red se reintenta solo (con un respiro para que la
+  // conexión termine de levantar). El botón queda como camino manual.
+  window.addEventListener("online", function () {
+    var estado = document.getElementById("estado-red");
+    if (estado) estado.textContent = "Conexión detectada, reintentando…";
+    window.setTimeout(reintentar, 600);
+  });
+})();
+</script>
+</body>
+</html>

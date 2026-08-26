@@ -22,6 +22,216 @@ from psycopg2 import pool
 _pool: pool.ThreadedConnectionPool | None = None
 
 
+_READINESS_CONTABLE_SQL = """
+WITH columnas_dinero AS (
+    SELECT table_name, column_name, data_type, numeric_precision, numeric_scale
+    FROM information_schema.columns
+    WHERE table_schema = CURRENT_SCHEMA()
+      AND (table_name, column_name) IN (
+          ('pagos', 'monto_ars'),
+          ('envios', 'monto_ars')
+      )
+), fk_pagos AS (
+    SELECT c.*
+    FROM pg_constraint c
+    WHERE c.contype = 'f'
+      AND c.conrelid = 'pagos'::regclass
+      AND c.confrelid = 'clientes'::regclass
+      AND c.conkey = ARRAY[(
+          SELECT a.attnum FROM pg_attribute a
+          WHERE a.attrelid = 'pagos'::regclass
+            AND a.attname = 'cliente_id' AND NOT a.attisdropped
+      )]::SMALLINT[]
+      AND c.confkey = ARRAY[(
+          SELECT a.attnum FROM pg_attribute a
+          WHERE a.attrelid = 'clientes'::regclass
+            AND a.attname = 'cliente_id' AND NOT a.attisdropped
+      )]::SMALLINT[]
+), fk_envios AS (
+    SELECT c.*
+    FROM pg_constraint c
+    WHERE c.contype = 'f'
+      AND c.conrelid = 'envios'::regclass
+      AND c.confrelid = 'clientes'::regclass
+      AND c.conkey = ARRAY[(
+          SELECT a.attnum FROM pg_attribute a
+          WHERE a.attrelid = 'envios'::regclass
+            AND a.attname = 'cliente_id' AND NOT a.attisdropped
+      )]::SMALLINT[]
+      AND c.confkey = ARRAY[(
+          SELECT a.attnum FROM pg_attribute a
+          WHERE a.attrelid = 'clientes'::regclass
+            AND a.attname = 'cliente_id' AND NOT a.attisdropped
+      )]::SMALLINT[]
+)
+SELECT
+    EXISTS (
+        SELECT 1 FROM columnas_dinero
+        WHERE table_name = 'pagos' AND column_name = 'monto_ars'
+          AND data_type = 'numeric'
+          AND numeric_precision = 14 AND numeric_scale = 2
+    ) AS pagos_monto_numeric_14_2,
+    EXISTS (
+        SELECT 1 FROM columnas_dinero
+        WHERE table_name = 'envios' AND column_name = 'monto_ars'
+          AND data_type = 'numeric'
+          AND numeric_precision = 14 AND numeric_scale = 2
+    ) AS envios_monto_numeric_14_2,
+    EXISTS (
+        SELECT 1 FROM pg_class c
+        WHERE c.oid = TO_REGCLASS('pagos_aplicaciones')
+          AND c.relkind IN ('r', 'p')
+    ) AS pagos_aplicaciones_existe,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('pagos_aplicaciones')
+          AND t.tgname = 'trg_validar_pago_aplicacion'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS trigger_pago_aplicacion_habilitado,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('pagos')
+          AND t.tgname = 'trg_validar_pago_con_aplicaciones'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS trigger_pago_padre_habilitado,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS('uq_envios_fc_normalizada')
+          AND i.indrelid = TO_REGCLASS('envios')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+          AND i.indnkeyatts = 1
+          AND i.indexprs IS NOT NULL AND i.indpred IS NOT NULL
+          AND LOWER(PG_GET_EXPR(i.indexprs, i.indrelid)) LIKE '%regexp_replace%'
+          AND LOWER(PG_GET_EXPR(i.indexprs, i.indrelid)) LIKE '%upper%'
+          AND LOWER(PG_GET_EXPR(i.indexprs, i.indrelid)) LIKE '%btrim%'
+          AND LOWER(PG_GET_EXPR(i.indexprs, i.indrelid)) LIKE '%nro_fc%'
+          AND LOWER(PG_GET_EXPR(i.indexprs, i.indrelid)) NOT LIKE '%cliente_id%'
+          AND PG_GET_EXPR(i.indexprs, i.indrelid) LIKE '%[^A-Z0-9]%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%estado%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%nc%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%nro_fc%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%regexp_replace%'
+          AND PG_GET_EXPR(i.indpred, i.indrelid) LIKE '%<>%'
+    ) AS indice_fc_global_correcto,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('envios')
+          AND c.contype = 'c'
+          AND c.conname = 'ck_envios_nro_fc_valida'
+          AND c.convalidated
+          AND LOWER(PG_GET_CONSTRAINTDEF(c.oid)) LIKE '%nro_fc%'
+          AND LOWER(PG_GET_CONSTRAINTDEF(c.oid)) LIKE '%regexp_replace%'
+    ) AS check_fc_valida,
+    (
+        SELECT COUNT(*) = 1 AND COALESCE(BOOL_AND(
+            conname = 'pagos_cliente_id_fkey'
+            AND confdeltype = 'r' AND convalidated
+        ), FALSE)
+        FROM fk_pagos
+    ) AS fk_pagos_cliente_restrict,
+    (
+        SELECT COUNT(*) = 1 AND COALESCE(BOOL_AND(
+            conname = 'envios_cliente_id_fkey'
+            AND confdeltype = 'r' AND convalidated
+        ), FALSE)
+        FROM fk_envios
+    ) AS fk_envios_cliente_restrict,
+    TO_REGCLASS('password_reset_tokens') IS NOT NULL
+        AS password_reset_tokens_existe,
+    TO_REGCLASS('password_reset_requests') IS NOT NULL
+        AS password_reset_requests_existe,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('password_reset_requests')
+          AND c.conname = 'ck_password_reset_request_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%VERIFICAR_EMAIL%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%PROCESANDO%'
+    ) AS password_reset_estado_correcto,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS('uq_password_reset_request_activa')
+          AND i.indrelid = TO_REGCLASS('password_reset_requests')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+          AND i.indpred IS NOT NULL
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%pendiente%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%procesando%'
+    ) AS password_reset_indice_activo_correcto,
+    TO_REGCLASS('cotizaciones_web') IS NOT NULL
+        AS cotizaciones_web_existe,
+    TO_REGCLASS('leads_cotizacion') IS NOT NULL
+        AS leads_cotizacion_existe,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('leads_cotizacion')
+          AND c.conname = 'ck_leads_cotizacion_email_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%VERIFICAR_EMAIL%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%ENVIADO%'
+    ) AS leads_email_estado_correcto,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS('uq_lead_cotizacion_email')
+          AND i.indrelid = TO_REGCLASS('leads_cotizacion')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+          AND i.indpred IS NOT NULL
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%cotizacion_id%'
+    ) AS leads_dedupe_indice_correcto,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('leads_cotizacion')
+          AND c.confrelid = TO_REGCLASS('cotizaciones_web')
+          AND c.contype = 'f' AND c.confdeltype = 'r' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%cotizacion_id%'
+    ) AS leads_cotizacion_fk_restrict
+"""
+
+_READINESS_CONTABLE_CAMPOS = (
+    "pagos_monto_numeric_14_2",
+    "envios_monto_numeric_14_2",
+    "pagos_aplicaciones_existe",
+    "trigger_pago_aplicacion_habilitado",
+    "trigger_pago_padre_habilitado",
+    "indice_fc_global_correcto",
+    "check_fc_valida",
+    "fk_pagos_cliente_restrict",
+    "fk_envios_cliente_restrict",
+    "password_reset_tokens_existe",
+    "password_reset_requests_existe",
+    "password_reset_estado_correcto",
+    "password_reset_indice_activo_correcto",
+    "cotizaciones_web_existe",
+    "leads_cotizacion_existe",
+    "leads_email_estado_correcto",
+    "leads_dedupe_indice_correcto",
+    "leads_cotizacion_fk_restrict",
+)
+
+
+def _verificar_readiness_contable(cur) -> dict[str, bool]:
+    """Audita contratos críticos con una consulta; nunca migra ni repara."""
+    cur.execute(_READINESS_CONTABLE_SQL)
+    fila = cur.fetchone()
+    if not fila:
+        raise RuntimeError("Readiness contable sin resultado.")
+    resultado = dict(fila)
+    fallas = [
+        campo for campo in _READINESS_CONTABLE_CAMPOS
+        if not bool(resultado.get(campo, False))
+    ]
+    if fallas:
+        raise RuntimeError(
+            "Schema crítico no listo: " + ", ".join(fallas)
+        )
+    return {campo: True for campo in _READINESS_CONTABLE_CAMPOS}
+
+
 def _init_pool() -> pool.ThreadedConnectionPool:
     url = os.getenv("DATABASE_URL")
     if not url:
@@ -119,10 +329,13 @@ def init_db():
     import pathlib
     schema_path = pathlib.Path(__file__).parent.parent / "sql" / "schema.sql"
     if not schema_path.exists():
+        if os.getenv("DATABASE_URL"):
+            raise RuntimeError("sql/schema.sql no existe; init_db abortado.")
         print("[db] ADVERTENCIA: sql/schema.sql no encontrado, saltando init_db.")
         return
     sql = schema_path.read_text(encoding="utf-8")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql)
+            _verificar_readiness_contable(cur)
     print("[db] Schema inicializado OK.")

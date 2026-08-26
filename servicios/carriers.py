@@ -1,13 +1,14 @@
 """
-Registro multi-courier de TAURO.
+Motor internacional legado de cotización multi-courier.
 
-Cada carrier declara sus REQUISITOS (las variables de entorno que necesita para
-operar). Mientras falten, el cotizador lo muestra igual —con su logo— en estado
-"próximamente". El día que se cargan las credenciales en Railway → Variables, el
-carrier se enciende solo y empieza a cotizar en vivo. Cero cambios de código.
+La presencia de credenciales indica solamente que el cliente técnico puede
+intentarse. No acredita certificación, contrato comercial, permisos por cliente
+ni disponibilidad productiva. Esos controles son independientes y se resuelven
+con la matriz administrativa y el contrato de ``carrier_contract``.
 
-FedEx ya opera. UPS y DHL tienen su cliente escrito y listo (core/ups_client.py,
-core/dhl_client.py); esperan credenciales.
+No se debe considerar operativo a FedEx, UPS o DHL por existir una clase Python
+o variables de entorno. Cada integración necesita sandbox, UAT productivo y
+habilitación explícita antes de mostrarse como disponible.
 """
 from __future__ import annotations
 

@@ -17,7 +17,7 @@
 
     {% if mensaje %}
       {# fail-safe: si el handler no aclara el tipo, pintamos error (nunca un fallo en verde) #}
-      <div class="msg {{ tipo_msg or 'error' }}">{{ mensaje }}</div>
+      <div class="msg {{ tipo_msg or 'error' }}" role="{{ 'status' if tipo_msg == 'ok' else 'alert' }}" aria-live="polite">{{ mensaje }}</div>
     {% endif %}
 
     {% if dev_link %}
@@ -28,6 +28,7 @@
     {% endif %}
 
     <form method="POST" action="/portal/login">
+      <input type="hidden" name="quote_id" value="{{ quote_id or '' }}">
       <div class="form-group">
         <label for="email">Email o usuario</label>
         {# type="text", no "email": el navegador rechazaría "MELCIOR" antes
@@ -56,16 +57,18 @@
       <summary style="cursor:pointer;color:var(--fg-3);font-size:13px;">
         ¿Olvidaste tu contraseña?
       </summary>
-      <form method="POST" action="/portal/login/send" style="margin-top:12px;">
+      <form method="POST" action="/portal/password/forgot" id="password-forgot-form" style="margin-top:12px;">
+        <input type="hidden" name="quote_id" value="{{ quote_id or '' }}">
         <p class="sub" style="margin-bottom:8px;">
-          Te enviamos un link de acceso a tu email para entrar sin contraseña.
+          Te enviamos un link de un solo uso para crear una nueva contraseña.
+          Vence en 30 minutos.
         </p>
         <div class="form-group">
-          <label for="email_magic">Email o usuario</label>
-          <input type="text" id="email_magic" name="email" required
-                 placeholder="tu@email.com o TUEMPRESA">
+          <label for="identificador_reset">Email o usuario</label>
+          <input type="text" id="identificador_reset" name="identificador" required
+                 placeholder="tu@email.com o TUEMPRESA" autocomplete="username">
         </div>
-        <button type="submit" class="btn btn-ghost btn-full">Enviar link de acceso</button>
+        <button type="submit" id="btn-password-forgot" class="btn btn-ghost btn-full">Restablecer contraseña</button>
       </form>
     </details>
 
@@ -110,8 +113,17 @@
   if (detOlvido) {
     detOlvido.addEventListener("toggle", function () {
       var principal = document.getElementById("email");
-      var magic = document.getElementById("email_magic");
-      if (this.open && magic && principal && !magic.value) magic.value = principal.value;
+      var recupero = document.getElementById("identificador_reset");
+      if (this.open && recupero && principal && !recupero.value) recupero.value = principal.value;
+    });
+  }
+  var formForgot = document.getElementById("password-forgot-form");
+  if (formForgot) {
+    formForgot.addEventListener("submit", function () {
+      var btn = document.getElementById("btn-password-forgot");
+      btn.disabled = true;
+      btn.classList.add("is-loading");
+      btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Solicitando…';
     });
   }
 </script>

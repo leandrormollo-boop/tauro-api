@@ -9,6 +9,7 @@
 
 <div class="card" style="max-width:480px;">
   <form method="POST" action="/admin/pagos/nuevo" enctype="multipart/form-data">
+    <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 
     <div class="form-group">
       <label>Cliente *</label>
@@ -25,32 +26,60 @@
     <div class="form-grid-2">
       <div class="form-group">
         <label>Fecha *</label>
-        <input type="date" name="fecha" required value="{{ today }}">
+        <input type="date" name="fecha" required value="{{ form_data.fecha if form_data else today }}">
       </div>
       <div class="form-group">
         <label>Monto ARS *</label>
-        <input type="text" name="monto_ars" required inputmode="decimal" data-numero="monto" placeholder="80.000 o 80,000">
+        <input type="text" name="monto_ars" required inputmode="decimal" data-numero="monto"
+               value="{{ form_data.monto_ars if form_data else '' }}" placeholder="80.000 o 80,000">
       </div>
     </div>
 
     <div class="form-group">
       <label>Método *</label>
       <select name="metodo" required>
-        <option value="transferencia">Transferencia bancaria</option>
-        <option value="efectivo">Efectivo</option>
-        <option value="cheque">Cheque</option>
-        <option value="otro">Otro</option>
+        {% set metodo_actual = form_data.metodo if form_data else 'transferencia' %}
+        <option value="transferencia" {% if metodo_actual == 'transferencia' %}selected{% endif %}>Transferencia bancaria</option>
+        <option value="efectivo" {% if metodo_actual == 'efectivo' %}selected{% endif %}>Efectivo</option>
+        <option value="cheque" {% if metodo_actual == 'cheque' %}selected{% endif %}>Cheque</option>
+        <option value="otro" {% if metodo_actual == 'otro' %}selected{% endif %}>Otro</option>
       </select>
     </div>
 
     <div class="form-group">
+      <label>Imputación *</label>
+      {% set imputacion_actual = form_data.imputacion if form_data else 'SIN_IMPUTAR' %}
+      <select name="imputacion" required>
+        <option value="SIN_IMPUTAR" {% if imputacion_actual == 'SIN_IMPUTAR' %}selected{% endif %}>Sin imputar</option>
+        <option value="NACIONAL" {% if imputacion_actual == 'NACIONAL' %}selected{% endif %}>Todo a Nacional</option>
+        <option value="INTERNACIONAL" {% if imputacion_actual == 'INTERNACIONAL' %}selected{% endif %}>Todo a Internacional</option>
+        <option value="DIVIDIR" {% if imputacion_actual == 'DIVIDIR' %}selected{% endif %}>Dividir entre ambos</option>
+      </select>
+      <small style="color:var(--fg-4);">Sin imputar conserva el crédito disponible sin restarlo dos veces.</small>
+    </div>
+
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Monto a Nacional</label>
+        <input type="text" name="monto_nacional" inputmode="decimal" data-numero="monto"
+               value="{{ form_data.monto_nacional if form_data else '' }}" placeholder="Sólo si elegís Dividir">
+      </div>
+      <div class="form-group">
+        <label>Monto a Internacional</label>
+        <input type="text" name="monto_internacional" inputmode="decimal" data-numero="monto"
+               value="{{ form_data.monto_internacional if form_data else '' }}" placeholder="Sólo si elegís Dividir">
+      </div>
+    </div>
+    <p style="color:var(--fg-4);font-size:12px;margin-top:-8px;">Al dividir, la suma no puede superar el pago; cualquier remanente queda como crédito sin imputar.</p>
+
+    <div class="form-group">
       <label>Referencia / CBU / Comprobante</label>
-      <input type="text" name="referencia" placeholder="CBU 0110599220059901234567">
+      <input type="text" name="referencia" value="{{ form_data.referencia if form_data else '' }}" placeholder="CBU 0110599220059901234567">
     </div>
 
     <div class="form-group">
       <label>Nota</label>
-      <input type="text" name="nota" placeholder="Pago parcial — cuota 1/3">
+      <input type="text" name="nota" value="{{ form_data.nota if form_data else '' }}" placeholder="Pago parcial — cuota 1/3">
     </div>
 
     <div class="form-group">

@@ -31,6 +31,14 @@
   .access-warning { display:flex;gap:10px;align-items:flex-start;margin:14px 0 0;padding:11px 14px;border:1px solid rgba(245,158,11,.26);background:rgba(245,158,11,.07);border-radius:10px;color:var(--fg-3);font-size:12.5px; }
   .access-actions { display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:16px; }
   .inherit-note { color:var(--fg-4);font-size:11px;margin-top:5px; }
+  .future-integrations { margin-top:16px;padding:16px 18px;border:1px dashed var(--line);border-radius:12px;background:rgba(255,255,255,.012); }
+  .future-integrations h2 { margin:0 0 5px;font-size:14px; }
+  .future-integrations > p { margin:0 0 12px;color:var(--fg-3);font-size:12px;max-width:720px; }
+  .future-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px; }
+  .future-card { display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line-soft);border-radius:10px;background:var(--bg-elev-2); }
+  .future-card strong { display:block;font-size:12px; }
+  .future-card small { display:block;margin-top:3px;color:var(--fg-4);font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.05em; }
+  .future-mark { display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:rgba(255,255,255,.06);font-size:15px; }
   .sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; }
   @media (max-width:1050px) {
     .access-grid { grid-template-columns:145px 82px 94px 94px minmax(250px,1fr); }
@@ -140,6 +148,21 @@
       <button type="submit" class="btn btn-primary">Guardar configuración</button>
     </div>
   </form>
+
+  {% if futuros_couriers %}
+  <section class="future-integrations" aria-labelledby="future-integrations-title">
+    <h2 id="future-integrations-title">Próximas integraciones</h2>
+    <p>La estructura ya está preparada. Cuando recibamos credenciales y contrato, activaremos cada operador desde esta misma matriz sin cambiar el portal del cliente.</p>
+    <div class="future-grid">
+      {% for c in futuros_couriers %}
+      <div class="future-card">
+        <span class="future-mark" aria-hidden="true">{% if 'NACIONAL' in c.ambitos %}🇦🇷{% else %}🌐{% endif %}</span>
+        <div><strong>{{ c.nombre }}</strong><small>API pendiente · {{ 'Nacional' if 'NACIONAL' in c.ambitos else 'Internacional' }}</small></div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 </div>
 
 <script nonce="{{ request.state.csp_nonce }}">

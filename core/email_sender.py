@@ -4,13 +4,14 @@ import smtplib
 def _from_visible(remitente: str) -> str:
     """
     El remitente que VE el destinatario. EMAIL_FROM permite mandar como un
-    alias del dominio (ej: "TAURO Solutions <cotizaciones@taurosolutions.ar>")
+    alias operativo del dominio: "TAURO Operaciones
+    <operaciones@taurosolutions.ar>".
     mientras el login SMTP sigue siendo la cuenta real (EMAIL_REMITENTE).
     En Google Workspace el alias tiene que estar dado de alta en el usuario
     ("Enviar como") o Gmail lo pisa con la cuenta real.
     """
-    import os
-    return os.getenv("EMAIL_FROM", "").strip() or remitente
+    from core.email_transport import operations_visible_sender
+    return operations_visible_sender()
 
 
 import os
@@ -20,6 +21,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from io import BytesIO
 from dotenv import load_dotenv
+from core.email_transport import EmailDeliveryResult
 
 load_dotenv()
 
@@ -167,8 +169,13 @@ def _enviar_mail(asunto: str, cuerpo_html: str, pdf_bytes: bytes = None, nombre_
         print("[email] Variables EMAIL_REMITENTE / EMAIL_PASSWORD / EMAIL_DESTINO no configuradas.")
         return False
 
+    visible_sender = _from_visible(remitente)
+    if not visible_sender:
+        print("[email] EMAIL_FROM debe ser operaciones@taurosolutions.ar y estar autorizado.")
+        return False
+
     msg = MIMEMultipart("mixed")
-    msg["From"] = _from_visible(remitente)
+    msg["From"] = visible_sender
     msg["To"] = destinatario
     msg["Subject"] = asunto
 
@@ -282,29 +289,23 @@ def _enviar_mail_a(email_destino: str, asunto: str, cuerpo_html: str) -> bool:
     _enviar_mail (que va al EMAIL_DESTINO global de alertas), acá el
     destino se elige — lo usa el centinela del checkout.
     """
-    remitente = os.getenv("EMAIL_REMITENTE")
-    password = os.getenv("EMAIL_PASSWORD")
-    if not remitente or not password:
-        print("[email] SMTP no configurado, no se envía el aviso.")
-        return False
+    import html
+    import re
 
-    msg = MIMEMultipart("mixed")
-    msg["From"] = _from_visible(remitente)
-    msg["To"] = email_destino
-    msg["Subject"] = asunto
-    msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+    from core.email_transport import send_transactional_email
 
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(remitente, password)
-        server.sendmail(remitente, email_destino, msg.as_string())
-        server.quit()
-        print(f"[email] aviso enviado a {email_destino}")
-        return True
-    except Exception as e:
-        print(f"[email] error enviando aviso: {e}")
-        return False
+    texto = re.sub(r"<\s*br\s*/?>", "\n", cuerpo_html or "", flags=re.I)
+    texto = re.sub(r"</\s*(?:p|div|tr|h[1-6])\s*>", "\n", texto, flags=re.I)
+    texto = html.unescape(re.sub(r"<[^>]+>", "", texto))
+    texto = "\n".join(line.strip() for line in texto.splitlines() if line.strip())
+    resultado = send_transactional_email(
+        recipient=email_destino,
+        subject=asunto,
+        text_body=texto or "Notificación de TAURO Solutions",
+        html_body=cuerpo_html,
+    )
+    print(f"[email] aviso: {resultado.code}")
+    return resultado.accepted
 
 
 def enviar_link_magico(email_destino: str, link: str, cliente: str,
@@ -316,7 +317,13 @@ def enviar_link_magico(email_destino: str, link: str, cliente: str,
     A diferencia de _enviar_mail, usa el email del destinatario y no el
     EMAIL_DESTINO global, que es para alertas internas.
     """
+    from html import escape
+
+    from core.email_transport import send_transactional_email
+
     asunto = "Acceso al portal Tauro Solutions"
+    cliente_seguro = escape(str(cliente or "Cliente"))
+    link_seguro = escape(link, quote=True)
     # Identidad TAURO: violeta #a78bfa sobre negro violáceo. Los clientes de
     # mail no soportan CSS moderno, así que todo va en estilos inline.
     cuerpo = f"""<html><body style="margin:0;padding:0;background:#f4f4f6;">
@@ -332,19 +339,19 @@ def enviar_link_magico(email_destino: str, link: str, cliente: str,
   </div>
 
   <div style="padding:34px 30px;">
-    <h2 style="color:#0c0a14;margin:0 0 14px;font-size:21px;">Hola {cliente}</h2>
+    <h2 style="color:#0c0a14;margin:0 0 14px;font-size:21px;">Hola {cliente_seguro}</h2>
     <p style="line-height:1.7;color:#4a4a58;margin:0 0 26px;">
       Pediste acceso al portal de Tauro Solutions. Entrá con este botón:
     </p>
     <p style="text-align:center;margin:0 0 26px;">
-      <a href="{link}" style="background:#7c5cf6;color:#ffffff;padding:15px 34px;
+      <a href="{link_seguro}" style="background:#7c5cf6;color:#ffffff;padding:15px 34px;
          text-decoration:none;font-weight:600;border-radius:999px;display:inline-block;
          font-size:15px;">Entrar al portal</a>
     </p>
     <p style="color:#7a7a88;font-size:13px;line-height:1.6;margin:0 0 18px;">
       Si no fuiste vos, ignorá este mail. El link vence en {vence_en} y se usa una sola vez.
     </p>
-    <p style="color:#a0a0ad;font-size:11px;word-break:break-all;margin:0;">{link}</p>
+    <p style="color:#a0a0ad;font-size:11px;word-break:break-all;margin:0;">{link_seguro}</p>
   </div>
 
   <div style="background:#0c0a14;padding:18px;text-align:center;font-size:11px;color:#8b86a0;">
@@ -354,30 +361,81 @@ def enviar_link_magico(email_destino: str, link: str, cliente: str,
 </div>
 </body></html>"""
 
-    remitente = os.getenv("EMAIL_REMITENTE")
-    password = os.getenv("EMAIL_PASSWORD")
+    texto = (
+        f"Hola {cliente}.\n\nEntrá al portal TAURO desde este link: {link}\n\n"
+        f"El link vence en {vence_en} y se usa una sola vez. Si no fuiste vos, ignoralo."
+    )
+    resultado = send_transactional_email(
+        recipient=email_destino,
+        subject=asunto,
+        text_body=texto,
+        html_body=cuerpo,
+        dedupe_key=f"magic:{link}",
+    )
+    print(f"[email] link mágico: {resultado.code}")
+    return resultado.accepted
 
-    if not remitente or not password:
-        print("[email] SMTP no configurado, no se envía link mágico.")
-        return False
 
-    msg = MIMEMultipart("mixed")
-    msg["From"] = _from_visible(remitente)
-    msg["To"] = email_destino
-    msg["Subject"] = asunto
-    msg.attach(MIMEText(cuerpo, "html", "utf-8"))
+def enviar_restablecimiento_password(
+    email_destino: str,
+    link: str,
+) -> EmailDeliveryResult:
+    """Envía el link de un solo uso para crear una contraseña nueva.
 
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(remitente, password)
-        server.sendmail(remitente, email_destino, msg.as_string())
-        server.quit()
-        print(f"[email] Link mágico enviado a {email_destino}")
-        return True
-    except Exception as e:
-        print(f"[email] Error enviando link mágico: {e}")
-        return False
+    Devuelve el ``EmailDeliveryResult`` tipado del transporte. El worker usa
+    ``accepted``, ``retryable`` y ``code`` para decidir activación/reintentos;
+    por eso un fallo de configuración o red nunca deja un link canjeable.
+    No se imprimen destinatario ni URL: ambos contienen datos sensibles.
+    """
+    from html import escape
+    from core.email_transport import send_transactional_email
+
+    link_seguro = escape(link, quote=True)
+    cuerpo = f"""<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>Restablecer contraseña · TAURO</title></head>
+<body style="margin:0;padding:0;background:#f4f4f6;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#f4f4f6" style="border-collapse:collapse;background:#f4f4f6;">
+  <tr><td align="center" style="padding:22px 10px;">
+    <table role="presentation" width="560" cellspacing="0" cellpadding="0" bgcolor="#ffffff" style="width:100%;max-width:560px;border-collapse:collapse;background:#ffffff;font-family:Arial,Helvetica,sans-serif;color:#2a2a33;">
+      <tr><td align="center" bgcolor="#0c0a14" style="background:#0c0a14;padding:34px 24px;">
+        <div style="font-size:24px;font-weight:700;letter-spacing:0.08em;color:#ffffff;">TAURO <span style="color:#a78bfa;">SOLUTIONS</span></div>
+        <div style="margin-top:6px;font-size:11px;letter-spacing:0.14em;color:#b1aabd;text-transform:uppercase;">Tu operación logística, en un solo lugar</div>
+      </td></tr>
+      <tr><td style="padding:34px 30px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6746d9;margin-bottom:10px;">Seguridad de la cuenta</div>
+        <h1 style="color:#0c0a14;margin:0 0 14px;font-size:22px;line-height:1.3;">Creá una nueva contraseña</h1>
+        <p style="line-height:1.7;color:#4a4a58;margin:0 0 26px;">Recibimos un pedido para restablecer la contraseña de tu portal TAURO.</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" align="center" style="margin:0 auto 26px;">
+          <tr><td align="center" bgcolor="#6746d9" style="border-radius:999px;">
+            <a href="{link_seguro}" style="background:#6746d9;border:1px solid #6746d9;color:#ffffff;padding:15px 30px;text-decoration:none;font-weight:700;border-radius:999px;display:inline-block;font-size:15px;">Crear nueva contraseña</a>
+          </td></tr>
+        </table>
+        <div style="border:1px solid #e8e6ef;border-radius:12px;padding:16px 18px;background:#faf9ff;color:#514b60;font-size:13px;line-height:1.6;">El link vence en <strong>30 minutos</strong> y se puede usar una sola vez. Al cambiarla, se cerrarán las sesiones abiertas de tu cuenta.</div>
+        <p style="color:#676270;font-size:13px;line-height:1.6;margin:22px 0 10px;">Si no pediste este cambio, ignorá este correo. Tu contraseña actual seguirá funcionando.</p>
+        <p style="color:#777181;font-size:11px;word-break:break-all;margin:0;">{link_seguro}</p>
+      </td></tr>
+      <tr><td align="center" bgcolor="#0c0a14" style="background:#0c0a14;padding:18px;color:#b1aabd;font-size:11px;">Tauro Solutions · taurosolutions.ar</td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
+    texto = (
+        "TAURO Solutions\n\n"
+        "Recibimos un pedido para restablecer la contraseña de tu portal.\n"
+        f"Creá una nueva contraseña desde este link: {link}\n\n"
+        "El link vence en 30 minutos y se puede usar una sola vez. "
+        "Al cambiarla, se cerrarán las sesiones abiertas de tu cuenta.\n\n"
+        "Si no pediste este cambio, ignorá este correo."
+    )
+    resultado = send_transactional_email(
+        recipient=email_destino,
+        subject="Restablecé tu contraseña · TAURO Solutions",
+        text_body=texto,
+        html_body=cuerpo,
+        dedupe_key=f"password-reset:{link}",
+    )
+    print(f"[email] recupero: {resultado.code}")
+    return resultado
 
 
 # ─────────────────────────────────────────────
@@ -452,8 +510,13 @@ def enviar_notificacion_estado(
         print(f"[email] Notificación de estado no enviada (SMTP o destino faltante) — solicitud {solicitud_id}")
         return False
 
+    visible_sender = _from_visible(remitente)
+    if not visible_sender:
+        print("[email] EMAIL_FROM debe ser operaciones@taurosolutions.ar y estar autorizado.")
+        return False
+
     msg = MIMEMultipart("mixed")
-    msg["From"] = _from_visible(remitente)
+    msg["From"] = visible_sender
     msg["To"] = email_destino
     msg["Subject"] = asunto
     msg.attach(MIMEText(cuerpo, "html", "utf-8"))

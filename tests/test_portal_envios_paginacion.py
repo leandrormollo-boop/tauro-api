@@ -116,9 +116,11 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "&paso={{ paso_filtro }}" in html
     assert "Mostrando {{ pagina_desde }}–{{ pagina_hasta }}" in html
     assert "cotizado en esta página" in html
-    assert "{% if not tipo_filtro %}" in html
-    assert "Todos</a>" not in html
-    assert "Cambiar ámbito" in html
+    assert "{% if not tipo_filtro %}" not in html
+    assert "envios-scope-tabs" in html
+    assert "Nacionales <b>{{ total_nacionales }}</b>" in html
+    assert "Internacionales <b>{{ total_internacionales }}</b>" in html
+    assert "Cambiar ámbito" not in html
     assert "No hay envíos que coincidan con estos filtros" in html
     # Los links de tipo y de paso no incluyen `pagina`: cambiar un filtro
     # siempre vuelve a la primera hoja.
@@ -131,3 +133,4 @@ def test_endpoint_real_usa_el_contrato_paginado_de_historial():
 
     assert "preparar_historial_envios(historial, tipo, paso, pagina)" in endpoint
     assert 'pagina: str = "1"' in endpoint
+    assert 'tipo = _ambito_portal(tipo) or "internacional"' in endpoint

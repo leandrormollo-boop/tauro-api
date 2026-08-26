@@ -136,15 +136,16 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     assert "El pago está en revisión y no modifica el saldo" in html
     assert "Todavía no impacta el saldo" in html
     assert "Facturado" in html
-    assert "Pendiente de facturación" in html
-    assert "Pagos aplicados" in html
-    assert "Saldo a favor" in html
+    assert "A facturar" in html
+    assert "Debe" in html
+    assert "Haber" in html
+    assert "A favor" in html
 
 
 def test_informar_pago_esta_antes_del_historial_y_es_compacto():
     html = _template("cuenta.html")
     assert 'class="card account-payment-card"' in html
-    assert html.index('id="informar-pago"') < html.index("{% if movimientos %}")
+    assert html.index('id="informar-pago"') < html.index('{% set filas = movimientos["items"] %}')
 
 
 def test_alta_y_edicion_de_clientes_abren_un_dialogo_sin_bajar_al_formulario():
@@ -161,14 +162,15 @@ def test_envios_distingue_cotizacion_de_cuenta_corriente():
     html = _template("envios.html")
     assert "Importe cotizado" in html
     assert "cotizado en esta página" in html
-    assert "Cargos y facturas en el resumen total" in html
+    assert "Cargos y facturas:" in html
+    assert "/portal/cuenta?ambito={{ tipo_filtro }}" in html
     assert "Tu costo" not in html
 
 
 def test_historial_de_envios_no_queda_truncado_en_cien():
     endpoint = (RAIZ / "endpoints" / "portal_cliente.py").read_text(encoding="utf-8")
     assert "listar_solicitudes_cliente(cliente, limite=None)" in endpoint
-    assert "get_facturas_recientes(cliente, limite=None)" in endpoint
+    assert "movimientos_cuenta_paginados(" in endpoint
 
 
 def test_tselect_busca_codigo_y_cierra_al_salir_del_componente():
