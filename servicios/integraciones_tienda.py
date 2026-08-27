@@ -434,7 +434,10 @@ def reiniciar_integracion_shopify_cliente(
                 """
                 DELETE FROM shopify_instalaciones
                  WHERE LOWER(dominio) = %s
-                   AND (cliente_id IS NULL OR UPPER(cliente_id) = %s)
+                   AND (
+                        NULLIF(BTRIM(cliente_id), '') IS NULL
+                        OR UPPER(BTRIM(cliente_id)) = %s
+                   )
                 """,
                 (dominio, cliente_id),
             )
@@ -547,14 +550,16 @@ def limpiar_espejo_shopify_huerfano_cliente(cliente_id: str) -> dict:
                 (cliente_id, cliente_id),
             )
             estado = cur.fetchone() or {}
-            if int(estado.get("bindings") or 0) or int(
-                estado.get("instalaciones") or 0
-            ):
+            if int(estado.get("bindings") or 0):
                 raise ValueError(
                     "Todavía existe una conexión Shopify. Reiniciala desde Mi tienda."
                 )
 
-            snapshot = {}
+            snapshot = {
+                "instalaciones_retiradas": int(
+                    estado.get("instalaciones") or 0
+                ),
+            }
             for clave, tabla in (
                 ("productos", "productos"),
                 ("inventario_ubicaciones", "producto_inventario_ubicaciones"),
@@ -572,6 +577,16 @@ def limpiar_espejo_shopify_huerfano_cliente(cliente_id: str) -> dict:
                 )
                 snapshot[clave] = int((cur.fetchone() or {}).get("n") or 0)
 
+            # Sin binding no hay una instalación operativa. Retirar estos
+            # tokens owner-only cierra webhooks viejos y permite que el próximo
+            # OAuth empiece con una generación realmente nueva.
+            cur.execute(
+                """
+                DELETE FROM shopify_instalaciones
+                 WHERE UPPER(COALESCE(cliente_id, '')) = %s
+                """,
+                (cliente_id,),
+            )
             cur.execute(
                 """
                 DELETE FROM producto_inventario_ubicaciones

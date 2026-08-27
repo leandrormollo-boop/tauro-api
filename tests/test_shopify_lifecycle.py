@@ -944,7 +944,7 @@ def test_limpieza_huerfana_retira_shopify_y_preserva_historia(monkeypatch):
     from servicios import integraciones_tienda
 
     cursor = _Cursor([
-        {"bindings": 0, "instalaciones": 0},
+        {"bindings": 0, "instalaciones": 1},
         {"n": 229},
         {"n": 458},
         {"n": 7},
@@ -964,6 +964,8 @@ def test_limpieza_huerfana_retira_shopify_y_preserva_historia(monkeypatch):
 
     sql = "\n".join(query for query, _params in cursor.ejecutadas)
     assert resultado["productos"] == 229
+    assert resultado["instalaciones_retiradas"] == 1
+    assert "DELETE FROM shopify_instalaciones" in sql
     assert "DELETE FROM producto_inventario_ubicaciones" in sql
     assert "DELETE FROM productos" in sql
     assert "DELETE FROM envios" not in sql
