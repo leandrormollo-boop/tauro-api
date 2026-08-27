@@ -682,7 +682,10 @@ def test_coleccion_postman_es_segura_y_no_contiene_secretos():
     assert graphql["url"].endswith("/graphql.json")
     assert "X-Shopify-Access-Token" in {h["key"] for h in graphql["header"]}
 
-    webhooks = coleccion["item"][1]["item"]
+    webhooks = next(
+        carpeta["item"] for carpeta in coleccion["item"]
+        if carpeta["name"] == "10 · Webhooks controlados"
+    )
     validos = [w for w in webhooks if "firma válida" in w["name"] or "idempotencia" in w["name"]]
     assert validos
     for request in validos:

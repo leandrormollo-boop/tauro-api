@@ -105,6 +105,17 @@ Suite: 92 tests, `.venv-codex/bin/python -m pytest tests/ -q` — **sin
 el 03/08: importaban `core/security.py`, que no está trackeado, así que
 explotaban al colectar y se venían salteando a mano en cada corrida.
 
+### Actualización API B2B — 27/08/2026
+
+- `POST /pedido` acepta `Idempotency-Key`; un retry concurrente devuelve la
+  misma solicitud y una clave reutilizada con otro body responde `409`.
+- `GET /pedidos/{id}` y `GET /pedidos/{id}/guia.pdf` permiten consultar y
+  descargar la guía con API key, siempre filtrando por dueño.
+- `GET /rastrear/{tracking}` consulta sólo envíos propios e intenta refrescar
+  DHL/FedEx/UPS; si el courier falla conserva el estado TAURO sin filtrar el
+  error interno.
+- Suite actual: **858 tests + 5 subtests**, sin exclusiones.
+
 ## Seguridad (03/08/2026)
 
 ### Endurecimiento grande de la web ("usa todo tu poder")
