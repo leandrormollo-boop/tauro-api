@@ -151,7 +151,13 @@ más viejo que `SECURITY_AUDIT_RETENTION_DAYS` (default 365).
 
 - Webhooks Shopify por **HMAC**; sin/mal firma → 401 (lo verifica
   `scripts/test_checkout_critico.py` en cada deploy).
-- OAuth con `state` verificado y dominio validado por regex.
+- OAuth con `state` obligatorio, ligado a cookie segura y dominio validado por
+  regex. Un callback sin cookie, sin estado o con valor distinto se rechaza.
+- Tokens offline públicos expirables y cifrados; la rotación access/refresh es
+  atómica y falla cerrada cuando el refresh ya no es válido.
+- La tienda sólo queda activa después de verificar el conjunto exacto de
+  webhooks de su generación. Las instalaciones históricas sin esa evidencia
+  deben reautorizar una vez desde Shopify.
 - Al vincular una tienda huérfana se le pregunta a la propia tienda quién es su
   dueño (`GET shop.json`) y se compara contra el mail del cliente.
 - Pedidos huérfanos se borran a los 90 días.
@@ -206,6 +212,10 @@ Opcionales de seguridad:
 - Rotar cualquier clave que haya viajado por chat/mail/captura (Gmail App
   Password, FedEx, UPS, DHL, base). Las API keys B2B se rotan desde el admin.
 - Activar backups/snapshots de PostgreSQL **y probar una restauración**.
+- Para una restauración que involucre datos Shopify, seguir
+  [`PRIVACIDAD_SHOPIFY_OPERACION.md`](PRIVACIDAD_SHOPIFY_OPERACION.md): un
+  snapshot viejo puede reintroducir PII ya borrada y no debe publicarse sin
+  reejecutar las redacciones posteriores.
 - Revisar `/admin/seguridad` y los logs de Railway.
 - Una sola persona con acceso de escritura a Railway/Cloudflare/GitHub.
 

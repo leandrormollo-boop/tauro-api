@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+from pathlib import Path
+
 import pytest
 
-from servicios import shopify_catalogo as sc
+from servicios import catalogo, shopify_catalogo as sc
 
 
 def _variante(*, sku="REEL-PJ-200", tracked=True):
@@ -74,6 +77,7 @@ def test_graphql_mapea_variante_imagen_peso_hs_y_stock(monkeypatch):
     assert fila["stock_comprometido"] == 3
     assert fila["stock_fisico"] == 13
     assert fila["stock_entrante"] == 4
+    assert fila["source_updated_at"] == "2026-08-27T01:03:00+00:00"
     assert [u["ubicacion_nombre"] for u in fila["ubicaciones"]] == ["Depósito", "Local"]
 
 
@@ -161,7 +165,14 @@ def test_webhook_inventario_consulta_la_variante_singular(monkeypatch):
     consultas = []
     guardadas = []
 
-    monkeypatch.setattr(sc, "instalacion", lambda _dominio: {"access_token": "token"})
+    monkeypatch.setattr(sc, "instalacion", lambda _dominio: {
+        "access_token": "token",
+        "cliente_id": "PESCA_JACKS",
+        "install_generation": "gen-1",
+    })
+    monkeypatch.setattr(
+        sc, "_bloqueo_generacion_operativa", lambda *_args: nullcontext(),
+    )
 
     def graphql(_dominio, _token, query, variables):
         consultas.append((query, variables))
@@ -170,13 +181,13 @@ def test_webhook_inventario_consulta_la_variante_singular(monkeypatch):
     monkeypatch.setattr(sc, "_graphql", graphql)
     monkeypatch.setattr(
         sc, "_guardar_variantes",
-        lambda dominio, cliente, filas, run_id: guardadas.append(
-            (dominio, cliente, filas, run_id)
+        lambda dominio, cliente, filas, run_id, **kwargs: guardadas.append(
+            (dominio, cliente, filas, run_id, kwargs)
         ) or (0, len(filas)),
     )
 
     resultado = sc.sincronizar_inventory_item(
-        "pesca-jacks.myshopify.com", "PESCA_JACKS", 300
+        "pesca-jacks.myshopify.com", "PESCA_JACKS", 300, "gen-1"
     )
 
     assert resultado == {"ok": True, "creados": 0, "actualizados": 1}
@@ -192,7 +203,12 @@ def test_sync_fallida_no_archiva_el_catalogo_existente(monkeypatch):
     monkeypatch.setattr(sc, "instalacion", lambda _dominio: {
         "access_token": "token",
         "scopes": "read_products,read_inventory",
+        "cliente_id": "PESCA_JACKS",
+        "install_generation": "gen-1",
     })
+    monkeypatch.setattr(
+        sc, "_bloqueo_generacion_operativa", lambda *_args: nullcontext(),
+    )
     monkeypatch.setattr(
         sc, "traer_variantes",
         lambda *_args: (_ for _ in ()).throw(
@@ -208,6 +224,215 @@ def test_sync_fallida_no_archiva_el_catalogo_existente(monkeypatch):
     assert resultado["codigo"] == "SHOPIFY_NO_RESPONDE"
     assert archivados == []
     assert estados[-1][0][2] == "ERROR"
+
+
+def test_evento_de_generacion_anterior_no_consulta_ni_escribe(monkeypatch):
+    graphql = []
+    guardadas = []
+    monkeypatch.setattr(sc, "instalacion", lambda _dominio: {
+        "access_token": "token-nuevo",
+        "cliente_id": "PESCA_JACKS",
+        "install_generation": "gen-2",
+    })
+    monkeypatch.setattr(sc, "_graphql", lambda *_a, **_k: graphql.append(True))
+    monkeypatch.setattr(
+        sc, "_guardar_variantes", lambda *_a, **_k: guardadas.append(True),
+    )
+
+    with pytest.raises(sc.ShopifyCatalogError) as exc:
+        sc.sincronizar_producto(
+            "pesca-jacks.myshopify.com", "PESCA_JACKS", 100, "gen-1",
+        )
+
+    assert exc.value.codigo == "GENERACION_OBSOLETA"
+    assert graphql == []
+    assert guardadas == []
+
+
+def test_worker_descarta_generacion_obsoleta_sin_reintentar(monkeypatch):
+    evento = {
+        "webhook_id": "wh-gen-1",
+        "dominio": "pesca-jacks.myshopify.com",
+        "topic": "products/update",
+        "install_generation": "gen-1",
+        "intentos": 1,
+        "payload": {"id": 100},
+    }
+    pendientes = iter([evento, None])
+    updates = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            updates.append((query, params))
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    monkeypatch.setattr(sc, "_tomar_evento", lambda: next(pendientes))
+    monkeypatch.setattr(
+        sc,
+        "_procesar_evento",
+        lambda _evento: (_ for _ in ()).throw(
+            sc.ShopifyCatalogError(
+                "GENERACION_OBSOLETA", "La instalación ya fue reemplazada.",
+            )
+        ),
+    )
+    monkeypatch.setattr(sc, "get_conn", lambda: Conn())
+
+    resultado = sc.procesar_cola_eventos()
+
+    assert resultado == {"procesados": 1, "errores": 0}
+    assert updates[-1][1][:3] == (
+        "COMPLETADO", "GENERACION_OBSOLETA", False,
+    )
+
+
+def test_schema_no_admite_eventos_sin_generacion_y_cuarentena_legacy():
+    schema = (
+        Path(__file__).resolve().parents[1] / "sql" / "schema.sql"
+    ).read_text(encoding="utf-8")
+    bloque = schema[schema.index("CREATE TABLE IF NOT EXISTS shopify_webhook_eventos") :]
+
+    assert "install_generation TEXT NOT NULL" in bloque
+    assert "SET install_generation = 'legacy-sin-generacion'" in bloque
+    assert "ALTER COLUMN install_generation SET NOT NULL" in bloque
+    assert "source_deleted_at" in schema
+    assert "source_observed_at" in schema
+
+
+def test_lanzar_sincronizacion_deduplica_y_limita_el_ejecutor(monkeypatch):
+    trabajos = []
+    importaciones = []
+
+    class Executor:
+        def submit(self, trabajo):
+            trabajos.append(trabajo)
+
+    monkeypatch.setattr(sc, "_sync_executor", Executor())
+    monkeypatch.setattr(
+        sc,
+        "importar_catalogo",
+        lambda dominio, cliente: importaciones.append((dominio, cliente)),
+    )
+    with sc._sync_en_curso_lock:
+        sc._sync_en_curso.clear()
+
+    try:
+        assert sc.lanzar_sincronizacion(
+            "PESCA-JACKS.MYSHOPIFY.COM", "pesca_jacks"
+        ) is True
+        assert sc.lanzar_sincronizacion(
+            "pesca-jacks.myshopify.com", "PESCA_JACKS"
+        ) is False
+        assert len(trabajos) == 1
+
+        trabajos.pop()()
+        assert importaciones == [
+            ("pesca-jacks.myshopify.com", "PESCA_JACKS")
+        ]
+        assert sc.lanzar_sincronizacion(
+            "pesca-jacks.myshopify.com", "PESCA_JACKS"
+        ) is True
+    finally:
+        with sc._sync_en_curso_lock:
+            sc._sync_en_curso.clear()
+
+
+def test_snapshot_viejo_no_habilita_regresion_de_stock(monkeypatch):
+    ejecuciones = []
+
+    class Cursor:
+        def __init__(self):
+            self.ultima = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.ultima = str(query)
+            ejecuciones.append((self.ultima, params))
+
+        def fetchone(self):
+            if "SELECT id," in self.ultima and "FROM productos" in self.ultima:
+                # La DB comparó source_updated_at y determinó que el webhook
+                # más nuevo ya ganó.
+                return {
+                    "id": 7,
+                    "aplicar_fuente": False,
+                    "aplicar_presencia": False,
+                }
+            return None
+
+    class Conn:
+        def __init__(self):
+            self.cursor_instancia = Cursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cursor_instancia
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(catalogo, "_ensure_imagen_col", lambda: None)
+    monkeypatch.setattr(catalogo, "get_conn", lambda: Conn())
+
+    catalogo.upsert_producto_importado(
+        "PESCA_JACKS",
+        "REEL-1",
+        "Reel",
+        tienda_dominio="pesca-jacks.myshopify.com",
+        external_product_id="gid://shopify/Product/1",
+        external_variant_id="gid://shopify/ProductVariant/2",
+        external_inventory_item_id="gid://shopify/InventoryItem/3",
+        stock_controlado=True,
+        stock_disponible=10,
+        source_updated_at="2026-08-27T12:00:00Z",
+        source_observed_at="2026-08-27T12:00:00Z",
+        sync_run_id="snapshot-viejo",
+        inventario_completo=True,
+        ubicaciones=[{
+            "external_location_id": "gid://shopify/Location/1",
+            "ubicacion_nombre": "Depósito",
+            "disponible": 10,
+            "source_updated_at": "2026-08-27T12:00:00Z",
+        }],
+    )
+
+    update = next(
+        (q, p) for q, p in ejecuciones if "UPDATE productos AS p SET" in q
+    )
+    assert update[1][-4] is False
+    assert update[1][-3] is False
+    assert "CASE WHEN incoming.aplicar" in update[0]
+    assert "sync_activo=CASE WHEN incoming.presencia" in update[0]
+    assert not any(
+        "INSERT INTO producto_inventario_ubicaciones" in q
+        for q, _ in ejecuciones
+    )
+    assert not any("DELETE FROM producto_inventario_ubicaciones" in q for q, _ in ejecuciones)
 
 
 @pytest.mark.parametrize(

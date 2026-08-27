@@ -98,9 +98,10 @@ class FedExClient(CarrierBase):
         data = resp.json()
         access_token = data.get("access_token")
         if not access_token:
+            codigo = self._codigos_errores_fedex(data)
             raise RuntimeError(
                 f"[fedex] No se pudo obtener token OAuth en ambiente {self.environment}. "
-                f"Status {resp.status_code}: {resp.text[:500]}"
+                f"HTTP {resp.status_code}; código={codigo}"
             )
 
         self._token = access_token
@@ -327,8 +328,17 @@ class FedExClient(CarrierBase):
             resp = self._request_with_retry("POST", url, json=payload)
 
             if resp.status_code != 200:
-                print(f"[fedex] get_rates error {resp.status_code}: {resp.text[:300]}")
-                return {"encontrado": False, "error": resp.text}
+                try:
+                    error_data = resp.json()
+                except Exception:
+                    error_data = {}
+                codigo = self._codigos_errores_fedex(error_data)
+                print(f"[fedex] get_rates error HTTP {resp.status_code}; código={codigo}")
+                detalle = self._extraer_errores_fedex(error_data)
+                return {
+                    "encontrado": False,
+                    "error": detalle or f"FedEx rechazó la cotización (HTTP {resp.status_code}).",
+                }
 
             data = resp.json()
             reply_details = data.get("output", {}).get("rateReplyDetails", [])
@@ -531,8 +541,11 @@ class FedExClient(CarrierBase):
             data = resp.json() if resp.content else {}
 
             if resp.status_code not in (200, 201):
-                msg = self._extraer_errores_fedex(data) or resp.text[:400]
-                print(f"[fedex] create_shipment error {resp.status_code}: {msg}")
+                codigo = self._codigos_errores_fedex(data)
+                msg = self._extraer_errores_fedex(data) or (
+                    f"FedEx rechazó la emisión (HTTP {resp.status_code})."
+                )
+                print(f"[fedex] create_shipment error HTTP {resp.status_code}; código={codigo}")
                 return {"encontrado": False, "error": msg}
 
             transaction = (data.get("output", {}).get("transactionShipments") or [{}])[0]
@@ -602,6 +615,13 @@ class FedExClient(CarrierBase):
             partes.append(f"{code}: {message}".strip(": "))
         return " | ".join(p for p in partes if p)
 
+    @staticmethod
+    def _codigos_errores_fedex(data: dict) -> str:
+        """Resumen seguro para logs: nunca incluye mensajes ni valores del body."""
+        errores = (data or {}).get("errors") or []
+        codigos = [str(e.get("code") or "").strip() for e in errores if isinstance(e, dict)]
+        return ",".join(c for c in codigos[:5] if c) or "sin_codigo"
+
     def track_many(self, tracking_numbers: list[str]) -> dict:
         """
         Consulta el estado FedEx de varios trackings.
@@ -635,7 +655,14 @@ class FedExClient(CarrierBase):
         )
 
         if resp.status_code != 200:
-            raise RuntimeError(f"[fedex] track error {resp.status_code}: {resp.text[:500]}")
+            try:
+                error_data = resp.json()
+            except Exception:
+                error_data = {}
+            codigo = self._codigos_errores_fedex(error_data)
+            raise RuntimeError(
+                f"[fedex] track error HTTP {resp.status_code}; código={codigo}"
+            )
 
         data = resp.json()
         output: dict[str, dict] = {}
@@ -760,7 +787,7 @@ class FedExClient(CarrierBase):
                 errs = resp.json().get("errors") or []
                 detalle = "; ".join(e.get("message", "") for e in errs)[:300]
             except Exception:
-                detalle = resp.text[:200]
+                detalle = ""
             return {"encontrado": False,
                     "error": detalle or f"FedEx rechazó la recolección ({resp.status_code})."}
 

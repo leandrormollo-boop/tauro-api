@@ -192,13 +192,11 @@ templates.env.globals["pendientes_admin"] = _pendientes_admin
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 if not ADMIN_PASSWORD:
-    # Nunca un default público. Si no hay contraseña configurada, generamos una
-    # aleatoria efímera y la dejamos en el log (visible en Railway) para que el
-    # dueño la vea una vez y configure ADMIN_PASSWORD en las variables de entorno.
-    ADMIN_PASSWORD = secrets.token_urlsafe(12)
-    print("[admin] ⚠️  ADMIN_PASSWORD no está configurada en el entorno.")
-    print(f"[admin] ⚠️  Contraseña temporal (cambia en cada restart): {ADMIN_PASSWORD}")
-    print("[admin] ⚠️  Configurá ADMIN_PASSWORD en Railway → Variables cuanto antes.")
+    # Fail closed: la clave aleatoria no se revela ni se guarda. El login por
+    # contraseña queda inaccesible hasta configurar ADMIN_PASSWORD; el canal de
+    # recuperación al correo oficial sigue siendo el único acceso de emergencia.
+    ADMIN_PASSWORD = secrets.token_urlsafe(48)
+    print("[admin] ADMIN_PASSWORD ausente; login por contraseña deshabilitado.")
 
 # En producción (HTTPS) las cookies deben ir con Secure. Default seguro: activado
 # salvo que se apague explícitamente para desarrollo local por HTTP.
@@ -716,6 +714,134 @@ def admin_seguridad(request: Request, admin_token: Optional[str] = Cookie(None))
     )
 
 
+# ── Privacidad Shopify ──────────────────────────────────────
+
+@router.get("/shopify/privacidad", response_class=HTMLResponse)
+def admin_shopify_privacidad(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    solicitudes = []
+    error = ""
+    try:
+        from servicios.shopify_gdpr import listar_pendientes
+        solicitudes = listar_pendientes()
+    except Exception as exc:
+        print(f"[admin] privacidad Shopify no disponible: {type(exc).__name__}")
+        error = "No pudimos leer las solicitudes de privacidad. Reintentá en unos minutos."
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/shopify_privacidad.html",
+        context={
+            "seccion": "shopify_privacidad",
+            "solicitudes": solicitudes,
+            "flash_ok": (
+                "Solicitud marcada como resuelta."
+                if request.query_params.get("ok") == "resuelta" else None
+            ),
+            "flash_error": error or None,
+        },
+    )
+
+
+@router.get("/shopify/privacidad/{solicitud_id}/datos.json")
+def admin_shopify_privacidad_descargar(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.shopify_gdpr import generar_exportacion
+        exportacion = generar_exportacion(solicitud_id)
+    except (TypeError, ValueError):
+        exportacion = None
+    except Exception as exc:
+        print(f"[admin] exportacion GDPR no disponible: {type(exc).__name__}")
+        return JSONResponse(
+            {"ok": False, "error": "No pudimos generar la exportación."},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    if not exportacion:
+        return JSONResponse(
+            {"ok": False, "error": "Solicitud no encontrada."},
+            status_code=404,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    request_id = str(exportacion["solicitud"]["request_id"])
+    shop_id = str(exportacion["solicitud"]["shop_id"])
+    registrar_desde_request(
+        request,
+        event="shopify.gdpr.download",
+        actor_type="admin",
+        actor_ref=f"{shop_id}:{request_id}",
+        status_code=200,
+        metadata={
+            "dominio": exportacion["solicitud"]["shop_domain"],
+            "cantidad_ordenes": len(exportacion["solicitud"]["orders_requested"]),
+        },
+    )
+    respuesta = Response(
+        content=json_dumps_pretty(exportacion),
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="shopify-data-request-{request_id}.json"',
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+    return respuesta
+
+
+@router.post("/shopify/privacidad/{solicitud_id}/resolver")
+def admin_shopify_privacidad_resolver(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.shopify_gdpr import marcar_resuelta
+        resultado = marcar_resuelta(solicitud_id)
+    except (TypeError, ValueError):
+        resultado = None
+    except Exception as exc:
+        print(f"[admin] no pude resolver GDPR Shopify: {type(exc).__name__}")
+        return RedirectResponse(
+            url="/admin/shopify/privacidad?error=db", status_code=303,
+        )
+    if not resultado:
+        return RedirectResponse(
+            url="/admin/shopify/privacidad?error=no_encontrada", status_code=303,
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    request_id = str(resultado["request_id"])
+    shop_id = str(resultado["shop_id"])
+    registrar_desde_request(
+        request,
+        event="shopify.gdpr.resolve",
+        actor_type="admin",
+        actor_ref=f"{shop_id}:{request_id}",
+        status_code=303,
+        metadata={
+            "dominio": resultado["dominio"],
+            "cantidad_ordenes": int(resultado.get("cantidad_ordenes") or 0),
+        },
+    )
+    return RedirectResponse(
+        url="/admin/shopify/privacidad?ok=resuelta", status_code=303,
+    )
+
+
 # ── Centro comercial / agentes ──────────────────────────────
 
 _FLASH_COMERCIAL = {
@@ -1010,7 +1136,10 @@ def admin_backup(admin_token: Optional[str] = Cookie(None)):
     return Response(
         content=contenido,
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
@@ -1775,8 +1904,14 @@ def admin_ver_factura(envio_id: int, admin_token: Optional[str] = Cookie(None)):
     if not dato:
         return Response(content="Sin PDF adjunto", status_code=404)
     contenido, nombre = dato
-    return Response(content=contenido, media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 def _cargo_para_facturar(cliente_id: str, envio_id: int):
@@ -2226,7 +2361,10 @@ def admin_pedido_guia_pdf(
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="guia-{solicitud_id}.pdf"'},
+        headers={
+            "Content-Disposition": f'inline; filename="guia-{solicitud_id}.pdf"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
@@ -2601,8 +2739,14 @@ def admin_ver_comprobante(pago_id: int, admin_token: Optional[str] = Cookie(None
     if not dato:
         return Response(content="Sin comprobante", status_code=404)
     contenido, tipo, nombre = dato
-    return Response(content=contenido, media_type=tipo,
-                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+    return Response(
+        content=contenido,
+        media_type=tipo,
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @router.post("/pagos/{pago_id}/resolver")

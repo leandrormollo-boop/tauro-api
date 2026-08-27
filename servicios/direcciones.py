@@ -156,13 +156,34 @@ def crear_direccion(
     pais: str = "AR",
     predeterminada: bool = False,
     notas: str = "",
+    origen_plataforma: str = "",
+    origen_dominio: str = "",
+    origen_pedido_externo_id: str = "",
 ) -> dict:
     cliente_id = _cliente(cliente_id)
     tipo = _tipo(tipo)
     pais = _pais(pais)
+    origen_plataforma_norm = _clean((origen_plataforma or "").lower())
+    origen_dominio_norm = _clean((origen_dominio or "").lower())
+    origen_pedido_norm = (
+        _clean(str(origen_pedido_externo_id))
+        if origen_pedido_externo_id is not None else None
+    )
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if origen_plataforma_norm == "shopify":
+                from servicios.integraciones_tienda import validar_origen_shopify_con_cursor
+                if not validar_origen_shopify_con_cursor(
+                    cur,
+                    cliente_id=cliente_id,
+                    dominio=origen_dominio_norm or "",
+                    pedido_externo_id=origen_pedido_norm or "",
+                ):
+                    raise ValueError(
+                        "El pedido de Shopify ya no está activo en esta cuenta "
+                        "o fue eliminado por privacidad."
+                    )
             if predeterminada:
                 cur.execute(
                     """
@@ -177,9 +198,13 @@ def crear_direccion(
                 """
                 INSERT INTO direcciones (
                     cliente_id, tipo, alias, nombre, documento, email, telefono,
-                    direccion, ciudad, estado, cp, pais, predeterminada, notas
+                    direccion, ciudad, estado, cp, pais, predeterminada, notas,
+                    origen_plataforma, origen_dominio, origen_pedido_externo_id
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s
+                )
                 RETURNING *
                 """,
                 (
@@ -197,6 +222,9 @@ def crear_direccion(
                     pais,
                     bool(predeterminada),
                     _clean(notas),
+                    origen_plataforma_norm,
+                    origen_dominio_norm,
+                    origen_pedido_norm,
                 ),
             )
             return _normalizar_row(cur.fetchone())

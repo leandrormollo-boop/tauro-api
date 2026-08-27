@@ -102,9 +102,11 @@ persona conservando únicamente el registro comercial que exige la ley.</p>
 
 <h2>Seguridad</h2>
 <p>La plataforma se sirve exclusivamente por HTTPS, las contraseñas se
-guardan cifradas (nunca en texto plano) y los accesos a la base están
-restringidos. Los secretos de conexión con tu tienda se almacenan
-cifrados y nunca se incluyen en exportaciones ni copias de respaldo.</p>
+guardan mediante hash seguro (nunca en texto plano) y los accesos a la base
+están restringidos. Los tokens de conexión con tu tienda se cifran en reposo
+y no se incluyen en exportaciones para clientes. Las copias de respaldo
+autorizadas pueden contener ese dato cifrado y están sujetas a controles de
+acceso, retención y eliminación.</p>
 
 <h2>Cambios</h2>
 <p>Si actualizamos esta política, publicamos la nueva versión en esta

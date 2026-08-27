@@ -514,8 +514,10 @@ def upsert_producto_importado(
     stock_fisico: Optional[int] = None,
     stock_entrante: Optional[int] = None,
     source_updated_at=None,
+    source_observed_at=None,
     sync_run_id: str = "",
     ubicaciones: Optional[list[dict]] = None,
+    inventario_completo: bool = False,
 ) -> str:
     """
     Alta/actualización de un producto traído de la tienda (Shopify).
@@ -576,49 +578,122 @@ def upsert_producto_importado(
             )
             cur.execute(
                 """
-                SELECT id FROM productos
+                SELECT id,
+                       (%s::timestamptz IS NOT NULL AND
+                        (source_updated_at IS NULL OR
+                         %s::timestamptz > source_updated_at OR
+                         (%s::timestamptz = source_updated_at AND
+                          (source_deleted_at IS NULL OR
+                           %s::timestamptz > source_deleted_at)))) AS aplicar_fuente,
+                       (%s::timestamptz IS NOT NULL AND
+                        (source_observed_at IS NULL OR
+                         %s::timestamptz > source_observed_at OR
+                         (%s::timestamptz = source_observed_at AND
+                          source_deleted_at IS NULL))
+                        AND (source_deleted_at IS NULL OR
+                             %s::timestamptz > source_deleted_at)) AS aplicar_presencia
+                FROM productos
                 WHERE cliente_id=%s AND plataforma='shopify'
                   AND tienda_dominio=%s AND external_variant_id=%s
                 FOR UPDATE
                 """,
-                (cliente, dominio, variante_id),
+                (
+                    source_updated_at, source_updated_at, source_updated_at,
+                    source_observed_at,
+                    source_observed_at, source_observed_at, source_observed_at,
+                    source_updated_at,
+                    cliente, dominio, variante_id,
+                ),
             )
             existente = cur.fetchone()
             if not existente and sku:
                 cur.execute(
                     """
-                    SELECT id FROM productos
+                    SELECT id,
+                           (%s::timestamptz IS NOT NULL AND
+                            (source_updated_at IS NULL OR
+                             %s::timestamptz > source_updated_at OR
+                             (%s::timestamptz = source_updated_at AND
+                              (source_deleted_at IS NULL OR
+                               %s::timestamptz > source_deleted_at)))) AS aplicar_fuente,
+                           (%s::timestamptz IS NOT NULL AND
+                            (source_observed_at IS NULL OR
+                             %s::timestamptz > source_observed_at OR
+                             (%s::timestamptz = source_observed_at AND
+                              source_deleted_at IS NULL))
+                            AND (source_deleted_at IS NULL OR
+                                 %s::timestamptz > source_deleted_at)) AS aplicar_presencia
+                    FROM productos
                     WHERE cliente_id=%s AND UPPER(alias_interno)=UPPER(%s)
                       AND (external_variant_id IS NULL OR external_variant_id='')
                     FOR UPDATE
                     """,
-                    (cliente, sku),
+                    (
+                        source_updated_at, source_updated_at, source_updated_at,
+                        source_observed_at,
+                        source_observed_at, source_observed_at, source_observed_at,
+                        source_updated_at,
+                        cliente, sku,
+                    ),
                 )
                 existente = cur.fetchone()
 
             if existente:
                 producto_id = int(existente["id"])
+                presencia_aplicada = bool(existente.get("aplicar_presencia"))
+                fuente_aplicada = bool(
+                    existente.get("aplicar_fuente") and presencia_aplicada
+                )
                 cur.execute(
                     """
-                    UPDATE productos SET
+                    UPDATE productos AS p SET
                         plataforma='shopify', tienda_dominio=%s,
                         external_product_id=%s, external_variant_id=%s,
-                        external_inventory_item_id=%s, sku_tienda=%s,
-                        titulo_tienda=%s, variante_tienda=%s,
-                        imagen_url=COALESCE(%s, imagen_url),
-                        precio_tienda=%s, moneda_tienda=%s,
-                        hs_code_tienda=%s, pais_origen_tienda=%s,
-                        nombre_invoice=CASE WHEN NOT activo THEN %s ELSE nombre_invoice END,
-                        hs_code=CASE WHEN COALESCE(hs_code,'')='' AND %s<>'' THEN %s ELSE hs_code END,
-                        peso_kg=CASE WHEN COALESCE(peso_kg,0)<=0 AND %s>0 THEN %s ELSE peso_kg END,
+                        external_inventory_item_id=%s,
+                        sku_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.sku_tienda END,
+                        titulo_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.titulo_tienda END,
+                        variante_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.variante_tienda END,
+                        imagen_url=CASE WHEN incoming.aplicar
+                            THEN COALESCE(%s, p.imagen_url) ELSE p.imagen_url END,
+                        precio_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.precio_tienda END,
+                        moneda_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.moneda_tienda END,
+                        hs_code_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.hs_code_tienda END,
+                        pais_origen_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.pais_origen_tienda END,
+                        nombre_invoice=CASE
+                            WHEN incoming.aplicar AND NOT p.activo THEN %s
+                            ELSE p.nombre_invoice END,
+                        hs_code=CASE
+                            WHEN incoming.aplicar AND COALESCE(p.hs_code,'')='' AND %s<>'' THEN %s
+                            ELSE p.hs_code END,
+                        peso_kg=CASE
+                            WHEN incoming.aplicar AND COALESCE(p.peso_kg,0)<=0 AND %s>0 THEN %s
+                            ELSE p.peso_kg END,
                         valor_usd_default=CASE
-                            WHEN COALESCE(valor_usd_default,0)<=0 AND COALESCE(%s,0)>0 THEN %s
-                            ELSE valor_usd_default END,
-                        stock_controlado=%s, stock_disponible=%s,
-                        stock_comprometido=%s, stock_fisico=%s, stock_entrante=%s,
-                        stock_actualizado_at=CASE WHEN %s THEN NOW() ELSE stock_actualizado_at END,
-                        source_updated_at=%s, sync_run_id=%s, sync_activo=TRUE
-                    WHERE id=%s AND cliente_id=%s
+                            WHEN incoming.aplicar
+                             AND COALESCE(p.valor_usd_default,0)<=0
+                             AND COALESCE(%s,0)>0 THEN %s
+                            ELSE p.valor_usd_default END,
+                        stock_controlado=CASE WHEN incoming.aplicar THEN %s ELSE p.stock_controlado END,
+                        stock_disponible=CASE WHEN incoming.aplicar THEN %s ELSE p.stock_disponible END,
+                        stock_comprometido=CASE WHEN incoming.aplicar THEN %s ELSE p.stock_comprometido END,
+                        stock_fisico=CASE WHEN incoming.aplicar THEN %s ELSE p.stock_fisico END,
+                        stock_entrante=CASE WHEN incoming.aplicar THEN %s ELSE p.stock_entrante END,
+                        stock_actualizado_at=CASE
+                            WHEN incoming.aplicar AND %s THEN NOW()
+                            ELSE p.stock_actualizado_at END,
+                        source_updated_at=CASE WHEN incoming.aplicar
+                            THEN %s::timestamptz ELSE p.source_updated_at END,
+                        source_deleted_at=CASE WHEN incoming.presencia
+                            THEN NULL ELSE p.source_deleted_at END,
+                        source_observed_at=CASE WHEN incoming.presencia
+                            THEN %s::timestamptz ELSE p.source_observed_at END,
+                        sync_run_id=CASE WHEN incoming.presencia
+                            THEN %s ELSE p.sync_run_id END,
+                        sync_activo=CASE WHEN incoming.presencia
+                            THEN TRUE ELSE p.sync_activo END
+                    FROM (SELECT %s::boolean AS aplicar,
+                                 %s::boolean AS presencia) AS incoming
+                    WHERE p.id=%s AND p.cliente_id=%s
                     """,
                     (
                         dominio, external_product_id, variante_id,
@@ -629,7 +704,8 @@ def upsert_producto_importado(
                         precio_declarado_sugerido, bool(stock_controlado),
                         stock_disponible, stock_comprometido, stock_fisico,
                         stock_entrante, bool(stock_controlado), source_updated_at,
-                        sync_run_id, producto_id, cliente,
+                        source_observed_at, sync_run_id, fuente_aplicada,
+                        presencia_aplicada, producto_id, cliente,
                     ),
                 )
                 estado = "actualizado"
@@ -647,11 +723,11 @@ def upsert_producto_importado(
                          hs_code_tienda, pais_origen_tienda, stock_controlado,
                          stock_disponible, stock_comprometido, stock_fisico,
                          stock_entrante, stock_actualizado_at, source_updated_at,
-                         sync_run_id, sync_activo, activo)
+                         source_observed_at, sync_run_id, sync_activo, activo)
                     VALUES
                         (%s,%s,%s,%s,0,0,0,%s,%s,%s,'shopify',%s,%s,%s,%s,
                          %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                         CASE WHEN %s THEN NOW() ELSE NULL END,%s,%s,TRUE,FALSE)
+                         CASE WHEN %s THEN NOW() ELSE NULL END,%s,%s,%s,TRUE,FALSE)
                     RETURNING id
                     """,
                     (
@@ -662,20 +738,21 @@ def upsert_producto_importado(
                         precio, moneda_tienda, hs_crudo, pais_origen_tienda,
                         bool(stock_controlado), stock_disponible,
                         stock_comprometido, stock_fisico, stock_entrante,
-                        bool(stock_controlado), source_updated_at, sync_run_id,
+                        bool(stock_controlado), source_updated_at,
+                        source_observed_at, sync_run_id,
                     ),
                 )
                 producto_id = int(cur.fetchone()["id"])
+                presencia_aplicada = True
+                fuente_aplicada = True
                 estado = "creado"
 
-            cur.execute(
-                "DELETE FROM producto_inventario_ubicaciones WHERE producto_id=%s AND cliente_id=%s",
-                (producto_id, cliente),
-            )
-            for ubicacion in ubicaciones:
+            location_ids: list[str] = []
+            for ubicacion in (ubicaciones if fuente_aplicada else []):
                 location_id = str(ubicacion.get("external_location_id") or "").strip()
                 if not location_id:
                     continue
+                location_ids.append(location_id)
                 cur.execute(
                     """
                     INSERT INTO producto_inventario_ubicaciones
@@ -691,6 +768,10 @@ def upsert_producto_importado(
                         entrante=EXCLUDED.entrante,
                         source_updated_at=EXCLUDED.source_updated_at,
                         updated_at=NOW()
+                    WHERE producto_inventario_ubicaciones.source_updated_at IS NULL
+                       OR (EXCLUDED.source_updated_at IS NOT NULL AND
+                           EXCLUDED.source_updated_at >=
+                           producto_inventario_ubicaciones.source_updated_at)
                     """,
                     (
                         cliente, producto_id, dominio, location_id,
@@ -700,39 +781,99 @@ def upsert_producto_importado(
                         ubicacion.get("source_updated_at"),
                     ),
                 )
+            if inventario_completo and fuente_aplicada:
+                cur.execute(
+                    """
+                    DELETE FROM producto_inventario_ubicaciones
+                     WHERE producto_id=%s AND cliente_id=%s
+                       AND NOT (external_location_id = ANY(%s::text[]))
+                    """,
+                    (producto_id, cliente, location_ids),
+                )
         conn.commit()
     return estado
 
 
-def desactivar_ausentes_shopify(cliente: str, dominio: str, sync_run_id: str) -> int:
-    """Archiva variantes que ya no aparecieron en una sincronización completa."""
+def desactivar_ausentes_shopify(
+    cliente: str,
+    dominio: str,
+    sync_run_id: str,
+    sincronizacion_iniciada_at,
+) -> int:
+    """Archiva ausentes y avanza su reloj aunque ya estuvieran inactivos."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE productos SET sync_activo=FALSE,
-                    stock_disponible=NULL, stock_comprometido=NULL,
-                    stock_fisico=NULL, stock_entrante=NULL
-                WHERE cliente_id=%s AND plataforma='shopify' AND tienda_dominio=%s
-                  AND COALESCE(sync_run_id,'')<>%s AND sync_activo=TRUE
+                WITH candidatos AS MATERIALIZED (
+                    SELECT id, sync_activo AS estaba_activo
+                      FROM productos
+                     WHERE cliente_id=%s AND plataforma='shopify'
+                       AND tienda_dominio=%s
+                       AND COALESCE(sync_run_id,'')<>%s
+                       AND (source_observed_at IS NULL OR
+                            source_observed_at < %s::timestamptz)
+                     FOR UPDATE
+                ), actualizados AS (
+                    UPDATE productos AS p SET sync_activo=FALSE,
+                        stock_disponible=NULL, stock_comprometido=NULL,
+                        stock_fisico=NULL, stock_entrante=NULL,
+                        source_observed_at=%s::timestamptz
+                      FROM candidatos AS c
+                     WHERE p.id=c.id
+                    RETURNING c.estaba_activo
+                )
+                SELECT COUNT(*) FILTER (WHERE estaba_activo)::integer
+                       AS desactivados
+                  FROM actualizados
                 """,
-                ((cliente or "").strip().upper(), (dominio or "").strip().lower(), sync_run_id),
+                (
+                    (cliente or "").strip().upper(),
+                    (dominio or "").strip().lower(),
+                    sync_run_id,
+                    sincronizacion_iniciada_at,
+                    sincronizacion_iniciada_at,
+                ),
             )
-            return cur.rowcount
+            fila = cur.fetchone() or {}
+            return int(fila.get("desactivados") or 0)
 
 
-def desactivar_producto_shopify(cliente: str, dominio: str, external_product_id: str) -> int:
+def desactivar_producto_shopify(
+    cliente: str,
+    dominio: str,
+    external_product_id: str,
+    evento_at,
+) -> int:
+    """Aplica un delete sólo si no existe una mutación Shopify posterior."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE productos SET sync_activo=FALSE,
                     stock_disponible=NULL, stock_comprometido=NULL,
-                    stock_fisico=NULL, stock_entrante=NULL
+                    stock_fisico=NULL, stock_entrante=NULL,
+                    source_updated_at=GREATEST(source_updated_at, %s::timestamptz),
+                    source_deleted_at=%s::timestamptz,
+                    source_observed_at=GREATEST(
+                        source_observed_at, %s::timestamptz
+                    )
                 WHERE cliente_id=%s AND plataforma='shopify' AND tienda_dominio=%s
                   AND external_product_id=%s
+                  AND %s::timestamptz IS NOT NULL
+                  AND (source_updated_at IS NULL OR %s::timestamptz >= source_updated_at)
+                  AND (source_observed_at IS NULL OR %s::timestamptz >= source_observed_at)
                 """,
-                ((cliente or "").strip().upper(), (dominio or "").strip().lower(),
-                 (external_product_id or "").strip()),
+                (
+                    evento_at,
+                    evento_at,
+                    evento_at,
+                    (cliente or "").strip().upper(),
+                    (dominio or "").strip().lower(),
+                    (external_product_id or "").strip(),
+                    evento_at,
+                    evento_at,
+                    evento_at,
+                ),
             )
             return cur.rowcount

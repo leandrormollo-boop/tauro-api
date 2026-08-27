@@ -436,6 +436,10 @@
                 "value": "orders/create"
               },
               {
+                "key": "X-Shopify-Triggered-At",
+                "value": "{{$isoTimestamp}}"
+              },
+              {
                 "key": "X-Shopify-Webhook-Id",
                 "value": "tauro-postman-{{synthetic_order_id}}"
               },
@@ -504,6 +508,10 @@
                 "value": "orders/updated"
               },
               {
+                "key": "X-Shopify-Triggered-At",
+                "value": "{{$isoTimestamp}}"
+              },
+              {
                 "key": "X-Shopify-Webhook-Id",
                 "value": "tauro-postman-repeat-{{synthetic_order_id}}"
               },
@@ -570,6 +578,10 @@
                 "value": "orders/create"
               },
               {
+                "key": "X-Shopify-Triggered-At",
+                "value": "{{$isoTimestamp}}"
+              },
+              {
                 "key": "X-Shopify-Hmac-SHA256",
                 "value": "firma-invalida"
               }
@@ -612,6 +624,10 @@
               {
                 "key": "X-Shopify-Topic",
                 "value": "inventory_levels/update"
+              },
+              {
+                "key": "X-Shopify-Triggered-At",
+                "value": "{{$isoTimestamp}}"
               },
               {
                 "key": "X-Shopify-Webhook-Id",
@@ -679,6 +695,10 @@
               {
                 "key": "X-Shopify-Topic",
                 "value": "inventory_levels/update"
+              },
+              {
+                "key": "X-Shopify-Triggered-At",
+                "value": "{{$isoTimestamp}}"
               },
               {
                 "key": "X-Shopify-Webhook-Id",

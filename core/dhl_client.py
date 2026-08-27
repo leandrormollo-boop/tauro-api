@@ -171,10 +171,10 @@ class DHLClient(CarrierBase):
         try:
             j = resp.json()
         except Exception:
-            return (resp.text or "")[:300]
+            return f"DHL rechazó la solicitud (HTTP {getattr(resp, 'status_code', '?')})."
 
         if not isinstance(j, dict):
-            return (resp.text or "")[:300]
+            return f"DHL rechazó la solicitud (HTTP {getattr(resp, 'status_code', '?')})."
 
         base = j.get("detail") or j.get("message") or j.get("title") or ""
 
@@ -187,7 +187,32 @@ class DHLClient(CarrierBase):
                 # Sin el " · " los problemas se leen como una sola frase larga.
                 return " · ".join(partes)[:600]
 
-        return (base or (resp.text or ""))[:300]
+        return (base or f"DHL rechazó la solicitud (HTTP {resp.status_code}).")[:300]
+
+    @staticmethod
+    def _codigos_error(resp) -> str:
+        """Extrae sólo códigos aptos para observabilidad, nunca textos del body."""
+        try:
+            data = resp.json()
+        except Exception:
+            return "sin_codigo"
+        if not isinstance(data, dict):
+            return "sin_codigo"
+        codigos = []
+        for clave in ("code", "errorCode", "status"):
+            valor = data.get(clave)
+            if valor not in (None, ""):
+                codigos.append(str(valor).strip())
+        detalles = data.get("additionalDetails") or []
+        if isinstance(detalles, dict):
+            detalles = [detalles]
+        if isinstance(detalles, (list, tuple)):
+            for detalle in detalles:
+                if isinstance(detalle, dict):
+                    valor = detalle.get("code") or detalle.get("errorCode")
+                    if valor not in (None, ""):
+                        codigos.append(str(valor).strip())
+        return ",".join(c for c in codigos[:5] if c) or "sin_codigo"
 
     def _parsear_rates(self, data: dict) -> dict:
         """
@@ -395,8 +420,9 @@ class DHLClient(CarrierBase):
                 timeout=30,
             )
             if resp.status_code != 200:
-                print(f"[dhl] POST /rates error {resp.status_code} (ref {msg_ref}): "
-                      f"{resp.text[:300]}")
+                codigo = self._codigos_error(resp)
+                print(f"[dhl] POST /rates error HTTP {resp.status_code}; "
+                      f"código={codigo}; ref={msg_ref}")
                 return {"encontrado": False, "error": self._error_legible(resp)}
             return self._parsear_rates(resp.json())
         except Exception as e:
@@ -499,7 +525,9 @@ class DHLClient(CarrierBase):
             )
 
             if resp.status_code != 200:
-                print(f"[dhl] get_rates error {resp.status_code} (ref {msg_ref}): {resp.text[:300]}")
+                codigo = self._codigos_error(resp)
+                print(f"[dhl] get_rates error HTTP {resp.status_code}; "
+                      f"código={codigo}; ref={msg_ref}")
                 return {"encontrado": False, "error": self._error_legible(resp)}
 
             return self._parsear_rates(resp.json())
@@ -776,8 +804,9 @@ class DHLClient(CarrierBase):
                     "incierto": True, "message_reference": msg_ref}
 
         if resp.status_code not in (200, 201):
-            print(f"[dhl] POST /shipments error {resp.status_code} (ref {msg_ref}): "
-                  f"{resp.text[:400]}")
+            codigo = self._codigos_error(resp)
+            print(f"[dhl] POST /shipments error HTTP {resp.status_code}; "
+                  f"código={codigo}; ref={msg_ref}")
             # Un timeout HTTP o un error del servidor puede llegar después de
             # que DHL haya persistido la guía. No es seguro liberar la reserva
             # ni reintentar: la referencia permite reconciliar en MyDHL.
@@ -1047,8 +1076,9 @@ class DHLClient(CarrierBase):
                     "incierto": True, "message_reference": msg_ref}
 
         if resp.status_code not in (200, 201):
-            print(f"[dhl] POST /pickups error {resp.status_code} "
-                  f"(ref {msg_ref}): {resp.text[:400]}")
+            codigo = self._codigos_error(resp)
+            print(f"[dhl] POST /pickups error HTTP {resp.status_code}; "
+                  f"código={codigo}; ref={msg_ref}")
             # Igual que una guía, un retiro puede haberse creado aunque el
             # gateway termine respondiendo 408/5xx. Marcarlo como incierto
             # evita agendar dos recolecciones por un reintento automático.
@@ -1112,6 +1142,7 @@ class DHLClient(CarrierBase):
 
         if resp.status_code in (200, 202, 204):
             return {"ok": True}
-        print(f"[dhl] DELETE /pickups/{codigo} error {resp.status_code}: "
-              f"{resp.text[:300]}")
+        error_code = self._codigos_error(resp)
+        print(f"[dhl] DELETE /pickups error HTTP {resp.status_code}; "
+              f"código={error_code}")
         return {"ok": False, "error": self._error_legible(resp)}

@@ -4,9 +4,11 @@
 # Pedido de Leandro (28/07): que la info de la plataforma "se cargue
 # automáticamente en un sheet como el que hoy tenemos de TAURO 2026".
 #
-# REGLA DE ORO: este job escribe SOLO en la pestaña "PLATAFORMA", que es
-# 100% propiedad del sistema y se reescribe entera en cada corrida. Las
-# pestañas que Leandro maneja a mano NO SE TOCAN NUNCA — pisarle una
+# REGLA DE ORO: este job escribe SOLO en la pestaña "PLATAFORMA_SIN_PII", que
+# es 100% propiedad del sistema y se reescribe entera en cada corrida. La
+# pestaña histórica "PLATAFORMA" queda intacta hasta que el responsable de
+# datos defina y documente su retención; no se la borra silenciosamente.
+# Las pestañas que Leandro maneja a mano NO SE TOCAN NUNCA — pisarle una
 # columna con filtro activo ya desalineó datos una vez (está documentado).
 #
 # Se enciende solo cuando existen las dos variables en Railway:
@@ -24,11 +26,11 @@ from servicios.couriers_urls import ambito_envio
 
 # El de "TAURO 2026" (documentado en CONTEXTO_PROYECTO.md / memoria).
 SHEET_ID_DEFAULT = "1-c83aUq5LOUM5RkFrcaZaPhPDz3mC3Mf1blecJcrPGg"
-PESTANA = "PLATAFORMA"
+PESTANA = "PLATAFORMA_SIN_PII"
 
 ENCABEZADOS = [
-    "Fecha", "Cliente", "Estado", "Tipo", "Courier", "Tracking", "Producto",
-    "Cajas", "Destinatario", "Ciudad", "País", "Peso (kg)",
+    "Fecha", "Solicitud TAURO", "Cliente", "Estado", "Tipo", "Courier",
+    "Producto", "Cajas", "País", "Peso (kg)",
     "Valor declarado (USD)", "Precio cliente (ARS)", "Precio cliente (USD)",
 ]
 
@@ -53,9 +55,9 @@ def sincronizar() -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT created_at, cliente_id, estado, courier, tracking,
+                SELECT id, created_at, cliente_id, estado, courier,
                        ambito, remitente_pais,
-                       producto_alias, cantidad, dest_nombre, dest_ciudad,
+                       producto_alias, cantidad,
                        destino_pais, peso_kg, valor_declarado_usd,
                        precio_tauro_ars, precio_tauro_usd
                 FROM solicitudes_guia
@@ -69,6 +71,7 @@ def sincronizar() -> None:
         courier = (s["courier"] or "FEDEX").upper()
         filas.append([
             s["created_at"].strftime("%d/%m/%Y") if s["created_at"] else "",
+            int(s["id"]),
             s["cliente_id"] or "",
             s["estado"] or "",
             {
@@ -76,11 +79,8 @@ def sincronizar() -> None:
                 "internacional": "Internacional",
             }.get(ambito_envio(dict(s)), "Sin clasificar"),
             courier,
-            s["tracking"] or "",
             s["producto_alias"] or "",
             int(s["cantidad"] or 1),
-            s["dest_nombre"] or "",
-            s["dest_ciudad"] or "",
             s["destino_pais"] or "",
             float(s["peso_kg"] or 0),
             float(s["valor_declarado_usd"] or 0),
@@ -103,7 +103,7 @@ def sincronizar() -> None:
     # la simpleza le gana a la sofisticación acá.
     hoja.clear()
     hoja.update(filas, "A1")
-    hoja.format("A1:O1", {"textFormat": {"bold": True}})
+    hoja.format("A1:M1", {"textFormat": {"bold": True}})
 
     print(f"[sync_sheet] {len(filas) - 1} envío(s) espejados en '{PESTANA}' "
           f"({datetime.now().strftime('%H:%M')})")

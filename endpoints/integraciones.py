@@ -16,8 +16,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from servicios.integraciones_tienda import (
+    OAUTH_SECRET_MARKER,
+    PedidoShopifyCanceladoError,
+    TiendaNoOperativaError,
     tienda_por_dominio,
-    verificar_hmac_shopify,
+    verificar_hmac_shopify,  # API legacy; Shopify OAuth ya no usa secreto manual.
     parsear_pedido_shopify,
     guardar_pedido,
 )
@@ -25,138 +28,271 @@ from servicios.integraciones_tienda import (
 router = APIRouter(prefix="/integraciones", tags=["integraciones"])
 
 
-@router.post("/shopify/webhook")
-async def shopify_webhook(request: Request):
+_TOPICS_CATALOGO = {
+    "products/create", "products/update", "products/delete",
+    "inventory_levels/update", "inventory_items/update",
+}
+_TOPICS_ORDEN = {"orders/create", "orders/updated", "orders/cancelled"}
+
+
+def _contrato_payload_shopify(topic: str, datos: dict) -> bool:
+    """Contrato mínimo exclusivo para impedir replay entre clases de evento."""
+    if not isinstance(datos, dict):
+        return False
+    if topic in _TOPICS_ORDEN:
+        if not str(datos.get("id") or "").strip():
+            return False
+        cancelado = bool(datos.get("cancelled_at")) or str(
+            datos.get("financial_status") or ""
+        ).lower() in {"refunded", "voided"}
+        if topic == "orders/create":
+            return not cancelado
+        if topic == "orders/cancelled":
+            return cancelado
+        return True
+    if topic in {"products/create", "products/update"}:
+        return bool(datos.get("id")) and isinstance(datos.get("variants"), list)
+    if topic == "products/delete":
+        return bool(datos.get("id")) and "variants" not in datos
+    if topic == "inventory_levels/update":
+        return bool(datos.get("inventory_item_id") and datos.get("location_id"))
+    if topic == "inventory_items/update":
+        return bool(datos.get("id")) and "inventory_item_id" not in datos
+    return False
+
+
+def _webhook_id_shopify(request: Request, dominio: str, topic: str, cuerpo: bytes) -> str:
+    valor = request.headers.get("x-shopify-webhook-id", "").strip()
+    if valor:
+        return valor
+    import hashlib
+    return hashlib.sha256(
+        dominio.encode() + b"\0" + topic.encode() + b"\0" + cuerpo
+    ).hexdigest()
+
+
+async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
+    topic = request.headers.get("x-shopify-topic", "").strip().lower()
+    if topic != topic_esperado:
+        return JSONResponse({"ok": False}, status_code=400)
+
     cuerpo = await request.body()
-    dominio = request.headers.get("x-shopify-shop-domain", "")
+    dominio = request.headers.get("x-shopify-shop-domain", "").strip().lower()
     firma = request.headers.get("x-shopify-hmac-sha256", "")
-    topic = request.headers.get("x-shopify-topic", "")
-
-    tienda = tienda_por_dominio(dominio)
-    if not tienda or tienda["plataforma"] != "shopify":
-        # TIENDA INSTALADA PERO SIN VINCULAR a una cuenta TAURO. Antes esto
-        # devolvía 401 y la venta se perdía; peor: a las 8 fallas Shopify da
-        # de baja la suscripción y se pierde el CANAL entero, no una venta.
-        # Ahora se valida la firma con el secreto de la APP (es el mismo con
-        # el que Shopify firma los webhooks de todas sus tiendas) y, si es
-        # legítima, se guarda en la bandeja de huérfanos y se contesta 200.
-        # Tiendanube ya resolvía esto bien; faltaba portarlo.
-        from servicios.shopify_app import firma_valida_webhook_app, instalacion
-        try:
-            instalacion_oauth = instalacion(dominio)
-        except Exception:
-            instalacion_oauth = None
-        app_esperada = str((instalacion_oauth or {}).get("app_client_id") or "")
-        if firma_valida_webhook_app(cuerpo, firma, app_esperada):
-            if topic.startswith("orders/"):
-                try:
-                    from servicios.integraciones_tienda import guardar_pedido_huerfano
-                    guardar_pedido_huerfano(dominio, cuerpo)
-                except Exception as e:
-                    print(f"[integraciones] no pude guardar el huérfano de {dominio}: {e}")
-                print(f"[integraciones] shopify {dominio} SIN VINCULAR: venta guardada "
-                      f"como huérfana. El comerciante tiene que vincular su tienda "
-                      f"en /portal/tienda para verla.")
-            # Catálogo/inventario se recuperan completos al vincular: no se
-            # guardan payloads sin tenant.
-            return {"ok": True, "estado": "sin_vincular"}
-        # Firma inválida o app sin configurar: 401 sin detalle, no le
-        # confirmamos a un tercero qué dominios existen.
-        return JSONResponse({"ok": False}, status_code=401)
-
-    secreto_webhook = tienda["secreto"]
+    from servicios.shopify_app import (
+        clasificar_evento_instalacion, dominio_valido,
+        firma_valida_webhook_app, instalacion,
+    )
+    if not dominio_valido(dominio):
+        return JSONResponse({"ok": False}, status_code=400)
     try:
-        from servicios.shopify_app import instalacion
+        tienda = tienda_por_dominio(dominio)
         instalacion_oauth = instalacion(dominio)
-        if instalacion_oauth:
-            # Tienda OAuth: Shopify firma con el secret único de la app. El
-            # marcador guardado en tiendas_conectadas no es una credencial.
-            from servicios.shopify_app import firma_valida_webhook_app
-            if not firma_valida_webhook_app(
-                cuerpo, firma, str(instalacion_oauth.get("app_client_id") or "")
-            ):
-                print(f"[integraciones] firma shopify INVALIDA para {dominio} "
-                      f"(topic {topic})")
-                return JSONResponse({"ok": False}, status_code=401)
-            secreto_webhook = "oauth:verificado"
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[integraciones] no pude resolver instalación: {type(exc).__name__}")
+        return JSONResponse({"ok": False}, status_code=503)
 
-    if secreto_webhook != "oauth:verificado" and (
-        not secreto_webhook or not verificar_hmac_shopify(secreto_webhook, cuerpo, firma)
-    ):
-        print(f"[integraciones] firma shopify INVALIDA para {dominio} (topic {topic})")
+    app_esperada = str((instalacion_oauth or {}).get("app_client_id") or "")
+    if not app_esperada or not firma_valida_webhook_app(cuerpo, firma, app_esperada):
         return JSONResponse({"ok": False}, status_code=401)
+    estado_temporal = clasificar_evento_instalacion(
+        instalacion_oauth, request.headers.get("x-shopify-triggered-at", ""),
+    )
+    if estado_temporal == "ANTERIOR":
+        return {"ok": True, "ignorado": "generacion_anterior"}
+    if estado_temporal != "ACTUAL":
+        return JSONResponse({"ok": False}, status_code=400)
 
     try:
-        order = json.loads(cuerpo.decode("utf-8"))
+        datos = json.loads(cuerpo.decode("utf-8"))
     except Exception:
-        return JSONResponse({"ok": False, "error": "JSON inválido"}, status_code=400)
+        return JSONResponse({"ok": False}, status_code=400)
+    if not _contrato_payload_shopify(topic, datos):
+        return JSONResponse({"ok": False}, status_code=400)
 
-    topics_sync = {
-        "products/create", "products/update", "products/delete",
-        "inventory_levels/update", "inventory_items/update",
-    }
-    if topic in topics_sync:
-        from servicios.shopify_catalogo import encolar_evento, lanzar_procesamiento_eventos
-        webhook_id = request.headers.get("x-shopify-webhook-id", "").strip()
-        if not webhook_id:
-            # Shopify siempre lo envía; el hash permite que Postman/tests
-            # conserven la misma garantía idempotente.
-            import hashlib
-            webhook_id = hashlib.sha256(
-                dominio.encode() + b"\0" + topic.encode() + b"\0" + cuerpo
-            ).hexdigest()
-        nuevo = encolar_evento(
-            webhook_id, dominio, topic, order,
-            request.headers.get("x-shopify-triggered-at"),
+    generation = str((instalacion_oauth or {}).get("install_generation") or "")
+    webhook_id = _webhook_id_shopify(request, dominio, topic, cuerpo)
+    if topic in _TOPICS_ORDEN:
+        from servicios.integraciones_tienda import webhook_shopify_ya_procesado
+        try:
+            if webhook_shopify_ya_procesado(webhook_id):
+                return {"ok": True, "duplicado": True}
+        except Exception as exc:
+            print(f"[integraciones] no pude consultar dedupe: {type(exc).__name__}")
+            return JSONResponse({"ok": False}, status_code=503)
+
+    owner_tienda = str((tienda or {}).get("cliente_id") or "").strip().upper()
+    owner_inst = str((instalacion_oauth or {}).get("cliente_id") or "").strip().upper()
+    coherente = bool(
+        tienda
+        and tienda.get("plataforma") == "shopify"
+        and tienda.get("activa") is True
+        and tienda.get("secreto") == OAUTH_SECRET_MARKER
+        and owner_tienda
+        and owner_tienda == owner_inst
+        and (instalacion_oauth or {}).get("access_token")
+    )
+
+    def _marcar_procesado():
+        from servicios.integraciones_tienda import marcar_webhook_shopify_procesado
+        marcar_webhook_shopify_procesado(
+            webhook_id, dominio, topic, generation,
         )
+
+    if not coherente:
+        try:
+            if topic in {"orders/create", "orders/updated"}:
+                from servicios.integraciones_tienda import guardar_pedido_huerfano
+                guardar_pedido_huerfano(
+                    dominio,
+                    cuerpo,
+                    app_client_id_verificado=app_esperada,
+                    install_generation_verificada=generation,
+                )
+            elif topic == "orders/cancelled":
+                from servicios.integraciones_tienda import cancelar_pedido_huerfano
+                cancelar_pedido_huerfano(
+                    dominio,
+                    str(datos.get("id") or ""),
+                    app_client_id_verificado=app_esperada,
+                    install_generation_verificada=generation,
+                    evento_at=request.headers.get("x-shopify-triggered-at", ""),
+                )
+            if topic in _TOPICS_ORDEN:
+                _marcar_procesado()
+        except Exception as exc:
+            print(f"[integraciones] no pude persistir evento ownerless: {type(exc).__name__}")
+            return JSONResponse({"ok": False}, status_code=503)
+        return {"ok": True, "estado": "sin_vincular"}
+
+    if topic in _TOPICS_CATALOGO:
+        from servicios.shopify_catalogo import (
+            ShopifyCatalogError, encolar_evento, lanzar_procesamiento_eventos,
+        )
+        try:
+            nuevo = encolar_evento(
+                webhook_id, dominio, topic, datos,
+                request.headers.get("x-shopify-triggered-at"), generation,
+            )
+        except ShopifyCatalogError as exc:
+            if exc.codigo == "GENERACION_OBSOLETA":
+                return {"ok": True, "ignorado": "generacion_anterior"}
+            return JSONResponse({"ok": False}, status_code=503)
+        except Exception as exc:
+            print(f"[integraciones] no pude encolar catálogo: {type(exc).__name__}")
+            return JSONResponse({"ok": False}, status_code=503)
         if nuevo:
             lanzar_procesamiento_eventos()
         return {"ok": True, "encolado": nuevo, "duplicado": not nuevo}
 
-    # Otros topics se aceptan y se ignoran para no provocar reintentos.
-    if topic and not topic.startswith("orders/"):
-        return {"ok": True, "ignorado": topic}
-
-    pedido = parsear_pedido_shopify(order)
-    if not pedido:
-        # Pedido sin dirección de envío (digital/retiro): no es un envío.
-        # Se loguea igual para no quedarnos sin rastro si alguien reclama.
-        print(f"[integraciones] shopify {dominio} pedido {order.get('name') or order.get('id')} "
-              f"ignorado: sin dirección de envío")
-        return {"ok": True, "ignorado": "sin_direccion_envio"}
-
-    # Un pedido cancelado (o cuyo pago se anuló) no se despacha: se saca de
-    # pendientes para que nadie mande mercadería de una venta caída.
-    if pedido.get("cancelado") or pedido.get("estado_pago") in ("refunded", "voided"):
+    pedido_externo_id = str(datos.get("id") or "")
+    cancelado = topic == "orders/cancelled" or bool(datos.get("cancelled_at")) or str(
+        datos.get("financial_status") or ""
+    ).lower() in {"refunded", "voided"}
+    if cancelado:
         from servicios.integraciones_tienda import cancelar_pedido_externo
-        cambio = cancelar_pedido_externo(tienda["id"], pedido["pedido_externo_id"])
-        print(f"[integraciones] shopify {dominio} pedido {pedido['numero']} "
-              f"cancelado/anulado → {'sacado de pendientes' if cambio else 'no estaba pendiente'}")
+        try:
+            cancelar_pedido_externo(
+                tienda["id"],
+                pedido_externo_id,
+                cliente_id=owner_tienda,
+                dominio_verificado=dominio,
+                install_generation_verificada=generation,
+                evento_at=request.headers.get("x-shopify-triggered-at", ""),
+            )
+        except TiendaNoOperativaError:
+            return {"ok": True, "ignorado": "generacion_anterior"}
+        except Exception as exc:
+            print(f"[integraciones] no pude cancelar orden: {type(exc).__name__}")
+            return JSONResponse({"ok": False}, status_code=503)
+        try:
+            _marcar_procesado()
+        except Exception:
+            return JSONResponse({"ok": False}, status_code=503)
         return {"ok": True, "cancelado": True}
 
-    creado = guardar_pedido(tienda["cliente_id"], tienda["id"], "shopify", pedido)
-    print(f"[integraciones] shopify {dominio} pedido {pedido['numero']} → "
-          f"{'guardado' if creado else 'actualizado'}")
+    pedido = parsear_pedido_shopify(datos)
+    if not pedido:
+        try:
+            _marcar_procesado()
+        except Exception:
+            return JSONResponse({"ok": False}, status_code=503)
+        return {"ok": True, "ignorado": "sin_direccion_envio"}
+    try:
+        creado = guardar_pedido(
+            tienda["cliente_id"], tienda["id"], "shopify", pedido,
+            dominio_verificado=dominio,
+            install_generation_verificada=generation,
+        )
+        _marcar_procesado()
+    except PedidoShopifyCanceladoError:
+        try:
+            _marcar_procesado()
+        except Exception:
+            return JSONResponse({"ok": False}, status_code=503)
+        return {"ok": True, "ignorado": "pedido_cancelado"}
+    except TiendaNoOperativaError:
+        return JSONResponse({"ok": False}, status_code=503)
+    except Exception as exc:
+        print(f"[integraciones] no pude procesar orden: {type(exc).__name__}")
+        return JSONResponse({"ok": False}, status_code=503)
 
-    # La solicitud de guía se arma SOLA: el comerciante no retipea nada, sólo
-    # revisa y genera. Va en un hilo porque cotizar tarda y la tienda espera
-    # un 200 rápido; demasiados timeouts hacen que Shopify dé de baja el
-    # webhook. La guía NO se emite sola: eso cuesta plata y no se deshace.
     if creado:
         try:
             from servicios.integraciones_tienda import id_de_pedido
             from servicios.solicitud_automatica import intentar_en_segundo_plano
-            pid = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
-            if pid:
-                intentar_en_segundo_plano(pid)
-        except Exception as e:
-            # Que falle el armado automático no puede tumbar el webhook: el
-            # pedido ya está guardado y el comerciante lo arma a mano.
-            print(f"[integraciones] no pude lanzar el armado automático: {e}")
-
+            pedido_id = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
+            if pedido_id:
+                intentar_en_segundo_plano(pedido_id)
+        except Exception as exc:
+            print(f"[integraciones] armado automático no iniciado: {type(exc).__name__}")
     return {"ok": True, "nuevo": creado}
+
+
+@router.post("/shopify/webhook")
+async def shopify_webhook(_request: Request):
+    """Ruta heredada sin contrato de topic: ya no procesa payloads."""
+    return JSONResponse({"ok": False, "error": "endpoint_obsoleto"}, status_code=410)
+
+
+@router.post("/shopify/webhook/orders-create")
+async def shopify_orders_create(request: Request):
+    return await _procesar_shopify_webhook(request, "orders/create")
+
+
+@router.post("/shopify/webhook/orders-updated")
+async def shopify_orders_updated(request: Request):
+    return await _procesar_shopify_webhook(request, "orders/updated")
+
+
+@router.post("/shopify/webhook/orders-cancelled")
+async def shopify_orders_cancelled(request: Request):
+    return await _procesar_shopify_webhook(request, "orders/cancelled")
+
+
+@router.post("/shopify/webhook/products-create")
+async def shopify_products_create(request: Request):
+    return await _procesar_shopify_webhook(request, "products/create")
+
+
+@router.post("/shopify/webhook/products-update")
+async def shopify_products_update(request: Request):
+    return await _procesar_shopify_webhook(request, "products/update")
+
+
+@router.post("/shopify/webhook/products-delete")
+async def shopify_products_delete(request: Request):
+    return await _procesar_shopify_webhook(request, "products/delete")
+
+
+@router.post("/shopify/webhook/inventory-levels-update")
+async def shopify_inventory_levels_update(request: Request):
+    return await _procesar_shopify_webhook(request, "inventory_levels/update")
+
+
+@router.post("/shopify/webhook/inventory-items-update")
+async def shopify_inventory_items_update(request: Request):
+    return await _procesar_shopify_webhook(request, "inventory_items/update")
 
 
 @router.get("/tiendanube/callback")
@@ -230,10 +366,10 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
                 dueno = cliente_cookie
                 vincular_cliente(store_id, dueno)
     except Exception as e:
-        print(f"[tiendanube] no pude vincular la tienda {store_id}: {e}")
+        print(f"[tiendanube] no pude vincular la tienda: {type(e).__name__}")
 
-    print(f"[tiendanube] instalada tienda {store_id} ({nombre or 's/nombre'}) · "
-          f"webhooks {eventos} · cliente {dueno or 'sin vincular'}")
+    print(f"[tiendanube] instalación procesada · {len(eventos)} webhook(s) · "
+          f"{'con claim' if dueno else 'ownerless'}")
 
     if dueno:
         texto = ("Listo: desde ahora cada venta con envío aparece en tu portal "
@@ -289,24 +425,23 @@ async def tiendanube_webhook(request: Request):
 
     if evento == "app/uninstalled":
         desinstalar(store_id)
-        print(f"[tiendanube] tienda {store_id} desinstaló la app")
+        print("[tiendanube] app/uninstalled procesado")
         return {"ok": True}
 
     inst = instalacion(store_id)
     if not inst or not inst.get("cliente_id"):
-        print(f"[tiendanube] tienda {store_id} sin vincular a una cuenta TAURO")
+        print("[tiendanube] evento ownerless")
         return {"ok": True, "estado": "sin_vincular"}
 
     # El webhook sólo trae el id: el pedido completo se pide a la API.
     r = _api(store_id, inst["access_token"], "GET", f"orders/{pedido_id}")
     if r is None or r.status_code != 200:
-        print(f"[tiendanube] no pude leer el pedido {pedido_id}: "
-              f"{r.status_code if r is not None else 'sin respuesta'}")
+        print("[tiendanube] no pude leer el pedido")
         return {"ok": True, "estado": "pedido_no_leido"}
 
     pedido = parsear_pedido(r.json())
     if not pedido:
-        print(f"[tiendanube] pedido {pedido_id} sin dirección de envío, ignorado")
+        print("[tiendanube] pedido sin dirección de envío, ignorado")
         return {"ok": True, "ignorado": "sin_direccion_envio"}
 
     from servicios.integraciones_tienda import tienda_por_dominio
@@ -316,12 +451,11 @@ async def tiendanube_webhook(request: Request):
 
     if evento == "order/cancelled" or pedido.get("cancelado"):
         cancelar_pedido_externo(tienda["id"], pedido["pedido_externo_id"])
-        print(f"[tiendanube] pedido {pedido['numero']} cancelado → fuera de pendientes")
+        print("[tiendanube] pedido cancelado → fuera de pendientes")
         return {"ok": True, "cancelado": True}
 
     creado = guardar_pedido(inst["cliente_id"], tienda["id"], "tiendanube", pedido)
-    print(f"[tiendanube] tienda {store_id} pedido {pedido['numero']} → "
-          f"{'guardado' if creado else 'actualizado'}")
+    print(f"[tiendanube] pedido {'guardado' if creado else 'actualizado'}")
 
     if creado:
         try:
@@ -331,6 +465,6 @@ async def tiendanube_webhook(request: Request):
             if pid:
                 intentar_en_segundo_plano(pid)
         except Exception as e:
-            print(f"[tiendanube] no pude lanzar el armado automático: {e}")
+            print(f"[tiendanube] armado automático no iniciado: {type(e).__name__}")
 
     return {"ok": True, "nuevo": creado}

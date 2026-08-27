@@ -247,7 +247,8 @@ def test_un_error_de_dhl_no_lanza_excepcion():
     with mock.patch("core.dhl_client.requests.get", return_value=resp):
         out = _cliente().get_rates(ORIGEN, DESTINO, PAQUETE)
     assert not out["encontrado"]
-    assert "Bad request" in out["error"]
+    assert "HTTP 400" in out["error"]
+    assert "missing parameter" not in out["error"]
 
 
 # ── Multi-bulto: POST /rates ─────────────────────────────────

@@ -12,6 +12,8 @@ import json
 import re
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -30,12 +32,97 @@ from servicios.shopify_app import _graphql, instalacion
 _PAGINA_VARIANTES = 10
 _MAX_PAGINAS = 1000
 _worker_lock = threading.Lock()
+_sync_executor = ThreadPoolExecutor(
+    max_workers=3,
+    thread_name_prefix="shopify-catalog-sync",
+)
+_sync_en_curso: set[tuple[str, str]] = set()
+_sync_en_curso_lock = threading.Lock()
 
 
 class ShopifyCatalogError(RuntimeError):
     def __init__(self, codigo: str, mensaje: str):
         super().__init__(mensaje)
         self.codigo = codigo
+
+
+@contextmanager
+def _bloqueo_generacion_operativa(
+    dominio: str,
+    cliente: str,
+    install_generation: str,
+):
+    """Impide que catálogo/stock sobrevivan al purge de otra generación.
+
+    La descarga GraphQL ocurre sin lock. Justo antes de escribir, este lock
+    transaccional vuelve a comprobar generación, token, owner y binding. Si
+    uninstall/reinstall ganó mientras Shopify respondía, no se persiste nada.
+    """
+    dominio = (dominio or "").strip().lower()
+    cliente = (cliente or "").strip().upper()
+    install_generation = str(install_generation or "").strip()
+    if not (dominio and cliente and install_generation):
+        raise ShopifyCatalogError(
+            "GENERACION_OBSOLETA",
+            "El evento pertenece a una instalación Shopify anterior.",
+        )
+
+    from servicios.integraciones_tienda import (
+        OAUTH_SECRET_MARKER,
+        _bloquear_dominio_shopify,
+    )
+
+    with get_conn() as lock_conn:
+        with lock_conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                SELECT 1
+                  FROM shopify_instalaciones i
+                  JOIN tiendas_conectadas t ON LOWER(t.dominio) = LOWER(i.dominio)
+                 WHERE LOWER(i.dominio) = %s
+                   AND i.install_generation = %s
+                   AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+                   AND UPPER(COALESCE(i.cliente_id, '')) = %s
+                   AND t.plataforma = 'shopify'
+                   AND t.secreto = %s
+                   AND t.activa = TRUE
+                   AND UPPER(t.cliente_id) = %s
+                 LIMIT 1
+                """,
+                (
+                    dominio,
+                    install_generation,
+                    cliente,
+                    OAUTH_SECRET_MARKER,
+                    cliente,
+                ),
+            )
+            if cur.fetchone() is None:
+                raise ShopifyCatalogError(
+                    "GENERACION_OBSOLETA",
+                    "El evento pertenece a una instalación Shopify anterior.",
+                )
+            yield
+
+
+def _actualizar_estado_si_actual(
+    dominio: str,
+    cliente: str,
+    install_generation: str,
+    estado: str,
+    **valores,
+) -> bool:
+    try:
+        with _bloqueo_generacion_operativa(
+            dominio, cliente, install_generation,
+        ):
+            _actualizar_estado(dominio, cliente, estado, **valores)
+        return True
+    except ShopifyCatalogError as exc:
+        if exc.codigo != "GENERACION_OBSOLETA":
+            raise
+        return False
 
 
 _VARIANT_FIELDS = """
@@ -56,6 +143,7 @@ _VARIANT_FIELDS = """
 
 _INVENTORY_FIELDS = """
     id
+    updatedAt
     tracked
     harmonizedSystemCode
     countryCodeOfOrigin
@@ -125,6 +213,22 @@ def _peso_kg(weight: Optional[dict]) -> float:
     return round(valor * factores.get(unidad, 1.0), 6)
 
 
+def _timestamp_fuente_mas_nuevo(*valores) -> Optional[str]:
+    """Normaliza el reloj de Shopify usado para impedir stock regresivo."""
+    candidatos: list[datetime] = []
+    for valor in valores:
+        if not valor:
+            continue
+        try:
+            fecha = datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+            if fecha.tzinfo is None:
+                fecha = fecha.replace(tzinfo=timezone.utc)
+            candidatos.append(fecha.astimezone(timezone.utc))
+        except (TypeError, ValueError):
+            continue
+    return max(candidatos).isoformat() if candidatos else None
+
+
 def _cantidades(niveles: Optional[dict]) -> tuple[list[dict], dict[str, Optional[int]]]:
     if (((niveles or {}).get("pageInfo") or {}).get("hasNextPage")):
         raise ShopifyCatalogError(
@@ -182,6 +286,16 @@ def _mapear_variante(node: dict, moneda: str, inventory_item: Optional[dict] = N
     if variante and variante.lower() != "default title":
         nombre = f"{titulo} · {variante}".strip(" ·")
     medicion = (inventario.get("measurement") or {}).get("weight")
+    source_updated_at = _timestamp_fuente_mas_nuevo(
+        node.get("updatedAt"),
+        producto.get("updatedAt"),
+        inventario.get("updatedAt"),
+        *(
+            nivel.get("updatedAt")
+            for nivel in ((inventario.get("inventoryLevels") or {}).get("nodes") or [])
+            if isinstance(nivel, dict)
+        ),
+    )
 
     return {
         "sku": str(node.get("sku") or "").strip(),
@@ -198,7 +312,7 @@ def _mapear_variante(node: dict, moneda: str, inventory_item: Optional[dict] = N
         "hs_code_tienda": str(inventario.get("harmonizedSystemCode") or ""),
         "pais_origen_tienda": str(inventario.get("countryCodeOfOrigin") or ""),
         "stock_controlado": tracked,
-        "source_updated_at": node.get("updatedAt") or producto.get("updatedAt"),
+        "source_updated_at": source_updated_at,
         "ubicaciones": ubicaciones,
         **totales,
     }
@@ -265,7 +379,13 @@ def _actualizar_estado(dominio: str, cliente: str, estado: str, **valores) -> No
             )
 
 
-def _guardar_variantes(dominio: str, cliente: str, filas: list[dict], run_id: str) -> tuple[int, int]:
+def _guardar_variantes(
+    dominio: str,
+    cliente: str,
+    filas: list[dict],
+    run_id: str,
+    source_observed_at=None,
+) -> tuple[int, int]:
     creados = actualizados = 0
     for fila in filas:
         estado = upsert_producto_importado(
@@ -289,8 +409,10 @@ def _guardar_variantes(dominio: str, cliente: str, filas: list[dict], run_id: st
             stock_fisico=fila.get("stock_fisico"),
             stock_entrante=fila.get("stock_entrante"),
             source_updated_at=fila.get("source_updated_at"),
+            source_observed_at=source_observed_at,
             sync_run_id=run_id,
             ubicaciones=fila.get("ubicaciones") or [],
+            inventario_completo=True,
         )
         if estado == "creado":
             creados += 1
@@ -307,14 +429,17 @@ def importar_catalogo(dominio: str, cliente_id: str) -> dict:
 
     inst = instalacion(dominio)
     token = (inst or {}).get("access_token")
+    generation = str((inst or {}).get("install_generation") or "").strip()
+    owner = str((inst or {}).get("cliente_id") or "").strip().upper()
     scopes = {s.strip() for s in str((inst or {}).get("scopes") or "").split(",") if s.strip()}
     faltantes = {"read_products", "read_inventory"} - scopes
-    if not token or faltantes:
-        _actualizar_estado(
-            dominio, cliente, "REAUTORIZAR",
-            ultimo_error_codigo="REAUTORIZACION_REQUERIDA",
-            ultimo_error="La tienda debe aprobar catálogo e inventario.",
-        )
+    if not token or not generation or owner != cliente or faltantes:
+        if generation and owner == cliente:
+            _actualizar_estado_si_actual(
+                dominio, cliente, generation, "REAUTORIZAR",
+                ultimo_error_codigo="REAUTORIZACION_REQUERIDA",
+                ultimo_error="La tienda debe aprobar catálogo e inventario.",
+            )
         return {
             "ok": False,
             "codigo": "REAUTORIZACION_REQUERIDA",
@@ -323,19 +448,32 @@ def importar_catalogo(dominio: str, cliente_id: str) -> dict:
         }
 
     run_id = uuid.uuid4().hex
+    sincronizacion_iniciada_at = datetime.now(timezone.utc)
     try:
-        _actualizar_estado(dominio, cliente, "SINCRONIZANDO",
-                           ultimo_error_codigo=None, ultimo_error=None)
+        with _bloqueo_generacion_operativa(dominio, cliente, generation):
+            _actualizar_estado(
+                dominio, cliente, "SINCRONIZANDO",
+                ultimo_error_codigo=None, ultimo_error=None,
+            )
         filas = traer_variantes(dominio, token)
-        creados, actualizados = _guardar_variantes(dominio, cliente, filas, run_id)
-        desactivados = desactivar_ausentes_shopify(cliente, dominio, run_id)
-        productos_total = len({f.get("external_product_id") for f in filas})
-        _actualizar_estado(
-            dominio, cliente, "COMPLETADO",
-            ultimo_error_codigo=None, ultimo_error=None,
-            productos_total=productos_total, variantes_total=len(filas),
-            creados=creados, actualizados=actualizados, desactivados=desactivados,
-        )
+        with _bloqueo_generacion_operativa(dominio, cliente, generation):
+            creados, actualizados = _guardar_variantes(
+                dominio,
+                cliente,
+                filas,
+                run_id,
+                source_observed_at=sincronizacion_iniciada_at,
+            )
+            desactivados = desactivar_ausentes_shopify(
+                cliente, dominio, run_id, sincronizacion_iniciada_at,
+            )
+            productos_total = len({f.get("external_product_id") for f in filas})
+            _actualizar_estado(
+                dominio, cliente, "COMPLETADO",
+                ultimo_error_codigo=None, ultimo_error=None,
+                productos_total=productos_total, variantes_total=len(filas),
+                creados=creados, actualizados=actualizados, desactivados=desactivados,
+            )
         print(f"[shopify_sync] {dominio} → {cliente}: {len(filas)} variantes, "
               f"{creados} nuevas, {actualizados} actualizadas, {desactivados} archivadas")
         return {
@@ -343,13 +481,18 @@ def importar_catalogo(dominio: str, cliente_id: str) -> dict:
             "desactivados": desactivados, "total": len(filas),
         }
     except ShopifyCatalogError as exc:
-        _actualizar_estado(dominio, cliente, "ERROR",
-                           ultimo_error_codigo=exc.codigo, ultimo_error=str(exc)[:300])
+        if exc.codigo != "GENERACION_OBSOLETA":
+            _actualizar_estado_si_actual(
+                dominio, cliente, generation, "ERROR",
+                ultimo_error_codigo=exc.codigo,
+                ultimo_error="No pudimos completar la sincronización.",
+            )
         return {"ok": False, "codigo": exc.codigo, "error": str(exc)}
     except Exception as exc:
         print(f"[shopify_sync] {dominio}: {type(exc).__name__}")
-        _actualizar_estado(
-            dominio, cliente, "ERROR", ultimo_error_codigo="ERROR_INTERNO",
+        _actualizar_estado_si_actual(
+            dominio, cliente, generation, "ERROR",
+            ultimo_error_codigo="ERROR_INTERNO",
             ultimo_error="No pudimos completar la sincronización.",
         )
         return {"ok": False, "codigo": "ERROR_INTERNO",
@@ -398,42 +541,114 @@ def solicitar_sincronizacion_cliente(cliente_id: str) -> dict:
             "error": "Autorizá una vez el catálogo y el inventario de Shopify.",
             "reautorizar_url": f"/shopify/install?shop={dominio}&reautorizar=1",
         }
-    lanzar_sincronizacion(dominio, cliente_id)
-    return {"ok": True, "iniciada": True, "dominio": dominio}
+    iniciada = lanzar_sincronizacion(dominio, cliente_id)
+    return {
+        "ok": True,
+        "iniciada": iniciada,
+        "en_curso": not iniciada,
+        "dominio": dominio,
+    }
 
 
-def lanzar_sincronizacion(dominio: str, cliente_id: str) -> None:
-    """Import inicial tolerante: un fallo queda en estado, nunca rompe el callback OAuth."""
+def lanzar_sincronizacion(dominio: str, cliente_id: str) -> bool:
+    """Encola una sola sincronización por tienda y limita el uso del pool SQL."""
+    clave = (
+        (dominio or "").strip().lower(),
+        (cliente_id or "").strip().upper(),
+    )
+    with _sync_en_curso_lock:
+        if clave in _sync_en_curso:
+            return False
+        _sync_en_curso.add(clave)
+
     def _run():
         try:
-            importar_catalogo(dominio, cliente_id)
+            importar_catalogo(clave[0], clave[1])
         except Exception as exc:
             print(f"[shopify_sync] hilo inicial falló: {type(exc).__name__}")
+        finally:
+            with _sync_en_curso_lock:
+                _sync_en_curso.discard(clave)
 
-    threading.Thread(target=_run, daemon=True, name="shopify-catalog-sync").start()
+    try:
+        _sync_executor.submit(_run)
+    except Exception:
+        with _sync_en_curso_lock:
+            _sync_en_curso.discard(clave)
+        raise
+    return True
 
 
-def sincronizar_producto(dominio: str, cliente: str, product_id) -> dict:
+def sincronizar_producto(
+    dominio: str,
+    cliente: str,
+    product_id,
+    install_generation_verificada: str = "",
+    triggered_at: Optional[str] = None,
+) -> dict:
+    dominio = (dominio or "").strip().lower()
+    cliente = (cliente or "").strip().upper()
+    generation = str(install_generation_verificada or "").strip()
     inst = instalacion(dominio) or {}
     token = inst.get("access_token")
+    if (
+        not generation
+        or str(inst.get("install_generation") or "").strip() != generation
+        or str(inst.get("cliente_id") or "").strip().upper() != cliente
+    ):
+        raise ShopifyCatalogError(
+            "GENERACION_OBSOLETA",
+            "El evento pertenece a una instalación Shopify anterior.",
+        )
     gid = _gid("Product", product_id)
     if not token or not gid:
         raise ShopifyCatalogError("EVENTO_INVALIDO", "Producto Shopify inválido.")
+    with _bloqueo_generacion_operativa(dominio, cliente, generation):
+        pass
     legacy_id = gid.rsplit("/", 1)[-1]
     filas = traer_variantes(dominio, token, query=f"product_id:{legacy_id}")
-    if not filas:
-        n = desactivar_producto_shopify(cliente, dominio, gid)
-        return {"ok": True, "desactivados": n}
-    creados, actualizados = _guardar_variantes(dominio, cliente, filas, uuid.uuid4().hex)
+    with _bloqueo_generacion_operativa(dominio, cliente, generation):
+        if not filas:
+            n = desactivar_producto_shopify(
+                cliente, dominio, gid, triggered_at,
+            )
+            return {"ok": True, "desactivados": n}
+        creados, actualizados = _guardar_variantes(
+            dominio,
+            cliente,
+            filas,
+            uuid.uuid4().hex,
+            source_observed_at=(triggered_at or datetime.now(timezone.utc)),
+        )
     return {"ok": True, "creados": creados, "actualizados": actualizados}
 
 
-def sincronizar_inventory_item(dominio: str, cliente: str, inventory_item_id) -> dict:
+def sincronizar_inventory_item(
+    dominio: str,
+    cliente: str,
+    inventory_item_id,
+    install_generation_verificada: str = "",
+    triggered_at: Optional[str] = None,
+) -> dict:
+    dominio = (dominio or "").strip().lower()
+    cliente = (cliente or "").strip().upper()
+    generation = str(install_generation_verificada or "").strip()
     inst = instalacion(dominio) or {}
     token = inst.get("access_token")
+    if (
+        not generation
+        or str(inst.get("install_generation") or "").strip() != generation
+        or str(inst.get("cliente_id") or "").strip().upper() != cliente
+    ):
+        raise ShopifyCatalogError(
+            "GENERACION_OBSOLETA",
+            "El evento pertenece a una instalación Shopify anterior.",
+        )
     gid = _gid("InventoryItem", inventory_item_id)
     if not token or not gid:
         raise ShopifyCatalogError("EVENTO_INVALIDO", "Inventario Shopify inválido.")
+    with _bloqueo_generacion_operativa(dominio, cliente, generation):
+        pass
     data = _graphql(dominio, token, _QUERY_INVENTORY_ITEM, {"id": gid})
     if data is None:
         raise ShopifyCatalogError("SHOPIFY_NO_RESPONDE", "Shopify no respondió al leer inventario.")
@@ -442,30 +657,96 @@ def sincronizar_inventory_item(dominio: str, cliente: str, inventory_item_id) ->
     variante = inventory.get("variant") or {}
     filas = ([_mapear_variante(variante, moneda, inventory)]
              if isinstance(variante, dict) and variante.get("id") else [])
-    creados, actualizados = _guardar_variantes(dominio, cliente, filas, uuid.uuid4().hex)
+    with _bloqueo_generacion_operativa(dominio, cliente, generation):
+        creados, actualizados = _guardar_variantes(
+            dominio,
+            cliente,
+            filas,
+            uuid.uuid4().hex,
+            source_observed_at=(triggered_at or datetime.now(timezone.utc)),
+        )
     return {"ok": True, "creados": creados, "actualizados": actualizados}
 
 
-def encolar_evento(webhook_id: str, dominio: str, topic: str,
-                   payload: dict, triggered_at: Optional[str] = None) -> bool:
-    """True si se encoló; False si Shopify ya había entregado el mismo evento."""
+def encolar_evento(
+    webhook_id: str,
+    dominio: str,
+    topic: str,
+    payload: dict,
+    triggered_at: Optional[str] = None,
+    install_generation: str = "",
+) -> bool:
+    """Encola sólo para la generación activa; False significa duplicado exacto."""
     webhook_id = (webhook_id or "").strip()
-    if not webhook_id:
-        return False
+    dominio = (dominio or "").strip().lower()
+    topic = (topic or "").strip().lower()
+    generation = str(install_generation or "").strip()
+    if not webhook_id or not dominio or not topic or not generation:
+        raise ShopifyCatalogError(
+            "EVENTO_INVALIDO", "El webhook Shopify está incompleto.",
+        )
+
+    from servicios.integraciones_tienda import (
+        OAUTH_SECRET_MARKER,
+        _bloquear_dominio_shopify,
+    )
+
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
             cur.execute(
                 """
                 INSERT INTO shopify_webhook_eventos
-                    (webhook_id, dominio, topic, triggered_at, payload)
-                VALUES (%s,%s,%s,%s,%s::jsonb)
+                    (webhook_id, dominio, topic, triggered_at, payload,
+                     install_generation)
+                SELECT %s,%s,%s,%s,%s::jsonb,%s
+                  FROM shopify_instalaciones i
+                  JOIN tiendas_conectadas t
+                    ON LOWER(t.dominio) = LOWER(i.dominio)
+                 WHERE LOWER(i.dominio) = %s
+                   AND i.install_generation = %s
+                   AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+                   AND NULLIF(BTRIM(i.cliente_id), '') IS NOT NULL
+                   AND t.plataforma = 'shopify'
+                   AND t.secreto = %s
+                   AND t.activa = TRUE
+                   AND UPPER(t.cliente_id) = UPPER(i.cliente_id)
                 ON CONFLICT (webhook_id) DO NOTHING
                 RETURNING webhook_id
                 """,
-                (webhook_id, dominio, topic, triggered_at,
-                 json.dumps(payload, ensure_ascii=False)),
+                (
+                    webhook_id, dominio, topic, triggered_at,
+                    json.dumps(payload, ensure_ascii=False), generation,
+                    dominio, generation, OAUTH_SECRET_MARKER,
+                ),
             )
-            return cur.fetchone() is not None
+            if cur.fetchone() is not None:
+                return True
+            cur.execute(
+                """
+                SELECT dominio, topic, install_generation
+                  FROM shopify_webhook_eventos
+                 WHERE webhook_id = %s
+                """,
+                (webhook_id,),
+            )
+            existente = cur.fetchone()
+            if existente:
+                coincide = (
+                    str(existente.get("dominio") or "").lower() == dominio
+                    and str(existente.get("topic") or "").lower() == topic
+                    and str(existente.get("install_generation") or "") == generation
+                )
+                if coincide:
+                    return False
+                raise ShopifyCatalogError(
+                    "WEBHOOK_ID_REUTILIZADO",
+                    "El identificador del webhook no coincide con su entrega original.",
+                )
+    raise ShopifyCatalogError(
+        "GENERACION_OBSOLETA",
+        "El evento pertenece a una instalación Shopify anterior.",
+    )
 
 
 def _tomar_evento() -> Optional[dict]:
@@ -491,8 +772,13 @@ def _tomar_evento() -> Optional[dict]:
     return dict(row) if row else None
 
 
-def _resolver_cliente(dominio: str) -> str:
+def _resolver_cliente(dominio: str, install_generation: str) -> str:
     inst = instalacion(dominio) or {}
+    if str(inst.get("install_generation") or "") != str(install_generation or ""):
+        raise ShopifyCatalogError(
+            "GENERACION_OBSOLETA",
+            "El evento pertenece a una instalación Shopify anterior.",
+        )
     return str(inst.get("cliente_id") or "").strip().upper()
 
 
@@ -500,22 +786,35 @@ def _procesar_evento(evento: dict) -> None:
     dominio = str(evento.get("dominio") or "").strip().lower()
     topic = str(evento.get("topic") or "").strip().lower()
     payload = evento.get("payload") or {}
-    cliente = _resolver_cliente(dominio)
+    triggered_at = evento.get("triggered_at")
+    generation = str(evento.get("install_generation") or "").strip()
+    if not generation:
+        raise ShopifyCatalogError(
+            "GENERACION_OBSOLETA",
+            "El evento no identifica una instalación Shopify activa.",
+        )
+    cliente = _resolver_cliente(dominio, generation)
     if not cliente:
         raise ShopifyCatalogError("TIENDA_SIN_VINCULAR", "La tienda todavía no está vinculada.")
 
     if topic in ("products/create", "products/update"):
         sincronizar_producto(dominio, cliente,
-                             payload.get("admin_graphql_api_id") or payload.get("id"))
+                             payload.get("admin_graphql_api_id") or payload.get("id"),
+                             generation, triggered_at)
     elif topic == "products/delete":
         gid = _gid("Product", payload.get("admin_graphql_api_id") or payload.get("id"))
         if not gid:
             raise ShopifyCatalogError("EVENTO_INVALIDO", "Producto Shopify inválido.")
-        desactivar_producto_shopify(cliente, dominio, gid)
+        with _bloqueo_generacion_operativa(dominio, cliente, generation):
+            desactivar_producto_shopify(
+                cliente, dominio, gid, triggered_at,
+            )
     elif topic in ("inventory_levels/update", "inventory_items/update"):
         sincronizar_inventory_item(
             dominio, cliente,
             payload.get("inventory_item_id") or payload.get("admin_graphql_api_id") or payload.get("id"),
+            generation,
+            triggered_at,
         )
 
 
@@ -540,7 +839,16 @@ def procesar_cola_eventos(limite: int = 20) -> dict:
             procesados += 1
         except Exception as exc:
             errores += 1
-            reintentar = int(evento.get("intentos") or 1) < 5
+            codigo = (
+                exc.codigo if isinstance(exc, ShopifyCatalogError)
+                else type(exc).__name__
+            )[:80]
+            obsoleto = codigo == "GENERACION_OBSOLETA"
+            reintentar = not obsoleto and int(evento.get("intentos") or 1) < 5
+            estado = (
+                "COMPLETADO" if obsoleto
+                else ("PENDIENTE" if reintentar else "ERROR")
+            )
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -550,11 +858,14 @@ def procesar_cola_eventos(limite: int = 20) -> dict:
                             processed_at=CASE WHEN %s THEN NULL ELSE NOW() END
                         WHERE webhook_id=%s
                         """,
-                        ("PENDIENTE" if reintentar else "ERROR",
-                         f"{type(exc).__name__}: {exc}"[:300], reintentar,
+                        (estado, codigo, reintentar,
                          evento["webhook_id"]),
                     )
-            print(f"[shopify_sync] webhook {evento.get('topic')} falló: {type(exc).__name__}")
+            if obsoleto:
+                errores -= 1
+                procesados += 1
+                continue
+            print(f"[shopify_sync] webhook falló: {codigo}")
             break
     return {"procesados": procesados, "errores": errores}
 

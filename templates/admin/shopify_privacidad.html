@@ -1,0 +1,55 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Privacidad Shopify{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:24px;">
+  <div>
+    <div class="eyebrow">Shopify · GDPR</div>
+    <h1 style="margin:4px 0 8px;">Solicitudes de acceso a datos</h1>
+    <p style="color:var(--fg-3);max-width:760px;margin:0;">
+      Descargá el JSON generado desde los datos actuales de TAURO, entregalo por el canal
+      acordado con la tienda y recién después marcá la solicitud como resuelta.
+    </p>
+  </div>
+  <span class="admin-badge">{{ solicitudes|length }} pendiente{% if solicitudes|length != 1 %}s{% endif %}</span>
+</div>
+
+{% if solicitudes %}
+  <div style="display:grid;gap:12px;">
+  {% for s in solicitudes %}
+    <section class="card" style="padding:18px;display:grid;gap:14px;">
+      <div style="display:flex;flex-wrap:wrap;gap:10px 24px;align-items:flex-start;justify-content:space-between;">
+        <div>
+          <div class="eyebrow">{{ s.dominio }}</div>
+          <h2 style="font-size:18px;margin:4px 0;">Solicitud {{ s.request_id }}</h2>
+          <div style="font-size:12px;color:var(--fg-4);">
+            {{ s.cantidad_ordenes }} orden{% if s.cantidad_ordenes != 1 %}es{% endif %}
+            · recibida {{ s.creado_at.strftime('%d/%m/%Y %H:%M') if s.creado_at else '—' }}
+            · {{ s.intentos }} intento{% if s.intentos != 1 %}s{% endif %} de aviso
+          </div>
+        </div>
+        <span class="admin-badge">{{ s.estado|replace('_', ' ') }}</span>
+      </div>
+
+      {% if s.ultimo_error_code %}
+        <div class="flash-msg error" style="margin:0;">Aviso operativo: {{ s.ultimo_error_code }}</div>
+      {% endif %}
+
+      <div style="display:flex;flex-wrap:wrap;gap:10px;">
+        <a class="btn btn-primary btn-sm"
+           href="/admin/shopify/privacidad/{{ s.id }}/datos.json">Descargar JSON</a>
+        <form method="POST" action="/admin/shopify/privacidad/{{ s.id }}/resolver"
+              data-confirm="¿Confirmás que los datos ya fueron entregados por el canal correspondiente?">
+          <button class="btn btn-ghost btn-sm" type="submit">Marcar resuelta</button>
+        </form>
+      </div>
+    </section>
+  {% endfor %}
+  </div>
+{% else %}
+  <section class="card" style="padding:28px;text-align:center;">
+    <h2 style="margin:0 0 8px;">No hay solicitudes pendientes</h2>
+    <p style="margin:0;color:var(--fg-3);">Los próximos pedidos firmados de Shopify aparecerán acá automáticamente.</p>
+  </section>
+{% endif %}
+{% endblock %}

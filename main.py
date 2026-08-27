@@ -155,10 +155,9 @@ async def headers_de_seguridad(request: Request, call_next):
       `/web`, y sólo si existe un `META_PIXEL_ID` válido, se habilitan los dos
       orígenes exactos que necesita el Pixel de Meta.
 
-    X-Frame-Options y esta CSP NO tocan /shopify/*: esas páginas viven en un
-    iframe del admin de Shopify y mandan su propio `frame-ancestors` dinámico
-    por tienda (endpoints/shopify.py). El setdefault respeta ese header;
-    pisarlo = pantalla en blanco para el comerciante y cadena de ventas rota.
+    La app pública de Shopify es externa (`embedded = false`): sus páginas se
+    abren como navegación principal y declaran su propia CSP. Nunca deben poder
+    incrustarse en un iframe; por eso /shopify recibe X-Frame-Options: DENY.
     """
     import secrets as _secrets
     path = request.scope.get("path", "")
@@ -231,7 +230,9 @@ async def headers_de_seguridad(request: Request, call_next):
     response.headers.setdefault(
         "Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()")
 
-    if not path.startswith("/shopify"):
+    if path.startswith("/shopify"):
+        response.headers.setdefault("X-Frame-Options", "DENY")
+    else:
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
 
     # Las páginas privadas no se guardan en disco. Sin esto, el HTML del
@@ -239,9 +240,23 @@ async def headers_de_seguridad(request: Request, call_next):
     # caché del navegador después de cerrar sesión: el que agarra esa
     # computadora aprieta "atrás" y lo lee sin loguearse. Y si algún día
     # hay un proxy o CDN adelante, tampoco lo guarda ni se lo sirve a otro.
-    if path.startswith(("/portal", "/admin")):
+    api_privada = (
+        path in {"/cotizar", "/stock", "/pedido", "/envios"}
+        or path.startswith(("/pedidos/", "/rastrear/"))
+    )
+    shopify_privada = path.startswith(
+        ("/shopify", "/integraciones/shopify/")
+    )
+    if path.startswith(("/portal", "/admin")) or api_privada or shopify_privada:
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
         response.headers["Pragma"] = "no-cache"
+        if api_privada:
+            vary = {
+                parte.strip() for parte in response.headers.get("Vary", "").split(",")
+                if parte.strip()
+            }
+            vary.add("X-API-Key")
+            response.headers["Vary"] = ", ".join(sorted(vary))
         # Que Google ni loco indexe páginas privadas (aunque estén tras login,
         # el título "Cuenta corriente · MELCIOR" en resultados ya es una fuga).
         response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
@@ -253,8 +268,8 @@ _db_init_error = None
 try:
     init_db()
 except Exception as _db_err:
-    _db_init_error = str(_db_err)
-    print(f"[startup] DB init error: {_db_err}")
+    _db_init_error = type(_db_err).__name__
+    print(f"[startup] DB init error: {type(_db_err).__name__}")
     # En producción no alcanza con dejar /health en 503: si el proceso sigue
     # vivo, antes de que Railway descarte el candidato puede arrancar jobs,
     # threads o llamadas a couriers con un schema incompleto. Fallar el boot
@@ -275,7 +290,10 @@ try:
     from servicios.api_b2b import _ensure_hash_migrado
     _ensure_hash_migrado()
 except Exception as _mig_err:
-    print(f"[startup] migración de api_key diferida al primer uso: {_mig_err}")
+    print(
+        "[startup] migración de api_key diferida al primer uso: "
+        f"{type(_mig_err).__name__}"
+    )
 
 # Static files (CSS, JS, imágenes), portal del cliente y admin
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -616,15 +634,32 @@ y lo estamos mirando. Probá de nuevo en un momento.</p>
 
 @app.exception_handler(Exception)
 async def error_global(request: Request, exc: Exception):
-    import traceback
-    print(f"[500] {request.method} {request.url.path} → {type(exc).__name__}: {exc}")
-    traceback.print_exc()
+    import secrets as _secrets
+
+    referencia = _secrets.token_hex(6)
+    route = request.scope.get("route")
+    ruta_log = getattr(route, "path", "<sin-ruta>")
+    print(
+        f"[500] ref={referencia} {request.method} {ruta_log} "
+        f"→ {type(exc).__name__}"
+    )
     acepta_html = "text/html" in (request.headers.get("accept") or "")
     if acepta_html and request.url.path.startswith(("/portal", "/admin", "/web")):
-        return HTMLResponse(_HTML_ERROR_500, status_code=500)
+        return HTMLResponse(
+            _HTML_ERROR_500,
+            status_code=500,
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Request-ID": referencia,
+            },
+        )
     return JSONResponse(
         {"ok": False, "error": "Error interno. Ya quedó registrado, probá de nuevo."},
         status_code=500,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Request-ID": referencia,
+        },
     )
 
 
@@ -674,7 +709,7 @@ def api_rastrear(nro: str, request: Request):
         from servicios.rastreo import rastrear_publico
         return rastrear_publico(nro)
     except Exception as e:
-        print(f"[rastrear] error: {type(e).__name__}: {e}")
+        print(f"[rastrear] error: {type(e).__name__}")
         return JSONResponse(
             {"ok": False, "error": "No pudimos rastrear ahora. Probá de nuevo."},
             status_code=200)
@@ -1248,7 +1283,10 @@ def descargar_guia_api(solicitud_id: int, x_api_key: str = Header(default=None))
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="guia-{solicitud_id}.pdf"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="guia-{solicitud_id}.pdf"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
@@ -1355,7 +1393,7 @@ def job_limpiar_auditoria():
         if borrados:
             print(f"[scheduler] auditoría: {borrados} eventos viejos podados")
     except Exception as e:
-        print(f"[scheduler] poda de auditoría falló: {e}")
+        print(f"[scheduler] poda de auditoría falló: {type(e).__name__}")
 
 
 scheduler.add_job(job_limpiar_auditoria, trigger="cron", hour=3, minute=30)
@@ -1422,6 +1460,52 @@ scheduler.add_job(
     coalesce=True,
 )
 
+# Privacidad Shopify: el webhook solo confirma despues del commit. Este
+# worker notifica a Operaciones desde la cola durable y la poda conserva 90
+# dias las solicitudes ya resueltas, nunca las obligaciones pendientes.
+from servicios.shopify_gdpr import (
+    limpiar_resueltas as limpiar_gdpr_shopify,
+    procesar_solicitudes as procesar_gdpr_shopify,
+)
+scheduler.add_job(
+    procesar_gdpr_shopify,
+    trigger="interval",
+    seconds=30,
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    limpiar_gdpr_shopify,
+    trigger="cron",
+    hour=3,
+    minute=50,
+    max_instances=1,
+    coalesce=True,
+)
+
+
+# La poda oportunista al recibir/vincular órdenes no alcanza para tiendas
+# dormidas. Este job garantiza la retención máxima de 90 días aun cuando no
+# llegue ningún webhook nuevo.
+def job_limpiar_pedidos_huerfanos():
+    try:
+        from servicios.integraciones_tienda import limpiar_pedidos_huerfanos_vencidos
+        eliminados = limpiar_pedidos_huerfanos_vencidos()
+        if eliminados:
+            print(f"[scheduler] Shopify: {eliminados} pedido(s) huérfano(s) vencido(s) podados")
+    except Exception as e:
+        print(f"[scheduler] poda de pedidos huérfanos falló: {type(e).__name__}")
+
+
+scheduler.add_job(
+    job_limpiar_pedidos_huerfanos,
+    trigger="cron",
+    hour=3,
+    minute=52,
+    max_instances=1,
+    coalesce=True,
+)
+
 
 # Dólar oficial automático: el tipo de cambio mueve TODOS los precios. En vez
 # de cargarlo a mano, se actualiza solo desde el oficial. Corre cada 6 h (el
@@ -1443,11 +1527,14 @@ def job_actualizar_dolar():
                     refrescar_cache()
                     print("[scheduler] tarifas del checkout recalculadas con el dólar nuevo")
                 except Exception as e:
-                    print(f"[scheduler] no pude refrescar tarifas tras el dólar: {e}")
+                    print(
+                        "[scheduler] no pude refrescar tarifas tras el dólar: "
+                        f"{type(e).__name__}"
+                    )
             import threading as _t
             _t.Thread(target=_refrescar, daemon=True).start()
     except Exception as e:
-        print(f"[scheduler] actualización de dólar falló: {e}")
+        print(f"[scheduler] actualización de dólar falló: {type(e).__name__}")
 
 
 scheduler.add_job(job_actualizar_dolar, trigger="interval", hours=6)
@@ -1463,7 +1550,7 @@ def job_refrescar_tarifas():
         from servicios.tarifas_cache import refrescar_cache
         refrescar_cache()
     except Exception as e:
-        print(f"[scheduler] refresco de tarifas falló: {e}")
+        print(f"[scheduler] refresco de tarifas falló: {type(e).__name__}")
 
 
 scheduler.add_job(
@@ -1482,13 +1569,14 @@ scheduler.add_job(
     minutes=15,
 )
 
-# Espejo en el Google Sheet TAURO 2026 (pestaña PLATAFORMA, propiedad del
-# sistema — las pestañas manuales no se tocan). Sólo corre si
+# Espejo sin PII en el Google Sheet TAURO 2026 (pestaña
+# PLATAFORMA_SIN_PII, propiedad del sistema; el histórico PLATAFORMA queda
+# intacto hasta una decisión documentada). Sólo corre si
 # GOOGLE_CREDENTIALS_JSON está cargada; cada 30 min alcanza para control.
 from jobs.sync_sheet_tauro import sincronizar_seguro, configurado as _sheet_conf
 if _sheet_conf():
     scheduler.add_job(sincronizar_seguro, trigger="interval", minutes=30)
-    print("[scheduler] Espejo en Google Sheet: cada 30 min (pestaña PLATAFORMA)")
+    print("[scheduler] Espejo en Google Sheet: cada 30 min (PLATAFORMA_SIN_PII)")
 else:
     print("[scheduler] Espejo en Google Sheet APAGADO (falta GOOGLE_CREDENTIALS_JSON)")
 
@@ -1540,7 +1628,7 @@ def _tarifas_al_arrancar():
         from servicios.dolar_oficial import actualizar_dolar_auto
         actualizar_dolar_auto()
     except Exception as e:
-        print(f"[startup] no pude actualizar el dólar: {e}")
+        print(f"[startup] no pude actualizar el dólar: {type(e).__name__}")
     try:
         from servicios.tarifas_cache import estado_cache, refrescar_cache
         estado = estado_cache()
@@ -1550,7 +1638,7 @@ def _tarifas_al_arrancar():
         print("[startup] tabla de tarifas vacía → llenando en segundo plano")
         refrescar_cache()
     except Exception as e:
-        print(f"[startup] no pude precargar tarifas: {e}")
+        print(f"[startup] no pude precargar tarifas: {type(e).__name__}")
 
 
 # En un hilo aparte: el arranque no puede esperar ~66 cotizaciones, y

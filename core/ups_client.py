@@ -30,6 +30,29 @@ class UPSClient(CarrierBase):
         self._token: str | None = None
         self._token_expires_at: float = 0
 
+    @staticmethod
+    def _errores_respuesta(resp) -> tuple[str, str]:
+        """Devuelve (detalle para UI, códigos seguros para logs)."""
+        try:
+            data = resp.json()
+        except Exception:
+            return "", "sin_codigo"
+        errores = (data or {}).get("response", {}).get("errors") or []
+        if isinstance(errores, dict):
+            errores = [errores]
+        mensajes = []
+        codigos = []
+        for error in errores:
+            if not isinstance(error, dict):
+                continue
+            mensaje = str(error.get("message") or "").strip()
+            codigo = str(error.get("code") or "").strip()
+            if mensaje:
+                mensajes.append(mensaje)
+            if codigo:
+                codigos.append(codigo)
+        return "; ".join(mensajes)[:300], ",".join(codigos[:5]) or "sin_codigo"
+
     def _get_token(self) -> str:
         """OAuth2 token con caché."""
         if self._token and time.time() < self._token_expires_at - 60:
@@ -136,8 +159,12 @@ class UPSClient(CarrierBase):
             )
 
             if resp.status_code != 200:
-                print(f"[ups] get_rates error {resp.status_code}: {resp.text[:300]}")
-                return {"encontrado": False, "error": resp.text}
+                detalle, codigo = self._errores_respuesta(resp)
+                print(f"[ups] get_rates error HTTP {resp.status_code}; código={codigo}")
+                return {
+                    "encontrado": False,
+                    "error": detalle or f"UPS rechazó la cotización (HTTP {resp.status_code}).",
+                }
 
             data = resp.json()
             rated = data.get("RateResponse", {}).get("RatedShipment", {})
@@ -318,14 +345,12 @@ class UPSClient(CarrierBase):
                              "antes de reintentar."}
 
         if resp.status_code not in (200, 201):
-            detalle = resp.text[:300]
-            try:
-                errs = resp.json().get("response", {}).get("errors") or []
-                detalle = "; ".join(e.get("message", "") for e in errs)[:300] or detalle
-            except Exception:
-                pass
-            print(f"[ups] error {resp.status_code} emitiendo: {resp.text[:400]}")
-            return {"encontrado": False, "error": detalle}
+            detalle, codigo = self._errores_respuesta(resp)
+            print(f"[ups] create_shipment error HTTP {resp.status_code}; código={codigo}")
+            return {
+                "encontrado": False,
+                "error": detalle or f"UPS rechazó la emisión (HTTP {resp.status_code}).",
+            }
 
         try:
             res = resp.json()["ShipmentResponse"]["ShipmentResults"]

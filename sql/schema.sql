@@ -125,11 +125,23 @@ CREATE TABLE IF NOT EXISTS direcciones (
     pais           TEXT NOT NULL DEFAULT 'AR',
     predeterminada BOOLEAN NOT NULL DEFAULT FALSE,
     notas          TEXT,
+    origen_plataforma         TEXT,
+    origen_dominio            TEXT,
+    origen_pedido_externo_id  TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE IF EXISTS direcciones
+    ADD COLUMN IF NOT EXISTS origen_plataforma TEXT;
+ALTER TABLE IF EXISTS direcciones
+    ADD COLUMN IF NOT EXISTS origen_dominio TEXT;
+ALTER TABLE IF EXISTS direcciones
+    ADD COLUMN IF NOT EXISTS origen_pedido_externo_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_direcciones_cliente_tipo
     ON direcciones(cliente_id, tipo, predeterminada DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_direcciones_origen_tienda
+    ON direcciones(origen_plataforma, origen_dominio, origen_pedido_externo_id)
+    WHERE origen_plataforma IS NOT NULL AND origen_dominio IS NOT NULL;
 
 -- ── Sesiones (ex SESSIONS) ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS sessions (
@@ -264,6 +276,8 @@ CREATE TABLE IF NOT EXISTS productos (
     stock_entrante   INTEGER,
     stock_actualizado_at TIMESTAMPTZ,
     source_updated_at TIMESTAMPTZ,
+    source_deleted_at TIMESTAMPTZ,
+    source_observed_at TIMESTAMPTZ,
     sync_run_id      TEXT,
     sync_activo      BOOLEAN NOT NULL DEFAULT TRUE,
     activo           BOOLEAN NOT NULL DEFAULT FALSE,  -- pendiente validación Tauro
@@ -292,6 +306,8 @@ ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_fisico INTEGER;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_entrante INTEGER;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_actualizado_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS source_updated_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS source_deleted_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS source_observed_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS sync_run_id TEXT;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS sync_activo BOOLEAN NOT NULL DEFAULT TRUE;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_productos_catalogo_externo_variante
@@ -321,6 +337,135 @@ CREATE TABLE IF NOT EXISTS producto_inventario_ubicaciones (
 CREATE INDEX IF NOT EXISTS ix_inventario_ubicaciones_cliente
     ON producto_inventario_ubicaciones (cliente_id, tienda_dominio, producto_id);
 
+-- Instalación OAuth pública por tienda. `install_generation` cambia después
+-- de una desinstalación real y permite que el SHOP_REDACT tardío de la
+-- generación anterior jamás borre un token recién autorizado.
+CREATE TABLE IF NOT EXISTS shopify_instalaciones (
+    id                 SERIAL PRIMARY KEY,
+    dominio            TEXT NOT NULL UNIQUE,
+    access_token       TEXT NOT NULL,
+    refresh_token      TEXT,
+    access_token_expires_at TIMESTAMPTZ,
+    refresh_token_expires_at TIMESTAMPTZ,
+    token_reauth_required BOOLEAN NOT NULL DEFAULT FALSE,
+    token_refresh_failed_at TIMESTAMPTZ,
+    webhooks_ready     BOOLEAN NOT NULL DEFAULT FALSE,
+    webhooks_verified_at TIMESTAMPTZ,
+    scopes             TEXT,
+    cliente_id         TEXT,
+    carrier_id         TEXT,
+    app_client_id      TEXT,
+    install_generation TEXT NOT NULL,
+    instalada_en       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS app_client_id TEXT;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS refresh_token TEXT;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS access_token_expires_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS refresh_token_expires_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS token_reauth_required BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS token_refresh_failed_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS webhooks_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ADD COLUMN IF NOT EXISTS webhooks_verified_at TIMESTAMPTZ;
+UPDATE shopify_instalaciones
+   SET install_generation = md5(
+       dominio || ':' || instalada_en::text || ':' || random()::text
+   )
+ WHERE install_generation IS NULL OR BTRIM(install_generation) = '';
+ALTER TABLE IF EXISTS shopify_instalaciones
+    ALTER COLUMN install_generation SET NOT NULL;
+
+-- Las filas anteriores no tienen evidencia durable de haber verificado el
+-- conjunto completo de suscripciones. Quedan cerradas hasta completar un OAuth
+-- nuevo; el owner se preserva, pero su binding no puede operar mientras tanto.
+DO $$
+BEGIN
+    IF to_regclass('public.tiendas_conectadas') IS NOT NULL THEN
+        UPDATE tiendas_conectadas t
+           SET activa = FALSE
+          FROM shopify_instalaciones i
+         WHERE LOWER(t.dominio) = LOWER(i.dominio)
+           AND t.plataforma = 'shopify'
+           AND t.secreto = 'oauth:shopify-app'
+           AND i.webhooks_ready = FALSE
+           AND t.activa = TRUE;
+    END IF;
+END $$;
+
+-- Evidencia no sensible de que una generación fue cerrada y purgada. Se
+-- conserva para ACKear el SHOP_REDACT que Shopify manda 48 h después sin
+-- tocar una reinstalación posterior de la misma app.
+CREATE TABLE IF NOT EXISTS shopify_desinstalaciones (
+    id                 BIGSERIAL PRIMARY KEY,
+    dominio            TEXT NOT NULL,
+    shop_id            TEXT NOT NULL DEFAULT '',
+    app_client_id      TEXT NOT NULL,
+    install_generation TEXT NOT NULL,
+    cliente_id         TEXT,
+    desinstalada_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    purge_completado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    shop_redact_ack_at TIMESTAMPTZ,
+    UNIQUE (dominio, app_client_id, install_generation)
+);
+CREATE INDEX IF NOT EXISTS ix_shopify_desinstalaciones_redact
+    ON shopify_desinstalaciones(dominio, shop_id, app_client_id, desinstalada_at DESC);
+
+-- Si llega shop/redact para una tienda activa y no existe un tombstone que
+-- identifique la generación desinstalada, no se borra a ciegas: la obligación
+-- queda persistida para conciliación y alerta operativa.
+CREATE TABLE IF NOT EXISTS shopify_shop_redact_pendientes (
+    dominio                   TEXT NOT NULL,
+    shop_id                   TEXT NOT NULL,
+    app_client_id             TEXT NOT NULL,
+    install_generation_activa TEXT NOT NULL,
+    estado                    TEXT NOT NULL DEFAULT 'VERIFICAR_GENERACION',
+    recibido_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_intento_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (dominio, shop_id, app_client_id)
+);
+CREATE INDEX IF NOT EXISTS ix_shop_redact_pendientes_estado
+    ON shopify_shop_redact_pendientes(estado, recibido_at);
+
+-- Una redacción de comprador debe seguir bloqueando copias tardías aunque
+-- un form estuviera abierto o un worker reintentara después del webhook.
+CREATE TABLE IF NOT EXISTS shopify_pedidos_redactados (
+    dominio           TEXT NOT NULL,
+    pedido_externo_id TEXT NOT NULL,
+    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (dominio, pedido_externo_id)
+);
+CREATE TABLE IF NOT EXISTS shopify_webhook_recibidos (
+    webhook_id        TEXT PRIMARY KEY,
+    dominio           TEXT NOT NULL,
+    topic             TEXT NOT NULL,
+    install_generation TEXT NOT NULL,
+    procesado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_shopify_webhook_recibidos_fecha
+    ON shopify_webhook_recibidos(procesado_at);
+CREATE TABLE IF NOT EXISTS shopify_huerfanos_cancelados (
+    dominio            TEXT NOT NULL,
+    pedido_externo_id  TEXT NOT NULL,
+    install_generation TEXT NOT NULL,
+    cancelado_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (dominio, pedido_externo_id, install_generation)
+);
+CREATE INDEX IF NOT EXISTS ix_shopify_huerfanos_cancelados_fecha
+    ON shopify_huerfanos_cancelados(cancelado_at);
+-- Los payloads sin owner quedan ligados a la generación que los recibió;
+-- jamás pueden volcarse sobre una reinstalación posterior del mismo dominio.
+ALTER TABLE IF EXISTS pedidos_huerfanos
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+
 -- Estado visible de la sincronización. No guarda tokens ni payloads sensibles.
 CREATE TABLE IF NOT EXISTS shopify_sync_estado (
     dominio               TEXT PRIMARY KEY,
@@ -347,6 +492,7 @@ CREATE TABLE IF NOT EXISTS shopify_webhook_eventos (
     dominio          TEXT NOT NULL,
     topic            TEXT NOT NULL,
     triggered_at     TIMESTAMPTZ,
+    install_generation TEXT NOT NULL,
     payload          JSONB NOT NULL,
     estado           TEXT NOT NULL DEFAULT 'PENDIENTE',
     intentos         INTEGER NOT NULL DEFAULT 0,
@@ -355,8 +501,59 @@ CREATE TABLE IF NOT EXISTS shopify_webhook_eventos (
     started_at       TIMESTAMPTZ,
     processed_at     TIMESTAMPTZ
 );
+ALTER TABLE IF EXISTS shopify_webhook_eventos
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+-- Las entregas anteriores a la migración no pueden atribuirse con seguridad
+-- a una instalación. Se conservan como evidencia pero el worker las trata
+-- como obsoletas; el catálogo se recupera con la reconciliación completa.
+UPDATE shopify_webhook_eventos
+   SET install_generation = 'legacy-sin-generacion'
+ WHERE install_generation IS NULL OR BTRIM(install_generation) = '';
+ALTER TABLE IF EXISTS shopify_webhook_eventos
+    ALTER COLUMN install_generation SET NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_shopify_webhook_pendientes
     ON shopify_webhook_eventos (estado, created_at);
+
+-- Solicitudes obligatorias de acceso a datos de compradores (Shopify GDPR).
+-- El webhook contiene email y telefono, pero esta cola guarda unicamente las
+-- referencias imprescindibles para preparar la respuesta bajo demanda. El
+-- cuerpo crudo nunca se persiste ni se copia a logs/correos.
+CREATE TABLE IF NOT EXISTS shopify_gdpr_solicitudes (
+    id                  BIGSERIAL PRIMARY KEY,
+    request_id          TEXT NOT NULL,
+    dominio             TEXT NOT NULL,
+    shop_id             TEXT NOT NULL,
+    orders_requested    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    estado              TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos            INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_id            TEXT,
+    claimed_at          TIMESTAMPTZ,
+    ultimo_error_code   TEXT,
+    message_id          TEXT,
+    notificado_at       TIMESTAMPTZ,
+    resuelto_at         TIMESTAMPTZ,
+    creado_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (
+        jsonb_typeof(orders_requested) = 'array'
+        AND jsonb_array_length(orders_requested) <= 500
+    ),
+    CHECK (intentos >= 0),
+    CHECK (estado IN (
+        'PENDIENTE', 'PROCESANDO', 'NOTIFICADO',
+        'VERIFICAR_EMAIL', 'FALLIDO', 'RESUELTO'
+    )),
+    -- Shopify documenta el id dentro de cada shop; no se asume unicidad
+    -- global entre comercios.
+    UNIQUE (shop_id, request_id)
+);
+CREATE INDEX IF NOT EXISTS ix_shopify_gdpr_pendientes
+    ON shopify_gdpr_solicitudes (estado, proximo_intento_at, creado_at)
+    WHERE estado <> 'RESUELTO';
+CREATE INDEX IF NOT EXISTS ix_shopify_gdpr_resueltas_retencion
+    ON shopify_gdpr_solicitudes (resuelto_at)
+    WHERE estado = 'RESUELTO';
 
 -- Política de precio de envío por tienda. También existe un ensure local en
 -- politica_envio.py; declararla en startup garantiza que los webhooks GDPR
@@ -921,6 +1118,9 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     precio_cliente_final_ars REAL,
     tracking                 TEXT,
     guia_url                 TEXT,
+    origen_plataforma        TEXT,
+    origen_dominio           TEXT,
+    origen_pedido_externo_id TEXT,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -933,6 +1133,18 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_estado
 -- existente, por eso este ALTER idempotente es obligatorio en producción.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS updated_at
     TIMESTAMPTZ NOT NULL DEFAULT NOW();
+-- Linaje durable: una solicitud nacida de una venta conserva su origen en el
+-- INSERT inicial. No depende del vínculo posterior pedidos_tienda.solicitud_id,
+-- que puede fallar o desaparecer durante una solicitud de privacidad.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS origen_plataforma TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS origen_dominio TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS origen_pedido_externo_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_origen_tienda
+    ON solicitudes_guia(origen_plataforma, origen_dominio, origen_pedido_externo_id)
+    WHERE origen_plataforma IS NOT NULL AND origen_dominio IS NOT NULL;
 
 -- Guía emitida (FedEx Ship API): número, label PDF y courier.
 -- El label se guarda como BYTEA en Postgres (el filesystem de Railway es efímero).

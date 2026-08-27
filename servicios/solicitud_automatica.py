@@ -28,16 +28,21 @@ from servicios.numeros_humanos import parse_entero_formulario
 
 def _motivo(pedido_id: int, texto: str) -> dict:
     """Deja el porqué escrito en el pedido: sin esto, 'no se armó' es mudo."""
+    texto = " ".join(str(texto or "").split())[:400]
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE pedidos_tienda SET motivo_pendiente = %s WHERE id = %s",
-                    (texto[:400], pedido_id),
+                    (texto, pedido_id),
                 )
     except Exception as e:
-        print(f"[solicitud_auto] no pude guardar el motivo del pedido {pedido_id}: {e}")
-    print(f"[solicitud_auto] pedido {pedido_id} queda PENDIENTE: {texto}")
+        print(f"[solicitud_auto] no pude guardar el motivo del pedido {pedido_id}: "
+              f"{type(e).__name__}")
+    # El motivo puede contener SKU/título de un comercio. Queda visible sólo
+    # dentro del portal autenticado; el log operativo conserva únicamente el
+    # id interno y nunca copia contenido de Shopify.
+    print(f"[solicitud_auto] pedido {pedido_id} queda PENDIENTE")
     return {"ok": False, "solicitud_id": None, "motivo": texto}
 
 
@@ -52,14 +57,41 @@ def crear_desde_pedido(pedido_id: int) -> dict:
     from servicios.catalogo import get_productos
     from servicios.direcciones import obtener_remitente_para_envio
     from servicios.integraciones_tienda import marcar_convertido
-    from servicios.solicitudes_guia import crear_solicitud_guia
+    from servicios.solicitudes_guia import (
+        crear_solicitud_guia,
+        idempotency_hash_origen_tienda,
+    )
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, cliente_id, estado, numero, destinatario, items,
-                       valor_total, moneda, solicitud_id
-                FROM pedidos_tienda WHERE id = %s
+                SELECT p.id, p.cliente_id, p.estado, p.numero,
+                       p.destinatario, p.items, p.valor_total, p.moneda,
+                       p.solicitud_id,
+                       LOWER(p.plataforma) AS origen_plataforma,
+                       LOWER(t.dominio) AS origen_dominio,
+                       p.pedido_externo_id AS origen_pedido_externo_id
+                FROM pedidos_tienda p
+                JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                LEFT JOIN shopify_instalaciones i
+                  ON i.dominio = t.dominio
+                 AND LOWER(t.plataforma) = 'shopify'
+                WHERE p.id = %s
+                  AND t.activa = TRUE
+                  AND UPPER(t.cliente_id) = UPPER(p.cliente_id)
+                  AND LOWER(t.plataforma) = LOWER(p.plataforma)
+                  AND (
+                      LOWER(t.plataforma) <> 'shopify'
+                      OR (
+                          t.secreto <> 'oauth:shopify-app'
+                          AND i.id IS NULL
+                      )
+                      OR (
+                          i.id IS NOT NULL
+                          AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+                          AND UPPER(COALESCE(i.cliente_id, '')) = UPPER(p.cliente_id)
+                      )
+                  )
             """, (pedido_id,))
             ped = cur.fetchone()
 
@@ -71,6 +103,28 @@ def crear_desde_pedido(pedido_id: int) -> dict:
     cliente = (ped["cliente_id"] or "").strip()
     if not cliente:
         return _motivo(pedido_id, "La tienda no está vinculada a una cuenta TAURO.")
+
+    # El vínculo posterior pedidos_tienda.solicitud_id es útil para la UI,
+    # pero no alcanza como linaje: si ese UPDATE falla, una solicitud de
+    # privacidad debe poder encontrar igualmente todos los datos derivados.
+    # Por eso el origen verificado en PostgreSQL viaja al INSERT inicial.
+    origen_plataforma = (ped.get("origen_plataforma") or "").strip().lower()
+    origen_dominio = (ped.get("origen_dominio") or "").strip().lower()
+    origen_pedido_externo_id = str(
+        ped.get("origen_pedido_externo_id") or ""
+    ).strip()
+    if not (origen_plataforma and origen_dominio and origen_pedido_externo_id):
+        return _motivo(
+            pedido_id,
+            "No se pudo verificar el origen de la venta vinculada. "
+            "No se creó ninguna solicitud.",
+        )
+    idempotency_key_hash = idempotency_hash_origen_tienda(
+        cliente_id=cliente,
+        origen_plataforma=origen_plataforma,
+        origen_dominio=origen_dominio,
+        origen_pedido_externo_id=origen_pedido_externo_id,
+    )
 
     dest = ped["destinatario"] or {}
     pais = (dest.get("pais") or "").upper()
@@ -98,7 +152,12 @@ def crear_desde_pedido(pedido_id: int) -> dict:
                 minimo=1, maximo=20,
             )
         except ValueError as exc:
-            return _motivo(pedido_id, str(exc))
+            print(f"[solicitud_auto] cantidad inválida en pedido {pedido_id}: "
+                  f"{type(exc).__name__}")
+            return _motivo(
+                pedido_id,
+                "La cantidad de uno de los productos no es válida.",
+            )
         variant_id = str(it.get("external_variant_id") or it.get("variant_id") or "").strip()
         producto = catalogo_por_variante.get(variant_id) or catalogo.get(sku)
         if producto:
@@ -148,11 +207,17 @@ def crear_desde_pedido(pedido_id: int) -> dict:
             cliente, pais, filas, origen_pais=origen,
         )
     except Exception as e:
-        return _motivo(pedido_id, f"No se pudo cotizar: {type(e).__name__}: {e}")
+        print(f"[solicitud_auto] cotización falló para pedido {pedido_id}: "
+              f"{type(e).__name__}")
+        return _motivo(
+            pedido_id,
+            "No se pudo cotizar el envío en este momento. Volvé a intentarlo desde el portal.",
+        )
     if not precio.get("encontrado"):
-        return _motivo(pedido_id,
-                       f"No se pudo cotizar el envío a {pais}: "
-                       f"{precio.get('motivo') or 'sin tarifa disponible'}.")
+        return _motivo(
+            pedido_id,
+            f"No hay una tarifa disponible para el envío a {pais}.",
+        )
 
     bultos = precio.get("bultos") or []
     primero = bultos[0] if bultos else {}
@@ -196,18 +261,27 @@ def crear_desde_pedido(pedido_id: int) -> dict:
             precio_tauro_ars=precio["precio_ars"],
             precio_tauro_usd=precio["precio_usd"],
             bultos=bultos or None,
+            origen_plataforma=origen_plataforma,
+            origen_dominio=origen_dominio,
+            origen_pedido_externo_id=origen_pedido_externo_id,
+            idempotency_key_hash=idempotency_key_hash,
         )
     except Exception as e:
-        return _motivo(pedido_id, f"No se pudo crear la solicitud: {type(e).__name__}: {e}")
+        print(f"[solicitud_auto] creación falló para pedido {pedido_id}: "
+              f"{type(e).__name__}")
+        return _motivo(
+            pedido_id,
+            "No se pudo preparar la solicitud en este momento. Volvé a intentarlo desde el portal.",
+        )
 
     sid = creada.get("id")
     try:
         marcar_convertido(cliente, pedido_id, solicitud_id=sid)
     except Exception as e:
         print(f"[solicitud_auto] solicitud {sid} creada pero no pude marcar "
-              f"convertido el pedido {pedido_id}: {e}")
+              f"convertido el pedido {pedido_id}: {type(e).__name__}")
 
-    print(f"[solicitud_auto] pedido {pedido_id} ({ped['numero']}) → solicitud {sid}, "
+    print(f"[solicitud_auto] pedido {pedido_id} → solicitud {sid}, "
           f"lista para generar la guía")
     return {"ok": True, "solicitud_id": sid, "motivo": ""}
 
@@ -225,6 +299,6 @@ def intentar_en_segundo_plano(pedido_id: int) -> None:
             crear_desde_pedido(pedido_id)
         except Exception as e:
             print(f"[solicitud_auto] falló armando el pedido {pedido_id}: "
-                  f"{type(e).__name__}: {e}")
+                  f"{type(e).__name__}")
 
     threading.Thread(target=_run, daemon=True).start()

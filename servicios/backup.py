@@ -39,7 +39,7 @@ TABLAS = [
 # filtra, dan acceso a cuentas de terceros.
 COLUMNAS_SENSIBLES = {
     "tiendas_conectadas": {"secreto"},
-    "shopify_instalaciones": {"access_token"},
+    "shopify_instalaciones": {"access_token", "refresh_token"},
     # api_key es una CREDENCIAL VIVA de la API B2B: con ella se cotiza y se
     # pide guías en nombre del cliente. Sale del backup por lo mismo que el
     # password_hash — el archivo se descarga y termina en un Drive cualquiera.

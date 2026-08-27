@@ -2,6 +2,7 @@
 # Servicio de solicitudes de guía — PostgreSQL
 # ============================================================
 
+import hashlib
 import json
 import uuid
 from typing import Optional
@@ -97,6 +98,31 @@ def _clean(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def idempotency_hash_origen_tienda(
+    *,
+    cliente_id: str,
+    origen_plataforma: str,
+    origen_dominio: str,
+    origen_pedido_externo_id: str,
+) -> str:
+    """Clave opaca y determinística: una venta sólo crea una solicitud.
+
+    El hash no expone dominio, cliente ni identificador del pedido en la base
+    de idempotencia. El prefijo versiona el contrato para que su composición
+    no se cambie accidentalmente en una futura integración.
+    """
+    partes = (
+        (cliente_id or "").strip().upper(),
+        (origen_plataforma or "").strip().lower(),
+        (origen_dominio or "").strip().lower(),
+        str(origen_pedido_externo_id or "").strip(),
+    )
+    if not all(partes):
+        raise ValueError("Falta el origen verificado del pedido de la tienda.")
+    canonico = json.dumps(partes, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(f"tauro-tienda-v1:{canonico}".encode("utf-8")).hexdigest()
+
+
 def _sin_label(row: dict) -> dict:
     """Reemplaza el PDF (bytea) por un booleano en los listados, para no cargar
     los bytes del label en cada fila de la tabla."""
@@ -152,6 +178,9 @@ def crear_solicitud_guia(
     api_referencia: str = "",
     idempotency_key_hash: str = "",
     request_fingerprint: str = "",
+    origen_plataforma: str = "",
+    origen_dominio: str = "",
+    origen_pedido_externo_id: str = "",
 ) -> dict:
     """Crea una solicitud de guía pendiente para gestión operativa.
 
@@ -169,9 +198,27 @@ def crear_solicitud_guia(
     if not origen_iso or not destino_iso:
         raise ValueError("Origen y destino deben ser países válidos para clasificar el envío.")
     ambito = "NACIONAL" if origen_iso == "AR" and destino_iso == "AR" else "INTERNACIONAL"
+    origen_plataforma_norm = _clean((origen_plataforma or "").lower())
+    origen_dominio_norm = _clean((origen_dominio or "").lower())
+    origen_pedido_norm = (
+        _clean(str(origen_pedido_externo_id))
+        if origen_pedido_externo_id is not None else None
+    )
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if origen_plataforma_norm == "shopify":
+                from servicios.integraciones_tienda import validar_origen_shopify_con_cursor
+                if not validar_origen_shopify_con_cursor(
+                    cur,
+                    cliente_id=cliente_id,
+                    dominio=origen_dominio_norm or "",
+                    pedido_externo_id=origen_pedido_norm or "",
+                ):
+                    raise ValueError(
+                        "El pedido de Shopify ya no está activo en esta cuenta "
+                        "o fue eliminado por privacidad."
+                    )
             cur.execute(
                 """
                 INSERT INTO solicitudes_guia (
@@ -187,7 +234,8 @@ def crear_solicitud_guia(
                     precio_tauro_usd, precio_cliente_final_ars, bultos,
                     courier, servicio_courier, tax_paga,
                     remitente_contacto, dest_contacto,
-                    api_referencia, idempotency_key_hash, request_fingerprint
+                    api_referencia, idempotency_key_hash, request_fingerprint,
+                    origen_plataforma, origen_dominio, origen_pedido_externo_id
                 )
                 VALUES (
                     %s, %s, %s, %s,
@@ -199,6 +247,7 @@ def crear_solicitud_guia(
                     %s, %s, %s,
                     %s, %s, %s,
                     %s, %s,
+                    %s, %s, %s,
                     %s, %s, %s
                 )
                 ON CONFLICT (cliente_id, idempotency_key_hash)
@@ -250,6 +299,9 @@ def crear_solicitud_guia(
                     _clean(api_referencia),
                     _clean(idempotency_key_hash),
                     _clean(request_fingerprint),
+                    origen_plataforma_norm,
+                    origen_dominio_norm,
+                    origen_pedido_norm,
                 ),
             )
             row = cur.fetchone()

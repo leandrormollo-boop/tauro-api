@@ -57,6 +57,7 @@ from servicios.api_b2b import (
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
+    idempotency_hash_origen_tienda,
 )
 from servicios.carriers import courier_default_cliente
 from servicios.carrier_contract import Ambito, public_catalog
@@ -234,7 +235,7 @@ def _pendientes_menu(cliente_id: str) -> dict:
             "tienda": contar_pendientes(cliente_id),
         }
     except Exception as e:
-        print(f"[portal] no pude contar pendientes de {cliente_id}: {e}")
+        print(f"[portal] no pude contar pendientes: {type(e).__name__}")
         return {"envios": 0, "tienda": 0}
 
 
@@ -272,7 +273,7 @@ def _saldo_menu(cliente_id: str, ya_calculado: Optional[dict] = None) -> Optiona
             "a_favor_ars": abs(pendiente) if pendiente < 0 else 0,
         }
     except Exception as e:
-        print(f"[portal] no pude calcular el saldo de {cliente_id}: {e}")
+        print(f"[portal] no pude calcular el saldo: {type(e).__name__}")
         return None
 
 
@@ -862,7 +863,7 @@ def track_redirect(nro: str = "", cliente: str = Depends(cliente_actual)):
                 if fila and fila.get("courier"):
                     courier = fila["courier"]
     except Exception as e:
-        print(f"[portal] track lookup falló ({e}); default FedEx")
+        print(f"[portal] track lookup falló: {type(e).__name__}; default FedEx")
 
     return RedirectResponse(url=url_tracking(courier, nro), status_code=303)
 
@@ -883,8 +884,10 @@ def backup_cliente(cliente: str = Depends(cliente_actual)):
     return Response(
         content=contenido,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition":
-                 f'attachment; filename="TAURO_{cliente}_{fecha}.xlsx"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="TAURO_{cliente}_{fecha}.xlsx"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
@@ -911,7 +914,7 @@ def recolecciones_view(
     try:
         recolecciones = listar(cliente)
     except Exception as e:
-        print(f"[portal] no pude listar recolecciones de {cliente}: {e}")
+        print(f"[portal] no pude listar recolecciones: {type(e).__name__}")
         recolecciones = []
     from servicios.configuracion_couriers_cliente import mapa_permisos
     permisos_pickup = mapa_permisos(cliente, "recolectar")
@@ -1006,10 +1009,10 @@ def recoleccion_nueva(
                   peso, instrucciones,
                   courier=courier, solicitud_id=solicitud_id_num)
     except ValueError as e:
-        print(f"[portal] error agendando recolección de {cliente}: {e}")
+        print("[portal] datos inválidos al agendar recolección")
         r = {"ok": False, "error": str(e)}
     except Exception as e:
-        print(f"[portal] error agendando recolección de {cliente}: {e}")
+        print(f"[portal] error agendando recolección: {type(e).__name__}")
         r = {"ok": False, "error": "No pudimos agendarla. Probá de nuevo o escribinos."}
 
     if r.get("ok"):
@@ -1149,7 +1152,7 @@ async def informar_pago(
             status_code=303,
         )
     except Exception as e:
-        print(f"[portal] informar_pago falló para {cliente}: {e}")
+        print(f"[portal] informar_pago falló: {type(e).__name__}")
         return RedirectResponse(
             url=(f"/portal/cuenta?ambito={volver_ambito}&error="
                  f"{quote('No pudimos guardar el pago. Probá de nuevo.') }"),
@@ -1170,8 +1173,14 @@ def ver_factura_propia(envio_id: int, cliente: str = Depends(cliente_actual)):
     if not dato:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     contenido, nombre = dato
-    return Response(content=contenido, media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @router.get("/pagos/{pago_id}/comprobante")
@@ -1185,8 +1194,14 @@ def ver_comprobante_propio(pago_id: int, cliente: str = Depends(cliente_actual))
     if not dato:
         raise HTTPException(status_code=404, detail="Comprobante no encontrado")
     contenido, tipo, nombre = dato
-    return Response(content=contenido, media_type=tipo,
-                    headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+    return Response(
+        content=contenido,
+        media_type=tipo,
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 # ── Cotizar ─────────────────────────────────────────────────
@@ -1403,7 +1418,7 @@ def api_precio_envio(
     try:
         precio = obtener_precio_envio(cliente, producto, destino, cantidad=cantidad)
     except Exception as e:
-        print(f"[portal] api_precio error: {e}")
+        print(f"[portal] api_precio error: {type(e).__name__}")
         return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
 
     if not precio.get("encontrado"):
@@ -1511,7 +1526,7 @@ async def api_precio_envio_multi(
             destino_real=destino_real, origen_real=origen_real,
         )
     except Exception as e:
-        print(f"[portal] api_precio_multi error: {e}")
+        print(f"[portal] api_precio_multi error: {type(e).__name__}")
         return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
 
     if not precio.get("encontrado"):
@@ -1647,7 +1662,10 @@ def descargar_guia(solicitud_id: int, cliente: str = Depends(cliente_actual)):
     return Response(
         content=pdf,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="guia-tauro-{solicitud_id}.pdf"'},
+        headers={
+            "Content-Disposition": f'inline; filename="guia-tauro-{solicitud_id}.pdf"',
+            "Cache-Control": "private, no-store",
+        },
     )
 
 
@@ -1665,6 +1683,74 @@ def _paises_con_nacional() -> list:
     """
     from servicios.paises import opciones
     return opciones()
+
+
+def _origen_pedido_tienda_verificado(cliente_id: str, pedido_id_raw: str) -> dict:
+    """Resuelve el origen de una venta sin confiar en datos ocultos del form.
+
+    El navegador sólo devuelve el id interno del pedido. Plataforma, dominio
+    y pedido externo se vuelven a leer de PostgreSQL y se filtran por la
+    cuenta autenticada; esos son los únicos valores que pueden persistirse
+    como linaje en la solicitud y, si corresponde, en la libreta.
+    """
+    pedido_id_raw = (pedido_id_raw or "").strip()
+    if not pedido_id_raw.isdigit():
+        raise ValueError("El pedido de la tienda no es válido. Volvé a abrirlo desde Pedidos.")
+
+    pedido_id = int(pedido_id_raw)
+    cliente_id = (cliente_id or "").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.id, p.estado, p.solicitud_id,
+                       LOWER(p.plataforma) AS origen_plataforma,
+                       LOWER(t.dominio) AS origen_dominio,
+                       p.pedido_externo_id AS origen_pedido_externo_id
+                FROM pedidos_tienda p
+                JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                LEFT JOIN shopify_instalaciones i ON i.dominio = t.dominio
+                WHERE p.id = %s AND p.cliente_id = %s
+                  AND t.cliente_id = p.cliente_id
+                  AND t.activa = TRUE
+                  AND (
+                      (
+                          LOWER(p.plataforma) <> 'shopify'
+                          AND i.id IS NULL
+                      )
+                      OR (
+                          LOWER(p.plataforma) = 'shopify'
+                          AND t.plataforma = 'shopify'
+                          AND t.secreto = 'oauth:shopify-app'
+                          AND i.id IS NOT NULL
+                          AND UPPER(COALESCE(i.cliente_id, '')) = p.cliente_id
+                          AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+                      )
+                  )
+                LIMIT 1
+                """,
+                (pedido_id, cliente_id),
+            )
+            row = cur.fetchone()
+
+    if not row:
+        raise ValueError("Ese pedido no pertenece a tu cuenta o ya no está disponible.")
+    if row.get("estado") != "PENDIENTE" or row.get("solicitud_id"):
+        raise ValueError("Ese pedido ya fue convertido o no está pendiente.")
+
+    plataforma = (row.get("origen_plataforma") or "").strip().lower()
+    dominio = (row.get("origen_dominio") or "").strip().lower()
+    externo = str(row.get("origen_pedido_externo_id") or "").strip()
+    if not (plataforma and dominio and externo):
+        raise ValueError(
+            "No se pudo verificar el origen del pedido. No se creó ningún envío."
+        )
+    return {
+        "pedido_id": int(row["id"]),
+        "origen_plataforma": plataforma,
+        "origen_dominio": dominio,
+        "origen_pedido_externo_id": externo,
+    }
 
 
 @router.get("/envios/nuevo", response_class=HTMLResponse)
@@ -2077,7 +2163,27 @@ def envio_nuevo_post(
     }
 
     error_step = 1
+    pedido_origen = None
+    origen_tienda: dict = {}
+    idempotency_tienda = ""
     try:
+        if (pedido_tienda_id or "").strip():
+            pedido_origen = _origen_pedido_tienda_verificado(
+                cliente, pedido_tienda_id,
+            )
+            origen_tienda = {
+                clave: pedido_origen[clave]
+                for clave in (
+                    "origen_plataforma",
+                    "origen_dominio",
+                    "origen_pedido_externo_id",
+                )
+            }
+            idempotency_tienda = idempotency_hash_origen_tienda(
+                cliente_id=cliente,
+                **origen_tienda,
+            )
+
         remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id)) or {}
         # Lo que el cliente EDITÓ en el form manda sobre la libreta: campo
         # por campo, para que elegir de la libreta y corregir una sola cosa
@@ -2306,6 +2412,7 @@ def envio_nuevo_post(
                 pais=destino_pais,
                 predeterminada=False,
                 notas="Guardado desde creación de envío.",
+                **origen_tienda,
             )
 
         # Campos legacy: primer bulto + totales (los listados y el admin los usan).
@@ -2378,6 +2485,8 @@ def envio_nuevo_post(
             # Se guarda POR ENVÍO: si el cliente cambia su default mañana,
             # los envíos ya despachados no cambian de manos.
             tax_paga=normalizar_tax(tax_paga, tax_paga_cliente(cliente)),
+            idempotency_key_hash=idempotency_tienda,
+            **origen_tienda,
             **courier_extra,
         )
     except Exception as e:
@@ -2387,7 +2496,7 @@ def envio_nuevo_post(
         if isinstance(e, ValueError):
             mensaje_error = str(e)
         else:
-            print(f"[portal] error creando envío de {cliente}: {type(e).__name__}: {e}")
+            print(f"[portal] error creando envío de {cliente}: {type(e).__name__}")
             mensaje_error = ("No pudimos crear el envío por un problema nuestro. "
                             "Probá de nuevo en un minuto o escribinos.")
         form["initial_step"] = error_step
@@ -2428,12 +2537,13 @@ def envio_nuevo_post(
             },
         )
 
-    if pedido_tienda_id.strip().isdigit():
+    if pedido_origen:
         try:
-            marcar_convertido(cliente, int(pedido_tienda_id),
+            marcar_convertido(cliente, pedido_origen["pedido_id"],
                               solicitud_id=solicitud_creada.get("id"))
         except Exception as e:
-            print(f"[integraciones] no pude marcar convertido el pedido {pedido_tienda_id}: {e}")
+            print(f"[integraciones] no pude marcar convertido el pedido "
+                  f"{pedido_origen['pedido_id']}: {type(e).__name__}")
 
     return RedirectResponse(
         url="/portal/envios?tipo=internacional&ok=solicitado",
@@ -2535,9 +2645,12 @@ def tienda_view(
                 if es_dueno_de_la_tienda(h["dominio"], cliente):
                     huerfanas.append(h)
             except Exception as e:
-                print(f"[portal] no pude verificar {h.get('dominio')}: {e}")
+                print(f"[portal] no pude verificar instalación: {type(e).__name__}")
     except Exception as e:
-        print(f"[portal] no pude listar instalaciones sin dueño: {e}")
+        print(
+            "[portal] no pude listar instalaciones sin dueño: "
+            f"{type(e).__name__}"
+        )
     # La política de flete se configura por tienda; hoy mostramos la de la
     # primera (el caso normal es una tienda por cuenta).
     dominio_cfg = tiendas[0]["dominio"] if tiendas else ""
@@ -2673,6 +2786,16 @@ def tienda_conectar(
     secreto: str = Form(...),
     cliente: str = Depends(cliente_actual),
 ):
+    if (plataforma or "").strip().lower() == "shopify":
+        # App Store 2.3.1: Shopify se instala exclusivamente mediante OAuth
+        # oficial. No alcanza con ocultar el formulario; la ruta POST también
+        # debe rechazar una invocación manual directa.
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "Shopify se conecta únicamente instalando la app oficial de TAURO desde Shopify Apps."
+            ),
+            status_code=303,
+        )
     r = conectar_tienda(cliente, plataforma, dominio, secreto)
     if not r.get("ok"):
         return RedirectResponse(url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo conectar.'))}", status_code=303)
@@ -2732,7 +2855,7 @@ def tienda_sincronizar_catalogo(cliente: str = Depends(cliente_actual)):
         from servicios.shopify_catalogo import solicitar_sincronizacion_cliente
         r = solicitar_sincronizacion_cliente(cliente)
     except Exception as e:
-        print(f"[portal] error sincronizando catálogo de {cliente}: {e}")
+        print(f"[portal] error sincronizando catálogo: {type(e).__name__}")
         r = {"ok": False, "error": "No pudimos sincronizar ahora. Probá de nuevo."}
     if not r.get("ok"):
         return RedirectResponse(
@@ -2960,7 +3083,7 @@ def catalogo_view(
     try:
         taxes = tax_de_productos(cliente)
     except Exception as e:
-        print(f"[catalogo] no pude leer los tax: {e}")
+        print(f"[catalogo] no pude leer los tax: {type(e).__name__}")
         taxes = {}
     return templates.TemplateResponse(
         request=request, name="portal/catalogo.html",
@@ -3016,9 +3139,17 @@ def catalogo_add(
         try:
             guardar_tax_producto(cliente, alias_interno, tax_num)
         except Exception as e:
-            print(f"[catalogo] no pude guardar el tax de {alias_interno}: {e}")
+            print(f"[catalogo] no pude guardar el tax: {type(e).__name__}")
+    except ValueError as e:
+        return RedirectResponse(
+            url=f"/portal/catalogo?error={quote(str(e))}", status_code=303,
+        )
     except Exception as e:
-        return RedirectResponse(url=f"/portal/catalogo?error={e}", status_code=303)
+        print(f"[catalogo] alta/edición falló: {type(e).__name__}")
+        return RedirectResponse(
+            url="/portal/catalogo?error=No%20pudimos%20guardar%20el%20producto.",
+            status_code=303,
+        )
     return RedirectResponse(url="/portal/catalogo?ok=1", status_code=303)
 
 

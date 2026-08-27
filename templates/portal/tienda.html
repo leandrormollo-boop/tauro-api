@@ -130,67 +130,14 @@
 {% if dominio_cfg %}
 <div class="card" style="margin-bottom:24px;">
     <h3 style="margin:0 0 4px;">Envío en tu checkout</h3>
-    <p class="sub" style="margin:0 0 18px;">
-        Vos decidís qué precio de envío ve tu comprador. Lo que le cobres no cambia
-        lo que TAURO te factura a vos: la diferencia la ganás o la absorbés.
+    <p class="sub" style="margin:0 0 14px;">
+        El precio y el orden de las opciones que ve tu comprador los administra
+        Shopify con las zonas y tarifas de tu tienda. TAURO no agrega cargos ni
+        modifica el checkout. Cuando entra una venta, recibimos el pedido para que
+        cotices y generes la guía desde el portal.
     </p>
-
-    <form method="POST" action="/portal/tienda/politica">
-        <input type="hidden" name="dominio" value="{{ dominio_cfg }}">
-
-        <div class="form-group">
-            <label for="politica">¿Cuánto le cobrás el envío?</label>
-            <select name="politica" id="politica">
-                <option value="real"   {% if cfg.politica == 'real' %}selected{% endif %}>Lo que cotiza TAURO (precio real)</option>
-                <option value="markup" {% if cfg.politica == 'markup' %}selected{% endif %}>Precio TAURO + un porcentaje</option>
-                <option value="fijo"   {% if cfg.politica == 'fijo' %}selected{% endif %}>Un precio fijo que yo defino</option>
-                <option value="gratis" {% if cfg.politica == 'gratis' %}selected{% endif %}>Envío gratis ($0 — lo absorbo yo)</option>
-            </select>
-        </div>
-
-        <div class="form-grid-2">
-            <div class="form-group">
-                <label for="markup_pct">Porcentaje a sumar (%)</label>
-                <input type="text" name="markup_pct" id="markup_pct" inputmode="decimal" data-numero="decimal" value="{{ cfg.markup_pct|round(2) }}"
-                       placeholder="Ej: 15">
-                <small style="color:var(--fg-3);font-size:12px;">Sólo si elegiste "TAURO + porcentaje".</small>
-            </div>
-            <div class="form-group">
-                <label for="precio_fijo_ars">Precio fijo (ARS)</label>
-                <input type="text" name="precio_fijo_ars" id="precio_fijo_ars" inputmode="decimal" data-numero="monto" value="{{ cfg.precio_fijo_ars|round(0)|int }}"
-                       placeholder="Ej: 25000">
-                <small style="color:var(--fg-3);font-size:12px;">Sólo si elegiste "precio fijo".</small>
-            </div>
-        </div>
-
-        <div class="form-group">
-            <label for="etiqueta">Cómo se llama la opción en el checkout (opcional)</label>
-            <input type="text" name="etiqueta" id="etiqueta" value="{{ cfg.etiqueta }}"
-                   placeholder="Ej: Envío internacional puerta a puerta">
-            <small style="color:var(--fg-3);font-size:12px;">Vacío = se muestra el courier y el servicio (ej: "FedEx — International Priority").</small>
-        </div>
-
-        <div style="margin:22px 0 6px;padding-top:18px;border-top:1px solid var(--line-soft);">
-            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
-                <input type="checkbox" name="mostrar_tax" value="1" {% if cfg.mostrar_tax %}checked{% endif %}>
-                <span><b>Mostrar impuestos de destino estimados</b> sumados al envío</span>
-            </label>
-            <p class="sub" style="margin:8px 0 0;">
-                Si lo activás, el comprador ve un precio que ya incluye los impuestos aproximados
-                de su país — y no se lleva sorpresas al recibir. El monto sale del impuesto que
-                cargues en cada producto de <a href="/portal/catalogo" style="color:var(--accent-soft);">Mis productos</a>;
-                para los que no tengan, se usa el porcentaje de abajo.
-            </p>
-        </div>
-
-        <div class="form-group" style="max-width:280px;">
-            <label for="tax_pct_default">Impuesto por defecto (% del valor)</label>
-            <input type="text" name="tax_pct_default" id="tax_pct_default" inputmode="decimal" data-numero="decimal" value="{{ cfg.tax_pct_default|round(2) }}"
-                   placeholder="Ej: 20">
-        </div>
-
-        <button type="submit" class="btn btn-primary">Guardar</button>
-    </form>
+    <a href="https://admin.shopify.com/" target="_blank" rel="noopener noreferrer"
+       class="btn btn-ghost btn-sm">Configurar envíos en Shopify →</a>
 </div>
 {% endif %}
 
@@ -257,14 +204,14 @@
 <div class="card">
     <h3 style="margin:0 0 4px;">Conectar Shopify</h3>
     {% if shopify_app_activa %}
-    <p class="sub" style="margin:0 0 18px;">Ingresá el dominio, aceptá los permisos en Shopify y volvé con ventas, productos, imágenes y stock vinculados.</p>
-    <form method="GET" action="/shopify/install">
-        <div class="form-group">
-            <label for="dominio">Dominio de tu tienda</label>
-            <input type="text" name="shop" id="dominio" required placeholder="mitienda.myshopify.com" autocomplete="url">
-        </div>
-        <button type="submit" class="btn btn-primary">Conectar con Shopify →</button>
-    </form>
+    <p class="sub" style="margin:0 0 18px;">
+        Por seguridad, la instalación siempre empieza dentro de Shopify. Abrí tu
+        administrador, entrá en <b>Apps</b> y elegí <b>TAURO Solutions</b>.
+        Shopify te muestra los permisos y vuelve al portal con ventas, productos,
+        imágenes y stock vinculados. TAURO nunca te pide escribir el dominio de tu tienda.
+    </p>
+    <a href="https://admin.shopify.com/" target="_blank" rel="noopener noreferrer"
+       class="btn btn-primary">Abrir Shopify Admin →</a>
     {% else %}
     <p class="sub" style="margin:0;">La app oficial está momentáneamente deshabilitada. Escribinos a integraciones@taurosolutions.ar.</p>
     {% endif %}

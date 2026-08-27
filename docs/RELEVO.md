@@ -1,4 +1,4 @@
-# RELEVO — estado y reglas del proyecto (act. 03/08/2026)
+# RELEVO — estado y reglas del proyecto (act. 27/08/2026)
 
 Este documento existe para que CUALQUIER agente (Codex, Claude, humano) pueda
 retomar el trabajo sin contexto previo. Leelo entero antes de tocar código.
@@ -125,8 +125,35 @@ explotaban al colectar y se venían salteando a mano en cada corrida.
   `SHOPIFY_PUBLIC_API_KEY` / `SHOPIFY_PUBLIC_API_SECRET`; el par genérico
   histórico sigue validando Pesca Jacks durante la reautorización. Cada token
   registra qué app lo emitió y un webhook tardío de desinstalación de la app
-  vieja no puede borrar una instalación nueva.
-- Suite actual: **876 tests + 5 subtests**, sin exclusiones.
+  vieja no puede borrar una instalación nueva. Los tokens offline públicos son
+  expirables, se guardan cifrados junto con su refresh token y rotan de forma
+  atómica antes del vencimiento.
+- Una instalación no queda operativa hasta verificar por GraphQL el conjunto
+  exacto de webhooks de esa generación. La migración deja los bindings OAuth
+  históricos inactivos y obliga a una reautorización única; no se opera con
+  suscripciones incompletas ni con evidencia heredada.
+- La Admin API de Shopify se usa exclusivamente por GraphQL. Se eliminó el
+  helper REST y el CarrierService retirado; TAURO no agrega cargos ni modifica
+  el orden de opciones del checkout.
+- El portal ya no pide escribir un dominio para instalar Shopify: la
+  instalación empieza en una superficie de Shopify y OAuth identifica la
+  tienda. Los reintentos de pedidos instalados siguen usando el dominio ya
+  verificado por el servidor.
+- Cada solicitud creada desde una venta conserva en su INSERT inicial
+  plataforma, dominio y pedido externo. Una clave SHA-256 determinística evita
+  duplicados aunque falle el UPDATE posterior que vincula el pedido.
+- Los tres webhooks obligatorios de privacidad validan HMAC y dominio
+  body/header. `customers/data_request` tiene cola durable y panel admin;
+  `customers/redact` y `shop/redact` anonimizan también guías, direcciones y
+  labels derivados antes de cualquier cascade. Las obligaciones pendientes no
+  se borran al desinstalar.
+- El espejo operativo nuevo de Google Sheets es `PLATAFORMA_SIN_PII`; la
+  decisión sobre la pestaña histórica y la retención de backups está documentada
+  en `docs/PRIVACIDAD_SHOPIFY_OPERACION.md` y sigue siendo un control externo.
+- Suite actual: **972 tests OK + 5 subtests**, sin exclusiones manuales. Los
+  tres tests de integración que pytest omite sin una URL aislada pasaron además
+  contra PostgreSQL real; también pasaron el schema fresco idempotente y la
+  migración desde la estructura productiva anterior.
 
 ## Seguridad (03/08/2026)
 

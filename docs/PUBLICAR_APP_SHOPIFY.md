@@ -1,11 +1,11 @@
 # Publicar TAURO Solutions en el Shopify App Store
 
 Guía para que la app aparezca en el App Store y cualquier comerciante la
-instale con un click. Actualizada 03/08/2026.
+instale con un click. Actualizada 27/08/2026.
 
 ---
 
-## Estado del código: LISTO PARA DESPLEGAR Y REAUTORIZAR
+## Estado del código: LISTO PARA REVISIÓN Y REAUTORIZACIÓN
 
 El flujo histórico de pedidos y tracking fue verificado e2e en producción el
 28/07 con Pesca Jacks. El espejo nuevo de catálogo y stock está validado por
@@ -13,16 +13,21 @@ suite automatizada, PostgreSQL real y colección Postman; su prueba e2e contra
 Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 
 - OAuth completo (instalar / desinstalar / reinstalar), con `state` anti-CSRF y
-  HMAC verificado; dominio validado con regex estricta (sin open-redirect). Si
-  el navegador embebido bloquea la cookie de `state`, se instala sin vincular
-  y el dueño debe reclamarla luego desde su portal.
+  HMAC verificado; dominio validado con regex estricta (sin open-redirect). Un
+  callback sin la cookie de `state`, con estado ausente o distinto se rechaza y
+  debe reiniciarse desde Shopify.
+- Token offline expirable y renovable: el canje pide `expiring=1`, TAURO guarda
+  cifrados el access/refresh token y rota el par antes de vencer, como exige
+  Shopify para apps públicas nuevas desde el 01/04/2026.
 - Scopes mínimos: `read_orders`, `read_products`, `read_inventory`, `read_locations`,
   `write_merchant_managed_fulfillment_orders`
   (`write` ya incluye lectura del mismo recurso y Shopify omite el `read` al
   devolver los permisos otorgados).
   (Se sacó `write_shipping` el 03/08 — era del CarrierService, ya retirado.)
 - Webhooks de pedidos, productos e inventario con firma verificada, cola durable,
-  idempotencia y reintentos.
+  idempotencia y reintentos. La vinculación sólo se activa después de consultar
+  por GraphQL y verificar el conjunto exacto de suscripciones de esa generación;
+  ante un alta parcial o una carrera queda cerrada y el OAuth puede reintentarse.
 - Catálogo espejado por variante, incluso sin SKU: imagen, precio, peso, HS code,
   país de origen y stock por ubicación. Shopify sigue siendo la fuente de verdad.
 - API B2B `GET /stock`, paginada y autenticada con `X-API-Key`, para leer el
@@ -31,14 +36,20 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
   aplican después de una lectura completa exitosa para no vaciar catálogos ante
   una caída de Shopify.
 - **Webhooks de privacidad obligatorios** (`customers/data_request`,
-  `customers/redact`, `shop/redact`) — verificados: rechazan firmas falsas y no
-  loguean datos personales.
-- App embebida con App Bridge y `frame-ancestors` por tienda.
+  `customers/redact`, `shop/redact`): rechazan firmas falsas, atan body/header
+  al mismo dominio y no loguean datos personales. `data_request` se confirma
+  sólo después de persistir la obligación; el admin permite exportarla y
+  resolverla. Las redacciones alcanzan pedidos, guías, direcciones y labels.
+- App externa (`embedded = false`): OAuth vuelve al acceso TAURO en una
+  navegación principal. El dominio de la tienda sólo inicia OAuth; los datos
+  operativos se muestran exclusivamente con una sesión TAURO del cliente
+  vinculado. No usa App Bridge ni se ejecuta dentro de un iframe.
 - Venta → solicitud de guía automática (la guía NO se emite sola).
 - Cierre del círculo: al emitir la guía en TAURO, el pedido queda "enviado" en
   Shopify con el tracking y se avisa al comprador.
-- Llamadas activas al Admin API migradas a GraphQL 2026-07 (identidad de la
-  tienda, suscripción de webhooks y fulfillment/tracking).
+- Admin API exclusivamente por GraphQL 2026-07 (identidad de la tienda,
+  suscripción de webhooks, catálogo, inventario y fulfillment/tracking). El
+  helper REST y el CarrierService retirado fueron eliminados del código.
 - Páginas legales YA servidas: taurosolutions.ar/privacidad y /terminos.
 
 > **Importante — NO es del checkout:** la app ya **no cotiza en el checkout**
@@ -48,9 +59,9 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 
 ---
 
-## Qué tenés que cargar vos
+## Configuración operativa
 
-### 1. Credenciales (Railway → Variables)
+### 1. Credenciales (Railway → Variables) — cargadas
 - `SHOPIFY_PUBLIC_API_KEY` y `SHOPIFY_PUBLIC_API_SECRET` (app pública TAURO):
   toda instalación nueva usa este par.
 - Durante la migración de Pesca Jacks, conservar `SHOPIFY_API_KEY` y
@@ -66,7 +77,7 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
   exclusiva.
 - `BASE_URL=https://taurosolutions.ar` (o dejar el default).
 
-### 2. Partner Dashboard (partners.shopify.com → Apps → TAURO → Configuration)
+### 2. Dev Dashboard → Apps → TAURO → Configuration — desplegada por CLI
 - **App URL**: `https://taurosolutions.ar/shopify/install`
 - **Allowed redirection URL(s)**: `https://taurosolutions.ar/shopify/callback`
 - **Access scopes**:
@@ -112,28 +123,32 @@ Recién ahí, **Submit**.
 
 ### 5. Facturación
 Free to install, flete cobrado por fuera de Shopify → no se usa la Billing API.
-Si el revisor lo objeta: el cargo es por un servicio de logística externo
-(excepción válida).
+En la ficha y en las notas de revisión debe quedar claro que la app es gratuita
+y que TAURO factura un servicio logístico real, no una función digital ni una
+suscripción de la app. Confirmar esta clasificación con Shopify durante la
+revisión; no presentar una excepción como aprobada antes de que la validen.
 
 ### 6. Revisión
-Submit → primera vuelta suele tardar **2-4 semanas**; es normal que pidan
-cambios. Responder rápido acorta el proceso.
+Enviar la ficha sólo después de la prueba completa en una tienda activa y
+responder dentro del mismo hilo si Shopify pide evidencia o cambios.
 
 ---
 
-## No hace falta publicar para operar
-Podés sumar clientes con el link directo:
+## Instalación antes del listing público
 
-    https://taurosolutions.ar/shopify/install?shop=SUTIENDA.myshopify.com
-
-La instalan igual; sólo no aparece en las búsquedas del App Store. El App Store
-es un canal de captación, no un requisito para funcionar.
+Para una prueba controlada, usar siempre **Instalar app** dentro del Dev
+Dashboard o la superficie de distribución que genere Shopify. No pedir al
+comerciante que escriba su dominio ni construir un link propio con `?shop=`:
+la instalación debe iniciarse en Shopify y OAuth identifica la tienda.
 
 ### Tiendas que ya estaban instaladas
 
 Al sumar catálogo e inventario, las tiendas existentes deben aceptar los nuevos
 permisos una sola vez. TAURO detecta automáticamente los scopes viejos y las
-redirige al consentimiento. No se les pide un token ni un secreto manual.
+redirige al consentimiento. La migración también deja cerradas las vinculaciones
+que no tienen evidencia durable de haber verificado todos los webhooks. No se
+les pide un token ni un secreto manual: se abre la app nuevamente desde Shopify
+y se completa el OAuth una sola vez.
 
 ---
 

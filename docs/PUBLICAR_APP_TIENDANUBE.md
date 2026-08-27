@@ -60,8 +60,9 @@ tracking llegue de vuelta a Tiendanube.
 ---
 
 ## Diferencia con Shopify (para no confundirlas)
-- **Shopify**: se conecta manual (dominio + secreto de webhook) o por link
-  directo `/shopify/install`. Firma HMAC en base64.
+- **Shopify**: la instalación empieza exclusivamente desde Shopify Apps y
+  vuelve a TAURO por OAuth; el cliente nunca escribe dominio ni secretos.
+  Firma HMAC en base64.
 - **Tiendanube**: se conecta por OAuth con un botón. Firma HMAC en hexadecimal,
   header `x-linkedstore-hmac-sha256`. Token que no vence, tienda identificada
   por `store_id` numérico (no por dominio).

@@ -4,9 +4,8 @@
 # Cubre el ciclo completo que decidimos:
 #   · INSTALACIÓN  → OAuth: el comerciante da un click y queda conectado
 #                    (registramos sus webhooks solos, sin pasos manuales).
-#   · CHECKOUT     → CarrierService: si el plan de la tienda lo permite,
-#                    el comprador ve la tarifa TAURO en vivo. Si no, la
-#                    tienda usa su envío fijo y la app funciona igual.
+#   · CHECKOUT     → la tienda conserva sus tarifas nativas de Shopify;
+#                    TAURO no modifica el precio ni el orden del checkout.
 #   · VENTA        → webhook orders/create → pedido pendiente en el portal.
 #   · GUÍA         → al emitirla en TAURO, marcamos el pedido como enviado
 #                    en Shopify con su tracking: el comprador recibe el mail
@@ -29,6 +28,7 @@ import re
 import secrets
 import time
 import urllib.parse
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
@@ -42,13 +42,10 @@ from core.database import get_conn
 # corría contra una versión que nadie eligió.
 API_VERSION = "2026-07"
 
-# Permisos mínimos REALES, uno por endpoint que la app usa:
-#   read_orders  ....................... recibir los webhooks orders/*
-#   write_shipping ..................... POST carrier_services.json (cotizar
-#                                        el envío dentro del checkout)
-#   *_merchant_managed_fulfillment_orders  GET orders/{id}/fulfillment_orders.json
-#                                        + POST fulfillments.json con
-#                                        line_items_by_fulfillment_order
+# Permisos mínimos REALES, uno por operación GraphQL que la app usa:
+#   read_orders  ....................... recibir orders/* y leer el pedido
+#   read_products/read_inventory/locations  sincronizar catálogo y stock
+#   write_merchant_managed_fulfillment_orders  crear el fulfillment con tracking
 #
 # OJO: `write_fulfillments` NO alcanza para esto. Ese scope aplica al objeto
 # FulfillmentService (cuando sos el depósito), no a las fulfillment orders de
@@ -60,10 +57,9 @@ API_VERSION = "2026-07"
 # ningún endpoint que usamos los necesita — pedir permisos de más es motivo de
 # rechazo en la revisión de la App Store, y asusta al comerciante en la
 # pantalla de instalación.
-#   · write_shipping era SÓLO para el CarrierService (cotizar en el checkout),
-#     retirado el 28/07: /shopify/tarifas devuelve [] a propósito y el precio
-#     del envío lo pone el comerciante con sus tarifas de Shopify. Sin uso
-#     vivo, fuera.
+#   · write_shipping era SÓLO para el antiguo CarrierService. Ese código
+#     REST fue eliminado: /shopify/tarifas devuelve [] a propósito y el precio
+#     del envío lo pone el comerciante con sus tarifas de Shopify.
 # Catálogo + inventario son de lectura: Shopify sigue siendo la fuente de
 # verdad y TAURO mantiene un espejo local rápido. No pedimos `write_inventory`.
 SCOPES = (
@@ -72,21 +68,33 @@ SCOPES = (
 )
 
 WEBHOOK_TOPICS = (
-    ("orders/create", "ORDERS_CREATE", "/integraciones/shopify/webhook"),
-    ("orders/updated", "ORDERS_UPDATED", "/integraciones/shopify/webhook"),
-    ("products/create", "PRODUCTS_CREATE", "/integraciones/shopify/webhook"),
-    ("products/update", "PRODUCTS_UPDATE", "/integraciones/shopify/webhook"),
-    ("products/delete", "PRODUCTS_DELETE", "/integraciones/shopify/webhook"),
-    ("inventory_levels/update", "INVENTORY_LEVELS_UPDATE", "/integraciones/shopify/webhook"),
-    ("inventory_items/update", "INVENTORY_ITEMS_UPDATE", "/integraciones/shopify/webhook"),
+    # Primero el cierre de ciclo. Si una alta posterior falla, Shopify ya puede
+    # avisar la desinstalación y TAURO conserva tombstone/purga deterministas.
     ("app/uninstalled", "APP_UNINSTALLED", "/shopify/webhook/desinstalada"),
+    ("orders/create", "ORDERS_CREATE", "/integraciones/shopify/webhook/orders-create"),
+    ("orders/updated", "ORDERS_UPDATED", "/integraciones/shopify/webhook/orders-updated"),
+    ("orders/cancelled", "ORDERS_CANCELLED", "/integraciones/shopify/webhook/orders-cancelled"),
+    ("products/create", "PRODUCTS_CREATE", "/integraciones/shopify/webhook/products-create"),
+    ("products/update", "PRODUCTS_UPDATE", "/integraciones/shopify/webhook/products-update"),
+    ("products/delete", "PRODUCTS_DELETE", "/integraciones/shopify/webhook/products-delete"),
+    ("inventory_levels/update", "INVENTORY_LEVELS_UPDATE", "/integraciones/shopify/webhook/inventory-levels-update"),
+    ("inventory_items/update", "INVENTORY_ITEMS_UPDATE", "/integraciones/shopify/webhook/inventory-items-update"),
 )
+
+# Shopify recomienda renovar antes del vencimiento, no esperar a que una
+# request de Admin API falle. El margen también absorbe pequeños desfasajes de
+# reloj entre TAURO y Shopify.
+_TOKEN_REFRESH_MARGIN = timedelta(minutes=1)
 
 _tabla_lista = False
 
 
 class ShopifyWebhookVerificationError(RuntimeError):
     """Shopify no permitió confirmar el estado de las suscripciones."""
+
+
+class ShopifyOwnershipConflict(RuntimeError):
+    """La tienda ya está vinculada a otra cuenta TAURO."""
 
 
 def _ensure_tabla() -> None:
@@ -101,13 +109,90 @@ def _ensure_tabla() -> None:
                     id             SERIAL PRIMARY KEY,
                     dominio        TEXT NOT NULL UNIQUE,
                     access_token   TEXT NOT NULL,
+                    refresh_token  TEXT,
+                    access_token_expires_at TIMESTAMPTZ,
+                    refresh_token_expires_at TIMESTAMPTZ,
+                    token_reauth_required BOOLEAN NOT NULL DEFAULT FALSE,
+                    token_refresh_failed_at TIMESTAMPTZ,
+                    webhooks_ready BOOLEAN NOT NULL DEFAULT FALSE,
+                    webhooks_verified_at TIMESTAMPTZ,
                     scopes         TEXT,
                     cliente_id     TEXT,
                     carrier_id     TEXT,
+                    app_client_id  TEXT,
+                    install_generation TEXT,
                     instalada_en   TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 ALTER TABLE shopify_instalaciones
                     ADD COLUMN IF NOT EXISTS app_client_id TEXT;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS refresh_token TEXT;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS access_token_expires_at TIMESTAMPTZ;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS refresh_token_expires_at TIMESTAMPTZ;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS token_reauth_required BOOLEAN
+                    NOT NULL DEFAULT FALSE;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS token_refresh_failed_at TIMESTAMPTZ;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS webhooks_ready BOOLEAN
+                    NOT NULL DEFAULT FALSE;
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS webhooks_verified_at TIMESTAMPTZ;
+                UPDATE shopify_instalaciones
+                   SET install_generation = md5(
+                       dominio || ':' || instalada_en::text || ':' || random()::text
+                   )
+                 WHERE install_generation IS NULL
+                    OR btrim(install_generation) = '';
+                ALTER TABLE shopify_instalaciones
+                    ALTER COLUMN install_generation SET NOT NULL;
+                DO $$
+                BEGIN
+                    IF to_regclass('public.tiendas_conectadas') IS NOT NULL THEN
+                        UPDATE tiendas_conectadas t
+                           SET activa = FALSE
+                          FROM shopify_instalaciones i
+                         WHERE LOWER(t.dominio) = LOWER(i.dominio)
+                           AND t.plataforma = 'shopify'
+                           AND t.secreto = 'oauth:shopify-app'
+                           AND i.webhooks_ready = FALSE
+                           AND t.activa = TRUE;
+                    END IF;
+                END $$;
+                CREATE TABLE IF NOT EXISTS shopify_desinstalaciones (
+                    id                  BIGSERIAL PRIMARY KEY,
+                    dominio             TEXT NOT NULL,
+                    shop_id             TEXT NOT NULL DEFAULT '',
+                    app_client_id       TEXT NOT NULL,
+                    install_generation  TEXT NOT NULL,
+                    cliente_id          TEXT,
+                    desinstalada_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    purge_completado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    shop_redact_ack_at  TIMESTAMPTZ,
+                    UNIQUE (dominio, app_client_id, install_generation)
+                );
+                CREATE INDEX IF NOT EXISTS ix_shopify_desinstalaciones_redact
+                    ON shopify_desinstalaciones(
+                        dominio, shop_id, app_client_id, desinstalada_at DESC
+                    );
+                CREATE TABLE IF NOT EXISTS shopify_shop_redact_pendientes (
+                    dominio                   TEXT NOT NULL,
+                    shop_id                   TEXT NOT NULL,
+                    app_client_id             TEXT NOT NULL,
+                    install_generation_activa TEXT NOT NULL,
+                    estado                    TEXT NOT NULL
+                                              DEFAULT 'VERIFICAR_GENERACION',
+                    recibido_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    ultimo_intento_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (dominio, shop_id, app_client_id)
+                );
+                CREATE INDEX IF NOT EXISTS ix_shop_redact_pendientes_estado
+                    ON shopify_shop_redact_pendientes(estado, recibido_at);
             """)
             client_id_historico = _client_id_historico()
             if client_id_historico:
@@ -206,6 +291,19 @@ def _client_id_historico() -> str:
 
 def _client_id_instalacion_efectivo(valor: object) -> str:
     return str(valor or "").strip() or _client_id_historico()
+
+
+def _credenciales_para_client_id(client_id: str) -> tuple[str, str]:
+    """Resuelve el secreto de la app que emitió el refresh token.
+
+    Durante la migración pueden coexistir tokens de la app pública y la
+    histórica. Nunca se intenta refrescar un token con un secreto de otra app.
+    """
+    esperado = (client_id or "").strip()
+    for candidato, secreto in _credenciales_webhook():
+        if candidato == esperado:
+            return candidato, secreto
+    return "", ""
 
 
 def cliente_app_para_webhook(cuerpo: bytes, firma: str,
@@ -317,42 +415,202 @@ def dominio_valido(dominio: str) -> bool:
 
 
 def canjear_token(dominio: str, code: str) -> Optional[dict]:
-    """El código de un solo uso se cambia por el token permanente de esa tienda."""
+    """Cambia el código por el par rotativo offline de esa tienda."""
     try:
         client_id, client_secret = _credenciales_publicas()
         r = requests.post(
             f"https://{dominio}/admin/oauth/access_token",
-            json={
+            data={
                 "client_id": client_id,
                 "client_secret": client_secret,
                 "code": code,
+                "expiring": "1",
             },
             timeout=20,
         )
         if r.status_code != 200:
-            print(f"[shopify] canje de token falló {r.status_code}: {r.text[:200]}")
+            # El body OAuth puede contener detalles sensibles. El log sólo
+            # conserva un código estable, nunca la respuesta cruda.
+            print(f"[shopify] canje de token falló HTTP {r.status_code}")
             return None
-        return r.json()
+        try:
+            payload = r.json()
+            access_token = str(payload.get("access_token") or "")
+            refresh_token = str(payload.get("refresh_token") or "")
+            expires_in = int(payload.get("expires_in"))
+            refresh_expires_in = int(payload.get("refresh_token_expires_in"))
+            if (
+                not access_token or not refresh_token
+                or expires_in <= 0 or refresh_expires_in <= 0
+            ):
+                raise ValueError("par OAuth incompleto")
+        except (AttributeError, TypeError, ValueError):
+            print("[shopify] canje de token devolvió un par OAuth incompleto")
+            return None
+        return payload
     except Exception as e:
-        print(f"[shopify] excepción canjeando token: {e}")
+        print(f"[shopify] excepción canjeando token: {type(e).__name__}")
         return None
 
 
-def guardar_instalacion(dominio: str, access_token: str, scopes: str = "") -> None:
+def guardar_instalacion(
+    dominio: str,
+    access_token: str,
+    scopes: str = "",
+    instalada_desde: Optional[datetime] = None,
+    *,
+    cliente_claim: str = "",
+    refresh_token: str,
+    expires_in: object,
+    refresh_token_expires_in: object,
+) -> str:
+    """Crea una generación OAuth pendiente sin heredar el tenant anterior.
+
+    ``cliente_claim`` sólo se entrega desde un callback con state y sesión
+    TAURO verificados. Sin ese claim, el token nuevo nace ownerless y cualquier
+    binding previo queda inactivo en la MISMA transacción. Con claim, el owner
+    se preserva pero su binding también queda inactivo hasta confirmar webhooks.
+    """
     _ensure_tabla()
+    from servicios.integraciones_tienda import (
+        OAUTH_SECRET_MARKER,
+        _bloquear_dominio_shopify,
+        _borrar_datos_tienda_con_cursor,
+        _ensure_tablas,
+    )
+
+    _ensure_tablas()
+    dominio = (dominio or "").strip().lower()
+    cliente_claim = (cliente_claim or "").strip().upper()
+    if not dominio_valido(dominio):
+        raise ValueError("Dominio Shopify inválido.")
     token_cifrado = _cifrar_token(access_token)
+    refresh_token = str(refresh_token or "")
+    try:
+        access_segundos = int(expires_in)
+        refresh_segundos = int(refresh_token_expires_in)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Shopify no entregó vencimientos OAuth válidos.") from exc
+    if not refresh_token or access_segundos <= 0 or refresh_segundos <= 0:
+        raise ValueError("Shopify no entregó un par OAuth rotativo completo.")
+    obtenido_en = datetime.now(timezone.utc)
+    access_expira_en = obtenido_en + timedelta(seconds=access_segundos)
+    refresh_expira_en = obtenido_en + timedelta(seconds=refresh_segundos)
+    refresh_cifrado = _cifrar_token(refresh_token)
+    generation = secrets.token_urlsafe(24)
+    instalada_desde = instalada_desde or datetime.now(timezone.utc)
+    if instalada_desde.tzinfo is None:
+        instalada_desde = instalada_desde.replace(tzinfo=timezone.utc)
+    instalada_desde = instalada_desde.astimezone(timezone.utc)
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                SELECT cliente_id AS owner_instalacion
+                  FROM shopify_instalaciones
+                 WHERE dominio = %s
+                 FOR UPDATE
+                """,
+                (dominio,),
+            )
+            anterior = cur.fetchone() or {}
+            cur.execute(
+                """
+                SELECT cliente_id AS owner_mapping
+                  FROM tiendas_conectadas
+                 WHERE dominio = %s
+                 FOR UPDATE
+                """,
+                (dominio,),
+            )
+            mapping_anterior = cur.fetchone() or {}
+            owners_anteriores = {
+                str(owner or "").strip().upper()
+                for owner in (
+                    anterior.get("owner_instalacion"),
+                    mapping_anterior.get("owner_mapping"),
+                )
+                if str(owner or "").strip()
+            }
+
+            # Un claim B sobre una generación que pertenecía a A es una
+            # transferencia explícita respaldada por OAuth+state+sesión. Se
+            # purgan los datos operativos de A antes de crear el binding de B.
+            if cliente_claim and any(
+                owner != cliente_claim for owner in owners_anteriores
+            ):
+                _borrar_datos_tienda_con_cursor(cur, dominio)
+
             cur.execute("""
                 INSERT INTO shopify_instalaciones
-                    (dominio, access_token, scopes, app_client_id)
-                VALUES (%s, %s, %s, %s)
+                    (dominio, access_token, refresh_token,
+                     access_token_expires_at, refresh_token_expires_at,
+                     token_reauth_required, token_refresh_failed_at,
+                     webhooks_ready, webhooks_verified_at,
+                     scopes, app_client_id, install_generation,
+                     instalada_en, cliente_id)
+                VALUES (%s, %s, %s, %s, %s, FALSE, NULL, FALSE, NULL,
+                        %s, %s, %s, %s, NULLIF(%s, ''))
                 ON CONFLICT (dominio) DO UPDATE
                     SET access_token = EXCLUDED.access_token,
+                        refresh_token = EXCLUDED.refresh_token,
+                        access_token_expires_at = EXCLUDED.access_token_expires_at,
+                        refresh_token_expires_at = EXCLUDED.refresh_token_expires_at,
+                        token_reauth_required = FALSE,
+                        token_refresh_failed_at = NULL,
+                        webhooks_ready = FALSE,
+                        webhooks_verified_at = NULL,
                         scopes = EXCLUDED.scopes,
-                        app_client_id = EXCLUDED.app_client_id
-            """, (dominio, token_cifrado, scopes, _credenciales_publicas()[0]))
+                        -- Cada OAuth exitoso es una generación nueva, incluso
+                        -- bajo la misma app. Shopify no distingue reauth de
+                        -- reinstall en webhooks tardíos; nosotros sí, mediante
+                        -- generación + instalada_en.
+                        instalada_en = EXCLUDED.instalada_en,
+                        install_generation = EXCLUDED.install_generation,
+                        app_client_id = EXCLUDED.app_client_id,
+                        cliente_id = EXCLUDED.cliente_id
+            """, (
+                dominio,
+                token_cifrado,
+                refresh_cifrado,
+                access_expira_en,
+                refresh_expira_en,
+                scopes,
+                _credenciales_publicas()[0],
+                generation,
+                instalada_desde,
+                cliente_claim,
+            ))
+
+            if cliente_claim:
+                cur.execute(
+                    """
+                    INSERT INTO tiendas_conectadas
+                        (cliente_id, plataforma, dominio, secreto, activa)
+                    VALUES (%s, 'shopify', %s, %s, FALSE)
+                    ON CONFLICT (dominio) DO UPDATE SET
+                        cliente_id = EXCLUDED.cliente_id,
+                        plataforma = 'shopify',
+                        secreto = EXCLUDED.secreto,
+                        activa = FALSE
+                    RETURNING id
+                    """,
+                    (cliente_claim, dominio, OAUTH_SECRET_MARKER),
+                )
+                if cur.fetchone() is None:
+                    raise RuntimeError("No se pudo materializar el binding OAuth.")
+            else:
+                cur.execute(
+                    """
+                    UPDATE tiendas_conectadas
+                       SET activa = FALSE
+                     WHERE dominio = %s
+                    """,
+                    (dominio,),
+                )
         conn.commit()
+    return generation
 
 
 def instalacion(dominio: str) -> Optional[dict]:
@@ -367,10 +625,28 @@ def instalacion(dominio: str) -> Optional[dict]:
             datos["app_client_id"] = _client_id_instalacion_efectivo(
                 datos.get("app_client_id")
             )
+            datos["webhooks_ready"] = bool(datos.get("webhooks_ready"))
+            # El refresh token jamás sale del servicio de credenciales. Los
+            # consumidores sólo necesitan saber si deben pedir reautorización.
+            refresh_expira = _fecha_utc(datos.get("refresh_token_expires_at"))
+            datos["token_rotativo"] = bool(
+                datos.get("refresh_token")
+                and datos.get("access_token_expires_at")
+                and refresh_expira
+                and refresh_expira > datetime.now(timezone.utc)
+                and not datos.get("token_reauth_required")
+            )
+            datos.pop("refresh_token", None)
+            datos.pop("access_token_expires_at", None)
+            datos.pop("refresh_token_expires_at", None)
+            datos.pop("token_refresh_failed_at", None)
+            if datos.get("token_reauth_required") or not datos["webhooks_ready"]:
+                datos["access_token"] = ""
+                return datos
             try:
                 datos["access_token"] = _descifrar_token(datos.get("access_token") or "")
             except Exception as exc:
-                print(f"[shopify] token de {dominio} no disponible: {type(exc).__name__}")
+                print(f"[shopify] token no disponible: {type(exc).__name__}")
                 datos["access_token"] = ""
             return datos
 
@@ -406,7 +682,7 @@ def es_dueno_de_la_tienda(dominio: str, cliente_id: str) -> bool:
                 fila = cur.fetchone()
         email_cliente = str((fila or {}).get("email") or "").strip().lower()
     except Exception as e:
-        print(f"[shopify] no pude leer el email de {cliente_id}: {e}")
+        print(f"[shopify] no pude leer email de ownership: {type(e).__name__}")
         return False
     if not email_cliente:
         return False
@@ -417,8 +693,7 @@ def es_dueno_de_la_tienda(dominio: str, cliente_id: str) -> bool:
         }
     """)
     if data is None:
-        print(f"[shopify] no pude verificar la propiedad de {dominio} "
-              f"(GraphQL no respondió)")
+        print("[shopify] no pude verificar ownership (GraphQL sin respuesta)")
         return False
     shop = data.get("shop") or {}
 
@@ -426,8 +701,7 @@ def es_dueno_de_la_tienda(dominio: str, cliente_id: str) -> bool:
     posibles = {str(shop.get(k) or "").strip().lower()
                 for k in ("email", "contactEmail")}
     coincide = email_cliente in posibles
-    print(f"[shopify] verificación de propiedad {dominio} ↔ {cliente_id}: "
-          f"{'OK' if coincide else 'NO COINCIDE'}")
+    print(f"[shopify] verificación de ownership: {'OK' if coincide else 'NO COINCIDE'}")
     return coincide
 
 
@@ -443,45 +717,95 @@ def vincular_cliente(dominio: str, cliente_id: str) -> None:
     los webhooks de las apps.
     """
     _ensure_tabla()
+    from servicios.integraciones_tienda import (
+        OAUTH_SECRET_MARKER,
+        _bloquear_dominio_shopify,
+        _ensure_tablas,
+        volcar_huerfanos,
+    )
+
+    _ensure_tablas()
     dominio = (dominio or "").strip().lower()
+    cliente_id = (cliente_id or "").strip().upper()
+    if not dominio_valido(dominio) or not cliente_id:
+        raise ValueError("Tienda o cliente inválido.")
+
+    tienda_id = None
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                SELECT id, cliente_id, webhooks_ready
+                  FROM shopify_instalaciones
+                 WHERE dominio = %s
+                 FOR UPDATE
+                """,
+                (dominio,),
+            )
+            instalacion_actual = cur.fetchone()
+            if not instalacion_actual:
+                raise RuntimeError("La instalación Shopify ya no está activa.")
+            if not instalacion_actual.get("webhooks_ready"):
+                raise RuntimeError(
+                    "La instalación Shopify todavía no verificó sus webhooks."
+                )
+            owner_inst = str(
+                (instalacion_actual or {}).get("cliente_id") or ""
+            ).strip().upper()
+            if owner_inst and owner_inst != cliente_id:
+                raise ShopifyOwnershipConflict(
+                    "Ese dominio ya está vinculado a otra cuenta TAURO."
+                )
+
+            cur.execute(
+                """
+                SELECT id, cliente_id, plataforma
+                  FROM tiendas_conectadas
+                 WHERE dominio = %s
+                 FOR UPDATE
+                """,
+                (dominio,),
+            )
+            mapping = cur.fetchone()
+            owner_mapping = str((mapping or {}).get("cliente_id") or "").strip().upper()
+            if owner_mapping and owner_mapping != cliente_id:
+                raise ShopifyOwnershipConflict(
+                    "Ese dominio ya está conectado a otra cuenta TAURO."
+                )
+
             cur.execute(
                 "UPDATE shopify_instalaciones SET cliente_id = %s WHERE dominio = %s",
                 (cliente_id, dominio),
             )
+            cur.execute(
+                """
+                INSERT INTO tiendas_conectadas
+                    (cliente_id, plataforma, dominio, secreto, activa)
+                VALUES (%s, 'shopify', %s, %s, TRUE)
+                ON CONFLICT (dominio) DO UPDATE SET
+                    plataforma = 'shopify',
+                    secreto = EXCLUDED.secreto,
+                    activa = TRUE
+                WHERE UPPER(tiendas_conectadas.cliente_id) = EXCLUDED.cliente_id
+                RETURNING id, cliente_id
+                """,
+                (cliente_id, dominio, OAUTH_SECRET_MARKER),
+            )
+            resultado = cur.fetchone()
+            if not resultado or str(resultado.get("cliente_id") or "").strip().upper() != cliente_id:
+                raise ShopifyOwnershipConflict(
+                    "Ese dominio ya está conectado a otra cuenta TAURO."
+                )
+            tienda_id = int(resultado["id"])
         conn.commit()
 
-    if not _credenciales_publicas()[1]:
-        return
+    # Ya fuera de la transacción de ownership: una orden malformada no puede
+    # revertir el vínculo, pero cada INSERT vuelve a verificar owner+instalación.
     try:
-        from servicios.integraciones_tienda import (
-            conectar_tienda, tienda_por_dominio, volcar_huerfanos,
-        )
-        # No duplicar el API secret de la app en una fila por cliente. El
-        # webhook OAuth se verifica con la variable segura de entorno.
-        resultado = conectar_tienda(
-            cliente_id,
-            "shopify",
-            dominio,
-            "oauth:shopify-app",
-            # Llegar acá requiere OAuth firmado por Shopify y, en el flujo
-            # normal, una sesión TAURO con state verificado. Eso constituye
-            # la prueba fuerte para migrar una tienda que hubiera quedado
-            # asociada a una cuenta de prueba histórica. El alta manual sigue
-            # sin poder reasignar dominios ajenos.
-            reasignar_confirmado=True,
-        )
-        if not resultado.get("ok"):
-            raise RuntimeError("Shopify autorizó la tienda pero no pudo vincularse.")
-        # Las ventas que entraron mientras la tienda estaba sin vincular no
-        # se perdieron: se guardaron como huérfanas y se recuperan ACÁ, que
-        # es el momento exacto en que ya hay a quién atribuírselas.
-        t = tienda_por_dominio(dominio)
-        if t:
-            volcar_huerfanos(cliente_id, t["id"], dominio)
-    except Exception as e:
-        print(f"[shopify] no pude registrar {dominio} en tiendas_conectadas: {e}")
+        volcar_huerfanos(cliente_id, tienda_id, dominio)
+    except Exception as exc:
+        print(f"[shopify] no pude recuperar pedidos huérfanos: {type(exc).__name__}")
 
 
 def instalaciones_sin_dueno() -> list[dict]:
@@ -491,7 +815,8 @@ def instalaciones_sin_dueno() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT dominio, instalada_en FROM shopify_instalaciones
-                WHERE cliente_id IS NULL OR cliente_id = ''
+                WHERE webhooks_ready = TRUE
+                  AND (cliente_id IS NULL OR cliente_id = '')
                 ORDER BY instalada_en DESC
             """)
             return [dict(r) for r in cur.fetchall()]
@@ -512,17 +837,81 @@ def cliente_app_instalada(dominio: str) -> Optional[str]:
     return _client_id_instalacion_efectivo((fila or {}).get("app_client_id"))
 
 
-def desinstalar(dominio: str, app_client_id: str = "") -> bool:
-    """Borra sólo la instalación perteneciente a la app que firmó el evento.
+def _fecha_webhook(valor: str) -> Optional[datetime]:
+    """Convierte X-Shopify-Triggered-At sin aceptar fechas ambiguas."""
+    valor = str(valor or "").strip()
+    if not valor:
+        return None
+    try:
+        fecha = datetime.fromisoformat(valor.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if fecha.tzinfo is None:
+        fecha = fecha.replace(tzinfo=timezone.utc)
+    return fecha.astimezone(timezone.utc)
 
-    Esto evita que el webhook tardío de desinstalación de la app histórica
-    borre el token recién emitido por la app pública.
+
+def clasificar_evento_instalacion(inst: Optional[dict], evento_at: str) -> str:
+    """Clasifica un webhook OAuth como ACTUAL, ANTERIOR o INVALIDO.
+
+    Shopify incluye ``X-Shopify-Triggered-At`` en cada entrega y recomienda
+    usarlo para descartar reintentos obsoletos. ``instalada_en`` se captura
+    antes de registrar las suscripciones, de modo que una entrega legítima de
+    la nueva generación nunca queda del lado anterior del límite.
+    """
+    evento = _fecha_webhook(evento_at)
+    instalada = (inst or {}).get("instalada_en")
+    if isinstance(instalada, str):
+        instalada = _fecha_webhook(instalada)
+    elif isinstance(instalada, datetime):
+        if instalada.tzinfo is None:
+            instalada = instalada.replace(tzinfo=timezone.utc)
+        instalada = instalada.astimezone(timezone.utc)
+    else:
+        instalada = None
+    if not evento or not instalada or not (inst or {}).get("install_generation"):
+        return "INVALIDO"
+    return "ANTERIOR" if evento < instalada else "ACTUAL"
+
+
+def desinstalar(
+    dominio: str,
+    app_client_id: str = "",
+    shop_id: str = "",
+    evento_at: str = "",
+) -> bool:
+    """Purga y desactiva exactamente la generación que recibió uninstall.
+
+    El tombstone permite reconocer ``shop/redact`` 48 h después sin tocar una
+    reinstalación posterior de la misma app. Todo ocurre en una transacción:
+    nunca queda token activo con mapping purgado ni mapping activo sin token.
     """
     _ensure_tabla()
+    from servicios.integraciones_tienda import (
+        _bloquear_dominio_shopify,
+        _borrar_datos_tienda_con_cursor,
+        _ensure_tablas,
+    )
+
+    _ensure_tablas()
+    dominio = (dominio or "").strip().lower()
+    app_client_id = (app_client_id or "").strip()
+    shop_id = str(shop_id or "").strip()
+    if not dominio_valido(dominio) or not app_client_id:
+        return False
+    evento = _fecha_webhook(evento_at)
+
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
             cur.execute(
-                "SELECT app_client_id FROM shopify_instalaciones WHERE dominio = %s",
+                """
+                SELECT id, app_client_id, install_generation, cliente_id,
+                       instalada_en
+                  FROM shopify_instalaciones
+                 WHERE dominio = %s
+                 FOR UPDATE
+                """,
                 (dominio,),
             )
             fila = cur.fetchone()
@@ -531,18 +920,407 @@ def desinstalar(dominio: str, app_client_id: str = "") -> bool:
             guardado = _client_id_instalacion_efectivo(
                 (fila or {}).get("app_client_id")
             )
-            firmado = (app_client_id or "").strip()
-            if guardado and firmado and guardado != firmado:
+            if guardado and guardado != app_client_id:
                 return False
-            cur.execute("DELETE FROM shopify_instalaciones WHERE dominio = %s", (dominio,))
+
+            instalada_en = (fila or {}).get("instalada_en")
+            if isinstance(instalada_en, str):
+                instalada_en = _fecha_webhook(instalada_en)
+            elif isinstance(instalada_en, datetime):
+                if instalada_en.tzinfo is None:
+                    instalada_en = instalada_en.replace(tzinfo=timezone.utc)
+                instalada_en = instalada_en.astimezone(timezone.utc)
+            if evento and instalada_en and evento < instalada_en:
+                # Webhook atrasado de una generación previa de la misma app.
+                return False
+
+            cur.execute(
+                """
+                SELECT 1
+                  FROM shopify_desinstalaciones
+                 WHERE dominio = %s AND app_client_id = %s
+                   AND (%s = '' OR shop_id = %s)
+                   AND install_generation <> %s
+                 LIMIT 1
+                """,
+                (
+                    dominio,
+                    app_client_id,
+                    shop_id,
+                    shop_id,
+                    str(fila.get("install_generation") or ""),
+                ),
+            )
+            if not evento and cur.fetchone() is not None:
+                # Sin timestamp no se puede probar que el evento pertenezca a
+                # la instalación actual. Fail closed: se conserva la nueva.
+                return False
+
+            total = _borrar_datos_tienda_con_cursor(cur, dominio)
+            cur.execute(
+                """
+                INSERT INTO shopify_desinstalaciones
+                    (dominio, shop_id, app_client_id, install_generation,
+                     purge_completado_at)
+                VALUES (%s, %s, %s, %s, NOW())
+                ON CONFLICT (dominio, app_client_id, install_generation)
+                DO UPDATE SET
+                    shop_id = CASE
+                        WHEN EXCLUDED.shop_id <> '' THEN EXCLUDED.shop_id
+                        ELSE shopify_desinstalaciones.shop_id
+                    END,
+                    purge_completado_at = NOW()
+                """,
+                (
+                    dominio,
+                    shop_id,
+                    app_client_id,
+                    str(fila.get("install_generation") or ""),
+                ),
+            )
+            cur.execute(
+                """
+                DELETE FROM shopify_instalaciones
+                 WHERE dominio = %s AND install_generation = %s
+                """,
+                (dominio, str(fila.get("install_generation") or "")),
+            )
+        conn.commit()
+    print(f"[shopify] uninstall procesado · purge operacional {total}")
+    return True
+
+
+def confirmar_shop_redact(
+    dominio: str,
+    shop_id: str,
+    app_client_id: str,
+) -> bool:
+    """ACK durable de una obligación ya purgada al desinstalar.
+
+    La búsqueda usa el tombstone histórico y nunca la instalación activa; por
+    eso una reinstalación de la misma app queda completamente fuera del UPDATE.
+    """
+    _ensure_tabla()
+    from servicios.integraciones_tienda import _bloquear_dominio_shopify
+
+    dominio = (dominio or "").strip().lower()
+    shop_id = str(shop_id or "").strip()
+    app_client_id = (app_client_id or "").strip()
+    if not dominio_valido(dominio) or not app_client_id:
+        return False
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                UPDATE shopify_desinstalaciones
+                   SET shop_redact_ack_at = COALESCE(shop_redact_ack_at, NOW())
+                 WHERE id = (
+                    SELECT id
+                      FROM shopify_desinstalaciones
+                     WHERE dominio = %s
+                       AND app_client_id = %s
+                       AND (%s = '' OR shop_id = %s)
+                     ORDER BY desinstalada_at DESC
+                     LIMIT 1
+                 )
+                RETURNING id
+                """,
+                (dominio, app_client_id, shop_id, shop_id),
+            )
+            encontrada = cur.fetchone() is not None
+            if encontrada:
+                cur.execute(
+                    """
+                    UPDATE shopify_shop_redact_pendientes
+                       SET estado = 'RESUELTO_POR_TOMBSTONE',
+                           ultimo_intento_at = NOW()
+                     WHERE dominio = %s AND shop_id = %s
+                       AND app_client_id = %s
+                    """,
+                    (dominio, shop_id, app_client_id),
+                )
+        conn.commit()
+    return encontrada
+
+
+def registrar_shop_redact_pendiente(
+    dominio: str,
+    shop_id: str,
+    app_client_id: str,
+) -> bool:
+    """Persiste una obligación cuyo evento no puede ligarse a un tombstone.
+
+    El lock y la relectura evitan confirmar una instalación que se desinstaló
+    entre el primer chequeo del endpoint y este INSERT. Nunca se guarda el
+    payload ni datos del comprador; sólo la identidad mínima de la obligación
+    y la generación activa que exige revisión.
+    """
+    _ensure_tabla()
+    from servicios.integraciones_tienda import _bloquear_dominio_shopify
+
+    dominio = (dominio or "").strip().lower()
+    shop_id = str(shop_id or "").strip()
+    app_client_id = (app_client_id or "").strip()
+    if not dominio_valido(dominio) or not shop_id or not app_client_id:
+        return False
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                SELECT install_generation, app_client_id
+                  FROM shopify_instalaciones
+                 WHERE dominio = %s
+                 FOR UPDATE
+                """,
+                (dominio,),
+            )
+            fila = cur.fetchone()
+            if not fila:
+                return False
+            app_activa = _client_id_instalacion_efectivo(
+                (fila or {}).get("app_client_id")
+            )
+            generation = str(
+                (fila or {}).get("install_generation") or ""
+            ).strip()
+            # La obligación puede provenir de la app histórica mientras una
+            # app pública ya está activa. Esa diferencia es justamente lo que
+            # debe revisar operaciones; nunca se descarta con un 200 vacío.
+            if not app_activa or not generation:
+                return False
+            cur.execute(
+                """
+                INSERT INTO shopify_shop_redact_pendientes
+                    (dominio, shop_id, app_client_id,
+                     install_generation_activa, estado)
+                VALUES (%s, %s, %s, %s, 'VERIFICAR_GENERACION')
+                ON CONFLICT (dominio, shop_id, app_client_id) DO UPDATE SET
+                    install_generation_activa = EXCLUDED.install_generation_activa,
+                    estado = 'VERIFICAR_GENERACION',
+                    ultimo_intento_at = NOW()
+                """,
+                (dominio, shop_id, app_client_id, generation),
+            )
         conn.commit()
     return True
 
 
 # ── Llamadas a la API de la tienda ──────────────────────────
 
-def _graphql(dominio: str, token: str, query: str,
-             variables: dict | None = None) -> Optional[dict]:
+def _fecha_utc(valor: object) -> Optional[datetime]:
+    if isinstance(valor, datetime):
+        fecha = valor
+    elif isinstance(valor, str):
+        try:
+            fecha = datetime.fromisoformat(valor.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if fecha.tzinfo is None:
+        fecha = fecha.replace(tzinfo=timezone.utc)
+    return fecha.astimezone(timezone.utc)
+
+
+def _invalidar_tokens_con_cursor(cur, instalacion_id: object,
+                                 generation: str) -> None:
+    """Falla cerrada sin tocar owner, app ni generación de instalación."""
+    cur.execute(
+        """
+        UPDATE shopify_instalaciones
+           SET access_token = '',
+               refresh_token = NULL,
+               access_token_expires_at = NOW(),
+               refresh_token_expires_at = NOW(),
+               token_reauth_required = TRUE,
+               token_refresh_failed_at = NOW()
+         WHERE id = %s AND install_generation = %s
+        """,
+        (instalacion_id, generation),
+    )
+
+
+def _token_admin_vigente(
+    dominio: str,
+    token_fallback: str = "",
+    *,
+    permitir_pendiente_webhooks: bool = False,
+) -> Optional[str]:
+    """Devuelve un access token vigente y rota el par de forma serializada.
+
+    El advisory lock de dominio es el mismo que usan OAuth y uninstall. La
+    llamada de refresh ocurre dentro de esa transacción: un segundo worker
+    espera, relee el par ya rotado y nunca reutiliza el refresh token anterior.
+    """
+    _ensure_tabla()
+    from servicios.integraciones_tienda import _bloquear_dominio_shopify
+
+    dominio = (dominio or "").strip().lower()
+    if not dominio_valido(dominio):
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                SELECT id, access_token, refresh_token,
+                       access_token_expires_at, refresh_token_expires_at,
+                       token_reauth_required, app_client_id,
+                       install_generation, webhooks_ready
+                  FROM shopify_instalaciones
+                 WHERE dominio = %s
+                 FOR UPDATE
+                """,
+                (dominio,),
+            )
+            fila = cur.fetchone()
+            if not fila:
+                # Un uninstall o una reinstalación puede ganar entre la lectura
+                # del caller y este lock. Sin fila durable jamás se usa el token
+                # que el caller leyó antes: esa generación ya no está activa.
+                return None
+            fila = dict(fila)
+            if fila.get("token_reauth_required"):
+                return None
+            if not fila.get("webhooks_ready") and not permitir_pendiente_webhooks:
+                # Sólo registrar_webhooks puede usar el token previo al readiness.
+                # Ningún flujo normal de catálogo, tracking o fulfillment opera
+                # hasta que el conjunto obligatorio quede confirmado.
+                return None
+
+            token_guardado = str(fila.get("access_token") or "")
+            refresh_guardado = str(fila.get("refresh_token") or "")
+            access_expira = _fecha_utc(fila.get("access_token_expires_at"))
+            refresh_expira = _fecha_utc(fila.get("refresh_token_expires_at"))
+
+            app_efectiva = _client_id_instalacion_efectivo(
+                fila.get("app_client_id")
+            )
+
+            # Sólo una app histórica distinta de la pública puede conservar
+            # los antiguos offline tokens permanentes. Una fila de la app
+            # pública sin par rotativo es una instalación incompleta y debe
+            # volver a OAuth, incluso si el access token aún responde.
+            if not access_expira and not refresh_guardado and not refresh_expira:
+                if app_efectiva == api_key_publica():
+                    generation = str(fila.get("install_generation") or "")
+                    _invalidar_tokens_con_cursor(cur, fila.get("id"), generation)
+                    conn.commit()
+                    print("[shopify] reautorización requerida: token público no rotativo")
+                    return None
+                try:
+                    return _descifrar_token(token_guardado) or None
+                except Exception as exc:
+                    print(f"[shopify] token legacy no disponible: {type(exc).__name__}")
+                    return None
+
+            generation = str(fila.get("install_generation") or "")
+            ahora = datetime.now(timezone.utc)
+            if access_expira and access_expira > ahora + _TOKEN_REFRESH_MARGIN:
+                try:
+                    return _descifrar_token(token_guardado) or None
+                except Exception as exc:
+                    print(f"[shopify] access token no disponible: {type(exc).__name__}")
+                    return None
+
+            if not generation or not refresh_guardado or not refresh_expira \
+                    or refresh_expira <= ahora:
+                _invalidar_tokens_con_cursor(cur, fila.get("id"), generation)
+                conn.commit()
+                print("[shopify] reautorización requerida: refresh no vigente")
+                return None
+
+            client_id = app_efectiva
+            client_id, client_secret = _credenciales_para_client_id(client_id)
+            if not client_id or not client_secret:
+                _invalidar_tokens_con_cursor(cur, fila.get("id"), generation)
+                conn.commit()
+                print("[shopify] reautorización requerida: app OAuth no disponible")
+                return None
+            try:
+                refresh_plano = _descifrar_token(refresh_guardado)
+                respuesta = requests.post(
+                    f"https://{dominio}/admin/oauth/access_token",
+                    data={
+                        "grant_type": "refresh_token",
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "refresh_token": refresh_plano,
+                    },
+                    timeout=20,
+                )
+            except Exception as exc:
+                # Un fallo de red no invalida un refresh token durable; esta
+                # llamada sí falla cerrada y el próximo intento puede reintentar.
+                print(f"[shopify] refresh no disponible: {type(exc).__name__}")
+                return None
+
+            if respuesta.status_code != 200:
+                if 400 <= respuesta.status_code < 500 and respuesta.status_code != 429:
+                    _invalidar_tokens_con_cursor(cur, fila.get("id"), generation)
+                    conn.commit()
+                    print(
+                        "[shopify] reautorización requerida: refresh rechazado "
+                        f"HTTP {respuesta.status_code}"
+                    )
+                else:
+                    print(f"[shopify] refresh respondió HTTP {respuesta.status_code}")
+                return None
+            try:
+                payload = respuesta.json()
+                nuevo_access = str(payload.get("access_token") or "")
+                nuevo_refresh = str(payload.get("refresh_token") or "")
+                access_segundos = int(payload.get("expires_in"))
+                refresh_segundos = int(payload.get("refresh_token_expires_in"))
+                if (
+                    not nuevo_access or not nuevo_refresh
+                    or access_segundos <= 0 or refresh_segundos <= 0
+                ):
+                    raise ValueError("par OAuth incompleto")
+            except (AttributeError, TypeError, ValueError):
+                # Shopify pudo haber rotado el refresh anterior; una respuesta
+                # incompleta no se puede recuperar de forma segura.
+                _invalidar_tokens_con_cursor(cur, fila.get("id"), generation)
+                conn.commit()
+                print("[shopify] reautorización requerida: refresh incompleto")
+                return None
+
+            renovado_en = datetime.now(timezone.utc)
+            cur.execute(
+                """
+                UPDATE shopify_instalaciones
+                   SET access_token = %s,
+                       refresh_token = %s,
+                       access_token_expires_at = %s,
+                       refresh_token_expires_at = %s,
+                       token_reauth_required = FALSE,
+                       token_refresh_failed_at = NULL
+                 WHERE id = %s AND install_generation = %s
+                """,
+                (
+                    _cifrar_token(nuevo_access),
+                    _cifrar_token(nuevo_refresh),
+                    renovado_en + timedelta(seconds=access_segundos),
+                    renovado_en + timedelta(seconds=refresh_segundos),
+                    fila.get("id"),
+                    generation,
+                ),
+            )
+        conn.commit()
+    return nuevo_access
+
+
+def _graphql(
+    dominio: str,
+    token: str,
+    query: str,
+    variables: dict | None = None,
+    *,
+    permitir_pendiente_webhooks: bool = False,
+) -> Optional[dict]:
     """
     Cliente mínimo del Admin GraphQL API.
 
@@ -550,13 +1328,21 @@ def _graphql(dominio: str, token: str, query: str,
     públicas nuevas. El helper nunca devuelve cuerpos de error ni tokens al
     log: esas respuestas pueden contener datos de la tienda.
     """
+    token_vigente = _token_admin_vigente(
+        dominio,
+        token,
+        permitir_pendiente_webhooks=permitir_pendiente_webhooks,
+    )
+    if not token_vigente:
+        print("[shopify] Admin API requiere reautorización o refresh")
+        return None
     url = f"https://{dominio}/admin/api/{API_VERSION}/graphql.json"
     for intento in range(5):
         try:
             r = requests.post(
                 url,
                 headers={
-                    "X-Shopify-Access-Token": token,
+                    "X-Shopify-Access-Token": token_vigente,
                     "Content-Type": "application/json",
                 },
                 json={"query": query, "variables": variables or {}},
@@ -601,29 +1387,9 @@ def _graphql(dominio: str, token: str, query: str,
                 espera = 1
             time.sleep(max(1, min(espera + 0.25, 20)))
             continue
-        mensajes = [
-            " ".join(str(error.get("message") or "").split())[:160]
-            for error in errores if isinstance(error, dict)
-        ]
-        print(f"[shopify] GraphQL error codes={sorted(codigos)} "
-              f"mensajes={mensajes[:2]}")
+        print(f"[shopify] GraphQL error codes={sorted(codigos)}")
         return None
     return None
-
-
-def _api(dominio: str, token: str, metodo: str, path: str, payload: dict | None = None):
-    """Compatibilidad transitoria para limpiar CarrierService legado."""
-    url = f"https://{dominio}/admin/api/{API_VERSION}/{path.lstrip('/')}"
-    try:
-        r = requests.request(
-            metodo, url,
-            headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
-            json=payload, timeout=25,
-        )
-        return r
-    except Exception as e:
-        print(f"[shopify] error llamando {metodo} {path}: {e}")
-        return None
 
 
 def registrar_webhooks(dominio: str, token: str) -> list[str]:
@@ -657,7 +1423,12 @@ def registrar_webhooks(dominio: str, token: str) -> list[str]:
     """
 
     def _actuales() -> Optional[set[tuple[str, str]]]:
-        data = _graphql(dominio, token, consulta)
+        data = _graphql(
+            dominio,
+            token,
+            consulta,
+            permitir_pendiente_webhooks=True,
+        )
         if data is None:
             return None
         nodes = ((data.get("webhookSubscriptions") or {}).get("nodes") or [])
@@ -673,14 +1444,20 @@ def registrar_webhooks(dominio: str, token: str) -> list[str]:
     for topic, topic_gql, address in topics:
         if (topic_gql, address) in existentes:
             continue
-        data = _graphql(dominio, token, mutation, {
-            "topic": topic_gql,
-            "subscription": {"uri": address, "format": "JSON"},
-        })
+        data = _graphql(
+            dominio,
+            token,
+            mutation,
+            {
+                "topic": topic_gql,
+                "subscription": {"uri": address, "format": "JSON"},
+            },
+            permitir_pendiente_webhooks=True,
+        )
         resultado = (data or {}).get("webhookSubscriptionCreate") or {}
         errores = resultado.get("userErrors") or []
         if not resultado.get("webhookSubscription") or errores:
-            print(f"[shopify] webhook {topic} no quedó por GraphQL")
+            print("[shopify] suscripción webhook no confirmada")
 
     verificados = _actuales()
     if verificados is None:
@@ -695,105 +1472,87 @@ def webhooks_requeridos() -> set[str]:
     return {topic for topic, _topic_gql, _path in WEBHOOK_TOPICS}
 
 
-def registrar_carrier_service(dominio: str, token: str) -> Optional[str]:
+def confirmar_webhooks_verificados(
+    dominio: str,
+    install_generation: str,
+    topics: list[str],
+) -> bool:
+    """Habilita exactamente la generación cuyo set completo fue verificado.
+
+    OAuth guarda primero token, owner y generación como pendientes. Esta segunda
+    transacción comparte el lock de dominio con reinstall/uninstall: un callback
+    atrasado nunca puede habilitar una generación posterior. Si hay owner, su
+    binding se activa en la misma confirmación; hasta entonces permanece cerrado.
     """
-    CÓDIGO TRANSITORIO — el CarrierService fue RETIRADO el 28/07. Ya no se
-    llama desde ningún flujo vivo (el precio del envío lo pone el comerciante
-    con sus tarifas de Shopify). Se conserva SÓLO por resiliencia: el callback
-    da de baja cualquier carrier service colgado de una instalación vieja, y
-    cotizar_para_checkout loguea a las tiendas que todavía peguen. No re-cablear
-    sin volver a pedir el scope write_shipping (que se sacó a propósito).
-
-    Registra a TAURO como transportista para que el comprador vea la
-    tarifa en vivo en el checkout. Shopify sólo lo habilita en planes
-    Advanced/Plus: si la tienda no califica devuelve error y seguimos
-    andando igual (la tienda usa su envío fijo).
-    """
-    r = _api(dominio, token, "POST", "carrier_services.json", {
-        "carrier_service": {
-            "name": "TAURO Solutions",
-            "callback_url": f"{_base_url()}/shopify/tarifas",
-            "service_discovery": True,
-            "format": "json",
-        }
-    })
-    if r is None:
-        return None
-    if r.status_code in (200, 201):
-        try:
-            cid = str(r.json()["carrier_service"]["id"])
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE shopify_instalaciones SET carrier_id = %s WHERE dominio = %s",
-                        (cid, dominio),
-                    )
-                conn.commit()
-            return cid
-        except Exception:
-            return None
-    print(f"[shopify] carrier service no disponible para {dominio} "
-          f"({r.status_code}) — la tienda usa su tarifa fija")
-    return None
-
-
-def dar_de_baja_carrier_service(dominio: str, token: str) -> bool:
-    """
-    Saca a TAURO como transportista de la tienda.
-
-    DECISIÓN DE PRODUCTO (28/07): la app NO cotiza más el envío dentro del
-    checkout. Su único trabajo es recibir la venta y cargarla como solicitud
-    en el portal; el precio que ve el comprador lo define el comerciante con
-    sus propias tarifas de Shopify.
-
-    OJO — el comerciante TIENE que tener sus zonas de envío configuradas
-    antes de esto: una tienda sin ningún método de envío para un destino no
-    deja completar la compra. Por eso se loguea fuerte.
-
-    Se borran todos los carrier services que apunten a nuestro callback, no
-    sólo el `carrier_id` guardado: una reinstalación puede haber dejado más
-    de uno colgado y cualquiera de ellos seguiría cotizando.
-    """
-    r = _api(dominio, token, "GET", "carrier_services.json")
-    if r is None or r.status_code != 200:
-        print(f"[shopify] no pude listar carrier services de {dominio}")
+    dominio = (dominio or "").strip().lower()
+    generation = str(install_generation or "").strip()
+    recibidos = {str(topic or "").strip().lower() for topic in (topics or [])}
+    if (
+        not dominio_valido(dominio)
+        or not generation
+        or recibidos != webhooks_requeridos()
+    ):
         return False
 
-    try:
-        servicios = r.json().get("carrier_services", [])
-    except Exception:
-        return False
+    _ensure_tabla()
+    from servicios.integraciones_tienda import (
+        OAUTH_SECRET_MARKER,
+        _bloquear_dominio_shopify,
+        _ensure_tablas,
+    )
 
-    base = _base_url()
-    mios = [cs for cs in servicios
-            if base in (cs.get("callback_url") or "")
-            or (cs.get("name") or "").strip().lower() == "tauro solutions"]
-    if not mios:
-        return True   # ya no está: nada que hacer
+    _ensure_tablas()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                SELECT id, cliente_id
+                  FROM shopify_instalaciones
+                 WHERE dominio = %s AND install_generation = %s
+                 FOR UPDATE
+                """,
+                (dominio, generation),
+            )
+            fila = cur.fetchone()
+            if not fila:
+                return False
+            owner = str((fila or {}).get("cliente_id") or "").strip().upper()
 
-    ok = True
-    for cs in mios:
-        d = _api(dominio, token, "DELETE", f"carrier_services/{cs['id']}.json")
-        if d is not None and d.status_code in (200, 204):
-            print(f"[shopify] {dominio}: dado de baja el carrier service "
-                  f"{cs['id']} ({cs.get('name')}). El comprador ya NO ve la "
-                  f"tarifa de TAURO — la tienda tiene que tener sus propias "
-                  f"zonas de envío configuradas o el checkout se bloquea.")
-        else:
-            ok = False
-            print(f"[shopify] {dominio}: FALLÓ la baja del carrier service {cs['id']}")
-
-    if ok:
-        try:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "UPDATE shopify_instalaciones SET carrier_id = NULL WHERE dominio = %s",
-                        (dominio,),
+            if owner:
+                cur.execute(
+                    """
+                    UPDATE tiendas_conectadas
+                       SET activa = TRUE
+                     WHERE LOWER(dominio) = %s
+                       AND UPPER(cliente_id) = %s
+                       AND plataforma = 'shopify'
+                       AND secreto = %s
+                    RETURNING id
+                    """,
+                    (dominio, owner, OAUTH_SECRET_MARKER),
+                )
+                if cur.fetchone() is None:
+                    raise RuntimeError(
+                        "No se pudo habilitar el binding Shopify verificado."
                     )
-        except Exception as e:
-            print(f"[shopify] baja OK pero no pude limpiar carrier_id: {e}")
-    return ok
+
+            cur.execute(
+                """
+                UPDATE shopify_instalaciones
+                   SET webhooks_ready = TRUE,
+                       webhooks_verified_at = COALESCE(webhooks_verified_at, NOW())
+                 WHERE dominio = %s AND install_generation = %s
+                RETURNING id
+                """,
+                (dominio, generation),
+            )
+            if cur.fetchone() is None:
+                raise RuntimeError(
+                    "La generación Shopify cambió durante la confirmación."
+                )
+        conn.commit()
+    return True
 
 
 def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
@@ -831,7 +1590,7 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
         }
     """, {"orderId": pedido_gid})
     if data is None:
-        print(f"[shopify] no pude leer fulfillment_orders de {pedido_externo_id}")
+        print("[shopify] no pude leer fulfillment_orders")
         return False
     order = data.get("order") or {}
     tracking_limpio = str(tracking or "").strip()
@@ -845,7 +1604,7 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
         estado_fulfillment = str(fulfillment.get("status") or "").upper()
         if (tracking_limpio in numeros
                 and estado_fulfillment not in ("CANCELLED", "FAILURE", "ERROR")):
-            print(f"[shopify] pedido {pedido_externo_id} ya tenía el tracking {tracking_limpio}")
+            print("[shopify] pedido ya tenía tracking")
             return True
 
     fos = [fo for fo in ((order.get("fulfillmentOrders") or {}).get("nodes") or [])
@@ -899,9 +1658,9 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
     })
     creado = (resultado or {}).get("fulfillmentCreate") or {}
     if creado.get("fulfillment") and not (creado.get("userErrors") or []):
-        print(f"[shopify] pedido {pedido_externo_id} marcado enviado con tracking {tracking_limpio}")
+        print("[shopify] pedido marcado enviado")
         return True
-    print(f"[shopify] no pude marcar enviado {pedido_externo_id} por GraphQL")
+    print("[shopify] no pude marcar pedido enviado por GraphQL")
     return False
 
 
@@ -978,13 +1737,13 @@ def cotizar_para_checkout(payload: dict) -> dict:
     try:
         opciones = buscar_tarifas(pais, peso_kg)          # 1. instantáneo (y fresco)
     except Exception as e:
-        print(f"[shopify] cache de tarifas falló: {e}")
+        print(f"[shopify] cache de tarifas falló: {type(e).__name__}")
 
     if not opciones:
         try:
             opciones = cotizar_carriers(origen, dest, paquete, dolar, markup)  # 2. en vivo
         except Exception as e:
-            print(f"[shopify] cotización en vivo falló: {e}")
+            print(f"[shopify] cotización en vivo falló: {type(e).__name__}")
             opciones = []
 
     if not [c for c in opciones if c.get("estado") == "cotizado"]:
@@ -996,7 +1755,7 @@ def cotizar_para_checkout(payload: dict) -> dict:
             opciones = []
 
     if not [c for c in opciones if c.get("estado") == "cotizado"]:
-        print(f"[shopify] sin tarifas para {pais}/{peso_kg}kg → tarifa de emergencia")
+        print("[shopify] sin tarifas; se usa tarifa de emergencia")
         opciones = tarifa_emergencia(pais, peso_kg, dolar)   # 4. nunca vacío
 
     # Qué ve el comprador lo decide el comerciante (política de flete):
@@ -1025,8 +1784,7 @@ def cotizar_para_checkout(payload: dict) -> dict:
     else:
         moneda, conversion = "ARS", 1.0
         if moneda_tienda:
-            print(f"[shopify] tienda en {moneda_tienda}: se cotiza en ARS y "
-                  f"Shopify hace la conversión")
+            print("[shopify] moneda no nativa; Shopify hará la conversión")
 
     rates = []
     for c in opciones:

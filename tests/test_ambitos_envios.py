@@ -292,6 +292,9 @@ def test_tienda_importacion_hacia_argentina_propaga_el_origen(monkeypatch):
     pedido = {
         "id": 21, "cliente_id": "TEST", "estado": "PENDIENTE",
         "numero": "ORD-21", "solicitud_id": None,
+        "origen_plataforma": "shopify",
+        "origen_dominio": "test.myshopify.com",
+        "origen_pedido_externo_id": "21",
         "destinatario": {
             "pais": "AR", "nombre": "Destino", "direccion": "Calle 1",
             "direccion2": "", "ciudad": "CABA", "estado": "C",
@@ -349,6 +352,9 @@ def test_tienda_no_inventa_cantidad_ni_llega_al_cotizador(monkeypatch, cantidad)
     pedido = {
         "id": 22, "cliente_id": "TEST", "estado": "PENDIENTE",
         "numero": "ORD-22", "solicitud_id": None,
+        "origen_plataforma": "shopify",
+        "origen_dominio": "test.myshopify.com",
+        "origen_pedido_externo_id": "22",
         "destinatario": {
             "pais": "US", "nombre": "Destino", "direccion": "Street 1",
             "direccion2": "", "ciudad": "Miami", "estado": "FL",
@@ -372,7 +378,7 @@ def test_tienda_no_inventa_cantidad_ni_llega_al_cotizador(monkeypatch, cantidad)
     resultado = solicitud_automatica.crear_desde_pedido(22)
 
     assert resultado["ok"] is False
-    assert "Cantidad del producto SKU" in resultado["motivo"]
+    assert resultado["motivo"] == "La cantidad de uno de los productos no es válida."
 
 
 def test_recoleccion_nacional_falla_antes_de_llamar_al_courier(monkeypatch):
