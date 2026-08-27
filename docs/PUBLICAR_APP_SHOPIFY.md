@@ -51,12 +51,19 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 ## Qué tenés que cargar vos
 
 ### 1. Credenciales (Railway → Variables)
-- `SHOPIFY_API_KEY` y `SHOPIFY_API_SECRET` (de la app en el Partner Dashboard).
+- `SHOPIFY_PUBLIC_API_KEY` y `SHOPIFY_PUBLIC_API_SECRET` (app pública TAURO):
+  toda instalación nueva usa este par.
+- Durante la migración de Pesca Jacks, conservar `SHOPIFY_API_KEY` y
+  `SHOPIFY_API_SECRET` con la app histórica. Sus webhooks siguen aceptándose
+  hasta que la tienda reautorice la app pública, sin mezclar aplicaciones.
+- Opcionalmente, después renombrar el par histórico a
+  `SHOPIFY_LEGACY_API_KEY` / `SHOPIFY_LEGACY_API_SECRET`.
 - `SHOPIFY_TOKEN_ENCRYPTION_KEY`: secreto largo y exclusivo para cifrar en reposo
   los tokens de las tiendas. Si se omite, TAURO deriva una clave del API secret
   para mantener compatibilidad, pero conviene configurarlo antes de producción.
   Puede agregarse después sin cortar tokens anteriores: el descifrado conserva
-  el API secret como clave transitoria mientras los nuevos ya usan la exclusiva.
+  ambos API secrets como claves transitorias mientras los nuevos ya usan la
+  exclusiva.
 - `BASE_URL=https://taurosolutions.ar` (o dejar el default).
 
 ### 2. Partner Dashboard (partners.shopify.com → Apps → TAURO → Configuration)

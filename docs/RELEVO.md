@@ -121,7 +121,12 @@ explotaban al colectar y se venían salteando a mano en cada corrida.
   migrar una tienda histórica de `TEST_CLIENT` al dueño real, mientras que el
   alta manual sigue sin poder apropiarse de dominios ajenos. La tabla durable
   de pedidos huérfanos ahora se crea en la migración base antes de leerla.
-- Suite actual: **865 tests + 5 subtests**, sin exclusiones.
+- Shopify TAURO pública: las instalaciones nuevas usan
+  `SHOPIFY_PUBLIC_API_KEY` / `SHOPIFY_PUBLIC_API_SECRET`; el par genérico
+  histórico sigue validando Pesca Jacks durante la reautorización. Cada token
+  registra qué app lo emitió y un webhook tardío de desinstalación de la app
+  vieja no puede borrar una instalación nueva.
+- Suite actual: **875 tests + 5 subtests**, sin exclusiones.
 
 ## Seguridad (03/08/2026)
 

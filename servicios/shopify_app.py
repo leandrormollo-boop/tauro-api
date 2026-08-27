@@ -12,9 +12,11 @@
 #                    en Shopify con su tracking: el comprador recibe el mail
 #                    de "tu pedido va en camino" sin que nadie toque nada.
 #
-# Se enciende cuando estén SHOPIFY_API_KEY / SHOPIFY_API_SECRET en Railway
-# (mismo patrón feature-flag que UPS/DHL). Sin credenciales, el módulo
-# queda inerte y el resto de la plataforma no se entera.
+# Las instalaciones nuevas usan SHOPIFY_PUBLIC_API_KEY / _SECRET. Durante la
+# migración, SHOPIFY_API_KEY / _SECRET conservan la app histórica para que sus
+# webhooks y tokens sigan funcionando hasta que cada tienda reautorice TAURO.
+# Si las variables PUBLIC todavía no existen, las genéricas siguen funcionando
+# como antes.
 # ============================================================
 from __future__ import annotations
 
@@ -104,7 +106,16 @@ def _ensure_tabla() -> None:
                     carrier_id     TEXT,
                     instalada_en   TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+                ALTER TABLE shopify_instalaciones
+                    ADD COLUMN IF NOT EXISTS app_client_id TEXT;
             """)
+            client_id_historico = _client_id_historico()
+            if client_id_historico:
+                cur.execute("""
+                    UPDATE shopify_instalaciones
+                    SET app_client_id = %s
+                    WHERE app_client_id IS NULL OR btrim(app_client_id) = ''
+                """, (client_id_historico,))
         conn.commit()
     _tabla_lista = True
 
@@ -118,7 +129,8 @@ def _fernets() -> list[Fernet]:
     """
     materiales = [
         os.getenv("SHOPIFY_TOKEN_ENCRYPTION_KEY") or "",
-        os.getenv("SHOPIFY_API_SECRET") or "",
+        _credenciales_publicas()[1],
+        *[secreto for _client_id, secreto in _credenciales_webhook()],
     ]
     resultado: list[Fernet] = []
     vistos: set[bytes] = set()
@@ -130,6 +142,93 @@ def _fernets() -> list[Fernet]:
         clave = base64.urlsafe_b64encode(hashlib.sha256(material).digest())
         resultado.append(Fernet(clave))
     return resultado
+
+
+def _credenciales_publicas() -> tuple[str, str]:
+    """Credenciales que se usan para toda instalación nueva.
+
+    Las variables PUBLIC se tratan como un par: si sólo cargaron una, no se
+    mezcla accidentalmente con la credencial histórica.
+    """
+    public_key = (os.getenv("SHOPIFY_PUBLIC_API_KEY") or "").strip()
+    public_secret = (os.getenv("SHOPIFY_PUBLIC_API_SECRET") or "").strip()
+    if public_key or public_secret:
+        return public_key, public_secret
+    return (
+        (os.getenv("SHOPIFY_API_KEY") or "").strip(),
+        (os.getenv("SHOPIFY_API_SECRET") or "").strip(),
+    )
+
+
+def _credenciales_webhook() -> list[tuple[str, str]]:
+    """Apps cuyos webhooks pueden coexistir durante la migración.
+
+    La app pública siempre queda primera. Las variables genéricas se conservan
+    como legado cuando existen las PUBLIC; también se admite el par LEGACY
+    explícito para poder retirar las genéricas más adelante sin apuro.
+    """
+    candidatos = [
+        _credenciales_publicas(),
+        (
+            (os.getenv("SHOPIFY_LEGACY_API_KEY") or "").strip(),
+            (os.getenv("SHOPIFY_LEGACY_API_SECRET") or "").strip(),
+        ),
+        (
+            (os.getenv("SHOPIFY_API_KEY") or "").strip(),
+            (os.getenv("SHOPIFY_API_SECRET") or "").strip(),
+        ),
+    ]
+    resultado: list[tuple[str, str]] = []
+    vistos: set[tuple[str, str]] = set()
+    for client_id, secreto in candidatos:
+        par = (client_id, secreto)
+        if not client_id or not secreto or par in vistos:
+            continue
+        vistos.add(par)
+        resultado.append(par)
+    return resultado
+
+
+def _client_id_historico() -> str:
+    """Identidad de las filas previas a la columna ``app_client_id``."""
+    legacy_key = (os.getenv("SHOPIFY_LEGACY_API_KEY") or "").strip()
+    legacy_secret = (os.getenv("SHOPIFY_LEGACY_API_SECRET") or "").strip()
+    if legacy_key and legacy_secret:
+        return legacy_key
+    generic_key = (os.getenv("SHOPIFY_API_KEY") or "").strip()
+    generic_secret = (os.getenv("SHOPIFY_API_SECRET") or "").strip()
+    if generic_key and generic_secret:
+        return generic_key
+    # Fail closed: una fila sin identidad nunca puede ser borrada por la firma
+    # de una app que apareció después.
+    return "__shopify_legacy_sin_identificar__"
+
+
+def _client_id_instalacion_efectivo(valor: object) -> str:
+    return str(valor or "").strip() or _client_id_historico()
+
+
+def cliente_app_para_webhook(cuerpo: bytes, firma: str,
+                             client_id_esperado: str = "") -> Optional[str]:
+    """Devuelve qué app firmó el webhook, sin exponer sus secretos.
+
+    Si una tienda ya reautorizó la app pública, sólo se acepta esa firma. Las
+    filas históricas sin ``app_client_id`` admiten ambas durante la transición.
+    """
+    from servicios.integraciones_tienda import verificar_hmac_shopify
+
+    esperado = (client_id_esperado or "").strip()
+    for client_id, secreto in _credenciales_webhook():
+        if esperado and client_id != esperado:
+            continue
+        if verificar_hmac_shopify(secreto, cuerpo, firma):
+            return client_id
+    return None
+
+
+def firma_valida_webhook_app(cuerpo: bytes, firma: str,
+                             client_id_esperado: str = "") -> bool:
+    return cliente_app_para_webhook(cuerpo, firma, client_id_esperado) is not None
 
 
 def _cifrar_token(token: str) -> str:
@@ -161,7 +260,13 @@ def _descifrar_token(token_guardado: str) -> str:
 
 
 def app_configurada() -> bool:
-    return bool(os.getenv("SHOPIFY_API_KEY") and os.getenv("SHOPIFY_API_SECRET"))
+    api_key, api_secret = _credenciales_publicas()
+    return bool(api_key and api_secret)
+
+
+def api_key_publica() -> str:
+    """Client ID público; es seguro usarlo en App Bridge y URLs OAuth."""
+    return _credenciales_publicas()[0]
 
 
 def _base_url() -> str:
@@ -173,7 +278,7 @@ def _base_url() -> str:
 def url_instalacion(dominio: str, state: str) -> str:
     """A dónde mandamos al comerciante para que autorice la app."""
     params = {
-        "client_id": os.getenv("SHOPIFY_API_KEY", ""),
+        "client_id": _credenciales_publicas()[0],
         "scope": SCOPES,
         "redirect_uri": f"{_base_url()}/shopify/callback",
         "state": state,
@@ -187,7 +292,7 @@ def validar_hmac_query(params: dict) -> bool:
     verificación, cualquiera podría hacerse pasar por Shopify e
     instalarnos una tienda falsa.
     """
-    secreto = os.getenv("SHOPIFY_API_SECRET", "")
+    secreto = _credenciales_publicas()[1]
     firma = params.get("hmac", "")
     if not secreto or not firma:
         return False
@@ -214,11 +319,12 @@ def dominio_valido(dominio: str) -> bool:
 def canjear_token(dominio: str, code: str) -> Optional[dict]:
     """El código de un solo uso se cambia por el token permanente de esa tienda."""
     try:
+        client_id, client_secret = _credenciales_publicas()
         r = requests.post(
             f"https://{dominio}/admin/oauth/access_token",
             json={
-                "client_id": os.getenv("SHOPIFY_API_KEY", ""),
-                "client_secret": os.getenv("SHOPIFY_API_SECRET", ""),
+                "client_id": client_id,
+                "client_secret": client_secret,
                 "code": code,
             },
             timeout=20,
@@ -238,12 +344,14 @@ def guardar_instalacion(dominio: str, access_token: str, scopes: str = "") -> No
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO shopify_instalaciones (dominio, access_token, scopes)
-                VALUES (%s, %s, %s)
+                INSERT INTO shopify_instalaciones
+                    (dominio, access_token, scopes, app_client_id)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (dominio) DO UPDATE
                     SET access_token = EXCLUDED.access_token,
-                        scopes = EXCLUDED.scopes
-            """, (dominio, token_cifrado, scopes))
+                        scopes = EXCLUDED.scopes,
+                        app_client_id = EXCLUDED.app_client_id
+            """, (dominio, token_cifrado, scopes, _credenciales_publicas()[0]))
         conn.commit()
 
 
@@ -256,6 +364,9 @@ def instalacion(dominio: str) -> Optional[dict]:
             if not row:
                 return None
             datos = dict(row)
+            datos["app_client_id"] = _client_id_instalacion_efectivo(
+                datos.get("app_client_id")
+            )
             try:
                 datos["access_token"] = _descifrar_token(datos.get("access_token") or "")
             except Exception as exc:
@@ -341,7 +452,7 @@ def vincular_cliente(dominio: str, cliente_id: str) -> None:
             )
         conn.commit()
 
-    if not os.getenv("SHOPIFY_API_SECRET", "").strip():
+    if not _credenciales_publicas()[1]:
         return
     try:
         from servicios.integraciones_tienda import (
@@ -386,12 +497,46 @@ def instalaciones_sin_dueno() -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
 
 
-def desinstalar(dominio: str) -> None:
+def cliente_app_instalada(dominio: str) -> Optional[str]:
+    """Client ID dueño del token actual, sin abrir ni exponer el token."""
     _ensure_tabla()
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                "SELECT app_client_id FROM shopify_instalaciones WHERE dominio = %s",
+                (dominio,),
+            )
+            fila = cur.fetchone()
+    if not fila:
+        return None
+    return _client_id_instalacion_efectivo((fila or {}).get("app_client_id"))
+
+
+def desinstalar(dominio: str, app_client_id: str = "") -> bool:
+    """Borra sólo la instalación perteneciente a la app que firmó el evento.
+
+    Esto evita que el webhook tardío de desinstalación de la app histórica
+    borre el token recién emitido por la app pública.
+    """
+    _ensure_tabla()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT app_client_id FROM shopify_instalaciones WHERE dominio = %s",
+                (dominio,),
+            )
+            fila = cur.fetchone()
+            if not fila:
+                return False
+            guardado = _client_id_instalacion_efectivo(
+                (fila or {}).get("app_client_id")
+            )
+            firmado = (app_client_id or "").strip()
+            if guardado and firmado and guardado != firmado:
+                return False
             cur.execute("DELETE FROM shopify_instalaciones WHERE dominio = %s", (dominio,))
         conn.commit()
+    return True
 
 
 # ── Llamadas a la API de la tienda ──────────────────────────

@@ -12,8 +12,6 @@
 from __future__ import annotations
 
 import json
-import os
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
@@ -43,8 +41,13 @@ async def shopify_webhook(request: Request):
         # el que Shopify firma los webhooks de todas sus tiendas) y, si es
         # legítima, se guarda en la bandeja de huérfanos y se contesta 200.
         # Tiendanube ya resolvía esto bien; faltaba portarlo.
-        secreto_app = os.getenv("SHOPIFY_API_SECRET", "").strip()
-        if secreto_app and verificar_hmac_shopify(secreto_app, cuerpo, firma):
+        from servicios.shopify_app import firma_valida_webhook_app, instalacion
+        try:
+            instalacion_oauth = instalacion(dominio)
+        except Exception:
+            instalacion_oauth = None
+        app_esperada = str((instalacion_oauth or {}).get("app_client_id") or "")
+        if firma_valida_webhook_app(cuerpo, firma, app_esperada):
             if topic.startswith("orders/"):
                 try:
                     from servicios.integraciones_tienda import guardar_pedido_huerfano
@@ -64,14 +67,24 @@ async def shopify_webhook(request: Request):
     secreto_webhook = tienda["secreto"]
     try:
         from servicios.shopify_app import instalacion
-        if instalacion(dominio):
+        instalacion_oauth = instalacion(dominio)
+        if instalacion_oauth:
             # Tienda OAuth: Shopify firma con el secret único de la app. El
             # marcador guardado en tiendas_conectadas no es una credencial.
-            secreto_webhook = os.getenv("SHOPIFY_API_SECRET", "").strip()
+            from servicios.shopify_app import firma_valida_webhook_app
+            if not firma_valida_webhook_app(
+                cuerpo, firma, str(instalacion_oauth.get("app_client_id") or "")
+            ):
+                print(f"[integraciones] firma shopify INVALIDA para {dominio} "
+                      f"(topic {topic})")
+                return JSONResponse({"ok": False}, status_code=401)
+            secreto_webhook = "oauth:verificado"
     except Exception:
         pass
 
-    if not secreto_webhook or not verificar_hmac_shopify(secreto_webhook, cuerpo, firma):
+    if secreto_webhook != "oauth:verificado" and (
+        not secreto_webhook or not verificar_hmac_shopify(secreto_webhook, cuerpo, firma)
+    ):
         print(f"[integraciones] firma shopify INVALIDA para {dominio} (topic {topic})")
         return JSONResponse({"ok": False}, status_code=401)
 

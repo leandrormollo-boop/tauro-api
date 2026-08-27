@@ -8,8 +8,6 @@
 # ============================================================
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -17,7 +15,7 @@ from servicios.shopify_app import (
     app_configurada, url_instalacion, validar_hmac_query, dominio_valido,
     canjear_token, guardar_instalacion, registrar_webhooks, vincular_cliente,
     desinstalar, nuevo_state, ShopifyWebhookVerificationError,
-    webhooks_requeridos,
+    webhooks_requeridos, api_key_publica,
 )
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
@@ -112,6 +110,15 @@ def install(request: Request, shop: str = ""):
         inst = None
 
     if inst and inst.get("access_token"):
+        # Una fila histórica puede tener todos los scopes correctos y aun así
+        # pertenecer a la app vieja. Con la app pública activa, esa tienda debe
+        # pasar una vez por SU OAuth; mostrar el panel legado acá impediría la
+        # migración para siempre.
+        app_instalada = str(inst.get("app_client_id") or "").strip()
+        if app_instalada != api_key_publica():
+            print(f"[shopify] {shop} todavía pertenece a la app histórica "
+                  "→ se reenvía al consentimiento de la app pública")
+            return _redirect_oauth(shop)
         # PERMISOS DESACTUALIZADOS: el token guardado sirve sólo para los
         # scopes con los que se autorizó. Si desde entonces la app pide más
         # (pasó al arreglar los de fulfillment orders), el token viejo sigue
@@ -156,7 +163,7 @@ def _pagina_autodeteccion() -> HTMLResponse:
     con ese dato. Dura un parpadeo y evita que el comerciante tenga que
     escribir su dominio a mano.
     """
-    api_key = os.getenv("SHOPIFY_API_KEY", "")
+    api_key = api_key_publica()
     return HTMLResponse(
         headers={"Content-Security-Policy":
                  "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"},
@@ -265,7 +272,7 @@ def _panel_tienda(shop: str, inst: dict, host: str = "") -> HTMLResponse:
     #   1. App Bridge, el puente oficial que Shopify espera en apps embebidas
     #   2. frame-ancestors permitiendo a admin.shopify.com y a la tienda
     #   3. NO mandar X-Frame-Options, que bloquearía el iframe
-    api_key = os.getenv("SHOPIFY_API_KEY", "")
+    api_key = api_key_publica()
     headers = {
         "Content-Security-Policy":
             f"frame-ancestors https://{shop} https://admin.shopify.com;",
@@ -369,14 +376,13 @@ def callback(request: Request):
         respuesta.delete_cookie("shopify_state")
         return respuesta
 
-    guardar_instalacion(shop, data["access_token"], data.get("scope", ""))
     try:
         topics = registrar_webhooks(shop, data["access_token"])
     except ShopifyWebhookVerificationError:
         respuesta = _pagina(
             "No pudimos verificar Shopify",
-            "La conexión no respondió a tiempo. Guardamos la autorización sin "
-            "vincular la tienda; reintentá en unos minutos.",
+            "La conexión no respondió a tiempo. Conservamos intacta tu conexión "
+            "anterior; reintentá en unos minutos.",
             f'<a href="/shopify/install?shop={shop}&reautorizar=1">Reintentar conexión</a>',
             status=503,
         )
@@ -395,6 +401,11 @@ def callback(request: Request):
         )
         respuesta.delete_cookie("shopify_state")
         return respuesta
+
+    # PROMOCIÓN ATÓMICA: recién ahora que el token nuevo tiene todos los
+    # webhooks confirmados reemplaza al legado. Si Shopify falló antes, la
+    # tienda sigue trabajando con la app anterior y no pierde eventos.
+    guardar_instalacion(shop, data["access_token"], data.get("scope", ""))
 
     # Si el comerciante instaló con su sesión del portal abierta (el caso
     # normal), la tienda queda atada a su cuenta acá mismo. Si no, la
@@ -469,9 +480,8 @@ async def tarifas(request: Request):
 # app: sin eso, cualquiera podría pedir o borrar datos de un comercio.
 
 def _firma_valida_app(cuerpo: bytes, firma: str) -> bool:
-    from servicios.integraciones_tienda import verificar_hmac_shopify
-    secreto = os.getenv("SHOPIFY_API_SECRET", "")
-    return bool(secreto) and verificar_hmac_shopify(secreto, cuerpo, firma)
+    from servicios.shopify_app import firma_valida_webhook_app
+    return firma_valida_webhook_app(cuerpo, firma)
 
 
 @router.post("/webhook/customers/data_request")
@@ -514,6 +524,10 @@ async def gdpr_customer_redact(request: Request):
         print(f"[gdpr] redact de comprador en {dominio}: {n} pedido(s) anonimizados")
     except Exception as e:
         print(f"[gdpr] error procesando customers/redact: {e}")
+        # Un 200 confirmaría un borrado que no ocurrió y Shopify dejaría de
+        # reintentarlo. El 503 conserva la obligación pendiente sin filtrar el
+        # detalle interno.
+        return JSONResponse({"ok": False}, status_code=503)
     return {"ok": True}
 
 
@@ -524,33 +538,47 @@ async def gdpr_shop_redact(request: Request):
     que borremos todo lo suyo.
     """
     cuerpo = await request.body()
-    if not _firma_valida_app(cuerpo, request.headers.get("x-shopify-hmac-sha256", "")):
+    firma = request.headers.get("x-shopify-hmac-sha256", "")
+    from servicios.shopify_app import (
+        cliente_app_instalada, cliente_app_para_webhook,
+    )
+    app_client_id = cliente_app_para_webhook(cuerpo, firma)
+    if not app_client_id:
         return JSONResponse({"ok": False}, status_code=401)
 
     dominio = request.headers.get("x-shopify-shop-domain", "")
     try:
+        app_actual = cliente_app_instalada(dominio)
+        if app_actual and app_actual != app_client_id:
+            # La app histórica puede mandar SHOP_REDACT 48 h después de su
+            # desinstalación. Si la tienda ya autorizó la app pública, ese
+            # evento viejo no puede borrar el token ni los datos nuevos.
+            print(f"[gdpr] shop_redact legado ignorado para {dominio}: "
+                  "la tienda está activa bajo otra app")
+            return {"ok": True}
         from servicios.integraciones_tienda import borrar_datos_tienda
         n = borrar_datos_tienda(dominio)
-        desinstalar(dominio)
+        desinstalar(dominio, app_client_id)
         print(f"[gdpr] shop_redact de {dominio}: {n} registro(s) borrados")
     except Exception as e:
         print(f"[gdpr] error procesando shop/redact: {e}")
+        return JSONResponse({"ok": False}, status_code=503)
     return {"ok": True}
 
 
 @router.post("/webhook/desinstalada")
 async def desinstalada(request: Request):
     """El comerciante desinstaló la app: borramos su token."""
-    from servicios.integraciones_tienda import verificar_hmac_shopify
+    from servicios.shopify_app import cliente_app_para_webhook
 
     cuerpo = await request.body()
     shop = request.headers.get("x-shopify-shop-domain", "")
     firma = request.headers.get("x-shopify-hmac-sha256", "")
-    secreto = os.getenv("SHOPIFY_API_SECRET", "")
-
-    if not secreto or not verificar_hmac_shopify(secreto, cuerpo, firma):
+    app_client_id = cliente_app_para_webhook(cuerpo, firma)
+    if not app_client_id:
         return JSONResponse({"ok": False}, status_code=401)
 
-    desinstalar(shop)
-    print(f"[shopify] app desinstalada de {shop}")
+    borrada = desinstalar(shop, app_client_id)
+    print(f"[shopify] app desinstalada de {shop} · "
+          f"{'token eliminado' if borrada else 'evento legado ignorado'}")
     return {"ok": True}

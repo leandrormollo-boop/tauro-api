@@ -72,6 +72,203 @@ def test_scopes_shopify_incluyen_ubicaciones_para_nombres_de_deposito():
     assert "read_locations" in SCOPES.split(",")
 
 
+def test_app_publica_recibe_oauth_y_conserva_webhooks_legados(monkeypatch):
+    from servicios import shopify_app
+
+    monkeypatch.setenv("SHOPIFY_PUBLIC_API_KEY", "client-publico")
+    monkeypatch.setenv("SHOPIFY_PUBLIC_API_SECRET", "secret-publico")
+    monkeypatch.setenv("SHOPIFY_API_KEY", "client-legado")
+    monkeypatch.setenv("SHOPIFY_API_SECRET", "secret-legado")
+
+    assert shopify_app.app_configurada()
+    assert shopify_app.api_key_publica() == "client-publico"
+    assert "client_id=client-publico" in shopify_app.url_instalacion(
+        "tauro-qa.myshopify.com", "state-qa",
+    )
+
+    cuerpo = b'{"id":1}'
+    firma_publica = base64.b64encode(
+        hmac.new(b"secret-publico", cuerpo, hashlib.sha256).digest()
+    ).decode()
+    firma_legada = base64.b64encode(
+        hmac.new(b"secret-legado", cuerpo, hashlib.sha256).digest()
+    ).decode()
+
+    assert shopify_app.cliente_app_para_webhook(cuerpo, firma_publica) == "client-publico"
+    assert shopify_app.cliente_app_para_webhook(cuerpo, firma_legada) == "client-legado"
+    assert not shopify_app.firma_valida_webhook_app(
+        cuerpo, firma_legada, "client-publico",
+    )
+
+
+def test_credencial_publica_incompleta_no_se_mezcla_con_legada(monkeypatch):
+    from servicios import shopify_app
+
+    monkeypatch.setenv("SHOPIFY_PUBLIC_API_KEY", "client-publico")
+    monkeypatch.delenv("SHOPIFY_PUBLIC_API_SECRET", raising=False)
+    monkeypatch.setenv("SHOPIFY_API_KEY", "client-legado")
+    monkeypatch.setenv("SHOPIFY_API_SECRET", "secret-legado")
+
+    assert shopify_app.api_key_publica() == "client-publico"
+    assert not shopify_app.app_configurada()
+
+
+def test_fila_sin_client_id_se_trata_como_legada_y_no_como_wildcard(monkeypatch):
+    from servicios import shopify_app
+
+    monkeypatch.setenv("SHOPIFY_PUBLIC_API_KEY", "client-publico")
+    monkeypatch.setenv("SHOPIFY_PUBLIC_API_SECRET", "secret-publico")
+    monkeypatch.setenv("SHOPIFY_API_KEY", "client-legado")
+    monkeypatch.setenv("SHOPIFY_API_SECRET", "secret-legado")
+
+    assert shopify_app._client_id_instalacion_efectivo(None) == "client-legado"
+
+
+def test_desinstalacion_legada_no_borra_token_de_app_publica(monkeypatch):
+    from servicios import shopify_app
+
+    class _Cursor:
+        borrado = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, _params=None):
+            if query.lstrip().startswith("DELETE"):
+                self.borrado = True
+
+        def fetchone(self):
+            return {"app_client_id": "client-publico"}
+
+    cursor = _Cursor()
+    conn = _ConnTienda(cursor)
+    monkeypatch.setattr(shopify_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(shopify_app, "get_conn", lambda: conn)
+
+    assert not shopify_app.desinstalar(
+        "tauro-qa.myshopify.com", "client-legado",
+    )
+    assert not cursor.borrado
+    assert conn.commits == 0
+
+    assert shopify_app.desinstalar(
+        "tauro-qa.myshopify.com", "client-publico",
+    )
+    assert cursor.borrado
+    assert conn.commits == 1
+
+
+def test_shop_redact_legado_no_borra_datos_de_app_publica(monkeypatch):
+    from endpoints import shopify
+    from servicios import integraciones_tienda, shopify_app
+
+    borrados = []
+    desinstalaciones = []
+    monkeypatch.setattr(
+        shopify_app, "cliente_app_para_webhook", lambda *_args: "client-legado",
+    )
+    monkeypatch.setattr(
+        shopify_app, "cliente_app_instalada", lambda _dominio: "client-publico",
+    )
+    monkeypatch.setattr(
+        integraciones_tienda, "borrar_datos_tienda", lambda *_args: borrados.append(True),
+    )
+    monkeypatch.setattr(
+        shopify, "desinstalar", lambda *_args: desinstalaciones.append(True),
+    )
+
+    response = asyncio.run(shopify.gdpr_shop_redact(_Request(
+        b'{"shop_id":1}',
+        {
+            "x-shopify-shop-domain": "tauro-qa.myshopify.com",
+            "x-shopify-hmac-sha256": "firma-legada",
+        },
+    )))
+
+    assert response == {"ok": True}
+    assert borrados == []
+    assert desinstalaciones == []
+
+
+def test_shop_redact_fallido_devuelve_503_para_que_shopify_reintente(monkeypatch):
+    from endpoints import shopify
+    from servicios import shopify_app
+
+    monkeypatch.setattr(
+        shopify_app, "cliente_app_para_webhook", lambda *_args: "client-publico",
+    )
+    monkeypatch.setattr(
+        shopify_app, "cliente_app_instalada",
+        lambda _dominio: (_ for _ in ()).throw(RuntimeError("db caída")),
+    )
+
+    response = asyncio.run(shopify.gdpr_shop_redact(_Request(
+        b'{"shop_id":1}',
+        {
+            "x-shopify-shop-domain": "tauro-qa.myshopify.com",
+            "x-shopify-hmac-sha256": "firma-publica",
+        },
+    )))
+
+    assert response.status_code == 503
+
+
+def test_customer_redact_sin_ordenes_no_anonimiza_toda_la_tienda(monkeypatch):
+    from servicios import integraciones_tienda
+
+    monkeypatch.setattr(
+        integraciones_tienda, "_ensure_tablas",
+        lambda: (_ for _ in ()).throw(AssertionError("no debe tocar la base")),
+    )
+
+    assert integraciones_tienda.anonimizar_pedidos(
+        "tauro-qa.myshopify.com", [],
+    ) == 0
+
+
+def test_shop_redact_purga_todos_los_datos_del_dominio(monkeypatch):
+    from servicios import integraciones_tienda
+
+    class _CursorBorrado:
+        def __init__(self):
+            self.consultas = []
+            self.rowcount = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.consultas.append((" ".join(query.split()), params))
+
+    cursor = _CursorBorrado()
+    conn = _ConnTienda(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    dominio = "tauro-qa.myshopify.com"
+    assert integraciones_tienda.borrar_datos_tienda(dominio) == 7
+    sql = "\n".join(query for query, _params in cursor.consultas)
+
+    for tabla in (
+        "pedidos_huerfanos",
+        "shopify_webhook_eventos",
+        "shopify_sync_estado",
+        "config_envio_tienda",
+        "producto_inventario_ubicaciones",
+        "productos",
+        "tiendas_conectadas",
+    ):
+        assert f"DELETE FROM {tabla}" in sql
+    assert all(params == (dominio,) for _query, params in cursor.consultas)
+    assert conn.commits == 1
+
+
 def test_conexion_manual_no_reasigna_tienda_de_otro_cliente(monkeypatch):
     from servicios import integraciones_tienda
 
@@ -479,7 +676,9 @@ def test_abrir_app_instalada_no_consume_admin_api(monkeypatch):
         "access_token": "token-qa",
         "scopes": SHOPIFY_SCOPES,
         "cliente_id": "MELCIOR",
+        "app_client_id": "client-publico",
     })
+    monkeypatch.setattr(shopify, "api_key_publica", lambda: "client-publico")
     monkeypatch.setattr(
         shopify, "registrar_webhooks",
         lambda *_args: (_ for _ in ()).throw(AssertionError("no debe llamar Shopify")),
@@ -491,6 +690,27 @@ def test_abrir_app_instalada_no_consume_admin_api(monkeypatch):
     ), shop="tauro-qa.myshopify.com")
 
     assert response == "panel-local"
+
+
+def test_abrir_instalacion_legada_fuerza_oauth_publico(monkeypatch):
+    from endpoints import shopify
+    from servicios import shopify_app
+
+    monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "api_key_publica", lambda: "client-publico")
+    monkeypatch.setattr(shopify_app, "instalacion", lambda _dominio: {
+        "access_token": "token-legado",
+        "scopes": SHOPIFY_SCOPES,
+        "cliente_id": "PESCAJACKS",
+        "app_client_id": None,
+    })
+    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio: ("oauth", dominio))
+
+    response = shopify.install(_Request(
+        query_params={"shop": "pesca-jacks.myshopify.com"},
+    ), shop="pesca-jacks.myshopify.com")
+
+    assert response == ("oauth", "pesca-jacks.myshopify.com")
 
 
 def test_reautorizar_inicia_oauth_sin_consultar_admin_api(monkeypatch):
@@ -577,12 +797,13 @@ def test_callback_no_declara_exito_si_falta_un_webhook(monkeypatch):
 
     desvinculadas = []
     vinculadas = []
+    guardadas = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
         "access_token": "token-qa", "scope": SHOPIFY_SCOPES,
     })
-    monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: None)
+    monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: guardadas.append(True))
     monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: SHOPIFY_WEBHOOKS[:-1])
     monkeypatch.setattr(shopify, "desinstalar", desvinculadas.append)
     monkeypatch.setattr(shopify, "vincular_cliente", lambda *_args: vinculadas.append(True))
@@ -600,18 +821,20 @@ def test_callback_no_declara_exito_si_falta_un_webhook(monkeypatch):
     assert response.status_code == 503
     assert desvinculadas == []
     assert vinculadas == []
+    assert guardadas == []
 
 
 def test_callback_timeout_verificando_webhooks_no_borra_instalacion(monkeypatch):
     from endpoints import shopify
 
     borradas = []
+    guardadas = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
         "access_token": "token-qa", "scope": SHOPIFY_SCOPES,
     })
-    monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: None)
+    monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: guardadas.append(True))
 
     def falla_verificacion(*_args):
         raise shopify.ShopifyWebhookVerificationError("timeout")
@@ -631,6 +854,7 @@ def test_callback_timeout_verificando_webhooks_no_borra_instalacion(monkeypatch)
 
     assert response.status_code == 503
     assert borradas == []
+    assert guardadas == []
 
 
 def test_callback_state_distinto_no_canjea_token(monkeypatch):
@@ -716,6 +940,7 @@ def test_webhook_inventario_se_encola_idempotente_y_responde_rapido(monkeypatch)
     monkeypatch.setattr(integraciones, "verificar_hmac_shopify", lambda *_args: True)
     monkeypatch.setenv("SHOPIFY_API_SECRET", "secreto-app-qa")
     monkeypatch.setattr(shopify_app, "instalacion", lambda _dominio: {"access_token": "token"})
+    monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_args: True)
 
     def encolar(*args):
         recibidos.append(args)

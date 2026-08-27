@@ -572,27 +572,24 @@ def anonimizar_pedidos(dominio: str, pedidos_externos: list[str]) -> int:
     personales de los pedidos, dejando el registro comercial (montos,
     fechas) que hace falta conservar por contabilidad.
     """
-    _ensure_tablas()
     dominio = (dominio or "").strip().lower()
-    if not dominio:
+    pedidos_externos = [str(x) for x in (pedidos_externos or []) if str(x).strip()]
+    # Shopify puede mandar customers/redact sin orders_to_redact. Eso indica
+    # que no hay pedidos de ese comprador para tocar; jamás significa "todos
+    # los pedidos de la tienda".
+    if not dominio or not pedidos_externos:
         return 0
+    _ensure_tablas()
     anonimo = json.dumps({"nombre": "[dato eliminado a pedido del comprador]"},
                          ensure_ascii=False)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if pedidos_externos:
-                cur.execute("""
-                    UPDATE pedidos_tienda p SET destinatario = %s::jsonb
-                    FROM tiendas_conectadas t
-                    WHERE p.tienda_id = t.id AND t.dominio = %s
-                      AND p.pedido_externo_id = ANY(%s)
-                """, (anonimo, dominio, [str(x) for x in pedidos_externos]))
-            else:
-                cur.execute("""
-                    UPDATE pedidos_tienda p SET destinatario = %s::jsonb
-                    FROM tiendas_conectadas t
-                    WHERE p.tienda_id = t.id AND t.dominio = %s
-                """, (anonimo, dominio))
+            cur.execute("""
+                UPDATE pedidos_tienda p SET destinatario = %s::jsonb
+                FROM tiendas_conectadas t
+                WHERE p.tienda_id = t.id AND t.dominio = %s
+                  AND p.pedido_externo_id = ANY(%s)
+            """, (anonimo, dominio, pedidos_externos))
             n = cur.rowcount
         conn.commit()
     return n
@@ -601,7 +598,14 @@ def anonimizar_pedidos(dominio: str, pedidos_externos: list[str]) -> int:
 def borrar_datos_tienda(dominio: str) -> int:
     """
     GDPR — el comercio desinstaló y pasaron 48 hs: se borra todo lo suyo.
-    Los pedidos caen solos por la clave foránea de tiendas_conectadas.
+
+    El dominio es la única clave común cuando la tienda todavía no llegó a
+    vincularse con un cliente. Por eso la purga también incluye huérfanos,
+    payloads pendientes de webhooks, estado de sincronización y el espejo de
+    catálogo/stock. Los pedidos vinculados caen por la clave foránea de
+    tiendas_conectadas; el inventario cae al borrar sus productos, aunque se
+    elimina explícitamente primero para que la intención de privacidad quede
+    verificable y no dependa sólo del cascade.
     """
     _ensure_tablas()
     dominio = (dominio or "").strip().lower()
@@ -609,11 +613,29 @@ def borrar_datos_tienda(dominio: str) -> int:
         return 0
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM tiendas_conectadas WHERE dominio = %s", (dominio,))
-            n = cur.rowcount
+            total = 0
+            cur.execute("DELETE FROM pedidos_huerfanos WHERE dominio = %s", (dominio,))
+            total += cur.rowcount
+            cur.execute("DELETE FROM shopify_webhook_eventos WHERE dominio = %s", (dominio,))
+            total += cur.rowcount
+            cur.execute("DELETE FROM shopify_sync_estado WHERE dominio = %s", (dominio,))
+            total += cur.rowcount
             cur.execute("DELETE FROM config_envio_tienda WHERE dominio = %s", (dominio,))
+            total += cur.rowcount
+            cur.execute("""
+                DELETE FROM producto_inventario_ubicaciones
+                WHERE plataforma = 'shopify' AND tienda_dominio = %s
+            """, (dominio,))
+            total += cur.rowcount
+            cur.execute("""
+                DELETE FROM productos
+                WHERE plataforma = 'shopify' AND tienda_dominio = %s
+            """, (dominio,))
+            total += cur.rowcount
+            cur.execute("DELETE FROM tiendas_conectadas WHERE dominio = %s", (dominio,))
+            total += cur.rowcount
         conn.commit()
-    return n
+    return total
 
 
 def descartar_pedido(cliente_id: str, pedido_id: int) -> None:
