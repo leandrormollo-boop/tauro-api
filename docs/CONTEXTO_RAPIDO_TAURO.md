@@ -30,7 +30,8 @@ Importante: diferenciar bien tres superficies:
 - Migracion desde Google Sheets a PostgreSQL completada.
 - Panel admin funcionando con CRUD de clientes, facturas, pagos, rutas, productos, migracion y solicitudes de guia.
 - Portal cliente usa PostgreSQL.
-- API B2B `/cotizar` y `/pedido` usan PostgreSQL para API keys, productos, pricing y cotizaciones.
+- API B2B `/cotizar`, `/pedido` y `/stock` usan PostgreSQL para API keys,
+  productos, inventario, pricing y cotizaciones.
 - Web publica `/cotizar-web` cotiza con FedEx y markup web.
 - El endpoint `/pedido` ahora tambien crea una solicitud interna de guia y devuelve `solicitud_id`.
 - Railway deploy verificado despues de los ultimos cambios.

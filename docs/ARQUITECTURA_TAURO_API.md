@@ -203,6 +203,19 @@ Headers: X-API-Key: tk_juanmendez_a3f9x
 
 ---
 
+### GET /stock
+```
+Headers: X-API-Key: <clave del cliente>
+GET /stock?limite=100&offset=0
+```
+
+Devuelve únicamente el catálogo del dueño de la clave: variante e imagen de
+Shopify, stock disponible/comprometido/físico/entrante, desglose por ubicación
+y estado de la última sincronización. La lectura sale del espejo PostgreSQL de
+TAURO, está paginada y nunca publica costos o márgenes logísticos.
+
+---
+
 ## 9. PDF de armado de guía
 
 El PDF contiene 4 bloques:

@@ -26,7 +26,9 @@ def construir_content_security_policy(
     pixel_habilitado: bool = False,
 ) -> str:
     scripts = ["'self'", f"'nonce-{nonce}'"]
-    imagenes = ["'self'", "data:"]
+    # Las fotos del catálogo se sirven desde el CDN oficial de Shopify. Son
+    # imágenes pasivas; scripts y conexiones siguen cerrados a terceros.
+    imagenes = ["'self'", "data:", "https://cdn.shopify.com", "https://*.shopifycdn.com"]
     conexiones = ["'self'"]
 
     # Orígenes exactos que usa el Pixel básico. No se abren comodines de

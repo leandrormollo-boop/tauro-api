@@ -45,32 +45,66 @@ async def shopify_webhook(request: Request):
         # Tiendanube ya resolvía esto bien; faltaba portarlo.
         secreto_app = os.getenv("SHOPIFY_API_SECRET", "").strip()
         if secreto_app and verificar_hmac_shopify(secreto_app, cuerpo, firma):
-            try:
-                from servicios.integraciones_tienda import guardar_pedido_huerfano
-                guardar_pedido_huerfano(dominio, cuerpo)
-            except Exception as e:
-                print(f"[integraciones] no pude guardar el huérfano de {dominio}: {e}")
-            print(f"[integraciones] shopify {dominio} SIN VINCULAR: venta guardada "
-                  f"como huérfana. El comerciante tiene que vincular su tienda "
-                  f"en /portal/tienda para verla.")
+            if topic.startswith("orders/"):
+                try:
+                    from servicios.integraciones_tienda import guardar_pedido_huerfano
+                    guardar_pedido_huerfano(dominio, cuerpo)
+                except Exception as e:
+                    print(f"[integraciones] no pude guardar el huérfano de {dominio}: {e}")
+                print(f"[integraciones] shopify {dominio} SIN VINCULAR: venta guardada "
+                      f"como huérfana. El comerciante tiene que vincular su tienda "
+                      f"en /portal/tienda para verla.")
+            # Catálogo/inventario se recuperan completos al vincular: no se
+            # guardan payloads sin tenant.
             return {"ok": True, "estado": "sin_vincular"}
         # Firma inválida o app sin configurar: 401 sin detalle, no le
         # confirmamos a un tercero qué dominios existen.
         return JSONResponse({"ok": False}, status_code=401)
 
-    if not verificar_hmac_shopify(tienda["secreto"], cuerpo, firma):
+    secreto_webhook = tienda["secreto"]
+    try:
+        from servicios.shopify_app import instalacion
+        if instalacion(dominio):
+            # Tienda OAuth: Shopify firma con el secret único de la app. El
+            # marcador guardado en tiendas_conectadas no es una credencial.
+            secreto_webhook = os.getenv("SHOPIFY_API_SECRET", "").strip()
+    except Exception:
+        pass
+
+    if not secreto_webhook or not verificar_hmac_shopify(secreto_webhook, cuerpo, firma):
         print(f"[integraciones] firma shopify INVALIDA para {dominio} (topic {topic})")
         return JSONResponse({"ok": False}, status_code=401)
-
-    # Solo nos interesan órdenes; otros topics se aceptan y se ignoran
-    # (devolver 200 evita que Shopify reintente o dé de baja el webhook).
-    if topic and not topic.startswith("orders/"):
-        return {"ok": True, "ignorado": topic}
 
     try:
         order = json.loads(cuerpo.decode("utf-8"))
     except Exception:
         return JSONResponse({"ok": False, "error": "JSON inválido"}, status_code=400)
+
+    topics_sync = {
+        "products/create", "products/update", "products/delete",
+        "inventory_levels/update", "inventory_items/update",
+    }
+    if topic in topics_sync:
+        from servicios.shopify_catalogo import encolar_evento, lanzar_procesamiento_eventos
+        webhook_id = request.headers.get("x-shopify-webhook-id", "").strip()
+        if not webhook_id:
+            # Shopify siempre lo envía; el hash permite que Postman/tests
+            # conserven la misma garantía idempotente.
+            import hashlib
+            webhook_id = hashlib.sha256(
+                dominio.encode() + b"\0" + topic.encode() + b"\0" + cuerpo
+            ).hexdigest()
+        nuevo = encolar_evento(
+            webhook_id, dominio, topic, order,
+            request.headers.get("x-shopify-triggered-at"),
+        )
+        if nuevo:
+            lanzar_procesamiento_eventos()
+        return {"ok": True, "encolado": nuevo, "duplicado": not nuevo}
+
+    # Otros topics se aceptan y se ignoran para no provocar reintentos.
+    if topic and not topic.startswith("orders/"):
+        return {"ok": True, "ignorado": topic}
 
     pedido = parsear_pedido_shopify(order)
     if not pedido:

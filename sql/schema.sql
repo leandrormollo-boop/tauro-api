@@ -244,14 +244,119 @@ CREATE TABLE IF NOT EXISTS productos (
     alto_cm          REAL NOT NULL,
     peso_kg          REAL NOT NULL,
     valor_usd_default REAL NOT NULL DEFAULT 0,
-    imagen_url       TEXT,                            -- miniatura data: URI (import Shopify)
+    imagen_url       TEXT,                            -- imagen de la tienda/CDN
+    plataforma       TEXT,                            -- shopify / tiendanube / manual
+    tienda_dominio   TEXT,
+    external_product_id       TEXT,
+    external_variant_id       TEXT,
+    external_inventory_item_id TEXT,
+    sku_tienda       TEXT,
+    titulo_tienda    TEXT,
+    variante_tienda  TEXT,
+    precio_tienda    NUMERIC(14,2),
+    moneda_tienda    TEXT,
+    hs_code_tienda   TEXT,
+    pais_origen_tienda TEXT,
+    stock_controlado BOOLEAN NOT NULL DEFAULT FALSE,
+    stock_disponible INTEGER,
+    stock_comprometido INTEGER,
+    stock_fisico     INTEGER,
+    stock_entrante   INTEGER,
+    stock_actualizado_at TIMESTAMPTZ,
+    source_updated_at TIMESTAMPTZ,
+    sync_run_id      TEXT,
+    sync_activo      BOOLEAN NOT NULL DEFAULT TRUE,
     activo           BOOLEAN NOT NULL DEFAULT FALSE,  -- pendiente validación Tauro
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(cliente_id, alias_interno)
 );
 CREATE INDEX IF NOT EXISTS idx_productos_cliente ON productos(cliente_id);
--- Miniatura del producto (data: URI). Se llena sola al importar de Shopify.
+-- Columnas de catálogo externo. Los ALTER mantienen upgrades idempotentes.
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS plataforma TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS tienda_dominio TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS external_product_id TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS external_variant_id TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS external_inventory_item_id TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS sku_tienda TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS titulo_tienda TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS variante_tienda TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS precio_tienda NUMERIC(14,2);
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS moneda_tienda TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS hs_code_tienda TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS pais_origen_tienda TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_controlado BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_disponible INTEGER;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_comprometido INTEGER;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_fisico INTEGER;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_entrante INTEGER;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS stock_actualizado_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS source_updated_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS sync_run_id TEXT;
+ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS sync_activo BOOLEAN NOT NULL DEFAULT TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_productos_catalogo_externo_variante
+    ON productos (cliente_id, plataforma, tienda_dominio, external_variant_id)
+    WHERE external_variant_id IS NOT NULL AND external_variant_id <> '';
+CREATE INDEX IF NOT EXISTS ix_productos_catalogo_externo
+    ON productos (cliente_id, plataforma, tienda_dominio, sync_activo);
+
+-- Stock por depósito/ubicación. `productos` mantiene los totales para que el
+-- portal responda rápido; esta tabla conserva el desglose que viene de Shopify.
+CREATE TABLE IF NOT EXISTS producto_inventario_ubicaciones (
+    id                   BIGSERIAL PRIMARY KEY,
+    cliente_id           TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    producto_id          INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+    plataforma           TEXT NOT NULL,
+    tienda_dominio       TEXT NOT NULL,
+    external_location_id TEXT NOT NULL,
+    ubicacion_nombre     TEXT NOT NULL,
+    disponible           INTEGER,
+    comprometido         INTEGER,
+    fisico               INTEGER,
+    entrante             INTEGER,
+    source_updated_at    TIMESTAMPTZ,
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (producto_id, external_location_id)
+);
+CREATE INDEX IF NOT EXISTS ix_inventario_ubicaciones_cliente
+    ON producto_inventario_ubicaciones (cliente_id, tienda_dominio, producto_id);
+
+-- Estado visible de la sincronización. No guarda tokens ni payloads sensibles.
+CREATE TABLE IF NOT EXISTS shopify_sync_estado (
+    dominio               TEXT PRIMARY KEY,
+    cliente_id            TEXT REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    estado                TEXT NOT NULL DEFAULT 'PENDIENTE',
+    ultimo_intento_at     TIMESTAMPTZ,
+    ultima_sincronizacion_at TIMESTAMPTZ,
+    ultimo_error_codigo   TEXT,
+    ultimo_error          TEXT,
+    productos_total       INTEGER NOT NULL DEFAULT 0,
+    variantes_total       INTEGER NOT NULL DEFAULT 0,
+    creados               INTEGER NOT NULL DEFAULT 0,
+    actualizados          INTEGER NOT NULL DEFAULT 0,
+    desactivados          INTEGER NOT NULL DEFAULT 0,
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_shopify_sync_cliente
+    ON shopify_sync_estado (cliente_id, ultima_sincronizacion_at);
+
+-- Cola durable de webhooks de catálogo/inventario. Permite contestar 200 a
+-- Shopify rápido y terminar el trabajo aunque el proceso reinicie.
+CREATE TABLE IF NOT EXISTS shopify_webhook_eventos (
+    webhook_id       TEXT PRIMARY KEY,
+    dominio          TEXT NOT NULL,
+    topic            TEXT NOT NULL,
+    triggered_at     TIMESTAMPTZ,
+    payload          JSONB NOT NULL,
+    estado           TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos         INTEGER NOT NULL DEFAULT 0,
+    ultimo_error     TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at       TIMESTAMPTZ,
+    processed_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_shopify_webhook_pendientes
+    ON shopify_webhook_eventos (estado, created_at);
 
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (

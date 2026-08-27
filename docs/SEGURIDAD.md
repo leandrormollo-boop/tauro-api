@@ -21,7 +21,8 @@ default-src 'self';
 script-src 'self' 'nonce-<por-request>';
 style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
 font-src 'self' https://fonts.gstatic.com;
-img-src 'self' data:; connect-src 'self'; object-src 'none';
+img-src 'self' data: https://cdn.shopify.com https://*.shopifycdn.com;
+connect-src 'self'; object-src 'none';
 base-uri 'self'; form-action 'self'; frame-src 'none'
 ```
 

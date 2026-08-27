@@ -6,16 +6,21 @@ QUÉ HAY ACÁ
 -----------
 Cada archivo agrupa endpoints por audiencia:
 
-  api_publica.py      - /cotizar, /pedido (B2B con X-API-Key)
+  main.py             - /cotizar, /pedido, /stock (B2B con X-API-Key)
   portal_cliente.py   - /portal/* (cliente final con login)
   admin.py            - /admin/* (solo Tauro)
 
 LÓGICA Y DECISIONES
 -------------------
 
-[api_publica.py]
+[main.py]
 Audiencia: tiendas e-commerce que integran Tauro.
-Auth: header X-API-Key (validado contra hoja PERFILES).
+Auth: header X-API-Key (hash validado contra PostgreSQL).
+
+  GET /stock
+    Input: limite/offset opcionales
+    Output: catálogo propio, stock total y por ubicación, estado de sync
+    Nunca consulta Shopify en el request ni expone costo/margen Tauro.
 
   POST /cotizar
     Input: ruta_id (o origen/destino libres), peso, dimensiones

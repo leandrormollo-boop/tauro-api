@@ -7,6 +7,20 @@ import hmac
 import json
 from pathlib import Path
 
+import pytest
+
+
+SHOPIFY_SCOPES = (
+    "read_orders,read_products,read_inventory,"
+    "write_merchant_managed_fulfillment_orders"
+)
+SHOPIFY_WEBHOOKS = [
+    "orders/create", "orders/updated",
+    "products/create", "products/update", "products/delete",
+    "inventory_levels/update", "inventory_items/update",
+    "app/uninstalled",
+]
+
 
 class _Respuesta:
     def __init__(self, status_code: int = 200, payload: dict | None = None):
@@ -67,6 +81,7 @@ def test_parser_shopify_conserva_datos_de_envio_y_flete():
         "line_items": [{
             "title": "Producto QA", "quantity": 2, "price": "10.00",
             "sku": "SKU-QA", "grams": 500,
+            "product_id": 321, "variant_id": 654, "variant_title": "Azul",
         }],
         "shipping_lines": [
             {"title": "Envío", "code": "TAURO_QA", "price": "4.00"},
@@ -80,6 +95,9 @@ def test_parser_shopify_conserva_datos_de_envio_y_flete():
     assert pedido["destinatario"]["estado"] == "FL"
     assert pedido["destinatario"]["pais"] == "US"
     assert pedido["items"][0]["cantidad"] == 2
+    assert pedido["items"][0]["external_product_id"] == "gid://shopify/Product/321"
+    assert pedido["items"][0]["external_variant_id"] == "gid://shopify/ProductVariant/654"
+    assert pedido["items"][0]["variante"] == "Azul"
     assert pedido["flete_cobrado"] == 5.0
     assert [f["codigo"] for f in pedido["flete_detalle"]] == ["TAURO_QA", "INSURANCE"]
 
@@ -122,7 +140,67 @@ def test_graphql_reintenta_un_throttle(monkeypatch):
     assert shopify_app._graphql(
         "tauro-qa.myshopify.com", "token", "query { shop { name } }",
     ) == {"shop": {"name": "QA"}}
-    assert pausas == [1]
+    assert pausas == [1.25]
+
+
+def test_graphql_respeta_el_presupuesto_de_costo_shopify(monkeypatch):
+    from servicios import shopify_app
+
+    respuestas = iter([
+        _Respuesta(payload={
+            "errors": [{"message": "Throttled", "extensions": {"code": "THROTTLED"}}],
+            "extensions": {"cost": {
+                "requestedQueryCost": 100,
+                "throttleStatus": {"currentlyAvailable": 0, "restoreRate": 50},
+            }},
+        }),
+        _Respuesta(payload={"data": {"shop": {"name": "QA"}}}),
+    ])
+    pausas = []
+    monkeypatch.setattr(shopify_app.requests, "post", lambda *_args, **_kwargs: next(respuestas))
+    monkeypatch.setattr(shopify_app.time, "sleep", pausas.append)
+
+    assert shopify_app._graphql(
+        "tauro-qa.myshopify.com", "token", "query { shop { name } }",
+    ) == {"shop": {"name": "QA"}}
+    assert pausas == [2.25]
+
+
+def test_token_shopify_se_guarda_cifrado_y_se_puede_migrar(monkeypatch):
+    from servicios import shopify_app
+
+    monkeypatch.setenv("SHOPIFY_TOKEN_ENCRYPTION_KEY", "clave-qa-independiente")
+    cifrado = shopify_app._cifrar_token("shpat_token-privado")
+
+    assert cifrado.startswith("enc:v1:")
+    assert "shpat_token-privado" not in cifrado
+    assert shopify_app._descifrar_token(cifrado) == "shpat_token-privado"
+    assert shopify_app._descifrar_token("token-legacy-plaintext") == "token-legacy-plaintext"
+
+
+def test_token_cifrado_falla_cerrado_con_otra_clave(monkeypatch):
+    from servicios import shopify_app
+
+    monkeypatch.setenv("SHOPIFY_TOKEN_ENCRYPTION_KEY", "clave-original")
+    cifrado = shopify_app._cifrar_token("token-qa")
+    monkeypatch.setenv("SHOPIFY_TOKEN_ENCRYPTION_KEY", "clave-equivocada")
+    with pytest.raises(RuntimeError, match="no se pudo abrir"):
+        shopify_app._descifrar_token(cifrado)
+
+
+def test_token_sigue_abriendo_al_agregar_clave_exclusiva(monkeypatch):
+    from servicios import shopify_app
+
+    monkeypatch.delenv("SHOPIFY_TOKEN_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setenv("SHOPIFY_API_SECRET", "api-secret-estable")
+    cifrado_anterior = shopify_app._cifrar_token("token-previo")
+
+    monkeypatch.setenv("SHOPIFY_TOKEN_ENCRYPTION_KEY", "clave-exclusiva-nueva")
+    assert shopify_app._descifrar_token(cifrado_anterior) == "token-previo"
+
+    cifrado_nuevo = shopify_app._cifrar_token("token-nuevo")
+    monkeypatch.setenv("SHOPIFY_TOKEN_ENCRYPTION_KEY", "clave-exclusiva-nueva")
+    assert shopify_app._descifrar_token(cifrado_nuevo) == "token-nuevo"
 
 
 def test_registro_webhooks_graphql_es_idempotente(monkeypatch):
@@ -154,12 +232,15 @@ def test_registro_webhooks_graphql_es_idempotente(monkeypatch):
     monkeypatch.setattr(shopify_app, "_graphql", graphql)
     monkeypatch.setenv("BASE_URL", "https://taurosolutions.ar")
 
-    assert shopify_app.registrar_webhooks("tauro-qa.myshopify.com", "token") == [
-        "orders/create", "orders/updated", "app/uninstalled",
-    ]
+    assert shopify_app.registrar_webhooks(
+        "tauro-qa.myshopify.com", "token"
+    ) == SHOPIFY_WEBHOOKS
     mutaciones = [v for q, v in llamadas if "TauroWebhookCreate" in q]
     assert [v["topic"] for v in mutaciones] == [
-        "ORDERS_CREATE", "ORDERS_UPDATED", "APP_UNINSTALLED",
+        "ORDERS_CREATE", "ORDERS_UPDATED",
+        "PRODUCTS_CREATE", "PRODUCTS_UPDATE", "PRODUCTS_DELETE",
+        "INVENTORY_LEVELS_UPDATE", "INVENTORY_ITEMS_UPDATE",
+        "APP_UNINSTALLED",
     ]
     assert mutaciones[0]["subscription"] == {
         "uri": "https://taurosolutions.ar/integraciones/shopify/webhook",
@@ -268,15 +349,10 @@ def test_callback_sin_state_instala_pero_no_autovincula(monkeypatch):
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
-        "access_token": "token-qa", "scope": (
-            "read_orders,read_merchant_managed_fulfillment_orders,"
-            "write_merchant_managed_fulfillment_orders"
-        ),
+        "access_token": "token-qa", "scope": SHOPIFY_SCOPES,
     })
     monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: None)
-    monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: [
-        "orders/create", "orders/updated", "app/uninstalled",
-    ])
+    monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: SHOPIFY_WEBHOOKS)
     monkeypatch.setattr(shopify, "vincular_cliente", lambda dominio, cliente: vinculados.append((dominio, cliente)))
 
     response = shopify.callback(_Request(
@@ -301,7 +377,7 @@ def test_abrir_app_instalada_no_consume_admin_api(monkeypatch):
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify_app, "instalacion", lambda _dominio: {
         "access_token": "token-qa",
-        "scopes": "read_orders,write_merchant_managed_fulfillment_orders",
+        "scopes": SHOPIFY_SCOPES,
         "cliente_id": "MELCIOR",
     })
     monkeypatch.setattr(
@@ -346,15 +422,13 @@ def test_callback_con_state_verificado_puede_autovincular(monkeypatch):
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
-        "access_token": "token-qa", "scope": (
-            "read_orders,read_merchant_managed_fulfillment_orders,"
-            "write_merchant_managed_fulfillment_orders"
-        ),
+        "access_token": "token-qa", "scope": SHOPIFY_SCOPES,
     })
     monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: None)
-    monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: [
-        "orders/create", "orders/updated", "app/uninstalled",
-    ])
+    monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: SHOPIFY_WEBHOOKS)
+    monkeypatch.setattr(
+        "servicios.shopify_catalogo.lanzar_sincronizacion", lambda *_args: None,
+    )
     monkeypatch.setattr(shopify, "vincular_cliente", lambda dominio, cliente: vinculados.append((dominio, cliente)))
     monkeypatch.setattr(auth, "validar_token", lambda _token: "MELCIOR")
 
@@ -406,15 +480,10 @@ def test_callback_no_declara_exito_si_falta_un_webhook(monkeypatch):
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
-        "access_token": "token-qa", "scope": (
-            "read_orders,read_merchant_managed_fulfillment_orders,"
-            "write_merchant_managed_fulfillment_orders"
-        ),
+        "access_token": "token-qa", "scope": SHOPIFY_SCOPES,
     })
     monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: None)
-    monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: [
-        "orders/create", "orders/updated",
-    ])
+    monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: SHOPIFY_WEBHOOKS[:-1])
     monkeypatch.setattr(shopify, "desinstalar", desvinculadas.append)
     monkeypatch.setattr(shopify, "vincular_cliente", lambda *_args: vinculadas.append(True))
 
@@ -440,9 +509,7 @@ def test_callback_timeout_verificando_webhooks_no_borra_instalacion(monkeypatch)
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
-        "access_token": "token-qa", "scope": (
-            "read_orders,write_merchant_managed_fulfillment_orders"
-        ),
+        "access_token": "token-qa", "scope": SHOPIFY_SCOPES,
     })
     monkeypatch.setattr(shopify, "guardar_instalacion", lambda *_args: None)
 
@@ -523,6 +590,50 @@ def test_webhook_nuevo_y_repetido_dispara_armado_una_sola_vez(monkeypatch):
     assert armados == [99]
 
 
+def test_webhook_inventario_se_encola_idempotente_y_responde_rapido(monkeypatch):
+    from endpoints import integraciones
+    from servicios import shopify_app, shopify_catalogo
+
+    cuerpo = json.dumps({
+        "inventory_item_id": 300000000001,
+        "location_id": 400000000001,
+        "available": 7,
+    }).encode()
+    request = _Request(cuerpo, {
+        "x-shopify-shop-domain": "tauro-qa.myshopify.com",
+        "x-shopify-hmac-sha256": "firma-valida",
+        "x-shopify-topic": "inventory_levels/update",
+        "x-shopify-webhook-id": "wh-stock-1",
+    })
+    resultados = iter([True, False])
+    lanzados = []
+    recibidos = []
+
+    monkeypatch.setattr(integraciones, "tienda_por_dominio", lambda _dominio: {
+        "id": 7, "cliente_id": "MELCIOR", "plataforma": "shopify",
+        "secreto": "oauth:shopify-app",
+    })
+    monkeypatch.setattr(integraciones, "verificar_hmac_shopify", lambda *_args: True)
+    monkeypatch.setenv("SHOPIFY_API_SECRET", "secreto-app-qa")
+    monkeypatch.setattr(shopify_app, "instalacion", lambda _dominio: {"access_token": "token"})
+
+    def encolar(*args):
+        recibidos.append(args)
+        return next(resultados)
+
+    monkeypatch.setattr(shopify_catalogo, "encolar_evento", encolar)
+    monkeypatch.setattr(shopify_catalogo, "lanzar_procesamiento_eventos", lambda: lanzados.append(True))
+
+    primera = asyncio.run(integraciones.shopify_webhook(request))
+    segunda = asyncio.run(integraciones.shopify_webhook(request))
+
+    assert primera == {"ok": True, "encolado": True, "duplicado": False}
+    assert segunda == {"ok": True, "encolado": False, "duplicado": True}
+    assert len(recibidos) == 2
+    assert recibidos[0][:3] == ("wh-stock-1", "tauro-qa.myshopify.com", "inventory_levels/update")
+    assert lanzados == [True]
+
+
 def test_firma_invalida_no_parsea_ni_guarda(monkeypatch):
     from endpoints import integraciones
 
@@ -559,9 +670,14 @@ def test_coleccion_postman_es_segura_y_no_contiene_secretos():
     assert "allow_tauro_webhook_writes') !== 'true'" in serializado
     assert next(v for v in entorno["values"] if v["key"] == "allow_tauro_webhook_writes")["value"] == "false"
     assert next(v for v in entorno["values"] if v["key"] == "shopify_access_token")["value"] == ""
+    assert next(v for v in entorno["values"] if v["key"] == "tauro_api_key")["value"] == ""
     assert not any(v["key"] == "shopify_api_secret" for v in entorno["values"])
 
-    graphql = coleccion["item"][0]["item"][2]["request"]
+    diagnosticos = coleccion["item"][0]["item"]
+    graphql = next(
+        item["request"] for item in diagnosticos
+        if item["name"] == "Shopify · Probar token con GraphQL"
+    )
     assert graphql["method"] == "POST"
     assert graphql["url"].endswith("/graphql.json")
     assert "X-Shopify-Access-Token" in {h["key"] for h in graphql["header"]}

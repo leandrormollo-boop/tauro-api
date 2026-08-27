@@ -63,6 +63,50 @@
           ]
         },
         {
+          "name": "TAURO · Stock del cliente",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{tauro_api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/stock?limite=100&offset=0",
+            "description": "Lee el espejo local de catálogo y stock del cliente dueño de la API key. No consulta Shopify en vivo ni expone costos o márgenes de TAURO."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('tauro_api_key') || '').trim()) {",
+                  "  throw new Error('Configurá tauro_api_key sólo en tu entorno local de Postman.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('TAURO devuelve únicamente el stock del cliente', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const data = pm.response.json();",
+                  "  pm.expect(data.status).to.eql('success');",
+                  "  pm.expect(data.productos).to.be.an('array');",
+                  "  pm.expect(JSON.stringify(data).toLowerCase()).not.to.include('costo_');",
+                  "  pm.expect(JSON.stringify(data).toLowerCase()).not.to.include('margen_');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Shopify · Probar token con GraphQL",
           "request": {
             "method": "POST",
@@ -111,6 +155,58 @@
                   "  const data = pm.response.json();",
                   "  pm.expect(data.errors || []).to.be.empty;",
                   "  pm.expect(data.data.shop.myshopifyDomain).to.eql(pm.environment.get('shop_domain').trim().toLowerCase());",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Shopify · Catálogo y stock de solo lectura",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Shopify-Access-Token",
+                "value": "{{shopify_access_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"query TauroCatalogProbe { productVariants(first: 1) { nodes { id sku image { url } inventoryItem { id tracked inventoryLevels(first: 10) { nodes { location { id name } quantities(names: [\\\"available\\\", \\\"committed\\\", \\\"on_hand\\\"]) { name quantity } } } } } } } }\"\n}"
+            },
+            "url": "https://{{shop_domain}}/admin/api/{{shopify_api_version}}/graphql.json",
+            "description": "Valida read_products y read_inventory con una muestra mínima. No modifica catálogo ni stock."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const shop = (pm.environment.get('shop_domain') || '').trim().toLowerCase();",
+                  "const token = (pm.environment.get('shopify_access_token') || '').trim();",
+                  "if (!/^[a-z0-9][a-z0-9-]*\\.myshopify\\.com$/.test(shop) || !token) {",
+                  "  throw new Error('Configurá shop_domain y shopify_access_token en el entorno local.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Shopify permite leer catálogo e inventario', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const data = pm.response.json();",
+                  "  pm.expect(data.errors || []).to.be.empty;",
+                  "  pm.expect(data.data.productVariants).to.be.an('object');",
                   "});"
                 ]
               }
@@ -329,7 +425,7 @@
           ]
         },
         {
-          "name": "Topic no operativo · firma válida",
+          "name": "Inventario actualizado · firma válida",
           "request": {
             "method": "POST",
             "header": [
@@ -343,7 +439,11 @@
               },
               {
                 "key": "X-Shopify-Topic",
-                "value": "products/update"
+                "value": "inventory_levels/update"
+              },
+              {
+                "key": "X-Shopify-Webhook-Id",
+                "value": "tauro-postman-inventory-001"
               },
               {
                 "key": "X-Shopify-Hmac-SHA256",
@@ -352,10 +452,10 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\"id\":{{synthetic_order_id}},\"title\":\"Producto ignorado\"}"
+              "raw": "{\"inventory_item_id\":300000000001,\"location_id\":400000000001,\"available\":7,\"updated_at\":\"2026-08-27T01:00:00Z\"}"
             },
             "url": "{{base_url}}/integraciones/shopify/webhook",
-            "description": "Comprueba que TAURO acepte y descarte topics que no son órdenes sin activar reintentos de Shopify."
+            "description": "Encola un cambio sintético de inventario. No escribe stock en Shopify; TAURO vuelve a leer el dato firmado desde GraphQL."
           },
           "event": [
             {
@@ -379,11 +479,78 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('El topic se acepta y se ignora', function () {",
+                  "pm.test('El cambio de inventario queda encolado', function () {",
                   "  pm.response.to.have.status(200);",
                   "  const data = pm.response.json();",
                   "  pm.expect(data.ok).to.eql(true);",
-                  "  pm.expect(data.ignorado).to.eql('products/update');",
+                  "  pm.expect(data.encolado).to.eql(true);",
+                  "  pm.expect(data.duplicado).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inventario repetido · idempotencia",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Shopify-Shop-Domain",
+                "value": "{{shop_domain}}"
+              },
+              {
+                "key": "X-Shopify-Topic",
+                "value": "inventory_levels/update"
+              },
+              {
+                "key": "X-Shopify-Webhook-Id",
+                "value": "tauro-postman-inventory-001"
+              },
+              {
+                "key": "X-Shopify-Hmac-SHA256",
+                "value": "{{shopify_webhook_hmac}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"inventory_item_id\":300000000001,\"location_id\":400000000001,\"available\":7,\"updated_at\":\"2026-08-27T01:00:00Z\"}"
+            },
+            "url": "{{base_url}}/integraciones/shopify/webhook",
+            "description": "Reenvía exactamente el mismo webhook id. TAURO debe confirmarlo sin crear un segundo trabajo."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.environment.get('allow_tauro_webhook_writes') !== 'true') {",
+                  "  pm.execution.skipRequest();",
+                  "}",
+                  "const secret = await pm.vault.get('tauro-shopify-dev-app-secret');",
+                  "if (!secret) { throw new Error('Falta tauro-shopify-dev-app-secret en Postman Vault.'); }",
+                  "const rawBody = pm.variables.replaceIn(pm.request.body.raw || '');",
+                  "const digest = CryptoJS.HmacSHA256(rawBody, secret);",
+                  "pm.variables.set('shopify_webhook_hmac', CryptoJS.enc.Base64.stringify(digest));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('TAURO descarta el duplicado sin error', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const data = pm.response.json();",
+                  "  pm.expect(data.encolado).to.eql(false);",
+                  "  pm.expect(data.duplicado).to.eql(true);",
                   "});"
                 ]
               }

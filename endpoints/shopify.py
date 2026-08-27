@@ -17,6 +17,7 @@ from servicios.shopify_app import (
     app_configurada, url_instalacion, validar_hmac_query, dominio_valido,
     canjear_token, guardar_instalacion, registrar_webhooks, vincular_cliente,
     desinstalar, nuevo_state, ShopifyWebhookVerificationError,
+    webhooks_requeridos,
 )
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
@@ -222,26 +223,42 @@ def _panel_tienda(shop: str, inst: dict, host: str = "") -> HTMLResponse:
     """
     cliente = (inst or {}).get("cliente_id") or ""
     pendientes = 0
+    sync_estado = None
+    stock = None
     if cliente:
         try:
             from servicios.integraciones_tienda import contar_pendientes
             pendientes = contar_pendientes(cliente)
+            from servicios.catalogo import estado_sincronizacion_cliente, resumen_stock_cliente
+            sync_estado = estado_sincronizacion_cliente(cliente)
+            stock = resumen_stock_cliente(cliente)
         except Exception as e:
-            print(f"[shopify] no pude contar pendientes de {cliente}: {e}")
+            print(f"[shopify] no pude armar panel de {cliente}: {type(e).__name__}")
 
     if not cliente:
         estado = ("Tu tienda está conectada, pero todavía no la vinculaste a tu cuenta "
                   "de TAURO. Entrá al portal, sección <b>Mi tienda</b>, y tocá "
                   "«Es mi tienda — vincular».")
         cta = "Vincular mi tienda"
+        cta_url = "https://taurosolutions.ar/portal/tienda"
+    elif sync_estado and sync_estado.get("estado") == "REAUTORIZAR":
+        estado = ("Tu tienda está conectada, pero necesita que autorices una vez "
+                  "el catálogo y el inventario para mostrar el stock en TAURO.")
+        cta = "Autorizar catálogo y stock"
+        cta_url = f"/shopify/install?shop={shop}&reautorizar=1"
     elif pendientes:
         estado = (f"Tenés <b>{pendientes} venta{'s' if pendientes != 1 else ''}</b> "
                   f"esperando que generes el envío.")
         cta = "Ver mis pedidos"
+        cta_url = "https://taurosolutions.ar/portal/tienda"
     else:
-        estado = ("Todo al día: no hay ventas pendientes de envío. Cuando entre una "
-                  "nueva, aparece sola acá y en tu portal.")
+        variantes = int((stock or {}).get("variantes") or 0)
+        unidades = int((stock or {}).get("unidades_disponibles") or 0)
+        estado = ("Todo al día: no hay ventas pendientes de envío. "
+                  f"TAURO está siguiendo <b>{variantes} variantes</b> y "
+                  f"<b>{unidades} unidades disponibles</b> en Shopify.")
         cta = "Abrir mi portal"
+        cta_url = "https://taurosolutions.ar/portal/catalogo"
 
     # Para que la pantalla se vea DENTRO del admin de Shopify (y no en una
     # ventana aparte) hacen falta tres cosas:
@@ -284,7 +301,7 @@ def _panel_tienda(shop: str, inst: dict, host: str = "") -> HTMLResponse:
   <div class="card">
     {f'<div class="num">{pendientes}</div>' if pendientes else ''}
     <p>{estado}</p>
-    <a class="btn" href="https://taurosolutions.ar/portal/tienda" target="_blank">{cta} →</a>
+    <a class="btn" href="{cta_url}" target="_blank">{cta} →</a>
   </div>
   <div class="pie">
     Tienda conectada: <b>{shop}</b><br>
@@ -365,12 +382,13 @@ def callback(request: Request):
         )
         respuesta.delete_cookie("shopify_state")
         return respuesta
-    esperados = {"orders/create", "orders/updated", "app/uninstalled"}
+    esperados = webhooks_requeridos()
     if set(topics) != esperados:
         respuesta = _pagina(
             "Conexión incompleta",
-            "Shopify autorizó la app, pero no confirmó todos los avisos automáticos. "
-            "No vinculamos la tienda para evitar que se pierdan ventas. Reintentá en "
+            "Shopify autorizó la app, pero no confirmó todos los avisos automáticos "
+            "de ventas, productos e inventario. No vinculamos la tienda para evitar "
+            "datos incompletos. Reintentá en "
             "unos minutos.",
             f'<a href="/shopify/install?shop={shop}&reautorizar=1">Reintentar instalación</a>',
             status=503,
@@ -391,19 +409,14 @@ def callback(request: Request):
         except Exception as e:
             print(f"[shopify] no pude vincular {shop} al instalar: {e}")
 
-    # Importar el catálogo de la tienda en segundo plano: apenas conecta, el
-    # cliente encuentra sus productos ya cargados (nombre, SKU, peso, foto).
-    # Va en un hilo porque bajar productos + miniaturas tarda y el callback
-    # tiene que responder rápido.
+    # Importar catálogo + stock en segundo plano. El wrapper captura cualquier
+    # fallo y lo deja visible en shopify_sync_estado; nunca rompe el OAuth.
     if dueno:
         try:
-            import threading
-            from servicios.shopify_catalogo import importar_catalogo
-            threading.Thread(
-                target=importar_catalogo, args=(shop, dueno), daemon=True,
-            ).start()
+            from servicios.shopify_catalogo import lanzar_sincronizacion
+            lanzar_sincronizacion(shop, dueno)
         except Exception as e:
-            print(f"[shopify] no pude lanzar la importación de catálogo de {shop}: {e}")
+            print(f"[shopify] no pude lanzar la sincronización de {shop}: {type(e).__name__}")
 
     print(f"[shopify] instalada {shop} · webhooks {topics} · "
           f"cliente {dueno or 'sin vincular'}")
@@ -413,8 +426,9 @@ def callback(request: Request):
              "te la dejamos lista en el portal para generar la guía.")
     respuesta = _pagina(
         "¡Tienda conectada!",
-        f"Listo: desde ahora cada venta con envío aparece en tu portal TAURO "
-        f"lista para generar la guía con un click. {extra}",
+        f"Listo: estamos sincronizando productos, imágenes y stock. Desde ahora "
+        f"cada venta con envío aparece en tu portal TAURO lista para generar la "
+        f"guía con un click. {extra}",
         '<a href="https://taurosolutions.ar/portal/tienda">Ver mis pedidos</a>',
     )
     respuesta.delete_cookie("shopify_state")
