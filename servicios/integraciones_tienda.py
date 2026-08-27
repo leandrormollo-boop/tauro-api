@@ -543,19 +543,27 @@ def limpiar_espejo_shopify_huerfano_cliente(cliente_id: str) -> dict:
                 SELECT
                     (SELECT COUNT(*) FROM tiendas_conectadas
                       WHERE UPPER(cliente_id) = %s
-                        AND plataforma = 'shopify') AS bindings,
+                        AND plataforma = 'shopify'
+                        AND activa = TRUE) AS bindings_activos,
+                    (SELECT COUNT(*) FROM tiendas_conectadas
+                      WHERE UPPER(cliente_id) = %s
+                        AND plataforma = 'shopify'
+                        AND activa = FALSE) AS bindings_inactivos,
                     (SELECT COUNT(*) FROM shopify_instalaciones
                       WHERE UPPER(COALESCE(cliente_id, '')) = %s) AS instalaciones
                 """,
-                (cliente_id, cliente_id),
+                (cliente_id, cliente_id, cliente_id),
             )
             estado = cur.fetchone() or {}
-            if int(estado.get("bindings") or 0):
+            if int(estado.get("bindings_activos") or 0):
                 raise ValueError(
                     "Todavía existe una conexión Shopify. Reiniciala desde Mi tienda."
                 )
 
             snapshot = {
+                "bindings_inactivos_retirados": int(
+                    estado.get("bindings_inactivos") or 0
+                ),
                 "instalaciones_retiradas": int(
                     estado.get("instalaciones") or 0
                 ),
@@ -580,6 +588,15 @@ def limpiar_espejo_shopify_huerfano_cliente(cliente_id: str) -> dict:
             # Sin binding no hay una instalación operativa. Retirar estos
             # tokens owner-only cierra webhooks viejos y permite que el próximo
             # OAuth empiece con una generación realmente nueva.
+            cur.execute(
+                """
+                DELETE FROM tiendas_conectadas
+                 WHERE UPPER(cliente_id) = %s
+                   AND plataforma = 'shopify'
+                   AND activa = FALSE
+                """,
+                (cliente_id,),
+            )
             cur.execute(
                 """
                 DELETE FROM shopify_instalaciones
