@@ -18,6 +18,7 @@
 .catalog-pagination a,.catalog-pagination span{min-width:31px;height:31px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;text-decoration:none;font-size:12px}
 .catalog-pagination a{border:1px solid var(--border);color:var(--fg-2)}
 .catalog-pagination .actual{background:var(--accent);color:#fff;font-weight:700}
+.catalog-pagination .ellipsis{min-width:18px;color:var(--fg-3)}
 .product-dialog{width:min(820px,calc(100vw - 28px));max-height:calc(100vh - 28px);padding:0;border:1px solid var(--border);border-radius:18px;background:var(--bg-1);color:var(--fg-1);box-shadow:0 24px 90px rgba(0,0,0,.65);overflow:auto}
 .product-dialog::backdrop{background:rgba(4,3,10,.78);backdrop-filter:blur(5px)}
 .product-dialog-panel{padding:17px 20px}
@@ -215,8 +216,14 @@
     <nav class="catalog-pagination" aria-label="Páginas del catálogo">
         {% if pagina > 1 %}<a href="/portal/catalogo?pagina={{ pagina - 1 }}" aria-label="Página anterior">‹</a>{% endif %}
         {% for n in range(1, total_paginas + 1) %}
-            {% if n == pagina %}<span class="actual" aria-current="page">{{ n }}</span>
-            {% else %}<a href="/portal/catalogo?pagina={{ n }}">{{ n }}</a>{% endif %}
+            {% if n == 1 or n == total_paginas or (n >= pagina - 2 and n <= pagina + 2) %}
+                {% if n == pagina %}<span class="actual" aria-current="page">{{ n }}</span>
+                {% else %}<a href="/portal/catalogo?pagina={{ n }}">{{ n }}</a>{% endif %}
+            {% elif n == 2 and pagina > 4 %}
+                <span class="ellipsis" aria-hidden="true">…</span>
+            {% elif n == total_paginas - 1 and pagina < total_paginas - 3 %}
+                <span class="ellipsis" aria-hidden="true">…</span>
+            {% endif %}
         {% endfor %}
         {% if pagina < total_paginas %}<a href="/portal/catalogo?pagina={{ pagina + 1 }}" aria-label="Página siguiente">›</a>{% endif %}
     </nav>

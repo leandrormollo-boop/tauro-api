@@ -172,3 +172,11 @@ def test_la_barra_y_el_texto_miden_lo_mismo():
             f"barra {r['pct']}% vs texto "
             f"{r['hechos_oblig']} de {r['total_oblig']} — con {kw}"
         )
+
+
+def test_catalogo_compacta_la_barra_de_paginas():
+    """Un catálogo grande no puede imprimir cien botones y forzar scroll."""
+    fuente = open("templates/portal/catalogo.html", encoding="utf-8").read()
+    assert "n >= pagina - 2 and n <= pagina + 2" in fuente
+    assert 'class="ellipsis"' in fuente
+    assert "n == total_paginas" in fuente
