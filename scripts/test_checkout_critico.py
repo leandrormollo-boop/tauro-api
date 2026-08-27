@@ -118,15 +118,21 @@ for nombre, payload in [
 
 # ── 4. Los webhooks rechazan firmas falsas ──
 print("\n[4] Seguridad de webhooks")
-status, _, _ = _post("/integraciones/shopify/webhook", {"id": 1},
+status, _, _ = _post("/integraciones/shopify/webhook/orders-create", {"id": 1},
                      headers={"X-Shopify-Shop-Domain": "cualquiera.myshopify.com",
                               "X-Shopify-Hmac-Sha256": "firma-falsa",
                               "X-Shopify-Topic": "orders/create"})
 check(status == 401, "Webhook con firma inválida es rechazado", f"HTTP {status}")
 
-status, _, _ = _post("/integraciones/shopify/webhook", {"id": 1},
-                     headers={"X-Shopify-Topic": "orders/create"})
+status, _, _ = _post("/integraciones/shopify/webhook/orders-create", {"id": 1},
+                     headers={"X-Shopify-Shop-Domain": "cualquiera.myshopify.com",
+                              "X-Shopify-Topic": "orders/create"})
 check(status == 401, "Webhook sin firma es rechazado", f"HTTP {status}")
+
+# La antigua ruta multipropósito no debe volver a procesar eventos: sin un
+# contrato de topic separado era más fácil relabelar un payload firmado.
+status, _, _ = _post("/integraciones/shopify/webhook", {"id": 1})
+check(status == 410, "Webhook heredado permanece retirado", f"HTTP {status}")
 
 # ── 5. Superficies vivas ──
 print("\n[5] Superficies públicas")
