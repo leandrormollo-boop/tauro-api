@@ -314,6 +314,62 @@ def listar_solicitudes_cliente(
             return [_sin_label(dict(r)) for r in cur.fetchall()]
 
 
+def listar_envios_api(
+    cliente_id: str,
+    *,
+    limite: int = 100,
+    offset: int = 0,
+    ambito: str = "",
+    estado: str = "",
+) -> tuple[list[dict], int]:
+    """Historial paginado y filtrado para integraciones B2B.
+
+    La selección es explícita: nunca devuelve costos del courier, márgenes,
+    errores internos, documentos ni el BYTEA de la etiqueta.
+    """
+    cliente_id = (cliente_id or "").strip().upper()
+    limite = max(1, min(int(limite), 200))
+    offset = max(0, int(offset))
+    ambito = (ambito or "").strip().upper()
+    estado = (estado or "").strip().upper()
+
+    condiciones = ["cliente_id=%s"]
+    params: list = [cliente_id]
+    if ambito:
+        condiciones.append("ambito=%s")
+        params.append(ambito)
+    if estado:
+        condiciones.append("estado=%s")
+        params.append(estado)
+    where = " AND ".join(condiciones)
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*) AS total FROM solicitudes_guia WHERE {where}",
+                tuple(params),
+            )
+            total = int(cur.fetchone()["total"])
+            cur.execute(
+                f"""
+                SELECT id, api_referencia, estado, ambito, courier,
+                       servicio_courier, producto_alias, cantidad,
+                       destino_pais, dest_nombre, dest_ciudad, dest_estado,
+                       peso_kg, valor_declarado_usd, precio_tauro_ars,
+                       precio_tauro_usd, tracking, guia_url,
+                       (label_pdf IS NOT NULL) AS tiene_label,
+                       created_at, updated_at, guia_generada_at
+                FROM solicitudes_guia
+                WHERE {where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s OFFSET %s
+                """,
+                (*params, limite, offset),
+            )
+            filas = [dict(row) for row in cur.fetchall()]
+    return filas, total
+
+
 def contar_guias_listas(cliente_id: str) -> int:
     """
     Cuántas guías tiene el cliente listas para descargar. Es su tarea

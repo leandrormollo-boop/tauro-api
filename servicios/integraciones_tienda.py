@@ -59,8 +59,18 @@ def _ensure_tablas() -> None:
                     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
                     UNIQUE (tienda_id, pedido_externo_id)
                 );
+                CREATE TABLE IF NOT EXISTS pedidos_huerfanos (
+                    id                SERIAL PRIMARY KEY,
+                    dominio           TEXT NOT NULL,
+                    pedido_externo_id TEXT NOT NULL,
+                    payload           JSONB NOT NULL,
+                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (dominio, pedido_externo_id)
+                );
                 CREATE INDEX IF NOT EXISTS ix_pedidos_tienda_cliente
                     ON pedidos_tienda (cliente_id, estado);
+                CREATE INDEX IF NOT EXISTS ix_pedidos_huerfanos_dominio_fecha
+                    ON pedidos_huerfanos (dominio, created_at);
                 -- Lo que el comprador REALMENTE pagó de envío en el checkout.
                 -- Sin esto no hay forma de comparar lo cobrado contra lo que
                 -- termina costando la guía: si el precio se calcula mal, se
@@ -82,7 +92,14 @@ def _ensure_tablas() -> None:
 
 # ── Tiendas conectadas ──────────────────────────────────────
 
-def conectar_tienda(cliente_id: str, plataforma: str, dominio: str, secreto: str) -> dict:
+def conectar_tienda(
+    cliente_id: str,
+    plataforma: str,
+    dominio: str,
+    secreto: str,
+    *,
+    reasignar_confirmado: bool = False,
+) -> dict:
     _ensure_tablas()
     plataforma = plataforma.strip().lower()
     if plataforma not in ("shopify", "tiendanube"):
@@ -94,25 +111,56 @@ def conectar_tienda(cliente_id: str, plataforma: str, dominio: str, secreto: str
     if not secreto or len(secreto.strip()) < 8:
         return {"ok": False, "error": "El secreto de firma es demasiado corto — copialo completo desde tu tienda."}
 
+    cliente_id = cliente_id.strip().upper()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Un dominio pertenece a UN cliente: si ya existe y es de otro, error.
-            cur.execute("SELECT cliente_id FROM tiendas_conectadas WHERE dominio = %s", (dominio,))
-            row = cur.fetchone()
-            if row and row["cliente_id"] != cliente_id:
-                return {"ok": False, "error": "Ese dominio ya está conectado a otra cuenta."}
+            # Una conexión manual jamás puede apropiarse de un dominio ajeno.
+            # Una reautorización OAuth firmada sí puede migrar una asociación
+            # histórica de TEST_CLIENT al dueño real. La decisión y la
+            # actualización ocurren en una sola sentencia para evitar carreras.
             cur.execute("""
-                INSERT INTO tiendas_conectadas (cliente_id, plataforma, dominio, secreto, activa)
-                VALUES (%s, %s, %s, %s, TRUE)
-                ON CONFLICT (dominio) DO UPDATE
-                    SET secreto = EXCLUDED.secreto,
-                        plataforma = EXCLUDED.plataforma,
-                        activa = TRUE
-                RETURNING id
-            """, (cliente_id, plataforma, dominio, secreto.strip()))
-            tienda_id = cur.fetchone()["id"]
+                INSERT INTO tiendas_conectadas
+                    (cliente_id, plataforma, dominio, secreto, activa)
+                VALUES
+                    (%(cliente)s, %(plataforma)s, %(dominio)s, %(secreto)s, TRUE)
+                ON CONFLICT (dominio) DO UPDATE SET
+                    cliente_id = CASE
+                        WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                             OR %(reasignar)s
+                        THEN EXCLUDED.cliente_id
+                        ELSE tiendas_conectadas.cliente_id
+                    END,
+                    plataforma = CASE
+                        WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                             OR %(reasignar)s
+                        THEN EXCLUDED.plataforma
+                        ELSE tiendas_conectadas.plataforma
+                    END,
+                    secreto = CASE
+                        WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                             OR %(reasignar)s
+                        THEN EXCLUDED.secreto
+                        ELSE tiendas_conectadas.secreto
+                    END,
+                    activa = CASE
+                        WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                             OR %(reasignar)s
+                        THEN TRUE
+                        ELSE tiendas_conectadas.activa
+                    END
+                RETURNING id, cliente_id
+            """, {
+                "cliente": cliente_id,
+                "plataforma": plataforma,
+                "dominio": dominio,
+                "secreto": secreto.strip(),
+                "reasignar": bool(reasignar_confirmado),
+            })
+            fila = cur.fetchone()
         conn.commit()
-    return {"ok": True, "tienda_id": tienda_id}
+    if str((fila or {}).get("cliente_id") or "").strip().upper() != cliente_id:
+        return {"ok": False, "error": "Ese dominio ya está conectado a otra cuenta."}
+    return {"ok": True, "tienda_id": fila["id"]}
 
 
 def listar_tiendas(cliente_id: str) -> list[dict]:

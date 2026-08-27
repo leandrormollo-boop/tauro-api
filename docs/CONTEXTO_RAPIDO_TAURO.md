@@ -30,9 +30,9 @@ Importante: diferenciar bien tres superficies:
 - Migracion desde Google Sheets a PostgreSQL completada.
 - Panel admin funcionando con CRUD de clientes, facturas, pagos, rutas, productos, migracion y solicitudes de guia.
 - Portal cliente usa PostgreSQL.
-- API B2B `/cotizar`, `/pedido`, `/pedidos/{id}`, `/rastrear/{tracking}` y
-  `/stock` usa PostgreSQL para API keys, productos, inventario, pricing,
-  solicitudes, guías y tracking aislado por cliente.
+- API B2B `/cotizar`, `/pedido`, `/envios`, `/pedidos/{id}`,
+  `/rastrear/{tracking}` y `/stock` usa PostgreSQL para API keys, productos,
+  inventario, pricing, historial paginado, guías y tracking aislado por cliente.
 - Web publica `/cotizar-web` cotiza con FedEx y markup web.
 - `/pedido` crea una solicitud interna y acepta `Idempotency-Key`: los retries
   devuelven el mismo `solicitud_id` y nunca duplican la futura guía/cargo.

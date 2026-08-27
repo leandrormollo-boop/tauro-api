@@ -231,6 +231,18 @@ Devuelve el estado de la solicitud, courier, tracking y disponibilidad de la
 guía. La consulta siempre filtra por el cliente dueño de `X-API-Key`; un ID de
 otra cuenta responde `404`.
 
+### GET /envios
+
+```text
+GET /envios?ambito=INTERNACIONAL&estado=GUIA_LISTA&limite=100&offset=0
+```
+
+Historial paginado del dueño de la API key. `ambito` es obligatorio y acepta
+`NACIONAL` o `INTERNACIONAL`, para que una integración nunca mezcle ambos
+circuitos; `estado` usa los estados operativos de TAURO. Devuelve
+destino, producto, precio final del cliente, tracking y disponibilidad de la
+guía, pero nunca costos de courier, márgenes ni PDFs embebidos.
+
 ### GET /pedidos/{solicitud_id}/guia.pdf
 
 Descarga autenticada de la etiqueta. Responde `404` hasta que la guía esté

@@ -246,8 +246,8 @@
       "name": "05 · API B2B operativa",
       "description": "Lecturas privadas del circuito pedido → guía → tracking. Requieren la API key del mismo cliente dueño del envío.",
       "item": [
-        {
-          "name": "TAURO · Estado del pedido",
+    {
+      "name": "TAURO · Estado del pedido",
           "request": {
             "method": "GET",
             "header": [
@@ -284,11 +284,55 @@
                   "});"
                 ]
               }
-            }
-          ]
+        }
+      ]
+    },
+    {
+      "name": "TAURO · Historial de envíos paginado",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "{{tauro_api_key}}",
+            "type": "text"
+          }
+        ],
+        "url": "{{base_url}}/envios?limite=50&offset=0&ambito=INTERNACIONAL",
+        "description": "Lista únicamente los envíos del cliente autenticado. El ámbito NACIONAL o INTERNACIONAL es obligatorio para no mezclar los dos circuitos. Permite paginar; el filtro estado es opcional."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!(pm.environment.get('tauro_api_key') || '').trim()) throw new Error('Configurá tauro_api_key.');"
+            ]
+          }
         },
         {
-          "name": "TAURO · Rastreo privado en vivo",
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('El historial está paginado y no expone costos internos', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const data = pm.response.json();",
+              "  pm.expect(data.status).to.eql('success');",
+              "  pm.expect(data.envios).to.be.an('array');",
+              "  pm.expect(data.limite).to.be.a('number');",
+              "  const raw = JSON.stringify(data).toLowerCase();",
+              "  pm.expect(raw).not.to.include('margen');",
+              "  pm.expect(raw).not.to.include('costo_');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "TAURO · Rastreo privado en vivo",
           "request": {
             "method": "GET",
             "header": [
