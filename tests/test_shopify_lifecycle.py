@@ -863,3 +863,77 @@ def test_create_activo_tardio_no_revive_pedido_cancelado(monkeypatch):
         for query, _ in cursor.ejecutadas
     )
     assert conn.commits == 0
+
+
+def test_reinicio_cliente_borra_solo_espejo_y_verifica_historia(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _Cursor([
+        {
+            "id": 17,
+            "cliente_id": "PESCAJACKS",
+            "owner_instalacion": "PESCAJACKS",
+        },
+        {"n": 229},
+        {"n": 458},
+        {"n": 1},
+        {"n": 7},
+        {"n": 3},
+        {"n": 5},
+        {"n": 7},
+        {"n": 3},
+        {"n": 5},
+    ])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(
+        integraciones_tienda, "_bloquear_dominio_shopify", lambda *_: None,
+    )
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    resultado = integraciones_tienda.reiniciar_integracion_shopify_cliente(
+        "pescajacks", "pescajacks-prueba.myshopify.com",
+    )
+
+    sql = "\n".join(query for query, _params in cursor.ejecutadas)
+    assert resultado["productos"] == 229
+    assert resultado["pedidos_importados"] == 1
+    assert "DELETE FROM shopify_instalaciones" in sql
+    assert "DELETE FROM producto_inventario_ubicaciones" in sql
+    assert "DELETE FROM productos" in sql
+    assert "DELETE FROM tiendas_conectadas" in sql
+    assert "DELETE FROM envios" not in sql
+    assert "DELETE FROM pagos" not in sql
+    assert "DELETE FROM solicitudes_guia" not in sql
+    assert "shopify.integration_reset" in str(cursor.ejecutadas[-1][1])
+    assert conn.commits == 1
+
+
+def test_reinicio_cliente_rechaza_tienda_de_otro_tenant(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _Cursor([{
+        "id": 17,
+        "cliente_id": "OTRO_CLIENTE",
+        "owner_instalacion": "OTRO_CLIENTE",
+    }])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(
+        integraciones_tienda, "_bloquear_dominio_shopify", lambda *_: None,
+    )
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    try:
+        integraciones_tienda.reiniciar_integracion_shopify_cliente(
+            "pescajacks", "pescajacks-prueba.myshopify.com",
+        )
+    except ValueError as exc:
+        assert "otra cuenta" in str(exc)
+    else:
+        raise AssertionError("debía rechazar el reset entre tenants")
+
+    assert all(
+        "DELETE FROM" not in query for query, _params in cursor.ejecutadas
+    )
+    assert conn.commits == 0

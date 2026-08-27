@@ -176,6 +176,22 @@
                 <input type="hidden" name="tienda_id" value="{{ t.id }}">
                 <button type="submit" class="btn btn-ghost btn-sm">Desconectar</button>
             </form>
+            {% if t.plataforma == 'shopify' %}
+            <details style="margin-left:auto;">
+                <summary class="btn btn-ghost btn-sm" style="cursor:pointer;">Reiniciar integración</summary>
+                <form method="POST" action="/portal/tienda/reiniciar-shopify"
+                      data-confirm="Se eliminarán de TAURO la conexión, el catálogo/stock importado y los pedidos importados de {{ t.dominio }}. Shopify, tus guías y tu cuenta corriente no se modifican. ¿Confirmás el reinicio?"
+                      style="margin-top:10px;padding:12px;border:1px solid rgba(255,138,138,.35);border-radius:10px;max-width:390px;">
+                    <input type="hidden" name="dominio" value="{{ t.dominio }}">
+                    <label class="sub" style="display:block;margin-bottom:8px;">
+                        Escribí <b>REINICIAR</b> para crear una vinculación limpia.
+                    </label>
+                    <input type="text" name="confirmar" autocomplete="off" required
+                           placeholder="REINICIAR" style="width:100%;margin-bottom:8px;">
+                    <button type="submit" class="btn btn-ghost btn-sm">Borrar sincronización anterior</button>
+                </form>
+            </details>
+            {% endif %}
         </div>
         {% endfor %}
         <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">

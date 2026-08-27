@@ -328,6 +328,172 @@ def desconectar_tienda(cliente_id: str, tienda_id: int) -> None:
         conn.commit()
 
 
+def reiniciar_integracion_shopify_cliente(
+    cliente_id: str,
+    dominio: str,
+) -> dict:
+    """Retira una instalación Shopify y su espejo sin tocar historia TAURO.
+
+    Es una operación deliberadamente más fuerte que ``desconectar_tienda``:
+    elimina token, binding, catálogo/stock, cola y pedidos importados de ESA
+    tienda para permitir una instalación limpia. Envíos, pagos, facturas y
+    solicitudes de guía permanecen intactos y se verifican antes del commit.
+    """
+    _ensure_tablas()
+    cliente_id = (cliente_id or "").strip().upper()
+    dominio = (dominio or "").strip().lower()
+    if not cliente_id or not dominio.endswith(".myshopify.com"):
+        raise ValueError("Tienda Shopify inválida.")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            _bloquear_dominio_shopify(cur, dominio)
+            cur.execute(
+                """
+                SELECT t.id, t.cliente_id, i.cliente_id AS owner_instalacion
+                  FROM tiendas_conectadas t
+                  LEFT JOIN shopify_instalaciones i
+                    ON LOWER(i.dominio) = LOWER(t.dominio)
+                 WHERE LOWER(t.dominio) = %s
+                   AND t.plataforma = 'shopify'
+                 FOR UPDATE OF t
+                """,
+                (dominio,),
+            )
+            binding = cur.fetchone()
+            if not binding:
+                raise ValueError("La tienda ya no está vinculada.")
+            if str(binding.get("cliente_id") or "").strip().upper() != cliente_id:
+                raise ValueError("La tienda pertenece a otra cuenta TAURO.")
+            owner = str(binding.get("owner_instalacion") or "").strip().upper()
+            if owner and owner != cliente_id:
+                raise ValueError("La instalación Shopify pertenece a otra cuenta TAURO.")
+
+            tienda_id = int(binding["id"])
+            snapshot = {}
+            conteos = {
+                "productos": (
+                    "SELECT COUNT(*) AS n FROM productos "
+                    "WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s",
+                    (dominio,),
+                ),
+                "inventario_ubicaciones": (
+                    "SELECT COUNT(*) AS n FROM producto_inventario_ubicaciones "
+                    "WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s",
+                    (dominio,),
+                ),
+                "pedidos_importados": (
+                    "SELECT COUNT(*) AS n FROM pedidos_tienda WHERE tienda_id = %s",
+                    (tienda_id,),
+                ),
+                "envios_preservados": (
+                    "SELECT COUNT(*) AS n FROM envios WHERE UPPER(cliente_id) = %s",
+                    (cliente_id,),
+                ),
+                "pagos_preservados": (
+                    "SELECT COUNT(*) AS n FROM pagos WHERE UPPER(cliente_id) = %s",
+                    (cliente_id,),
+                ),
+                "solicitudes_preservadas": (
+                    "SELECT COUNT(*) AS n FROM solicitudes_guia "
+                    "WHERE UPPER(cliente_id) = %s",
+                    (cliente_id,),
+                ),
+            }
+            for clave, (sql, params) in conteos.items():
+                cur.execute(sql, params)
+                snapshot[clave] = int((cur.fetchone() or {}).get("n") or 0)
+
+            # Invalidar primero la credencial local. Todo queda dentro de una
+            # sola transacción y bajo el lock por dominio, de modo que ningún
+            # webhook o worker atrasado puede recrear el espejo entre deletes.
+            cur.execute(
+                """
+                DELETE FROM shopify_instalaciones
+                 WHERE LOWER(dominio) = %s
+                   AND (cliente_id IS NULL OR UPPER(cliente_id) = %s)
+                """,
+                (dominio, cliente_id),
+            )
+            cur.execute(
+                "DELETE FROM shopify_webhook_eventos WHERE LOWER(dominio) = %s",
+                (dominio,),
+            )
+            cur.execute(
+                "DELETE FROM shopify_sync_estado WHERE LOWER(dominio) = %s",
+                (dominio,),
+            )
+            cur.execute(
+                "DELETE FROM config_envio_tienda WHERE LOWER(dominio) = %s",
+                (dominio,),
+            )
+            cur.execute(
+                "DELETE FROM pedidos_huerfanos WHERE LOWER(dominio) = %s",
+                (dominio,),
+            )
+            cur.execute(
+                "DELETE FROM shopify_huerfanos_cancelados WHERE LOWER(dominio) = %s",
+                (dominio,),
+            )
+            cur.execute(
+                """
+                DELETE FROM producto_inventario_ubicaciones
+                 WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s
+                """,
+                (dominio,),
+            )
+            cur.execute(
+                """
+                DELETE FROM productos
+                 WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s
+                """,
+                (dominio,),
+            )
+            # pedidos_tienda cae por ON DELETE CASCADE. No son guías ni
+            # movimientos contables: son exclusivamente el inbox importado.
+            cur.execute(
+                """
+                DELETE FROM tiendas_conectadas
+                 WHERE id = %s AND UPPER(cliente_id) = %s
+                """,
+                (tienda_id, cliente_id),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("El binding Shopify cambió durante el reinicio.")
+
+            for clave, tabla in (
+                ("envios_preservados", "envios"),
+                ("pagos_preservados", "pagos"),
+                ("solicitudes_preservadas", "solicitudes_guia"),
+            ):
+                cur.execute(
+                    f"SELECT COUNT(*) AS n FROM {tabla} WHERE UPPER(cliente_id) = %s",
+                    (cliente_id,),
+                )
+                despues = int((cur.fetchone() or {}).get("n") or 0)
+                if despues != snapshot[clave]:
+                    raise RuntimeError(
+                        f"Control de preservación falló para {tabla}."
+                    )
+
+            from servicios.auditoria import registrar_evento_con_cursor
+            registrar_evento_con_cursor(
+                cur,
+                event="shopify.integration_reset",
+                actor_type="cliente",
+                actor_ref=cliente_id,
+                ip=None,
+                method="POST",
+                path="/portal/tienda/reiniciar-shopify",
+                status_code=303,
+                success=True,
+                request_id=None,
+                metadata={"dominio": dominio, **snapshot},
+            )
+        conn.commit()
+    return {"ok": True, "dominio": dominio, **snapshot}
+
+
 def tienda_por_dominio(dominio: str) -> Optional[dict]:
     _ensure_tablas()
     dominio = (dominio or "").strip().lower()

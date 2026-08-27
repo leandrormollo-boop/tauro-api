@@ -72,6 +72,7 @@ from servicios.provincias import opciones as opciones_provincias
 from servicios.panel_cliente import embudo_envios, preparar_historial_envios
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
+    reiniciar_integracion_shopify_cliente,
     listar_pedidos, contar_pendientes, obtener_pedido,
     marcar_convertido, descartar_pedido,
 )
@@ -2836,6 +2837,42 @@ def tienda_desconectar(
 ):
     desconectar_tienda(cliente, tienda_id)
     return RedirectResponse(url="/portal/tienda?ok=desconectada", status_code=303)
+
+
+@router.post("/tienda/reiniciar-shopify")
+def tienda_reiniciar_shopify(
+    dominio: str = Form(...),
+    confirmar: str = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    if confirmar != "REINICIAR":
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "Escribí REINICIAR para confirmar el borrado del espejo Shopify."
+            ),
+            status_code=303,
+        )
+    try:
+        reporte = reiniciar_integracion_shopify_cliente(cliente, dominio)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/portal/tienda?error={quote(str(exc))}", status_code=303,
+        )
+    except Exception as exc:
+        print(f"[shopify] reinicio controlado falló: {type(exc).__name__}")
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "No pudimos reiniciar la integración. No se aplicaron cambios parciales."
+            ),
+            status_code=303,
+        )
+    mensaje = (
+        f"Integración reiniciada: se retiraron {reporte['productos']} productos "
+        "del espejo TAURO. Shopify no fue modificado."
+    )
+    return RedirectResponse(
+        url=f"/portal/tienda?ok={quote(mensaje)}", status_code=303,
+    )
 
 
 @router.post("/tienda/pedidos/descartar")
