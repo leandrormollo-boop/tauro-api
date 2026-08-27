@@ -65,7 +65,7 @@ API_VERSION = "2026-07"
 # Catálogo + inventario son de lectura: Shopify sigue siendo la fuente de
 # verdad y TAURO mantiene un espejo local rápido. No pedimos `write_inventory`.
 SCOPES = (
-    "read_orders,read_products,read_inventory,"
+    "read_orders,read_products,read_inventory,read_locations,"
     "write_merchant_managed_fulfillment_orders"
 )
 
@@ -349,7 +349,20 @@ def vincular_cliente(dominio: str, cliente_id: str) -> None:
         )
         # No duplicar el API secret de la app en una fila por cliente. El
         # webhook OAuth se verifica con la variable segura de entorno.
-        conectar_tienda(cliente_id, "shopify", dominio, "oauth:shopify-app")
+        resultado = conectar_tienda(
+            cliente_id,
+            "shopify",
+            dominio,
+            "oauth:shopify-app",
+            # Llegar acá requiere OAuth firmado por Shopify y, en el flujo
+            # normal, una sesión TAURO con state verificado. Eso constituye
+            # la prueba fuerte para migrar una tienda que hubiera quedado
+            # asociada a una cuenta de prueba histórica. El alta manual sigue
+            # sin poder reasignar dominios ajenos.
+            reasignar_confirmado=True,
+        )
+        if not resultado.get("ok"):
+            raise RuntimeError("Shopify autorizó la tienda pero no pudo vincularse.")
         # Las ventas que entraron mientras la tienda estaba sin vincular no
         # se perdieron: se guardaron como huérfanas y se recuperan ACÁ, que
         # es el momento exacto en que ya hay a quién atribuírselas.

@@ -172,6 +172,68 @@ def test_estado_pedido_y_label_siempre_filtran_por_cliente(monkeypatch):
     assert bytes(pdf.body).startswith(b"%PDF")
 
 
+def test_listado_envios_b2b_pagina_y_separa_ambito(monkeypatch):
+    monkeypatch.setattr(main, "autenticar", lambda _: _perfil())
+    from servicios import solicitudes_guia
+    consultas = []
+
+    def listar(cliente_id, **filtros):
+        consultas.append((cliente_id, filtros))
+        return ([{
+            "id": 91,
+            "api_referencia": "PESCA-91",
+            "estado": "GUIA_LISTA",
+            "ambito": "INTERNACIONAL",
+            "courier": "DHL",
+            "servicio_courier": "P",
+            "producto_alias": "REEL-QA",
+            "cantidad": 1,
+            "destino_pais": "US",
+            "dest_nombre": "Cliente QA",
+            "dest_ciudad": "Miami",
+            "dest_estado": "FL",
+            "peso_kg": 1.2,
+            "valor_declarado_usd": 40,
+            "precio_tauro_ars": 100000,
+            "precio_tauro_usd": 100,
+            "tracking": "2634793766",
+            "tiene_label": True,
+            "created_at": datetime(2026, 8, 27, tzinfo=timezone.utc),
+            "updated_at": datetime(2026, 8, 27, tzinfo=timezone.utc),
+        }], 3)
+
+    monkeypatch.setattr(solicitudes_guia, "listar_envios_api", listar)
+
+    respuesta = main.listar_envios_b2b(
+        x_api_key="tauro-qa", limite=1, offset=1,
+        ambito="internacional", estado="guia_lista",
+    )
+
+    assert consultas == [("PESCA_JACKS_QA", {
+        "limite": 1, "offset": 1,
+        "ambito": "INTERNACIONAL", "estado": "GUIA_LISTA",
+    })]
+    assert respuesta["total"] == 3
+    assert respuesta["siguiente_offset"] == 2
+    assert respuesta["anterior_offset"] == 0
+    assert respuesta["envios"][0]["ambito"] == "internacional"
+    assert respuesta["envios"][0]["guia_url"] == "/pedidos/91/guia.pdf"
+    serializado = str(respuesta).lower()
+    assert "margen" not in serializado
+    assert "costo_" not in serializado
+
+
+def test_listado_envios_rechaza_filtros_ambiguos(monkeypatch):
+    monkeypatch.setattr(main, "autenticar", lambda _: _perfil())
+
+    with pytest.raises(HTTPException) as exc:
+        main.listar_envios_b2b(
+            x_api_key="tauro-qa", limite=100, offset=0,
+            ambito="todos", estado="",
+        )
+    assert exc.value.status_code == 400
+
+
 class _Cursor:
     def __init__(self, row):
         self.row = row
@@ -287,3 +349,14 @@ def test_servicio_idempotente_usa_indice_atomico():
     schema = open("sql/schema.sql", encoding="utf-8").read()
     assert "ON CONFLICT (cliente_id, idempotency_key_hash)" in fuente
     assert "uq_solicitudes_cliente_idempotency" in schema
+
+
+def test_listado_envios_sql_filtra_cliente_y_no_selecciona_costos():
+    fuente = open("servicios/solicitudes_guia.py", encoding="utf-8").read()
+    bloque = fuente.split("def listar_envios_api(", 1)[1].split(
+        "def contar_guias_listas", 1
+    )[0]
+    assert 'condiciones = ["cliente_id=%s"]' in bloque
+    assert "costo_" not in bloque
+    assert "margen" not in bloque
+    assert "label_pdf," not in bloque

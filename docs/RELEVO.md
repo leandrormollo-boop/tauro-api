@@ -111,10 +111,17 @@ explotaban al colectar y se venían salteando a mano en cada corrida.
   misma solicitud y una clave reutilizada con otro body responde `409`.
 - `GET /pedidos/{id}` y `GET /pedidos/{id}/guia.pdf` permiten consultar y
   descargar la guía con API key, siempre filtrando por dueño.
+- `GET /envios` devuelve el historial paginado y filtrable por ámbito/estado,
+  sin mezclar nacional con internacional ni publicar costos internos.
 - `GET /rastrear/{tracking}` consulta sólo envíos propios e intenta refrescar
   DHL/FedEx/UPS; si el courier falla conserva el estado TAURO sin filtrar el
   error interno.
-- Suite actual: **858 tests + 5 subtests**, sin exclusiones.
+- Shopify Pesca Jacks: el OAuth exige también `read_locations` porque el espejo
+  muestra el nombre de cada depósito. La vinculación OAuth confirmada puede
+  migrar una tienda histórica de `TEST_CLIENT` al dueño real, mientras que el
+  alta manual sigue sin poder apropiarse de dominios ajenos. La tabla durable
+  de pedidos huérfanos ahora se crea en la migración base antes de leerla.
+- Suite actual: **865 tests + 5 subtests**, sin exclusiones.
 
 ## Seguridad (03/08/2026)
 

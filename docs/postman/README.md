@@ -43,8 +43,9 @@ GraphQL sólo leen identidad, scopes, una muestra del catálogo y stock; no
 modifican la tienda.
 
 La carpeta **05 · API B2B operativa** también es de solo lectura: valida el
-estado de la solicitud, el rastreo privado y la descarga de la guía. Usar IDs y
-trackings de QA del mismo cliente configurado en `tauro_api_key`.
+historial paginado, el estado de la solicitud, el rastreo privado y la descarga
+de la guía. Usar IDs y trackings de QA del mismo cliente configurado en
+`tauro_api_key`.
 
 La carpeta **10 · Webhooks controlados** está deshabilitada por defecto y usa
 `pm.vault.get`, por lo que se ejecuta manualmente en la app de Postman (no en
@@ -79,6 +80,8 @@ una fila sintética y no debe apuntarse a producción.
   paginado y sin costos ni márgenes internos.
 - Estado/guía/tracking: sólo responden para solicitudes del mismo cliente; un
   ID o tracking ajeno devuelve `404`.
+- Historial: permite separar `NACIONAL` de `INTERNACIONAL`, pagina sin repetir
+  filas y no expone costos ni márgenes de TAURO.
 - Firma falsa: 401 y cero escritura.
 - Primera entrega válida: `ok=true`.
 - Segunda entrega con el mismo order id: `nuevo=false`.

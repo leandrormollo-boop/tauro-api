@@ -16,7 +16,7 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
   HMAC verificado; dominio validado con regex estricta (sin open-redirect). Si
   el navegador embebido bloquea la cookie de `state`, se instala sin vincular
   y el dueño debe reclamarla luego desde su portal.
-- Scopes mínimos: `read_orders`, `read_products`, `read_inventory`,
+- Scopes mínimos: `read_orders`, `read_products`, `read_inventory`, `read_locations`,
   `write_merchant_managed_fulfillment_orders`
   (`write` ya incluye lectura del mismo recurso y Shopify omite el `read` al
   devolver los permisos otorgados).
@@ -63,7 +63,7 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 - **App URL**: `https://taurosolutions.ar/shopify/install`
 - **Allowed redirection URL(s)**: `https://taurosolutions.ar/shopify/callback`
 - **Access scopes**:
-  `read_orders,read_products,read_inventory,write_merchant_managed_fulfillment_orders`
+  `read_orders,read_products,read_inventory,read_locations,write_merchant_managed_fulfillment_orders`
   (exactamente los mismos que pide el OAuth, sin `write_shipping`).
 - **Compliance webhooks** (van SÍ o SÍ acá, no por API — Shopify los prueba):
   - customers/data_request → `https://taurosolutions.ar/shopify/webhook/customers/data_request`

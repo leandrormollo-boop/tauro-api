@@ -1167,6 +1167,75 @@ def estado_pedido(solicitud_id: int, x_api_key: str = Header(default=None)):
     }
 
 
+@app.get("/envios", tags=["envios"])
+def listar_envios_b2b(
+    x_api_key: str = Header(default=None),
+    limite: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    ambito: str = Query(..., description="NACIONAL o INTERNACIONAL"),
+    estado: str = Query(""),
+):
+    """Historial B2B paginado, separado por ámbito y dueño de la API key."""
+    perfil = autenticar(x_api_key)
+    ambito = (ambito or "").strip().upper()
+    estado = (estado or "").strip().upper()
+    if ambito not in {"NACIONAL", "INTERNACIONAL"}:
+        raise HTTPException(
+            status_code=400, detail="Ámbito inválido: usá NACIONAL o INTERNACIONAL."
+        )
+    from servicios.solicitudes_guia import ESTADOS_VALIDOS, listar_envios_api
+    if estado and estado not in ESTADOS_VALIDOS:
+        raise HTTPException(status_code=400, detail="Estado de envío inválido.")
+
+    filas, total = listar_envios_api(
+        perfil["cliente_id"], limite=limite, offset=offset,
+        ambito=ambito, estado=estado,
+    )
+    envios = []
+    for envio in filas:
+        tracking = (envio.get("tracking") or "").strip()
+        courier = (envio.get("courier") or "").strip().upper()
+        envios.append({
+            "solicitud_id": envio["id"],
+            "referencia": envio.get("api_referencia"),
+            "estado": envio.get("estado"),
+            "ambito": (envio.get("ambito") or "").lower(),
+            "courier": courier or None,
+            "servicio": envio.get("servicio_courier"),
+            "producto": envio.get("producto_alias"),
+            "cantidad": envio.get("cantidad"),
+            "destino": {
+                "pais": envio.get("destino_pais"),
+                "nombre": envio.get("dest_nombre"),
+                "ciudad": envio.get("dest_ciudad"),
+                "estado": envio.get("dest_estado"),
+            },
+            "peso_kg": envio.get("peso_kg"),
+            "valor_declarado_usd": envio.get("valor_declarado_usd"),
+            "precio_tauro_ars": envio.get("precio_tauro_ars"),
+            "precio_tauro_usd": envio.get("precio_tauro_usd"),
+            "tracking": tracking or None,
+            "guia_disponible": bool(envio.get("tiene_label")),
+            "estado_url": f"/pedidos/{envio['id']}",
+            "guia_url": f"/pedidos/{envio['id']}/guia.pdf" if envio.get("tiene_label") else None,
+            "creado_en": _fecha_api(envio.get("created_at")),
+            "actualizado_en": _fecha_api(envio.get("updated_at")),
+        })
+
+    siguiente = offset + limite if offset + len(envios) < total else None
+    anterior = max(0, offset - limite) if offset > 0 else None
+    return {
+        "status": "success",
+        "total": total,
+        "limite": limite,
+        "offset": offset,
+        "siguiente_offset": siguiente,
+        "anterior_offset": anterior,
+        "filtros": {"ambito": ambito or None, "estado": estado or None},
+        "envios": envios,
+    }
+
+
 @app.get("/pedidos/{solicitud_id}/guia.pdf", tags=["envios"])
 def descargar_guia_api(solicitud_id: int, x_api_key: str = Header(default=None)):
     """Descarga autenticada de la etiqueta sin depender de la sesión web."""

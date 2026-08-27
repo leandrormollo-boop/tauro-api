@@ -11,7 +11,7 @@ import pytest
 
 
 SHOPIFY_SCOPES = (
-    "read_orders,read_products,read_inventory,"
+    "read_orders,read_products,read_inventory,read_locations,"
     "write_merchant_managed_fulfillment_orders"
 )
 SHOPIFY_WEBHOOKS = [
@@ -20,6 +20,106 @@ SHOPIFY_WEBHOOKS = [
     "inventory_levels/update", "inventory_items/update",
     "app/uninstalled",
 ]
+
+
+class _CursorTienda:
+    def __init__(self, propietario_inicial: str = "TEST_CLIENT"):
+        self.propietario = propietario_inicial
+        self.params = None
+        self.query = ""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, query, params=None):
+        self.query = query
+        self.params = params or {}
+        if isinstance(self.params, dict) and (
+            self.propietario == self.params.get("cliente")
+            or self.params.get("reasignar")
+        ):
+            self.propietario = self.params["cliente"]
+
+    def fetchone(self):
+        return {"id": 7, "cliente_id": self.propietario}
+
+
+class _ConnTienda:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.commits = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def cursor(self):
+        return self._cursor
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_scopes_shopify_incluyen_ubicaciones_para_nombres_de_deposito():
+    from servicios.shopify_app import SCOPES
+
+    assert set(SCOPES.split(",")) == set(SHOPIFY_SCOPES.split(","))
+    assert "read_locations" in SCOPES.split(",")
+
+
+def test_conexion_manual_no_reasigna_tienda_de_otro_cliente(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _CursorTienda("TEST_CLIENT")
+    conn = _ConnTienda(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    resultado = integraciones_tienda.conectar_tienda(
+        "PESCAJACKS", "shopify", "pesca.myshopify.com", "secreto-seguro",
+    )
+
+    assert resultado["ok"] is False
+    assert cursor.propietario == "TEST_CLIENT"
+    assert cursor.params["reasignar"] is False
+
+
+def test_oauth_confirmado_reasigna_tienda_historica(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _CursorTienda("TEST_CLIENT")
+    conn = _ConnTienda(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    resultado = integraciones_tienda.conectar_tienda(
+        "PESCAJACKS", "shopify", "pesca.myshopify.com", "oauth:shopify-app",
+        reasignar_confirmado=True,
+    )
+
+    assert resultado == {"ok": True, "tienda_id": 7}
+    assert cursor.propietario == "PESCAJACKS"
+    assert cursor.params["reasignar"] is True
+
+
+def test_migracion_base_crea_huerfanos_antes_de_leerlos(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _CursorTienda()
+    conn = _ConnTienda(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_tablas_listas", False)
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    integraciones_tienda._ensure_tablas()
+
+    assert "CREATE TABLE IF NOT EXISTS pedidos_huerfanos" in cursor.query
+    assert "ix_pedidos_huerfanos_dominio_fecha" in cursor.query
+    assert conn.commits == 1
 
 
 class _Respuesta:
