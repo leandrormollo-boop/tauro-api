@@ -186,16 +186,26 @@ def parsear_pedido_shopify(order: dict) -> Optional[dict]:
     if not ship.get("address1"):
         return None
 
-    items = [
-        {
+    items = []
+    for it in (order.get("line_items") or []):
+        product_id = str(it.get("product_id") or "").strip()
+        variant_id = str(it.get("variant_id") or "").strip()
+        items.append({
             "titulo": (it.get("title") or "")[:180],
+            "variante": (it.get("variant_title") or "")[:180],
             "cantidad": int(it.get("quantity") or 1),
             "precio": it.get("price"),
-            "sku": (it.get("sku") or "")[:80],
+            "sku": (it.get("sku") or "")[:160],
             "peso_gr": it.get("grams"),
-        }
-        for it in (order.get("line_items") or [])
-    ]
+            # IDs estables: el SKU puede cambiar y no es obligatorio. Son la
+            # llave correcta para encontrar imagen, stock y datos aduaneros.
+            "external_product_id": (
+                f"gid://shopify/Product/{product_id}" if product_id.isdigit() else product_id
+            ),
+            "external_variant_id": (
+                f"gid://shopify/ProductVariant/{variant_id}" if variant_id.isdigit() else variant_id
+            ),
+        })
 
     nombre = (ship.get("name")
               or f"{ship.get('first_name', '')} {ship.get('last_name', '')}".strip())

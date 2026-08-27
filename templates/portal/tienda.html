@@ -20,6 +20,40 @@
 </div>{% endif %}
 {% if flash_error %}<div class="msg error">{{ flash_error }}</div>{% endif %}
 
+{% if sync_estado %}
+<div class="card" style="margin-bottom:24px;border-color:rgba(167,139,250,.35);">
+    <div style="display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap;">
+        <div>
+            <div class="eyebrow">Shopify · catálogo y stock</div>
+            <h3 style="margin:3px 0 6px;">
+                {% if sync_estado.estado == 'COMPLETADO' %}Sincronizado
+                {% elif sync_estado.estado == 'SINCRONIZANDO' %}Sincronizando…
+                {% elif sync_estado.estado == 'REAUTORIZAR' %}Requiere autorización
+                {% else %}Sincronización pendiente{% endif %}
+            </h3>
+            <p class="sub" style="margin:0;">
+                {% if sync_estado.ultima_sincronizacion_at %}
+                    Última actualización: {{ sync_estado.ultima_sincronizacion_at.strftime('%d/%m/%Y %H:%M') }}.
+                {% else %}TAURO está preparando tu primer catálogo.{% endif %}
+                Shopify sigue siendo la fuente oficial.
+            </p>
+        </div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;">
+            <div><strong style="display:block;font-size:24px;">{{ stock_resumen.variantes or 0 }}</strong><span class="sub">variantes</span></div>
+            <div><strong style="display:block;font-size:24px;">{{ stock_resumen.unidades_disponibles or 0 }}</strong><span class="sub">disponibles</span></div>
+            <div><strong style="display:block;font-size:24px;{% if stock_resumen.agotadas %}color:#ff8a8a;{% endif %}">{{ stock_resumen.agotadas or 0 }}</strong><span class="sub">agotadas</span></div>
+        </div>
+    </div>
+    {% if sync_estado.estado == 'REAUTORIZAR' and sync_estado.dominio %}
+    <div style="margin-top:14px;">
+        <a class="btn btn-primary btn-sm" href="/shopify/install?shop={{ sync_estado.dominio }}&reautorizar=1">Autorizar productos y stock →</a>
+    </div>
+    {% elif sync_estado.estado == 'ERROR' %}
+    <div class="msg warn" style="margin:14px 0 0;">No pudimos actualizar ahora. El sistema vuelve a intentarlo automáticamente.</div>
+    {% endif %}
+</div>
+{% endif %}
+
 {# ── Pedidos pendientes ─────────────────────────────── #}
 <div class="card" style="margin-bottom:24px;">
     <h3 style="margin:0 0 4px;">Pedidos pendientes de envío
@@ -44,7 +78,11 @@
                     <span style="font-size:12px;color:var(--fg-3);">{{ d.cp or '' }}</span></td>
                 <td style="max-width:260px;">
                     {% for it in (p['items'] or [])[:3] %}
-                        <div style="font-size:13px;">{{ it.cantidad }}x {{ it.titulo }}</div>
+                        <div style="font-size:13px;display:flex;gap:8px;align-items:center;margin:3px 0;">
+                            {% if it.imagen_url %}<img src="{{ it.imagen_url }}" alt="" loading="lazy"
+                                style="width:34px;height:34px;object-fit:cover;border-radius:7px;background:var(--bg-2);">{% endif %}
+                            <span><b>{{ it.cantidad }}x</b> {{ it.titulo }}{% if it.variante %}<br><span style="color:var(--fg-3);font-size:11px;">{{ it.variante }}</span>{% endif %}</span>
+                        </div>
                     {% endfor %}
                     {% if (p['items'] or [])|length > 3 %}<div style="font-size:12px;color:var(--fg-3);">+{{ (p['items'] or [])|length - 3 }} más</div>{% endif %}
                     {# El envío se arma solo cuando entra la venta. Si no se pudo,
@@ -195,9 +233,9 @@
         {% endfor %}
         <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <form method="POST" action="/portal/tienda/sincronizar-catalogo">
-                <button type="submit" class="btn btn-ghost btn-sm">↻ Sincronizar productos de Shopify</button>
+                <button type="submit" class="btn btn-ghost btn-sm">↻ Sincronizar catálogo y stock</button>
             </form>
-            <span class="sub" style="margin:0;font-size:12px;">Trae tus productos (nombre, SKU, peso y foto) a <a href="/portal/catalogo">tu catálogo</a>. Al conectar por la app oficial ya se cargan solos.</span>
+            <span class="sub" style="margin:0;font-size:12px;">Shopify avisa cada cambio. Este botón fuerza una conciliación completa sin frenar el portal.</span>
         </div>
     {% else %}
         <p class="sub" style="margin:0;">Todavía no conectaste ninguna tienda.</p>
@@ -215,34 +253,20 @@
     {% endif %}
 </div>
 
-{# ── Conectar Shopify (manual por webhook) ────────────── #}
+{# ── Conectar Shopify por OAuth ────────────────── #}
 <div class="card">
     <h3 style="margin:0 0 4px;">Conectar Shopify</h3>
-    <p class="sub" style="margin:0 0 18px;">Cinco minutos, sin programar.</p>
-
-    <form method="POST" action="/portal/tienda/conectar">
-        <input type="hidden" name="plataforma" value="shopify">
+    {% if shopify_app_activa %}
+    <p class="sub" style="margin:0 0 18px;">Ingresá el dominio, aceptá los permisos en Shopify y volvé con ventas, productos, imágenes y stock vinculados.</p>
+    <form method="GET" action="/shopify/install">
         <div class="form-group">
             <label for="dominio">Dominio de tu tienda</label>
-            <input type="text" name="dominio" id="dominio" required placeholder="mitienda.myshopify.com">
+            <input type="text" name="shop" id="dominio" required placeholder="mitienda.myshopify.com" autocomplete="url">
         </div>
-        <div class="form-group">
-            <label for="secreto">Secreto de firma de webhooks</label>
-            <input type="text" name="secreto" id="secreto" required
-                   placeholder="Lo copiás de Shopify al crear el webhook (paso 4 de la guía)">
-        </div>
-        <button type="submit" class="btn btn-primary">Conectar tienda</button>
+        <button type="submit" class="btn btn-primary">Conectar con Shopify →</button>
     </form>
-
-    <div style="margin-top:26px;padding-top:20px;border-top:1px solid var(--line-soft);">
-        <h4 style="margin:0 0 12px;">Guía rápida — Shopify</h4>
-        <ol style="margin:0;padding-left:20px;line-height:2;color:var(--fg-2);font-size:14px;">
-            <li>En tu admin de Shopify: <b>Configuración → Notificaciones → Webhooks</b></li>
-            <li><b>Crear webhook</b> → Evento: <b>Creación de pedidos</b> · Formato: <b>JSON</b></li>
-            <li>URL: <span class="mono" style="user-select:all;background:var(--bg);padding:3px 8px;border-radius:6px;">{{ webhook_url }}</span></li>
-            <li>Al pie de esa pantalla Shopify muestra la clave con la que <i>"se firmarán tus webhooks"</i> — <b>copiala</b> y pegala arriba como secreto</li>
-            <li>Guardá acá con <b>Conectar tienda</b> — y hacé un pedido de prueba en tu tienda para verlo aparecer</li>
-        </ol>
-    </div>
+    {% else %}
+    <p class="sub" style="margin:0;">La app oficial está momentáneamente deshabilitada. Escribinos a integraciones@taurosolutions.ar.</p>
+    {% endif %}
 </div>
 {% endblock %}

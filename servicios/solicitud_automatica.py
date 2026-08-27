@@ -80,7 +80,13 @@ def crear_desde_pedido(pedido_id: int) -> dict:
     # ── Productos: cada SKU del carrito tiene que existir en el catálogo ──
     # El catálogo es lo único que tiene medidas y HS code; sin eso no se
     # puede ni cotizar ni armar la factura de aduana.
-    catalogo = {p.alias_interno.strip().upper(): p for p in get_productos(cliente)}
+    productos_catalogo = get_productos(cliente)
+    catalogo = {p.alias_interno.strip().upper(): p for p in productos_catalogo}
+    catalogo_por_variante = {
+        str(getattr(p, "external_variant_id", "") or "").strip(): p
+        for p in productos_catalogo
+        if getattr(p, "external_variant_id", None)
+    }
     filas, faltantes = [], []
     for it in (ped["items"] or []):
         if not isinstance(it, dict):
@@ -93,9 +99,11 @@ def crear_desde_pedido(pedido_id: int) -> dict:
             )
         except ValueError as exc:
             return _motivo(pedido_id, str(exc))
-        if sku and sku in catalogo:
+        variant_id = str(it.get("external_variant_id") or it.get("variant_id") or "").strip()
+        producto = catalogo_por_variante.get(variant_id) or catalogo.get(sku)
+        if producto:
             filas.append({
-                "producto": catalogo[sku].alias_interno,
+                "producto": producto.alias_interno,
                 "cantidad": cant,
                 "unidades_aduana": cant,
             })
@@ -106,8 +114,8 @@ def crear_desde_pedido(pedido_id: int) -> dict:
         return _motivo(pedido_id,
                        f"Estos productos no están en tu catálogo: "
                        f"{', '.join(str(f) for f in faltantes[:6])}. "
-                       f"Cargalos con el MISMO SKU que usás en tu tienda y el envío "
-                       f"se arma solo la próxima vez.")
+                       f"Sincronizá el catálogo o completá sus datos aduaneros y el "
+                       f"envío se arma solo la próxima vez.")
     if not filas:
         return _motivo(pedido_id, "El pedido no tiene productos despachables.")
 

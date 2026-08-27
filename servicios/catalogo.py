@@ -2,6 +2,7 @@
 # Servicio de catálogo de productos — PostgreSQL
 # ============================================================
 
+import re
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -40,6 +41,28 @@ def _row_a_producto(r: dict) -> Optional[Producto]:
         valor_usd_default=float(r["valor_usd_default"] or 0),
         activo=bool(r["activo"]),
         imagen_url=(r.get("imagen_url") if isinstance(r, dict) else None),
+        plataforma=r.get("plataforma"),
+        tienda_dominio=r.get("tienda_dominio"),
+        external_product_id=r.get("external_product_id"),
+        external_variant_id=r.get("external_variant_id"),
+        external_inventory_item_id=r.get("external_inventory_item_id"),
+        sku_tienda=r.get("sku_tienda"),
+        titulo_tienda=r.get("titulo_tienda"),
+        variante_tienda=r.get("variante_tienda"),
+        precio_tienda=(float(r["precio_tienda"])
+                       if r.get("precio_tienda") is not None else None),
+        moneda_tienda=r.get("moneda_tienda"),
+        hs_code_tienda=r.get("hs_code_tienda"),
+        pais_origen_tienda=r.get("pais_origen_tienda"),
+        stock_controlado=bool(r.get("stock_controlado")),
+        stock_disponible=r.get("stock_disponible"),
+        stock_comprometido=r.get("stock_comprometido"),
+        stock_fisico=r.get("stock_fisico"),
+        stock_entrante=r.get("stock_entrante"),
+        stock_actualizado_at=r.get("stock_actualizado_at"),
+        source_updated_at=r.get("source_updated_at"),
+        sync_activo=bool(r.get("sync_activo", True)),
+        ubicaciones=list(r.get("ubicaciones") or []),
     )
     try:
         return Producto(**campos)
@@ -63,14 +86,95 @@ def get_productos(cliente: str, solo_activos: bool = True) -> List[Producto]:
     params = [cliente]
     if solo_activos:
         query += " AND activo = TRUE"
-    query += " ORDER BY alias_interno"
+    query += " AND COALESCE(sync_activo, TRUE) = TRUE ORDER BY alias_interno"
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
-            rows = cur.fetchall()
+            rows = [dict(r) for r in cur.fetchall()]
+
+            ids = [int(r["id"]) for r in rows if r.get("id") is not None]
+            ubicaciones: dict[int, list[dict]] = {}
+            if ids:
+                cur.execute(
+                    """
+                    SELECT producto_id, external_location_id, ubicacion_nombre,
+                           disponible, comprometido, fisico, entrante,
+                           source_updated_at
+                    FROM producto_inventario_ubicaciones
+                    WHERE cliente_id = %s AND producto_id = ANY(%s)
+                    ORDER BY ubicacion_nombre
+                    """,
+                    (cliente, ids),
+                )
+                for u in cur.fetchall():
+                    ubicaciones.setdefault(int(u["producto_id"]), []).append(dict(u))
+
+    for row in rows:
+        row["ubicaciones"] = ubicaciones.get(int(row["id"]), [])
 
     return [p for r in rows if (p := _row_a_producto(r)) is not None]
+
+
+def listar_stock_cliente(
+    cliente: str, limite: int = 100, offset: int = 0,
+) -> tuple[List[Producto], int]:
+    """Catálogo operativo paginado para la API B2B, aislado por tenant.
+
+    Incluye variantes Shopify todavía pendientes de completar en TAURO porque
+    el inventario sirve para identificarlas aunque aún no puedan cotizarse ni
+    emitirse. Las variantes archivadas por Shopify no se publican.
+    """
+    _ensure_imagen_col()
+    cliente = (cliente or "").strip().upper()
+    limite = max(1, min(int(limite), 200))
+    offset = max(0, int(offset))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *, COUNT(*) OVER() AS total_filtrado
+                FROM productos
+                WHERE cliente_id=%s AND COALESCE(sync_activo, TRUE)=TRUE
+                ORDER BY alias_interno
+                LIMIT %s OFFSET %s
+                """,
+                (cliente, limite, offset),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            total = int(rows[0].get("total_filtrado") or 0) if rows else 0
+            if not rows and offset:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS total FROM productos
+                    WHERE cliente_id=%s AND COALESCE(sync_activo, TRUE)=TRUE
+                    """,
+                    (cliente,),
+                )
+                total = int((cur.fetchone() or {}).get("total") or 0)
+
+            ids = [int(r["id"]) for r in rows if r.get("id") is not None]
+            ubicaciones: dict[int, list[dict]] = {}
+            if ids:
+                cur.execute(
+                    """
+                    SELECT producto_id, external_location_id, ubicacion_nombre,
+                           disponible, comprometido, fisico, entrante,
+                           source_updated_at
+                    FROM producto_inventario_ubicaciones
+                    WHERE cliente_id=%s AND producto_id=ANY(%s)
+                    ORDER BY ubicacion_nombre
+                    """,
+                    (cliente, ids),
+                )
+                for ubicacion in cur.fetchall():
+                    ubicaciones.setdefault(int(ubicacion["producto_id"]), []).append(
+                        dict(ubicacion)
+                    )
+
+    for row in rows:
+        row["ubicaciones"] = ubicaciones.get(int(row["id"]), [])
+    return [p for row in rows if (p := _row_a_producto(row)) is not None], total
 
 
 def get_producto(cliente: str, alias_interno: str) -> Optional[Producto]:
@@ -88,6 +192,119 @@ def get_producto(cliente: str, alias_interno: str) -> Optional[Producto]:
             )
             row = cur.fetchone()
     return _row_a_producto(row) if row else None
+
+
+def get_producto_por_variante(cliente: str, external_variant_id: str) -> Optional[Producto]:
+    """Busca una variante Shopify dentro del tenant; nunca cruza catálogos."""
+    cliente = (cliente or "").strip().upper()
+    variante = (external_variant_id or "").strip()
+    if not cliente or not variante:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM productos
+                WHERE cliente_id = %s AND plataforma = 'shopify'
+                  AND external_variant_id = %s
+                LIMIT 1
+                """,
+                (cliente, variante),
+            )
+            row = cur.fetchone()
+    return _row_a_producto(dict(row)) if row else None
+
+
+def enriquecer_items_catalogo(cliente: str, items: list[dict]) -> list[dict]:
+    """Añade imagen/alias/stock a una orden sin consultar Shopify en el request."""
+    cliente = (cliente or "").strip().upper()
+    salida = [dict(item) for item in (items or []) if isinstance(item, dict)]
+    if not cliente or not salida:
+        return salida
+
+    variantes = {
+        str(item.get("external_variant_id") or item.get("variant_id") or "").strip()
+        for item in salida
+    }
+    variantes.discard("")
+    skus = {str(item.get("sku") or "").strip().upper() for item in salida}
+    skus.discard("")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT external_variant_id, alias_interno, sku_tienda, imagen_url,
+                       titulo_tienda, variante_tienda, stock_controlado,
+                       stock_disponible, sync_activo
+                FROM productos
+                WHERE cliente_id = %s
+                  AND (
+                    external_variant_id = ANY(%s)
+                    OR UPPER(COALESCE(sku_tienda, alias_interno)) = ANY(%s)
+                  )
+                """,
+                (cliente, list(variantes), list(skus)),
+            )
+            filas = [dict(r) for r in cur.fetchall()]
+
+    por_variante = {str(r.get("external_variant_id") or ""): r for r in filas}
+    por_sku = {
+        str(r.get("sku_tienda") or r.get("alias_interno") or "").upper(): r
+        for r in filas
+    }
+    for item in salida:
+        clave = str(item.get("external_variant_id") or item.get("variant_id") or "")
+        producto = por_variante.get(clave) or por_sku.get(str(item.get("sku") or "").upper())
+        if not producto:
+            continue
+        item.update({
+            "producto_alias": producto.get("alias_interno"),
+            "imagen_url": producto.get("imagen_url"),
+            "titulo_catalogo": producto.get("titulo_tienda"),
+            "variante_catalogo": producto.get("variante_tienda"),
+            "stock_controlado": bool(producto.get("stock_controlado")),
+            "stock_disponible": producto.get("stock_disponible"),
+            "producto_activo_tienda": bool(producto.get("sync_activo", True)),
+        })
+    return salida
+
+
+def estado_sincronizacion_cliente(cliente: str) -> Optional[dict]:
+    cliente = (cliente or "").strip().upper()
+    if not cliente:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM shopify_sync_estado
+                WHERE cliente_id = %s
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (cliente,),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def resumen_stock_cliente(cliente: str) -> dict:
+    cliente = (cliente or "").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FILTER (WHERE plataforma = 'shopify') AS variantes,
+                       COUNT(*) FILTER (WHERE stock_controlado) AS controladas,
+                       COUNT(*) FILTER (WHERE stock_controlado AND COALESCE(stock_disponible, 0) <= 0) AS agotadas,
+                       COUNT(*) FILTER (WHERE stock_controlado AND stock_disponible BETWEEN 1 AND 5) AS stock_bajo,
+                       COALESCE(SUM(stock_disponible) FILTER (WHERE stock_controlado), 0) AS unidades_disponibles
+                FROM productos
+                WHERE cliente_id = %s AND COALESCE(sync_activo, TRUE) = TRUE
+                """,
+                (cliente,),
+            )
+            row = cur.fetchone()
+    return dict(row or {})
 
 
 def get_productos_pendientes() -> List[dict]:
@@ -281,45 +498,241 @@ def upsert_producto_importado(
     nombre_invoice: str,
     peso_kg: float = 0.0,
     imagen_url: Optional[str] = None,
+    *,
+    tienda_dominio: str = "",
+    external_product_id: str = "",
+    external_variant_id: str = "",
+    external_inventory_item_id: str = "",
+    variante_tienda: str = "",
+    precio_tienda: Optional[float] = None,
+    moneda_tienda: str = "",
+    hs_code_tienda: str = "",
+    pais_origen_tienda: str = "",
+    stock_controlado: bool = False,
+    stock_disponible: Optional[int] = None,
+    stock_comprometido: Optional[int] = None,
+    stock_fisico: Optional[int] = None,
+    stock_entrante: Optional[int] = None,
+    source_updated_at=None,
+    sync_run_id: str = "",
+    ubicaciones: Optional[list[dict]] = None,
 ) -> str:
     """
     Alta/actualización de un producto traído de la tienda (Shopify).
 
-    Se guarda con `alias_interno = SKU` (la llave con la que se cruzan las
-    ventas) y queda `activo=FALSE`: la foto y el nombre ya están, pero le
-    faltan los datos aduaneros (medidas, HS, valor) que ninguna tienda tiene.
-    El cliente los completa una sola vez y recién ahí Tauro lo valida.
-
-    En un re-sync NO se pisa lo que el cliente ya cargó: sólo se refresca la
-    miniatura (y el peso si todavía estaba en 0). Devuelve 'creado' o
-    'actualizado'.
+    La identidad estable es ``external_variant_id``; el SKU puede cambiar o
+    incluso venir vacío. Los datos aduaneros que el cliente/Tauro ya
+    completaron nunca se pisan. Devuelve ``creado`` o ``actualizado``.
     """
     _ensure_imagen_col()
     cliente = cliente.strip().upper()
-    sku = (sku or "").strip()
-    if not sku:
-        raise ValueError("Producto sin SKU: no se puede importar (la venta se cruza por SKU).")
-    nombre = (nombre_invoice or sku).strip()[:120] or sku
-    peso = float(peso_kg or 0)
+    sku = (sku or "").strip()[:160]
+    dominio = (tienda_dominio or "").strip().lower()
+    variante_id = (external_variant_id or "").strip()
+    if not dominio or not variante_id:
+        # Compatibilidad con el importador inicial. El flujo GraphQL nuevo
+        # siempre manda dominio e ID global de variante.
+        if not sku:
+            raise ValueError("Producto Shopify sin SKU ni ID de variante.")
+        dominio = dominio or "legacy.myshopify.com"
+        variante_id = variante_id or f"legacy:{sku.upper()}"
 
+    nombre = (nombre_invoice or sku or "Producto Shopify").strip()[:120]
+    peso = float(peso_kg or 0)
+    precio = float(precio_tienda) if precio_tienda not in (None, "") else None
+    # El precio de venta de la tienda no siempre es el valor declarado para
+    # aduana. Sólo lo sugerimos si Shopify confirma USD: copiar ARS como USD
+    # (por ejemplo 44.500 ARS → USD 44.500) sería un error operativo grave.
+    precio_declarado_sugerido = (
+        precio if str(moneda_tienda or "").strip().upper() == "USD" else None
+    )
+    hs_crudo = re.sub(r"\D", "", str(hs_code_tienda or ""))[:12]
+    hs_tauro = (f"{hs_crudo[:4]}.{hs_crudo[4:6]}.{hs_crudo[6:8]}"
+                if len(hs_crudo) == 8 else "")
+    sufijo = re.sub(r"\D", "", variante_id)[-8:] or "VARIANTE"
+    alias_base = (sku or f"SHOPIFY-{sufijo}").strip()[:60]
+    ubicaciones = list(ubicaciones or [])
+
+    def _alias_libre(cur) -> str:
+        cur.execute(
+            "SELECT external_variant_id FROM productos WHERE cliente_id=%s AND UPPER(alias_interno)=UPPER(%s)",
+            (cliente, alias_base),
+        )
+        usada = cur.fetchone()
+        if not usada or str(usada.get("external_variant_id") or "") == variante_id:
+            return alias_base
+        raiz = alias_base[: max(2, 59 - len(sufijo))].rstrip(" -")
+        return f"{raiz}-{sufijo}"[:60]
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            # Un webhook y una conciliación completa pueden llegar juntos.
+            # El lock vive sólo durante esta transacción y se segmenta por
+            # tenant/tienda/alias: evita altas duplicadas sin frenar a otros
+            # clientes ni a otros productos del mismo catálogo.
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))",
+                (f"{cliente}:{dominio}", alias_base.upper()),
+            )
+            cur.execute(
+                """
+                SELECT id FROM productos
+                WHERE cliente_id=%s AND plataforma='shopify'
+                  AND tienda_dominio=%s AND external_variant_id=%s
+                FOR UPDATE
+                """,
+                (cliente, dominio, variante_id),
+            )
+            existente = cur.fetchone()
+            if not existente and sku:
+                cur.execute(
+                    """
+                    SELECT id FROM productos
+                    WHERE cliente_id=%s AND UPPER(alias_interno)=UPPER(%s)
+                      AND (external_variant_id IS NULL OR external_variant_id='')
+                    FOR UPDATE
+                    """,
+                    (cliente, sku),
+                )
+                existente = cur.fetchone()
+
+            if existente:
+                producto_id = int(existente["id"])
+                cur.execute(
+                    """
+                    UPDATE productos SET
+                        plataforma='shopify', tienda_dominio=%s,
+                        external_product_id=%s, external_variant_id=%s,
+                        external_inventory_item_id=%s, sku_tienda=%s,
+                        titulo_tienda=%s, variante_tienda=%s,
+                        imagen_url=COALESCE(%s, imagen_url),
+                        precio_tienda=%s, moneda_tienda=%s,
+                        hs_code_tienda=%s, pais_origen_tienda=%s,
+                        nombre_invoice=CASE WHEN NOT activo THEN %s ELSE nombre_invoice END,
+                        hs_code=CASE WHEN COALESCE(hs_code,'')='' AND %s<>'' THEN %s ELSE hs_code END,
+                        peso_kg=CASE WHEN COALESCE(peso_kg,0)<=0 AND %s>0 THEN %s ELSE peso_kg END,
+                        valor_usd_default=CASE
+                            WHEN COALESCE(valor_usd_default,0)<=0 AND COALESCE(%s,0)>0 THEN %s
+                            ELSE valor_usd_default END,
+                        stock_controlado=%s, stock_disponible=%s,
+                        stock_comprometido=%s, stock_fisico=%s, stock_entrante=%s,
+                        stock_actualizado_at=CASE WHEN %s THEN NOW() ELSE stock_actualizado_at END,
+                        source_updated_at=%s, sync_run_id=%s, sync_activo=TRUE
+                    WHERE id=%s AND cliente_id=%s
+                    """,
+                    (
+                        dominio, external_product_id, variante_id,
+                        external_inventory_item_id, sku, nombre, variante_tienda,
+                        imagen_url, precio, moneda_tienda, hs_crudo,
+                        pais_origen_tienda, nombre, hs_tauro, hs_tauro,
+                        peso, peso, precio_declarado_sugerido,
+                        precio_declarado_sugerido, bool(stock_controlado),
+                        stock_disponible, stock_comprometido, stock_fisico,
+                        stock_entrante, bool(stock_controlado), source_updated_at,
+                        sync_run_id, producto_id, cliente,
+                    ),
+                )
+                estado = "actualizado"
+            else:
+                alias = _alias_libre(cur)
+                cur.execute(
+                    """
+                    INSERT INTO productos
+                        (cliente_id, alias_interno, nombre_invoice, hs_code,
+                         largo_cm, ancho_cm, alto_cm, peso_kg, valor_usd_default,
+                         imagen_url, plataforma, tienda_dominio,
+                         external_product_id, external_variant_id,
+                         external_inventory_item_id, sku_tienda, titulo_tienda,
+                         variante_tienda, precio_tienda, moneda_tienda,
+                         hs_code_tienda, pais_origen_tienda, stock_controlado,
+                         stock_disponible, stock_comprometido, stock_fisico,
+                         stock_entrante, stock_actualizado_at, source_updated_at,
+                         sync_run_id, sync_activo, activo)
+                    VALUES
+                        (%s,%s,%s,%s,0,0,0,%s,%s,%s,'shopify',%s,%s,%s,%s,
+                         %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                         CASE WHEN %s THEN NOW() ELSE NULL END,%s,%s,TRUE,FALSE)
+                    RETURNING id
+                    """,
+                    (
+                        cliente, alias, nombre, hs_tauro, peso,
+                        precio_declarado_sugerido or 0,
+                        imagen_url, dominio, external_product_id, variante_id,
+                        external_inventory_item_id, sku, nombre, variante_tienda,
+                        precio, moneda_tienda, hs_crudo, pais_origen_tienda,
+                        bool(stock_controlado), stock_disponible,
+                        stock_comprometido, stock_fisico, stock_entrante,
+                        bool(stock_controlado), source_updated_at, sync_run_id,
+                    ),
+                )
+                producto_id = int(cur.fetchone()["id"])
+                estado = "creado"
+
+            cur.execute(
+                "DELETE FROM producto_inventario_ubicaciones WHERE producto_id=%s AND cliente_id=%s",
+                (producto_id, cliente),
+            )
+            for ubicacion in ubicaciones:
+                location_id = str(ubicacion.get("external_location_id") or "").strip()
+                if not location_id:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO producto_inventario_ubicaciones
+                        (cliente_id, producto_id, plataforma, tienda_dominio,
+                         external_location_id, ubicacion_nombre, disponible,
+                         comprometido, fisico, entrante, source_updated_at)
+                    VALUES (%s,%s,'shopify',%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (producto_id, external_location_id) DO UPDATE SET
+                        ubicacion_nombre=EXCLUDED.ubicacion_nombre,
+                        disponible=EXCLUDED.disponible,
+                        comprometido=EXCLUDED.comprometido,
+                        fisico=EXCLUDED.fisico,
+                        entrante=EXCLUDED.entrante,
+                        source_updated_at=EXCLUDED.source_updated_at,
+                        updated_at=NOW()
+                    """,
+                    (
+                        cliente, producto_id, dominio, location_id,
+                        str(ubicacion.get("ubicacion_nombre") or "Ubicación Shopify")[:160],
+                        ubicacion.get("disponible"), ubicacion.get("comprometido"),
+                        ubicacion.get("fisico"), ubicacion.get("entrante"),
+                        ubicacion.get("source_updated_at"),
+                    ),
+                )
+        conn.commit()
+    return estado
+
+
+def desactivar_ausentes_shopify(cliente: str, dominio: str, sync_run_id: str) -> int:
+    """Archiva variantes que ya no aparecieron en una sincronización completa."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO productos
-                    (cliente_id, alias_interno, nombre_invoice, hs_code,
-                     largo_cm, ancho_cm, alto_cm, peso_kg, valor_usd_default,
-                     imagen_url, activo)
-                VALUES (%s, %s, %s, '', 0, 0, 0, %s, 0, %s, FALSE)
-                ON CONFLICT (cliente_id, alias_interno) DO UPDATE SET
-                    imagen_url = COALESCE(EXCLUDED.imagen_url, productos.imagen_url),
-                    peso_kg    = CASE WHEN productos.peso_kg = 0
-                                      THEN EXCLUDED.peso_kg ELSE productos.peso_kg END
-                RETURNING (xmax = 0) AS insertado
+                UPDATE productos SET sync_activo=FALSE,
+                    stock_disponible=NULL, stock_comprometido=NULL,
+                    stock_fisico=NULL, stock_entrante=NULL
+                WHERE cliente_id=%s AND plataforma='shopify' AND tienda_dominio=%s
+                  AND COALESCE(sync_run_id,'')<>%s AND sync_activo=TRUE
                 """,
-                (cliente, sku, nombre, peso, imagen_url),
+                ((cliente or "").strip().upper(), (dominio or "").strip().lower(), sync_run_id),
             )
-            fila = cur.fetchone()
-        conn.commit()
-    insertado = bool(fila["insertado"]) if fila else False
-    return "creado" if insertado else "actualizado"
+            return cur.rowcount
+
+
+def desactivar_producto_shopify(cliente: str, dominio: str, external_product_id: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE productos SET sync_activo=FALSE,
+                    stock_disponible=NULL, stock_comprometido=NULL,
+                    stock_fisico=NULL, stock_entrante=NULL
+                WHERE cliente_id=%s AND plataforma='shopify' AND tienda_dominio=%s
+                  AND external_product_id=%s
+                """,
+                ((cliente or "").strip().upper(), (dominio or "").strip().lower(),
+                 (external_product_id or "").strip()),
+            )
+            return cur.rowcount

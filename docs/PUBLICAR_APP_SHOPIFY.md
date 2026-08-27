@@ -5,19 +5,31 @@ instale con un click. Actualizada 03/08/2026.
 
 ---
 
-## Estado del código: LISTO
+## Estado del código: LISTO PARA DESPLEGAR Y REAUTORIZAR
 
-Todo esto ya funciona y está verificado e2e en producción (28/07, Pesca Jacks):
+El flujo histórico de pedidos y tracking fue verificado e2e en producción el
+28/07 con Pesca Jacks. El espejo nuevo de catálogo y stock está validado por
+suite automatizada, PostgreSQL real y colección Postman; su prueba e2e contra
+Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 
 - OAuth completo (instalar / desinstalar / reinstalar), con `state` anti-CSRF y
   HMAC verificado; dominio validado con regex estricta (sin open-redirect). Si
   el navegador embebido bloquea la cookie de `state`, se instala sin vincular
   y el dueño debe reclamarla luego desde su portal.
-- Scopes mínimos: `read_orders`, `write_merchant_managed_fulfillment_orders`
+- Scopes mínimos: `read_orders`, `read_products`, `read_inventory`,
+  `write_merchant_managed_fulfillment_orders`
   (`write` ya incluye lectura del mismo recurso y Shopify omite el `read` al
   devolver los permisos otorgados).
   (Se sacó `write_shipping` el 03/08 — era del CarrierService, ya retirado.)
-- Webhooks de pedidos con firma verificada por tienda.
+- Webhooks de pedidos, productos e inventario con firma verificada, cola durable,
+  idempotencia y reintentos.
+- Catálogo espejado por variante, incluso sin SKU: imagen, precio, peso, HS code,
+  país de origen y stock por ubicación. Shopify sigue siendo la fuente de verdad.
+- API B2B `GET /stock`, paginada y autenticada con `X-API-Key`, para leer el
+  catálogo propio sin consultar Shopify en cada request ni exponer márgenes.
+- Sincronización completa inicial y reconciliación periódica; las bajas sólo se
+  aplican después de una lectura completa exitosa para no vaciar catálogos ante
+  una caída de Shopify.
 - **Webhooks de privacidad obligatorios** (`customers/data_request`,
   `customers/redact`, `shop/redact`) — verificados: rechazan firmas falsas y no
   loguean datos personales.
@@ -40,12 +52,18 @@ Todo esto ya funciona y está verificado e2e en producción (28/07, Pesca Jacks)
 
 ### 1. Credenciales (Railway → Variables)
 - `SHOPIFY_API_KEY` y `SHOPIFY_API_SECRET` (de la app en el Partner Dashboard).
+- `SHOPIFY_TOKEN_ENCRYPTION_KEY`: secreto largo y exclusivo para cifrar en reposo
+  los tokens de las tiendas. Si se omite, TAURO deriva una clave del API secret
+  para mantener compatibilidad, pero conviene configurarlo antes de producción.
+  Puede agregarse después sin cortar tokens anteriores: el descifrado conserva
+  el API secret como clave transitoria mientras los nuevos ya usan la exclusiva.
 - `BASE_URL=https://taurosolutions.ar` (o dejar el default).
 
 ### 2. Partner Dashboard (partners.shopify.com → Apps → TAURO → Configuration)
 - **App URL**: `https://taurosolutions.ar/shopify/install`
 - **Allowed redirection URL(s)**: `https://taurosolutions.ar/shopify/callback`
-- **Access scopes**: `read_orders,write_merchant_managed_fulfillment_orders`
+- **Access scopes**:
+  `read_orders,read_products,read_inventory,write_merchant_managed_fulfillment_orders`
   (exactamente los mismos que pide el OAuth, sin `write_shipping`).
 - **Compliance webhooks** (van SÍ o SÍ acá, no por API — Shopify los prueba):
   - customers/data_request → `https://taurosolutions.ar/shopify/webhook/customers/data_request`
@@ -81,6 +99,10 @@ envío prellenado desde un pedido · comparador de couriers en `/web`.
 solicitud automática → emitir guía → ver "enviado" con tracking en Shopify.
 Recién ahí, **Submit**.
 
+> El 27/08/2026 la development store usada por Pesca Jacks devolvió
+> `Store unavailable`. No declarar el catálogo/stock como verificado e2e hasta
+> que Shopify reactive la tienda y se complete el consentimiento OAuth nuevo.
+
 ### 5. Facturación
 Free to install, flete cobrado por fuera de Shopify → no se usa la Billing API.
 Si el revisor lo objeta: el cargo es por un servicio de logística externo
@@ -99,6 +121,12 @@ Podés sumar clientes con el link directo:
 
 La instalan igual; sólo no aparece en las búsquedas del App Store. El App Store
 es un canal de captación, no un requisito para funcionar.
+
+### Tiendas que ya estaban instaladas
+
+Al sumar catálogo e inventario, las tiendas existentes deben aceptar los nuevos
+permisos una sola vez. TAURO detecta automáticamente los scopes viejos y las
+redirige al consentimiento. No se les pide un token ni un secreto manual.
 
 ---
 

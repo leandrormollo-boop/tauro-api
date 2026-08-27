@@ -3,11 +3,12 @@
 Esta colección valida el flujo de TAURO sin guardar credenciales en Git ni
 emitir guías. El alcance actual es:
 
-1. Shopify envía una venta por webhook.
-2. TAURO verifica la firma y guarda o actualiza el pedido sin duplicarlo.
-3. TAURO intenta preparar una solicitud para que el cliente la revise.
-4. La guía **no se emite automáticamente**.
-5. Cuando una guía se emite desde TAURO, el tracking vuelve a Shopify.
+1. Shopify expone catálogo, variantes, imágenes y stock por ubicación vía GraphQL.
+2. Shopify envía ventas y cambios de catálogo/inventario por webhook.
+3. TAURO verifica la firma, encola los cambios y evita duplicados.
+4. TAURO intenta preparar una solicitud para que el cliente la revise.
+5. La guía **no se emite automáticamente**.
+6. Cuando una guía se emite desde TAURO, el tracking vuelve a Shopify.
 
 La integración no calcula la tarifa del checkout. El comerciante conserva sus
 tarifas y zonas de envío dentro de Shopify.
@@ -22,6 +23,8 @@ tarifas y zonas de envío dentro de Shopify.
 3. Duplicar el entorno importado y completar localmente:
    - `shop_domain`: dominio exacto `*.myshopify.com`.
    - `shopify_access_token`: token de esa development store.
+   - `tauro_api_key`: API key de un cliente creado exclusivamente para QA;
+     permite verificar `GET /stock` sin mezclar catálogos.
 4. Crear una **app de desarrollo separada** en Shopify. No usar ni copiar el
    secreto de la app productiva de TAURO. Configurar la instancia local de
    TAURO con el secreto de esa app de desarrollo.
@@ -33,8 +36,9 @@ tarifas y zonas de envío dentro de Shopify.
 
 ## Orden seguro de ejecución
 
-Ejecutar primero toda la carpeta **00 · Diagnóstico seguro**. La consulta
-GraphQL sólo lee el nombre y dominio interno de la tienda.
+Ejecutar primero toda la carpeta **00 · Diagnóstico seguro**. Las consultas
+GraphQL sólo leen identidad, scopes, una muestra del catálogo y stock; no
+modifican la tienda.
 
 La carpeta **10 · Webhooks controlados** está deshabilitada por defecto y usa
 `pm.vault.get`, por lo que se ejecuta manualmente en la app de Postman (no en
@@ -64,7 +68,11 @@ una fila sintética y no debe apuntarse a producción.
 - Salud TAURO: 200.
 - PostgreSQL: `status=ok`, `db=ok`.
 - GraphQL: el dominio devuelto coincide con `shop_domain`.
+- GraphQL de catálogo: devuelve variantes e inventario sin errores de permisos.
+- Stock TAURO: responde sólo con el catálogo del dueño de `tauro_api_key`,
+  paginado y sin costos ni márgenes internos.
 - Firma falsa: 401 y cero escritura.
 - Primera entrega válida: `ok=true`.
 - Segunda entrega con el mismo order id: `nuevo=false`.
+- Webhook de inventario repetido: el segundo queda marcado como duplicado.
 - Topic no operativo: 200 con `ignorado`.

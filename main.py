@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
@@ -884,6 +884,74 @@ def cotizar(body: CotizarRequest, x_api_key: str = Header(default=None)):
     }
 
 
+@app.get("/stock", tags=["catalogo"])
+def stock_cliente(
+    x_api_key: str = Header(default=None),
+    limite: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Devuelve el catálogo y stock del dueño de la API key.
+
+    Shopify sigue siendo la fuente de verdad. Esta lectura usa el espejo
+    PostgreSQL de TAURO, por lo que responde rápido y no consume el límite de
+    la tienda. Nunca mezcla clientes ni publica costos/márgenes logísticos.
+    """
+    perfil = autenticar(x_api_key)
+    from servicios.catalogo import estado_sincronizacion_cliente, listar_stock_cliente
+
+    productos, total = listar_stock_cliente(perfil["cliente_id"], limite, offset)
+    estado = estado_sincronizacion_cliente(perfil["cliente_id"]) or {}
+
+    def _fecha(valor):
+        return valor.isoformat() if hasattr(valor, "isoformat") else valor
+
+    filas = []
+    for producto in productos:
+        filas.append({
+            "alias": producto.alias_interno,
+            "sku": producto.sku_tienda or producto.alias_interno,
+            "producto": producto.titulo_tienda or producto.nombre_invoice,
+            "variante": producto.variante_tienda or "",
+            "imagen_url": producto.imagen_url,
+            "shopify_product_id": producto.external_product_id,
+            "shopify_variant_id": producto.external_variant_id,
+            "precio_tienda": producto.precio_tienda,
+            "moneda_tienda": producto.moneda_tienda,
+            "stock_controlado": producto.stock_controlado,
+            "stock_disponible": producto.stock_disponible,
+            "stock_comprometido": producto.stock_comprometido,
+            "stock_fisico": producto.stock_fisico,
+            "stock_entrante": producto.stock_entrante,
+            "stock_actualizado_en": _fecha(producto.stock_actualizado_at),
+            "listo_para_envio": producto.activo,
+            "ubicaciones": [
+                {
+                    "id": ubicacion.get("external_location_id"),
+                    "nombre": ubicacion.get("ubicacion_nombre"),
+                    "disponible": ubicacion.get("disponible"),
+                    "comprometido": ubicacion.get("comprometido"),
+                    "fisico": ubicacion.get("fisico"),
+                    "entrante": ubicacion.get("entrante"),
+                    "actualizado_en": _fecha(ubicacion.get("source_updated_at")),
+                }
+                for ubicacion in producto.ubicaciones
+            ],
+        })
+
+    return {
+        "status": "success",
+        "total": total,
+        "limite": limite,
+        "offset": offset,
+        "sincronizacion": {
+            "estado": estado.get("estado") or "SIN_TIENDA",
+            "ultima_sincronizacion_en": _fecha(estado.get("ultima_sincronizacion_at")),
+            "ultimo_error_codigo": estado.get("ultimo_error_codigo"),
+        },
+        "productos": filas,
+    }
+
+
 @app.post("/pedido")
 def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None)):
     """
@@ -1131,6 +1199,38 @@ scheduler.add_job(
     trigger="cron",
     hour=3,
     minute=45,
+    max_instances=1,
+    coalesce=True,
+)
+
+# Shopify: los webhooks de catálogo/stock se confirman rápido y quedan en
+# una cola PostgreSQL. Este worker durable completa lo pendiente aunque el
+# proceso se haya reiniciado. La reconciliación de 30 minutos cubre un webhook
+# que Shopify no haya podido entregar.
+from servicios.shopify_catalogo import (
+    limpiar_eventos as limpiar_eventos_shopify,
+    procesar_cola_eventos as procesar_webhooks_shopify,
+    reconciliar_tiendas_pendientes as reconciliar_shopify,
+)
+scheduler.add_job(
+    procesar_webhooks_shopify,
+    trigger="interval",
+    seconds=15,
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    reconciliar_shopify,
+    trigger="interval",
+    minutes=5,
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    limpiar_eventos_shopify,
+    trigger="cron",
+    hour=3,
+    minute=55,
     max_instances=1,
     coalesce=True,
 )

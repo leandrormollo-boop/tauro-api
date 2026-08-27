@@ -30,6 +30,7 @@ import urllib.parse
 from typing import Optional
 
 import requests
+from cryptography.fernet import Fernet, InvalidToken
 
 from core.database import get_conn
 
@@ -61,10 +62,23 @@ API_VERSION = "2026-07"
 #     retirado el 28/07: /shopify/tarifas devuelve [] a propósito y el precio
 #     del envío lo pone el comerciante con sus tarifas de Shopify. Sin uso
 #     vivo, fuera.
-# Lo que queda es el mínimo: leer las órdenes y marcar el envío como cumplido
-# con su tracking. Shopify omite `read_x` del token cuando también se pidió
-# `write_x`, porque escribir ya incluye leer ese recurso.
-SCOPES = "read_orders,write_merchant_managed_fulfillment_orders"
+# Catálogo + inventario son de lectura: Shopify sigue siendo la fuente de
+# verdad y TAURO mantiene un espejo local rápido. No pedimos `write_inventory`.
+SCOPES = (
+    "read_orders,read_products,read_inventory,"
+    "write_merchant_managed_fulfillment_orders"
+)
+
+WEBHOOK_TOPICS = (
+    ("orders/create", "ORDERS_CREATE", "/integraciones/shopify/webhook"),
+    ("orders/updated", "ORDERS_UPDATED", "/integraciones/shopify/webhook"),
+    ("products/create", "PRODUCTS_CREATE", "/integraciones/shopify/webhook"),
+    ("products/update", "PRODUCTS_UPDATE", "/integraciones/shopify/webhook"),
+    ("products/delete", "PRODUCTS_DELETE", "/integraciones/shopify/webhook"),
+    ("inventory_levels/update", "INVENTORY_LEVELS_UPDATE", "/integraciones/shopify/webhook"),
+    ("inventory_items/update", "INVENTORY_ITEMS_UPDATE", "/integraciones/shopify/webhook"),
+    ("app/uninstalled", "APP_UNINSTALLED", "/shopify/webhook/desinstalada"),
+)
 
 _tabla_lista = False
 
@@ -93,6 +107,57 @@ def _ensure_tabla() -> None:
             """)
         conn.commit()
     _tabla_lista = True
+
+
+def _fernets() -> list[Fernet]:
+    """Claves activa y de transición para rotar sin perder instalaciones.
+
+    Si la clave exclusiva todavía no existe, se cifra con el API secret. Al
+    agregarla más adelante, los tokens nuevos usan la exclusiva y los viejos
+    siguen pudiendo abrirse con el API secret estable.
+    """
+    materiales = [
+        os.getenv("SHOPIFY_TOKEN_ENCRYPTION_KEY") or "",
+        os.getenv("SHOPIFY_API_SECRET") or "",
+    ]
+    resultado: list[Fernet] = []
+    vistos: set[bytes] = set()
+    for material_crudo in materiales:
+        material = material_crudo.encode("utf-8")
+        if not material or material in vistos:
+            continue
+        vistos.add(material)
+        clave = base64.urlsafe_b64encode(hashlib.sha256(material).digest())
+        resultado.append(Fernet(clave))
+    return resultado
+
+
+def _cifrar_token(token: str) -> str:
+    token = str(token or "")
+    if not token or token.startswith("enc:v1:"):
+        return token
+    fernets = _fernets()
+    if not fernets:
+        raise RuntimeError("Falta clave para cifrar el token de Shopify.")
+    return "enc:v1:" + fernets[0].encrypt(token.encode("utf-8")).decode("ascii")
+
+
+def _descifrar_token(token_guardado: str) -> str:
+    token_guardado = str(token_guardado or "")
+    if not token_guardado.startswith("enc:v1:"):
+        # Compatibilidad con instalaciones previas. Se cifra la próxima vez
+        # que Shopify entregue un token al reautorizar scopes.
+        return token_guardado
+    fernets = _fernets()
+    if not fernets:
+        raise RuntimeError("Falta clave para descifrar el token de Shopify.")
+    ultimo_error = None
+    for fernet in fernets:
+        try:
+            return fernet.decrypt(token_guardado[7:].encode("ascii")).decode("utf-8")
+        except InvalidToken as exc:
+            ultimo_error = exc
+    raise RuntimeError("El token cifrado de Shopify no se pudo abrir.") from ultimo_error
 
 
 def app_configurada() -> bool:
@@ -169,6 +234,7 @@ def canjear_token(dominio: str, code: str) -> Optional[dict]:
 
 def guardar_instalacion(dominio: str, access_token: str, scopes: str = "") -> None:
     _ensure_tabla()
+    token_cifrado = _cifrar_token(access_token)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -177,7 +243,7 @@ def guardar_instalacion(dominio: str, access_token: str, scopes: str = "") -> No
                 ON CONFLICT (dominio) DO UPDATE
                     SET access_token = EXCLUDED.access_token,
                         scopes = EXCLUDED.scopes
-            """, (dominio, access_token, scopes))
+            """, (dominio, token_cifrado, scopes))
         conn.commit()
 
 
@@ -187,7 +253,15 @@ def instalacion(dominio: str) -> Optional[dict]:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM shopify_instalaciones WHERE dominio = %s", (dominio,))
             row = cur.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            datos = dict(row)
+            try:
+                datos["access_token"] = _descifrar_token(datos.get("access_token") or "")
+            except Exception as exc:
+                print(f"[shopify] token de {dominio} no disponible: {type(exc).__name__}")
+                datos["access_token"] = ""
+            return datos
 
 
 def es_dueno_de_la_tienda(dominio: str, cliente_id: str) -> bool:
@@ -267,14 +341,15 @@ def vincular_cliente(dominio: str, cliente_id: str) -> None:
             )
         conn.commit()
 
-    secreto = os.getenv("SHOPIFY_API_SECRET", "").strip()
-    if not secreto:
+    if not os.getenv("SHOPIFY_API_SECRET", "").strip():
         return
     try:
         from servicios.integraciones_tienda import (
             conectar_tienda, tienda_por_dominio, volcar_huerfanos,
         )
-        conectar_tienda(cliente_id, "shopify", dominio, secreto)
+        # No duplicar el API secret de la app en una fila por cliente. El
+        # webhook OAuth se verifica con la variable segura de entorno.
+        conectar_tienda(cliente_id, "shopify", dominio, "oauth:shopify-app")
         # Las ventas que entraron mientras la tienda estaba sin vincular no
         # se perdieron: se guardaron como huérfanas y se recuperan ACÁ, que
         # es el momento exacto en que ya hay a quién atribuírselas.
@@ -318,7 +393,7 @@ def _graphql(dominio: str, token: str, query: str,
     log: esas respuestas pueden contener datos de la tienda.
     """
     url = f"https://{dominio}/admin/api/{API_VERSION}/graphql.json"
-    for intento in range(2):
+    for intento in range(5):
         try:
             r = requests.post(
                 url,
@@ -332,8 +407,12 @@ def _graphql(dominio: str, token: str, query: str,
         except Exception as e:
             print(f"[shopify] GraphQL no disponible: {type(e).__name__}")
             return None
-        if r.status_code == 429 and intento == 0:
-            time.sleep(1)
+        if r.status_code == 429 and intento < 4:
+            try:
+                espera = float((getattr(r, "headers", {}) or {}).get("Retry-After") or 1)
+            except (TypeError, ValueError):
+                espera = 1
+            time.sleep(max(1, min(espera, 20)))
             continue
         if r.status_code != 200:
             print(f"[shopify] GraphQL respondió HTTP {r.status_code}")
@@ -351,8 +430,18 @@ def _graphql(dominio: str, token: str, query: str,
             str((error.get("extensions") or {}).get("code") or "UNKNOWN")
             for error in errores if isinstance(error, dict)
         }
-        if "THROTTLED" in codigos and intento == 0:
-            time.sleep(1)
+        if "THROTTLED" in codigos and intento < 4:
+            costo = (payload.get("extensions") or {}).get("cost") or {}
+            throttle = costo.get("throttleStatus") or {}
+            try:
+                solicitado = float(costo.get("requestedQueryCost") or 0)
+                disponible = float(throttle.get("currentlyAvailable") or 0)
+                restauracion = float(throttle.get("restoreRate") or 0)
+                espera = ((solicitado - disponible) / restauracion
+                          if restauracion > 0 and solicitado > disponible else 1)
+            except (TypeError, ValueError, ZeroDivisionError):
+                espera = 1
+            time.sleep(max(1, min(espera + 0.25, 20)))
             continue
         mensajes = [
             " ".join(str(error.get("message") or "").split())[:160]
@@ -385,11 +474,8 @@ def registrar_webhooks(dominio: str, token: str) -> list[str]:
     configura nada a mano (esa es la diferencia con el modo manual).
     """
     base = _base_url()
-    topics = [
-        ("orders/create", "ORDERS_CREATE", f"{base}/integraciones/shopify/webhook"),
-        ("orders/updated", "ORDERS_UPDATED", f"{base}/integraciones/shopify/webhook"),
-        ("app/uninstalled", "APP_UNINSTALLED", f"{base}/shopify/webhook/desinstalada"),
-    ]
+    topics = [(topic, topic_gql, f"{base}{path}")
+              for topic, topic_gql, path in WEBHOOK_TOPICS]
     mutation = """
         mutation TauroWebhookCreate(
           $topic: WebhookSubscriptionTopic!,
@@ -445,6 +531,10 @@ def registrar_webhooks(dominio: str, token: str) -> list[str]:
         topic for topic, topic_gql, address in topics
         if (topic_gql, address) in verificados
     ]
+
+
+def webhooks_requeridos() -> set[str]:
+    return {topic for topic, _topic_gql, _path in WEBHOOK_TOPICS}
 
 
 def registrar_carrier_service(dominio: str, token: str) -> Optional[str]:

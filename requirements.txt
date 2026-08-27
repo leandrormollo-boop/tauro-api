@@ -12,5 +12,6 @@ jinja2
 python-multipart
 pydantic[email]
 bcrypt
+cryptography
 pypdf
 openpyxl

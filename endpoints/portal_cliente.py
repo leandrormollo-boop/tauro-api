@@ -41,7 +41,7 @@ from servicios.password_reset_queue import (
 )
 from servicios.rate_limit import check_rate, reset_rate, client_ip
 from servicios.catalogo import (
-    get_productos, get_producto, agregar_producto,
+    get_productos, get_producto, listar_stock_cliente, agregar_producto,
     actualizar_producto_cliente, eliminar_producto_cliente,
 )
 from servicios.cotizador import cotizar_referencia_couriers
@@ -2507,6 +2507,21 @@ def tienda_view(
     if base_url.startswith("http://") and "localhost" not in base_url and "127.0.0.1" not in base_url:
         base_url = "https://" + base_url[len("http://"):]
     tiendas = [t for t in listar_tiendas(cliente) if t["activa"]]
+    pedidos = listar_pedidos(cliente, "PENDIENTE")
+    convertidos = listar_pedidos(cliente, "CONVERTIDO", limite=10)
+    sync_estado = None
+    stock_resumen = {}
+    try:
+        from servicios.catalogo import (
+            enriquecer_items_catalogo, estado_sincronizacion_cliente,
+            resumen_stock_cliente,
+        )
+        for pedido in pedidos:
+            pedido["items"] = enriquecer_items_catalogo(cliente, pedido.get("items") or [])
+        sync_estado = estado_sincronizacion_cliente(cliente)
+        stock_resumen = resumen_stock_cliente(cliente)
+    except Exception as e:
+        print(f"[portal] no pude enriquecer pedidos/stock de {cliente}: {type(e).__name__}")
     # Tiendas sin dueño: SÓLO las que este cliente puede probar que son
     # suyas. Antes se listaban TODAS a TODOS — un cliente veía el dominio
     # myshopify de otro comercio y podía reclamarlo. Ahora se filtra contra
@@ -2531,18 +2546,26 @@ def tienda_view(
         tiendanube_activa = _tn_ok()
     except Exception:
         tiendanube_activa = False
+    try:
+        from servicios.shopify_app import app_configurada as _shopify_ok
+        shopify_app_activa = _shopify_ok()
+    except Exception:
+        shopify_app_activa = False
     return templates.TemplateResponse(
         request=request, name="portal/tienda.html",
         context={
             "cliente": cliente,
             "tiendas": tiendas,
-            "pedidos": listar_pedidos(cliente, "PENDIENTE"),
-            "convertidos": listar_pedidos(cliente, "CONVERTIDO", limite=10),
+            "pedidos": pedidos,
+            "convertidos": convertidos,
             "webhook_url": f"{base_url}/integraciones/shopify/webhook",
             "dominio_cfg": dominio_cfg,
             "cfg": obtener_config(dominio_cfg),
             "huerfanas": huerfanas,
             "tiendanube_activa": tiendanube_activa,
+            "shopify_app_activa": shopify_app_activa,
+            "sync_estado": sync_estado,
+            "stock_resumen": stock_resumen,
             "flash_ok": ok,
             "flash_error": error,
         },
@@ -2592,6 +2615,11 @@ def tienda_reclamar(
         )
 
     vincular_cliente(dominio, cliente)
+    try:
+        from servicios.shopify_catalogo import lanzar_sincronizacion
+        lanzar_sincronizacion(dominio, cliente)
+    except Exception as e:
+        print(f"[portal] no pude lanzar sync al vincular {dominio}: {type(e).__name__}")
     registrar_desde_request(request, event="portal.reclamar_tienda", actor_type="cliente",
                             actor_ref=cliente, success=True, metadata={"dominio": dominio})
     return RedirectResponse(url="/portal/tienda?ok=conectada", status_code=303)
@@ -2701,8 +2729,8 @@ def tienda_sincronizar_catalogo(cliente: str = Depends(cliente_actual)):
     """Reimporta el catálogo desde Shopify a pedido del cliente. El alta ya
     ocurre sola al instalar; esto es para volver a traer productos nuevos."""
     try:
-        from servicios.shopify_catalogo import sincronizar_para_cliente
-        r = sincronizar_para_cliente(cliente)
+        from servicios.shopify_catalogo import solicitar_sincronizacion_cliente
+        r = solicitar_sincronizacion_cliente(cliente)
     except Exception as e:
         print(f"[portal] error sincronizando catálogo de {cliente}: {e}")
         r = {"ok": False, "error": "No pudimos sincronizar ahora. Probá de nuevo."}
@@ -2710,8 +2738,7 @@ def tienda_sincronizar_catalogo(cliente: str = Depends(cliente_actual)):
         return RedirectResponse(
             url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo sincronizar.'))}",
             status_code=303)
-    msg = (f"Catálogo sincronizado: {r.get('creados', 0)} nuevos, "
-           f"{r.get('actualizados', 0)} actualizados.")
+    msg = "Sincronización iniciada. Podés seguir trabajando; el stock se actualiza en segundo plano."
     return RedirectResponse(url=f"/portal/tienda?ok={quote(msg)}", status_code=303)
 
 
@@ -2904,8 +2931,32 @@ def direcciones_delete(
 
 # ── Catálogo ────────────────────────────────────────────────
 @router.get("/catalogo", response_class=HTMLResponse)
-def catalogo_view(request: Request, cliente: str = Depends(cliente_actual)):
-    productos = get_productos(cliente, solo_activos=False)
+def catalogo_view(
+    request: Request,
+    pagina: int = 1,
+    cliente: str = Depends(cliente_actual),
+):
+    # Dos filas mantienen el catálogo dentro de una pantalla común. Si hay
+    # más, se navegan por páginas: no hay una lista infinita para scrollear.
+    por_pagina = 2
+    pagina = max(1, int(pagina or 1))
+    productos, productos_total = listar_stock_cliente(
+        cliente, por_pagina, (pagina - 1) * por_pagina,
+    )
+    total_paginas = max(1, (productos_total + por_pagina - 1) // por_pagina)
+    if pagina > total_paginas:
+        pagina = total_paginas
+        productos, productos_total = listar_stock_cliente(
+            cliente, por_pagina, (pagina - 1) * por_pagina,
+        )
+    try:
+        from servicios.catalogo import estado_sincronizacion_cliente, resumen_stock_cliente
+        sync_estado = estado_sincronizacion_cliente(cliente)
+        stock_resumen = resumen_stock_cliente(cliente)
+    except Exception as e:
+        print(f"[catalogo] no pude leer estado de stock: {type(e).__name__}")
+        sync_estado = None
+        stock_resumen = {}
     try:
         taxes = tax_de_productos(cliente)
     except Exception as e:
@@ -2913,7 +2964,11 @@ def catalogo_view(request: Request, cliente: str = Depends(cliente_actual)):
         taxes = {}
     return templates.TemplateResponse(
         request=request, name="portal/catalogo.html",
-        context={"cliente": cliente, "productos": productos, "taxes": taxes,
+        context={"cliente": cliente, "productos": productos,
+                 "productos_total": productos_total,
+                 "pagina": pagina, "total_paginas": total_paginas,
+                 "taxes": taxes,
+                 "sync_estado": sync_estado, "stock_resumen": stock_resumen,
                  # Para la columna "costo de envío por unidad": el JS cotiza
                  # cada producto contra el destino elegido, con el pricing
                  # del cliente ya aplicado (/portal/api/precio).

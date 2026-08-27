@@ -2,13 +2,69 @@
 {% block title %}Mis productos{% endblock %}
 
 {% block content %}
-<div class="page-title page-title-row">
+<style nonce="{{ request.state.csp_nonce }}">
+.catalog-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.catalog-sync{margin-bottom:12px!important;padding:14px 18px!important}
+.catalog-card{padding:16px 18px!important}
+.catalog-card .card-head{margin-bottom:10px}
+.catalog-table td{padding-top:10px;padding-bottom:10px}
+.catalog-table th{padding-top:8px;padding-bottom:8px}
+.catalog-card .table-wrap{overflow-x:hidden}
+.catalog-table .row-actions{gap:4px;flex-wrap:nowrap}
+.catalog-table .row-actions .btn{padding:7px 9px;font-size:11px}
+.main-inner:has(.catalog-page-title){max-width:1220px;padding:18px 22px 4px}
+.main:has(.catalog-page-title)>.footer{display:none}
+.catalog-pagination{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px}
+.catalog-pagination a,.catalog-pagination span{min-width:31px;height:31px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;text-decoration:none;font-size:12px}
+.catalog-pagination a{border:1px solid var(--border);color:var(--fg-2)}
+.catalog-pagination .actual{background:var(--accent);color:#fff;font-weight:700}
+.product-dialog{width:min(820px,calc(100vw - 28px));max-height:calc(100vh - 28px);padding:0;border:1px solid var(--border);border-radius:18px;background:var(--bg-1);color:var(--fg-1);box-shadow:0 24px 90px rgba(0,0,0,.65);overflow:auto}
+.product-dialog::backdrop{background:rgba(4,3,10,.78);backdrop-filter:blur(5px)}
+.product-dialog-panel{padding:17px 20px}
+.product-dialog .card-head{background:var(--bg-1);margin-bottom:8px}
+.product-dialog .card-head h3{margin-bottom:3px}
+.product-dialog .msg{padding:9px 12px;margin-bottom:10px;font-size:11.5px}
+.product-dialog .form-group{margin-bottom:9px}
+.product-dialog .form-grid-3,.product-dialog .form-grid-2{gap:10px}
+.product-dialog input{padding:9px 11px;min-height:38px}
+.product-dialog .hint,.product-dialog small{font-size:10.5px!important;line-height:1.35}
+@media(max-height:800px){.page-title{margin-bottom:12px}.page-title p{margin-top:3px}.catalog-sync h3{font-size:16px}.catalog-card .card-head p{display:none}}
+@media(max-width:900px){
+  .main-inner:has(.catalog-page-title){padding:14px 10px 76px}
+  .catalog-page-title{gap:10px}.catalog-page-title p{display:none}
+  .catalog-actions{display:grid;grid-template-columns:1fr 1fr}.catalog-actions .btn{justify-content:center;white-space:nowrap}
+  .catalog-sync{padding:11px 14px!important}.catalog-sync>div{gap:6px}.catalog-sync h3{margin-bottom:1px!important}.catalog-sync form{display:none}
+  .catalog-sync .sub{font-size:11px;line-height:1.35}
+  .catalog-card{padding:12px!important}.catalog-card .card-head{margin-bottom:6px}.catalog-card .card-head p{display:none}
+  .catalog-quote-unit{display:grid!important;grid-template-columns:auto minmax(0,1fr);align-items:center!important;margin-bottom:8px!important}
+  .catalog-quote-unit label{font-size:11px!important}.catalog-quote-unit select{width:100%;max-width:none!important}
+  .catalog-card .table-wrap{overflow:hidden}
+  .catalog-table,.catalog-table tbody,.catalog-table tr,.catalog-table td{display:block;width:100%}
+  .catalog-table thead{display:none}
+  .catalog-table tbody{display:grid;gap:9px}
+  .catalog-table tbody tr{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 84px;gap:3px 8px;padding:9px 9px 39px;border:1px solid var(--line-soft);border-radius:12px;background:var(--bg)}
+  .catalog-table tbody td{width:auto!important;min-width:0!important;padding:3px!important;border:0}
+  .catalog-table tbody img{font-size:0}
+  .catalog-table tbody td:nth-child(1){grid-column:1}
+  .catalog-table tbody td:nth-child(2){grid-column:2}
+  .catalog-table tbody td:nth-child(3){display:none}
+  .catalog-table tbody td:nth-child(4){position:absolute;right:7px;bottom:6px;width:auto;display:flex;justify-content:flex-end}
+  .catalog-table .row-actions{justify-content:flex-end}
+  .product-dialog{width:calc(100vw - 16px);max-height:calc(100vh - 16px)}
+  .product-dialog-panel{padding:14px}.product-dialog .form-grid-3,.product-dialog .form-grid-2{grid-template-columns:1fr}
+}
+</style>
+
+<div class="page-title page-title-row catalog-page-title">
     <div>
         <div class="eyebrow">Catálogo</div>
         <h1>Mis productos</h1>
-        <p>Productos pre-cargados para armar guías más rápido: alias, descripción de invoice, HS code y medidas listos para usar.</p>
+        <p>Tu catálogo operativo: productos, imágenes y stock de Shopify junto con los datos aduaneros de TAURO.</p>
     </div>
-    <a href="/portal/envios/nuevo" class="btn btn-primary btn-sm">Crear envío</a>
+    <div class="catalog-actions">
+        <button type="button" class="btn btn-ghost btn-sm" id="prod-abrir">+ Agregar manualmente</button>
+        <a href="/portal/envios/nuevo" class="btn btn-primary btn-sm">Crear envío</a>
+    </div>
 </div>
 
 {% set qp = request.query_params|default({}) %}
@@ -21,24 +77,51 @@
     <div class="msg error">No pudimos guardar el producto: {{ qp.get('error') }}</div>
 {% endif %}
 
-<div class="card">
+{% if sync_estado %}
+<div class="card catalog-sync" style="border-color:rgba(167,139,250,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div>
+            <div class="eyebrow">Shopify conectado</div>
+            <h3 style="margin:3px 0 5px;">
+                {% if sync_estado.estado == 'COMPLETADO' %}Stock sincronizado
+                {% elif sync_estado.estado == 'SINCRONIZANDO' %}Sincronizando catálogo y stock…
+                {% elif sync_estado.estado == 'REAUTORIZAR' %}Falta autorizar catálogo y stock
+                {% else %}Revisando sincronización{% endif %}
+            </h3>
+            <p class="sub" style="margin:0;">
+                {{ stock_resumen.variantes or 0 }} variantes · {{ stock_resumen.unidades_disponibles or 0 }} unidades disponibles
+                {% if sync_estado.ultima_sincronizacion_at %}· actualizado {{ sync_estado.ultima_sincronizacion_at.strftime('%d/%m %H:%M') }}{% endif %}
+            </p>
+        </div>
+        {% if sync_estado.estado == 'REAUTORIZAR' %}
+        <a class="btn btn-primary btn-sm" href="/shopify/install?shop={{ sync_estado.dominio }}&reautorizar=1">Autorizar en Shopify →</a>
+        {% else %}
+        <form method="POST" action="/portal/tienda/sincronizar-catalogo">
+            <button class="btn btn-ghost btn-sm" type="submit">↻ Sincronizar ahora</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card catalog-card">
     <div class="card-head">
         <div>
             <h3>Productos</h3>
             {% if productos %}
             <p>Los aprobados ya se pueden elegir al crear un envío.</p>
             {% else %}
-            <p>Cargá tu primer producto acá abajo y lo validamos.</p>
+            <p>Podés conectar Shopify o cargar un producto manualmente cuando lo necesites.</p>
             {% endif %}
         </div>
-        <span class="badge muted">{{ productos|length }}</span>
+        <span class="badge muted">{{ productos_total }}</span>
     </div>
 
     {% if productos %}
     {# Costo de envío por unidad con el descuento del cliente aplicado:
        la feature comercial del portal según la spec. Cada fila cotiza en
        vivo contra /portal/api/precio al elegir destino. #}
-    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap;">
+    <div class="catalog-quote-unit" style="display:flex;align-items:center;gap:10px;margin:0 0 12px;flex-wrap:wrap;">
         <label for="cat-destino" style="font-size:13px;color:var(--fg-2);">
             Ver costo de envío por unidad a:
         </label>
@@ -51,18 +134,13 @@
         <span id="cat-destino-nota" style="font-size:12px;color:var(--fg-3);"></span>
     </div>
     <div class="table-wrap">
-        <table>
+        <table class="catalog-table">
             <thead>
                 <tr>
-                    <th></th>
-                    <th>Alias</th>
-                    <th>Invoice (EN)</th>
-                    <th>HS code</th>
-                    <th>Medidas y peso</th>
-                    <th class="num">Valor USD</th>
-                    <th class="num">Envío / unidad</th>
-                    <th>Estado</th>
-                    <th></th>
+                    <th>Producto</th>
+                    <th>Stock Shopify</th>
+                    <th>Aduana y paquete</th>
+                    <th>Acciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -72,42 +150,59 @@
                     data-ancho="{{ '%g'|format(p.ancho_cm) }}" data-alto="{{ '%g'|format(p.alto_cm) }}"
                     data-peso="{{ '%g'|format(p.peso_kg) }}" data-valor="{{ '%g'|format(p.valor_usd_default) }}"
                     data-tax="{{ '%g'|format(taxes.get(p.alias_interno, 0)) }}">
-                    <td class="thumb-cell">
-                        {% if p.imagen_url %}
-                            <img src="{{ p.imagen_url }}" alt="{{ p.alias_interno }}"
-                                 style="width:44px;height:44px;object-fit:cover;border-radius:8px;background:var(--bg-2);">
-                        {% else %}
-                            <span style="display:inline-flex;width:44px;height:44px;border-radius:8px;
-                                         background:var(--bg-2);align-items:center;justify-content:center;
-                                         color:var(--fg-3);font-size:16px;">📦</span>
-                        {% endif %}
-                    </td>
-                    <td><strong>{{ p.alias_interno }}</strong></td>
-                    <td>{{ p.nombre_invoice }}</td>
-                    <td class="mono">{{ p.hs_code }}</td>
-                    <td class="mono">{{ '%g'|format(p.largo_cm) }}×{{ '%g'|format(p.ancho_cm) }}×{{ '%g'|format(p.alto_cm) }} cm · {{ '%g'|format(p.peso_kg) }} kg</td>
-                    <td class="num">$ {{ '%g'|format(p.valor_usd_default) }}</td>
-                    {# Se llena por JS al elegir destino. Sólo productos
-                       aprobados: los "en revisión" no se pueden cotizar. #}
-                    <td class="num precio-unidad" data-prod="{{ p.alias_interno }}"
-                        data-aprobado="{{ 1 if p.activo else 0 }}">—</td>
-                    <td>
+                    <td style="width:31%;min-width:205px;">
                         {% set incompleto = (not p.hs_code) or (p.largo_cm|float <= 0) or (p.valor_usd_default|float <= 0) %}
-                        {% if p.activo %}
-                            <span class="badge ok">Aprobado</span>
-                        {% elif incompleto %}
-                            <span class="badge warn" title="Importado de tu tienda. Completá medidas, HS code y valor para poder despacharlo.">Falta completar</span>
+                        <div style="display:flex;align-items:center;gap:9px;">
+                            {% if p.imagen_url %}
+                                <img src="{{ p.imagen_url }}" alt="{{ p.titulo_tienda or p.alias_interno }}" loading="lazy"
+                                     style="width:44px;height:44px;object-fit:cover;border-radius:9px;background:var(--bg-2);flex:0 0 auto;">
+                            {% else %}
+                                <span style="display:inline-flex;width:44px;height:44px;border-radius:9px;
+                                             background:var(--bg-2);align-items:center;justify-content:center;
+                                             color:var(--fg-3);font-size:18px;flex:0 0 auto;">📦</span>
+                            {% endif %}
+                            <div>
+                                <strong>{{ p.titulo_tienda or p.alias_interno }}</strong>
+                                {% if p.variante_tienda %}<div style="font-size:12px;color:var(--fg-2);">{{ p.variante_tienda }}</div>{% endif %}
+                                <div class="mono" style="font-size:11px;color:var(--fg-3);">SKU {{ p.sku_tienda or p.alias_interno }}</div>
+                                <div style="font-size:10px;margin-top:2px;{% if p.activo %}color:#6ee7b7{% else %}color:#fde68a{% endif %};">
+                                    {% if p.activo %}✓ Aprobado{% elif incompleto %}Falta completar{% else %}En revisión{% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td style="width:19%;min-width:122px;">
+                        {% if p.plataforma == 'shopify' and p.stock_controlado %}
+                            <strong style="font-size:21px;{% if (p.stock_disponible or 0) <= 0 %}color:#ff8a8a;{% endif %}">{{ p.stock_disponible or 0 }}</strong>
+                            <span style="font-size:11px;color:var(--fg-3);"> disponibles</span>
+                            <div style="font-size:11px;color:var(--fg-3);">{{ p.stock_comprometido or 0 }} comprometidas · {{ p.stock_fisico or 0 }} físicas</div>
+                            {% if p.ubicaciones|length > 1 %}
+                            <details style="font-size:11px;margin-top:4px;color:var(--fg-2);">
+                                <summary>{{ p.ubicaciones|length }} ubicaciones</summary>
+                                {% for u in p.ubicaciones %}<div>{{ u.ubicacion_nombre }}: {{ u.disponible or 0 }}</div>{% endfor %}
+                            </details>
+                            {% endif %}
+                        {% elif p.plataforma == 'shopify' %}
+                            <span class="badge muted">No controlado</span>
                         {% else %}
-                            <span class="badge warn">En revisión</span>
+                            <span style="font-size:12px;color:var(--fg-3);">Producto manual</span>
                         {% endif %}
                     </td>
-                    <td>
+                    <td style="width:34%;min-width:230px;">
+                        <div>{{ p.nombre_invoice }}</div>
+                        <div class="mono" style="font-size:11px;color:var(--fg-3);">HS {{ p.hs_code or p.hs_code_tienda or '—' }}</div>
+                        <div style="font-size:11px;color:var(--fg-3);">Valor USD {{ '%g'|format(p.valor_usd_default) }} · Envío <span class="precio-unidad" data-prod="{{ p.alias_interno }}" data-aprobado="{{ 1 if p.activo else 0 }}">—</span></div>
+                        <div class="mono" style="font-size:11px;color:var(--fg-2);margin-top:3px;">
+                            {{ '%g'|format(p.largo_cm) }}×{{ '%g'|format(p.ancho_cm) }}×{{ '%g'|format(p.alto_cm) }} cm · {{ '%g'|format(p.peso_kg) }} kg
+                        </div>
+                    </td>
+                    <td style="width:16%;min-width:126px;">
                         <div class="row-actions">
                             <button type="button" class="btn btn-ghost btn-sm prod-editar">Editar</button>
                             <form method="POST" action="/portal/catalogo/eliminar"
                                   data-confirm="¿Borrar {{ p.alias_interno }} del catálogo? Los envíos ya hechos no se tocan.">
                                 <input type="hidden" name="alias_interno" value="{{ p.alias_interno }}">
-                                <button type="submit" class="btn btn-ghost btn-sm">Eliminar</button>
+                                <button type="submit" class="btn btn-ghost btn-sm" title="Eliminar producto" aria-label="Eliminar {{ p.alias_interno }}">×</button>
                             </form>
                         </div>
                     </td>
@@ -116,18 +211,29 @@
             </tbody>
         </table>
     </div>
+    {% if total_paginas > 1 %}
+    <nav class="catalog-pagination" aria-label="Páginas del catálogo">
+        {% if pagina > 1 %}<a href="/portal/catalogo?pagina={{ pagina - 1 }}" aria-label="Página anterior">‹</a>{% endif %}
+        {% for n in range(1, total_paginas + 1) %}
+            {% if n == pagina %}<span class="actual" aria-current="page">{{ n }}</span>
+            {% else %}<a href="/portal/catalogo?pagina={{ n }}">{{ n }}</a>{% endif %}
+        {% endfor %}
+        {% if pagina < total_paginas %}<a href="/portal/catalogo?pagina={{ pagina + 1 }}" aria-label="Página siguiente">›</a>{% endif %}
+    </nav>
+    {% endif %}
     {% else %}
-        <p class="empty">Todavía no tenés productos cargados. Agregá el primero acá abajo y lo validamos.</p>
+        <p class="empty">Todavía no tenés productos cargados. Conectá Shopify o usá “Agregar manualmente” cuando lo necesites.</p>
     {% endif %}
 </div>
 
-<div class="card" id="form-producto">
+<dialog class="product-dialog" id="form-producto">
+<div class="product-dialog-panel">
     <div class="card-head">
         <div>
             <h3 id="form-prod-titulo">Agregar producto</h3>
             <p>Completá los datos como van en la invoice: descripción en inglés y HS code de la mercadería.</p>
         </div>
-        <a href="/portal/catalogo" id="form-prod-cancelar" class="btn btn-ghost btn-sm" hidden>Cancelar edición</a>
+        <button type="button" id="form-prod-cancelar" class="btn btn-ghost btn-sm">Cerrar</button>
     </div>
 
     <div class="msg warn">Los productos nuevos (y los editados) los valida Tauro antes de que puedas usarlos en tus envíos — en el día, y te avisamos por mail. Hasta entonces figuran como "En revisión".</div>
@@ -206,10 +312,22 @@
         <button type="submit" class="btn btn-primary" id="btn-guardar-prod">Agregar al catálogo</button>
     </form>
 </div>
+</dialog>
 
 <script nonce="{{ request.state.csp_nonce }}">
 // Editar producto: precarga el form con la fila elegida. Al guardar,
 // vuelve a revisión de Tauro (cambian datos que van a la aduana).
+var productoDialog = document.getElementById("form-producto");
+var abrirProducto = document.getElementById("prod-abrir");
+var cerrarProducto = document.getElementById("form-prod-cancelar");
+if (abrirProducto && productoDialog) abrirProducto.addEventListener("click", function () {
+    productoDialog.showModal();
+    document.getElementById("cat-alias").focus();
+});
+if (cerrarProducto && productoDialog) cerrarProducto.addEventListener("click", function () {
+    productoDialog.close();
+    location.href = "/portal/catalogo";
+});
 document.querySelectorAll(".prod-editar").forEach(function (btn) {
     btn.addEventListener("click", function () {
         var tr = btn.closest("tr");
@@ -227,9 +345,8 @@ document.querySelectorAll(".prod-editar").forEach(function (btn) {
         set("cat-tax", tr.dataset.tax);
         document.getElementById("form-prod-titulo").textContent = "Editar producto";
         document.getElementById("btn-guardar-prod").textContent = "Guardar cambios";
-        document.getElementById("form-prod-cancelar").hidden = false;
-        document.getElementById("form-producto").scrollIntoView({ behavior: "smooth" });
-        document.getElementById("cat-alias").focus({ preventScroll: true });
+        productoDialog.showModal();
+        document.getElementById("cat-alias").focus();
     });
 });
 

@@ -2,6 +2,7 @@
 # Modelos Pydantic — Producto del catálogo
 # ============================================================
 import re
+from datetime import datetime
 from pydantic import BaseModel, Field, validator
 from typing import Optional
 
@@ -42,6 +43,27 @@ class Producto(BaseModel):
     # Miniatura del producto (data: URI). Se llena sola al importar de
     # Shopify; sirve para que el cliente lo identifique de un vistazo.
     imagen_url: Optional[str] = None
+    plataforma: Optional[str] = None
+    tienda_dominio: Optional[str] = None
+    external_product_id: Optional[str] = None
+    external_variant_id: Optional[str] = None
+    external_inventory_item_id: Optional[str] = None
+    sku_tienda: Optional[str] = None
+    titulo_tienda: Optional[str] = None
+    variante_tienda: Optional[str] = None
+    precio_tienda: Optional[float] = None
+    moneda_tienda: Optional[str] = None
+    hs_code_tienda: Optional[str] = None
+    pais_origen_tienda: Optional[str] = None
+    stock_controlado: bool = False
+    stock_disponible: Optional[int] = None
+    stock_comprometido: Optional[int] = None
+    stock_fisico: Optional[int] = None
+    stock_entrante: Optional[int] = None
+    stock_actualizado_at: Optional[datetime] = None
+    source_updated_at: Optional[datetime] = None
+    sync_activo: bool = True
+    ubicaciones: list[dict] = Field(default_factory=list)
 
     _normalizar_decimales = validator(
         "largo_cm", "ancho_cm", "alto_cm", "peso_kg",

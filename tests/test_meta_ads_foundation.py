@@ -62,7 +62,9 @@ class TestMetaAdsFoundation(unittest.TestCase):
 
         csp = construir_content_security_policy("nonce-test", pixel_habilitado=True)
         self.assertIn("script-src 'self' 'nonce-nonce-test' https://connect.facebook.net", csp)
-        self.assertIn("img-src 'self' data: https://www.facebook.com", csp)
+        self.assertIn("https://cdn.shopify.com", csp)
+        self.assertIn("https://*.shopifycdn.com", csp)
+        self.assertIn("https://www.facebook.com", csp)
         self.assertIn(
             "connect-src 'self' https://connect.facebook.net https://www.facebook.com",
             csp,
