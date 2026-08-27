@@ -67,6 +67,20 @@ def _ensure_tablas() -> None:
                     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     UNIQUE (dominio, pedido_externo_id)
                 );
+                -- También se materializa acá porque shop/redact debe poder
+                -- purgarla aunque el comercio nunca haya abierto la pantalla
+                -- que configura su política de envío.
+                CREATE TABLE IF NOT EXISTS config_envio_tienda (
+                    dominio          TEXT PRIMARY KEY,
+                    cliente_id       TEXT,
+                    politica         TEXT NOT NULL DEFAULT 'real',
+                    markup_pct       NUMERIC(6,2) NOT NULL DEFAULT 0,
+                    precio_fijo_ars  NUMERIC(14,2) NOT NULL DEFAULT 0,
+                    mostrar_tax      BOOLEAN NOT NULL DEFAULT FALSE,
+                    tax_pct_default  NUMERIC(6,2) NOT NULL DEFAULT 0,
+                    etiqueta         TEXT DEFAULT '',
+                    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
                 CREATE INDEX IF NOT EXISTS ix_pedidos_tienda_cliente
                     ON pedidos_tienda (cliente_id, estado);
                 CREATE INDEX IF NOT EXISTS ix_pedidos_huerfanos_dominio_fecha
@@ -591,6 +605,14 @@ def anonimizar_pedidos(dominio: str, pedidos_externos: list[str]) -> int:
                   AND p.pedido_externo_id = ANY(%s)
             """, (anonimo, dominio, pedidos_externos))
             n = cur.rowcount
+            # Una orden puede haber llegado antes de que el comercio vincule
+            # la tienda. Ese payload huérfano contiene la dirección completa;
+            # ante customers/redact se elimina por id en vez de conservar PII.
+            cur.execute("""
+                DELETE FROM pedidos_huerfanos
+                WHERE dominio = %s AND pedido_externo_id = ANY(%s)
+            """, (dominio, pedidos_externos))
+            n += cur.rowcount
         conn.commit()
     return n
 

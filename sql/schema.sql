@@ -358,6 +358,21 @@ CREATE TABLE IF NOT EXISTS shopify_webhook_eventos (
 CREATE INDEX IF NOT EXISTS ix_shopify_webhook_pendientes
     ON shopify_webhook_eventos (estado, created_at);
 
+-- Política de precio de envío por tienda. También existe un ensure local en
+-- politica_envio.py; declararla en startup garantiza que los webhooks GDPR
+-- puedan purgarla incluso si el cliente nunca abrió esa configuración.
+CREATE TABLE IF NOT EXISTS config_envio_tienda (
+    dominio          TEXT PRIMARY KEY,
+    cliente_id       TEXT,
+    politica         TEXT NOT NULL DEFAULT 'real',
+    markup_pct       NUMERIC(6,2) NOT NULL DEFAULT 0,
+    precio_fijo_ars  NUMERIC(14,2) NOT NULL DEFAULT 0,
+    mostrar_tax      BOOLEAN NOT NULL DEFAULT FALSE,
+    tax_pct_default  NUMERIC(6,2) NOT NULL DEFAULT 0,
+    etiqueta         TEXT DEFAULT '',
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (
     id           SERIAL PRIMARY KEY,

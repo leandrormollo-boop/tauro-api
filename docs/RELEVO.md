@@ -126,7 +126,7 @@ explotaban al colectar y se venían salteando a mano en cada corrida.
   histórico sigue validando Pesca Jacks durante la reautorización. Cada token
   registra qué app lo emitió y un webhook tardío de desinstalación de la app
   vieja no puede borrar una instalación nueva.
-- Suite actual: **875 tests + 5 subtests**, sin exclusiones.
+- Suite actual: **876 tests + 5 subtests**, sin exclusiones.
 
 ## Seguridad (03/08/2026)
 

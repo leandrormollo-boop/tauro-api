@@ -229,6 +229,39 @@ def test_customer_redact_sin_ordenes_no_anonimiza_toda_la_tienda(monkeypatch):
     ) == 0
 
 
+def test_customer_redact_tambien_elimina_pedido_huerfano(monkeypatch):
+    from servicios import integraciones_tienda
+
+    class _CursorRedact:
+        def __init__(self):
+            self.consultas = []
+            self.rowcount = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            self.consultas.append((" ".join(query.split()), params))
+
+    cursor = _CursorRedact()
+    conn = _ConnTienda(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    dominio = "tauro-qa.myshopify.com"
+    pedidos = ["101", "102"]
+    assert integraciones_tienda.anonimizar_pedidos(dominio, pedidos) == 2
+    sql = "\n".join(query for query, _params in cursor.consultas)
+
+    assert "UPDATE pedidos_tienda" in sql
+    assert "DELETE FROM pedidos_huerfanos" in sql
+    assert cursor.consultas[1][1] == (dominio, pedidos)
+    assert conn.commits == 1
+
+
 def test_shop_redact_purga_todos_los_datos_del_dominio(monkeypatch):
     from servicios import integraciones_tienda
 
@@ -315,6 +348,7 @@ def test_migracion_base_crea_huerfanos_antes_de_leerlos(monkeypatch):
     integraciones_tienda._ensure_tablas()
 
     assert "CREATE TABLE IF NOT EXISTS pedidos_huerfanos" in cursor.query
+    assert "CREATE TABLE IF NOT EXISTS config_envio_tienda" in cursor.query
     assert "ix_pedidos_huerfanos_dominio_fecha" in cursor.query
     assert conn.commits == 1
 
