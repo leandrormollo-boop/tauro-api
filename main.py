@@ -6,7 +6,10 @@ from fastapi.responses import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from apscheduler.schedulers.background import BackgroundScheduler
+import hashlib
+import json
 import os
+import secrets
 from dotenv import load_dotenv
 from typing import Optional
 
@@ -22,7 +25,7 @@ from servicios.api_b2b import (
     obtener_precio_envio,
     obtener_datos_producto,
 )
-from servicios.solicitudes_guia import crear_solicitud_guia
+from servicios.solicitudes_guia import crear_solicitud_guia, IdempotencyConflictError
 from servicios.meta_ads import (
     construir_content_security_policy,
     inyectar_meta_pixel,
@@ -953,7 +956,11 @@ def stock_cliente(
 
 
 @app.post("/pedido")
-def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None)):
+def registrar_pedido(
+    body: PedidoRequest,
+    x_api_key: str = Header(default=None),
+    idempotency_key: str = Header(default=None, alias="Idempotency-Key"),
+):
     """
     Registra un pedido confirmado.
     Combina los datos del comprador con el perfil del cliente (remitente) 
@@ -961,6 +968,21 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
     """
     perfil = autenticar(x_api_key)
     cliente_id = perfil["cliente_id"]
+
+    idempotency_key = (idempotency_key or "").strip()
+    if idempotency_key and not 8 <= len(idempotency_key) <= 200:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key debe tener entre 8 y 200 caracteres.",
+        )
+    body_dict = body.model_dump(mode="json") if hasattr(body, "model_dump") else body.dict()
+    request_fingerprint = hashlib.sha256(
+        json.dumps(body_dict, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    idempotency_key_hash = (
+        hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+        if idempotency_key else ""
+    )
 
     from servicios.paises import normalizar_iso2
     origen_iso = normalizar_iso2(perfil.get("pais") or "AR")
@@ -1042,50 +1064,146 @@ def registrar_pedido(body: PedidoRequest, x_api_key: str = Header(default=None))
         "margen_ars": precio.get("margen_ars", 0),
     }
 
-    # Generar referencia única
+    # La referencia es estable cuando el integrador trae Idempotency-Key.
+    # Sin ella conservamos compatibilidad, pero agregamos aleatoriedad para
+    # evitar colisiones entre dos pedidos del mismo producto en el mismo minuto.
     from datetime import datetime
     fecha = datetime.now().strftime("%Y%m%d-%H%M")
-    referencia = f"{cliente_id}-{body.producto_id}-{fecha}"
+    sufijo = idempotency_key_hash[:12] if idempotency_key_hash else secrets.token_hex(4)
+    referencia = f"{cliente_id}-{body.producto_id}-{fecha}-{sufijo}"
     datos_pedido["referencia"] = referencia
 
-    # Enviar PDF por email a logística
-    ok = enviar_email_pedido(datos_pedido)
-    if not ok:
-        raise HTTPException(status_code=500, detail="Error al generar o enviar el PDF de pedido.")
+    # Primero persistimos; el correo es una notificación auxiliar. Antes un
+    # fallo SMTP hacía perder el pedido entero aunque el cliente ya lo hubiera
+    # confirmado. El admin ve la solicitud incluso si el mail necesita revisión.
+    try:
+        solicitud = crear_solicitud_guia(
+            cliente_id=cliente_id,
+            producto_alias=producto["nombre_es"],
+            cantidad=int(producto["unidades"] or 1),
+            destino_pais=destino_iso,
+            dest_nombre=body.nombre_comprador,
+            dest_documento="",
+            dest_email=body.email_comprador,
+            dest_telefono=body.telefono,
+            dest_direccion=body.direccion_exacta,
+            dest_ciudad=body.ciudad,
+            dest_estado=body.estado,
+            dest_zip=body.zip_code,
+            observaciones=f"Pedido API {referencia}",
+            peso_kg=producto["peso_kg"],
+            largo_cm=producto["largo"],
+            ancho_cm=producto["ancho"],
+            alto_cm=producto["alto"],
+            valor_declarado_usd=producto["valor_usd"],
+            ruta_id=precio["ruta_id"],
+            coti_id=precio["coti_id"],
+            precio_tauro_ars=precio["precio_ars"],
+            precio_tauro_usd=precio["precio_usd"],
+            precio_cliente_final_ars=body.precio_cliente_final_ars,
+            remitente_pais=origen_iso,
+            api_referencia=referencia,
+            idempotency_key_hash=idempotency_key_hash,
+            request_fingerprint=request_fingerprint,
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
-    solicitud = crear_solicitud_guia(
-        cliente_id=cliente_id,
-        producto_alias=producto["nombre_es"],
-        cantidad=int(producto["unidades"] or 1),
-        destino_pais=destino_iso,
-        dest_nombre=body.nombre_comprador,
-        dest_documento="",
-        dest_email=body.email_comprador,
-        dest_telefono=body.telefono,
-        dest_direccion=body.direccion_exacta,
-        dest_ciudad=body.ciudad,
-        dest_estado=body.estado,
-        dest_zip=body.zip_code,
-        observaciones=f"Pedido API {referencia}",
-        peso_kg=producto["peso_kg"],
-        largo_cm=producto["largo"],
-        ancho_cm=producto["ancho"],
-        alto_cm=producto["alto"],
-        valor_declarado_usd=producto["valor_usd"],
-        ruta_id=precio["ruta_id"],
-        coti_id=precio["coti_id"],
-        precio_tauro_ars=precio["precio_ars"],
-        precio_tauro_usd=precio["precio_usd"],
-        precio_cliente_final_ars=body.precio_cliente_final_ars,
-        remitente_pais=origen_iso,
-    )
+    replay = bool(solicitud.get("_idempotent_replay"))
+    referencia = solicitud.get("api_referencia") or referencia
+    notificacion = "omitida_reintento"
+    if not replay:
+        notificacion = "enviada" if enviar_email_pedido(datos_pedido) else "fallida_no_bloqueante"
 
     return {
         "status": "success",
-        "mensaje": "Pedido recibido. PDF enviado a logística y solicitud creada.",
+        "mensaje": (
+            "Pedido ya recibido anteriormente; se devuelve la misma solicitud."
+            if replay else "Pedido recibido y solicitud creada."
+        ),
         "referencia": referencia,
         "solicitud_id": solicitud["id"],
+        "estado": solicitud.get("estado") or "SOLICITADO",
+        "idempotent_replay": replay,
+        "idempotencia_protegida": bool(idempotency_key),
+        "notificacion_logistica": notificacion,
+        "estado_url": f"/pedidos/{solicitud['id']}",
     }
+
+
+def _fecha_api(valor):
+    return valor.isoformat() if hasattr(valor, "isoformat") else valor
+
+
+@app.get("/pedidos/{solicitud_id}", tags=["envios"])
+def estado_pedido(solicitud_id: int, x_api_key: str = Header(default=None)):
+    """Estado operativo de una solicitud, aislado por cliente."""
+    perfil = autenticar(x_api_key)
+    from servicios.couriers_urls import url_tracking
+    from servicios.solicitudes_guia import obtener_solicitud_de_cliente
+
+    solicitud = obtener_solicitud_de_cliente(solicitud_id, perfil["cliente_id"])
+    if not solicitud:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado.")
+    tracking = (solicitud.get("tracking") or "").strip()
+    courier = (solicitud.get("courier") or "").strip().upper()
+    return {
+        "status": "success",
+        "solicitud_id": solicitud["id"],
+        "referencia": solicitud.get("api_referencia"),
+        "estado": solicitud.get("estado"),
+        "ambito": (solicitud.get("ambito") or "").lower(),
+        "courier": courier or None,
+        "servicio": solicitud.get("servicio_courier"),
+        "tracking": tracking or None,
+        "tracking_url": url_tracking(courier, tracking) if tracking else None,
+        "guia_disponible": bool(solicitud.get("tiene_label")),
+        "guia_url": (
+            f"/pedidos/{solicitud['id']}/guia.pdf"
+            if solicitud.get("tiene_label") else solicitud.get("guia_url")
+        ),
+        "creado_en": _fecha_api(solicitud.get("created_at")),
+        "actualizado_en": _fecha_api(solicitud.get("updated_at")),
+    }
+
+
+@app.get("/pedidos/{solicitud_id}/guia.pdf", tags=["envios"])
+def descargar_guia_api(solicitud_id: int, x_api_key: str = Header(default=None)):
+    """Descarga autenticada de la etiqueta sin depender de la sesión web."""
+    perfil = autenticar(x_api_key)
+    from servicios.solicitudes_guia import obtener_label_de_cliente
+
+    pdf = obtener_label_de_cliente(solicitud_id, perfil["cliente_id"])
+    if not pdf:
+        raise HTTPException(status_code=404, detail="La guía todavía no está disponible.")
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="guia-{solicitud_id}.pdf"'},
+    )
+
+
+@app.get("/rastrear/{tracking}", tags=["envios"])
+def rastrear_envio_api(
+    tracking: str,
+    x_api_key: str = Header(default=None),
+    actualizar: bool = Query(True),
+):
+    """Rastreo privado: sólo permite consultar envíos de la propia cuenta."""
+    perfil = autenticar(x_api_key)
+    from servicios.rate_limit import check_rate
+    from servicios.rastreo import rastrear_cliente
+
+    if not check_rate(
+        f"rastrear-api:{perfil['cliente_id']}", max_attempts=60, window_seconds=300
+    ):
+        raise HTTPException(status_code=429, detail="Demasiadas consultas de tracking.")
+    resultado = rastrear_cliente(
+        perfil["cliente_id"], tracking, actualizar=actualizar,
+    )
+    if not resultado.get("encontrado"):
+        raise HTTPException(status_code=404, detail="Envío no encontrado en tu cuenta.")
+    return {"status": "success", **resultado}
 
 
 # ─────────────────────────────────────────────

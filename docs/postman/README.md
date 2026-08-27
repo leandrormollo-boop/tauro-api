@@ -25,6 +25,8 @@ tarifas y zonas de envío dentro de Shopify.
    - `shopify_access_token`: token de esa development store.
    - `tauro_api_key`: API key de un cliente creado exclusivamente para QA;
      permite verificar `GET /stock` sin mezclar catálogos.
+   - `tauro_solicitud_id`: una solicitud QA perteneciente a esa misma clave.
+   - `tauro_tracking`: tracking QA perteneciente a esa solicitud.
 4. Crear una **app de desarrollo separada** en Shopify. No usar ni copiar el
    secreto de la app productiva de TAURO. Configurar la instancia local de
    TAURO con el secreto de esa app de desarrollo.
@@ -39,6 +41,10 @@ tarifas y zonas de envío dentro de Shopify.
 Ejecutar primero toda la carpeta **00 · Diagnóstico seguro**. Las consultas
 GraphQL sólo leen identidad, scopes, una muestra del catálogo y stock; no
 modifican la tienda.
+
+La carpeta **05 · API B2B operativa** también es de solo lectura: valida el
+estado de la solicitud, el rastreo privado y la descarga de la guía. Usar IDs y
+trackings de QA del mismo cliente configurado en `tauro_api_key`.
 
 La carpeta **10 · Webhooks controlados** está deshabilitada por defecto y usa
 `pm.vault.get`, por lo que se ejecuta manualmente en la app de Postman (no en
@@ -71,6 +77,8 @@ una fila sintética y no debe apuntarse a producción.
 - GraphQL de catálogo: devuelve variantes e inventario sin errores de permisos.
 - Stock TAURO: responde sólo con el catálogo del dueño de `tauro_api_key`,
   paginado y sin costos ni márgenes internos.
+- Estado/guía/tracking: sólo responden para solicitudes del mismo cliente; un
+  ID o tracking ajeno devuelve `404`.
 - Firma falsa: 401 y cero escritura.
 - Primera entrega válida: `ok=true`.
 - Segunda entrega con el mismo order id: `nuevo=false`.

@@ -177,6 +177,7 @@ Headers: X-API-Key: tk_juanmendez_a3f9x
 ### POST /pedido
 ```
 Headers: X-API-Key: tk_juanmendez_a3f9x
+         Idempotency-Key: orden-tienda-84721
 ```
 ```json
 {
@@ -196,10 +197,18 @@ Headers: X-API-Key: tk_juanmendez_a3f9x
 ```json
 {
   "status": "success",
-  "mensaje": "Pedido recibido. PDF enviado a logística.",
-  "referencia": "JUAN_MENDEZ-CARTERA_MINI-20260401-1430"
+  "mensaje": "Pedido recibido y solicitud creada.",
+  "referencia": "JUAN_MENDEZ-CARTERA_MINI-20260401-1430-a1b2c3d4",
+  "solicitud_id": 91,
+  "estado": "SOLICITADO",
+  "idempotent_replay": false,
+  "estado_url": "/pedidos/91"
 }
 ```
+
+`Idempotency-Key` evita duplicados cuando Shopify, Postman o el cliente
+reintentan por timeout. Repetir la misma clave y el mismo body devuelve la
+solicitud original; reutilizarla con datos diferentes responde `409`.
 
 ---
 
@@ -213,6 +222,25 @@ Devuelve únicamente el catálogo del dueño de la clave: variante e imagen de
 Shopify, stock disponible/comprometido/físico/entrante, desglose por ubicación
 y estado de la última sincronización. La lectura sale del espejo PostgreSQL de
 TAURO, está paginada y nunca publica costos o márgenes logísticos.
+
+---
+
+### GET /pedidos/{solicitud_id}
+
+Devuelve el estado de la solicitud, courier, tracking y disponibilidad de la
+guía. La consulta siempre filtra por el cliente dueño de `X-API-Key`; un ID de
+otra cuenta responde `404`.
+
+### GET /pedidos/{solicitud_id}/guia.pdf
+
+Descarga autenticada de la etiqueta. Responde `404` hasta que la guía esté
+emitida y el PDF pertenezca a esa solicitud y cliente.
+
+### GET /rastrear/{tracking}?actualizar=true
+
+Rastreo privado. Valida primero que el tracking sea del cliente y luego intenta
+consultar el courier en vivo. Si DHL/FedEx/UPS no responde, conserva el estado
+persistido por TAURO y devuelve el enlace oficial, sin filtrar errores internos.
 
 ---
 

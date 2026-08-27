@@ -33,6 +33,10 @@ ESTADO_EMITIENDO = "EMITIENDO"
 ESTADOS_VALIDOS = ESTADOS_SOLICITUD + [ESTADO_EMITIENDO]
 
 
+class IdempotencyConflictError(ValueError):
+    """La misma clave externa intentó crear dos pedidos distintos."""
+
+
 def _error_ambito_no_emitible(solicitud: dict) -> Optional[str]:
     """Falla cerrado antes de cualquier operación irreversible.
 
@@ -145,6 +149,9 @@ def crear_solicitud_guia(
     # Quién paga los impuestos de destino EN ESTE envío (DESTINATARIO |
     # CLIENTE). Define el incoterm de la guía, por eso se congela acá.
     tax_paga: Optional[str] = None,
+    api_referencia: str = "",
+    idempotency_key_hash: str = "",
+    request_fingerprint: str = "",
 ) -> dict:
     """Crea una solicitud de guía pendiente para gestión operativa.
 
@@ -179,7 +186,8 @@ def crear_solicitud_guia(
                     valor_declarado_usd, ruta_id, coti_id, precio_tauro_ars,
                     precio_tauro_usd, precio_cliente_final_ars, bultos,
                     courier, servicio_courier, tax_paga,
-                    remitente_contacto, dest_contacto
+                    remitente_contacto, dest_contacto,
+                    api_referencia, idempotency_key_hash, request_fingerprint
                 )
                 VALUES (
                     %s, %s, %s, %s,
@@ -190,8 +198,12 @@ def crear_solicitud_guia(
                     %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s
+                    %s, %s,
+                    %s, %s, %s
                 )
+                ON CONFLICT (cliente_id, idempotency_key_hash)
+                    WHERE idempotency_key_hash IS NOT NULL
+                DO NOTHING
                 RETURNING *
                 """,
                 (
@@ -235,9 +247,39 @@ def crear_solicitud_guia(
                     _clean(tax_paga),
                     _clean(remitente_contacto),
                     _clean(dest_contacto),
+                    _clean(api_referencia),
+                    _clean(idempotency_key_hash),
+                    _clean(request_fingerprint),
                 ),
             )
-            return dict(cur.fetchone())
+            row = cur.fetchone()
+            if row:
+                resultado = dict(row)
+                resultado["_idempotent_replay"] = False
+                return resultado
+
+            # Otra petición con la misma clave ganó la carrera. Recuperamos
+            # esa fila dentro de la transacción para que un retry simultáneo
+            # nunca cree dos solicitudes ni dos futuros cargos.
+            cur.execute(
+                """
+                SELECT *
+                FROM solicitudes_guia
+                WHERE cliente_id=%s AND idempotency_key_hash=%s
+                LIMIT 1
+                """,
+                (cliente_id, _clean(idempotency_key_hash)),
+            )
+            existente = cur.fetchone()
+            if not existente:
+                raise RuntimeError("No se pudo recuperar el pedido idempotente.")
+            existente = dict(existente)
+            if existente.get("request_fingerprint") != _clean(request_fingerprint):
+                raise IdempotencyConflictError(
+                    "La Idempotency-Key ya fue utilizada con datos diferentes."
+                )
+            existente["_idempotent_replay"] = True
+            return existente
 
 
 def listar_solicitudes_cliente(
@@ -470,6 +512,24 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
             )
             row = cur.fetchone()
     return _sin_label(dict(row)) if row else None
+
+
+def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[bytes]:
+    """Devuelve el PDF sólo si la solicitud pertenece al dueño de la API key."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT label_pdf
+                FROM solicitudes_guia
+                WHERE id=%s AND cliente_id=%s
+                """,
+                (solicitud_id, cliente_id.strip().upper()),
+            )
+            row = cur.fetchone()
+    if not row or row.get("label_pdf") is None:
+        return None
+    return bytes(row["label_pdf"])
 
 
 # ── Emisión de guía real (FedEx Ship API) ───────────────────

@@ -243,6 +243,134 @@
       ]
     },
     {
+      "name": "05 · API B2B operativa",
+      "description": "Lecturas privadas del circuito pedido → guía → tracking. Requieren la API key del mismo cliente dueño del envío.",
+      "item": [
+        {
+          "name": "TAURO · Estado del pedido",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{tauro_api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/pedidos/{{tauro_solicitud_id}}",
+            "description": "Consulta estado, courier, tracking y disponibilidad de la guía sin exponer pedidos de otro cliente."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('tauro_api_key') || '').trim()) throw new Error('Configurá tauro_api_key.');",
+                  "if (!(pm.environment.get('tauro_solicitud_id') || '').trim()) throw new Error('Configurá tauro_solicitud_id con una solicitud QA del mismo cliente.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('El pedido pertenece al cliente autenticado', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const data = pm.response.json();",
+                  "  pm.expect(data.status).to.eql('success');",
+                  "  pm.expect(String(data.solicitud_id)).to.eql(String(pm.environment.get('tauro_solicitud_id')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "TAURO · Rastreo privado en vivo",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{tauro_api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/rastrear/{{tauro_tracking}}?actualizar=true",
+            "description": "Consulta primero la pertenencia del tracking y luego intenta actualizar el estado con el courier. Si el courier no responde, conserva el estado seguro de TAURO."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('tauro_api_key') || '').trim()) throw new Error('Configurá tauro_api_key.');",
+                  "if (!(pm.environment.get('tauro_tracking') || '').trim()) throw new Error('Configurá tauro_tracking con una guía QA del mismo cliente.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('TAURO devuelve tracking sin datos financieros', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  const data = pm.response.json();",
+                  "  pm.expect(data.status).to.eql('success');",
+                  "  pm.expect(['tauro', 'courier']).to.include(data.fuente);",
+                  "  pm.expect(JSON.stringify(data).toLowerCase()).not.to.include('precio');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "TAURO · Descargar guía PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{tauro_api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{base_url}}/pedidos/{{tauro_solicitud_id}}/guia.pdf",
+            "description": "Descarga el PDF solamente si la solicitud pertenece a la API key y la guía ya está disponible."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!(pm.environment.get('tauro_api_key') || '').trim()) throw new Error('Configurá tauro_api_key.');",
+                  "if (!(pm.environment.get('tauro_solicitud_id') || '').trim()) throw new Error('Configurá tauro_solicitud_id.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('La guía se entrega como PDF', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.headers.get('Content-Type') || '').to.include('application/pdf');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "10 · Webhooks controlados",
       "description": "Estos requests escriben o intentan escribir en TAURO. Sólo se ejecutan si allow_tauro_webhook_writes=true.",
       "item": [

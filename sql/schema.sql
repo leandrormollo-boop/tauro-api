@@ -952,6 +952,16 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_cliente_ambito_fecha
 -- No borrar ni reescribir esa historia al conectar Andreani/OCA directo.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS servicio_courier TEXT;
 
+-- Contrato B2B idempotente: un retry de POST /pedido con la misma clave
+-- devuelve la solicitud original. El fingerprint impide reutilizar esa clave
+-- accidentalmente con otro comprador o contenido.
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS api_referencia TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS idempotency_key_hash TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_solicitudes_cliente_idempotency
+    ON solicitudes_guia(cliente_id, idempotency_key_hash)
+    WHERE idempotency_key_hash IS NOT NULL;
+
 -- Multi-bulto: lista JSON de cajas del envío. Cada elemento:
 --   {producto_alias, cantidad, peso_kg, largo_cm, ancho_cm, alto_cm,
 --    valor_unitario_usd, hs_code, descripcion_en}
