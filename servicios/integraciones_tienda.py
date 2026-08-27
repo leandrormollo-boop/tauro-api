@@ -370,17 +370,40 @@ def reiniciar_integracion_shopify_cliente(
                 raise ValueError("La instalación Shopify pertenece a otra cuenta TAURO.")
 
             tienda_id = int(binding["id"])
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n
+                  FROM tiendas_conectadas
+                 WHERE UPPER(cliente_id) = %s
+                   AND plataforma = 'shopify'
+                   AND id <> %s
+                """,
+                (cliente_id, tienda_id),
+            )
+            otras_tiendas = int((cur.fetchone() or {}).get("n") or 0)
+            incluir_legado = otras_tiendas == 0
+            filtro_productos = (
+                "cliente_id = %s AND plataforma = 'shopify' AND ("
+                "LOWER(COALESCE(tienda_dominio, '')) = %s"
+                + (
+                    " OR LOWER(COALESCE(tienda_dominio, '')) "
+                    "IN ('', 'legacy.myshopify.com')"
+                    if incluir_legado else ""
+                )
+                + ")"
+            )
+            params_productos = (cliente_id, dominio)
             snapshot = {}
             conteos = {
                 "productos": (
-                    "SELECT COUNT(*) AS n FROM productos "
-                    "WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s",
-                    (dominio,),
+                    f"SELECT COUNT(*) AS n FROM productos WHERE {filtro_productos}",
+                    params_productos,
                 ),
                 "inventario_ubicaciones": (
                     "SELECT COUNT(*) AS n FROM producto_inventario_ubicaciones "
-                    "WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s",
-                    (dominio,),
+                    "WHERE producto_id IN (SELECT id FROM productos WHERE "
+                    f"{filtro_productos})",
+                    params_productos,
                 ),
                 "pedidos_importados": (
                     "SELECT COUNT(*) AS n FROM pedidos_tienda WHERE tienda_id = %s",
@@ -420,8 +443,12 @@ def reiniciar_integracion_shopify_cliente(
                 (dominio,),
             )
             cur.execute(
-                "DELETE FROM shopify_sync_estado WHERE LOWER(dominio) = %s",
-                (dominio,),
+                """
+                DELETE FROM shopify_sync_estado
+                 WHERE LOWER(dominio) = %s
+                    OR (%s AND UPPER(cliente_id) = %s)
+                """,
+                (dominio, incluir_legado, cliente_id),
             )
             cur.execute(
                 "DELETE FROM config_envio_tienda WHERE LOWER(dominio) = %s",
@@ -436,18 +463,14 @@ def reiniciar_integracion_shopify_cliente(
                 (dominio,),
             )
             cur.execute(
-                """
-                DELETE FROM producto_inventario_ubicaciones
-                 WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s
-                """,
-                (dominio,),
+                "DELETE FROM producto_inventario_ubicaciones "
+                "WHERE producto_id IN (SELECT id FROM productos WHERE "
+                + filtro_productos + ")",
+                params_productos,
             )
             cur.execute(
-                """
-                DELETE FROM productos
-                 WHERE plataforma = 'shopify' AND LOWER(tienda_dominio) = %s
-                """,
-                (dominio,),
+                f"DELETE FROM productos WHERE {filtro_productos}",
+                params_productos,
             )
             # pedidos_tienda cae por ON DELETE CASCADE. No son guías ni
             # movimientos contables: son exclusivamente el inbox importado.
@@ -492,6 +515,112 @@ def reiniciar_integracion_shopify_cliente(
             )
         conn.commit()
     return {"ok": True, "dominio": dominio, **snapshot}
+
+
+def limpiar_espejo_shopify_huerfano_cliente(cliente_id: str) -> dict:
+    """Limpia catálogo Shopify legado cuando ya no existe una instalación.
+
+    Cubre importaciones antiguas guardadas como ``legacy.myshopify.com`` o sin
+    dominio. Se niega a actuar si el cliente tiene cualquier binding o token
+    Shopify vigente, evitando mezclar catálogos de dos tiendas.
+    """
+    _ensure_tablas()
+    cliente_id = (cliente_id or "").strip().upper()
+    if not cliente_id:
+        raise ValueError("Cliente inválido.")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"tauro:shopify:legacy:{cliente_id}",),
+            )
+            cur.execute(
+                """
+                SELECT
+                    (SELECT COUNT(*) FROM tiendas_conectadas
+                      WHERE UPPER(cliente_id) = %s
+                        AND plataforma = 'shopify') AS bindings,
+                    (SELECT COUNT(*) FROM shopify_instalaciones
+                      WHERE UPPER(COALESCE(cliente_id, '')) = %s) AS instalaciones
+                """,
+                (cliente_id, cliente_id),
+            )
+            estado = cur.fetchone() or {}
+            if int(estado.get("bindings") or 0) or int(
+                estado.get("instalaciones") or 0
+            ):
+                raise ValueError(
+                    "Todavía existe una conexión Shopify. Reiniciala desde Mi tienda."
+                )
+
+            snapshot = {}
+            for clave, tabla in (
+                ("productos", "productos"),
+                ("inventario_ubicaciones", "producto_inventario_ubicaciones"),
+                ("envios_preservados", "envios"),
+                ("pagos_preservados", "pagos"),
+                ("solicitudes_preservadas", "solicitudes_guia"),
+            ):
+                extra = " AND plataforma = 'shopify'" if tabla in {
+                    "productos", "producto_inventario_ubicaciones",
+                } else ""
+                cur.execute(
+                    f"SELECT COUNT(*) AS n FROM {tabla} "
+                    f"WHERE UPPER(cliente_id) = %s{extra}",
+                    (cliente_id,),
+                )
+                snapshot[clave] = int((cur.fetchone() or {}).get("n") or 0)
+
+            cur.execute(
+                """
+                DELETE FROM producto_inventario_ubicaciones
+                 WHERE UPPER(cliente_id) = %s AND plataforma = 'shopify'
+                """,
+                (cliente_id,),
+            )
+            cur.execute(
+                """
+                DELETE FROM productos
+                 WHERE UPPER(cliente_id) = %s AND plataforma = 'shopify'
+                """,
+                (cliente_id,),
+            )
+            cur.execute(
+                "DELETE FROM shopify_sync_estado WHERE UPPER(cliente_id) = %s",
+                (cliente_id,),
+            )
+
+            for clave, tabla in (
+                ("envios_preservados", "envios"),
+                ("pagos_preservados", "pagos"),
+                ("solicitudes_preservadas", "solicitudes_guia"),
+            ):
+                cur.execute(
+                    f"SELECT COUNT(*) AS n FROM {tabla} WHERE UPPER(cliente_id) = %s",
+                    (cliente_id,),
+                )
+                if int((cur.fetchone() or {}).get("n") or 0) != snapshot[clave]:
+                    raise RuntimeError(
+                        f"Control de preservación falló para {tabla}."
+                    )
+
+            from servicios.auditoria import registrar_evento_con_cursor
+            registrar_evento_con_cursor(
+                cur,
+                event="shopify.orphan_mirror_cleanup",
+                actor_type="cliente",
+                actor_ref=cliente_id,
+                ip=None,
+                method="POST",
+                path="/portal/tienda/limpiar-shopify-legado",
+                status_code=303,
+                success=True,
+                request_id=None,
+                metadata=snapshot,
+            )
+        conn.commit()
+    return {"ok": True, **snapshot}
 
 
 def tienda_por_dominio(dominio: str) -> Optional[dict]:

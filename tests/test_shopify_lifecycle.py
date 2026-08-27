@@ -874,6 +874,7 @@ def test_reinicio_cliente_borra_solo_espejo_y_verifica_historia(monkeypatch):
             "cliente_id": "PESCAJACKS",
             "owner_instalacion": "PESCAJACKS",
         },
+        {"n": 0},
         {"n": 229},
         {"n": 458},
         {"n": 1},
@@ -937,3 +938,36 @@ def test_reinicio_cliente_rechaza_tienda_de_otro_tenant(monkeypatch):
         "DELETE FROM" not in query for query, _params in cursor.ejecutadas
     )
     assert conn.commits == 0
+
+
+def test_limpieza_huerfana_retira_shopify_y_preserva_historia(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _Cursor([
+        {"bindings": 0, "instalaciones": 0},
+        {"n": 229},
+        {"n": 458},
+        {"n": 7},
+        {"n": 3},
+        {"n": 5},
+        {"n": 7},
+        {"n": 3},
+        {"n": 5},
+    ])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    resultado = integraciones_tienda.limpiar_espejo_shopify_huerfano_cliente(
+        "pescajacks",
+    )
+
+    sql = "\n".join(query for query, _params in cursor.ejecutadas)
+    assert resultado["productos"] == 229
+    assert "DELETE FROM producto_inventario_ubicaciones" in sql
+    assert "DELETE FROM productos" in sql
+    assert "DELETE FROM envios" not in sql
+    assert "DELETE FROM pagos" not in sql
+    assert "DELETE FROM solicitudes_guia" not in sql
+    assert "shopify.orphan_mirror_cleanup" in str(cursor.ejecutadas[-1][1])
+    assert conn.commits == 1

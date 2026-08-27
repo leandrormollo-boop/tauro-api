@@ -73,6 +73,7 @@ from servicios.panel_cliente import embudo_envios, preparar_historial_envios
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
     reiniciar_integracion_shopify_cliente,
+    limpiar_espejo_shopify_huerfano_cliente,
     listar_pedidos, contar_pendientes, obtener_pedido,
     marcar_convertido, descartar_pedido,
 )
@@ -2869,6 +2870,41 @@ def tienda_reiniciar_shopify(
     mensaje = (
         f"Integración reiniciada: se retiraron {reporte['productos']} productos "
         "del espejo TAURO. Shopify no fue modificado."
+    )
+    return RedirectResponse(
+        url=f"/portal/tienda?ok={quote(mensaje)}", status_code=303,
+    )
+
+
+@router.post("/tienda/limpiar-shopify-legado")
+def tienda_limpiar_shopify_legado(
+    confirmar: str = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    if confirmar != "LIMPIAR":
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "Escribí LIMPIAR para confirmar la limpieza del catálogo anterior."
+            ),
+            status_code=303,
+        )
+    try:
+        reporte = limpiar_espejo_shopify_huerfano_cliente(cliente)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/portal/tienda?error={quote(str(exc))}", status_code=303,
+        )
+    except Exception as exc:
+        print(f"[shopify] limpieza de espejo legado falló: {type(exc).__name__}")
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "No pudimos limpiar el catálogo anterior. No hubo cambios parciales."
+            ),
+            status_code=303,
+        )
+    mensaje = (
+        f"Catálogo anterior retirado: {reporte['productos']} productos Shopify. "
+        "Tus guías y tu cuenta corriente siguen intactas."
     )
     return RedirectResponse(
         url=f"/portal/tienda?ok={quote(mensaje)}", status_code=303,

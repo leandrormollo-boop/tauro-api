@@ -202,6 +202,23 @@
         </div>
     {% else %}
         <p class="sub" style="margin:0;">Todavía no conectaste ninguna tienda.</p>
+        {% if stock_resumen.variantes %}
+        <details style="margin-top:14px;">
+            <summary class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                Limpiar sincronización anterior
+            </summary>
+            <form method="POST" action="/portal/tienda/limpiar-shopify-legado"
+                  data-confirm="Se eliminarán del portal los productos y el stock Shopify de la sincronización anterior. Shopify, tus guías y tu cuenta corriente no se modifican. ¿Confirmás la limpieza?"
+                  style="margin-top:10px;padding:12px;border:1px solid rgba(255,138,138,.35);border-radius:10px;max-width:390px;">
+                <label class="sub" style="display:block;margin-bottom:8px;">
+                    Escribí <b>LIMPIAR</b> para retirar las {{ stock_resumen.variantes }} variantes anteriores.
+                </label>
+                <input type="text" name="confirmar" autocomplete="off" required
+                       placeholder="LIMPIAR" style="width:100%;margin-bottom:8px;">
+                <button type="submit" class="btn btn-ghost btn-sm">Eliminar catálogo anterior</button>
+            </form>
+        </details>
+        {% endif %}
     {% endif %}
 </div>
 
