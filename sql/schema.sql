@@ -1157,6 +1157,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_solicitudes_guia_courier_tracking
     ON solicitudes_guia (UPPER(courier), UPPER(BTRIM(tracking)))
     WHERE tracking IS NOT NULL AND BTRIM(tracking) <> '';
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS label_pdf BYTEA;
+-- DHL devuelve la factura comercial separada del label. Railway no garantiza
+-- persistencia del filesystem, por lo que ambos documentos viven en Postgres.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS commercial_invoice_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS guia_generada_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_alias TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_nombre TEXT;

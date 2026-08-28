@@ -1197,6 +1197,13 @@ def estado_pedido(solicitud_id: int, x_api_key: str = Header(default=None)):
             f"/pedidos/{solicitud['id']}/guia.pdf"
             if solicitud.get("tiene_label") else solicitud.get("guia_url")
         ),
+        "factura_comercial_disponible": bool(
+            solicitud.get("tiene_factura_comercial")
+        ),
+        "factura_comercial_url": (
+            f"/pedidos/{solicitud['id']}/factura-comercial.pdf"
+            if solicitud.get("tiene_factura_comercial") else None
+        ),
         "creado_en": _fecha_api(solicitud.get("created_at")),
         "actualizado_en": _fecha_api(solicitud.get("updated_at")),
     }
@@ -1253,6 +1260,13 @@ def listar_envios_b2b(
             "guia_disponible": bool(envio.get("tiene_label")),
             "estado_url": f"/pedidos/{envio['id']}",
             "guia_url": f"/pedidos/{envio['id']}/guia.pdf" if envio.get("tiene_label") else None,
+            "factura_comercial_disponible": bool(
+                envio.get("tiene_factura_comercial")
+            ),
+            "factura_comercial_url": (
+                f"/pedidos/{envio['id']}/factura-comercial.pdf"
+                if envio.get("tiene_factura_comercial") else None
+            ),
             "creado_en": _fecha_api(envio.get("created_at")),
             "actualizado_en": _fecha_api(envio.get("updated_at")),
         })
@@ -1285,6 +1299,33 @@ def descargar_guia_api(solicitud_id: int, x_api_key: str = Header(default=None))
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="guia-{solicitud_id}.pdf"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@app.get("/pedidos/{solicitud_id}/factura-comercial.pdf", tags=["envios"])
+def descargar_factura_comercial_api(
+    solicitud_id: int, x_api_key: str = Header(default=None),
+):
+    """Descarga autenticada de la invoice, siempre filtrada por dueño."""
+    perfil = autenticar(x_api_key)
+    from servicios.solicitudes_guia import obtener_factura_comercial_pdf
+
+    pdf = obtener_factura_comercial_pdf(
+        solicitud_id, cliente_id=perfil["cliente_id"],
+    )
+    if not pdf:
+        raise HTTPException(
+            status_code=404,
+            detail="La factura comercial todavía no está disponible.",
+        )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="factura-comercial-{solicitud_id}.pdf"',
             "Cache-Control": "private, no-store",
         },
     )

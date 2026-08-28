@@ -150,6 +150,7 @@ def test_estado_pedido_y_label_siempre_filtran_por_cliente(monkeypatch):
             "servicio_courier": "P",
             "tracking": "2634793766",
             "tiene_label": True,
+            "tiene_factura_comercial": True,
             "guia_url": None,
             "api_referencia": "PESCA-91",
             "created_at": datetime(2026, 8, 27, tzinfo=timezone.utc),
@@ -161,15 +162,23 @@ def test_estado_pedido_y_label_siempre_filtran_por_cliente(monkeypatch):
         solicitudes_guia, "obtener_label_de_cliente",
         lambda solicitud_id, cliente_id: b"%PDF-1.4\nQA",
     )
+    monkeypatch.setattr(
+        solicitudes_guia, "obtener_factura_comercial_pdf",
+        lambda solicitud_id, cliente_id: b"%PDF-1.4\nINVOICE",
+    )
 
     estado = main.estado_pedido(91, x_api_key="tauro-qa")
     pdf = main.descargar_guia_api(91, x_api_key="tauro-qa")
+    factura = main.descargar_factura_comercial_api(91, x_api_key="tauro-qa")
 
     assert consultas == [(91, "PESCA_JACKS_QA")]
     assert estado["tracking"] == "2634793766"
     assert estado["guia_url"] == "/pedidos/91/guia.pdf"
+    assert estado["factura_comercial_url"] == "/pedidos/91/factura-comercial.pdf"
     assert pdf.media_type == "application/pdf"
     assert bytes(pdf.body).startswith(b"%PDF")
+    assert factura.media_type == "application/pdf"
+    assert bytes(factura.body).startswith(b"%PDF")
 
 
 def test_listado_envios_b2b_pagina_y_separa_ambito(monkeypatch):

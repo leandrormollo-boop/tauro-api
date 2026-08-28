@@ -124,11 +124,13 @@ def idempotency_hash_origen_tienda(
 
 
 def _sin_label(row: dict) -> dict:
-    """Reemplaza el PDF (bytea) por un booleano en los listados, para no cargar
-    los bytes del label en cada fila de la tabla."""
+    """Reemplaza PDFs por booleanos para no arrastrar BYTEA en las vistas."""
     if "tiene_label" not in row:
         row["tiene_label"] = bool(row.get("label_pdf"))
+    if "tiene_factura_comercial" not in row:
+        row["tiene_factura_comercial"] = bool(row.get("commercial_invoice_pdf"))
     row.pop("label_pdf", None)
+    row.pop("commercial_invoice_pdf", None)
     return row
 
 
@@ -353,7 +355,9 @@ def listar_solicitudes_cliente(
                        peso_kg, valor_declarado_usd, precio_tauro_ars,
                        precio_tauro_usd, precio_cliente_final_ars, tracking,
                        guia_url, created_at, courier, bultos,
-                       (label_pdf IS NOT NULL) AS tiene_label
+                       (label_pdf IS NOT NULL) AS tiene_label,
+                       (commercial_invoice_pdf IS NOT NULL)
+                           AS tiene_factura_comercial
                 FROM solicitudes_guia
                 WHERE cliente_id = %s
                 ORDER BY created_at DESC
@@ -410,6 +414,8 @@ def listar_envios_api(
                        peso_kg, valor_declarado_usd, precio_tauro_ars,
                        precio_tauro_usd, tracking, guia_url,
                        (label_pdf IS NOT NULL) AS tiene_label,
+                       (commercial_invoice_pdf IS NOT NULL)
+                           AS tiene_factura_comercial,
                        created_at, updated_at, guia_generada_at
                 FROM solicitudes_guia
                 WHERE {where}
@@ -664,8 +670,9 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
 
 def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[bytes],
                           courier: str = "FEDEX",
-                          message_reference: Optional[str] = None) -> None:
-    """Persiste la guía emitida: tracking, label PDF y estado GUIA_LISTA."""
+                          message_reference: Optional[str] = None,
+                          commercial_invoice_pdf: Optional[bytes] = None) -> None:
+    """Persiste tracking, documentos emitidos y estado de la guía."""
     tracking = (tracking or "").strip()[:120]
     if not tracking:
         raise ValueError("El courier no devolvió un tracking válido.")
@@ -674,13 +681,16 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
             cur.execute(
                 """
                 UPDATE solicitudes_guia
-                SET estado='GUIA_LISTA', tracking=%s, label_pdf=%s, courier=%s,
+                SET estado='GUIA_LISTA', tracking=%s, label_pdf=%s,
+                    commercial_invoice_pdf=%s, courier=%s,
                     courier_message_reference=COALESCE(%s, courier_message_reference),
                     courier_error=NULL, cargo_pendiente=TRUE, cargo_error=NULL,
                     guia_generada_at=NOW(), updated_at=NOW()
                 WHERE id=%s
                 """,
                 (tracking, psycopg2.Binary(label_pdf) if label_pdf else None,
+                 psycopg2.Binary(commercial_invoice_pdf)
+                 if commercial_invoice_pdf else None,
                  courier, _clean(message_reference), solicitud_id),
             )
     # DÉBITO AUTOMÁTICO (decisión de Leandro 28/07): la guía emitida carga
@@ -839,6 +849,29 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
     if not row or not row["label_pdf"]:
         return None
     return bytes(row["label_pdf"])
+
+
+def obtener_factura_comercial_pdf(
+    solicitud_id: int, cliente_id: Optional[str] = None,
+) -> Optional[bytes]:
+    """Devuelve la invoice del courier aplicando el mismo control de dueño."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if cliente_id:
+                cur.execute(
+                    """SELECT commercial_invoice_pdf FROM solicitudes_guia
+                       WHERE id=%s AND cliente_id=%s""",
+                    (solicitud_id, cliente_id.strip().upper()),
+                )
+            else:
+                cur.execute(
+                    "SELECT commercial_invoice_pdf FROM solicitudes_guia WHERE id=%s",
+                    (solicitud_id,),
+                )
+            row = cur.fetchone()
+    if not row or not row["commercial_invoice_pdf"]:
+        return None
+    return bytes(row["commercial_invoice_pdf"])
 
 
 def cargar_envio_externo(
@@ -1773,6 +1806,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
             guardar_guia_generada(
                 solicitud_id, tracking, resultado.get("label_pdf"), courier=courier,
                 message_reference=resultado.get("message_reference"),
+                commercial_invoice_pdf=resultado.get("invoice_pdf"),
             )
             guardado = True
             break
@@ -1795,6 +1829,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         "ok": True,
         "tracking": tracking,
         "tiene_label": bool(resultado.get("label_pdf")),
+        "tiene_factura_comercial": bool(resultado.get("invoice_pdf")),
     }
 
 

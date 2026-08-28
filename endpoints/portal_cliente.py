@@ -56,6 +56,7 @@ from servicios.api_b2b import (
 )
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
+    obtener_factura_comercial_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
     idempotency_hash_origen_tienda,
 )
@@ -1666,6 +1667,27 @@ def descargar_guia(solicitud_id: int, cliente: str = Depends(cliente_actual)):
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'inline; filename="guia-tauro-{solicitud_id}.pdf"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.get("/envios/{solicitud_id}/factura-comercial.pdf")
+def descargar_factura_comercial(
+    solicitud_id: int, cliente: str = Depends(cliente_actual),
+):
+    """Descarga la invoice sin permitir documentos de otra cuenta."""
+    pdf = obtener_factura_comercial_pdf(solicitud_id, cliente_id=cliente)
+    if not pdf:
+        return RedirectResponse(
+            url=f"/portal/envios/{solicitud_id}", status_code=303,
+        )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition":
+                f'inline; filename="factura-comercial-{solicitud_id}.pdf"',
             "Cache-Control": "private, no-store",
         },
     )

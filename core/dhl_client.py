@@ -70,6 +70,11 @@ class DHLClient(CarrierBase):
     # nuestros envíos llevan mercadería con valor declarado, no documentos.
     PRODUCTO_DEFAULT = "P"
 
+    # Requisito de certificación confirmado por DHL Sistemas (11/08/2026):
+    # Data Staging 12 se representa en el contrato JSON como el servicio PV.
+    # El código XML histórico PT no es equivalente y no debe usarse aquí.
+    DATA_STAGING_SERVICE_CODE = "PV"
+
     def __init__(self):
         self.api_key        = os.getenv("DHL_API_KEY")
         self.api_secret     = os.getenv("DHL_API_SECRET")
@@ -577,6 +582,22 @@ class DHLClient(CarrierBase):
             }],
         }
 
+    @staticmethod
+    def _cuit_argentino_valido(documento: object) -> bool:
+        """Valida longitud y dígito verificador de un CUIT argentino."""
+        cuit = "".join(ch for ch in str(documento or "") if ch.isdigit())
+        if len(cuit) != 11:
+            return False
+        pesos = (5, 4, 3, 2, 7, 6, 5, 4, 3, 2)
+        verificador = 11 - sum(
+            int(numero) * peso for numero, peso in zip(cuit[:10], pesos)
+        ) % 11
+        if verificador == 11:
+            verificador = 0
+        if verificador == 10:
+            return False
+        return verificador == int(cuit[-1])
+
     def _direccion_envio(self, d: dict) -> dict:
         """
         postalAddress del POST. Igual que en /rates pero con la calle, que
@@ -621,6 +642,23 @@ class DHLClient(CarrierBase):
                 return {"encontrado": False, "error":
                         f"Completá {', '.join(faltan)} del {etiqueta} "
                         "antes de emitir con DHL."}
+
+        # DHL Sistemas exige identificar al exportador argentino en
+        # shipperDetails.registrationNumbers. Bloquear antes del POST evita
+        # emitir una guía y una factura comercial fiscalmente incompletas.
+        pais_shipper = (
+            shipper.get("pais") or shipper.get("country") or "AR"
+        ).upper()[:2]
+        if pais_shipper == "AR" and not self._cuit_argentino_valido(
+            shipper.get("documento")
+        ):
+            return {
+                "encontrado": False,
+                "error": (
+                    "Completá un CUIT argentino válido de 11 dígitos "
+                    "para el remitente antes de emitir con DHL."
+                ),
+            }
         bultos = datos.get("bultos") or []
         if not bultos:
             package = datos.get("package") or {}
@@ -734,6 +772,9 @@ class DHLClient(CarrierBase):
             "pickup": {"isRequested": False},
             "productCode": self.product_code,
             "accounts": [{"typeCode": "shipper", "number": cuenta}],
+            "valueAddedServices": [{
+                "serviceCode": self.DATA_STAGING_SERVICE_CODE,
+            }],
             "customerDetails": {
                 "shipperDetails": {
                     "postalAddress": self._direccion_envio(shipper),
@@ -776,7 +817,16 @@ class DHLClient(CarrierBase):
                 },
             },
             "outputImageProperties": {
-                "imageOptions": [{"typeCode": "label", "templateName": "ECOM26_84_A4_001"}],
+                "encodingFormat": "pdf",
+                "imageOptions": [
+                    {"typeCode": "label", "templateName": "ECOM26_84_A4_001"},
+                    {
+                        "typeCode": "invoice",
+                        "templateName": "COMMERCIAL_INVOICE_P_10",
+                        "isRequested": True,
+                        "invoiceType": "commercial",
+                    },
+                ],
             },
         }
 
@@ -827,23 +877,37 @@ class DHLClient(CarrierBase):
                 return {"encontrado": False, "error": "DHL no devolvió tracking.",
                         "incierto": True, "message_reference": msg_ref}
 
-            # El label viene en base64 dentro de documents (typeCode "label").
+            # La guía y la factura comercial son documentos independientes.
+            # Nunca permitir que una invoice reemplace al label por orden de
+            # respuesta o por un typeCode con distinto uso de guiones bajos.
             label_b64 = ""
+            invoice_b64 = ""
             for doc in (data.get("documents") or []):
-                if (doc.get("typeCode") or "").lower() == "label":
+                tipo = (doc.get("typeCode") or "").replace("_", "").lower()
+                if tipo == "label":
                     label_b64 = doc.get("content") or ""
-                    break
-            label_pdf = None
-            if label_b64:
-                import base64
+                elif tipo in {"invoice", "commercialinvoice"}:
+                    invoice_b64 = doc.get("content") or ""
+
+            import base64
+
+            def _decodificar_pdf(contenido_b64: str, nombre: str):
+                if not contenido_b64:
+                    return None
                 try:
-                    label_pdf = base64.b64decode(label_b64)
-                    if not label_pdf.startswith(b"%PDF"):
-                        print(f"[dhl] guía {tracking} emitida pero el documento "
-                              "devuelto no es PDF")
-                        label_pdf = None
+                    pdf = base64.b64decode(contenido_b64, validate=True)
+                    if not pdf.startswith(b"%PDF"):
+                        print(f"[dhl] guía {tracking} emitida pero {nombre} "
+                              "no es un PDF válido")
+                        return None
+                    return pdf
                 except Exception as e:
-                    print(f"[dhl] guía {tracking} emitida pero el label no decodifica: {e}")
+                    print(f"[dhl] guía {tracking} emitida pero {nombre} "
+                          f"no decodifica: {e}")
+                    return None
+
+            label_pdf = _decodificar_pdf(label_b64, "el label")
+            invoice_pdf = _decodificar_pdf(invoice_b64, "la factura comercial")
 
             print(f"[dhl] guía emitida: {tracking} (ref {msg_ref})")
             return {
@@ -852,6 +916,8 @@ class DHLClient(CarrierBase):
                 "servicio": "DHL Express Worldwide",
                 "label_pdf": label_pdf,
                 "label_b64": label_b64,
+                "invoice_pdf": invoice_pdf,
+                "invoice_b64": invoice_b64,
                 "message_reference": msg_ref,
             }
         except Exception as e:

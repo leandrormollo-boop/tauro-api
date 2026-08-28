@@ -19,7 +19,8 @@ ENVIO = {
     "shipper": {"nombre": "Prete Rosso", "empresa": "PRETE ROSSO S.A.",
                 "telefono": "1145678900", "email": "envios@prete.com",
                 "calle": "Nicasio Oroño 1680", "ciudad": "CABA",
-                "estado": "C", "zip": "1416", "pais": "AR"},
+                "estado": "C", "zip": "1416", "pais": "AR",
+                "documento": "20111111112"},
     "recipient": {"nombre": "Michelle Bordelon", "telefono": "3103446337",
                   "calle": "5223 42nd Ave SW", "ciudad": "Seattle",
                   "estado": "WA", "zip": "98136", "pais": "US"},
@@ -51,9 +52,15 @@ def _emitir_capturando(envio=None, respuesta=None, status=200):
         status_code = status
         text = "error simulado"
         def json(self):
-            return respuesta if respuesta is not None else {
+            if respuesta is not None:
+                return respuesta
+            pdf = "JVBERi0xLjQK"
+            return {
                 "shipmentTrackingNumber": "1234567890",
-                "documents": [{"typeCode": "label", "content": "JVBERi0xLjQK"}],
+                "documents": [
+                    {"typeCode": "label", "content": pdf},
+                    {"typeCode": "invoice", "content": pdf},
+                ],
             }
 
     def fake_post(url, json=None, **kw):
@@ -71,6 +78,33 @@ def test_emite_y_devuelve_tracking_y_label():
     _, r = _emitir_capturando()
     assert r["encontrado"] and r["tracking"] == "1234567890"
     assert r["label_pdf"] and r["label_pdf"].startswith(b"%PDF")
+    assert r["invoice_pdf"] and r["invoice_pdf"].startswith(b"%PDF")
+
+
+def test_solicita_data_staging_guia_y_factura_comercial():
+    cap, _ = _emitir_capturando()
+    body = cap["body"]
+    assert body["valueAddedServices"] == [{"serviceCode": "PV"}]
+    assert body["outputImageProperties"] == {
+        "encodingFormat": "pdf",
+        "imageOptions": [
+            {"typeCode": "label", "templateName": "ECOM26_84_A4_001"},
+            {
+                "typeCode": "invoice",
+                "templateName": "COMMERCIAL_INVOICE_P_10",
+                "isRequested": True,
+                "invoiceType": "commercial",
+            },
+        ],
+    }
+
+
+def test_exportador_argentino_sin_cuit_valido_no_llega_a_dhl():
+    envio = {**ENVIO, "shipper": {**ENVIO["shipper"], "documento": "20-1"}}
+    with mock.patch("core.dhl_client.requests.post") as post:
+        r = _cliente().create_shipment(envio)
+    assert not r["encontrado"] and "CUIT argentino válido" in r["error"]
+    post.assert_not_called()
 
 
 def test_usa_la_referencia_que_el_servicio_persistio_antes_del_post():
@@ -114,7 +148,8 @@ def test_el_camino_ingles_de_cotizacion_sigue_andando():
     envio = {
         **ENVIO,
         "shipper": {"nombre": "X", "telefono": "1", "calle": "Calle 1",
-                    "city": "CABA", "postal_code": "1414", "country": "AR"},
+                    "city": "CABA", "postal_code": "1414", "country": "AR",
+                    "documento": "20111111112"},
         "recipient": {"nombre": "Y", "telefono": "2", "calle": "5th Av 1",
                       "city": "New York", "postal_code": "10001", "country": "US"},
     }
