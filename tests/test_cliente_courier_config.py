@@ -91,6 +91,60 @@ def test_admin_no_puede_activar_apis_pendientes():
         )
 
 
+def test_admin_parsea_tramos_dhl_y_los_proyecta_al_pricing(monkeypatch):
+    _dhl_produccion(monkeypatch)
+    fila = config.parsear_fila(
+        "dhl",
+        puede_cotizar=True,
+        puede_emitir=True,
+        puede_recolectar=False,
+        markup_tipo="FIJO_ARS",
+        markup_valor="95.000",
+        markup_low_max_usd="100",
+        markup_low_ars="20.000",
+        markup_high_min_usd="200",
+        markup_high_usd="100",
+    )
+    matriz = config._armar_matriz(_cliente(), [fila])
+    dhl = next(c for c in matriz["couriers"] if c["id"] == "dhl")
+
+    assert dhl["pricing"] == {
+        "tipo": "FIJO_ARS",
+        "valor": 95_000,
+        "tramos_usd": {
+            "bajo_hasta_usd": 100,
+            "bajo_markup_ars": 20_000,
+            "alto_desde_usd": 200,
+            "alto_markup_usd": 100,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("campos", "mensaje"),
+    [
+        ({"markup_low_max_usd": "100"}, "completá el límite y la ganancia"),
+        ({"markup_low_max_usd": "200", "markup_low_ars": "20.000",
+          "markup_high_min_usd": "100", "markup_high_usd": "100"},
+         "límite bajo debe ser menor"),
+    ],
+)
+def test_admin_rechaza_tramos_dhl_incompletos_o_superpuestos(
+    monkeypatch, campos, mensaje,
+):
+    _dhl_produccion(monkeypatch)
+    with pytest.raises(ValueError, match=mensaje):
+        config.parsear_fila(
+            "dhl",
+            puede_cotizar=True,
+            puede_emitir=False,
+            puede_recolectar=False,
+            markup_tipo="FIJO_ARS",
+            markup_valor="95.000",
+            **campos,
+        )
+
+
 def test_dhl_se_puede_preconfigurar_pero_no_opera_fuera_de_produccion(monkeypatch):
     monkeypatch.setenv("DHL_ENVIRONMENT", "sandbox")
     monkeypatch.setenv("DHL_API_KEY", "k")
@@ -321,7 +375,7 @@ def test_formulario_general_no_puede_escribir_permisos_operativos():
     assert "courier_default=%s" not in fuente_edicion
 
 
-def test_post_admin_persiste_dhl_14000_y_auditoria_en_la_misma_transaccion(
+def test_post_admin_persiste_dhl_tramos_y_auditoria_en_la_misma_transaccion(
     monkeypatch,
 ):
     _dhl_produccion(monkeypatch)
@@ -376,6 +430,8 @@ def test_post_admin_persiste_dhl_14000_y_auditoria_en_la_misma_transaccion(
         fedex_markup_tipo="", fedex_markup_valor="",
         dhl_cotizar="1", dhl_emitir="1", dhl_pickup="",
         dhl_markup_tipo="FIJO_ARS", dhl_markup_valor="14.000",
+        dhl_markup_low_max_usd="100", dhl_markup_low_ars="20.000",
+        dhl_markup_high_min_usd="200", dhl_markup_high_usd="100",
         ups_cotizar="", ups_emitir="", ups_pickup="",
         ups_markup_tipo="", ups_markup_valor="",
         courier_default="dhl", tope_deuda_ars="500.000",
@@ -396,9 +452,12 @@ def test_post_admin_persiste_dhl_14000_y_auditoria_en_la_misma_transaccion(
         if "INSERT INTO cliente_courier_config" in sql
     ]
     assert filas == [
-        ("MELCIOR", "fedex", False, False, False, None, None),
-        ("MELCIOR", "dhl", True, True, False, "FIJO_ARS", 14_000.0),
-        ("MELCIOR", "ups", False, False, False, None, None),
+        ("MELCIOR", "fedex", False, False, False, None, None,
+         None, None, None, None),
+        ("MELCIOR", "dhl", True, True, False, "FIJO_ARS", 14_000.0,
+         100.0, 20_000.0, 200.0, 100.0),
+        ("MELCIOR", "ups", False, False, False, None, None,
+         None, None, None, None),
     ]
     auditorias = [
         params for sql, params in ejecutadas if "INSERT INTO security_audit" in sql
@@ -436,6 +495,8 @@ def test_post_admin_manipulado_no_activa_fedex_ni_escribe(monkeypatch):
         fedex_markup_tipo="", fedex_markup_valor="",
         dhl_cotizar="", dhl_emitir="", dhl_pickup="",
         dhl_markup_tipo="", dhl_markup_valor="",
+        dhl_markup_low_max_usd="", dhl_markup_low_ars="",
+        dhl_markup_high_min_usd="", dhl_markup_high_usd="",
         ups_cotizar="", ups_emitir="", ups_pickup="",
         ups_markup_tipo="", ups_markup_valor="",
         courier_default="", tope_deuda_ars="",
@@ -480,7 +541,8 @@ def test_roundtrip_admin_post_get_relee_permisos_y_default(monkeypatch):
                         base.cliente["tope_deuda_ars"] = tope
                     elif "INSERT INTO cliente_courier_config" in compacto:
                         (_cliente_id, courier, cotizar, emitir, pickup,
-                         tipo, valor) = params
+                         tipo, valor, low_max, low_ars,
+                         high_min, high_usd) = params
                         base.configs[courier] = {
                             "courier": courier,
                             "puede_cotizar": cotizar,
@@ -488,6 +550,10 @@ def test_roundtrip_admin_post_get_relee_permisos_y_default(monkeypatch):
                             "puede_recolectar": pickup,
                             "markup_tipo": tipo,
                             "markup_valor": valor,
+                            "markup_low_max_usd": low_max,
+                            "markup_low_ars": low_ars,
+                            "markup_high_min_usd": high_min,
+                            "markup_high_usd": high_usd,
                         }
                     elif "INSERT INTO security_audit" in compacto:
                         base.auditorias.append(params)
@@ -531,6 +597,8 @@ def test_roundtrip_admin_post_get_relee_permisos_y_default(monkeypatch):
         fedex_markup_tipo="", fedex_markup_valor="",
         dhl_cotizar="1", dhl_emitir="1", dhl_pickup="1",
         dhl_markup_tipo="FIJO_ARS", dhl_markup_valor="14000",
+        dhl_markup_low_max_usd="", dhl_markup_low_ars="",
+        dhl_markup_high_min_usd="", dhl_markup_high_usd="",
         ups_cotizar="", ups_emitir="", ups_pickup="",
         ups_markup_tipo="", ups_markup_valor="",
         courier_default="dhl", tope_deuda_ars="250000",

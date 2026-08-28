@@ -1545,6 +1545,10 @@ def admin_cliente_acceso_precios_guardar(
     dhl_pickup: str = Form(""),
     dhl_markup_tipo: str = Form(""),
     dhl_markup_valor: str = Form(""),
+    dhl_markup_low_max_usd: str = Form(""),
+    dhl_markup_low_ars: str = Form(""),
+    dhl_markup_high_min_usd: str = Form(""),
+    dhl_markup_high_usd: str = Form(""),
     ups_cotizar: str = Form(""),
     ups_emitir: str = Form(""),
     ups_pickup: str = Form(""),
@@ -1576,6 +1580,10 @@ def admin_cliente_acceso_precios_guardar(
                 puede_recolectar=dhl_pickup == "1",
                 markup_tipo=dhl_markup_tipo,
                 markup_valor=dhl_markup_valor,
+                markup_low_max_usd=dhl_markup_low_max_usd,
+                markup_low_ars=dhl_markup_low_ars,
+                markup_high_min_usd=dhl_markup_high_min_usd,
+                markup_high_usd=dhl_markup_high_usd,
             ),
             parsear_fila(
                 "ups",
@@ -1660,6 +1668,10 @@ def admin_cliente_acceso_precios_guardar(
                         "puede_recolectar": intento["puede_recolectar"],
                         "markup_tipo": intento["markup_tipo"] or "",
                         "markup_valor": intento["markup_valor"],
+                        "markup_low_max_usd": intento["markup_low_max_usd"],
+                        "markup_low_ars": intento["markup_low_ars"],
+                        "markup_high_min_usd": intento["markup_high_min_usd"],
+                        "markup_high_usd": intento["markup_high_usd"],
                     })
             matriz["courier_default"] = _courier_valido(courier_default)
             matriz["courier_default_configurado"] = _courier_valido(courier_default)

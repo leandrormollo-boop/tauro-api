@@ -134,18 +134,49 @@ def aplicar_pricing(
     dolar: float,
     pricing: dict,
 ) -> dict:
-    """Calcula precio final usando la regla del cliente."""
+    """Calcula precio final usando la regla base y overrides por costo USD.
+
+    Los límites de los tramos son estrictos: ``costo < bajo`` y
+    ``costo > alto``. En los bordes y en el intervalo central se aplica la
+    regla base, evitando huecos de pricing.
+    """
     tipo = pricing["tipo"]
     valor = float(pricing["valor"])
     costo_ars = float(costo_ars or 0)
     costo_usd = float(costo_usd or 0)
     dolar = float(dolar or 1)
 
-    if tipo == "FIJO_ARS":
+    tramos = pricing.get("tramos_usd") or {}
+    bajo_hasta = tramos.get("bajo_hasta_usd")
+    bajo_ars = tramos.get("bajo_markup_ars")
+    alto_desde = tramos.get("alto_desde_usd")
+    alto_usd = tramos.get("alto_markup_usd")
+
+    if (
+        bajo_hasta is not None and bajo_ars is not None
+        and costo_usd < float(bajo_hasta)
+    ):
+        valor_aplicado = float(bajo_ars)
+        tipo_aplicado = "FIJO_ARS"
+        precio_ars = round(costo_ars + valor_aplicado, 0)
+    elif (
+        alto_desde is not None and alto_usd is not None
+        and costo_usd > float(alto_desde)
+    ):
+        valor_aplicado = round(float(alto_usd) * dolar, 4)
+        tipo_aplicado = "FIJO_ARS"
+        precio_ars = round(costo_ars + valor_aplicado, 0)
+    elif tipo == "FIJO_ARS":
+        tipo_aplicado = tipo
+        valor_aplicado = valor
         precio_ars = round(costo_ars + valor, 0)
     elif tipo == "MULTIPLICADOR":
+        tipo_aplicado = tipo
+        valor_aplicado = valor
         precio_ars = round(costo_ars * valor, 0)
     else:
+        tipo_aplicado = tipo
+        valor_aplicado = valor
         precio_ars = round(costo_ars * (1 + valor / 100), 0)
 
     precio_usd = round(precio_ars / dolar, 2) if dolar else round(costo_usd, 2)
@@ -158,8 +189,8 @@ def aplicar_pricing(
         "precio_final_ars": precio_ars,
         "precio_final_usd": precio_usd,
         "markup_pct_equivalente": markup_pct_equivalente,
-        "markup_tipo": tipo,
-        "markup_valor": valor,
+        "markup_tipo": tipo_aplicado,
+        "markup_valor": valor_aplicado,
     }
 
 

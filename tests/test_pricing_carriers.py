@@ -140,6 +140,38 @@ def test_el_portal_cobra_el_monto_fijo_del_cliente():
     assert r["precio_ars"] == round(130.18 * 1450) + 95000
 
 
+def test_pricing_escalonado_dhl_aplica_bajo_base_y_alto_sin_huecos():
+    from servicios.pricing import aplicar_pricing
+
+    pricing = {
+        "tipo": "FIJO_ARS",
+        "valor": 95_000,
+        "tramos_usd": {
+            "bajo_hasta_usd": 100,
+            "bajo_markup_ars": 20_000,
+            "alto_desde_usd": 200,
+            "alto_markup_usd": 100,
+        },
+    }
+    dolar = 1_200
+
+    def precio(costo_usd):
+        return aplicar_pricing(
+            costo_usd=costo_usd,
+            costo_ars=round(costo_usd * dolar),
+            dolar=dolar,
+            pricing=pricing,
+        )
+
+    assert precio(99)["precio_final_ars"] == 99 * dolar + 20_000
+    assert precio(100)["precio_final_ars"] == 100 * dolar + 95_000
+    assert precio(150)["precio_final_ars"] == 150 * dolar + 95_000
+    assert precio(200)["precio_final_ars"] == 200 * dolar + 95_000
+    assert precio(201)["precio_final_ars"] == 201 * dolar + 100 * dolar
+    assert precio(201)["markup_tipo"] == "FIJO_ARS"
+    assert precio(201)["markup_valor"] == 100 * dolar
+
+
 def test_cada_cliente_su_precio_con_el_mismo_costo():
     """Prete Rosso $11.000 y Melcior $14.000 sobre el MISMO envío."""
     from servicios.carriers import cotizar_carriers_cliente

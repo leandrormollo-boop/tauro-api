@@ -83,6 +83,12 @@ CREATE TABLE IF NOT EXISTS cliente_courier_config (
     puede_recolectar  BOOLEAN NOT NULL DEFAULT FALSE,
     markup_tipo       TEXT,
     markup_valor      NUMERIC(14,4),
+    -- Overrides opcionales por costo real del courier en USD. El tramo entre
+    -- ambos límites conserva markup_tipo/markup_valor como regla base.
+    markup_low_max_usd    NUMERIC(14,4),
+    markup_low_ars        NUMERIC(14,4),
+    markup_high_min_usd   NUMERIC(14,4),
+    markup_high_usd       NUMERIC(14,4),
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (cliente_id, courier),
@@ -101,10 +107,77 @@ CREATE TABLE IF NOT EXISTS cliente_courier_config (
                 OR (markup_tipo IN ('PCT', 'FIJO_ARS') AND markup_valor >= 0)
             )
         )
+    ),
+    CONSTRAINT ck_cliente_courier_tramos CHECK (
+        (markup_low_max_usd IS NULL AND markup_low_ars IS NULL)
+        OR (
+            markup_low_max_usd IS NOT NULL AND markup_low_ars IS NOT NULL
+            AND markup_low_max_usd::text NOT IN ('NaN', 'Infinity', '-Infinity')
+            AND markup_low_ars::text NOT IN ('NaN', 'Infinity', '-Infinity')
+            AND markup_low_max_usd > 0 AND markup_low_ars >= 0
+        )
+    ),
+    CONSTRAINT ck_cliente_courier_tramo_alto CHECK (
+        (markup_high_min_usd IS NULL AND markup_high_usd IS NULL)
+        OR (
+            markup_high_min_usd IS NOT NULL AND markup_high_usd IS NOT NULL
+            AND markup_high_min_usd::text NOT IN ('NaN', 'Infinity', '-Infinity')
+            AND markup_high_usd::text NOT IN ('NaN', 'Infinity', '-Infinity')
+            AND markup_high_min_usd > 0 AND markup_high_usd >= 0
+        )
+    ),
+    CONSTRAINT ck_cliente_courier_orden_tramos CHECK (
+        markup_low_max_usd IS NULL OR markup_high_min_usd IS NULL
+        OR markup_low_max_usd < markup_high_min_usd
     )
 );
 ALTER TABLE IF EXISTS cliente_courier_config
     ALTER COLUMN puede_cotizar SET DEFAULT FALSE;
+ALTER TABLE IF EXISTS cliente_courier_config
+    ADD COLUMN IF NOT EXISTS markup_low_max_usd NUMERIC(14,4);
+ALTER TABLE IF EXISTS cliente_courier_config
+    ADD COLUMN IF NOT EXISTS markup_low_ars NUMERIC(14,4);
+ALTER TABLE IF EXISTS cliente_courier_config
+    ADD COLUMN IF NOT EXISTS markup_high_min_usd NUMERIC(14,4);
+ALTER TABLE IF EXISTS cliente_courier_config
+    ADD COLUMN IF NOT EXISTS markup_high_usd NUMERIC(14,4);
+DO $$ BEGIN
+    ALTER TABLE cliente_courier_config
+        ADD CONSTRAINT ck_cliente_courier_tramos
+        CHECK (
+            (markup_low_max_usd IS NULL AND markup_low_ars IS NULL)
+            OR (
+                markup_low_max_usd IS NOT NULL AND markup_low_ars IS NOT NULL
+                AND markup_low_max_usd::text NOT IN ('NaN', 'Infinity', '-Infinity')
+                AND markup_low_ars::text NOT IN ('NaN', 'Infinity', '-Infinity')
+                AND markup_low_max_usd > 0 AND markup_low_ars >= 0
+            )
+        );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE cliente_courier_config
+        ADD CONSTRAINT ck_cliente_courier_tramo_alto
+        CHECK (
+            (markup_high_min_usd IS NULL AND markup_high_usd IS NULL)
+            OR (
+                markup_high_min_usd IS NOT NULL AND markup_high_usd IS NOT NULL
+                AND markup_high_min_usd::text NOT IN ('NaN', 'Infinity', '-Infinity')
+                AND markup_high_usd::text NOT IN ('NaN', 'Infinity', '-Infinity')
+                AND markup_high_min_usd > 0 AND markup_high_usd >= 0
+            )
+        );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN
+    ALTER TABLE cliente_courier_config
+        ADD CONSTRAINT ck_cliente_courier_orden_tramos
+        CHECK (
+            markup_low_max_usd IS NULL OR markup_high_min_usd IS NULL
+            OR markup_low_max_usd < markup_high_min_usd
+        );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_cliente_courier_config_cliente
     ON cliente_courier_config(cliente_id);
 

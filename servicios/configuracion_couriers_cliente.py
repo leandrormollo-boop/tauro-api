@@ -121,6 +121,24 @@ def _pricing_general(cliente: dict) -> dict:
     )
 
 
+def _tramos_pricing(fila: dict | None) -> dict | None:
+    """Arma los overrides por costo USD sin alterar la regla base."""
+    if not fila:
+        return None
+    bajo_hasta = fila.get("markup_low_max_usd")
+    bajo_ars = fila.get("markup_low_ars")
+    alto_desde = fila.get("markup_high_min_usd")
+    alto_usd = fila.get("markup_high_usd")
+    if all(valor is None for valor in (bajo_hasta, bajo_ars, alto_desde, alto_usd)):
+        return None
+    return {
+        "bajo_hasta_usd": float(bajo_hasta) if bajo_hasta is not None else None,
+        "bajo_markup_ars": float(bajo_ars) if bajo_ars is not None else None,
+        "alto_desde_usd": float(alto_desde) if alto_desde is not None else None,
+        "alto_markup_usd": float(alto_usd) if alto_usd is not None else None,
+    }
+
+
 def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
     especificas = {
         normalizar_courier(f.get("courier")): dict(f)
@@ -144,6 +162,9 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
             if tipo_especifico
             else general
         )
+        tramos = _tramos_pricing(fila)
+        if tramos:
+            pricing = {**pricing, "tramos_usd": tramos}
         config_puede_cotizar = bool(fila["puede_cotizar"]) if fila else False
         config_puede_emitir = bool(fila["puede_emitir"]) if fila else False
         config_puede_recolectar = bool(fila["puede_recolectar"]) if fila else False
@@ -168,6 +189,10 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
             ),
             "markup_tipo": tipo_especifico,
             "markup_valor": valor_especifico,
+            "markup_low_max_usd": fila.get("markup_low_max_usd") if fila else None,
+            "markup_low_ars": fila.get("markup_low_ars") if fila else None,
+            "markup_high_min_usd": fila.get("markup_high_min_usd") if fila else None,
+            "markup_high_usd": fila.get("markup_high_usd") if fila else None,
             "pricing": pricing,
             "hereda_pricing": not bool(tipo_especifico),
             "operativo": activa,
@@ -211,7 +236,9 @@ def leer_matriz_con_cursor(cur, cliente_id: str) -> dict | None:
     cur.execute(
         """
         SELECT courier, puede_cotizar, puede_emitir, puede_recolectar,
-               markup_tipo, markup_valor
+               markup_tipo, markup_valor,
+               markup_low_max_usd, markup_low_ars,
+               markup_high_min_usd, markup_high_usd
         FROM cliente_courier_config
         WHERE cliente_id = %s
         """,
@@ -276,6 +303,10 @@ def parsear_fila(
     puede_recolectar: bool,
     markup_tipo: str,
     markup_valor: str,
+    markup_low_max_usd: str = "",
+    markup_low_ars: str = "",
+    markup_high_min_usd: str = "",
+    markup_high_usd: str = "",
 ) -> dict:
     """Valida una fila enviada por el admin, sin confiar en el navegador."""
     courier = normalizar_courier(courier)
@@ -291,6 +322,10 @@ def parsear_fila(
     if not metadata["integracion_implementada"] and (
         puede_cotizar or puede_emitir or puede_recolectar
         or (markup_tipo or "").strip() or (markup_valor or "").strip()
+        or any((valor or "").strip() for valor in (
+            markup_low_max_usd, markup_low_ars,
+            markup_high_min_usd, markup_high_usd,
+        ))
     ):
         raise ValueError(
             f"{metadata['nombre']}: la integración todavía no está habilitada "
@@ -330,6 +365,62 @@ def parsear_fila(
             f"{metadata['nombre']}: elegí un tipo de ganancia o dejá el valor vacío."
         )
 
+    def _par_tramo(
+        limite_raw: str,
+        ganancia_raw: str,
+        *,
+        etiqueta: str,
+        ganancia_ars: bool,
+    ) -> tuple[float | None, float | None]:
+        limite_txt = (limite_raw or "").strip()
+        ganancia_txt = (ganancia_raw or "").strip()
+        if not limite_txt and not ganancia_txt:
+            return None, None
+        if not limite_txt or not ganancia_txt:
+            raise ValueError(
+                f"{metadata['nombre']}: completá el límite y la ganancia del "
+                f"tramo {etiqueta}."
+            )
+        try:
+            limite = float(parse_numero_humano(limite_txt))
+            ganancia = float(
+                parse_importe_humano(ganancia_txt)
+                if ganancia_ars else parse_numero_humano(ganancia_txt)
+            )
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"{metadata['nombre']}: los valores del tramo {etiqueta} "
+                "deben ser números válidos."
+            ) from None
+        if not math.isfinite(limite) or limite <= 0:
+            raise ValueError(
+                f"{metadata['nombre']}: el límite del tramo {etiqueta} "
+                "debe ser mayor a cero."
+            )
+        if not math.isfinite(ganancia) or ganancia < 0:
+            raise ValueError(
+                f"{metadata['nombre']}: la ganancia del tramo {etiqueta} "
+                "no puede ser negativa."
+            )
+        return limite, ganancia
+
+    low_max, low_ars = _par_tramo(
+        markup_low_max_usd,
+        markup_low_ars,
+        etiqueta="bajo",
+        ganancia_ars=True,
+    )
+    high_min, high_usd = _par_tramo(
+        markup_high_min_usd,
+        markup_high_usd,
+        etiqueta="alto",
+        ganancia_ars=False,
+    )
+    if low_max is not None and high_min is not None and low_max >= high_min:
+        raise ValueError(
+            f"{metadata['nombre']}: el límite bajo debe ser menor al límite alto."
+        )
+
     return {
         "courier": courier,
         "puede_cotizar": bool(puede_cotizar),
@@ -337,6 +428,10 @@ def parsear_fila(
         "puede_recolectar": bool(puede_recolectar),
         "markup_tipo": tipo or None,
         "markup_valor": valor,
+        "markup_low_max_usd": low_max,
+        "markup_low_ars": low_ars,
+        "markup_high_min_usd": high_min,
+        "markup_high_usd": high_usd,
     }
 
 
@@ -350,14 +445,20 @@ def guardar_matriz_con_cursor(cur, cliente_id: str, configuraciones: list[dict])
             """
             INSERT INTO cliente_courier_config
                 (cliente_id, courier, puede_cotizar, puede_emitir,
-                 puede_recolectar, markup_tipo, markup_valor, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                 puede_recolectar, markup_tipo, markup_valor,
+                 markup_low_max_usd, markup_low_ars,
+                 markup_high_min_usd, markup_high_usd, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (cliente_id, courier) DO UPDATE SET
                 puede_cotizar = EXCLUDED.puede_cotizar,
                 puede_emitir = EXCLUDED.puede_emitir,
                 puede_recolectar = EXCLUDED.puede_recolectar,
                 markup_tipo = EXCLUDED.markup_tipo,
                 markup_valor = EXCLUDED.markup_valor,
+                markup_low_max_usd = EXCLUDED.markup_low_max_usd,
+                markup_low_ars = EXCLUDED.markup_low_ars,
+                markup_high_min_usd = EXCLUDED.markup_high_min_usd,
+                markup_high_usd = EXCLUDED.markup_high_usd,
                 updated_at = NOW()
             """,
             (
@@ -368,6 +469,10 @@ def guardar_matriz_con_cursor(cur, cliente_id: str, configuraciones: list[dict])
                 config["puede_recolectar"],
                 config["markup_tipo"],
                 config["markup_valor"],
+                config["markup_low_max_usd"],
+                config["markup_low_ars"],
+                config["markup_high_min_usd"],
+                config["markup_high_usd"],
             ),
         )
 
@@ -447,6 +552,20 @@ def resumen_auditoria(configuraciones: list[dict]) -> dict:
             "pickup": c["puede_recolectar"],
             "markup_tipo": c["markup_tipo"] or "HEREDA",
             "markup_valor": c["markup_valor"],
+            "tramo_bajo": (
+                {
+                    "hasta_usd": c["markup_low_max_usd"],
+                    "ganancia_ars": c["markup_low_ars"],
+                }
+                if c["markup_low_max_usd"] is not None else None
+            ),
+            "tramo_alto": (
+                {
+                    "desde_usd": c["markup_high_min_usd"],
+                    "ganancia_usd": c["markup_high_usd"],
+                }
+                if c["markup_high_min_usd"] is not None else None
+            ),
         }
         for c in configuraciones
     }

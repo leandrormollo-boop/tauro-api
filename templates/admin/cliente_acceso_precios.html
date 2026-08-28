@@ -26,6 +26,13 @@
   .permission.disabled label { opacity:.35;cursor:not-allowed; }
   .pricing-cell { display:grid;grid-template-columns:minmax(155px,1fr) minmax(90px,.65fr);gap:8px;align-items:center; }
   .pricing-cell select,.pricing-cell input { margin:0;min-width:0; }
+  .tier-pricing { margin-top:9px;border:1px solid var(--line-soft);border-radius:9px;background:rgba(255,255,255,.018); }
+  .tier-pricing summary { cursor:pointer;padding:8px 10px;color:var(--fg-3);font-size:11px;font-weight:700; }
+  .tier-pricing[open] summary { border-bottom:1px solid var(--line-soft); }
+  .tier-grid { display:grid;grid-template-columns:repeat(2,minmax(125px,1fr));gap:9px;padding:10px; }
+  .tier-grid label { display:block;color:var(--fg-4);font-size:10px;margin-bottom:4px; }
+  .tier-grid input { width:100%;margin:0; }
+  .tier-note { grid-column:1/-1;color:var(--fg-4);font-size:10px;line-height:1.45; }
   .access-settings { display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 18px;border-top:1px solid var(--line-soft);background:rgba(255,255,255,.015); }
   .access-settings .form-group { margin:0; }
   .access-warning { display:flex;gap:10px;align-items:flex-start;margin:14px 0 0;padding:11px 14px;border:1px solid rgba(245,158,11,.26);background:rgba(245,158,11,.07);border-radius:10px;color:var(--fg-3);font-size:12.5px; }
@@ -116,6 +123,38 @@
                    inputmode="decimal" data-numero="pricing" data-pricing-select="{{ c.id }}-markup-tipo" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
           </div>
           {% if not c.markup_tipo %}<div class="inherit-note">Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}</div>{% endif %}
+          {% if c.id == 'dhl' %}
+          <details class="tier-pricing" {% if c.markup_low_max_usd is not none or c.markup_high_min_usd is not none %}open{% endif %}>
+            <summary>Tramos opcionales por costo DHL</summary>
+            <div class="tier-grid">
+              <div>
+                <label for="dhl-low-max">Si el costo es menor a (USD)</label>
+                <input id="dhl-low-max" type="text" name="dhl_markup_low_max_usd"
+                       value="{% if c.markup_low_max_usd is not none %}{{ '%g'|format(c.markup_low_max_usd|float) }}{% endif %}"
+                       placeholder="Ej. 100" inputmode="decimal" data-numero="decimal">
+              </div>
+              <div>
+                <label for="dhl-low-ars">Sumar ganancia (ARS)</label>
+                <input id="dhl-low-ars" type="text" name="dhl_markup_low_ars"
+                       value="{% if c.markup_low_ars is not none %}{{ '%g'|format(c.markup_low_ars|float) }}{% endif %}"
+                       placeholder="Ej. 20.000" inputmode="decimal" data-numero="monto">
+              </div>
+              <div>
+                <label for="dhl-high-min">Si el costo es mayor a (USD)</label>
+                <input id="dhl-high-min" type="text" name="dhl_markup_high_min_usd"
+                       value="{% if c.markup_high_min_usd is not none %}{{ '%g'|format(c.markup_high_min_usd|float) }}{% endif %}"
+                       placeholder="Ej. 200" inputmode="decimal" data-numero="decimal">
+              </div>
+              <div>
+                <label for="dhl-high-usd">Sumar ganancia (USD)</label>
+                <input id="dhl-high-usd" type="text" name="dhl_markup_high_usd"
+                       value="{% if c.markup_high_usd is not none %}{{ '%g'|format(c.markup_high_usd|float) }}{% endif %}"
+                       placeholder="Ej. 100" inputmode="decimal" data-numero="decimal">
+              </div>
+              <div class="tier-note">Entre ambos límites —y exactamente en los límites— se aplica la regla base elegida arriba. El margen USD se convierte con el dólar vigente de TAURO.</div>
+            </div>
+          </details>
+          {% endif %}
         </div>
       </fieldset>
       {% endfor %}
