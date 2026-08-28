@@ -99,6 +99,50 @@ def test_cotizar_invalido_no_llama_al_courier(monkeypatch):
     assert llamadas == []
 
 
+def test_cotizador_post_envia_varias_cajas_y_preserva_las_filas(monkeypatch):
+    recibidos = []
+
+    def cotizador_falso(**datos):
+        recibidos.append(datos)
+        return {
+            "encontrado": True,
+            "opciones": [],
+            "no_disponibles": [],
+            "resumen": {"cantidad_bultos": 3},
+        }
+
+    monkeypatch.setattr(portal, "cotizar_referencia_couriers", cotizador_falso)
+    monkeypatch.setattr(
+        portal, "_paises_con_nacional",
+        lambda: [("AR", "Argentina"), ("US", "Estados Unidos")],
+    )
+    monkeypatch.setattr(
+        portal.templates,
+        "TemplateResponse",
+        lambda *, context, status_code=200, **_kw: SimpleNamespace(
+            status_code=status_code, context=context,
+        ),
+    )
+
+    respuesta = portal.cotizar_post(
+        request=SimpleNamespace(), origen_pais="AR", destino_pais="US",
+        valor_declarado_usd="300", cliente="WAIMAO",
+        bulto_cantidad=["2", "1"], bulto_peso=["2,5", "5"],
+        bulto_largo=["40", "50"], bulto_ancho=["30", "40"],
+        bulto_alto=["20", "30"],
+    )
+
+    assert respuesta.context["error"] is None
+    assert recibidos[0]["paquetes"] == [
+        {"cantidad": 2, "peso_kg": 2.5, "largo_cm": 40,
+         "ancho_cm": 30, "alto_cm": 20},
+        {"cantidad": 1, "peso_kg": 5, "largo_cm": 50,
+         "ancho_cm": 40, "alto_cm": 30},
+    ]
+    assert respuesta.context["form"]["bultos"][0]["peso_kg"] == "2,5"
+    assert len(respuesta.context["form"]["bultos"]) == 2
+
+
 def test_cotizador_rapido_exige_valor_declarado_antes_del_courier(monkeypatch):
     llamadas = []
     monkeypatch.setattr(

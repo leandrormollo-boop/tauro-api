@@ -168,6 +168,8 @@ def test_pricing_escalonado_dhl_aplica_bajo_base_y_alto_sin_huecos():
     assert precio(150)["precio_final_ars"] == 150 * dolar + 95_000
     assert precio(200)["precio_final_ars"] == 200 * dolar + 95_000
     assert precio(201)["precio_final_ars"] == 201 * dolar + 100 * dolar
+    assert precio(224)["precio_final_usd"] == 324
+    assert precio(224)["precio_final_ars"] == 324 * dolar
     assert precio(201)["markup_tipo"] == "FIJO_ARS"
     assert precio(201)["markup_valor"] == 100 * dolar
 

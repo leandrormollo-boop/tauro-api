@@ -1208,6 +1208,65 @@ def ver_comprobante_propio(pago_id: int, cliente: str = Depends(cliente_actual))
 
 
 # ── Cotizar ─────────────────────────────────────────────────
+def _bultos_cotizador_internacional(
+    *,
+    peso_kg: str,
+    largo_cm: str,
+    ancho_cm: str,
+    alto_cm: str,
+    cantidades,
+    pesos,
+    largos,
+    anchos,
+    altos,
+) -> tuple[list[dict], list[dict]]:
+    """Valida filas repetibles y conserva el texto para re-renderizar."""
+    listas = [
+        list(valor) if isinstance(valor, (list, tuple)) else []
+        for valor in (cantidades, pesos, largos, anchos, altos)
+    ]
+    usa_filas = any(listas)
+    if not usa_filas:
+        listas = [["1"], [peso_kg], [largo_cm], [ancho_cm], [alto_cm]]
+    longitudes = {len(lista) for lista in listas}
+    if len(longitudes) != 1 or not next(iter(longitudes), 0):
+        raise ValueError("Las cajas enviadas están incompletas. Volvé a cargarlas.")
+
+    paquetes = []
+    filas_form = []
+    total_cajas = 0
+    for indice, (cantidad, peso, largo, ancho, alto) in enumerate(zip(*listas), start=1):
+        fila_form = {
+            "cantidad": str(cantidad or ""),
+            "peso_kg": str(peso or ""),
+            "largo_cm": str(largo or ""),
+            "ancho_cm": str(ancho or ""),
+            "alto_cm": str(alto or ""),
+        }
+        filas_form.append(fila_form)
+        cantidad_num = _entero_form(
+            cantidad, f"Caja {indice}: cantidad", minimo=1, maximo=20,
+        )
+        paquete = {
+            "cantidad": cantidad_num,
+            "peso_kg": _numero_form(
+                peso, f"Caja {indice}: peso", minimo=0.1, maximo=70,
+            ),
+            "largo_cm": _numero_form(largo, f"Caja {indice}: largo", minimo=1),
+            "ancho_cm": _numero_form(ancho, f"Caja {indice}: ancho", minimo=1),
+            "alto_cm": _numero_form(alto, f"Caja {indice}: alto", minimo=1),
+        }
+        if paquete["largo_cm"] + paquete["ancho_cm"] + paquete["alto_cm"] > 330:
+            raise ValueError(
+                f"Caja {indice}: la suma de las tres medidas no puede superar 330 cm."
+            )
+        total_cajas += cantidad_num
+        if total_cajas > 20:
+            raise ValueError("DHL admite como máximo 20 cajas por envío.")
+        paquetes.append(paquete)
+    return paquetes, filas_form
+
+
 @router.get("/cotizar", response_class=HTMLResponse)
 def cotizar_form(
     request: Request,
@@ -1231,7 +1290,7 @@ def cotizar_form(
             ),
             "resultado_nacional": None,
             "error": None,
-            "form": {},
+            "form": {"bultos": [{}]},
         },
     )
 
@@ -1245,10 +1304,10 @@ def cotizar_post(
     # default evita que FastAPI responda 422 antes de poder validar el ámbito.
     origen_pais: str = Form(""),
     destino_pais: str = Form(""),
-    peso_kg: str = Form(...),
-    largo_cm: str = Form(...),
-    ancho_cm: str = Form(...),
-    alto_cm: str = Form(...),
+    peso_kg: str = Form(""),
+    largo_cm: str = Form(""),
+    ancho_cm: str = Form(""),
+    alto_cm: str = Form(""),
     valor_declarado_usd: str = Form(""),
     origen_provincia: str = Form(""),
     origen_localidad: str = Form(""),
@@ -1260,6 +1319,11 @@ def cotizar_post(
     modalidad_destino: str = Form("domicilio"),
     cantidad_bultos: str = Form("1"),
     valor_declarado_ars: str = Form(""),
+    bulto_cantidad: list[str] = Form([]),
+    bulto_peso: list[str] = Form([]),
+    bulto_largo: list[str] = Form([]),
+    bulto_ancho: list[str] = Form([]),
+    bulto_alto: list[str] = Form([]),
     cliente: str = Depends(cliente_actual),
 ):
     ambito_normalizado = _ambito_post(ambito)
@@ -1339,12 +1403,24 @@ def cotizar_post(
     opciones = None
     no_disponibles = []
     resumen = None
+    filas_bultos_form = [{
+        "cantidad": "1", "peso_kg": peso_kg, "largo_cm": largo_cm,
+        "ancho_cm": ancho_cm, "alto_cm": alto_cm,
+    }]
 
     try:
-        peso_num = _numero_form(peso_kg, "Peso", minimo=0.1, maximo=70)
-        largo_num = _numero_form(largo_cm, "Largo", minimo=1)
-        ancho_num = _numero_form(ancho_cm, "Ancho", minimo=1)
-        alto_num = _numero_form(alto_cm, "Alto", minimo=1)
+        paquetes, filas_bultos_form = _bultos_cotizador_internacional(
+            peso_kg=peso_kg,
+            largo_cm=largo_cm,
+            ancho_cm=ancho_cm,
+            alto_cm=alto_cm,
+            cantidades=bulto_cantidad,
+            pesos=bulto_peso,
+            largos=bulto_largo,
+            anchos=bulto_ancho,
+            altos=bulto_alto,
+        )
+        primero = paquetes[0]
         valor_usd_num = _numero_form(
             valor_declarado_usd, "Valor declarado", importe=True, minimo=0.01,
         )
@@ -1352,11 +1428,12 @@ def cotizar_post(
             cliente=cliente,
             origen_pais=origen_pais,
             destino_pais=destino_pais,
-            peso_kg=peso_num,
-            largo_cm=largo_num,
-            ancho_cm=ancho_num,
-            alto_cm=alto_num,
+            peso_kg=primero["peso_kg"],
+            largo_cm=primero["largo_cm"],
+            ancho_cm=primero["ancho_cm"],
+            alto_cm=primero["alto_cm"],
             valor_declarado_usd=valor_usd_num,
+            paquetes=paquetes,
         )
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
@@ -1392,10 +1469,11 @@ def cotizar_post(
             "form": {
                 "origen_pais": origen_pais,
                 "destino_pais": destino_pais,
-                "peso_kg": peso_kg,
-                "largo_cm": largo_cm,
-                "ancho_cm": ancho_cm,
-                "alto_cm": alto_cm,
+                "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
+                "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
+                "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),
+                "alto_cm": filas_bultos_form[0].get("alto_cm", ""),
+                "bultos": filas_bultos_form,
                 "valor_declarado_usd": valor_declarado_usd,
             },
             # Para que cada tarjeta de opción linkee a "crear envío" con el

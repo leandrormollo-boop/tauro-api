@@ -215,6 +215,7 @@ def cotizar_referencia_couriers(
     ancho_cm: float,
     alto_cm: float,
     valor_declarado_usd: float,
+    paquetes: list[dict] | None = None,
 ) -> dict:
     """Compara una opción principal por courier para el cotizador rápido.
 
@@ -243,30 +244,81 @@ def cotizar_referencia_couriers(
         )
 
     try:
-        medidas = {
-            "peso_kg": float(peso_kg),
-            "largo": float(largo_cm),
-            "ancho": float(ancho_cm),
-            "alto": float(alto_cm),
-        }
         valor_declarado = float(valor_declarado_usd)
     except (TypeError, ValueError):
-        raise ValueError("El peso, las medidas y el valor declarado deben ser válidos.") from None
-    if any(not math.isfinite(valor) for valor in medidas.values()):
-        raise ValueError("El peso y las medidas deben ser números finitos.")
+        raise ValueError("El valor declarado debe ser válido.") from None
     if not math.isfinite(valor_declarado) or valor_declarado <= 0:
         raise ValueError("El valor declarado debe ser mayor a cero.")
-    if any(valor <= 0 for valor in medidas.values()):
-        raise ValueError("El peso y las tres medidas deben ser mayores a cero.")
-    if medidas["peso_kg"] > 70:
-        raise ValueError("El peso máximo por caja es 70 kg.")
-    if medidas["largo"] + medidas["ancho"] + medidas["alto"] > 330:
-        raise ValueError("La suma de las tres medidas no puede superar 330 cm.")
 
-    peso_volumetrico = calcular_peso_volumetrico(
-        medidas["largo"], medidas["ancho"], medidas["alto"],
-    )
-    peso_usado = max(medidas["peso_kg"], peso_volumetrico)
+    filas = paquetes or [{
+        "cantidad": 1,
+        "peso_kg": peso_kg,
+        "largo_cm": largo_cm,
+        "ancho_cm": ancho_cm,
+        "alto_cm": alto_cm,
+    }]
+    piezas: list[dict] = []
+    for indice, fila in enumerate(filas, start=1):
+        if not isinstance(fila, dict):
+            raise ValueError(f"Caja {indice}: el formato no es válido.")
+        try:
+            cantidad = parse_entero_formulario(
+                fila.get("cantidad", 1),
+                f"Caja {indice}: cantidad",
+                minimo=1,
+                maximo=20,
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        try:
+            medidas = {
+                "peso_kg": float(fila.get("peso_kg")),
+                "largo": float(fila.get("largo_cm", fila.get("largo"))),
+                "ancho": float(fila.get("ancho_cm", fila.get("ancho"))),
+                "alto": float(fila.get("alto_cm", fila.get("alto"))),
+            }
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Caja {indice}: el peso, las medidas y la cantidad deben ser válidos."
+            ) from None
+        if any(not math.isfinite(valor) for valor in medidas.values()):
+            raise ValueError(f"Caja {indice}: el peso y las medidas deben ser finitos.")
+        if any(valor <= 0 for valor in medidas.values()):
+            raise ValueError(
+                f"Caja {indice}: el peso y las tres medidas deben ser mayores a cero."
+            )
+        if medidas["peso_kg"] > 70:
+            raise ValueError(f"Caja {indice}: el peso máximo por caja es 70 kg.")
+        if medidas["largo"] + medidas["ancho"] + medidas["alto"] > 330:
+            raise ValueError(
+                f"Caja {indice}: la suma de las tres medidas no puede superar 330 cm."
+            )
+        for _ in range(cantidad):
+            piezas.append({**medidas, "unidades": 1})
+        if len(piezas) > 20:
+            raise ValueError("DHL admite como máximo 20 cajas por envío.")
+
+    if not piezas:
+        raise ValueError("Agregá al menos una caja para cotizar.")
+
+    valor_por_pieza = round(valor_declarado / len(piezas), 2)
+    for pieza in piezas:
+        pieza.update({
+            "valor_declarado_usd": valor_por_pieza,
+            "valor_unitario_usd": valor_por_pieza,
+            "descripcion_en": "Merchandise",
+        })
+
+    peso_real = round(sum(p["peso_kg"] for p in piezas), 3)
+    pesos_volumetricos = [
+        calcular_peso_volumetrico(p["largo"], p["ancho"], p["alto"])
+        for p in piezas
+    ]
+    peso_volumetrico = round(sum(pesos_volumetricos), 3)
+    peso_usado = round(sum(
+        max(p["peso_kg"], peso_vol)
+        for p, peso_vol in zip(piezas, pesos_volumetricos)
+    ), 3)
 
     origen = referencia(origen_iso)
     destino = referencia(destino_iso)
@@ -277,12 +329,8 @@ def cotizar_referencia_couriers(
     tarjetas = cotizar_carriers_cliente(
         origen=origen,
         destino=destino,
-        paquete={
-            **medidas,
-            "valor_declarado_usd": valor_declarado,
-            "descripcion_en": "Merchandise",
-            "unidades": 1,
-        },
+        paquete=piezas[0],
+        paquetes=piezas if len(piezas) > 1 else None,
         dolar=_get_dolar_ars(),
         pricing_cliente=acceso_couriers["pricing_general"],
         pricing_por_courier=acceso_couriers["pricing_por_courier"],
@@ -327,7 +375,7 @@ def cotizar_referencia_couriers(
             "dias_estimados": tarjeta.get("dias_estimados") or "A confirmar",
             "tarifa_lista_ars": None,
             "peso_usado_kg": peso_usado,
-            "peso_real_kg": medidas["peso_kg"],
+            "peso_real_kg": peso_real,
             "peso_volumetrico_kg": peso_volumetrico,
             "ruta": f"{origen_iso} → {destino_iso}",
         })
@@ -340,9 +388,10 @@ def cotizar_referencia_couriers(
         "resumen": {
             "ruta": f"{origen_iso} → {destino_iso}",
             "peso_usado_kg": peso_usado,
-            "peso_real_kg": medidas["peso_kg"],
+            "peso_real_kg": peso_real,
             "peso_volumetrico_kg": peso_volumetrico,
             "valor_declarado_usd": valor_declarado,
+            "cantidad_bultos": len(piezas),
             "couriers_consultados": len(tarjetas),
         },
     }

@@ -77,30 +77,62 @@
                     <div class="quote-form-block">
                         <div class="quote-block-head">
                             <span>2</span>
-                            <div><strong>Paquete</strong><small>Peso y medidas exteriores</small></div>
+                            <div><strong>Cajas</strong><small>Cargá cada tipo de caja con su peso y medidas</small></div>
                         </div>
-                        <div class="quote-package-grid">
-                            <div class="form-group">
-                                <label for="peso_kg">Peso (kg)</label>
-                                <input type="text" name="peso_kg" id="peso_kg" inputmode="decimal" data-numero="decimal" required value="{{ form.peso_kg or '' }}" placeholder="Ej. 5,5">
+                        <div class="quote-package-list" id="quote-package-list">
+                            {% for b in form.bultos or [{}] %}
+                            <div class="quote-package-row" data-package-row>
+                                <div class="quote-package-row-head">
+                                    <strong>Caja <span data-package-number>{{ loop.index }}</span></strong>
+                                    <button type="button" class="quote-remove-package" data-remove-package aria-label="Quitar caja {{ loop.index }}">Quitar</button>
+                                </div>
+                                <div class="quote-package-grid">
+                                    <div class="form-group">
+                                        <label>Cantidad iguales</label>
+                                        <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" required value="{{ b.cantidad or 1 }}">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Peso por caja (kg)</label>
+                                        <input type="text" name="bulto_peso" inputmode="decimal" data-numero="decimal" required value="{{ b.peso_kg or '' }}" placeholder="Ej. 5,5">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Largo (cm)</label>
+                                        <input type="text" name="bulto_largo" inputmode="decimal" data-numero="decimal" required value="{{ b.largo_cm or '' }}">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Ancho (cm)</label>
+                                        <input type="text" name="bulto_ancho" inputmode="decimal" data-numero="decimal" required value="{{ b.ancho_cm or '' }}">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Alto (cm)</label>
+                                        <input type="text" name="bulto_alto" inputmode="decimal" data-numero="decimal" required value="{{ b.alto_cm or '' }}">
+                                    </div>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label for="largo_cm">Largo (cm)</label>
-                                <input type="text" name="largo_cm" id="largo_cm" inputmode="decimal" data-numero="decimal" required value="{{ form.largo_cm or '' }}">
-                            </div>
-                            <div class="form-group">
-                                <label for="ancho_cm">Ancho (cm)</label>
-                                <input type="text" name="ancho_cm" id="ancho_cm" inputmode="decimal" data-numero="decimal" required value="{{ form.ancho_cm or '' }}">
-                            </div>
-                            <div class="form-group">
-                                <label for="alto_cm">Alto (cm)</label>
-                                <input type="text" name="alto_cm" id="alto_cm" inputmode="decimal" data-numero="decimal" required value="{{ form.alto_cm or '' }}">
-                            </div>
+                            {% endfor %}
+                        </div>
+                        <div class="quote-package-actions">
+                            <button type="button" class="btn btn-ghost btn-sm" id="quote-add-package">+ Agregar otra caja</button>
                             <div class="form-group quote-declared-value">
-                                <label for="valor_declarado_usd">Valor declarado (USD)</label>
+                                <label for="valor_declarado_usd">Valor declarado total (USD)</label>
                                 <input type="text" name="valor_declarado_usd" id="valor_declarado_usd" inputmode="decimal" data-numero="monto" required value="{{ form.valor_declarado_usd or '' }}" placeholder="Ej. 100">
                             </div>
                         </div>
+                        <template id="quote-package-template">
+                            <div class="quote-package-row" data-package-row>
+                                <div class="quote-package-row-head">
+                                    <strong>Caja <span data-package-number></span></strong>
+                                    <button type="button" class="quote-remove-package" data-remove-package>Quitar</button>
+                                </div>
+                                <div class="quote-package-grid">
+                                    <div class="form-group"><label>Cantidad iguales</label><input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" required value="1"></div>
+                                    <div class="form-group"><label>Peso por caja (kg)</label><input type="text" name="bulto_peso" inputmode="decimal" data-numero="decimal" required placeholder="Ej. 5,5"></div>
+                                    <div class="form-group"><label>Largo (cm)</label><input type="text" name="bulto_largo" inputmode="decimal" data-numero="decimal" required></div>
+                                    <div class="form-group"><label>Ancho (cm)</label><input type="text" name="bulto_ancho" inputmode="decimal" data-numero="decimal" required></div>
+                                    <div class="form-group"><label>Alto (cm)</label><input type="text" name="bulto_alto" inputmode="decimal" data-numero="decimal" required></div>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                 </div>
 
@@ -121,7 +153,7 @@
                  aria-label="Opciones estimadas para tu envío" aria-live="polite">
             <div class="quote-result-summary">
                 <div><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
-                <div><span>Peso facturable</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
+                <div><span>Peso facturable · {{ resultado.cantidad_bultos }} caja{% if resultado.cantidad_bultos != 1 %}s{% endif %}</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
                 <div><span>Real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
                 <div><span>Valor declarado</span><strong>USD {{ '%g'|format(resultado.valor_declarado_usd) }}</strong></div>
             </div>
@@ -173,6 +205,46 @@
     var loader = document.getElementById("toro-loading");
     var modify = document.getElementById("quote-modify");
     var stage = document.getElementById("quote-stage");
+    var packageList = document.getElementById("quote-package-list");
+    var packageTemplate = document.getElementById("quote-package-template");
+    var addPackage = document.getElementById("quote-add-package");
+
+    function syncPackages() {
+        if (!packageList) return;
+        var rows = packageList.querySelectorAll("[data-package-row]");
+        rows.forEach(function (row, index) {
+            var number = row.querySelector("[data-package-number]");
+            var remove = row.querySelector("[data-remove-package]");
+            if (number) number.textContent = String(index + 1);
+            if (remove) {
+                remove.hidden = rows.length === 1;
+                remove.setAttribute("aria-label", "Quitar caja " + String(index + 1));
+            }
+        });
+        if (addPackage) addPackage.disabled = rows.length >= 20;
+    }
+
+    if (addPackage && packageList && packageTemplate) {
+        addPackage.addEventListener("click", function () {
+            if (packageList.querySelectorAll("[data-package-row]").length >= 20) return;
+            packageList.appendChild(packageTemplate.content.cloneNode(true));
+            syncPackages();
+            var rows = packageList.querySelectorAll("[data-package-row]");
+            var last = rows[rows.length - 1];
+            var weight = last && last.querySelector('input[name="bulto_peso"]');
+            if (weight) weight.focus({ preventScroll: true });
+        });
+        packageList.addEventListener("click", function (event) {
+            var remove = event.target.closest("[data-remove-package]");
+            if (!remove) return;
+            var row = remove.closest("[data-package-row]");
+            if (row && packageList.querySelectorAll("[data-package-row]").length > 1) {
+                row.remove();
+                syncPackages();
+            }
+        });
+        syncPackages();
+    }
 
     if (form) {
         form.addEventListener("submit", function () {

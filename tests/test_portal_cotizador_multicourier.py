@@ -82,10 +82,60 @@ def test_envia_al_courier_las_medidas_reales_con_claves_canonicas():
     assert capturado["paquete"] == {
         "peso_kg": 1.2, "largo": 40.0, "ancho": 30.0, "alto": 20.0,
         "valor_declarado_usd": 250.0, "descripcion_en": "Merchandise",
-        "unidades": 1,
+        "unidades": 1, "valor_unitario_usd": 250.0,
     }
     assert resultado["resumen"]["peso_volumetrico_kg"] == 4.8
     assert resultado["resumen"]["peso_usado_kg"] == 4.8
+
+
+def test_multibulto_expande_cajas_y_suma_peso_facturable():
+    capturado = {}
+    with mock.patch(
+        "servicios.carriers.cotizar_carriers_cliente",
+        side_effect=lambda **kwargs: capturado.update(kwargs) or _tarjetas_dos_couriers(),
+    ), mock.patch.object(cotizador, "_get_dolar_ars", return_value=1500), \
+         mock.patch(
+             "servicios.configuracion_couriers_cliente.configuracion_cotizacion",
+             return_value={
+                 "pricing_general": {"tipo": "FIJO_ARS", "valor": 95_000},
+                 "pricing_por_courier": {
+                     "dhl": {"tipo": "FIJO_ARS", "valor": 95_000},
+                 },
+                 "couriers_habilitados": {"dhl"},
+             },
+         ):
+        resultado = cotizador.cotizar_referencia_couriers(
+            cliente="WAIMAO", origen_pais="AR", destino_pais="US",
+            peso_kg=2, largo_cm=40, ancho_cm=30, alto_cm=20,
+            valor_declarado_usd=300,
+            paquetes=[
+                {"cantidad": 2, "peso_kg": 2, "largo_cm": 40,
+                 "ancho_cm": 30, "alto_cm": 20},
+                {"cantidad": 1, "peso_kg": 5, "largo_cm": 50,
+                 "ancho_cm": 40, "alto_cm": 30},
+            ],
+        )
+
+    assert len(capturado["paquetes"]) == 3
+    assert [p["peso_kg"] for p in capturado["paquetes"]] == [2, 2, 5]
+    assert all(p["valor_unitario_usd"] == 100 for p in capturado["paquetes"])
+    assert resultado["resumen"]["cantidad_bultos"] == 3
+    assert resultado["resumen"]["peso_real_kg"] == 9
+    assert resultado["resumen"]["peso_volumetrico_kg"] == 21.6
+    assert resultado["resumen"]["peso_usado_kg"] == 21.6
+
+
+def test_multibulto_rechaza_mas_de_20_cajas_antes_del_courier():
+    with mock.patch("servicios.carriers.cotizar_carriers_cliente") as consultar:
+        with pytest.raises(ValueError, match="máximo es 20"):
+            cotizador.cotizar_referencia_couriers(
+                cliente="WAIMAO", origen_pais="AR", destino_pais="US",
+                peso_kg=1, largo_cm=10, ancho_cm=10, alto_cm=10,
+                valor_declarado_usd=100,
+                paquetes=[{"cantidad": 21, "peso_kg": 1, "largo_cm": 10,
+                           "ancho_cm": 10, "alto_cm": 10}],
+            )
+    consultar.assert_not_called()
 
 
 def test_un_courier_sin_tarifa_no_borra_al_otro_ni_filtra_el_error():
@@ -209,3 +259,16 @@ def test_la_vista_no_esconde_dhl_despues_de_dos_opciones():
     assert 'class="quote-carrier-logo"' in html
     assert "no_disponibles" in html
     assert "        {% endif %}\n\n        {% if no_disponibles %}" in html
+
+
+def test_la_vista_permite_agregar_y_quitar_cajas():
+    ruta = os.path.join(os.path.dirname(os.path.dirname(__file__)),
+                        "templates", "portal", "cotizar.html")
+    html = open(ruta, encoding="utf-8").read()
+    for campo in (
+        "bulto_cantidad", "bulto_peso", "bulto_largo",
+        "bulto_ancho", "bulto_alto",
+    ):
+        assert f'name="{campo}"' in html
+    assert 'id="quote-add-package"' in html
+    assert "data-remove-package" in html

@@ -3302,7 +3302,7 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
 .quote-form-card { padding: 18px; }
 .quote-form-sections {
   display: grid;
-  grid-template-columns: .9fr 1.25fr;
+  grid-template-columns: .72fr 1.5fr;
   gap: 12px;
 }
 .quote-form-block {
@@ -3336,6 +3336,14 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
 .quote-package-grid { display: grid; gap: 9px; }
 .quote-route-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .quote-package-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.quote-package-list { display: grid; gap: 8px; max-height: 318px; overflow-y: auto; padding-right: 2px; }
+.quote-package-row { padding: 9px; border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(255,255,255,.018); }
+.quote-package-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+.quote-package-row-head strong { color: var(--fg-3); font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+.quote-remove-package { padding: 0; border: 0; background: none; color: var(--danger); font-size: 9px; cursor: pointer; }
+.quote-remove-package[hidden] { display: none; }
+.quote-package-actions { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-top: 9px; }
+.quote-package-actions .quote-declared-value { width: min(240px, 45%); }
 .quote-form-card .form-group { min-width: 0; margin-bottom: 0; }
 .quote-form-card .form-group label { margin-bottom: 4px; font-size: 8.5px; }
 .quote-form-card input,
@@ -3521,7 +3529,9 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
   .quote-block-head small { display: none; }
   .quote-route-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quote-package-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .quote-package-grid .quote-declared-value { grid-column: 1 / -1; }
+  .quote-package-list { max-height: none; }
+  .quote-package-actions { align-items: stretch; flex-direction: column; }
+  .quote-package-actions .quote-declared-value { width: 100%; }
   .quote-form-card input,
   .quote-form-card select { padding: 8px 9px; }
   .quote-form-card .tselect-btn { min-height: 37px; padding: 7px 9px; }
