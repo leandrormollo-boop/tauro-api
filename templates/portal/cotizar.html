@@ -26,25 +26,26 @@
     </header>
 
     <div class="quote-operator-strip" aria-label="Estado de integraciones internacionales">
-        <div class="quote-operator-strip-copy">
-            <span class="quote-operator-strip-title">Operadores internacionales</span>
-            <strong>Conexiones para cotizar</strong>
-        </div>
-        <div class="quote-operator-list">
-            {% for operador in operadores_internacionales %}
-            <span class="quote-operator-chip {{ 'ready' if operador.estado == 'disponible_segun_cuenta' else 'pending' }}" data-carrier="{{ operador.id }}">
-                {% if operador.logo %}
-                <span class="quote-operator-logo-shell" aria-hidden="true">
-                    <img class="quote-operator-logo" src="{{ operador.logo }}" alt="">
+        <div class="quote-operator-layout">
+            <div class="quote-operator-strip-copy">
+                <span class="quote-operator-strip-title">Operadores internacionales</span>
+                <strong>Conexiones para cotizar</strong>
+            </div>
+            <div class="quote-operator-list">
+                {% for operador in operadores_internacionales %}
+                <span class="quote-operator-chip {{ 'ready' if operador.estado == 'disponible_segun_cuenta' else 'pending' }}" data-carrier="{{ operador.id }}">
+                    {% if operador.logo %}
+                    <span class="quote-operator-logo-shell" aria-hidden="true">
+                        <img class="quote-operator-logo" src="{{ operador.logo }}" alt="">
+                    </span>
+                    {% endif %}
+                    <span class="quote-operator-copy">
+                        <strong>{{ operador.nombre }}</strong>
+                        <small class="quote-operator-state"><i aria-hidden="true"></i>{{ operador.estado_label }}</small>
+                    </span>
                 </span>
-                {% endif %}
-                <span class="quote-operator-copy">
-                    <strong>{{ operador.nombre }}</strong>
-                    <small>{{ operador.estado_label }}</small>
-                </span>
-                <i aria-hidden="true"></i>
-            </span>
-            {% endfor %}
+                {% endfor %}
+            </div>
         </div>
     </div>
 
@@ -188,7 +189,7 @@
 
             <div class="quote-options quote-options-compact">
                 {% for op in opciones %}
-                <article class="price-card quote-price-card"
+                <article class="price-card quote-price-card" data-carrier="{{ op.carrier_id }}"
                          aria-label="{{ op.servicio_nombre }}: {{ '{:,.0f}'.format(op.precio_final_ars).replace(',', '.') }} pesos estimados, {{ op.dias_estimados }} días estimados.">
                     <div class="pc-badge quote-carrier-head">
                         <span><strong>{{ op.carrier_nombre }}</strong><small>{{ op.servicio }}</small></span>

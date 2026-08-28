@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=31" in base
+    assert "tauro.css?v=32" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -86,6 +86,9 @@ def test_cotizador_destaca_dhl_y_da_profundidad_al_formulario():
     css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
 
     assert 'class="quote-operator-logo" src="{{ operador.logo }}"' in html
+    assert 'class="quote-operator-layout"' in html
+    assert 'class="quote-operator-state"><i aria-hidden="true"></i>{{ operador.estado_label }}' in html
+    assert 'data-carrier="{{ op.carrier_id }}"' in html
     assert 'class="quote-form-overview"' in html
     assert 'id="quote-route-summary"' in html
     assert 'id="quote-package-summary"' in html
@@ -97,6 +100,29 @@ def test_cotizador_destaca_dhl_y_da_profundidad_al_formulario():
     assert '.quote-carrier-logo {' in css
     assert 'width: 88px;' in css
     assert 'box-shadow:\n    0 26px 70px rgba(0,0,0,.32)' in css
+
+
+def test_logos_de_courier_no_se_recortan_y_el_strip_refluye_antes_de_colisionar():
+    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+
+    logo_start = css.index(".quote-operator-logo {")
+    logo_end = css.index('.quote-operator-chip[data-carrier="dhl"]', logo_start)
+    logo_rule = css[logo_start:logo_end]
+
+    assert "position: absolute;" in logo_rule
+    assert "inset: 0;" in logo_rule
+    assert "width: 100%;" in logo_rule
+    assert "height: 100%;" in logo_rule
+    assert "object-fit: contain;" in logo_rule
+    assert '.quote-operator-chip[data-carrier="fedex"] .quote-operator-logo' in css
+    assert '.quote-operator-chip[data-carrier="ups"] .quote-operator-logo' in css
+    assert "@container quote-operators (max-width: 820px)" in css
+    assert ".quote-operator-chip.ready {\n    grid-column: 1 / -1;" in css
+    assert ".quote-operator-chip.pending { opacity" not in css
+    operator_start = css.index(".quote-operator-strip {")
+    operator_end = css.index(".national-eyebrow", operator_start)
+    assert "font-size: 6.5px" not in css[operator_start:operator_end]
+    assert ".quote-operator-state > i" in css
 
 
 def test_cotizador_actualiza_resumen_progreso_y_cajas_en_vivo():

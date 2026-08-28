@@ -1897,10 +1897,8 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 /* Cotizador nacional: una sola entrada canónica provincia→provincia.
    Los adapters de OCA/Andreani consumirán este contrato sin duplicar UI. */
 .quote-operator-strip {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 18px;
+  container-name: quote-operators;
+  container-type: inline-size;
   margin: 0 0 14px;
   padding: 11px 12px;
   border: 1px solid rgba(167, 139, 250, .2);
@@ -1909,6 +1907,12 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
     radial-gradient(circle at 7% 35%, rgba(167, 139, 250, .12), transparent 30%),
     linear-gradient(135deg, rgba(26, 22, 40, .9), rgba(15, 12, 26, .86));
   box-shadow: 0 12px 34px rgba(0, 0, 0, .16), inset 0 1px 0 rgba(255,255,255,.025);
+}
+.quote-operator-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
 }
 .quote-operator-strip-copy {
   min-width: 155px;
@@ -1939,7 +1943,9 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .quote-operator-chip {
   position: relative;
   display: flex;
+  min-height: 58px;
   min-width: 150px;
+  flex: 1 1 150px;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
@@ -1951,17 +1957,21 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 }
 .quote-operator-chip.ready {
   min-width: 230px;
+  flex: 1.35 1 230px;
   border-color: rgba(46, 194, 126, .38);
   background: linear-gradient(135deg, rgba(46,194,126,.095), rgba(255,255,255,.018));
   box-shadow: 0 9px 26px rgba(0,0,0,.16), inset 0 0 0 1px rgba(46,194,126,.04);
 }
-.quote-operator-chip.pending { opacity: .58; }
+.quote-operator-chip.pending {
+  border-color: rgba(167, 139, 250, .15);
+  background: rgba(8, 6, 15, .28);
+}
 .quote-operator-logo-shell {
-  display: grid;
+  position: relative;
+  display: block;
   width: 58px;
   height: 27px;
   flex: 0 0 auto;
-  place-items: center;
   overflow: hidden;
   border-radius: 6px;
   background: rgba(255,255,255,.95);
@@ -1973,7 +1983,18 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   border-radius: 8px;
   box-shadow: 0 7px 18px rgba(0,0,0,.24), 0 0 0 1px rgba(255,204,0,.22);
 }
-.quote-operator-logo { width: 100%; height: 100%; object-fit: contain; }
+.quote-operator-logo {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+.quote-operator-chip[data-carrier="dhl"] .quote-operator-logo-shell { background: #ffcc00; }
+.quote-operator-chip[data-carrier="fedex"] .quote-operator-logo { padding: 3px 5px; }
+.quote-operator-chip[data-carrier="ups"] .quote-operator-logo { padding: 2px; }
 .quote-operator-copy { min-width: 0; }
 .quote-operator-copy strong,
 .quote-operator-copy small {
@@ -1981,35 +2002,73 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.quote-operator-copy strong { color: var(--fg-2); font-size: 10px; }
-.quote-operator-chip.ready .quote-operator-copy strong { color: var(--fg); font-size: 12px; }
-.quote-operator-copy small {
-  margin-top: 1px;
-  color: var(--fg-4);
-  font-size: 7px;
-  letter-spacing: .035em;
+.quote-operator-copy strong { color: #c4c8d0; font-size: 11.5px; }
+.quote-operator-chip.ready .quote-operator-copy strong { color: var(--fg); font-size: 13px; }
+.quote-operator-state {
+  display: inline-flex !important;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 2px 5px;
+  border: 1px solid rgba(154, 164, 178, .16);
+  border-radius: 999px;
+  background: rgba(154, 164, 178, .065);
+  color: #98a1ae;
+  font-size: 9px;
+  line-height: 1.25;
+  letter-spacing: .025em;
   text-transform: uppercase;
 }
-.quote-operator-chip.ready .quote-operator-copy small { color: rgba(150, 226, 190, .82); }
-.quote-operator-chip i {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+.quote-operator-chip.ready .quote-operator-state {
+  border-color: rgba(46, 194, 126, .22);
+  background: rgba(46, 194, 126, .075);
+  color: #96deba;
+}
+.quote-operator-state > i {
+  position: static;
+  display: block;
   width: 6px;
   height: 6px;
+  flex: 0 0 6px;
   border-radius: 50%;
-  background: var(--fg-4);
+  background: #7f8997;
 }
-.quote-operator-chip.ready i { background: var(--ok); box-shadow: 0 0 9px rgba(46,194,126,.72); }
-@media (max-width:640px) {
-  .quote-operator-strip { display: block; padding: 10px; }
-  .quote-operator-strip-copy { min-width: 0; margin-bottom: 8px; }
+.quote-operator-chip.ready .quote-operator-state > i { background: var(--ok); box-shadow: 0 0 9px rgba(46,194,126,.72); }
+
+@container quote-operators (max-width: 820px) {
+  .quote-operator-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .quote-operator-strip-copy { min-width: 0; }
   .quote-operator-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .quote-operator-chip {
+    width: 100%;
+    min-width: 0;
+    white-space: normal;
+  }
+  .quote-operator-chip.ready {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+  .quote-operator-list:not(:has(.ready)) .quote-operator-chip:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width:640px) {
+  .quote-operator-strip { padding: 10px; }
+  .quote-operator-layout { gap: 8px; }
+  .quote-operator-list {
     gap: 6px;
   }
   .quote-operator-chip {
+    min-height: 54px;
     min-width: 0;
     padding: 6px;
     white-space: normal;
@@ -2023,9 +2082,9 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
     height: 38px;
   }
   .quote-operator-logo-shell { width: 45px; height: 22px; }
-  .quote-operator-copy small { font-size: 6.5px; line-height: 1.2; white-space: normal; }
-  .quote-operator-chip.pending .quote-operator-copy strong { font-size: 9px; }
-  .quote-operator-chip.pending .quote-operator-copy small {
+  .quote-operator-state { font-size: 9px; line-height: 1.2; white-space: normal; }
+  .quote-operator-chip.pending .quote-operator-copy strong { font-size: 10.5px; }
+  .quote-operator-chip.pending .quote-operator-state {
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -3981,6 +4040,9 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
   object-fit: contain;
   object-position: center;
 }
+.quote-price-card[data-carrier="dhl"] .quote-carrier-logo { padding: 0; background: #ffcc00; }
+.quote-price-card[data-carrier="fedex"] .quote-carrier-logo { padding: 7px 10px; }
+.quote-price-card[data-carrier="ups"] .quote-carrier-logo { padding: 4px 20px; }
 .quote-carrier-head span { min-width: 0; }
 .quote-carrier-head strong,
 .quote-carrier-head small {
