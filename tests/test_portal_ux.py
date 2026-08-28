@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=28" in base
+    assert "tauro.css?v=29" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -79,6 +79,36 @@ def test_cotizador_no_apila_formulario_y_resultados_en_la_misma_vista():
     assert "opciones[2:]" not in html
     assert "Modificar datos" in html
     assert "result.focus({ preventScroll: true })" in html
+
+
+def test_cotizador_destaca_dhl_y_da_profundidad_al_formulario():
+    html = _template("cotizar.html")
+    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+
+    assert 'class="quote-operator-logo" src="{{ operador.logo }}"' in html
+    assert 'class="quote-form-overview"' in html
+    assert 'id="quote-route-summary"' in html
+    assert 'id="quote-package-summary"' in html
+    assert 'id="quote-progress-bar"' in html
+    assert 'data-quote-section="route"' in html
+    assert 'data-quote-section="packages"' in html
+    assert '.quote-operator-chip.ready .quote-operator-logo-shell' in css
+    assert 'width: 92px;' in css
+    assert '.quote-carrier-logo {' in css
+    assert 'width: 88px;' in css
+    assert 'box-shadow:\n    0 26px 70px rgba(0,0,0,.32)' in css
+
+
+def test_cotizador_actualiza_resumen_progreso_y_cajas_en_vivo():
+    html = _template("cotizar.html")
+
+    assert "function syncQuotePreview()" in html
+    assert 'form.addEventListener("input", syncQuotePreview)' in html
+    assert 'form.addEventListener("change", syncQuotePreview)' in html
+    assert 'totalWeight.toLocaleString("es-AR"' in html
+    assert 'progressBar.style.width' in html
+    assert 'last.classList.add("is-entering")' in html
+    assert 'row.classList.add("is-removing")' in html
 
 
 def test_cotizar_y_nuevo_envio_exigen_elegir_ambito_primero():
