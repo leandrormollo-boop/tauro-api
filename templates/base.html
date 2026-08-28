@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
-    <link rel="stylesheet" href="/static/css/tauro.css?v=26">
+    <link rel="stylesheet" href="/static/css/tauro.css?v=27">
     <script src="/static/js/tauro-ui.js?v=8" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png?v=2">
     <link rel="apple-touch-icon" href="/static/img/favicon-180.png">
@@ -76,15 +76,18 @@
                 Inicio
             </a>
 
-            <a href="/portal/envios/nuevo" class="side-item cta">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-                Nuevo envío
-            </a>
-
-            <a href="/portal/cotizar" class="side-item {% if '/cotizar' in path %}active{% endif %}">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
-                Cotizar
-            </a>
+            <div class="side-quick-actions" aria-label="Acciones rápidas">
+                <a href="/portal/envios/nuevo"
+                   class="side-quick-action primary {% if '/envios/nuevo' in path %}active{% endif %}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    <span>Nuevo envío</span>
+                </a>
+                <a href="/portal/cotizar"
+                   class="side-quick-action secondary {% if '/cotizar' in path %}active{% endif %}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6M8 11h6"/></svg>
+                    <span>Cotizar</span>
+                </a>
+            </div>
 
             <a href="/portal/envios" class="side-item {% if '/envios' in path and '/envios/nuevo' not in path %}active{% endif %}">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8.5 12 3 3 8.5v7L12 21l9-5.5z"/><path d="M3.3 8.7 12 14l8.7-5.3M12 21v-7"/></svg>

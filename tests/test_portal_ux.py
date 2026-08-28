@@ -24,6 +24,19 @@ def test_home_prioriza_nuevo_envio_y_cotizar_sin_onboarding_generico():
     assert "Cargá tu primer producto" not in html
 
 
+def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
+    base = (RAIZ / "templates" / "base.html").read_text(encoding="utf-8")
+    selector = _template("_ambito_selector.html")
+    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+
+    assert 'class="side-quick-actions"' in base
+    assert 'class="side-item cta"' not in base
+    assert "Cotizar envío" in _template("home.html")
+    assert selector.count('class="scope-cta"') == 2
+    assert ".shell .btn-primary:not(.is-loading)" in css
+    assert "tauro.css?v=27" in base
+
+
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
     html = _template("home.html")
     assert "Requiere tu acción" in html

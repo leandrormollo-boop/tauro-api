@@ -17,10 +17,10 @@ PORTAL_BASE = (RAIZ / "templates" / "base.html").read_text(encoding="utf-8")
 ADMIN_BASE = (RAIZ / "templates" / "admin" / "base_admin.html").read_text(encoding="utf-8")
 
 
-def test_portal_y_admin_cargan_la_misma_version_de_la_ui_compartida():
+def test_portal_y_admin_cargan_la_ui_compartida_con_cache_independiente():
     assert '/static/js/tauro-ui.js?v=8' in PORTAL_BASE
     assert '/static/js/tauro-ui.js?v=8' in ADMIN_BASE
-    assert '/static/css/tauro.css?v=26' in PORTAL_BASE
+    assert '/static/css/tauro.css?v=27' in PORTAL_BASE
     assert '/static/css/tauro.css?v=26' in ADMIN_BASE
 
 

@@ -376,6 +376,52 @@ h1, h2, h3, h4 {
 }
 .side-item.cta:hover { background: var(--accent-soft); color: #fff; }
 
+/* Las dos acciones que inician un trabajo tienen la misma jerarquía y
+   ocupan una sola fila. El estado activo depende de la pantalla actual. */
+.side-quick-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(0, .86fr);
+  gap: 7px;
+  margin: 8px 0 10px;
+}
+.side-quick-action {
+  min-width: 0;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  color: var(--fg-2);
+  background: rgba(255,255,255,.025);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: color .15s, border-color .15s, background .15s, box-shadow .15s, transform .1s;
+}
+.side-quick-action svg { flex: 0 0 auto; }
+.side-quick-action:hover,
+.side-quick-action.active {
+  color: #fff;
+  border-color: rgba(167,139,250,.62);
+  background: rgba(124,92,246,.13);
+}
+.side-quick-action.primary {
+  color: #f3efff;
+  border-color: rgba(167,139,250,.45);
+  background: linear-gradient(180deg, rgba(100,70,177,.4), rgba(49,31,94,.42));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+}
+.side-quick-action.primary:hover,
+.side-quick-action.primary.active {
+  border-color: rgba(199,181,255,.78);
+  background: linear-gradient(180deg, rgba(116,82,201,.56), rgba(56,35,108,.54));
+  box-shadow: 0 6px 18px rgba(85,55,160,.22), inset 0 1px 0 rgba(255,255,255,.16);
+}
+.side-quick-action:active { transform: translateY(1px); }
+
 .side-foot {
   border-top: 1px solid var(--line-soft);
   padding-top: 10px;
@@ -3903,4 +3949,125 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
 /* Papel: la tabbar y la CTA son navegación de pantalla, no contenido. */
 @media print {
   .tabbar, .pwa-banner { display: none !important; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   SISTEMA DE ACCIONES V2 — compacto, calmo y predecible
+   Un primario por decisión; secundarios sin destellos decorativos.
+   ══════════════════════════════════════════════════════════ */
+.shell .btn {
+  min-height: 42px;
+  padding: 9px 18px;
+  border-radius: 11px;
+  font-weight: 650;
+  letter-spacing: -.005em;
+}
+.shell .btn-sm {
+  min-height: 34px;
+  padding: 6px 13px;
+  border-radius: 9px;
+  font-size: 12.5px;
+}
+.shell .btn-primary:not(.is-loading),
+.shell .btn-primary:not(.is-loading):hover {
+  background-color: #5e3fad;
+  background-image: linear-gradient(180deg, rgba(133,94,220,.94), rgba(78,49,151,.96));
+  background-size: 100% 100%;
+  background-position: 0 0;
+  border: 1px solid rgba(190,168,255,.64);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 7px 20px rgba(62,37,126,.24);
+  animation: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.shell .btn-primary:not(.is-loading)::before { display: none; }
+.shell .btn-primary:not(.is-loading):hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+.shell .btn-ghost,
+.shell .btn-secondary {
+  color: var(--fg-2);
+  border-color: rgba(255,255,255,.13);
+  background: rgba(255,255,255,.035);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035);
+}
+.shell .btn-ghost:hover,
+.shell .btn-secondary:hover {
+  color: #fff;
+  border-color: rgba(181,158,244,.4);
+  background: rgba(124,92,246,.09);
+}
+
+.home-primary-actions { gap: 9px; }
+.home-primary-actions .btn {
+  min-width: 156px;
+  min-height: 44px;
+}
+.btn-hero-secondary {
+  min-height: 44px;
+  color: #f4f1fb;
+  border: 1px solid rgba(255,255,255,.32);
+  background: rgba(11,9,18,.58);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.055);
+  backdrop-filter: blur(9px);
+}
+.btn-hero-secondary:hover {
+  color: #fff;
+  border-color: rgba(184,161,247,.68);
+  background: rgba(35,25,58,.76);
+}
+
+.scope-card {
+  min-height: 158px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  padding: 22px;
+  border-radius: 18px;
+}
+.scope-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 15px;
+  font-size: 27px;
+}
+.scope-copy strong { font-size: 20px; }
+.scope-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 9px;
+  color: var(--fg-2);
+  background: rgba(0,0,0,.12);
+  font-size: 11px;
+  font-weight: 650;
+  transition: color .15s, border-color .15s, background .15s, transform .15s;
+}
+.scope-cta span { font-size: 15px; line-height: 1; }
+.scope-card:hover .scope-cta {
+  color: #fff;
+  border-color: rgba(190,168,255,.5);
+  background: rgba(124,92,246,.16);
+  transform: translateX(2px);
+}
+.scope-card-national:hover .scope-cta {
+  border-color: rgba(93,203,142,.5);
+  background: rgba(31,155,91,.13);
+}
+
+@media (max-width: 720px) {
+  .scope-card {
+    min-height: 132px;
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 16px;
+  }
+  .scope-icon { width: 46px; height: 46px; border-radius: 13px; font-size: 23px; }
+  .scope-copy strong { font-size: 17px; }
+  .scope-copy > span { font-size: 11.5px; }
+  .scope-cta { padding: 7px; font-size: 0; }
+  .scope-cta span { font-size: 16px; }
 }
