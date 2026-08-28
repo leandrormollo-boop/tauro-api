@@ -3143,7 +3143,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
    `:has()` porque .wizard-compacto vive ADENTRO de .main-inner y hay que
    estilar al padre. Si un browser no lo soporta, el wizard sigue andando:
    scrollea un poco más, que es exactamente el estado anterior. */
-.main-inner:has(.wizard-compacto) { padding-bottom: 24px; }
+.main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 0; }
 .main:has(.wizard-compacto) > .footer { display: none; }
 .wizard-compacto .card { padding: 18px 22px; }
 .wizard-compacto .stepper { padding: 4px 0 6px; }

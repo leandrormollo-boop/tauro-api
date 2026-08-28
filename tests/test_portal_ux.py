@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=30" in base
+    assert "tauro.css?v=31" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -157,6 +157,7 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     assert "wizard.dataset.step = String(actual + 1)" in html
     assert "if (i > actual + 1) i = actual + 1" in html
     assert 'data-step]:not([data-step="1"]) > details.card' in css
+    assert ".main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 0; }" in css
     assert "shipment-step-recipient .form-grid-2" in css
     assert '/portal/clientes?nuevo=1' in html
     assert '{% if not remitente %}disabled{% endif %}' not in html
