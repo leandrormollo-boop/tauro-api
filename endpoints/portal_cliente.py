@@ -2104,7 +2104,10 @@ def envio_nuevo_post(
     # Fallback legacy: producto_alias + cantidad sueltos = una sola fila.
     filas = []
     filas_form = []
-    errores_numericos = []
+    # Mantener separados los errores físicos (paso 3) y aduaneros (paso 4)
+    # para reabrir exactamente la hoja que el cliente debe corregir.
+    errores_paquete = []
+    errores_invoice = []
     n_filas = max(len(bulto_producto or []), len(bulto_cantidad or []),
                   len(bulto_peso or []), len(bulto_desc_en or []),
                   len(bulto_unidades_aduana or []))
@@ -2139,7 +2142,7 @@ def envio_nuevo_post(
             )
         except (TypeError, ValueError) as exc:
             cantidad_valida = False
-            errores_numericos.append(
+            errores_paquete.append(
                 str(exc)
             )
             cant = 1
@@ -2151,7 +2154,7 @@ def envio_nuevo_post(
             )
         except (TypeError, ValueError) as exc:
             unidades_validas = False
-            errores_numericos.append(
+            errores_invoice.append(
                 str(exc)
             )
             unidades_aduana = cant
@@ -2185,7 +2188,7 @@ def envio_nuevo_post(
                     )
                     fila_form[clave] = fila[clave]
                 except ValueError as exc:
-                    errores_numericos.append(str(exc))
+                    errores_paquete.append(str(exc))
         # Overrides de invoice: sólo viajan los completados; el resto sale
         # del catálogo, como siempre.
         if _campo(bulto_desc_en):
@@ -2197,7 +2200,7 @@ def envio_nuevo_post(
             if pais_fabricacion:
                 fila["pais_origen"] = pais_fabricacion
             else:
-                errores_numericos.append(
+                errores_invoice.append(
                     f"Caja {i + 1}: elegí un país de fabricación válido."
                 )
         v = _campo(bulto_valor_usd)
@@ -2211,7 +2214,7 @@ def envio_nuevo_post(
                     fila["valor_unitario_usd"] = round(valor, 2)
                     fila_form["valor_unitario_usd"] = fila["valor_unitario_usd"]
             except ValueError as exc:
-                errores_numericos.append(str(exc))
+                errores_paquete.append(str(exc))
         filas.append(fila)
     # Form viejo cacheado (pre multi-bulto): ahí "cantidad" significaba
     # unidades dentro de UNA caja — se respeta esa semántica para que el
@@ -2343,8 +2346,8 @@ def envio_nuevo_post(
             raise ValueError("Elegí un país de destino válido.")
 
         error_step = 3
-        if errores_numericos:
-            raise ValueError(errores_numericos[0])
+        if errores_paquete:
+            raise ValueError(errores_paquete[0])
         if not filas:
             raise ValueError("Agregá al menos una caja al envío.")
         if origen_pais == "AR" and destino_pais == "AR":
@@ -2371,7 +2374,6 @@ def envio_nuevo_post(
             # hasta que Andreani/OCA directos estén integrados.
             obligatorios = [("peso_kg", "el peso"), ("largo_cm", "el largo"),
                             ("ancho_cm", "el ancho"), ("alto_cm", "el alto"),
-                            ("descripcion_en", "la descripción en inglés"),
                             ("valor_unitario_usd", "el valor declarado en USD")]
             faltan = [nombre for clave, nombre in obligatorios if not fila.get(clave)]
             if faltan:
@@ -2379,6 +2381,18 @@ def envio_nuevo_post(
                 raise ValueError(
                     f"En {donde} te falta {', '.join(faltan)}. "
                     "Completalos, o elegí un producto de tu catálogo y se cargan solos."
+                )
+
+        error_step = 4
+        if errores_invoice:
+            raise ValueError(errores_invoice[0])
+        for i, fila in enumerate(filas, start=1):
+            if (fila.get("producto") or "").strip():
+                continue
+            if not fila.get("descripcion_en"):
+                donde = f"la caja {i}" if len(filas) > 1 else "la caja"
+                raise ValueError(
+                    f"En {donde} te falta la descripción en inglés para la invoice comercial."
                 )
 
         courier_extra = {}

@@ -394,7 +394,7 @@ def test_si_dhl_cambia_la_tarifa_no_crea_hasta_nueva_confirmacion(monkeypatch):
 
     assert "cambió de $ 190.000 a $ 195.000" in respuesta["context"]["error"]
     assert "no creamos ni cobramos nada" in respuesta["context"]["error"]
-    assert respuesta["context"]["form"]["initial_step"] == 3
+    assert respuesta["context"]["form"]["initial_step"] == 4
     assert respuesta["context"]["form"]["bultos"][0]["cantidad"] == 1
     assert respuesta["context"]["form"]["bultos"][0]["unidades_aduana"] == 8
     assert respuesta["context"]["form"]["bultos"][0]["valor_unitario_usd"] == 15

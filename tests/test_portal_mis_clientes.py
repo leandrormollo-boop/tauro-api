@@ -259,3 +259,37 @@ def test_error_del_paquete_conserva_remitente_manual_y_vuelve_al_paso_tres(monke
     assert contexto["form"]["intl_courier"] == "dhl"
     assert contexto["form"]["tax_paga"] == "CLIENTE"
     assert contexto["remitente"]["direccion"] == "88 Fabric Road"
+
+
+def test_error_de_invoice_vuelve_directo_al_paso_cuatro(monkeypatch):
+    monkeypatch.setattr(pc.templates, "TemplateResponse", lambda **kwargs: kwargs)
+    monkeypatch.setattr(pc, "get_productos", lambda cliente: [])
+    monkeypatch.setattr(
+        pc, "_paises_con_nacional",
+        lambda: [("AR", "Argentina"), ("CN", "China"), ("US", "Estados Unidos")],
+    )
+    monkeypatch.setattr(pc, "listar_direcciones", lambda cliente, tipo: [])
+    monkeypatch.setattr(pc, "obtener_remitente_para_envio", lambda *args, **kwargs: None)
+    monkeypatch.setattr(pc, "tax_paga_cliente", lambda cliente: "DESTINATARIO")
+    monkeypatch.setattr(pc, "courier_default_cliente", lambda cliente: "DHL")
+
+    respuesta = pc.envio_nuevo_post(
+        _request(), destino_pais="US",
+        bulto_producto=[""], bulto_cantidad=["1"], bulto_unidades_aduana=["1"],
+        bulto_peso=["2"], bulto_largo=["30"], bulto_ancho=["20"],
+        bulto_alto=["10"], bulto_desc_en=[""], bulto_valor_usd=["25"],
+        bulto_hs=[""], bulto_pais_fab=["CN"], producto_alias="", cantidad=1,
+        intl_courier="dhl", tax_paga="DESTINATARIO",
+        remitente_id="", rem_nombre="Yiwu Hailu Garment", rem_contacto="Jeff Jang",
+        rem_documento="CN-TAX-8", rem_email="jeff@example.cn", rem_telefono="+86 10",
+        rem_direccion="88 Fabric Road", rem_ciudad="Yiwu", rem_estado="Zhejiang",
+        rem_zip="322000", rem_pais="CN", destinatario_id="",
+        dest_nombre="Elle McGill", dest_contacto="Elle", dest_documento="US-TAX-77",
+        dest_email="elle@example.com", dest_telefono="+1 305", dest_direccion="Brickell Ave",
+        dest_ciudad="Miami", dest_estado="FL", dest_zip="33131", dest_alias="Elle",
+        guardar_destinatario=None, precio_cliente_final_ars="", observaciones="",
+        pedido_tienda_id="", cliente="MELCIOR",
+    )
+
+    assert "descripción en inglés para la invoice comercial" in respuesta["context"]["error"]
+    assert respuesta["context"]["form"]["initial_step"] == 4

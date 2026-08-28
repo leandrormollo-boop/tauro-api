@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=29" in base
+    assert "tauro.css?v=30" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -150,6 +150,10 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
     assert 'id="shipment-wizard" data-step="1"' in html
     assert "shipment-step-recipient" in html
+    assert "shipment-step-package" in html
+    assert "shipment-step-invoice" in html
+    assert html.index("shipment-step-package") < html.index("shipment-step-invoice")
+    assert "<label>Invoice</label>" in html
     assert "wizard.dataset.step = String(actual + 1)" in html
     assert "if (i > actual + 1) i = actual + 1" in html
     assert 'data-step]:not([data-step="1"]) > details.card' in css
@@ -158,6 +162,40 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     assert '{% if not remitente %}disabled{% endif %}' not in html
     for campo in ("rem_nombre", "rem_direccion", "rem_ciudad", "rem_zip"):
         assert f'name="{campo}" id="{campo}" required' in html
+
+
+def test_paquete_e_invoice_estan_separados_y_sin_perder_multibulto():
+    html = _template("envio_nuevo.html")
+    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+
+    paquete = html[html.index('class="form-section shipment-step shipment-step-package"'):
+                   html.index('class="form-section shipment-step shipment-step-invoice"')]
+    invoice = html[html.index('class="form-section shipment-step shipment-step-invoice"'):
+                   html.index('class="submit-bar"')]
+    for campo in ("bulto_peso", "bulto_largo", "bulto_ancho", "bulto_alto",
+                  "bulto_cantidad", "bulto_valor_usd"):
+        assert f'name="{campo}"' in paquete
+        assert f'name="{campo}"' not in invoice
+    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_hs", "bulto_pais_fab"):
+        assert f'name="{campo}"' in invoice
+        assert f'name="{campo}"' not in paquete
+
+    assert 'id="invoice-list"' in html
+    assert "function invoiceDe(row)" in html
+    assert "invoiceList.appendChild(nuevaInvoice)" in html
+    assert "if (invoice) invoice.remove()" in html
+    assert "renumerarBultos()" in html
+    assert ".shipment-package-main" in css
+    assert ".wizard-compacto .bulto-invoice" in css
+    assert "grid-template-columns: repeat(5" in css
+
+
+def test_error_aduanero_reabre_la_hoja_de_invoice():
+    fuente = (RAIZ / "endpoints" / "portal_cliente.py").read_text(encoding="utf-8")
+    assert "errores_paquete = []" in fuente
+    assert "errores_invoice = []" in fuente
+    assert "error_step = 4" in fuente
+    assert "la descripción en inglés para la invoice comercial" in fuente
 
 
 def test_opciones_secundarias_del_paquete_no_alargan_el_paso_principal():

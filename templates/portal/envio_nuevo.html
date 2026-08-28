@@ -20,7 +20,7 @@
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>Completá remitente, destinatario y paquete. Revisamos la solicitud antes de emitir.</p>
+        <p>Cuatro pasos simples: origen, destino, paquete e invoice comercial.</p>
     </div>
     <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Administrar remitentes</a>
 </div>
@@ -56,7 +56,7 @@
 </details>
 {% endif %}
 
-<!-- Stepper REAL: 3 pasos = 3 secciones del form, se actualiza con el scroll -->
+<!-- Cuatro pantallas independientes: cada tema se completa sin mezclar datos. -->
 <div class="stepper" id="stepper-envio">
     <div class="step active">
         <span>1</span>
@@ -70,6 +70,10 @@
         <span>3</span>
         <label>Paquete</label>
     </div>
+    <div class="step">
+        <span>4</span>
+        <label>Invoice</label>
+    </div>
 </div>
 
 {% if pedido_tienda %}
@@ -80,8 +84,8 @@
     <div style="color:var(--fg-2);font-size:13.5px;line-height:1.7;">
         Ya te cargamos los datos del comprador
         {% if pedido_tienda.destinatario %}(<b>{{ pedido_tienda.destinatario.nombre }}</b>, {{ pedido_tienda.destinatario.ciudad }}{% if pedido_tienda.destinatario.pais %} · {{ pedido_tienda.destinatario.pais }}{% endif %}){% endif %}.
-        <br><b>Sólo te falta:</b> en el paso 3, elegir el producto del catálogo
-        —o cargar peso y medidas a mano— y apretar <b>Crear solicitud</b>.
+        <br><b>Sólo te falta:</b> revisar peso y medidas en el paso 3, completar
+        la invoice en el paso 4 y apretar <b>Crear solicitud</b>.
         {% if pedido_tienda['items'] %}
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--fg-3);">
             Compró: {% for it in pedido_tienda['items'] %}{{ it.cantidad }}x {{ it.titulo }}{% if not loop.last %} · {% endif %}{% endfor %}
@@ -321,109 +325,120 @@
             </div>
         </div>
 
+        {% set filas = form.bultos if form.bultos else [{"producto": form.producto_alias, "cantidad": form.cantidad or 1, "unidades_aduana": form.cantidad or 1}] %}
         <div class="form-section shipment-step shipment-step-package" style="margin-bottom:0;">
-            <h4><span class="n">3</span> Cajas del envío <span class="badge ok">Catálogo</span></h4>
+            <div class="shipment-step-heading">
+                <div>
+                    <h4><span class="n">3</span> Información del paquete <span class="badge ok">Cajas</span></h4>
+                    <p>Peso, medidas, valor declarado y cantidad. Todo lo físico queda en esta pantalla.</p>
+                </div>
+                <span class="shipment-step-counter"><b data-package-types>{{ filas|length }}</b> tipo{% if filas|length != 1 %}s{% endif %} de caja</span>
+            </div>
 
-            <!-- Multi-bulto: una fila por producto; "Cajas" = cajas IGUALES de
-                 ese producto. Cada caja viaja como pieza con su propio label. -->
             <div id="bultos-list">
-                {% set filas = form.bultos if form.bultos else [{"producto": form.producto_alias, "cantidad": form.cantidad or 1, "unidades_aduana": form.cantidad or 1}] %}
                 {% for f in filas %}
-                <div class="bulto-row" data-bulto>
-                    {# Catálogo OPCIONAL: precarga la fila, no es requisito.
-                       Guía HAILU (05/08): un freight-forwarder despacha cajas
-                       distintas en cada envío — peso y medidas se cargan acá,
-                       como en Boxfly o la web de DHL. #}
-                    <div class="form-group" style="grid-column: 1 / -1;">
-                        <label>Precargar del catálogo <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label>
-                        <select name="bulto_producto" class="bulto-producto">
-                            <option value="">— caja manual —</option>
-                            {% for p in productos %}
-                                <option value="{{ p.alias_interno }}"
-                                        data-peso="{{ p.peso_kg }}" data-largo="{{ p.largo_cm }}"
-                                        data-ancho="{{ p.ancho_cm }}" data-alto="{{ p.alto_cm }}"
-                                        data-valor="{{ p.valor_usd_default }}"
-                                        data-desc="{{ p.nombre_invoice }}" data-hs="{{ p.hs_code }}"
-                                        {% if f.producto == p.alias_interno %}selected{% endif %}>
-                                    {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
-                                </option>
-                            {% endfor %}
-                        </select>
-                        {% if not productos %}
-                        <p class="field-help">El catálogo es opcional. Completá esta caja manualmente; sólo lo necesitás para automatizar cargas o integrar una tienda.</p>
-                        {% endif %}
+                <article class="bulto-row shipment-package-card" data-bulto data-bulto-index="{{ loop.index0 }}">
+                    <div class="shipment-box-head">
+                        <div><span>Paquete</span><strong>Caja <b data-box-number>{{ loop.index }}</b></strong></div>
+                        <button type="button" class="btn btn-ghost btn-sm bulto-quitar" aria-label="Quitar esta caja">Quitar</button>
                     </div>
-
-                    <div class="bulto-fisico" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr 44px; gap:10px;">
-                        <div class="form-group">
-                            <label>Peso caja (kg)</label>
-                            <input type="text" name="bulto_peso" class="bulto-peso" inputmode="decimal" data-numero="decimal" value="{{ f.peso_kg or '' }}">
+                    <div class="shipment-package-main">
+                        <div class="form-group shipment-catalog-field">
+                            <label>Precargar del catálogo <span class="field-optional">(opcional)</span></label>
+                            <select name="bulto_producto" class="bulto-producto">
+                                <option value="">— caja manual —</option>
+                                {% for p in productos %}
+                                    <option value="{{ p.alias_interno }}"
+                                            data-peso="{{ p.peso_kg }}" data-largo="{{ p.largo_cm }}"
+                                            data-ancho="{{ p.ancho_cm }}" data-alto="{{ p.alto_cm }}"
+                                            data-valor="{{ p.valor_usd_default }}"
+                                            data-desc="{{ p.nombre_invoice }}" data-hs="{{ p.hs_code }}"
+                                            {% if f.producto == p.alias_interno %}selected{% endif %}>
+                                        {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
+                                    </option>
+                                {% endfor %}
+                            </select>
+                            {% if not productos %}
+                            <p class="field-help">El catálogo es opcional. Podés completar la caja manualmente; sirve para automatizar cargas o integrar una tienda.</p>
+                            {% endif %}
                         </div>
-                        <div class="form-group">
-                            <label>Largo (cm)</label>
-                            <input type="text" name="bulto_largo" class="bulto-largo" inputmode="decimal" data-numero="decimal" value="{{ f.largo_cm or '' }}">
-                        </div>
-                        <div class="form-group">
-                            <label>Ancho (cm)</label>
-                            <input type="text" name="bulto_ancho" class="bulto-ancho" inputmode="decimal" data-numero="decimal" value="{{ f.ancho_cm or '' }}">
-                        </div>
-                        <div class="form-group">
-                            <label>Alto (cm)</label>
-                            <input type="text" name="bulto_alto" class="bulto-alto" inputmode="decimal" data-numero="decimal" value="{{ f.alto_cm or '' }}">
-                        </div>
-                        <div class="form-group">
-                            <label>Cajas iguales</label>
-                            <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
-                        </div>
-                        <div class="form-group bulto-quitar-wrap">
-                            <label aria-hidden="true">&nbsp;</label>
-                            <button type="button" class="btn btn-ghost btn-sm bulto-quitar" aria-label="Quitar esta caja">✕</button>
+                        <div class="bulto-fisico">
+                            <div class="form-group">
+                                <label>Peso por caja</label>
+                                <div class="input-unit"><input type="text" name="bulto_peso" class="bulto-peso" inputmode="decimal" data-numero="decimal" value="{{ f.peso_kg or '' }}" required><span>kg</span></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Largo</label>
+                                <div class="input-unit"><input type="text" name="bulto_largo" class="bulto-largo" inputmode="decimal" data-numero="decimal" value="{{ f.largo_cm or '' }}" required><span>cm</span></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Ancho</label>
+                                <div class="input-unit"><input type="text" name="bulto_ancho" class="bulto-ancho" inputmode="decimal" data-numero="decimal" value="{{ f.ancho_cm or '' }}" required><span>cm</span></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Alto</label>
+                                <div class="input-unit"><input type="text" name="bulto_alto" class="bulto-alto" inputmode="decimal" data-numero="decimal" value="{{ f.alto_cm or '' }}" required><span>cm</span></div>
+                            </div>
+                            <div class="form-group">
+                                <label>Cajas iguales</label>
+                                <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
+                            </div>
+                            <div class="form-group shipment-declared-value">
+                                <label>Valor declarado unitario</label>
+                                <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_usd" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_unitario_usd or '' }}" required></div>
+                            </div>
                         </div>
                     </div>
+                </article>
+                {% endfor %}
+            </div>
+            <button type="button" id="btn-add-bulto" class="btn-add-bulto">+ Agregar otro tipo de caja</button>
+            <p class="shipment-step-help">Si todas las cajas son iguales, indicá la cantidad en una sola fila. Agregá otra únicamente cuando cambien el peso, las medidas o el contenido.</p>
+        </div>
 
-                    {# ── Declaración para la invoice de ESTA caja ─────────
-                       Obligatoria para la aduana: qué es, cuánto vale, HS y
-                       dónde se fabricó. Para textiles el destino suele exigir
-                       composición y tejido (punto/plano) en la descripción. #}
-                    <div class="bulto-invoice" style="grid-column: 1 / -1; display:grid; grid-template-columns: 1.7fr 0.65fr 0.8fr 0.8fr 1fr; gap:10px;">
-                        <div class="form-group">
-                            <label>Contenido / descripción invoice (EN)</label>
-                            <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75"
-                                   value="{{ f.descripcion_en or '' }}">
+        <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
+            <div class="shipment-step-heading">
+                <div>
+                    <h4><span class="n">4</span> Contenido para la invoice comercial <span class="badge warn">Aduana</span></h4>
+                    <p>Una línea clara por cada tipo de caja. Estos datos viajan a DHL y a la aduana.</p>
+                </div>
+                <span class="shipment-step-counter">Descripción en inglés</span>
+            </div>
+
+            <div id="invoice-list">
+                {% for f in filas %}
+                <article class="bulto-row shipment-invoice-card" data-invoice-bulto data-bulto-index="{{ loop.index0 }}">
+                    <div class="shipment-box-head">
+                        <div><span>Invoice comercial</span><strong>Contenido de caja <b data-box-number>{{ loop.index }}</b></strong></div>
+                        <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
+                    </div>
+                    <div class="bulto-invoice">
+                        <div class="form-group shipment-content-field">
+                            <label>Descripción del contenido (en inglés)</label>
+                            <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
                         </div>
                         <div class="form-group">
-                            <label>Unid. aduana</label>
-                            <input type="text" name="bulto_unidades_aduana"
-                                   class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero"
-                                   min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Valor unit. USD</label>
-                            <input type="text" name="bulto_valor_usd" class="bulto-valor"
-                                   inputmode="decimal" data-numero="monto" value="{{ f.valor_unitario_usd or '' }}">
+                            <label>Unidades</label>
+                            <input type="text" name="bulto_unidades_aduana" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group">
                             <label>HS code</label>
-                            <input type="text" name="bulto_hs" class="bulto-hs"
-                                   value="{{ f.hs_code or '' }}">
+                            <input type="text" name="bulto_hs" class="bulto-hs" placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}" required>
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
                             <select name="bulto_pais_fab" class="bulto-pais-fab" data-searchable>
-                                <option value="">= origen del envío</option>
+                                <option value="">Igual al origen del envío</option>
                                 {% for iso, nom in paises_destino %}
                                     <option value="{{ iso }}" {% if f.pais_origen == iso %}selected{% endif %}>{{ nom }}</option>
                                 {% endfor %}
                             </select>
                         </div>
                     </div>
-                </div>
+                </article>
                 {% endfor %}
             </div>
-            <button type="button" id="btn-add-bulto" class="btn-add-bulto">+ Añadir otra caja</button>
-            <p style="font-size:12.5px;color:var(--fg-3);margin:8px 0 18px;">
-                "Cajas iguales" define los paquetes físicos. "Unid. aduana" es la cantidad total de productos dentro de esas cajas (por ejemplo: 1 caja con 8 camisas). Cada caja sale con su propia etiqueta, todas bajo el mismo tracking.
-            </p>
+            <div class="invoice-note"><strong>Dato aduanero:</strong> describí qué producto es, material y uso. Evitá términos genéricos como “samples” o “goods”.</div>
 
             <details class="shipment-extra-options" {% if form.precio_cliente_final_ars or form.observaciones %}open{% endif %}>
                 <summary>
@@ -462,8 +477,8 @@
 
             {# Impuestos de destino. Arranca con lo que el cliente dejó
                configurado en su cuenta; acá sólo se pisa para ESTE envío.
-               Va al lado de Observaciones: eran dos filas enteras para dos
-               campos y el paso 3 es el más alto de los tres. #}
+               Se mantiene dentro de opciones para que la hoja de invoice
+               conserve como protagonistas los datos aduaneros. #}
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="tax_paga">Impuestos de destino</label>
@@ -639,10 +654,57 @@
 
   // ── Filas de cajas (multi-bulto) ──────────────────────────
   const bultosList = document.getElementById("bultos-list");
+  const invoiceList = document.getElementById("invoice-list");
   const btnAddBulto = document.getElementById("btn-add-bulto");
 
   function bultoRows() {
     return Array.prototype.slice.call(bultosList.querySelectorAll("[data-bulto]"));
+  }
+
+  function invoiceRows() {
+    return Array.prototype.slice.call(invoiceList.querySelectorAll("[data-invoice-bulto]"));
+  }
+
+  function invoiceDe(row) {
+    return invoiceRows()[bultoRows().indexOf(row)] || null;
+  }
+
+  function actualizarReferenciaPaquete(row) {
+    var invoice = invoiceDe(row);
+    if (!invoice) return;
+    var valor = function (sel) { return ((row.querySelector(sel) || {}).value || "").trim(); };
+    var peso = valor(".bulto-peso");
+    var cantidad = valor(".bulto-cantidad") || "1";
+    var medidas = [valor(".bulto-largo"), valor(".bulto-ancho"), valor(".bulto-alto")];
+    var partes = [];
+    if (peso) partes.push(peso + " kg");
+    if (medidas.every(Boolean)) partes.push(medidas.join("×") + " cm");
+    partes.push(cantidad + (cantidad === "1" ? " caja" : " cajas iguales"));
+    var ref = invoice.querySelector("[data-package-reference]");
+    if (ref) ref.textContent = partes.join(" · ");
+  }
+
+  function renumerarBultos() {
+    var fisicos = bultoRows();
+    var invoices = invoiceRows();
+    fisicos.forEach(function (row, i) {
+      row.dataset.bultoIndex = String(i);
+      var numero = row.querySelector("[data-box-number]");
+      if (numero) numero.textContent = String(i + 1);
+      var quitar = row.querySelector(".bulto-quitar");
+      if (quitar) quitar.style.visibility = fisicos.length === 1 ? "hidden" : "visible";
+    });
+    invoices.forEach(function (row, i) {
+      row.dataset.bultoIndex = String(i);
+      var numero = row.querySelector("[data-box-number]");
+      if (numero) numero.textContent = String(i + 1);
+    });
+    var contador = document.querySelector("[data-package-types]");
+    if (contador && contador.parentNode) {
+      contador.parentNode.innerHTML = "<b data-package-types>" + fisicos.length + "</b> " +
+        (fisicos.length === 1 ? "tipo de caja" : "tipos de caja");
+    }
+    fisicos.forEach(actualizarReferenciaPaquete);
   }
 
   // Elegir un producto precarga SU declaración de invoice en la fila
@@ -650,48 +712,49 @@
   document.getElementById("bultos-list").addEventListener("change", function (e) {
     if (!e.target.classList.contains("bulto-producto")) return;
     var row = e.target.closest("[data-bulto]");
+    var invoice = invoiceDe(row);
     var op = e.target.options[e.target.selectedIndex];
     if (!row || !op || !op.value) return;
-    var setea = function (sel, v) {
-      var el = row.querySelector(sel);
+    var setea = function (contenedor, sel, v) {
+      var el = contenedor && contenedor.querySelector(sel);
       if (el) el.value = v || "";
     };
-    setea(".bulto-peso", op.dataset.peso);
-    setea(".bulto-largo", op.dataset.largo);
-    setea(".bulto-ancho", op.dataset.ancho);
-    setea(".bulto-alto", op.dataset.alto);
-    setea(".bulto-valor", op.dataset.valor);
-    setea(".bulto-desc", op.dataset.desc);
-    setea(".bulto-hs", op.dataset.hs);
+    setea(row, ".bulto-peso", op.dataset.peso);
+    setea(row, ".bulto-largo", op.dataset.largo);
+    setea(row, ".bulto-ancho", op.dataset.ancho);
+    setea(row, ".bulto-alto", op.dataset.alto);
+    setea(row, ".bulto-valor", op.dataset.valor);
+    setea(invoice, ".bulto-desc", op.dataset.desc);
+    setea(invoice, ".bulto-hs", op.dataset.hs);
+    actualizarReferenciaPaquete(row);
     refreshLivePrice();
   });
 
   function leerBultos() {
-    return Array.prototype.slice.call(document.querySelectorAll("[data-bulto]")).map(function (row) {
-      var v = function (sel) { return ((row.querySelector(sel) || {}).value || "").trim(); };
+    return bultoRows().map(function (row, i) {
+      var invoice = invoiceRows()[i];
+      var v = function (contenedor, sel) { return ((contenedor && contenedor.querySelector(sel) || {}).value || "").trim(); };
       return {
-        producto: v(".bulto-producto"),
+        producto: v(row, ".bulto-producto"),
         // Viajan crudos: el servidor aplica la misma validación estricta del
         // submit. `parseInt("10,000")` devolvía 10 en la vista previa aunque
         // el envío real rechazaba ese texto, generando dos precios distintos.
-        cantidad: v(".bulto-cantidad"),
-        unidades_aduana: v(".bulto-unidades-aduana"),
-        peso_kg: v(".bulto-peso"),
-        largo_cm: v(".bulto-largo"),
-        ancho_cm: v(".bulto-ancho"),
-        alto_cm: v(".bulto-alto"),
-        valor_unitario_usd: v(".bulto-valor"),
-        descripcion_en: v(".bulto-desc"),
-        hs_code: v(".bulto-hs"),
-        pais_origen: v(".bulto-pais-fab"),
+        cantidad: v(row, ".bulto-cantidad"),
+        unidades_aduana: v(invoice, ".bulto-unidades-aduana"),
+        peso_kg: v(row, ".bulto-peso"),
+        largo_cm: v(row, ".bulto-largo"),
+        ancho_cm: v(row, ".bulto-ancho"),
+        alto_cm: v(row, ".bulto-alto"),
+        valor_unitario_usd: v(row, ".bulto-valor"),
+        descripcion_en: v(invoice, ".bulto-desc"),
+        hs_code: v(invoice, ".bulto-hs"),
+        pais_origen: v(invoice, ".bulto-pais-fab"),
       };
     }).filter(function (b) { return b.producto || b.peso_kg || b.descripcion_en; });
   }
 
   function wireBultoRow(row) {
     var sel = row.querySelector(".bulto-producto");
-    var cant = row.querySelector(".bulto-cantidad");
-    var unidadesAduana = row.querySelector(".bulto-unidades-aduana");
     var quitar = row.querySelector(".bulto-quitar");
     if (sel) sel.addEventListener("change", refreshLivePrice);
     // Peso y medidas manuales también recotizan: el precio depende de la
@@ -699,36 +762,51 @@
     [".bulto-cantidad", ".bulto-peso", ".bulto-largo", ".bulto-ancho", ".bulto-alto"]
       .forEach(function (c) {
         var el = row.querySelector(c);
-        if (el) el.addEventListener("input", refreshLivePrice);
+        if (el) el.addEventListener("input", function () {
+          actualizarReferenciaPaquete(row);
+          refreshLivePrice();
+        });
       });
     if (quitar) quitar.addEventListener("click", function () {
-      if (bultoRows().length <= 1) {
-        // última fila: no se quita, se limpia
-        if (sel) sel.value = "";
-        if (cant) cant.value = 1;
-        if (unidadesAduana) unidadesAduana.value = 1;
-      } else {
-        row.remove();
-      }
+      if (bultoRows().length <= 1) return;
+      var invoice = invoiceDe(row);
+      row.remove();
+      if (invoice) invoice.remove();
+      renumerarBultos();
       refreshLivePrice();
     });
   }
 
   function agregarBulto(producto, cantidad) {
     var base = bultoRows()[0];
+    var baseInvoice = invoiceRows()[0];
     var nueva = base.cloneNode(true);
+    var nuevaInvoice = baseInvoice.cloneNode(true);
     var sel = nueva.querySelector(".bulto-producto");
     var cant = nueva.querySelector(".bulto-cantidad");
-    var unidadesAduana = nueva.querySelector(".bulto-unidades-aduana");
+    var unidadesAduana = nuevaInvoice.querySelector(".bulto-unidades-aduana");
+    nueva.querySelectorAll("input").forEach(function (el) { el.value = ""; });
+    nuevaInvoice.querySelectorAll("input").forEach(function (el) { el.value = ""; });
     if (sel) sel.value = producto || "";
     if (cant) cant.value = cantidad || 1;
     if (unidadesAduana) unidadesAduana.value = cantidad || 1;
+    var pais = nuevaInvoice.querySelector(".bulto-pais-fab");
+    if (pais) pais.value = "";
+    nueva.classList.add("is-entering");
+    nuevaInvoice.classList.add("is-entering");
     bultosList.appendChild(nueva);
+    invoiceList.appendChild(nuevaInvoice);
     wireBultoRow(nueva);
+    renumerarBultos();
+    window.setTimeout(function () {
+      nueva.classList.remove("is-entering");
+      nuevaInvoice.classList.remove("is-entering");
+    }, 280);
     return nueva;
   }
 
   bultoRows().forEach(wireBultoRow);
+  renumerarBultos();
   if (btnAddBulto) btnAddBulto.addEventListener("click", function () {
     agregarBulto("", 1);
   });
@@ -948,17 +1026,21 @@
           if (paquetes.length) {
             // Re-parse: sacar las filas que sobran de un pegado anterior,
             // para que el form quede EXACTAMENTE como el pedido nuevo.
-            bultoRows().slice(Math.max(paquetes.length, 1)).forEach(function (r) { r.remove(); });
+            var limiteFilas = Math.max(paquetes.length, 1);
+            bultoRows().slice(limiteFilas).forEach(function (r) { r.remove(); });
+            invoiceRows().slice(limiteFilas).forEach(function (r) { r.remove(); });
             var rows = bultoRows();
             paquetes.slice(0, 20).forEach(function (p, i) {
               var row = rows[i] || agregarBulto("", 1);
               var cant = row.querySelector(".bulto-cantidad");
               if (cant && p.cantidad) { cant.value = p.cantidad; llenados++; }
-              var unidades = row.querySelector(".bulto-unidades-aduana");
+              var invoiceRow = invoiceRows()[i];
+              var unidades = invoiceRow && invoiceRow.querySelector(".bulto-unidades-aduana");
               if (unidades && (p.unidades_aduana || p.cantidad)) {
                 unidades.value = p.unidades_aduana || p.cantidad;
               }
             });
+            renumerarBultos();
           }
           var aviso = "Listo: " + llenados + " campos precargados.";
           if (paquetes.length > 1) {
@@ -976,8 +1058,8 @@
   }
 
   // ── Pasos navegables (guía HAILU, 05/08) ─────────────────────
-  // Como la web de DHL o Boxfly: un paso por pantalla — 1 Remitente,
-  // 2 Destinatario, 3 Cajas y envío. "Siguiente" valida los campos del
+  // Como la web de DHL: un paso por pantalla — 1 Remitente,
+  // 2 Destinatario, 3 Paquete y 4 Invoice. "Siguiente" valida los campos del
   // paso antes de avanzar; el stepper de arriba también navega. El botón
   // de crear y el precio en vivo sólo aparecen en el último paso.
   (function () {
