@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from servicios.panel_cliente import preparar_historial_envios
+from servicios.panel_cliente import ENVIOS_POR_PAGINA, preparar_historial_envios
 
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -32,18 +32,21 @@ def _historial() -> list[dict]:
 
 
 def test_historial_se_divide_en_paginas_sin_perder_filas():
-    primera = preparar_historial_envios(_historial(), pagina=1)
-    segunda = preparar_historial_envios(_historial(), pagina=2)
-    tercera = preparar_historial_envios(_historial(), pagina=3)
-    cuarta = preparar_historial_envios(_historial(), pagina=4)
+    historial = [
+        _envio(numero, "FEDEX", "DESPACHADO")
+        for numero in range(1, 24)
+    ]
+    primera = preparar_historial_envios(historial, pagina=1)
+    segunda = preparar_historial_envios(historial, pagina=2)
+    tercera = preparar_historial_envios(historial, pagina=3)
 
-    assert [s["id"] for s in primera["solicitudes"]] == [1, 2]
-    assert [s["id"] for s in segunda["solicitudes"]] == [3, 4]
-    assert [s["id"] for s in tercera["solicitudes"]] == [5, 6]
-    assert [s["id"] for s in cuarta["solicitudes"]] == [7]
-    assert primera["total_resultados"] == 7
-    assert primera["total_paginas"] == 4
-    assert (segunda["pagina_desde"], segunda["pagina_hasta"]) == (3, 4)
+    assert ENVIOS_POR_PAGINA == 10
+    assert [s["id"] for s in primera["solicitudes"]] == list(range(1, 11))
+    assert [s["id"] for s in segunda["solicitudes"]] == list(range(11, 21))
+    assert [s["id"] for s in tercera["solicitudes"]] == [21, 22, 23]
+    assert primera["total_resultados"] == 23
+    assert primera["total_paginas"] == 3
+    assert (segunda["pagina_desde"], segunda["pagina_hasta"]) == (11, 20)
 
 
 def test_filtros_todos_internacionales_y_nacionales_son_distintos():
@@ -93,8 +96,8 @@ def test_pagina_invalida_o_fuera_de_rango_se_normaliza():
 
     assert invalida["pagina_actual"] == 1
     assert negativa["pagina_actual"] == 1
-    assert excesiva["pagina_actual"] == 4
-    assert [s["id"] for s in excesiva["solicitudes"]] == [7]
+    assert excesiva["pagina_actual"] == 1
+    assert [s["id"] for s in excesiva["solicitudes"]] == [1, 2, 3, 4, 5, 6, 7]
 
 
 def test_filtro_sin_resultados_no_se_confunde_con_cliente_sin_historial():

@@ -57,10 +57,10 @@ PASOS_EMBUDO = [
 ]
 
 
-# Dos filas dejan visibles título, filtros, listado y paginación incluso en
-# un teléfono bajo. El historial completo sigue disponible: sólo se divide
-# en páginas, nunca se recorta.
-ENVIOS_POR_PAGINA = 2
+# Diez filas permiten recorrer el historial sin saltar de página a cada rato.
+# El historial completo sigue disponible: sólo se divide en páginas, nunca se
+# recorta.
+ENVIOS_POR_PAGINA = 10
 
 
 def paso_de_estado(estado: str) -> str | None:
