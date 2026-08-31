@@ -1530,6 +1530,755 @@ CREATE TABLE IF NOT EXISTS security_audit (
 CREATE INDEX IF NOT EXISTS ix_security_audit_created ON security_audit (created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_security_audit_event   ON security_audit (event);
 
+-- ── Conciliación de facturas de couriers ──────────────────
+-- Fuente de verdad financiera para DHL, FedEx, Andreani y OCA. El Excel o
+-- Google Sheet puede funcionar como bandeja operativa, pero nunca reemplaza
+-- estos snapshots ni el historial de aprobación del portal.
+--
+-- 1) Congela el precio aceptado y el margen al crear la guía. Esta fila es
+--    inmutable: un cambio posterior de markup no puede reescribir la venta.
+CREATE TABLE IF NOT EXISTS envio_cotizacion_snapshots (
+    id                           BIGSERIAL PRIMARY KEY,
+    solicitud_id                 INTEGER NOT NULL UNIQUE
+        REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    coti_id                      TEXT,
+    courier                      TEXT NOT NULL,
+    servicio_courier             TEXT,
+    moneda_courier               TEXT NOT NULL,
+    tipo_cambio_ars              NUMERIC(18,6) NOT NULL,
+    costo_courier_estimado       NUMERIC(18,4) NOT NULL,
+    costo_courier_estimado_ars   NUMERIC(18,4) NOT NULL,
+    precio_cliente_inicial_ars   NUMERIC(18,4) NOT NULL,
+    margen_tauro_protegido_ars   NUMERIC(18,4) NOT NULL,
+    markup_tipo                  TEXT,
+    markup_valor                 NUMERIC(18,4),
+    peso_real_cotizado_kg        NUMERIC(12,3),
+    peso_volumetrico_cotizado_kg NUMERIC(12,3),
+    peso_facturable_cotizado_kg  NUMERIC(12,3),
+    bultos                       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    origen_calculo               JSONB NOT NULL DEFAULT '{}'::jsonb,
+    aceptado_at                  TIMESTAMPTZ NOT NULL,
+    created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_snapshot_courier CHECK (
+        courier IN ('DHL','FEDEX','ANDREANI','OCA')
+    ),
+    CONSTRAINT ck_snapshot_moneda CHECK (
+        moneda_courier ~ '^[A-Z]{3}$'
+    ),
+    CONSTRAINT ck_snapshot_importes CHECK (
+        tipo_cambio_ars > 0
+        AND costo_courier_estimado >= 0
+        AND costo_courier_estimado_ars >= 0
+        AND precio_cliente_inicial_ars >= 0
+        AND margen_tauro_protegido_ars >= 0
+    ),
+    CONSTRAINT ck_snapshot_conversion CHECK (
+        ABS(
+            costo_courier_estimado_ars
+            - costo_courier_estimado * tipo_cambio_ars
+        ) <= 0.02
+    ),
+    CONSTRAINT ck_snapshot_margen CHECK (
+        ABS(
+            precio_cliente_inicial_ars
+            - costo_courier_estimado_ars
+            - margen_tauro_protegido_ars
+        ) <= 0.02
+    ),
+    CONSTRAINT ck_snapshot_pesos CHECK (
+        COALESCE(peso_real_cotizado_kg, 0) >= 0
+        AND COALESCE(peso_volumetrico_cotizado_kg, 0) >= 0
+        AND COALESCE(peso_facturable_cotizado_kg, 0) >= 0
+    )
+);
+CREATE INDEX IF NOT EXISTS ix_snapshot_courier_fecha
+    ON envio_cotizacion_snapshots (UPPER(courier), aceptado_at DESC);
+
+CREATE OR REPLACE FUNCTION tauro_validar_snapshot_cotizacion()
+RETURNS TRIGGER AS $$
+DECLARE
+    solicitud_actual RECORD;
+BEGIN
+    SELECT courier, coti_id, precio_tauro_ars
+      INTO solicitud_actual
+      FROM solicitudes_guia
+     WHERE id = NEW.solicitud_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Solicitud de guía inexistente: %', NEW.solicitud_id;
+    END IF;
+    IF UPPER(BTRIM(solicitud_actual.courier)) <> NEW.courier THEN
+        RAISE EXCEPTION 'El courier del snapshot no coincide con la solicitud';
+    END IF;
+    IF solicitud_actual.precio_tauro_ars IS NOT NULL
+       AND ABS(solicitud_actual.precio_tauro_ars::NUMERIC
+            - NEW.precio_cliente_inicial_ars) > 0.02 THEN
+        RAISE EXCEPTION 'El precio del snapshot no coincide con la solicitud';
+    END IF;
+    IF NULLIF(BTRIM(solicitud_actual.coti_id), '') IS NOT NULL
+       AND NULLIF(BTRIM(NEW.coti_id), '') IS NOT NULL
+       AND BTRIM(solicitud_actual.coti_id) <> BTRIM(NEW.coti_id) THEN
+        RAISE EXCEPTION 'La cotización del snapshot no coincide con la solicitud';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_snapshot_cotizacion
+    ON envio_cotizacion_snapshots;
+CREATE TRIGGER trg_validar_snapshot_cotizacion
+BEFORE INSERT ON envio_cotizacion_snapshots
+FOR EACH ROW EXECUTE FUNCTION tauro_validar_snapshot_cotizacion();
+
+-- 2) Documento recibido. El número normalizado evita duplicar una factura
+--    por guiones, espacios o mayúsculas. NC nunca se guarda como FC ni como
+--    deuda: su signo contable se aplica al calcular la conciliación.
+CREATE TABLE IF NOT EXISTS facturas_courier (
+    id                       BIGSERIAL PRIMARY KEY,
+    courier                  TEXT NOT NULL,
+    tipo_documento           TEXT NOT NULL,
+    numero                   TEXT NOT NULL,
+    numero_normalizado       TEXT GENERATED ALWAYS AS (
+        REGEXP_REPLACE(UPPER(BTRIM(numero)), '[^A-Z0-9]', '', 'g')
+    ) STORED,
+    factura_referenciada_id  BIGINT REFERENCES facturas_courier(id)
+        ON DELETE RESTRICT,
+    fecha_emision            DATE,
+    fecha_vencimiento        DATE,
+    periodo_desde            DATE,
+    periodo_hasta            DATE,
+    moneda                   TEXT NOT NULL,
+    subtotal                 NUMERIC(18,4) NOT NULL DEFAULT 0,
+    impuestos                NUMERIC(18,4) NOT NULL DEFAULT 0,
+    total                    NUMERIC(18,4) NOT NULL,
+    estado                   TEXT NOT NULL DEFAULT 'RECIBIDA',
+    mensaje_origen_id        TEXT,
+    evidencia_uri            TEXT,
+    archivo_nombre           TEXT,
+    archivo_sha256           TEXT,
+    metadatos_origen         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_factura_courier CHECK (
+        courier IN ('DHL','FEDEX','ANDREANI','OCA')
+    ),
+    CONSTRAINT ck_factura_tipo CHECK (
+        tipo_documento IN ('FC','NC','ND')
+    ),
+    CONSTRAINT ck_factura_numero CHECK (
+        REGEXP_REPLACE(UPPER(BTRIM(numero)), '[^A-Z0-9]', '', 'g') <> ''
+    ),
+    CONSTRAINT ck_factura_moneda CHECK (moneda ~ '^[A-Z]{3}$'),
+    CONSTRAINT ck_factura_importes CHECK (
+        subtotal >= 0 AND impuestos >= 0 AND total >= 0
+    ),
+    CONSTRAINT ck_factura_fechas CHECK (
+        (fecha_vencimiento IS NULL OR fecha_emision IS NULL
+            OR fecha_vencimiento >= fecha_emision)
+        AND (periodo_hasta IS NULL OR periodo_desde IS NULL
+            OR periodo_hasta >= periodo_desde)
+    ),
+    CONSTRAINT ck_factura_estado CHECK (
+        estado IN (
+            'RECIBIDA','EXTRAIDA','PARCIAL','CONCILIADA',
+            'OBSERVADA','CERRADA','ANULADA'
+        )
+    ),
+    CONSTRAINT ck_factura_hash CHECK (
+        archivo_sha256 IS NULL OR archivo_sha256 ~ '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT ck_factura_referencia_nc CHECK (
+        tipo_documento <> 'NC' OR factura_referenciada_id IS NULL
+            OR factura_referenciada_id <> id
+    ),
+    CONSTRAINT uq_factura_courier_documento UNIQUE (
+        courier, tipo_documento, numero_normalizado
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_courier_archivo
+    ON facturas_courier (archivo_sha256)
+    WHERE archivo_sha256 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_factura_courier_estado_fecha
+    ON facturas_courier (UPPER(courier), estado, fecha_emision DESC);
+
+-- 3) Una factura mensual puede traer muchas líneas y el mismo tracking puede
+--    repetirse en FLETE, COMBUSTIBLE e IMPUESTOS. Se deduplica por número de
+--    línea dentro del documento, no por tracking.
+CREATE TABLE IF NOT EXISTS facturas_courier_items (
+    id                   BIGSERIAL PRIMARY KEY,
+    factura_id           BIGINT NOT NULL REFERENCES facturas_courier(id)
+        ON DELETE RESTRICT,
+    linea_numero         INTEGER NOT NULL,
+    tracking_raw         TEXT,
+    tracking_normalizado TEXT GENERATED ALWAYS AS (
+        NULLIF(REGEXP_REPLACE(UPPER(BTRIM(tracking_raw)), '[^A-Z0-9]', '', 'g'), '')
+    ) STORED,
+    concepto_codigo      TEXT,
+    concepto_tipo        TEXT NOT NULL DEFAULT 'OTRO',
+    descripcion          TEXT,
+    signo                SMALLINT NOT NULL DEFAULT 1,
+    importe              NUMERIC(18,4) NOT NULL,
+    moneda               TEXT NOT NULL,
+    tipo_cambio_ars      NUMERIC(18,6) NOT NULL,
+    importe_ars          NUMERIC(18,4) NOT NULL,
+    fecha_envio          DATE,
+    peso_real_kg         NUMERIC(12,3),
+    peso_volumetrico_kg  NUMERIC(12,3),
+    peso_facturado_kg    NUMERIC(12,3),
+    peso_base            TEXT NOT NULL DEFAULT 'NO_INFORMADO',
+    dimensiones          JSONB NOT NULL DEFAULT '[]'::jsonb,
+    datos_crudos         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    parse_confianza      NUMERIC(5,4),
+    estado               TEXT NOT NULL DEFAULT 'EXTRAIDO',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_factura_item_linea UNIQUE (factura_id, linea_numero),
+    CONSTRAINT ck_factura_item_linea CHECK (linea_numero > 0),
+    CONSTRAINT ck_factura_item_concepto CHECK (
+        concepto_tipo IN (
+            'FLETE','COMBUSTIBLE','IMPUESTO','ADUANA','MANEJO',
+            'SEGURO','DESCUENTO','OTRO'
+        )
+    ),
+    CONSTRAINT ck_factura_item_signo CHECK (signo IN (-1, 1)),
+    CONSTRAINT ck_factura_item_moneda CHECK (moneda ~ '^[A-Z]{3}$'),
+    CONSTRAINT ck_factura_item_importes CHECK (
+        importe > 0 AND tipo_cambio_ars > 0 AND importe_ars > 0
+    ),
+    CONSTRAINT ck_factura_item_conversion CHECK (
+        ABS(importe_ars - importe * tipo_cambio_ars) <= 0.02
+    ),
+    CONSTRAINT ck_factura_item_pesos CHECK (
+        COALESCE(peso_real_kg, 0) >= 0
+        AND COALESCE(peso_volumetrico_kg, 0) >= 0
+        AND COALESCE(peso_facturado_kg, 0) >= 0
+    ),
+    CONSTRAINT ck_factura_item_peso_base CHECK (
+        peso_base IN (
+            'REAL','VOLUMETRICO','DECLARADO','OTRO','NO_INFORMADO'
+        )
+    ),
+    CONSTRAINT ck_factura_item_confianza CHECK (
+        parse_confianza IS NULL OR parse_confianza BETWEEN 0 AND 1
+    ),
+    CONSTRAINT ck_factura_item_estado CHECK (
+        estado IN ('EXTRAIDO','LISTO','OBSERVADO','CONCILIADO','IGNORADO')
+    )
+);
+CREATE INDEX IF NOT EXISTS ix_factura_item_tracking
+    ON facturas_courier_items (tracking_normalizado)
+    WHERE tracking_normalizado IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_factura_item_factura_estado
+    ON facturas_courier_items (factura_id, estado, linea_numero);
+
+-- 4) El match puede ser propuesto automáticamente, pero confirmar una línea
+--    o repartirla entre varios envíos es una decisión auditada. Los montos
+--    asignados permiten prorratear líneas agrupadas sin perder el original.
+CREATE TABLE IF NOT EXISTS factura_courier_item_matches (
+    id                    BIGSERIAL PRIMARY KEY,
+    item_id               BIGINT NOT NULL REFERENCES facturas_courier_items(id)
+        ON DELETE RESTRICT,
+    solicitud_id          INTEGER NOT NULL REFERENCES solicitudes_guia(id)
+        ON DELETE RESTRICT,
+    monto_asignado        NUMERIC(18,4) NOT NULL,
+    monto_asignado_ars    NUMERIC(18,4) NOT NULL,
+    metodo                TEXT NOT NULL,
+    confianza             NUMERIC(5,4),
+    estado                TEXT NOT NULL DEFAULT 'PROPUESTO',
+    evidencia_uri         TEXT,
+    creado_por            TEXT NOT NULL,
+    confirmado_por        TEXT,
+    confirmado_at         TIMESTAMPTZ,
+    motivo_rechazo        TEXT,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_factura_item_match UNIQUE (item_id, solicitud_id),
+    CONSTRAINT ck_factura_match_importes CHECK (
+        monto_asignado > 0 AND monto_asignado_ars > 0
+    ),
+    CONSTRAINT ck_factura_match_metodo CHECK (
+        metodo IN ('EXACTO_TRACKING','REFERENCIA','MANUAL')
+    ),
+    CONSTRAINT ck_factura_match_confianza CHECK (
+        confianza IS NULL OR confianza BETWEEN 0 AND 1
+    ),
+    CONSTRAINT ck_factura_match_estado CHECK (
+        estado IN ('PROPUESTO','CONFIRMADO','RECHAZADO')
+    ),
+    CONSTRAINT ck_factura_match_manual_evidencia CHECK (
+        metodo <> 'MANUAL' OR NULLIF(BTRIM(evidencia_uri), '') IS NOT NULL
+    ),
+    CONSTRAINT ck_factura_match_confirmacion CHECK (
+        estado <> 'CONFIRMADO'
+        OR (NULLIF(BTRIM(confirmado_por), '') IS NOT NULL
+            AND confirmado_at IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS ix_factura_match_solicitud_estado
+    ON factura_courier_item_matches (solicitud_id, estado);
+
+CREATE OR REPLACE FUNCTION tauro_validar_match_factura_courier()
+RETURNS TRIGGER AS $$
+DECLARE
+    item_actual RECORD;
+    solicitud_actual RECORD;
+    asignado NUMERIC(18,4);
+    asignado_ars NUMERIC(18,4);
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF OLD.item_id IS DISTINCT FROM NEW.item_id
+           OR OLD.solicitud_id IS DISTINCT FROM NEW.solicitud_id
+           OR OLD.monto_asignado IS DISTINCT FROM NEW.monto_asignado
+           OR OLD.monto_asignado_ars IS DISTINCT FROM NEW.monto_asignado_ars
+           OR OLD.metodo IS DISTINCT FROM NEW.metodo THEN
+            RAISE EXCEPTION 'La identidad y los importes del match son inmutables';
+        END IF;
+        IF OLD.estado = 'CONFIRMADO' AND NEW.estado <> 'CONFIRMADO' THEN
+            RAISE EXCEPTION 'Un match confirmado no puede reabrirse';
+        END IF;
+        IF OLD.estado = 'RECHAZADO' AND NEW.estado <> 'RECHAZADO' THEN
+            RAISE EXCEPTION 'Un match rechazado no puede reabrirse';
+        END IF;
+    END IF;
+
+    SELECT i.importe, i.importe_ars, i.tipo_cambio_ars,
+           i.tracking_normalizado, f.courier
+      INTO item_actual
+      FROM facturas_courier_items i
+      JOIN facturas_courier f ON f.id = i.factura_id
+     WHERE i.id = NEW.item_id
+     FOR UPDATE OF i;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Ítem de factura inexistente: %', NEW.item_id;
+    END IF;
+
+    SELECT courier,
+           NULLIF(REGEXP_REPLACE(
+               UPPER(BTRIM(tracking)), '[^A-Z0-9]', '', 'g'
+           ), '') AS tracking_normalizado
+      INTO solicitud_actual
+      FROM solicitudes_guia
+     WHERE id = NEW.solicitud_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Solicitud de guía inexistente: %', NEW.solicitud_id;
+    END IF;
+
+    IF UPPER(BTRIM(solicitud_actual.courier))
+       <> UPPER(BTRIM(item_actual.courier)) THEN
+        RAISE EXCEPTION 'Courier de factura y solicitud no coinciden';
+    END IF;
+
+    IF NEW.metodo = 'EXACTO_TRACKING' AND (
+        item_actual.tracking_normalizado IS NULL
+        OR solicitud_actual.tracking_normalizado IS NULL
+        OR item_actual.tracking_normalizado
+            <> solicitud_actual.tracking_normalizado
+    ) THEN
+        RAISE EXCEPTION 'El tracking exacto no coincide';
+    END IF;
+
+    IF ABS(
+        NEW.monto_asignado_ars
+        - NEW.monto_asignado * item_actual.tipo_cambio_ars
+    ) > 0.02 THEN
+        RAISE EXCEPTION 'La conversión ARS del match no coincide';
+    END IF;
+
+    SELECT COALESCE(SUM(monto_asignado), 0),
+           COALESCE(SUM(monto_asignado_ars), 0)
+      INTO asignado, asignado_ars
+      FROM factura_courier_item_matches
+     WHERE item_id = NEW.item_id
+       AND estado IN ('PROPUESTO','CONFIRMADO')
+       AND id <> COALESCE(NEW.id, 0);
+
+    IF NEW.estado IN ('PROPUESTO','CONFIRMADO') AND (
+        asignado + NEW.monto_asignado > item_actual.importe + 0.02
+        OR asignado_ars + NEW.monto_asignado_ars
+            > item_actual.importe_ars + 0.02
+    ) THEN
+        RAISE EXCEPTION 'Los matches exceden el importe del ítem';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_match_factura_courier
+    ON factura_courier_item_matches;
+CREATE TRIGGER trg_validar_match_factura_courier
+BEFORE INSERT OR UPDATE ON factura_courier_item_matches
+FOR EACH ROW EXECUTE FUNCTION tauro_validar_match_factura_courier();
+
+-- Una vez que una cabecera tiene líneas o una línea tiene un match, sus datos
+-- financieros dejan de ser editables. Las correcciones se modelan con
+-- anulación + nuevo documento/match, no reescribiendo evidencia histórica.
+CREATE OR REPLACE FUNCTION tauro_proteger_factura_con_items()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM facturas_courier_items WHERE factura_id = OLD.id
+    ) AND (
+        OLD.courier IS DISTINCT FROM NEW.courier
+        OR OLD.tipo_documento IS DISTINCT FROM NEW.tipo_documento
+        OR OLD.numero IS DISTINCT FROM NEW.numero
+        OR OLD.factura_referenciada_id IS DISTINCT FROM NEW.factura_referenciada_id
+        OR OLD.moneda IS DISTINCT FROM NEW.moneda
+        OR OLD.subtotal IS DISTINCT FROM NEW.subtotal
+        OR OLD.impuestos IS DISTINCT FROM NEW.impuestos
+        OR OLD.total IS DISTINCT FROM NEW.total
+    ) THEN
+        RAISE EXCEPTION 'La cabecera financiera con ítems es inmutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_proteger_factura_con_items ON facturas_courier;
+CREATE TRIGGER trg_proteger_factura_con_items
+BEFORE UPDATE ON facturas_courier
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_factura_con_items();
+
+CREATE OR REPLACE FUNCTION tauro_proteger_item_matcheado()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM factura_courier_item_matches WHERE item_id = OLD.id
+    ) AND (
+        OLD.factura_id IS DISTINCT FROM NEW.factura_id
+        OR OLD.linea_numero IS DISTINCT FROM NEW.linea_numero
+        OR OLD.tracking_raw IS DISTINCT FROM NEW.tracking_raw
+        OR OLD.concepto_codigo IS DISTINCT FROM NEW.concepto_codigo
+        OR OLD.concepto_tipo IS DISTINCT FROM NEW.concepto_tipo
+        OR OLD.signo IS DISTINCT FROM NEW.signo
+        OR OLD.importe IS DISTINCT FROM NEW.importe
+        OR OLD.moneda IS DISTINCT FROM NEW.moneda
+        OR OLD.tipo_cambio_ars IS DISTINCT FROM NEW.tipo_cambio_ars
+        OR OLD.importe_ars IS DISTINCT FROM NEW.importe_ars
+        OR OLD.peso_real_kg IS DISTINCT FROM NEW.peso_real_kg
+        OR OLD.peso_volumetrico_kg IS DISTINCT FROM NEW.peso_volumetrico_kg
+        OR OLD.peso_facturado_kg IS DISTINCT FROM NEW.peso_facturado_kg
+        OR OLD.peso_base IS DISTINCT FROM NEW.peso_base
+    ) THEN
+        RAISE EXCEPTION 'El ítem con match es inmutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_proteger_item_matcheado ON facturas_courier_items;
+CREATE TRIGGER trg_proteger_item_matcheado
+BEFORE UPDATE ON facturas_courier_items
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_item_matcheado();
+
+-- 5) Resultado versionado del cálculo. El precio final siempre es costo real
+--    + margen protegido; el ajuste es precio final - precio inicial.
+CREATE TABLE IF NOT EXISTS conciliaciones_envio (
+    id                           BIGSERIAL PRIMARY KEY,
+    solicitud_id                 INTEGER NOT NULL REFERENCES solicitudes_guia(id)
+        ON DELETE RESTRICT,
+    version                      INTEGER NOT NULL,
+    estado                       TEXT NOT NULL DEFAULT 'BORRADOR',
+    precio_cliente_inicial_ars   NUMERIC(18,4) NOT NULL,
+    costo_courier_estimado_ars   NUMERIC(18,4) NOT NULL,
+    margen_tauro_protegido_ars   NUMERIC(18,4) NOT NULL,
+    costo_courier_real_ars       NUMERIC(18,4) NOT NULL,
+    precio_cliente_final_ars     NUMERIC(18,4) NOT NULL,
+    ajuste_cliente_ars           NUMERIC(18,4) NOT NULL,
+    peso_cotizado_kg             NUMERIC(12,3),
+    peso_real_facturado_kg       NUMERIC(12,3),
+    peso_volumetrico_facturado_kg NUMERIC(12,3),
+    peso_final_facturado_kg      NUMERIC(12,3),
+    peso_base_facturado          TEXT NOT NULL DEFAULT 'NO_INFORMADO',
+    motivo_diferencia            TEXT NOT NULL DEFAULT 'OTRO',
+    formula_version              TEXT NOT NULL DEFAULT 'MARGEN_PROTEGIDO_V1',
+    calculo_hash                 TEXT NOT NULL,
+    evidencias                   JSONB NOT NULL DEFAULT '[]'::jsonb,
+    evidencia_completa           BOOLEAN NOT NULL DEFAULT FALSE,
+    calculado_por                TEXT NOT NULL,
+    calculado_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    aprobado_por                 TEXT,
+    aprobado_at                  TIMESTAMPTZ,
+    created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_conciliacion_envio_version UNIQUE (solicitud_id, version),
+    CONSTRAINT uq_conciliacion_calculo_hash UNIQUE (calculo_hash),
+    CONSTRAINT ck_conciliacion_version CHECK (version > 0),
+    CONSTRAINT ck_conciliacion_estado CHECK (
+        estado IN (
+            'BORRADOR','PARA_REVISION','APROBADA','RECLAMADA',
+            'CERRADA','ANULADA'
+        )
+    ),
+    CONSTRAINT ck_conciliacion_importes CHECK (
+        precio_cliente_inicial_ars >= 0
+        AND costo_courier_estimado_ars >= 0
+        AND margen_tauro_protegido_ars >= 0
+        AND precio_cliente_final_ars >= 0
+    ),
+    CONSTRAINT ck_conciliacion_formula_final CHECK (
+        ABS(
+            precio_cliente_final_ars
+            - costo_courier_real_ars
+            - margen_tauro_protegido_ars
+        ) <= 0.02
+    ),
+    CONSTRAINT ck_conciliacion_formula_ajuste CHECK (
+        ABS(
+            ajuste_cliente_ars
+            - precio_cliente_final_ars
+            + precio_cliente_inicial_ars
+        ) <= 0.02
+    ),
+    CONSTRAINT ck_conciliacion_pesos CHECK (
+        COALESCE(peso_cotizado_kg, 0) >= 0
+        AND COALESCE(peso_real_facturado_kg, 0) >= 0
+        AND COALESCE(peso_volumetrico_facturado_kg, 0) >= 0
+        AND COALESCE(peso_final_facturado_kg, 0) >= 0
+    ),
+    CONSTRAINT ck_conciliacion_peso_base CHECK (
+        peso_base_facturado IN (
+            'REAL','VOLUMETRICO','DECLARADO','OTRO','NO_INFORMADO'
+        )
+    ),
+    CONSTRAINT ck_conciliacion_motivo CHECK (
+        motivo_diferencia IN (
+            'PESO_REAL','PESO_VOLUMETRICO','RECARGO','IMPUESTOS',
+            'DEVOLUCION','DESCUENTO','MIXTO','SIN_DIFERENCIA','OTRO'
+        )
+    ),
+    CONSTRAINT ck_conciliacion_hash CHECK (
+        calculo_hash ~ '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT ck_conciliacion_aprobacion CHECK (
+        estado NOT IN ('APROBADA','CERRADA')
+        OR (NULLIF(BTRIM(aprobado_por), '') IS NOT NULL
+            AND aprobado_at IS NOT NULL AND evidencia_completa)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_conciliacion_envio_activa
+    ON conciliaciones_envio (solicitud_id)
+    WHERE estado IN ('BORRADOR','PARA_REVISION','APROBADA','RECLAMADA');
+CREATE INDEX IF NOT EXISTS ix_conciliacion_estado_fecha
+    ON conciliaciones_envio (estado, calculado_at DESC);
+
+CREATE OR REPLACE FUNCTION tauro_proteger_calculo_conciliacion()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.solicitud_id IS DISTINCT FROM NEW.solicitud_id
+       OR OLD.version IS DISTINCT FROM NEW.version
+       OR OLD.precio_cliente_inicial_ars IS DISTINCT FROM NEW.precio_cliente_inicial_ars
+       OR OLD.costo_courier_estimado_ars IS DISTINCT FROM NEW.costo_courier_estimado_ars
+       OR OLD.margen_tauro_protegido_ars IS DISTINCT FROM NEW.margen_tauro_protegido_ars
+       OR OLD.costo_courier_real_ars IS DISTINCT FROM NEW.costo_courier_real_ars
+       OR OLD.precio_cliente_final_ars IS DISTINCT FROM NEW.precio_cliente_final_ars
+       OR OLD.ajuste_cliente_ars IS DISTINCT FROM NEW.ajuste_cliente_ars
+       OR OLD.peso_cotizado_kg IS DISTINCT FROM NEW.peso_cotizado_kg
+       OR OLD.peso_real_facturado_kg IS DISTINCT FROM NEW.peso_real_facturado_kg
+       OR OLD.peso_volumetrico_facturado_kg IS DISTINCT FROM NEW.peso_volumetrico_facturado_kg
+       OR OLD.peso_final_facturado_kg IS DISTINCT FROM NEW.peso_final_facturado_kg
+       OR OLD.peso_base_facturado IS DISTINCT FROM NEW.peso_base_facturado
+       OR OLD.motivo_diferencia IS DISTINCT FROM NEW.motivo_diferencia
+       OR OLD.formula_version IS DISTINCT FROM NEW.formula_version
+       OR OLD.calculo_hash IS DISTINCT FROM NEW.calculo_hash
+       OR OLD.evidencias IS DISTINCT FROM NEW.evidencias
+       OR OLD.calculado_por IS DISTINCT FROM NEW.calculado_por
+       OR OLD.calculado_at IS DISTINCT FROM NEW.calculado_at THEN
+        RAISE EXCEPTION 'El cálculo de conciliación es inmutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_proteger_calculo_conciliacion
+    ON conciliaciones_envio;
+CREATE TRIGGER trg_proteger_calculo_conciliacion
+BEFORE UPDATE ON conciliaciones_envio
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_calculo_conciliacion();
+
+-- 6) El cálculo sólo propone un débito o crédito. Aplicarlo al saldo exige
+--    aprobación explícita y queda identificado por una clave idempotente.
+CREATE TABLE IF NOT EXISTS ajustes_cliente (
+    id                    BIGSERIAL PRIMARY KEY,
+    conciliacion_id       BIGINT NOT NULL UNIQUE
+        REFERENCES conciliaciones_envio(id) ON DELETE RESTRICT,
+    solicitud_id          INTEGER NOT NULL REFERENCES solicitudes_guia(id)
+        ON DELETE RESTRICT,
+    tipo                  TEXT NOT NULL,
+    monto_ars             NUMERIC(18,4) NOT NULL,
+    precio_anterior_ars   NUMERIC(18,4) NOT NULL,
+    precio_nuevo_ars      NUMERIC(18,4) NOT NULL,
+    estado                TEXT NOT NULL DEFAULT 'PROPUESTO',
+    idempotency_key       TEXT NOT NULL UNIQUE,
+    motivo                TEXT,
+    propuesto_por         TEXT NOT NULL,
+    aprobado_por          TEXT,
+    aprobado_at           TIMESTAMPTZ,
+    aplicado_por          TEXT,
+    aplicado_at           TIMESTAMPTZ,
+    referencia_aplicacion TEXT,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_ajuste_tipo_monto CHECK (
+        (tipo = 'DEBITO' AND monto_ars > 0)
+        OR (tipo = 'CREDITO' AND monto_ars < 0)
+    ),
+    CONSTRAINT ck_ajuste_formula CHECK (
+        ABS(monto_ars - precio_nuevo_ars + precio_anterior_ars) <= 0.02
+    ),
+    CONSTRAINT ck_ajuste_precios CHECK (
+        precio_anterior_ars >= 0 AND precio_nuevo_ars >= 0
+    ),
+    CONSTRAINT ck_ajuste_estado CHECK (
+        estado IN ('PROPUESTO','APROBADO','APLICADO','ANULADO')
+    ),
+    CONSTRAINT ck_ajuste_aprobado CHECK (
+        estado NOT IN ('APROBADO','APLICADO')
+        OR (NULLIF(BTRIM(aprobado_por), '') IS NOT NULL
+            AND aprobado_at IS NOT NULL)
+    ),
+    CONSTRAINT ck_ajuste_aplicado CHECK (
+        estado <> 'APLICADO'
+        OR (NULLIF(BTRIM(aplicado_por), '') IS NOT NULL
+            AND aplicado_at IS NOT NULL
+            AND NULLIF(BTRIM(referencia_aplicacion), '') IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS ix_ajuste_cliente_estado_fecha
+    ON ajustes_cliente (estado, created_at DESC);
+
+CREATE OR REPLACE FUNCTION tauro_validar_ajuste_cliente()
+RETURNS TRIGGER AS $$
+DECLARE
+    conciliacion_actual RECORD;
+BEGIN
+    IF TG_OP = 'UPDATE' AND (
+        OLD.conciliacion_id IS DISTINCT FROM NEW.conciliacion_id
+        OR OLD.solicitud_id IS DISTINCT FROM NEW.solicitud_id
+        OR OLD.tipo IS DISTINCT FROM NEW.tipo
+        OR OLD.monto_ars IS DISTINCT FROM NEW.monto_ars
+        OR OLD.precio_anterior_ars IS DISTINCT FROM NEW.precio_anterior_ars
+        OR OLD.precio_nuevo_ars IS DISTINCT FROM NEW.precio_nuevo_ars
+        OR OLD.idempotency_key IS DISTINCT FROM NEW.idempotency_key
+    ) THEN
+        RAISE EXCEPTION 'Los importes y la identidad del ajuste son inmutables';
+    END IF;
+
+    SELECT solicitud_id, estado, precio_cliente_inicial_ars,
+           precio_cliente_final_ars, ajuste_cliente_ars
+      INTO conciliacion_actual
+      FROM conciliaciones_envio
+     WHERE id = NEW.conciliacion_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Conciliación inexistente: %', NEW.conciliacion_id;
+    END IF;
+    IF conciliacion_actual.solicitud_id <> NEW.solicitud_id
+       OR ABS(conciliacion_actual.precio_cliente_inicial_ars
+            - NEW.precio_anterior_ars) > 0.02
+       OR ABS(conciliacion_actual.precio_cliente_final_ars
+            - NEW.precio_nuevo_ars) > 0.02
+       OR ABS(conciliacion_actual.ajuste_cliente_ars - NEW.monto_ars) > 0.02 THEN
+        RAISE EXCEPTION 'El ajuste no coincide con la conciliación';
+    END IF;
+    IF NEW.estado IN ('APROBADO','APLICADO')
+       AND conciliacion_actual.estado NOT IN ('APROBADA','CERRADA') THEN
+        RAISE EXCEPTION 'La conciliación debe estar aprobada antes del ajuste';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_ajuste_cliente ON ajustes_cliente;
+CREATE TRIGGER trg_validar_ajuste_cliente
+BEFORE INSERT OR UPDATE ON ajustes_cliente
+FOR EACH ROW EXECUTE FUNCTION tauro_validar_ajuste_cliente();
+
+-- 7) Auditoría permanente del módulo. No comparte la política de retención
+--    corta de security_audit porque forma parte de la evidencia financiera.
+CREATE TABLE IF NOT EXISTS auditoria_facturas_courier (
+    id               BIGSERIAL PRIMARY KEY,
+    evento           TEXT NOT NULL,
+    factura_id       BIGINT REFERENCES facturas_courier(id) ON DELETE RESTRICT,
+    item_id          BIGINT REFERENCES facturas_courier_items(id) ON DELETE RESTRICT,
+    solicitud_id     INTEGER REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    conciliacion_id  BIGINT REFERENCES conciliaciones_envio(id) ON DELETE RESTRICT,
+    ajuste_id        BIGINT REFERENCES ajustes_cliente(id) ON DELETE RESTRICT,
+    actor            TEXT NOT NULL,
+    metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_auditoria_courier_fecha
+    ON auditoria_facturas_courier (created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_auditoria_courier_solicitud
+    ON auditoria_facturas_courier (solicitud_id, created_at DESC);
+
+-- Ningún documento financiero se borra físicamente. Los errores se anulan o
+-- rechazan preservando evidencia. DROP SCHEMA de tests/migraciones no dispara
+-- estos triggers y sigue siendo posible.
+CREATE OR REPLACE FUNCTION tauro_bloquear_borrado_financiero()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Los registros financieros no se eliminan; deben anularse';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION tauro_bloquear_mutacion_snapshot()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'El snapshot de cotización aceptada es inmutable';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION tauro_bloquear_mutacion_auditoria()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'La auditoría financiera es append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DO $$
+DECLARE
+    tabla TEXT;
+    trigger_nombre TEXT;
+BEGIN
+    FOREACH tabla IN ARRAY ARRAY[
+        'facturas_courier',
+        'facturas_courier_items',
+        'factura_courier_item_matches',
+        'conciliaciones_envio',
+        'ajustes_cliente',
+        'auditoria_facturas_courier'
+    ]
+    LOOP
+        trigger_nombre := 'trg_no_delete_' || tabla;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger
+             WHERE tgrelid = TO_REGCLASS(tabla)
+               AND tgname = trigger_nombre
+               AND NOT tgisinternal
+        ) THEN
+            EXECUTE FORMAT(
+                'CREATE TRIGGER %I BEFORE DELETE ON %I '
+                'FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_borrado_financiero()',
+                trigger_nombre, tabla
+            );
+        END IF;
+    END LOOP;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_snapshot_inmutable
+    ON envio_cotizacion_snapshots;
+CREATE TRIGGER trg_snapshot_inmutable
+BEFORE UPDATE OR DELETE ON envio_cotizacion_snapshots
+FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_mutacion_snapshot();
+
+DROP TRIGGER IF EXISTS trg_auditoria_courier_append_only
+    ON auditoria_facturas_courier;
+CREATE TRIGGER trg_auditoria_courier_append_only
+BEFORE UPDATE ON auditoria_facturas_courier
+FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_mutacion_auditoria();
+
 -- Valores default de config
 INSERT INTO config (parametro, valor) VALUES
     ('COTIZACION_DOLAR_ARS', '1450'),

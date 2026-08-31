@@ -55,6 +55,16 @@ def test_readiness_contable_usa_una_consulta_de_catalogo_y_acepta_schema_listo()
     assert "TO_REGCLASS('cotizaciones_web')" in sql
     assert "uq_lead_cotizacion_email" in sql
     assert "VERIFICAR_EMAIL" in sql
+    assert "TO_REGCLASS('envio_cotizacion_snapshots')" in sql
+    assert "TO_REGCLASS('facturas_courier')" in sql
+    assert "uq_factura_courier_documento" in sql
+    assert "trg_validar_match_factura_courier" in sql
+    assert "trg_validar_ajuste_cliente" in sql
+    assert "trg_snapshot_inmutable" in sql
+    assert "trg_validar_snapshot_cotizacion" in sql
+    assert "trg_proteger_factura_con_items" in sql
+    assert "trg_auditoria_courier_append_only" in sql
+    assert "ck_conciliacion_formula_final" in sql
 
 
 @pytest.mark.parametrize("campo", database._READINESS_CONTABLE_CAMPOS)
