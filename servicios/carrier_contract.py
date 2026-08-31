@@ -40,6 +40,7 @@ CAPACIDADES_NACIONALES_CONFIRMADAS = frozenset({
     Capacidad.ETIQUETA,
     Capacidad.TRACKING,
 })
+CAPACIDADES_SOLO_COTIZACION = frozenset({Capacidad.COTIZAR})
 
 
 @dataclass(frozen=True)
@@ -116,9 +117,15 @@ CARRIER_SPECS: Tuple[CarrierSpec, ...] = (
         nombre="OCA",
         ambitos=frozenset({Ambito.NACIONAL}),
         logo="/static/img/carriers/oca.svg",
-        capacidades=CAPACIDADES_NACIONALES_CONFIRMADAS,
-        implementacion="pendiente",
-        variables_requeridas=("OCA_USUARIO", "OCA_PASSWORD", "OCA_CUIT"),
+        capacidades=CAPACIDADES_SOLO_COTIZACION,
+        implementacion="operativa",
+        variables_requeridas=(
+            "OCA_USUARIO",
+            "OCA_PASSWORD",
+            "OCA_CUIT",
+            "OCA_CUENTA",
+            "OCA_OPERATIVA",
+        ),
     ),
 )
 

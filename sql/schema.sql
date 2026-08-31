@@ -643,6 +643,102 @@ CREATE TABLE IF NOT EXISTS config_envio_tienda (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Tiendanube: OAuth, lifecycle y claim seguro posterior. Una instalación
+-- iniciada desde la App Store puede existir sin cliente TAURO; el navegador
+-- que completó OAuth recibe el secreto y acá sólo se conserva su hash.
+CREATE TABLE IF NOT EXISTS tiendanube_instalaciones (
+    id                   SERIAL PRIMARY KEY,
+    store_id             TEXT NOT NULL UNIQUE,
+    access_token         TEXT NOT NULL,
+    cliente_id           TEXT,
+    nombre               TEXT,
+    estado               TEXT NOT NULL DEFAULT 'ACTIVA',
+    install_generation   TEXT,
+    webhooks_ready       BOOLEAN NOT NULL DEFAULT FALSE,
+    webhooks_verified_at TIMESTAMPTZ,
+    claim_token_hash     TEXT,
+    claim_expires_at     TIMESTAMPTZ,
+    instalada_en         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    suspendida_en        TIMESTAMPTZ,
+    desinstalada_en      TIMESTAMPTZ,
+    redactada_en         TIMESTAMPTZ
+);
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS estado TEXT NOT NULL DEFAULT 'ACTIVA';
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS webhooks_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS webhooks_verified_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS claim_token_hash TEXT;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS actualizada_en TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS suspendida_en TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS desinstalada_en TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS redactada_en TIMESTAMPTZ;
+UPDATE tiendanube_instalaciones
+   SET install_generation = md5(
+       store_id || ':' || instalada_en::text || ':' || random()::text
+   )
+ WHERE install_generation IS NULL OR BTRIM(install_generation) = '';
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ALTER COLUMN install_generation SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS tiendanube_lifecycle_eventos (
+    id                 BIGSERIAL PRIMARY KEY,
+    store_id           TEXT NOT NULL,
+    evento             TEXT NOT NULL,
+    install_generation TEXT NOT NULL,
+    recibido_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_tiendanube_lifecycle_store
+    ON tiendanube_lifecycle_eventos(store_id, recibido_at DESC);
+
+-- El endpoint sólo responde 2xx después de este INSERT. El worker puede
+-- reiniciarse, recuperar PROCESANDO stale y aplicar backoff sin perder eventos.
+CREATE TABLE IF NOT EXISTS tiendanube_webhook_eventos (
+    evento_id          TEXT PRIMARY KEY,
+    store_id           TEXT NOT NULL,
+    evento             TEXT NOT NULL,
+    recurso_id         TEXT NOT NULL DEFAULT '',
+    install_generation TEXT NOT NULL,
+    payload            JSONB NOT NULL,
+    estado             TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos           INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_error       TEXT,
+    recibido_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at         TIMESTAMPTZ,
+    procesado_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_tiendanube_webhook_pendientes
+    ON tiendanube_webhook_eventos(estado, proximo_intento_at, recibido_at);
+
+-- No persiste email, teléfono ni identificación del consumidor. La solicitud
+-- conserva sólo referencias necesarias para responder al merchant.
+CREATE TABLE IF NOT EXISTS tiendanube_privacidad_solicitudes (
+    id          BIGSERIAL PRIMARY KEY,
+    request_id  TEXT NOT NULL,
+    store_id    TEXT NOT NULL,
+    tipo        TEXT NOT NULL,
+    customer_id TEXT NOT NULL DEFAULT '',
+    recursos    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    estado      TEXT NOT NULL DEFAULT 'PENDIENTE',
+    creado_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resuelto_at TIMESTAMPTZ,
+    UNIQUE(store_id, tipo, request_id)
+);
+CREATE INDEX IF NOT EXISTS ix_tiendanube_privacidad_pendientes
+    ON tiendanube_privacidad_solicitudes(estado, creado_at);
+
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (
     id           SERIAL PRIMARY KEY,

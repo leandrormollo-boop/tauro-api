@@ -1,68 +1,70 @@
-# Conectar TAURO Solutions con Tiendanube
+# TAURO Nacional en Tiendanube
 
-Guía para dejar la integración de Tiendanube operativa. Actualizada 03/08/2026.
+Estado de trabajo actualizado: 31/08/2026.
 
----
+La integración ya no se considera lista por tener OAuth y webhooks de pedidos.
+Para publicarla como solución nacional debe completar también el contrato de
+**Shipping Carrier**, cotizar en el checkout con tarifas contractuales y pasar
+la homologación síncrona de Tiendanube.
 
-## Estado del código: LISTO
+## Arquitectura preparada
 
-El backend está completo y cableado al mismo pipeline que Shopify:
+- OAuth y almacenamiento por `store_id`.
+- Webhooks de pedidos y ciclo de vida.
+- Ingreso del pedido al portal TAURO sin emitir una guía automáticamente.
+- Actualización de tracking al despachar.
+- Callback de tarifas `TAURO Nacional` protegido por token por tienda.
+- Contrato fail-closed: sin adapter nacional operativo no se publica tarifa.
+- Soporte de carrito mixto con `price` y `price_merchant` separados.
+- Extensión NubeSDK aislada, sin DOM, en `tiendanube_nube_app/`.
 
-- OAuth: canje del `code` por token permanente, alta de la instalación.
-- **Anti-CSRF**: el botón del portal siembra un `state` en cookie; el callback
-  sólo ata la tienda a tu cuenta si ese state vuelve (un callback disparado por
-  un tercero no puede colgar una tienda ajena en tu cuenta).
-- Webhooks firmados con HMAC-SHA256 en **hexadecimal** (Tiendanube firma
-  distinto a Shopify) verificados con el client_secret.
-- El webhook trae sólo el id → se busca el pedido completo en la API.
-- Parser propio: dirección, piso, items, peso, y el **flete cobrado**
-  (`shipping_cost_customer`) para comparar contra el costo real de la guía.
-- Venta → solicitud de guía automática (la guía NO se emite sola).
-- Al emitir la guía, el pedido pasa a "enviado" (shipped) con tracking en
-  Tiendanube.
-- Registro automático de webhooks (order created/updated/cancelled,
-  app/uninstalled) y desinstalación.
-- El botón "Instalar app de Tiendanube" aparece solo en el portal
-  (`/portal/tienda`) cuando la app está configurada.
+## Bloqueadores externos y comerciales
 
-La integración se **enciende sola** cuando estén las dos env vars.
+1. Crear o confirmar la app **TAURO Nacional** en Partners, categoría Shipping.
+2. Habilitar solamente `write_shipping`, `write_orders` y `read_customers`.
+3. Pedir al Platform Team de Tiendanube acceso a Shipping API para la cuenta y
+   la tienda demo: <https://forms.gle/oqP1BrtwMzNb7xCM9>.
+4. Configurar la redirect URL:
+   `https://taurosolutions.ar/integraciones/tiendanube/callback`.
+5. Completar OCA con credenciales contractuales propias y validar en QA la
+   cotización ya implementada. Andreani continúa pendiente.
+6. Ejecutar UAT de cotización OCA con una respuesta real anonimizada. Emisión,
+   etiqueta, cancelación y tracking siguen bloqueados hasta cerrar su contrato
+   neutral e idempotencia.
+7. Completar los artefactos y solicitar homologación síncrona.
 
----
+## Variables de producción
 
-## Qué tenés que cargar vos
+```text
+BASE_URL=https://taurosolutions.ar
+TIENDANUBE_CLIENT_ID=
+TIENDANUBE_CLIENT_SECRET=
+TIENDANUBE_TOKEN_ENCRYPTION_KEY=
+TIENDANUBE_SHIPPING_ACCESS_APPROVED=false
+TIENDANUBE_DEMO_STORE_ID=
+TIENDANUBE_SHIPPING_ENABLED=false
+TAURO_NACIONAL_RATES_READY=false
+TIENDANUBE_HOMOLOGATION_APPROVED=false
+OCA_ADAPTER_ENABLED=false
+OCA_UAT_APPROVED=false
+OCA_ENVIRONMENT=qa
+OCA_PRODUCTION_APPROVED=false
+```
 
-### 1. App en el Partners Portal de Tiendanube (partners.tiendanube.com)
-- Crear/registrar la app de TAURO y obtener **Client ID** y **Client Secret**.
-  (Si figura "en trámite", esperar la aprobación de Tiendanube.)
-- **Redirect URI** (exacta):
-  `https://taurosolutions.ar/integraciones/tiendanube/callback`
-- **Permisos**: leer pedidos + escribir estado de envío (marcar shipped +
-  tracking). Sin el write de órdenes, el aviso de "enviado" falla.
+Los dos flags permanecen en `false` hasta que el adapter nacional, sus tarifas
+y el UAT estén aprobados. La mera presencia del Client ID y el Client Secret no
+habilita el medio de envío.
 
-### 2. Credenciales (Railway → Variables)
-- `TIENDANUBE_CLIENT_ID`
-- `TIENDANUBE_CLIENT_SECRET`
-- `BASE_URL=https://taurosolutions.ar` (o dejar el default).
+## Artefactos
 
-Apenas las dos existan, `app_configurada()` da True: el callback deja de
-responder 503, el webhook empieza a procesar y en el portal aparece el botón
-de instalación.
+- [Checklist de homologación](tiendanube/HOMOLOGACION_CHECKLIST.md)
+- [Diagrama de secuencia](tiendanube/SEQUENCE_DIAGRAM.md)
+- [Guion de video demo](tiendanube/DEMO_SCRIPT.md)
+- [Copy de publicación](tiendanube/LISTING_COPY.md)
 
-### 3. Cómo instala un comerciante
-Entra a su portal TAURO → **Mi tienda** → **Instalar app de Tiendanube** →
-autoriza en Tiendanube → vuelve con la tienda ya atada a su cuenta.
+## Referencias oficiales
 
-### 4. Primera venta real
-Como con cualquier courier nuevo, mirar de cerca la primera venta de Tiendanube
-end-to-end: parseo → solicitud automática → al emitir, que el "enviado" con
-tracking llegue de vuelta a Tiendanube.
-
----
-
-## Diferencia con Shopify (para no confundirlas)
-- **Shopify**: la instalación empieza exclusivamente desde Shopify Apps y
-  vuelve a TAURO por OAuth; el cliente nunca escribe dominio ni secretos.
-  Firma HMAC en base64.
-- **Tiendanube**: se conecta por OAuth con un botón. Firma HMAC en hexadecimal,
-  header `x-linkedstore-hmac-sha256`. Token que no vence, tienda identificada
-  por `store_id` numérico (no por dominio).
+- Shipping Provider: <https://nuvemshop.dev/api/guides/shipping-provider>
+- Shipping Carrier API: <https://tiendanube.github.io/api-documentation/v1/resources/shipping-carrier>
+- Requisitos de homologación: <https://dev.tiendanube.com/docs/homologation/requirements>
+- Directrices de publicación: <https://dev.tiendanube.com/docs/applications/guidelines>

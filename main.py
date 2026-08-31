@@ -19,6 +19,7 @@ from core.database import init_db
 from endpoints.portal_cliente import router as portal_router
 from endpoints.admin import router as admin_router
 from endpoints.integraciones import router as integraciones_router
+from endpoints.tiendanube_shipping import router as tiendanube_shipping_router
 from endpoints.shopify import router as shopify_router
 from servicios.api_b2b import (
     obtener_cliente_por_api_key,
@@ -59,6 +60,15 @@ def _importe_json(valor):
     return parse_float_formulario(valor, "Valor declarado", importe=True, minimo=0)
 
 load_dotenv()
+
+# El adapter no toca red durante el arranque. Una configuración inválida nunca
+# publica tarifas, pero tampoco tira abajo toda la API: el preflight mantiene
+# el release bloqueado y Shipping continúa fail-closed.
+from servicios.oca_adapter import OCAConfigurationError, register_oca_from_env
+try:
+    register_oca_from_env()
+except OCAConfigurationError:
+    print("[startup] OCA adapter no registrado: configuración incompleta")
 
 # Documentación interactiva SÓLO fuera de producción. Estaba abierta al
 # público: /docs le daba a cualquiera el mapa completo de la API — rutas de
@@ -300,6 +310,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(integraciones_router)
+app.include_router(tiendanube_shipping_router)
 app.include_router(shopify_router)
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
@@ -1520,6 +1531,28 @@ scheduler.add_job(
     trigger="cron",
     hour=3,
     minute=50,
+    max_instances=1,
+    coalesce=True,
+)
+
+# Tiendanube confirma cada webhook únicamente después de persistirlo. Este
+# worker procesa pedidos/lifecycle/privacidad y recupera reintentos aunque la
+# instancia se haya reiniciado después del ACK.
+from servicios.tiendanube_app import (
+    procesar_cola_eventos as procesar_webhooks_tiendanube,
+    reconciliar_instalaciones_pendientes as reconciliar_tiendanube,
+)
+scheduler.add_job(
+    procesar_webhooks_tiendanube,
+    trigger="interval",
+    seconds=15,
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    reconciliar_tiendanube,
+    trigger="interval",
+    minutes=5,
     max_instances=1,
     coalesce=True,
 )

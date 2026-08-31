@@ -65,7 +65,7 @@ def test_adapter_completo_se_registra_y_resuelve_por_capacidad():
     adapter = CompleteFakeAdapter()
     register_adapter(adapter)
     assert registered_adapters() == ("oca",)
-    assert adapter_for("oca", "emitir") is adapter
+    assert adapter_for("oca", "cotizar") is adapter
 
 
 def test_no_registra_operador_desconocido():
