@@ -938,6 +938,7 @@ class DHLClient(CarrierBase):
         try:
             resp = requests.get(
                 f"{self.base_url}/shipments/{tracking_number}/tracking",
+                params={"requestGMTOffsetPerEvent": "true"},
                 auth=(self.api_key, self.api_secret),
                 headers={"Accept": "application/json", "x-version": self.API_VERSION},
                 timeout=30,
@@ -949,12 +950,56 @@ class DHLClient(CarrierBase):
                 return {"encontrado": False, "error": "Sin datos de tracking"}
             env = envios[0]
             eventos = env.get("events") or []
+            # `shipments[].status` informa si la consulta fue exitosa; no es
+            # el estado logístico. El avance real vive en el evento más
+            # reciente. Elegimos por fecha/hora para no depender del orden de
+            # la respuesta de DHL.
+            def _clave_evento(par):
+                indice, evento = par
+                fecha = str(evento.get("date") or "")
+                hora = str(evento.get("time") or "")
+                timestamp = str(
+                    evento.get("timestamp")
+                    or evento.get("dateTime")
+                    or evento.get("gmtDateTime")
+                    or ""
+                )
+                if not timestamp:
+                    offset = str(evento.get("GMTOffset") or "")
+                    timestamp = f"{fecha}T{hora}{offset}"
+                try:
+                    instante = datetime.fromisoformat(
+                        timestamp.replace("Z", "+00:00")
+                    ).timestamp()
+                except (TypeError, ValueError):
+                    instante = float("-inf")
+                return (instante, timestamp, indice)
+
+            ultimo_evento = None
+            eventos_validos = [e for e in eventos if isinstance(e, dict)]
+            if eventos_validos:
+                ultimo_evento = max(
+                    enumerate(eventos_validos), key=_clave_evento
+                )[1]
+            estado_evento = ""
+            descripcion_evento = ""
+            if ultimo_evento:
+                estado_evento = str(
+                    ultimo_evento.get("typeCode")
+                    or ultimo_evento.get("statusCode")
+                    or ultimo_evento.get("eventType")
+                    or ""
+                ).strip().upper()
+                descripcion_evento = str(
+                    ultimo_evento.get("description") or ""
+                ).strip()
             return {
                 "encontrado": True,
-                "estado": (env.get("status") or "").upper(),
-                "descripcion": env.get("description") or "",
-                "eventos": eventos,
-                "ultimo_evento": eventos[0] if eventos else None,
+                "estado": estado_evento,
+                "estado_consulta": str(env.get("status") or "").upper(),
+                "descripcion": descripcion_evento,
+                "eventos": eventos_validos,
+                "ultimo_evento": ultimo_evento,
             }
         except Exception as e:
             return {"encontrado": False, "error": str(e)}

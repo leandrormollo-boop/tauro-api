@@ -1191,6 +1191,11 @@ def estado_pedido(solicitud_id: int, x_api_key: str = Header(default=None)):
         "courier": courier or None,
         "servicio": solicitud.get("servicio_courier"),
         "tracking": tracking or None,
+        "tracking_estado": solicitud.get("tracking_estado"),
+        "tracking_descripcion": solicitud.get("tracking_descripcion"),
+        "tracking_actualizado_en": _fecha_api(
+            solicitud.get("tracking_actualizado_at")
+        ),
         "tracking_url": url_tracking(courier, tracking) if tracking else None,
         "guia_disponible": bool(solicitud.get("tiene_label")),
         "guia_url": (
@@ -1257,6 +1262,11 @@ def listar_envios_b2b(
             "precio_tauro_ars": envio.get("precio_tauro_ars"),
             "precio_tauro_usd": envio.get("precio_tauro_usd"),
             "tracking": tracking or None,
+            "tracking_estado": envio.get("tracking_estado"),
+            "tracking_descripcion": envio.get("tracking_descripcion"),
+            "tracking_actualizado_en": _fecha_api(
+                envio.get("tracking_actualizado_at")
+            ),
             "guia_disponible": bool(envio.get("tiene_label")),
             "estado_url": f"/pedidos/{envio['id']}",
             "guia_url": f"/pedidos/{envio['id']}/guia.pdf" if envio.get("tiene_label") else None,
@@ -1422,6 +1432,36 @@ scheduler.add_job(
     trigger="cron",
     hour=3,
     minute=0,
+)
+
+
+# Rastreo DHL diario: la página lee el snapshot persistido y nunca llama al
+# courier al refrescarse. Un advisory lock evita que dos procesos ejecuten el
+# mismo lote y los envíos entregados quedan fuera definitivamente.
+def _entero_cron(nombre: str, default: int, minimo: int, maximo: int) -> int:
+    try:
+        valor = int(os.getenv(nombre, str(default)))
+    except ValueError:
+        valor = default
+    if valor < minimo or valor > maximo:
+        print(f"[scheduler] {nombre} inválido; se usa {default}.")
+        return default
+    return valor
+
+
+from servicios.tracking_envios import actualizar_trackings_diarios_seguro
+
+_DHL_TRACKING_HORA = _entero_cron("DHL_TRACKING_CRON_HOUR", 5, 0, 23)
+_DHL_TRACKING_MINUTO = _entero_cron("DHL_TRACKING_CRON_MINUTE", 20, 0, 59)
+scheduler.add_job(
+    actualizar_trackings_diarios_seguro,
+    trigger="cron",
+    hour=_DHL_TRACKING_HORA,
+    minute=_DHL_TRACKING_MINUTO,
+    max_instances=1,
+    coalesce=True,
+    id="tracking_dhl_diario",
+    replace_existing=True,
 )
 
 
@@ -1686,8 +1726,19 @@ def _tarifas_al_arrancar():
 # Railway mata el deploy si el healthcheck no responde a tiempo.
 import threading
 threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
+# Ejecuta el primer control sin esperar al próximo horario de cron. El filtro
+# por fecha de Argentina y el advisory lock mantienen, aun con reinicios o
+# varios workers, una sola consulta por día y por guía pendiente.
+threading.Thread(
+    target=actualizar_trackings_diarios_seguro,
+    daemon=True,
+).start()
 
 print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
 print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
+print(
+    "[scheduler] Rastreo DHL diario: "
+    f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
+)
 print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
 print(f"[scheduler] Centinela del checkout: cada 15 min")

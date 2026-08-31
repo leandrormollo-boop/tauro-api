@@ -251,6 +251,37 @@ def test_un_error_de_dhl_no_lanza_excepcion():
     assert "missing parameter" not in out["error"]
 
 
+def test_tracking_usa_ultimo_evento_y_no_status_success_de_la_consulta():
+    resp = mock.Mock(status_code=200)
+    resp.json.return_value = {
+        "shipments": [{
+            "shipmentTrackingNumber": "1234567890",
+            "status": "Success",
+            "description": "Contenido del envío",
+            "events": [
+                {
+                    "date": "2026-08-31", "time": "13:00:00",
+                    "typeCode": "OK", "description": "Shipment delivered",
+                },
+                {
+                    "date": "2026-08-30", "time": "09:00:00",
+                    "typeCode": "PU", "description": "Shipment picked up",
+                },
+            ],
+        }]
+    }
+
+    with mock.patch("core.dhl_client.requests.get", return_value=resp) as get:
+        resultado = _cliente().track("1234567890")
+
+    assert resultado["encontrado"] is True
+    assert resultado["estado_consulta"] == "SUCCESS"
+    assert resultado["estado"] == "OK"
+    assert resultado["descripcion"] == "Shipment delivered"
+    assert resultado["ultimo_evento"]["typeCode"] == "OK"
+    assert get.call_args.kwargs["params"]["requestGMTOffsetPerEvent"] == "true"
+
+
 # ── Multi-bulto: POST /rates ─────────────────────────────────
 
 BULTOS = [

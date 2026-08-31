@@ -189,7 +189,38 @@ SELECT
           AND c.confrelid = TO_REGCLASS('cotizaciones_web')
           AND c.contype = 'f' AND c.confdeltype = 'r' AND c.convalidated
           AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%cotizacion_id%'
-    ) AS leads_cotizacion_fk_restrict
+    ) AS leads_cotizacion_fk_restrict,
+    (
+        SELECT COUNT(*) = 8
+        FROM information_schema.columns
+        WHERE table_schema = CURRENT_SCHEMA()
+          AND table_name = 'solicitudes_guia'
+          AND column_name IN (
+              'tracking_estado', 'tracking_estado_courier',
+              'tracking_descripcion', 'tracking_consultado_at',
+              'tracking_actualizado_at', 'tracking_finalizado_at',
+              'tracking_error', 'tracking_error_at'
+          )
+    ) AS tracking_dhl_columnas_existen,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('solicitudes_guia')
+          AND c.conname = 'ck_solicitudes_tracking_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%PROCESO_ENTREGA%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%ENTREGADO%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%RETENIDO%'
+    ) AS tracking_dhl_estado_controlado,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS(
+            'idx_solicitudes_tracking_dhl_pendiente'
+        )
+          AND i.indrelid = TO_REGCLASS('solicitudes_guia')
+          AND i.indisvalid AND i.indisready AND i.indpred IS NOT NULL
+    ) AS tracking_dhl_indice_pendiente
 """
 
 _READINESS_CONTABLE_CAMPOS = (
@@ -211,6 +242,9 @@ _READINESS_CONTABLE_CAMPOS = (
     "leads_email_estado_correcto",
     "leads_dedupe_indice_correcto",
     "leads_cotizacion_fk_restrict",
+    "tracking_dhl_columnas_existen",
+    "tracking_dhl_estado_controlado",
+    "tracking_dhl_indice_pendiente",
 )
 
 

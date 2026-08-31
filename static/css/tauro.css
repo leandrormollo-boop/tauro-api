@@ -2966,6 +2966,19 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   font-size: 11px;
 }
 .envio-service-cell .badge { font-size: 8.5px; }
+.envio-service-cell .tracking-updated,
+.envio-service-cell .tracking-alert {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+  line-height: 1.25;
+}
+.envio-service-cell .tracking-updated { color: var(--fg-4); }
+.envio-service-cell .tracking-alert {
+  color: var(--error);
+  font-weight: 650;
+  max-width: 260px;
+}
 .envio-service-cell .track-link {
   display: block;
   width: max-content;
