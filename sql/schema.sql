@@ -1357,18 +1357,69 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia_reemisiones (
     campos_modificados       JSONB NOT NULL DEFAULT '[]'::jsonb,
     motivo                   TEXT,
     estado                   TEXT NOT NULL DEFAULT 'PENDIENTE',
+    -- Riesgo independiente del estado de la reemisión: la guía anterior
+    -- puede seguir siendo físicamente utilizable aunque TAURO la descarte.
+    -- Se controla una sola vez a los 7 días. Sin eventos queda confirmada;
+    -- con movimiento abre alerta. Nunca se reactiva su cargo automáticamente.
+    riesgo_estado            TEXT NOT NULL DEFAULT 'VIGILAR',
+    tracking_anterior_consultado_at TIMESTAMPTZ,
+    tracking_anterior_estado_courier TEXT,
+    tracking_anterior_descripcion TEXT,
+    tracking_anterior_evento_fecha TEXT,
+    tracking_anterior_actualizado_at TIMESTAMPTZ,
+    tracking_anterior_error  TEXT,
+    tracking_anterior_error_at TIMESTAMPTZ,
+    alerta_movimiento_at     TIMESTAMPTZ,
+    riesgo_resuelto_at       TIMESTAMPTZ,
+    riesgo_resuelto_nota     TEXT,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at             TIMESTAMPTZ,
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT ck_solicitudes_guia_reemisiones_distintas
         CHECK (solicitud_anterior_id <> solicitud_nueva_id),
     CONSTRAINT ck_solicitudes_guia_reemisiones_estado
-        CHECK (estado IN ('PENDIENTE', 'EMITIDA', 'VERIFICAR_COURIER'))
+        CHECK (estado IN ('PENDIENTE', 'EMITIDA', 'VERIFICAR_COURIER')),
+    CONSTRAINT ck_solicitudes_guia_reemisiones_riesgo
+        CHECK (riesgo_estado IN (
+            'VIGILAR', 'ALERTA_MOVIMIENTO', 'CERRADA'
+        ))
 );
+-- Compatibilidad con bases que ya recibieron la primera versión de la tabla.
+ALTER TABLE solicitudes_guia_reemisiones
+    ADD COLUMN IF NOT EXISTS riesgo_estado TEXT NOT NULL DEFAULT 'VIGILAR',
+    ADD COLUMN IF NOT EXISTS tracking_anterior_consultado_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS tracking_anterior_estado_courier TEXT,
+    ADD COLUMN IF NOT EXISTS tracking_anterior_descripcion TEXT,
+    ADD COLUMN IF NOT EXISTS tracking_anterior_evento_fecha TEXT,
+    ADD COLUMN IF NOT EXISTS tracking_anterior_actualizado_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS tracking_anterior_error TEXT,
+    ADD COLUMN IF NOT EXISTS tracking_anterior_error_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS alerta_movimiento_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS riesgo_resuelto_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS riesgo_resuelto_nota TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ck_solicitudes_guia_reemisiones_riesgo'
+          AND conrelid = 'solicitudes_guia_reemisiones'::regclass
+    ) THEN
+        ALTER TABLE solicitudes_guia_reemisiones
+            ADD CONSTRAINT ck_solicitudes_guia_reemisiones_riesgo
+            CHECK (riesgo_estado IN (
+                'VIGILAR', 'ALERTA_MOVIMIENTO', 'CERRADA'
+            ));
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_reemisiones_cliente_fecha
     ON solicitudes_guia_reemisiones (cliente_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reemisiones_estado
     ON solicitudes_guia_reemisiones (estado, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reemisiones_riesgo_tracking
+    ON solicitudes_guia_reemisiones (
+        riesgo_estado, completed_at ASC NULLS FIRST, id
+    )
+    WHERE estado = 'EMITIDA' AND riesgo_estado = 'VIGILAR';
 
 -- ── Recolecciones de couriers ──────────────────────────────
 -- Esquema canónico: no se crea ni se modifica desde el primer request. Las

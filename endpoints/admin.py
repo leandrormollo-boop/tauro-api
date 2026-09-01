@@ -190,6 +190,22 @@ def _pendientes_admin() -> int:
 
 templates.env.globals["pendientes_admin"] = _pendientes_admin
 
+
+def _alertas_guias_reemplazadas() -> int:
+    """Contador del menú: tracking viejo con actividad detectada por DHL."""
+    try:
+        from servicios.monitoreo_guias_reemplazadas import (
+            contar_alertas_reemplazadas,
+        )
+        return contar_alertas_reemplazadas()
+    except Exception:
+        return 0
+
+
+templates.env.globals["alertas_guias_reemplazadas"] = (
+    _alertas_guias_reemplazadas
+)
+
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 if not ADMIN_PASSWORD:
     # Fail closed: la clave aleatoria no se revela ni se guarda. El login por
@@ -2056,6 +2072,116 @@ def admin_envio_cancelar(
 
 
 # ── Solicitudes de guía ─────────────────────────────────────
+
+@router.get("/guias-reemplazadas", response_class=HTMLResponse)
+def admin_guias_reemplazadas(
+    request: Request,
+    riesgo: str = "",
+    ok: Optional[str] = None,
+    error: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Bandeja de riesgo: etiquetas descartadas que DHL aún podría aceptar."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.monitoreo_guias_reemplazadas import (
+        RIESGOS_VALIDOS,
+        listar_reemisiones_admin,
+        resumen_reemisiones_admin,
+    )
+
+    riesgo = (riesgo or "").strip().upper()
+    if riesgo not in RIESGOS_VALIDOS:
+        riesgo = ""
+    mensajes = {
+        "consultado": "Tracking anterior consultado en DHL.",
+        "cerrado": "Control cerrado con su constancia de revisión.",
+        "reabierto": "Control reabierto; volverá a verificarse diariamente.",
+    }
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/guias_reemplazadas.html",
+        context={
+            "seccion": "guias_reemplazadas",
+            "reemisiones": listar_reemisiones_admin(riesgo=riesgo),
+            "resumen": resumen_reemisiones_admin(),
+            "riesgo_filtro": riesgo,
+            "flash_ok": mensajes.get(ok or ""),
+            "flash_error": error,
+        },
+    )
+
+
+@router.post("/guias-reemplazadas/{reemision_id}/consultar")
+def admin_guia_reemplazada_consultar(
+    reemision_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.monitoreo_guias_reemplazadas import (
+        actualizar_tracking_reemplazado_dhl,
+    )
+
+    resultado = actualizar_tracking_reemplazado_dhl(reemision_id)
+    if resultado.get("ok") and not resultado.get("omitido"):
+        return RedirectResponse(
+            url="/admin/guias-reemplazadas?ok=consultado", status_code=303
+        )
+    error = resultado.get("error") or (
+        "Este control está cerrado o todavía no corresponde vigilarlo."
+    )
+    return RedirectResponse(
+        url=f"/admin/guias-reemplazadas?error={quote(str(error)[:240])}",
+        status_code=303,
+    )
+
+
+@router.post("/guias-reemplazadas/{reemision_id}/cerrar")
+def admin_guia_reemplazada_cerrar(
+    reemision_id: int,
+    nota: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.monitoreo_guias_reemplazadas import cerrar_control_reemision
+
+    resultado = cerrar_control_reemision(reemision_id, nota)
+    if resultado.get("ok"):
+        return RedirectResponse(
+            url="/admin/guias-reemplazadas?ok=cerrado", status_code=303
+        )
+    return RedirectResponse(
+        url=("/admin/guias-reemplazadas?error="
+             + quote(str(resultado.get("error") or "Error")[:240])),
+        status_code=303,
+    )
+
+
+@router.post("/guias-reemplazadas/{reemision_id}/reabrir")
+def admin_guia_reemplazada_reabrir(
+    reemision_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.monitoreo_guias_reemplazadas import reabrir_control_reemision
+
+    resultado = reabrir_control_reemision(reemision_id)
+    if resultado.get("ok"):
+        return RedirectResponse(
+            url="/admin/guias-reemplazadas?ok=reabierto", status_code=303
+        )
+    return RedirectResponse(
+        url=("/admin/guias-reemplazadas?error="
+             + quote(str(resultado.get("error") or "Error")[:240])),
+        status_code=303,
+    )
+
 
 @router.get("/pedidos", response_class=HTMLResponse)
 def admin_pedidos(

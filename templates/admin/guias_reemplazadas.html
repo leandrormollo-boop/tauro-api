@@ -1,0 +1,156 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Guías reemplazadas{% endblock %}
+
+{% block content %}
+<div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+  <div>
+    <div class="eyebrow">Control de riesgo DHL</div>
+    <h1>Guías reemplazadas</h1>
+    <p>Cada etiqueta descartada se controla una sola vez, siete días después del reemplazo.</p>
+  </div>
+  <a href="/admin/guias-reemplazadas" class="btn btn-ghost btn-sm">Actualizar pantalla</a>
+</div>
+
+<div class="msg warn" style="margin-bottom:18px;">
+  <strong>Importante:</strong> reemplazar una guía en TAURO no anula físicamente la etiqueta en DHL.
+  A los 7 días, si el tracking anterior sigue sin recolección ni movimientos, la cancelación queda confirmada.
+  Si registra un evento, este panel alerta pero <strong>no reactiva el cargo viejo</strong>:
+  primero hay que comprobar la factura del courier y conciliar el caso.
+</div>
+
+<div class="grid-3" style="margin-bottom:18px;">
+  <a href="/admin/guias-reemplazadas?riesgo=ALERTA_MOVIMIENTO" class="card" style="padding:18px;{% if riesgo_filtro == 'ALERTA_MOVIMIENTO' %}border-color:var(--error);{% endif %}">
+    <div class="eyebrow" style="color:var(--error);">Requieren acción</div>
+    <div style="font-size:30px;font-weight:700;margin-top:5px;color:var(--error);">{{ resumen.alertas }}</div>
+    <small style="color:var(--fg-3);">La guía vieja tiene movimiento DHL</small>
+  </a>
+  <a href="/admin/guias-reemplazadas?riesgo=VIGILAR" class="card" style="padding:18px;{% if riesgo_filtro == 'VIGILAR' %}border-color:var(--warn);{% endif %}">
+    <div class="eyebrow" style="color:var(--warn);">Pendientes de control</div>
+    <div style="font-size:30px;font-weight:700;margin-top:5px;">{{ resumen.vigilar }}</div>
+    <small style="color:var(--fg-3);">Esperando el control único a 7 días</small>
+  </a>
+  <a href="/admin/guias-reemplazadas?riesgo=CERRADA" class="card" style="padding:18px;{% if riesgo_filtro == 'CERRADA' %}border-color:var(--line);{% endif %}">
+    <div class="eyebrow">Controles cerrados</div>
+    <div style="font-size:30px;font-weight:700;margin-top:5px;">{{ resumen.cerradas }}</div>
+    <small style="color:var(--fg-3);">Con nota de resolución</small>
+  </a>
+</div>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+  <a href="/admin/guias-reemplazadas" class="btn btn-sm {% if not riesgo_filtro %}btn-primary{% else %}btn-ghost{% endif %}">Todas</a>
+  <a href="/admin/guias-reemplazadas?riesgo=ALERTA_MOVIMIENTO" class="btn btn-sm {% if riesgo_filtro == 'ALERTA_MOVIMIENTO' %}btn-primary{% else %}btn-ghost{% endif %}">Con alerta</a>
+  <a href="/admin/guias-reemplazadas?riesgo=VIGILAR" class="btn btn-sm {% if riesgo_filtro == 'VIGILAR' %}btn-primary{% else %}btn-ghost{% endif %}">Pendientes</a>
+  <a href="/admin/guias-reemplazadas?riesgo=CERRADA" class="btn btn-sm {% if riesgo_filtro == 'CERRADA' %}btn-primary{% else %}btn-ghost{% endif %}">Cerradas</a>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Cliente / reemplazo</th>
+          <th>Tracking descartado</th>
+          <th>Tracking vigente</th>
+          <th>Rastreo DHL de la guía vieja</th>
+          <th>Cuenta corriente</th>
+          <th>Control</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in reemisiones %}
+        <tr {% if r.riesgo_estado == 'ALERTA_MOVIMIENTO' %}style="background:var(--error-glow);"{% endif %}>
+          <td style="min-width:175px;">
+            <strong>{{ r.cliente_id }}</strong>
+            <br><small style="color:var(--fg-4);">{{ r.cliente_nombre or '' }}</small>
+            <div class="mono" style="font-size:10px;margin-top:8px;">#{{ r.solicitud_anterior_id }} → #{{ r.solicitud_nueva_id }}</div>
+            <small style="color:var(--fg-4);">{{ r.completed_at.strftime("%d/%m/%Y %H:%M") if r.completed_at else "—" }}</small>
+            {% if r.motivo %}<br><small style="color:var(--fg-3);">Motivo: {{ r.motivo }}</small>{% endif %}
+          </td>
+          <td style="min-width:175px;">
+            <span class="badge error">Descartada</span>
+            <div class="mono" style="font-size:13px;margin:8px 0;">{{ r.tracking_anterior }}</div>
+            <a href="{{ url_tracking('DHL', r.tracking_anterior) }}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost">Rastrear en DHL ↗</a>
+            {% if r.anterior_tiene_label %}
+              <br><a href="/admin/pedidos/{{ r.solicitud_anterior_id }}/guia.pdf" target="_blank" class="btn btn-sm btn-ghost" style="margin-top:6px;">PDF archivado</a>
+            {% endif %}
+          </td>
+          <td style="min-width:175px;">
+            <span class="badge ok">Vigente</span>
+            <div class="mono" style="font-size:13px;margin:8px 0;">{{ r.tracking_nuevo or 'Pendiente' }}</div>
+            {% if r.tracking_nuevo %}
+              <a href="{{ url_tracking('DHL', r.tracking_nuevo) }}" target="_blank" rel="noopener" class="btn btn-sm btn-ghost">Rastrear vigente ↗</a>
+            {% endif %}
+            {% if r.nueva_tiene_label %}
+              <br><a href="/admin/pedidos/{{ r.solicitud_nueva_id }}/guia.pdf" target="_blank" class="btn btn-sm btn-primary" style="margin-top:6px;">Descargar guía final</a>
+            {% endif %}
+          </td>
+          <td style="min-width:255px;">
+            {% if r.riesgo_estado == 'ALERTA_MOVIMIENTO' %}
+              <span class="badge error">⚠ Movimiento detectado</span>
+              <div style="margin-top:8px;"><strong>{{ r.tracking_anterior_estado_courier or 'Evento DHL' }}</strong></div>
+              <small style="color:var(--error);">{{ r.tracking_anterior_descripcion or 'DHL actualizó el tracking descartado.' }}</small>
+              {% if r.tracking_anterior_evento_fecha %}<br><small class="mono">Evento: {{ r.tracking_anterior_evento_fecha }}</small>{% endif %}
+              {% if r.alerta_movimiento_at %}<br><small style="color:var(--fg-4);">Detectado: {{ r.alerta_movimiento_at.strftime("%d/%m/%Y %H:%M") }}</small>{% endif %}
+            {% elif r.riesgo_estado == 'CERRADA' %}
+              {% if r.alerta_movimiento_at %}
+                <span class="badge muted">Alerta resuelta</span>
+              {% else %}
+                <span class="badge ok">Cancelación confirmada</span>
+              {% endif %}
+              {% if r.riesgo_resuelto_nota %}<div style="font-size:12px;margin-top:8px;">{{ r.riesgo_resuelto_nota }}</div>{% endif %}
+              {% if r.riesgo_resuelto_at %}<small style="color:var(--fg-4);">{{ r.riesgo_resuelto_at.strftime("%d/%m/%Y %H:%M") }}</small>{% endif %}
+            {% elif r.tracking_anterior_error %}
+              <span class="badge warn">Consulta con error</span>
+              <div style="font-size:12px;color:var(--warn);margin-top:8px;">{{ r.tracking_anterior_error }}</div>
+            {% elif r.tracking_anterior_consultado_at %}
+              <span class="badge ok">Sin movimientos por ahora</span>
+              <div style="font-size:12px;color:var(--fg-3);margin-top:8px;">La confirmación definitiva se hace al cumplir 7 días.</div>
+            {% else %}
+              <span class="badge warn">Control programado</span>
+            {% endif %}
+            {% if r.riesgo_estado == 'VIGILAR' and r.control_programado_at %}
+              <br><small style="color:var(--fg-4);">Se controla: {{ r.control_programado_at.strftime("%d/%m/%Y %H:%M") }}</small>
+            {% endif %}
+            {% if r.tracking_anterior_consultado_at %}
+              <br><small style="color:var(--fg-4);">Última consulta: {{ r.tracking_anterior_consultado_at.strftime("%d/%m/%Y %H:%M") }}</small>
+            {% endif %}
+          </td>
+          <td style="min-width:170px;">
+            {% if r.cuenta_consistente %}
+              <span class="badge ok">Consistente</span>
+              <div style="font-size:12px;margin-top:8px;">Vieja: <strong>cancelada</strong></div>
+              <div style="font-size:12px;">Final: <strong>activa</strong></div>
+            {% else %}
+              <span class="badge error">Revisar cargos</span>
+              <div style="font-size:12px;margin-top:8px;">Vieja: {{ r.cargo_anterior_estado or 'sin cargo' }}</div>
+              <div style="font-size:12px;">Final: {{ r.cargo_nuevo_estado or 'sin cargo' }}</div>
+            {% endif %}
+            {% if r.cargo_anterior_fc %}<small style="display:block;color:var(--error);margin-top:5px;">La vieja tiene FC: {{ r.cargo_anterior_fc }}</small>{% endif %}
+          </td>
+          <td style="min-width:220px;">
+            {% if r.riesgo_estado == 'VIGILAR' %}
+              <span class="badge muted">Sin acción necesaria</span>
+              <div style="font-size:12px;color:var(--fg-4);margin-top:8px;">TAURO hará el único control en la fecha programada.</div>
+            {% elif r.riesgo_estado == 'ALERTA_MOVIMIENTO' %}
+              <form method="POST" action="/admin/guias-reemplazadas/{{ r.id }}/consultar" style="margin-bottom:8px;">
+                <button class="btn btn-sm btn-primary" type="submit">Actualizar alerta en DHL</button>
+              </form>
+              <form method="POST" action="/admin/guias-reemplazadas/{{ r.id }}/cerrar" data-confirm="¿Resolver esta alerta y dejar constancia del control realizado?">
+                <input type="text" name="nota" required minlength="5" maxlength="500" placeholder="Cómo se verificó o resolvió">
+                <button class="btn btn-sm btn-ghost" type="submit" style="margin-top:6px;">Resolver alerta con constancia</button>
+              </form>
+            {% else %}
+              <form method="POST" action="/admin/guias-reemplazadas/{{ r.id }}/reabrir" data-confirm="¿Reabrir este control para realizar una nueva verificación?">
+                <button class="btn btn-sm btn-ghost" type="submit">Reabrir control</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--fg-4);">No hay guías reemplazadas para este filtro.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1437,7 +1437,8 @@ scheduler.add_job(
 
 # Rastreo DHL diario: la página lee el snapshot persistido y nunca llama al
 # courier al refrescarse. Un advisory lock evita que dos procesos ejecuten el
-# mismo lote y los envíos entregados quedan fuera definitivamente.
+# mismo lote. El wrapper también toma las guías reemplazadas que cumplieron
+# siete días y hace su único control del tracking descartado.
 def _entero_cron(nombre: str, default: int, minimo: int, maximo: int) -> int:
     try:
         valor = int(os.getenv(nombre, str(default)))

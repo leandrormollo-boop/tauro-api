@@ -340,9 +340,28 @@ def actualizar_trackings_diarios_dhl(limite: Optional[int] = None) -> dict:
 
 
 def actualizar_trackings_diarios_seguro() -> dict:
-    """Wrapper para APScheduler: registra el resultado sin tumbar el proceso."""
+    """Wrapper APScheduler: rastreo vigente + riesgo de guías reemplazadas."""
     try:
         resultado = actualizar_trackings_diarios_dhl()
+    except Exception as exc:
+        print(f"[tracking-dhl] job diario falló: {type(exc).__name__}")
+        resultado = {"ok": False, "error": type(exc).__name__}
+    try:
+        # Una guía REEMPLAZADA queda afuera del tracking normal. El control
+        # separado consulta cada tracking descartado una sola vez al cumplir
+        # 7 días: sin eventos confirma la cancelación; con actividad alerta.
+        from servicios.monitoreo_guias_reemplazadas import (
+            actualizar_trackings_reemplazados_dhl,
+        )
+        reemplazadas = actualizar_trackings_reemplazados_dhl()
+    except Exception as exc:
+        print(
+            "[tracking-dhl] vigilancia de reemplazadas falló: "
+            f"{type(exc).__name__}"
+        )
+        reemplazadas = {"ok": False, "error": type(exc).__name__}
+
+    try:
         print(
             "[tracking-dhl] diario: "
             f"consultados={resultado.get('consultados', 0)} "
@@ -352,7 +371,21 @@ def actualizar_trackings_diarios_seguro() -> dict:
             f"errores={resultado.get('errores', 0)} "
             f"omitido={resultado.get('motivo', '')}"
         )
-        return resultado
+        print(
+            "[tracking-dhl] reemplazadas: "
+            f"consultados={reemplazadas.get('consultados', 0)} "
+            f"sin_movimiento={reemplazadas.get('sin_movimiento', 0)} "
+            f"confirmadas={reemplazadas.get('cancelaciones_confirmadas', 0)} "
+            f"alertas={reemplazadas.get('alertas', 0)} "
+            f"alertas_nuevas={reemplazadas.get('alertas_nuevas', 0)} "
+            f"errores={reemplazadas.get('errores', 0)} "
+            f"omitido={reemplazadas.get('motivo', '')}"
+        )
+        return {**resultado, "reemplazadas": reemplazadas}
     except Exception as exc:
-        print(f"[tracking-dhl] job diario falló: {type(exc).__name__}")
-        return {"ok": False, "error": type(exc).__name__}
+        print(f"[tracking-dhl] registro del job falló: {type(exc).__name__}")
+        return {
+            **resultado,
+            "reemplazadas": reemplazadas,
+            "error_log": type(exc).__name__,
+        }

@@ -1712,6 +1712,10 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
                     """
                     UPDATE solicitudes_guia_reemisiones
                     SET estado='EMITIDA', tracking_nuevo=%s,
+                        riesgo_estado='VIGILAR',
+                        tracking_anterior_consultado_at=NULL,
+                        tracking_anterior_error=NULL,
+                        tracking_anterior_error_at=NULL,
                         completed_at=NOW(), updated_at=NOW()
                     WHERE solicitud_anterior_id=%s
                       AND solicitud_nueva_id=%s
