@@ -4820,20 +4820,31 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
 }
 .shell .btn-primary:not(.is-loading),
 .shell .btn-primary:not(.is-loading):hover {
-  background-color: #5e3fad;
-  background-image: linear-gradient(180deg, rgba(133,94,220,.94), rgba(78,49,151,.96));
+  background-color: rgba(77,50,132,.2);
+  background-image:
+    linear-gradient(120deg, rgba(255,255,255,.09), rgba(255,255,255,0) 38%),
+    linear-gradient(180deg, rgba(132,96,213,.26), rgba(53,34,94,.24));
   background-size: 100% 100%;
   background-position: 0 0;
-  border: 1px solid rgba(190,168,255,.64);
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 7px 20px rgba(62,37,126,.24);
+  border: 1px solid rgba(190,168,255,.46);
+  color: #f7f3ff;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.12),
+    inset 0 -1px 0 rgba(18,10,36,.16),
+    0 7px 20px rgba(31,18,61,.14);
   animation: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  backdrop-filter: blur(12px) saturate(1.08);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
 }
 .shell .btn-primary:not(.is-loading)::before { display: none; }
 .shell .btn-primary:not(.is-loading):hover {
-  filter: brightness(1.08);
+  background-color: rgba(97,62,166,.3);
+  border-color: rgba(210,195,255,.62);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.16),
+    inset 0 -1px 0 rgba(18,10,36,.14),
+    0 9px 24px rgba(45,26,85,.2);
+  filter: none;
   transform: translateY(-1px);
 }
 .shell .btn-ghost,
@@ -5000,6 +5011,49 @@ html[data-theme="light"] .btn-primary:not(.is-loading):hover {
   -webkit-backdrop-filter: none;
 }
 html[data-theme="light"] .btn-primary:not(.is-loading)::before { display: none; }
+html[data-theme="light"] .shell .btn-primary:not(.is-loading),
+html[data-theme="light"] .shell .btn-primary:not(.is-loading):hover {
+  color: #57389f;
+  border-color: rgba(101,68,188,.34);
+  background-color: rgba(111,79,197,.075);
+  background-image:
+    linear-gradient(120deg, rgba(255,255,255,.72), rgba(255,255,255,0) 42%),
+    linear-gradient(180deg, rgba(126,91,216,.11), rgba(96,65,179,.07));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.82),
+    inset 0 -1px 0 rgba(77,49,144,.06),
+    0 7px 18px rgba(67,43,124,.08);
+  backdrop-filter: blur(12px) saturate(1.05);
+  -webkit-backdrop-filter: blur(12px) saturate(1.05);
+}
+html[data-theme="light"] .shell .btn-primary:not(.is-loading):hover {
+  color: #4c2e93;
+  border-color: rgba(101,68,188,.5);
+  background-color: rgba(111,79,197,.13);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.88),
+    inset 0 -1px 0 rgba(77,49,144,.07),
+    0 9px 22px rgba(67,43,124,.12);
+}
+/* El héroe conserva una base oscura también con el tema claro: su CTA usa
+   el mismo vidrio nocturno para sostener contraste sobre la fotografía. */
+html[data-theme="light"] .home-hero .btn-primary:not(.is-loading),
+html[data-theme="light"] .home-hero .btn-primary:not(.is-loading):hover {
+  color: #f7f3ff;
+  border-color: rgba(190,168,255,.5);
+  background-color: rgba(77,50,132,.24);
+  background-image:
+    linear-gradient(120deg, rgba(255,255,255,.1), rgba(255,255,255,0) 38%),
+    linear-gradient(180deg, rgba(132,96,213,.3), rgba(53,34,94,.28));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.14),
+    inset 0 -1px 0 rgba(18,10,36,.18),
+    0 7px 20px rgba(31,18,61,.16);
+}
+html[data-theme="light"] .home-hero .btn-primary:not(.is-loading):hover {
+  background-color: rgba(97,62,166,.34);
+  border-color: rgba(210,195,255,.66);
+}
 html[data-theme="light"] .scope-cta {
   border-color: var(--line);
   background: rgba(255,255,255,.72);
