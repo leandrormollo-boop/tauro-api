@@ -170,6 +170,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert 'role="search"' in html
     assert 'name="buscar"' in html
     assert 'placeholder="Ej. 888244412640"' in html
+    assert "envios-search-icon" not in html
     assert "{{ con_busqueda }}" in html
     assert 'class="envio-destination-name"' in html
     assert 'class="track-link mono"' in html

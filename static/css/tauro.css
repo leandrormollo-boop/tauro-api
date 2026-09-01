@@ -3102,19 +3102,11 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   min-width: 0;
   gap: 6px;
 }
-.envios-search-icon {
-  position: absolute;
-  z-index: 1;
-  margin-left: 11px;
-  color: var(--accent-soft);
-  pointer-events: none;
-}
-.envios-search-icon svg { display: block; width: 16px; height: 16px; }
 .envios-search input[type="search"] {
   flex: 1;
   min-width: 0;
   height: 34px;
-  padding: 7px 12px 7px 34px;
+  padding: 7px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   outline: 0;
