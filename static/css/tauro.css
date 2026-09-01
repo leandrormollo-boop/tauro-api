@@ -2616,7 +2616,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .account-title-actions .btn { padding: 8px 12px; font-size: 11.5px; }
 .account-overview {
   display: grid;
-  grid-template-columns: minmax(220px, .85fr) minmax(0, 2fr);
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 2fr);
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -2628,13 +2628,15 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   border-radius: var(--radius-card);
 }
 .account-total-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 9px;
+  min-width: 0;
   padding: 13px 15px;
   background: linear-gradient(135deg, rgba(167,139,250,.13), rgba(13,11,24,.92));
 }
+.account-total-card > div { min-width: 0; }
 .account-total-label,
 .account-total-state { display: block; color: var(--fg-3); font-size: 10px; }
 .account-total-value {
@@ -2642,15 +2644,30 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   margin: 2px 0 1px;
   color: var(--fg);
   font-family: var(--font-display);
-  font-size: clamp(23px, 2.5vw, 31px);
+  font-size: clamp(23px, 2.25vw, 31px);
   letter-spacing: -.035em;
   white-space: nowrap;
 }
 .account-total-value.ok { color: var(--ok); }
-.account-total-breakdown { display: grid; gap: 7px; margin: 0; text-align: right; }
-.account-total-breakdown div { min-width: 100px; }
+.account-total-breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  text-align: left;
+}
+.account-total-breakdown div { min-width: 0; }
 .account-total-breakdown dt { color: var(--fg-4); font-size: 9px; text-transform: uppercase; }
-.account-total-breakdown dd { margin: 1px 0 0; font-family: var(--font-mono); font-size: 11px; }
+.account-total-breakdown dd {
+  margin: 1px 0 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .account-scope-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .account-scope-card {
   min-width: 0;

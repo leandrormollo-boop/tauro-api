@@ -223,3 +223,12 @@ def test_template_muestra_invariantes_tabs_paginacion_y_copy_seguro():
     assert "paymentDetails.open = true" in html
     assert "movimientos.paginas_visibles" in html
     assert "&pagina={{ numero }}" in html
+
+
+def test_resumen_consolidado_no_desborda_sobre_los_ambitos():
+    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+
+    assert "grid-template-columns: minmax(300px, 1fr) minmax(0, 2fr);" in css
+    assert ".account-total-card > div { min-width: 0; }" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+    assert "text-overflow: ellipsis;" in css
