@@ -1681,6 +1681,29 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   position: relative;
   overflow: hidden;
 }
+.login-back-row {
+  display: flex;
+  margin: -3px 0 16px;
+}
+.login-back-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+.login-back-link:hover,
+.login-back-link:focus-visible {
+  border-color: var(--accent-soft);
+  background: rgba(167,139,250,.08);
+  color: var(--fg);
+}
 .login-card::before {
   content: "";
   position: absolute;

@@ -396,6 +396,17 @@ def test_template_reset_no_expone_identidad_y_explica_reglas():
     assert "email" not in template.lower()
 
 
+def test_accesos_permiten_volver_al_formulario_correcto():
+    portal = (RAIZ / "templates/portal/login.html").read_text(encoding="utf-8")
+    reset = (RAIZ / "templates/portal/password_reset.html").read_text(encoding="utf-8")
+    admin = (RAIZ / "templates/admin/login.html").read_text(encoding="utf-8")
+
+    assert 'href="/web" class="login-back-link"' in portal
+    assert 'href="/portal/login" class="login-back-link"' in reset
+    assert 'href="/portal/login" class="login-back-link"' in admin
+    assert "Volver al acceso de clientes" in admin
+
+
 def test_encolado_es_durable_atomico_y_no_persiste_email_ni_token(monkeypatch):
     from servicios import password_reset_queue as cola
 
