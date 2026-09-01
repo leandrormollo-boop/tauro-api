@@ -437,30 +437,75 @@ h1, h2, h3, h4 {
 .side-item svg { flex-shrink: 0; opacity: .8; }
 .side-item:hover { color: var(--fg); background: var(--bg-elev-2); }
 
-/* Globo de notificación estilo macOS: rojo, redondo, pegado a la derecha
-   del ítem. Sólo aparece si hay algo que el cliente tiene que hacer. */
-.side-badge {
-  margin-left: auto;
-  min-width: 19px;
-  height: 19px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #ff5f57, #e03127);
+/* Sello de notificación TAURO. En vez del globo rojo genérico, usa el
+   isotipo real, vidrio violeta y una forma compacta que admite 1–3 cifras. */
+.side-badge,
+.tabbar-badge {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 31px;
+  height: 22px;
+  padding: 0 7px 0 6px;
+  overflow: visible;
+  border: 1px solid rgba(218, 201, 255, .62);
+  border-radius: 8px;
+  background:
+    linear-gradient(115deg, rgba(255,255,255,.27), transparent 34%),
+    linear-gradient(145deg, #a17cf5 0%, #7a55d6 48%, #5635a6 100%);
   color: #fff;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
-  line-height: 19px;
+  line-height: 1;
+  letter-spacing: -.03em;
   text-align: center;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35), 0 2px 8px rgba(224, 49, 39, .55);
-  animation: badge-pop .34s cubic-bezier(.2, 1.6, .4, 1) both;
+  text-shadow: 0 1px 2px rgba(31, 15, 69, .5);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.3),
+    inset 0 -1px 0 rgba(35,15,79,.25),
+    0 5px 14px rgba(100, 66, 193, .28);
+  animation: tauro-badge-arrive .46s cubic-bezier(.2, 1.35, .35, 1) both;
 }
-@keyframes badge-pop {
-  from { transform: scale(0); }
-  to   { transform: scale(1); }
+.side-badge { margin-left: auto; }
+.side-badge::before,
+.tabbar-badge::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  background: url("/static/img/logo-mark-white.png") center / contain no-repeat;
+  opacity: .94;
+  filter: drop-shadow(0 1px 1px rgba(35,15,79,.45));
+}
+.side-badge::after,
+.tabbar-badge::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -3px;
+  border: 1px solid rgba(167, 139, 250, .34);
+  border-radius: 11px;
+  pointer-events: none;
+  animation: tauro-badge-ring .7s ease-out .08s both;
+}
+@keyframes tauro-badge-arrive {
+  0% { opacity: 0; transform: translateY(-3px) scale(.76); }
+  68% { opacity: 1; transform: translateY(0) scale(1.06); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes tauro-badge-ring {
+  0% { opacity: .72; transform: scale(.8); }
+  100% { opacity: 0; transform: scale(1.22); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .side-badge { animation: none; }
+  .side-badge,
+  .tabbar-badge,
+  .side-badge::after,
+  .tabbar-badge::after { animation: none; }
 }
 .side-item.active {
   color: var(--fg);
@@ -4674,18 +4719,23 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
   .tabbar-cta:hover .tabbar-cta-ico { background: var(--accent-soft); }
   .tabbar-badge {
     position: absolute;
-    top: 5px;
-    left: calc(50% + 5px);
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: var(--radius-pill);
-    background: var(--error);
-    color: #fff;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 16px;
+    top: 3px;
+    left: calc(50% + 3px);
+    min-width: 25px;
+    height: 18px;
+    gap: 2px;
+    padding: 0 5px 0 4px;
+    border-radius: 6px;
+    font-size: 9px;
+  }
+  .tabbar-badge::before {
+    width: 7px;
+    height: 7px;
+    flex-basis: 7px;
+  }
+  .tabbar-badge::after {
+    inset: -2px;
+    border-radius: 8px;
   }
 
   /* La tabbar no puede tapar contenido ni CTAs: el contenido gana un
