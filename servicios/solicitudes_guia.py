@@ -760,7 +760,11 @@ def crear_solicitud_guia(
 
 
 def listar_solicitudes_cliente(
-    cliente_id: str, limite: Optional[int] = 100
+    cliente_id: str,
+    limite: Optional[int] = 100,
+    *,
+    desde=None,
+    hasta=None,
 ) -> list[dict]:
     """Solicitudes de guía de un cliente, últimas primero.
 
@@ -779,6 +783,11 @@ def listar_solicitudes_cliente(
                        s.valor_declarado_usd, s.precio_tauro_ars,
                        s.precio_tauro_usd, s.precio_cliente_final_ars, s.tracking,
                        s.guia_url, s.created_at, s.courier, s.bultos,
+                       COALESCE(
+                           cargo_periodo.fecha,
+                           (s.created_at AT TIME ZONE
+                               'America/Argentina/Buenos_Aires')::date
+                       ) AS fecha_operacion,
                        s.tracking_estado, s.tracking_estado_courier,
                        s.tracking_descripcion, s.tracking_consultado_at,
                        s.tracking_actualizado_at, s.tracking_finalizado_at,
@@ -811,6 +820,8 @@ def listar_solicitudes_cliente(
                   ON re_next.solicitud_anterior_id=s.id
                 LEFT JOIN solicitudes_guia vigente
                   ON vigente.id=re_next.solicitud_nueva_id
+                LEFT JOIN envios cargo_periodo
+                  ON cargo_periodo.solicitud_id=s.id
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
@@ -821,14 +832,63 @@ def listar_solicitudes_cliente(
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.cliente_id = %s
-                ORDER BY s.created_at DESC
             """
             params = [cliente_id.strip().upper()]
+            if desde is not None:
+                query += """
+                    AND COALESCE(
+                        cargo_periodo.fecha,
+                        (s.created_at AT TIME ZONE
+                            'America/Argentina/Buenos_Aires')::date
+                    ) >= %s
+                """
+                params.append(desde)
+            if hasta is not None:
+                query += """
+                    AND COALESCE(
+                        cargo_periodo.fecha,
+                        (s.created_at AT TIME ZONE
+                            'America/Argentina/Buenos_Aires')::date
+                    ) < %s
+                """
+                params.append(hasta)
+            query += " ORDER BY fecha_operacion DESC, s.created_at DESC"
             if limite is not None:
                 query += " LIMIT %s"
                 params.append(max(1, int(limite)))
             cur.execute(query, tuple(params))
             return [_sin_label(dict(r)) for r in cur.fetchall()]
+
+
+def periodos_solicitudes_cliente(cliente_id: str) -> list[tuple[int, int]]:
+    """Años/meses con actividad, sin traer el historial ni sus documentos."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT
+                    EXTRACT(YEAR FROM COALESCE(
+                        e.fecha,
+                        (s.created_at AT TIME ZONE
+                            'America/Argentina/Buenos_Aires')::date
+                    ))::int AS anio,
+                    EXTRACT(MONTH FROM COALESCE(
+                        e.fecha,
+                        (s.created_at AT TIME ZONE
+                            'America/Argentina/Buenos_Aires')::date
+                    ))::int AS mes
+                FROM solicitudes_guia s
+                LEFT JOIN envios e ON e.solicitud_id=s.id
+                WHERE s.cliente_id=%s
+                ORDER BY anio DESC, mes DESC
+                """,
+                (cliente_id.strip().upper(),),
+            )
+            return [
+                (int(fila["anio"]), int(fila["mes"]))
+                for fila in cur.fetchall()
+                if fila.get("anio") and fila.get("mes")
+            ]
 
 
 def listar_envios_api(

@@ -84,13 +84,68 @@
 <div class="msg ok" style="margin-bottom:16px;">{{ flash_ok }}</div>
 {% endif %}
 
+<form id="admin-periodo-form" method="GET" action="/admin/clientes/{{ cliente.cliente_id }}"
+      class="card" style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px;padding:14px;margin-bottom:16px;align-items:end;">
+  <label style="margin:0;">Año
+    <select name="anio" data-periodo-admin>
+      {% for opcion in periodo.anios %}
+      <option value="{{ opcion }}" {% if opcion == periodo.anio %}selected{% endif %}>{{ opcion }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="margin:0;">Mes
+    <select name="mes" data-periodo-admin>
+      {% for numero, nombre in periodo.meses %}
+      <option value="{{ numero }}" {% if numero == periodo.mes %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="margin:0;">Período
+    <select name="semana" data-periodo-admin>
+      {% for numero, nombre in periodo.semanas %}
+      <option value="{{ numero }}" {% if numero == periodo.semana %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <noscript><button type="submit" class="btn btn-primary btn-sm">Aplicar período</button></noscript>
+</form>
+<script nonce="{{ request.state.csp_nonce }}">
+document.querySelectorAll("#admin-periodo-form [data-periodo-admin]").forEach(function (campo) {
+  campo.addEventListener("change", function () {
+    document.getElementById("admin-periodo-form").requestSubmit();
+  });
+});
+</script>
+
+<div class="card-grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:16px;">
+  <div class="stat-card">
+    <div class="label">Período</div>
+    <div class="value" style="font-size:20px;">{{ periodo.etiqueta }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Envíos vigentes</div>
+    <div class="value">{{ resumen_periodo.vigentes }}</div>
+    <small style="color:var(--fg-4);">N {{ resumen_periodo.nacionales }} · I {{ resumen_periodo.internacionales }}</small>
+  </div>
+  <div class="stat-card">
+    <div class="label">Facturación</div>
+    <div class="value" style="font-size:20px;">{{ resumen_periodo.facturados }} facturados</div>
+    <small style="color:var(--warn);">{{ resumen_periodo.pendientes_fc }} pendientes de FC</small>
+  </div>
+  <div class="stat-card">
+    <div class="label">Importe vigente</div>
+    <div class="value">$ {{ "{:,.2f}".format(resumen_periodo.total_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+    {% if resumen_periodo.cancelados %}<small style="color:var(--fg-4);">{{ resumen_periodo.cancelados }} cancelados fuera del total</small>{% endif %}
+  </div>
+</div>
+
 <!-- Facturas y cargos -->
 <div class="card" style="margin-bottom:16px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <h3 style="margin:0;">Facturas / cargos</h3>
+    <h3 style="margin:0;">Envíos y cargos · {{ periodo.etiqueta }}</h3>
     {% if pagination %}
     <small style="color:var(--fg-4);">
-      {{ pagination.total_envios }} en total · página {{ pagination.page }} de {{ pagination.total_pages }}
+      {{ pagination.total_envios }} en el período · página {{ pagination.page }} de {{ pagination.total_pages }}
     </small>
     {% endif %}
   </div>
@@ -184,9 +239,9 @@
   {% endif %}
 </div>
 
-<!-- Pagos -->
+<!-- Pagos: historial separado; el filtro superior controla envíos/cargos. -->
 <div class="card">
-  <h3>Pagos recibidos</h3>
+  <h3>Pagos recibidos · historial reciente</h3>
   <div class="table-wrap">
     <table>
       <thead>

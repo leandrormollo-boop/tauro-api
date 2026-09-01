@@ -4920,6 +4920,10 @@ a.stat-link.urge:hover { border-color: var(--warn); background: rgba(245, 184, 0
 }
 
 @media (max-width: 720px) {
+  #envios-periodo-form,
+  #admin-periodo-form {
+    grid-template-columns: 1fr !important;
+  }
   .scope-card {
     min-height: 132px;
     grid-template-columns: 46px minmax(0, 1fr) auto;

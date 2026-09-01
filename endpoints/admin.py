@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, Form, Cookie, Depends, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -1349,16 +1350,18 @@ def admin_cliente_detail(
     ok: Optional[str] = None,
     pwd_error: Optional[str] = None,
     page: int = 1,
+    anio: str = "",
+    mes: str = "",
+    semana: str = "",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
 
     cliente_id = cliente_id.strip().upper()
-    # Paginación: 50 envíos por página
+    # Paginación: 50 cargos por página, dentro del período seleccionado.
     PAGE_SIZE = 50
     page = max(1, page)
-    offset = (page - 1) * PAGE_SIZE
 
     # Todo en UNA sola conexión (1 round trip al pool en vez de 3)
     with get_conn() as conn:
@@ -1368,12 +1371,70 @@ def admin_cliente_detail(
             if not row:
                 return RedirectResponse(url="/admin/clientes", status_code=303)
 
-            # Total envíos del cliente (para pagination meta)
             cur.execute(
-                "SELECT COUNT(*) AS n FROM envios WHERE cliente_id = %s",
+                """
+                SELECT DISTINCT EXTRACT(YEAR FROM fecha)::int AS anio,
+                                EXTRACT(MONTH FROM fecha)::int AS mes
+                FROM envios
+                WHERE cliente_id=%s AND fecha IS NOT NULL
+                ORDER BY anio DESC, mes DESC
+                """,
                 (cliente_id,),
             )
-            total_envios = cur.fetchone()["n"]
+            periodos_disponibles = [
+                (int(f["anio"]), int(f["mes"]))
+                for f in cur.fetchall()
+                if f.get("anio") and f.get("mes")
+            ]
+            from servicios.periodos_envios import normalizar_periodo
+            periodo = normalizar_periodo(
+                anio, mes, semana, periodos_disponibles,
+            )
+
+            # Conteos y montos del período en una sola consulta determinística.
+            cur.execute(
+                """
+                SELECT COUNT(*) AS n,
+                       COUNT(*) FILTER (WHERE estado='ACTIVO') AS vigentes,
+                       COUNT(*) FILTER (WHERE estado='CANCELADO') AS cancelados,
+                       COUNT(*) FILTER (
+                           WHERE estado='ACTIVO' AND ambito='NACIONAL'
+                       ) AS nacionales,
+                       COUNT(*) FILTER (
+                           WHERE estado='ACTIVO' AND ambito='INTERNACIONAL'
+                       ) AS internacionales,
+                       COUNT(*) FILTER (
+                           WHERE estado='ACTIVO'
+                             AND NULLIF(BTRIM(nro_fc), '') IS NULL
+                       ) AS pendientes_fc,
+                       COUNT(*) FILTER (
+                           WHERE estado='ACTIVO'
+                             AND NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                       ) AS facturados,
+                       COALESCE(SUM(monto_ars) FILTER (
+                           WHERE estado='ACTIVO'
+                       ), 0) AS total_ars
+                FROM envios
+                WHERE cliente_id=%s AND fecha >= %s AND fecha < %s
+                """,
+                (cliente_id, periodo["desde"], periodo["hasta"]),
+            )
+            resumen_fila = cur.fetchone() or {}
+            total_envios = int(resumen_fila.get("n") or 0)
+            resumen_periodo = {
+                "vigentes": int(resumen_fila.get("vigentes") or 0),
+                "cancelados": int(resumen_fila.get("cancelados") or 0),
+                "nacionales": int(resumen_fila.get("nacionales") or 0),
+                "internacionales": int(
+                    resumen_fila.get("internacionales") or 0
+                ),
+                "pendientes_fc": int(resumen_fila.get("pendientes_fc") or 0),
+                "facturados": int(resumen_fila.get("facturados") or 0),
+                "total_ars": Decimal(str(resumen_fila.get("total_ars") or 0)),
+            }
+            total_pages = max(1, (total_envios + PAGE_SIZE - 1) // PAGE_SIZE)
+            page = min(page, total_pages)
+            offset = (page - 1) * PAGE_SIZE
 
             # Envíos paginados
             cur.execute(
@@ -1383,11 +1444,14 @@ def admin_cliente_detail(
                        solicitud_id, ambito,
                        (factura_pdf IS NOT NULL) AS tiene_factura_pdf
                 FROM envios
-                WHERE cliente_id = %s
+                WHERE cliente_id = %s AND fecha >= %s AND fecha < %s
                 ORDER BY fecha DESC, id DESC
                 LIMIT %s OFFSET %s
                 """,
-                (cliente_id, PAGE_SIZE, offset),
+                (
+                    cliente_id, periodo["desde"], periodo["hasta"],
+                    PAGE_SIZE, offset,
+                ),
             )
             envios = [dict(r) for r in cur.fetchall()]
 
@@ -1439,7 +1503,17 @@ def admin_cliente_detail(
         flash_ok = None  # priorizar error
         # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
 
-    total_pages = max(1, (total_envios + PAGE_SIZE - 1) // PAGE_SIZE)
+    filtros_periodo = {
+        "anio": periodo["anio"],
+        "mes": periodo["mes"],
+        "semana": periodo["semana"],
+    }
+    def _url_pagina(numero: int) -> str:
+        return (
+            f"/admin/clientes/{cliente_id}?"
+            + urlencode({**filtros_periodo, "page": numero})
+        )
+
     pagination = {
         "page": page,
         "total_pages": total_pages,
@@ -1447,8 +1521,8 @@ def admin_cliente_detail(
         "page_size": PAGE_SIZE,
         "has_prev": page > 1,
         "has_next": page < total_pages,
-        "prev_url": f"/admin/clientes/{cliente_id}?page={page - 1}" if page > 1 else None,
-        "next_url": f"/admin/clientes/{cliente_id}?page={page + 1}" if page < total_pages else None,
+        "prev_url": _url_pagina(page - 1) if page > 1 else None,
+        "next_url": _url_pagina(page + 1) if page < total_pages else None,
     }
 
     return templates.TemplateResponse(
@@ -1458,6 +1532,8 @@ def admin_cliente_detail(
             "cliente": cliente,
             "cuenta_ambitos": cuenta_ambitos,
             "envios": envios,
+            "periodo": periodo,
+            "resumen_periodo": resumen_periodo,
             "pagos": pagos,
             "puede_clasificar_cargos": puede_clasificar_cargos,
             "pagination": pagination,

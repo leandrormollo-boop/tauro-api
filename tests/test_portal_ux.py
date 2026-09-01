@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=35" in base
+    assert "tauro.css?v=36" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -269,8 +269,9 @@ def test_alta_y_edicion_de_clientes_abren_un_dialogo_sin_bajar_al_formulario():
 def test_envios_distingue_cotizacion_de_cuenta_corriente():
     html = _template("envios.html")
     assert "Importe cotizado" in html
-    assert "cotizado en esta página" in html
+    assert "Monto activo del período" in html
     assert "Cargos y facturas:" in html
+    assert "No suma guías canceladas o reemplazadas" in html
     assert "/portal/cuenta?ambito={{ tipo_filtro }}" in html
     assert "Tu costo" not in html
 

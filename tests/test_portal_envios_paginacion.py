@@ -118,7 +118,10 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "&tipo={{ tipo_filtro }}" in html
     assert "&paso={{ paso_filtro }}" in html
     assert "Mostrando {{ pagina_desde }}–{{ pagina_hasta }}" in html
-    assert "cotizado en esta página" in html
+    assert "Monto activo del período" in html
+    assert "periodo_query" in html
+    assert "data-periodo-envios" in html
+    assert "Todo el mes" not in html  # las opciones vienen del servicio común
     assert "{% if not tipo_filtro %}" not in html
     assert "envios-scope-tabs" in html
     assert "Nacionales <b>{{ total_nacionales }}</b>" in html
@@ -127,8 +130,8 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "No hay envíos que coincidan con estos filtros" in html
     # Los links de tipo y de paso no incluyen `pagina`: cambiar un filtro
     # siempre vuelve a la primera hoja.
-    assert '/portal/envios?tipo=internacional{{ con_paso }}' in html
-    assert '/portal/envios?paso={{ c.clave }}{{ con_tipo }}' in html
+    assert '/portal/envios?tipo=internacional{{ con_paso }}{{ con_periodo }}' in html
+    assert '/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_periodo }}' in html
 
 
 def test_endpoint_real_usa_el_contrato_paginado_de_historial():
@@ -137,3 +140,6 @@ def test_endpoint_real_usa_el_contrato_paginado_de_historial():
     assert "preparar_historial_envios(historial, tipo, paso, pagina)" in endpoint
     assert 'pagina: str = "1"' in endpoint
     assert 'tipo = _ambito_portal(tipo) or "internacional"' in endpoint
+    assert "periodos_solicitudes_cliente(cliente)" in endpoint
+    assert 'desde=periodo["desde"]' in endpoint
+    assert 'hasta=periodo["hasta"]' in endpoint

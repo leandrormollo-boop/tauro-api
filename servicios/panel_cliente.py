@@ -19,6 +19,8 @@ estructuras vacías y la página sale igual, sin el bloque.
 """
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 from core.database import get_conn
 
 
@@ -146,6 +148,29 @@ def preparar_historial_envios(
     elif tipo == "internacional":
         por_tipo = [s for s in historial if ambito_envio(s) == "internacional"]
 
+    vigentes_periodo = [
+        s for s in por_tipo
+        if (s.get("estado") or "").upper() not in {"CANCELADO", "REEMPLAZADO"}
+    ]
+
+    def _monto(solicitud) -> Decimal:
+        valor = (
+            solicitud.get("precio_final_cliente_ars")
+            or solicitud.get("precio_tauro_ars")
+            or 0
+        )
+        try:
+            return Decimal(str(valor))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal("0")
+
+    resumen_periodo = {
+        "operaciones_vigentes": len(vigentes_periodo),
+        "guias_emitidas": sum(bool(s.get("tracking")) for s in vigentes_periodo),
+        "canceladas_reemplazadas": len(por_tipo) - len(vigentes_periodo),
+        "total_ars": sum((_monto(s) for s in vigentes_periodo), Decimal("0")),
+    }
+
     total_sin_filtrar = len(por_tipo)
     conteos: dict[str, int] = {}
     for solicitud in por_tipo:
@@ -187,6 +212,7 @@ def preparar_historial_envios(
         "pagina_desde": inicio + 1 if total_resultados else 0,
         "pagina_hasta": fin,
         "tiene_historial": tiene_historial,
+        "resumen_periodo": resumen_periodo,
         "total_nacionales": sum(ambito_envio(s) == "nacional" for s in historial),
         "total_internacionales": sum(ambito_envio(s) == "internacional" for s in historial),
         "total_sin_clasificar": sum(ambito_envio(s) == "sin_clasificar" for s in historial),

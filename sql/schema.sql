@@ -1114,6 +1114,10 @@ BEGIN
 END $$;
 -- Índice compuesto para queries de facturación (cliente + filtro de estado)
 CREATE INDEX IF NOT EXISTS idx_envios_cliente_estado ON envios(cliente_id, estado);
+-- El detalle mensual del ADMIN filtra por cliente y un rango semiabierto de
+-- fechas; este orden evita recorrer toda la historia del cliente cada vez.
+CREATE INDEX IF NOT EXISTS idx_envios_cliente_fecha
+    ON envios(cliente_id, fecha DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_envios_cliente_ambito_fecha
     ON envios(cliente_id, ambito, fecha DESC);
 -- Índice por fecha para listados ordenados

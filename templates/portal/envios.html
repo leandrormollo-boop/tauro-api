@@ -23,14 +23,51 @@
     <div class="msg ok">{{ flash_ok }}</div>
 {% endif %}
 
+{# Período contable: un cambio se aplica solo, sin botón obligatorio. #}
+<form id="envios-periodo-form" method="GET" action="/portal/envios" class="card"
+      style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px;padding:14px;margin-bottom:14px;align-items:end;">
+    <input type="hidden" name="tipo" value="{{ tipo_filtro }}">
+    {% if paso_filtro %}<input type="hidden" name="paso" value="{{ paso_filtro }}">{% endif %}
+    <label style="margin:0;">Año
+        <select name="anio" data-periodo-envios>
+            {% for opcion in periodo.anios %}
+            <option value="{{ opcion }}" {% if opcion == periodo.anio %}selected{% endif %}>{{ opcion }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label style="margin:0;">Mes
+        <select name="mes" data-periodo-envios>
+            {% for numero, nombre in periodo.meses %}
+            <option value="{{ numero }}" {% if numero == periodo.mes %}selected{% endif %}>{{ nombre }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label style="margin:0;">Período
+        <select name="semana" data-periodo-envios>
+            {% for numero, nombre in periodo.semanas %}
+            <option value="{{ numero }}" {% if numero == periodo.semana %}selected{% endif %}>{{ nombre }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <noscript><button type="submit" class="btn btn-primary btn-sm">Aplicar período</button></noscript>
+</form>
+<script nonce="{{ request.state.csp_nonce }}">
+document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(function (campo) {
+    campo.addEventListener("change", function () {
+        document.getElementById("envios-periodo-form").requestSubmit();
+    });
+});
+</script>
+
 {# Los dos ámbitos quedan siempre a un click, sin pantalla intermedia. El
    filtro de estado se conserva al cambiar de pestaña y la página vuelve a 1. #}
 {% set con_paso = ("&paso=" ~ paso_filtro) if paso_filtro else "" %}
+{% set con_periodo = "&" ~ periodo_query %}
 <nav class="chips-tipo envios-scope-tabs" aria-label="Ámbito de los envíos">
-    <a href="/portal/envios?tipo=nacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="page"{% endif %}>
+    <a href="/portal/envios?tipo=nacional{{ con_paso }}{{ con_periodo }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="page"{% endif %}>
         <span aria-hidden="true">🇦🇷</span> Nacionales <b>{{ total_nacionales }}</b>
     </a>
-    <a href="/portal/envios?tipo=internacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="page"{% endif %}>
+    <a href="/portal/envios?tipo=internacional{{ con_paso }}{{ con_periodo }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="page"{% endif %}>
         <span aria-hidden="true">🌐</span> Internacionales <b>{{ total_internacionales }}</b>
     </a>
 </nav>
@@ -41,7 +78,7 @@
 </div>
 {% endif %}
 
-{% if not total_sin_filtrar %}
+{% if not tiene_historial %}
 <div class="card">
     <div class="empty" style="padding:48px 20px;">
         <img src="/static/img/logo-mark-white.png" alt="" style="height:40px;width:auto;opacity:.85;">
@@ -63,11 +100,11 @@
 {% set solo_tipo = ("?tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 {% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 <nav class="chips-embudo" aria-label="Filtrar por estado">
-    <a href="/portal/envios{{ solo_tipo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
+    <a href="/portal/envios{{ solo_tipo }}{{ con_periodo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
         <b>{{ total_sin_filtrar }}</b> Todos
     </a>
     {% for c in chips %}
-    <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}"
+    <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_periodo }}"
        class="chip-e {% if paso_filtro == c.clave %}on{% endif %} {% if c.cantidad and c.accion_de == 'cliente' %}espera{% endif %}"
        {% if paso_filtro == c.clave %}aria-current="true"{% endif %}
        title="{{ c.detalle }}">
@@ -76,27 +113,32 @@
     {% endfor %}
 </nav>
 
-{# Resumen de lo que estás viendo ahora — se recalcula con cada filtro, así
-   sirve para responder "¿cuánto llevo gastado en lo despachado?". #}
-{% if solicitudes %}
-{% set resumen = namespace(total_ars=0) %}
-{% for envio in solicitudes %}
-    {% if envio.estado != 'REEMPLAZADO' %}
-        {% set resumen.total_ars = resumen.total_ars + (envio.precio_tauro_ars or 0) %}
+<div class="card" style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:14px 18px;margin-bottom:14px;">
+    <div style="min-width:180px;">
+        <div class="eyebrow">Período seleccionado</div>
+        <strong>{{ periodo.etiqueta }}</strong>
+    </div>
+    <div><small style="color:var(--fg-4);display:block;">Guías emitidas</small><strong>{{ resumen_periodo.guias_emitidas }}</strong></div>
+    <div><small style="color:var(--fg-4);display:block;">Operaciones vigentes</small><strong>{{ resumen_periodo.operaciones_vigentes }}</strong></div>
+    <div>
+        <small style="color:var(--fg-4);display:block;">Monto activo del período</small>
+        <strong>$ {{ "{:,.0f}".format(resumen_periodo.total_ars).replace(",", ".") }}</strong>
+        <small style="color:var(--fg-4);display:block;">No suma guías canceladas o reemplazadas</small>
+    </div>
+    {% if resumen_periodo.canceladas_reemplazadas %}
+    <div><small style="color:var(--fg-4);display:block;">Canceladas / reemplazadas</small><strong>{{ resumen_periodo.canceladas_reemplazadas }}</strong></div>
     {% endif %}
-{% endfor %}
-<p class="envios-resumen">
-    Mostrando {{ pagina_desde }}–{{ pagina_hasta }} de {{ total_resultados }}
-    envío{{ "s" if total_resultados != 1 }} ·
-    <b>$ {{ "{:,.0f}".format(resumen.total_ars).replace(",", ".") }}</b> cotizado en esta página (sólo guías vigentes)
-</p>
+</div>
+
+{% if solicitudes %}
+<p class="envios-resumen">Mostrando {{ pagina_desde }}–{{ pagina_hasta }} de {{ total_resultados }} resultado{{ "s" if total_resultados != 1 }}.</p>
 {% endif %}
 
 {% if not solicitudes %}
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
     <div class="msg envios-empty-filter">No hay envíos que coincidan con estos filtros.
-        <a href="/portal/envios?tipo={{ tipo_filtro }}">Quitar filtro de estado</a>
+        <a href="/portal/envios?tipo={{ tipo_filtro }}{{ con_periodo }}">Ver todo el período</a>
     </div>
 {% else %}
 <div class="card envios-card">
@@ -223,14 +265,14 @@
         <nav class="envios-pagination" aria-label="Páginas de envíos">
             {% if pagina_actual > 1 %}
             <a class="page-arrow" aria-label="Página anterior"
-               href="/portal/envios?pagina={{ pagina_actual - 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}">‹</a>
+               href="/portal/envios?pagina={{ pagina_actual - 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}{{ con_periodo }}">‹</a>
             {% else %}
             <span class="page-arrow disabled" aria-label="No hay página anterior" aria-disabled="true">‹</span>
             {% endif %}
 
             {% for numero in paginas_visibles %}
                 {% if numero %}
-                <a href="/portal/envios?pagina={{ numero }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}"
+                <a href="/portal/envios?pagina={{ numero }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}{{ con_periodo }}"
                    class="page-number {% if numero == pagina_actual %}on{% endif %}"
                    {% if numero == pagina_actual %}aria-current="page"{% endif %}>{{ numero }}</a>
                 {% else %}
@@ -240,7 +282,7 @@
 
             {% if pagina_actual < total_paginas %}
             <a class="page-arrow" aria-label="Página siguiente"
-               href="/portal/envios?pagina={{ pagina_actual + 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}">›</a>
+               href="/portal/envios?pagina={{ pagina_actual + 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}{{ con_periodo }}">›</a>
             {% else %}
             <span class="page-arrow disabled" aria-label="No hay página siguiente" aria-disabled="true">›</span>
             {% endif %}

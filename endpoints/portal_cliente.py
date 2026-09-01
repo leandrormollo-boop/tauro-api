@@ -59,8 +59,9 @@ from servicios.solicitudes_guia import (
     obtener_factura_comercial_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
     idempotency_hash_origen_tienda,
-    validar_reemision_cliente,
+    validar_reemision_cliente, periodos_solicitudes_cliente,
 )
+from servicios.periodos_envios import normalizar_periodo
 from servicios.carriers import courier_default_cliente
 from servicios.carrier_contract import Ambito, public_catalog
 from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
@@ -1699,6 +1700,9 @@ def envios_view(
     tipo: str = "",
     paso: str = "",
     pagina: str = "1",
+    anio: str = "",
+    mes: str = "",
+    semana: str = "",
     cliente: str = Depends(cliente_actual),
 ):
     # Esta es la vista de historial, no un preview: no ocultar silenciosamente
@@ -1707,8 +1711,20 @@ def envios_view(
     # pestañas quedan siempre visibles. Internacional conserva el flujo que el
     # portal tenía antes de incorporar operadores nacionales.
     tipo = _ambito_portal(tipo) or "internacional"
-    historial = listar_solicitudes_cliente(cliente, limite=None)
+    periodos_disponibles = periodos_solicitudes_cliente(cliente)
+    periodo = normalizar_periodo(
+        anio, mes, semana, periodos_disponibles,
+    )
+    historial = listar_solicitudes_cliente(
+        cliente,
+        limite=None,
+        desde=periodo["desde"],
+        hasta=periodo["hasta"],
+    )
     vista = preparar_historial_envios(historial, tipo, paso, pagina)
+    # El período puede no tener filas aunque el cliente sí tenga historia. La
+    # pantalla debe decir "sin envíos en agosto", no "nunca hiciste envíos".
+    vista["tiene_historial"] = periodo["tiene_actividad_historica"]
 
     from servicios.configuracion_couriers_cliente import mapa_permisos
     permisos_emision = mapa_permisos(cliente, "emitir")
@@ -1726,6 +1742,12 @@ def envios_view(
         context={
             "cliente": cliente,
             **vista,
+            "periodo": periodo,
+            "periodo_query": urlencode({
+                "anio": periodo["anio"],
+                "mes": periodo["mes"],
+                "semana": periodo["semana"],
+            }),
             "puede_emitir": puede_emitir,
             "flash_ok": (
                 ("Solicitud creada. Podés emitir la guía vos mismo desde el botón "
