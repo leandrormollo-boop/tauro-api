@@ -6,7 +6,7 @@ import hashlib
 import json
 import uuid
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 import psycopg2
 
@@ -24,6 +24,9 @@ ESTADOS_SOLICITUD = [
     "VERIFICAR_COURIER",
     "GUIA_LISTA",
     "DESPACHADO",
+    # La guía anterior de una reemisión se conserva para auditoría, pero su
+    # etiqueta deja de ser descargable y su cargo queda cancelado.
+    "REEMPLAZADO",
     "CANCELADO",
 ]
 
@@ -230,9 +233,196 @@ def _sin_label(row: dict) -> dict:
         row["tiene_label"] = bool(row.get("label_pdf"))
     if "tiene_factura_comercial" not in row:
         row["tiene_factura_comercial"] = bool(row.get("commercial_invoice_pdf"))
+    if row.get("estado") == "REEMPLAZADO" or (
+        row.get("reemplaza_solicitud_id")
+        and (row.get("cargo_pendiente")
+             or row.get("reemision_estado") != "EMITIDA")
+    ):
+        row["tiene_label"] = False
+        row["tiene_factura_comercial"] = False
     row.pop("label_pdf", None)
     row.pop("commercial_invoice_pdf", None)
+    campos = row.get("reemision_campos_modificados") or []
+    if isinstance(campos, str):
+        try:
+            campos = json.loads(campos)
+        except (TypeError, ValueError):
+            campos = []
+    etiquetas = {
+        "remitente_nombre": "nombre del remitente",
+        "remitente_contacto": "contacto del remitente",
+        "remitente_documento": "documento del remitente",
+        "remitente_email": "email del remitente",
+        "remitente_telefono": "teléfono del remitente",
+        "remitente_direccion": "dirección del remitente",
+        "remitente_ciudad": "ciudad del remitente",
+        "remitente_estado": "estado/provincia del remitente",
+        "remitente_zip": "código postal del remitente",
+        "remitente_pais": "país del remitente",
+        "destino_pais": "país de destino",
+        "dest_nombre": "nombre del destinatario",
+        "dest_contacto": "contacto del destinatario",
+        "dest_documento": "documento del destinatario",
+        "dest_email": "email del destinatario",
+        "dest_telefono": "teléfono del destinatario",
+        "dest_direccion": "dirección del destinatario",
+        "dest_ciudad": "ciudad del destinatario",
+        "dest_estado": "estado/provincia del destinatario",
+        "dest_zip": "código postal del destinatario",
+        "producto_alias": "producto",
+        "cantidad": "cantidad de cajas",
+        "peso_kg": "peso",
+        "largo_cm": "largo",
+        "ancho_cm": "ancho",
+        "alto_cm": "alto",
+        "valor_declarado_usd": "valor declarado",
+        "bultos": "cajas e invoice comercial",
+        "tax_paga": "responsable de impuestos",
+        "observaciones": "observaciones",
+    }
+    row["reemision_cambios"] = [etiquetas.get(c, c) for c in campos]
     return row
+
+
+_CAMPOS_REEMISION_AUDITABLES = (
+    "remitente_nombre", "remitente_contacto", "remitente_documento",
+    "remitente_email", "remitente_telefono", "remitente_direccion",
+    "remitente_ciudad", "remitente_estado", "remitente_zip",
+    "remitente_pais", "destino_pais", "dest_nombre", "dest_contacto",
+    "dest_documento", "dest_email", "dest_telefono", "dest_direccion",
+    "dest_ciudad", "dest_estado", "dest_zip", "producto_alias",
+    "cantidad", "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
+    "valor_declarado_usd", "bultos", "tax_paga", "observaciones",
+)
+
+
+def _valor_comparable_reemision(valor: Any) -> str:
+    """Representación estable sólo para detectar cambios, nunca para cobrar."""
+    if isinstance(valor, str):
+        return " ".join(valor.strip().split())
+    if isinstance(valor, (dict, list)):
+        return json.dumps(valor, sort_keys=True, ensure_ascii=False, default=str)
+    if valor is None:
+        return ""
+    return str(valor)
+
+
+def _campos_modificados_reemision(anterior: dict, nueva: dict) -> list[str]:
+    return [
+        campo for campo in _CAMPOS_REEMISION_AUDITABLES
+        if _valor_comparable_reemision(anterior.get(campo))
+        != _valor_comparable_reemision(nueva.get(campo))
+    ]
+
+
+def validar_reemision_cliente(
+    solicitud_id: int,
+    cliente_id: str,
+    *,
+    consultar_courier: bool = False,
+    cliente_dhl=None,
+    reemision_nueva_id: Optional[int] = None,
+) -> dict:
+    """Valida que una guía DHL pueda descartarse y reemplazarse.
+
+    El control se repite al abrir, al guardar la corrección y justo antes de
+    emitir. Un botón visible nunca es autorización suficiente para crear un
+    segundo AWB real.
+    """
+    cliente_id = (cliente_id or "").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.id, s.cliente_id, s.estado, s.courier, s.tracking,
+                       s.tracking_estado, s.cargo_pendiente,
+                       e.id AS cargo_id, e.estado AS cargo_estado,
+                       e.nro_fc AS cargo_nro_fc, e.monto_ars AS cargo_monto_ars,
+                       r.solicitud_nueva_id AS reemision_existente_id,
+                       EXISTS (
+                           SELECT 1 FROM ajustes_cliente a
+                           WHERE a.solicitud_id=s.id
+                             AND a.estado <> 'ANULADO'
+                       ) AS tiene_ajustes_contables,
+                       EXISTS (
+                           SELECT 1 FROM recolecciones p
+                           WHERE p.solicitud_id=s.id
+                             AND p.estado IN ('AGENDANDO', 'AGENDADA',
+                                              'CANCELANDO', 'VERIFICAR_COURIER')
+                       ) AS tiene_recoleccion_activa
+                FROM solicitudes_guia s
+                LEFT JOIN envios e ON e.solicitud_id=s.id
+                LEFT JOIN solicitudes_guia_reemisiones r
+                  ON r.solicitud_anterior_id=s.id
+                WHERE s.id=%s AND s.cliente_id=%s
+                """,
+                (int(solicitud_id), cliente_id),
+            )
+            fila = cur.fetchone()
+
+    if not fila:
+        return {"ok": False, "error": "Ese envío no existe o no es de tu cuenta."}
+    fila = dict(fila)
+    if (fila.get("courier") or "").strip().upper() != "DHL":
+        return {"ok": False, "error":
+                "Por ahora sólo se pueden corregir y reemitir guías DHL."}
+    if (fila.get("reemision_existente_id")
+            and int(fila["reemision_existente_id"]) != int(reemision_nueva_id or 0)):
+        return {
+            "ok": False,
+            "error": "Esta guía ya tiene una corrección preparada. Abrí la guía nueva.",
+            "reemision_existente_id": int(fila["reemision_existente_id"]),
+        }
+    if fila.get("estado") != "GUIA_LISTA" or not fila.get("tracking"):
+        return {"ok": False, "error":
+                "Sólo podés corregir una guía recién emitida que todavía esté lista."}
+    if fila.get("tracking_estado"):
+        return {"ok": False, "error":
+                "DHL ya informó movimientos para esta guía. Escribile a Tauro para corregirla."}
+    if not fila.get("cargo_id") or fila.get("cargo_estado") != "ACTIVO":
+        return {"ok": False, "error":
+                "El cargo de esta guía necesita conciliación antes de reemplazarla."}
+    if fila.get("cargo_pendiente"):
+        return {"ok": False, "error":
+                "La guía todavía está conciliando su cargo. Probá nuevamente en unos segundos."}
+    if str(fila.get("cargo_nro_fc") or "").strip():
+        return {"ok": False, "error":
+                "Esta guía ya fue facturada. Tauro debe corregirla con respaldo contable."}
+    if fila.get("tiene_ajustes_contables"):
+        return {"ok": False, "error":
+                "Esta guía tiene ajustes contables. Tauro debe revisar la corrección."}
+    if fila.get("tiene_recoleccion_activa"):
+        return {"ok": False, "error":
+                "Esta guía tiene una recolección activa. Cancelala antes de corregirla."}
+
+    if consultar_courier:
+        if cliente_dhl is None:
+            from core.dhl_client import DHLClient
+            cliente_dhl = DHLClient()
+        try:
+            respuesta = cliente_dhl.track(str(fila["tracking"]))
+        except Exception as exc:
+            respuesta = {"encontrado": False, "error": type(exc).__name__}
+        eventos = [
+            evento for evento in (respuesta.get("eventos") or [])
+            if isinstance(evento, dict)
+        ] if isinstance(respuesta, dict) else []
+        if respuesta.get("encontrado") and eventos:
+            return {"ok": False, "error":
+                    "DHL ya registró movimientos para esta guía. No puede reemitirse desde el portal."}
+        if not respuesta.get("encontrado"):
+            # Recién emitida: MyDHL puede tardar en publicar el AWB y responde
+            # 404. Eso confirma que todavía no hay movimientos. Cualquier
+            # otro error se bloquea para no asumir que una falla es ausencia.
+            estado_http = respuesta.get("http_status")
+            error = str(respuesta.get("error") or "")
+            if estado_http != 404 and error != "Sin datos de tracking":
+                return {"ok": False, "error":
+                        "No pudimos confirmar con DHL que la guía siga sin movimientos. "
+                        "Probá nuevamente en unos minutos."}
+
+    return {"ok": True, "tracking_anterior": str(fila["tracking"]),
+            "cargo_monto_ars": fila.get("cargo_monto_ars")}
 
 
 def crear_solicitud_guia(
@@ -285,6 +475,8 @@ def crear_solicitud_guia(
     origen_dominio: str = "",
     origen_pedido_externo_id: str = "",
     costo_courier_estimado_ars: Optional[float] = None,
+    reemplaza_solicitud_id: Optional[int] = None,
+    reemision_motivo: str = "",
 ) -> dict:
     """Crea una solicitud de guía pendiente para gestión operativa.
 
@@ -308,9 +500,91 @@ def crear_solicitud_guia(
         _clean(str(origen_pedido_externo_id))
         if origen_pedido_externo_id is not None else None
     )
+    reemplaza_id = int(reemplaza_solicitud_id) if reemplaza_solicitud_id else None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            anterior_reemision = None
+            if reemplaza_id:
+                if (courier or "").strip().upper() != "DHL":
+                    raise ValueError("Una corrección DHL debe volver a emitirse con DHL.")
+                cur.execute(
+                    """
+                    SELECT id, cliente_id, estado, courier, tracking,
+                           tracking_estado, cargo_pendiente,
+                           remitente_nombre, remitente_contacto,
+                           remitente_documento, remitente_email,
+                           remitente_telefono, remitente_direccion,
+                           remitente_ciudad, remitente_estado, remitente_zip,
+                           remitente_pais, destino_pais, dest_nombre,
+                           dest_contacto, dest_documento, dest_email,
+                           dest_telefono, dest_direccion, dest_ciudad,
+                           dest_estado, dest_zip, producto_alias, cantidad,
+                           peso_kg, largo_cm, ancho_cm, alto_cm,
+                           valor_declarado_usd, bultos, tax_paga, observaciones
+                    FROM solicitudes_guia
+                    WHERE id=%s AND cliente_id=%s
+                    FOR UPDATE
+                    """,
+                    (reemplaza_id, cliente_id),
+                )
+                anterior_reemision = cur.fetchone()
+                if not anterior_reemision:
+                    raise ValueError("La guía que querés corregir no existe o no es tuya.")
+                anterior_reemision = dict(anterior_reemision)
+                if ((anterior_reemision.get("courier") or "").upper() != "DHL"
+                        or anterior_reemision.get("estado") != "GUIA_LISTA"
+                        or not anterior_reemision.get("tracking")
+                        or anterior_reemision.get("tracking_estado")
+                        or anterior_reemision.get("cargo_pendiente")):
+                    raise ValueError(
+                        "La guía anterior ya no está disponible para una reemisión automática."
+                    )
+                cur.execute(
+                    """
+                    SELECT e.id, e.estado, e.nro_fc,
+                           EXISTS (
+                               SELECT 1 FROM ajustes_cliente a
+                               WHERE a.solicitud_id=e.solicitud_id
+                                 AND a.estado <> 'ANULADO'
+                           ) AS tiene_ajustes_contables
+                    FROM envios e
+                    WHERE e.solicitud_id=%s AND e.cliente_id=%s
+                    FOR UPDATE
+                    """,
+                    (reemplaza_id, cliente_id),
+                )
+                cargo_anterior = cur.fetchone()
+                if (not cargo_anterior or cargo_anterior.get("estado") != "ACTIVO"
+                        or str(cargo_anterior.get("nro_fc") or "").strip()
+                        or cargo_anterior.get("tiene_ajustes_contables")):
+                    raise ValueError(
+                        "El cargo anterior necesita revisión antes de reemitir la guía."
+                    )
+                cur.execute(
+                    """
+                    SELECT solicitud_nueva_id
+                    FROM solicitudes_guia_reemisiones
+                    WHERE solicitud_anterior_id=%s
+                    """,
+                    (reemplaza_id,),
+                )
+                if cur.fetchone():
+                    raise ValueError("Esta guía ya tiene una corrección creada.")
+                cur.execute(
+                    """
+                    SELECT id FROM recolecciones
+                    WHERE solicitud_id=%s
+                      AND estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO',
+                                     'VERIFICAR_COURIER')
+                    LIMIT 1
+                    """,
+                    (reemplaza_id,),
+                )
+                if cur.fetchone():
+                    raise ValueError(
+                        "Cancelá la recolección activa antes de corregir esta guía."
+                    )
             if origen_plataforma_norm == "shopify":
                 from servicios.integraciones_tienda import validar_origen_shopify_con_cursor
                 if not validar_origen_shopify_con_cursor(
@@ -416,6 +690,48 @@ def crear_solicitud_guia(
                     resultado,
                     costo_estimado_manual_ars=costo_courier_estimado_ars,
                 )
+                if anterior_reemision:
+                    campos_modificados = _campos_modificados_reemision(
+                        anterior_reemision, resultado,
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO solicitudes_guia_reemisiones (
+                            cliente_id, solicitud_anterior_id,
+                            solicitud_nueva_id, tracking_anterior,
+                            campos_modificados, motivo, estado
+                        ) VALUES (%s, %s, %s, %s, %s::jsonb, %s, 'PENDIENTE')
+                        ON CONFLICT (solicitud_anterior_id) DO NOTHING
+                        RETURNING id
+                        """,
+                        (
+                            cliente_id, reemplaza_id, resultado["id"],
+                            anterior_reemision["tracking"],
+                            json.dumps(campos_modificados),
+                            _clean(reemision_motivo),
+                        ),
+                    )
+                    if cur.fetchone() is None:
+                        raise ValueError("Esta guía ya tiene una corrección creada.")
+                    from servicios.auditoria import registrar_evento_con_cursor
+                    registrar_evento_con_cursor(
+                        cur,
+                        event="portal.reemision_preparada",
+                        actor_type="cliente",
+                        actor_ref=cliente_id,
+                        ip=None,
+                        method=None,
+                        path=None,
+                        status_code=200,
+                        success=True,
+                        request_id=None,
+                        metadata={
+                            "solicitud_anterior_id": reemplaza_id,
+                            "solicitud_nueva_id": int(resultado["id"]),
+                            "tracking_anterior": anterior_reemision["tracking"],
+                            "campos_modificados": campos_modificados,
+                        },
+                    )
                 resultado["_idempotent_replay"] = False
                 return resultado
 
@@ -476,8 +792,25 @@ def listar_solicitudes_cliente(
                        COALESCE(fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
-                       fin.peso_base_facturado, fin.motivo_diferencia
+                       fin.peso_base_facturado, fin.motivo_diferencia,
+                       re_prev.solicitud_anterior_id AS reemplaza_solicitud_id,
+                       re_prev.tracking_anterior,
+                       re_next.solicitud_nueva_id AS reemplazada_por_solicitud_id,
+                       COALESCE(re_next.tracking_nuevo, vigente.tracking)
+                           AS tracking_vigente,
+                       COALESCE(re_prev.campos_modificados,
+                                re_next.campos_modificados)
+                           AS reemision_campos_modificados,
+                       COALESCE(re_prev.motivo, re_next.motivo)
+                           AS reemision_motivo,
+                       re_prev.estado AS reemision_estado
                 FROM solicitudes_guia s
+                LEFT JOIN solicitudes_guia_reemisiones re_prev
+                  ON re_prev.solicitud_nueva_id=s.id
+                LEFT JOIN solicitudes_guia_reemisiones re_next
+                  ON re_next.solicitud_anterior_id=s.id
+                LEFT JOIN solicitudes_guia vigente
+                  ON vigente.id=re_next.solicitud_nueva_id
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
@@ -758,6 +1091,17 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
             cur.execute(
                 """
                 SELECT s.*,
+                       re_prev.solicitud_anterior_id AS reemplaza_solicitud_id,
+                       re_prev.tracking_anterior,
+                       re_next.solicitud_nueva_id AS reemplazada_por_solicitud_id,
+                       COALESCE(re_next.tracking_nuevo, vigente.tracking)
+                           AS tracking_vigente,
+                       COALESCE(re_prev.campos_modificados,
+                                re_next.campos_modificados)
+                           AS reemision_campos_modificados,
+                       COALESCE(re_prev.motivo, re_next.motivo)
+                           AS reemision_motivo,
+                       re_prev.estado AS reemision_estado,
                        COALESCE(fin.precio_cliente_inicial_ars,
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
@@ -767,6 +1111,12 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
                        fin.peso_base_facturado, fin.motivo_diferencia
                 FROM solicitudes_guia s
+                LEFT JOIN solicitudes_guia_reemisiones re_prev
+                  ON re_prev.solicitud_nueva_id=s.id
+                LEFT JOIN solicitudes_guia_reemisiones re_next
+                  ON re_next.solicitud_anterior_id=s.id
+                LEFT JOIN solicitudes_guia vigente
+                  ON vigente.id=re_next.solicitud_nueva_id
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
@@ -791,8 +1141,14 @@ def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[byt
             cur.execute(
                 """
                 SELECT label_pdf
-                FROM solicitudes_guia
-                WHERE id=%s AND cliente_id=%s
+                FROM solicitudes_guia s
+                WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.estado <> 'REEMPLAZADO'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM solicitudes_guia_reemisiones r
+                      WHERE r.solicitud_nueva_id=s.id
+                        AND (r.estado <> 'EMITIDA' OR s.cargo_pendiente=TRUE)
+                  )
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )
@@ -811,6 +1167,17 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
             cur.execute(
                 """
                 SELECT s.*,
+                       re_prev.solicitud_anterior_id AS reemplaza_solicitud_id,
+                       re_prev.tracking_anterior,
+                       re_next.solicitud_nueva_id AS reemplazada_por_solicitud_id,
+                       COALESCE(re_next.tracking_nuevo, vigente.tracking)
+                           AS tracking_vigente,
+                       COALESCE(re_prev.campos_modificados,
+                                re_next.campos_modificados)
+                           AS reemision_campos_modificados,
+                       COALESCE(re_prev.motivo, re_next.motivo)
+                           AS reemision_motivo,
+                       re_prev.estado AS reemision_estado,
                        c.nombre AS cliente_nombre, c.telefono AS cliente_telefono,
                        c.direccion AS cliente_direccion, c.ciudad AS cliente_ciudad,
                        c.cp AS cliente_cp, c.pais AS cliente_pais,
@@ -824,6 +1191,12 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                        fin.peso_base_facturado, fin.motivo_diferencia
                 FROM solicitudes_guia s
                 JOIN clientes c ON c.cliente_id = s.cliente_id
+                LEFT JOIN solicitudes_guia_reemisiones re_prev
+                  ON re_prev.solicitud_nueva_id=s.id
+                LEFT JOIN solicitudes_guia_reemisiones re_next
+                  ON re_next.solicitud_anterior_id=s.id
+                LEFT JOIN solicitudes_guia vigente
+                  ON vigente.id=re_next.solicitud_nueva_id
                 LEFT JOIN LATERAL (
                     SELECT ce.precio_cliente_inicial_ars,
                            ce.precio_cliente_final_ars, ce.ajuste_cliente_ars,
@@ -844,7 +1217,7 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
 def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[bytes],
                           courier: str = "FEDEX",
                           message_reference: Optional[str] = None,
-                          commercial_invoice_pdf: Optional[bytes] = None) -> None:
+                          commercial_invoice_pdf: Optional[bytes] = None) -> bool:
     """Persiste tracking, documentos emitidos y estado de la guía."""
     tracking = (tracking or "").strip()[:120]
     if not tracking:
@@ -875,6 +1248,7 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
     # único por solicitud) y un fallo acá NO tumba la emisión: la guía ya
     # existe en el courier y eso es lo que no se puede deshacer — el cargo,
     # en el peor caso, se carga a mano y el log lo dice.
+    cargo_confirmado = False
     try:
         from servicios.cuenta_corriente import cargar_guia_emitida
         if cargar_guia_emitida(solicitud_id) is not True:
@@ -886,6 +1260,7 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                     SET cargo_pendiente=FALSE, cargo_error=NULL, updated_at=NOW()
                     WHERE id=%s
                 """, (solicitud_id,))
+        cargo_confirmado = True
     except Exception as e:
         error_cargo = str(e)[:500]
         try:
@@ -896,6 +1271,11 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                         SET cargo_pendiente=TRUE, cargo_error=%s, updated_at=NOW()
                         WHERE id=%s
                     """, (error_cargo, solicitud_id))
+                    cur.execute("""
+                        UPDATE solicitudes_guia_reemisiones
+                        SET estado='VERIFICAR_COURIER', updated_at=NOW()
+                        WHERE solicitud_nueva_id=%s AND estado='PENDIENTE'
+                    """, (solicitud_id,))
         except Exception as persistencia_error:
             print(f"[solicitudes] tampoco pude persistir el cargo pendiente "
                   f"de {solicitud_id}: {persistencia_error}")
@@ -909,12 +1289,14 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
     # En un hilo aparte: avisarle a la tienda puede tardar (API de un
     # tercero, con timeout). El admin no puede quedarse colgado mirando
     # una pantalla en blanco después de emitir — la guía ya está hecha.
-    import threading
-    threading.Thread(
-        target=_avisar_tienda_origen,
-        args=(solicitud_id, tracking, courier),
-        daemon=True,
-    ).start()
+    if cargo_confirmado:
+        import threading
+        threading.Thread(
+            target=_avisar_tienda_origen,
+            args=(solicitud_id, tracking, courier),
+            daemon=True,
+        ).start()
+    return cargo_confirmado
 
 
 def adjuntar_label_guia(solicitud_id: int, label_pdf: bytes) -> dict:
@@ -1014,7 +1396,15 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    "SELECT label_pdf FROM solicitudes_guia WHERE id=%s AND cliente_id=%s",
+                    """SELECT s.label_pdf FROM solicitudes_guia s
+                       WHERE s.id=%s AND s.cliente_id=%s
+                         AND s.estado <> 'REEMPLAZADO'
+                         AND NOT EXISTS (
+                           SELECT 1 FROM solicitudes_guia_reemisiones r
+                           WHERE r.solicitud_nueva_id=s.id
+                             AND (r.estado <> 'EMITIDA'
+                                  OR s.cargo_pendiente=TRUE)
+                         )""",
                     (solicitud_id, cliente_id.strip().upper()),
                 )
             else:
@@ -1036,8 +1426,15 @@ def obtener_factura_comercial_pdf(
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    """SELECT commercial_invoice_pdf FROM solicitudes_guia
-                       WHERE id=%s AND cliente_id=%s""",
+                    """SELECT s.commercial_invoice_pdf FROM solicitudes_guia s
+                       WHERE s.id=%s AND s.cliente_id=%s
+                         AND s.estado <> 'REEMPLAZADO'
+                         AND NOT EXISTS (
+                           SELECT 1 FROM solicitudes_guia_reemisiones r
+                           WHERE r.solicitud_nueva_id=s.id
+                             AND (r.estado <> 'EMITIDA'
+                                  OR s.cargo_pendiente=TRUE)
+                         )""",
                     (solicitud_id, cliente_id.strip().upper()),
                 )
             else:
@@ -1158,6 +1555,18 @@ def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
     facturada en el acto — sin eso, esta función sería un agujero.
     """
     cliente_id = (cliente_id or "").strip().upper()
+
+    previa = obtener_solicitud(solicitud_id)
+    if (previa and previa.get("reemplaza_solicitud_id")
+            and (previa.get("courier") or "").upper() == "DHL"):
+        elegible = validar_reemision_cliente(
+            int(previa["reemplaza_solicitud_id"]),
+            cliente_id,
+            consultar_courier=True,
+            reemision_nueva_id=solicitud_id,
+        )
+        if not elegible.get("ok"):
+            return elegible
 
     reserva = _reservar_credito_cliente(solicitud_id, cliente_id)
     if not reserva.get("ok"):
@@ -1352,6 +1761,10 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                 SELECT s.cliente_id, s.tracking, s.estado, s.precio_tauro_ars,
                        s.courier, s.ambito, s.remitente_pais, s.destino_pais,
                        c.activo,
+                       r.solicitud_anterior_id,
+                       e_anterior.monto_ars AS monto_reemplazado_ars,
+                       e_anterior.estado AS cargo_reemplazado_estado,
+                       e_anterior.nro_fc AS cargo_reemplazado_fc,
                        CASE
                          WHEN LOWER(COALESCE(s.courier, '')) = 'dhl'
                          THEN COALESCE(cc.puede_emitir, FALSE)
@@ -1363,6 +1776,10 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                 LEFT JOIN cliente_courier_config cc
                   ON cc.cliente_id = s.cliente_id
                  AND cc.courier = LOWER(COALESCE(s.courier, ''))
+                LEFT JOIN solicitudes_guia_reemisiones r
+                  ON r.solicitud_nueva_id=s.id
+                LEFT JOIN envios e_anterior
+                  ON e_anterior.solicitud_id=r.solicitud_anterior_id
                 WHERE s.id = %s
                 FOR UPDATE OF c, s
             """, (solicitud_id,))
@@ -1397,8 +1814,15 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                         "Tu cuenta no tiene habilitada la emisión directa. "
                         "Reenviá la solicitud a Tauro y la emitimos nosotros."}
 
+            if fila.get("solicitud_anterior_id"):
+                if (fila.get("cargo_reemplazado_estado") != "ACTIVO"
+                        or str(fila.get("cargo_reemplazado_fc") or "").strip()):
+                    return {"ok": False, "error":
+                            "La guía anterior cambió en la cuenta corriente. "
+                            "Tauro debe conciliarla antes de reemitir."}
+
             tope = fila["tope_deuda_ars"]
-            if tope is not None and float(tope) >= 0:
+            if tope is not None and Decimal(str(tope)) >= 0:
                 # Una sola consulta/snapshot para deuda y reservas. Antes se
                 # abrian conexiones separadas para facturado y pagos, por lo
                 # que una aprobacion concurrente podia dejar una mezcla de
@@ -1434,13 +1858,18 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                         ), 0) AS reservado
                 """, (cliente_id, cliente_id, cliente_id, solicitud_id))
                 resumen_credito = cur.fetchone() or {}
-                deuda = float(resumen_credito.get("deuda") or 0)
-                reservado = float(resumen_credito.get("reservado") or 0)
-                nueva = float(fila.get("precio_tauro_ars") or 0)
-                proyectado = deuda + reservado + nueva
-                if proyectado > float(tope):
+                deuda = Decimal(str(resumen_credito.get("deuda") or 0))
+                reservado = Decimal(str(resumen_credito.get("reservado") or 0))
+                nueva = Decimal(str(fila.get("precio_tauro_ars") or 0))
+                # Al reemplazar una guía, el cargo anterior sale de la cuenta
+                # en la misma transacción que entra el nuevo. El límite se
+                # calcula sobre ese saldo final, no sobre dos guías activas.
+                reemplazado = Decimal(str(fila.get("monto_reemplazado_ars") or 0))
+                proyectado = max(Decimal("0"), deuda - reemplazado) + reservado + nueva
+                tope_decimal = Decimal(str(tope))
+                if proyectado > tope_decimal:
                     proyectado_txt = f"{proyectado:,.0f}".replace(",", ".")
-                    tope_txt = f"{float(tope):,.0f}".replace(",", ".")
+                    tope_txt = f"{tope_decimal:,.0f}".replace(",", ".")
                     return {"ok": False, "error":
                             f"Esta guía llevaría el saldo comprometido a ARS "
                             f"{proyectado_txt}, por encima del límite de tu cuenta "
@@ -1986,9 +2415,10 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     # reintenta y, en el peor caso, se grita en los logs con el número.
     tracking = resultado["tracking"]
     guardado = False
+    cargo_confirmado = False
     for intento in (1, 2, 3):
         try:
-            guardar_guia_generada(
+            cargo_confirmado = guardar_guia_generada(
                 solicitud_id, tracking, resultado.get("label_pdf"), courier=courier,
                 message_reference=resultado.get("message_reference"),
                 commercial_invoice_pdf=resultado.get("invoice_pdf"),
@@ -2009,6 +2439,16 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
                 "error": f"La guía se emitió en {courier} (tracking {tracking}) pero no "
                          f"pudimos guardarla. Anotá ese número y avisá a soporte: "
                          f"NO vuelvas a generar la guía o saldría duplicada."}
+
+    if sol.get("reemplaza_solicitud_id") and not cargo_confirmado:
+        return {
+            "ok": False,
+            "error": (
+                f"La nueva guía existe en {courier} (tracking {tracking}), pero "
+                "la cuenta corriente no pudo cerrar el reemplazo. El PDF queda "
+                "bloqueado y Tauro debe conciliarlo; no vuelvas a emitir."
+            ),
+        }
 
     return {
         "ok": True,

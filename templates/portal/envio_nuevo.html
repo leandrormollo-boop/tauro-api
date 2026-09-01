@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Crear envío{% endblock %}
+{% block title %}{{ 'Corregir guía DHL' if reemision_origen else 'Crear envío' }}{% endblock %}
 
 {% block content %}
 {% if not ambito %}
@@ -16,17 +16,26 @@
 <div class="page-title page-title-row">
     <div>
         <div class="eyebrow"><span aria-hidden="true">🌐</span> Envío internacional</div>
-        <h1>Nuevo envío internacional</h1>
+        <h1>{{ 'Corregir guía DHL' if reemision_origen else 'Nuevo envío internacional' }}</h1>
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>Cuatro pasos simples: origen, destino, paquete e invoice comercial.</p>
+        <p>{% if reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
     </div>
     <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Administrar remitentes</a>
 </div>
 
 {% if error %}
     <div class="msg error">{{ error }}</div>
+{% endif %}
+
+{% if reemision_origen %}
+    <div class="msg warn" role="status">
+        <strong>Corrección de la guía {{ reemision_origen.tracking }}</strong><br>
+        No se modifica el AWB de DHL: TAURO emitirá una guía nueva. La anterior
+        quedará registrada como reemplazada, sin cargo en tu cuenta y sin PDF
+        descargable. Sólo la guía final será válida.
+    </div>
 {% endif %}
 
 {% if cotizacion_web %}
@@ -41,7 +50,7 @@
 {# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
    (es un atajo, no el camino principal) y ni aparece cuando el envío ya
    viene de una venta de la tienda: ahí no hay nada que pegar. #}
-{% if not pedido_tienda %}
+{% if not pedido_tienda and not reemision_origen %}
 <details class="card" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
     <summary style="cursor:pointer;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:10px;font-size:13.5px;">
         ⚡ Atajo: ¿te llegó el pedido por mail? Pegalo y te completo el formulario
@@ -94,9 +103,12 @@
     </div>
 </div>
 {% endif %}
-<form method="POST" action="/portal/envios/nuevo">
+<form method="POST" action="/portal/envios/nuevo"
+      {% if reemision_origen %}data-confirm="¿Confirmar la corrección? DHL emitirá un tracking nuevo. La guía anterior quedará reemplazada y sólo la nueva se aplicará a tu cuenta corriente."{% endif %}>
     <input type="hidden" name="ambito" value="internacional">
     <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
+    <input type="hidden" name="reemplaza_solicitud_id" value="{{ form.reemplaza_solicitud_id or '' }}">
+    <input type="hidden" name="reemision_motivo" value="{{ form.reemision_motivo or '' }}">
     {# Courier internacional elegido. Si queda vacío el submit no adivina:
        falla pidiendo que se elija, en vez de cobrar el primero de la lista. #}
     <input type="hidden" name="intl_courier" id="intl_courier" value="{{ form.intl_courier or '' }}">
@@ -514,9 +526,9 @@
             <button type="button" id="wizard-back-final" class="btn btn-ghost">
                 ← Atrás
             </button>
-            <a href="/portal/envios" class="btn btn-ghost">Cancelar</a>
+            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Cancelar</a>
             <button type="submit" class="btn btn-primary">
-                Crear solicitud
+                {{ 'Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud' }}
             </button>
         </div>
     </div>

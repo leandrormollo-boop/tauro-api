@@ -57,14 +57,17 @@ def _conn_falsa(filas=None, n=0):
 def test_ningun_estado_se_pierde_en_el_embudo():
     """
     Con un envío en cada estado válido, el embudo tiene que contarlos todos
-    menos CANCELADO. Si alguno no cae en ninguna rama, desaparece del panel.
+    menos CANCELADO y REEMPLAZADO. Esos dos quedan sólo en el historial: no
+    esperan una acción operativa de nadie.
     """
     filas = [{"estado": e, "n": 1} for e in ESTADOS_VALIDOS]
     with mock.patch.object(pc, "get_conn", _conn_falsa(filas, n=0)):
         pasos = pc.embudo_envios("TEST")
 
     contados = sum(p["cantidad"] for p in pasos)
-    esperados = len([e for e in ESTADOS_VALIDOS if e != "CANCELADO"])
+    esperados = len([
+        e for e in ESTADOS_VALIDOS if e not in ("CANCELADO", "REEMPLAZADO")
+    ])
     assert contados == esperados, (
         f"se pierden {esperados - contados} envío(s): "
         f"algún estado de {ESTADOS_VALIDOS} no está mapeado en embudo_envios"

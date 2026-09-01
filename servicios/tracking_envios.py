@@ -165,6 +165,7 @@ def _candidato_dhl(solicitud_id: int) -> Optional[dict]:
                   AND UPPER(courier) = 'DHL'
                   AND NULLIF(BTRIM(tracking), '') IS NOT NULL
                   AND estado NOT IN ('CANCELADO', 'ENTREGADO')
+                  AND estado <> 'REEMPLAZADO'
                   AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                 """,
                 (int(solicitud_id),),
@@ -214,6 +215,7 @@ def actualizar_tracking_dhl(
                         updated_at = NOW()
                     WHERE id = %s
                       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
+                      AND estado <> 'REEMPLAZADO'
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                     RETURNING id
                     """,
@@ -235,6 +237,7 @@ def actualizar_tracking_dhl(
                         updated_at = NOW()
                     WHERE id = %s
                       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
+                      AND estado <> 'REEMPLAZADO'
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                     RETURNING id
                     """,
@@ -289,6 +292,7 @@ def actualizar_trackings_diarios_dhl(limite: Optional[int] = None) -> dict:
                     WHERE UPPER(courier) = 'DHL'
                       AND NULLIF(BTRIM(tracking), '') IS NOT NULL
                       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
+                      AND estado <> 'REEMPLAZADO'
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                       AND (
                           tracking_consultado_at IS NULL

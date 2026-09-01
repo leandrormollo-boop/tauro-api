@@ -1337,7 +1337,38 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_tracking_dhl_pendiente
     WHERE UPPER(courier) = 'DHL'
       AND tracking IS NOT NULL AND BTRIM(tracking) <> ''
       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
+      AND estado <> 'REEMPLAZADO'
       AND (tracking_estado IS NULL OR tracking_estado <> 'ENTREGADO');
+
+-- ── Corrección y reemisión de guías DHL ────────────────────
+-- Una guía emitida no se modifica dentro de MyDHL. TAURO conserva la guía
+-- anterior como historia, crea una solicitud nueva y enlaza ambas. La fila
+-- anterior nunca se borra: su tracking explica qué se descartó; la nueva es
+-- la única que puede quedar vigente y debitada en cuenta corriente.
+CREATE TABLE IF NOT EXISTS solicitudes_guia_reemisiones (
+    id                       SERIAL PRIMARY KEY,
+    cliente_id               TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    solicitud_anterior_id    INTEGER NOT NULL UNIQUE
+                               REFERENCES solicitudes_guia(id) ON DELETE CASCADE,
+    solicitud_nueva_id       INTEGER NOT NULL UNIQUE
+                               REFERENCES solicitudes_guia(id) ON DELETE CASCADE,
+    tracking_anterior        TEXT NOT NULL,
+    tracking_nuevo           TEXT,
+    campos_modificados       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    motivo                   TEXT,
+    estado                   TEXT NOT NULL DEFAULT 'PENDIENTE',
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at             TIMESTAMPTZ,
+    updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ck_solicitudes_guia_reemisiones_distintas
+        CHECK (solicitud_anterior_id <> solicitud_nueva_id),
+    CONSTRAINT ck_solicitudes_guia_reemisiones_estado
+        CHECK (estado IN ('PENDIENTE', 'EMITIDA', 'VERIFICAR_COURIER'))
+);
+CREATE INDEX IF NOT EXISTS idx_reemisiones_cliente_fecha
+    ON solicitudes_guia_reemisiones (cliente_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reemisiones_estado
+    ON solicitudes_guia_reemisiones (estado, updated_at DESC);
 
 -- ── Recolecciones de couriers ──────────────────────────────
 -- Esquema canónico: no se crea ni se modifica desde el primer request. Las

@@ -1562,9 +1562,20 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT cliente_id, precio_tauro_ars, tracking, courier, ambito,
-                       producto_alias, remitente_pais, destino_pais
-                FROM solicitudes_guia WHERE id = %s
+                SELECT s.cliente_id, s.precio_tauro_ars, s.tracking,
+                       s.courier, s.ambito, s.producto_alias,
+                       s.remitente_pais, s.destino_pais,
+                       r.solicitud_anterior_id,
+                       r.tracking_anterior,
+                       r.estado AS reemision_estado,
+                       e_actual.id AS cargo_actual_id,
+                       e_actual.estado AS cargo_actual_estado
+                FROM solicitudes_guia s
+                LEFT JOIN solicitudes_guia_reemisiones r
+                  ON r.solicitud_nueva_id=s.id
+                LEFT JOIN envios e_actual ON e_actual.solicitud_id=s.id
+                WHERE s.id = %s
+                FOR UPDATE OF s
             """, (solicitud_id,))
             sol = cur.fetchone()
 
@@ -1589,6 +1600,55 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
                 )
             ambito = ambito.upper()
 
+            anterior = None
+            if sol.get("solicitud_anterior_id"):
+                cur.execute(
+                    """
+                    SELECT s.id, s.cliente_id, s.estado, s.tracking,
+                           s.origen_plataforma,
+                           e.id AS cargo_id, e.estado AS cargo_estado,
+                           e.nro_fc AS cargo_nro_fc,
+                           EXISTS (
+                               SELECT 1 FROM ajustes_cliente a
+                               WHERE a.solicitud_id=s.id
+                                 AND a.estado <> 'ANULADO'
+                           ) AS tiene_ajustes_contables,
+                           EXISTS (
+                               SELECT 1 FROM recolecciones p
+                               WHERE p.solicitud_id=s.id
+                                 AND p.estado IN (
+                                   'AGENDANDO','AGENDADA','CANCELANDO',
+                                   'VERIFICAR_COURIER'
+                                 )
+                           ) AS tiene_recoleccion_activa
+                    FROM solicitudes_guia s
+                    JOIN envios e ON e.solicitud_id=s.id
+                    WHERE s.id=%s AND s.cliente_id=%s
+                    FOR UPDATE OF s, e
+                    """,
+                    (int(sol["solicitud_anterior_id"]), sol["cliente_id"]),
+                )
+                anterior = cur.fetchone()
+                if sol.get("reemision_estado") == "EMITIDA":
+                    if (anterior and anterior.get("estado") == "REEMPLAZADO"
+                            and anterior.get("cargo_estado") == "CANCELADO"
+                            and sol.get("cargo_actual_id")
+                            and sol.get("cargo_actual_estado") == "ACTIVO"):
+                        return True
+                    raise ValueError(
+                        "El reemplazo figura emitido pero sus cargos no conservan "
+                        "el estado esperado; requiere conciliación."
+                    )
+                if (not anterior or anterior.get("estado") != "GUIA_LISTA"
+                        or anterior.get("cargo_estado") != "ACTIVO"
+                        or str(anterior.get("cargo_nro_fc") or "").strip()
+                        or anterior.get("tiene_ajustes_contables")
+                        or anterior.get("tiene_recoleccion_activa")):
+                    raise ValueError(
+                        "La guía anterior cambió de estado o fue facturada; "
+                        "la reemisión necesita conciliación y no se aplicó."
+                    )
+
             descripcion = (f"Guía {sol['tracking'] or 's/n'} · "
                            f"{sol['producto_alias'] or 'envío'} → {sol['destino_pais'] or ''} · "
                            f"{(sol['courier'] or 'FEDEX').upper()} · cargo automático")
@@ -1609,6 +1669,91 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
                 raise ValueError(
                     f"El cargo de la solicitud {solicitud_id} ya existe en otro ámbito; "
                     "requiere conciliación"
+                )
+
+            if anterior:
+                # El nuevo cargo y la baja del anterior viven en la misma
+                # transacción. Nunca puede quedar la cuenta corriente con dos
+                # guías activas por una sola corrección.
+                cur.execute(
+                    """
+                    UPDATE envios
+                    SET estado='CANCELADO',
+                        descripcion=COALESCE(descripcion, '') ||
+                          %s
+                    WHERE id=%s AND estado='ACTIVO'
+                      AND COALESCE(nro_fc, '')=''
+                    RETURNING id
+                    """,
+                    (
+                        f" · reemplazada por guía {sol['tracking']}",
+                        anterior["cargo_id"],
+                    ),
+                )
+                if cur.fetchone() is None:
+                    raise ValueError(
+                        "No se pudo retirar el cargo de la guía anterior; "
+                        "la reemisión necesita conciliación."
+                    )
+                cur.execute(
+                    """
+                    UPDATE solicitudes_guia
+                    SET estado='REEMPLAZADO', updated_at=NOW()
+                    WHERE id=%s AND estado='GUIA_LISTA'
+                    RETURNING id
+                    """,
+                    (anterior["id"],),
+                )
+                if cur.fetchone() is None:
+                    raise ValueError(
+                        "No se pudo marcar la guía anterior como reemplazada."
+                    )
+                cur.execute(
+                    """
+                    UPDATE solicitudes_guia_reemisiones
+                    SET estado='EMITIDA', tracking_nuevo=%s,
+                        completed_at=NOW(), updated_at=NOW()
+                    WHERE solicitud_anterior_id=%s
+                      AND solicitud_nueva_id=%s
+                      AND estado='PENDIENTE'
+                    RETURNING id
+                    """,
+                    (sol["tracking"], anterior["id"], solicitud_id),
+                )
+                if cur.fetchone() is None:
+                    raise ValueError(
+                        "No se pudo cerrar el registro de reemplazo de la guía."
+                    )
+                # Si nació de Shopify/Tiendanube, el pedido apunta a la guía
+                # final; así sólo se comunica el tracking vigente.
+                if str(anterior.get("origen_plataforma") or "").strip():
+                    cur.execute(
+                        """
+                        UPDATE pedidos_tienda
+                        SET solicitud_id=%s
+                        WHERE cliente_id=%s AND solicitud_id=%s
+                        """,
+                        (solicitud_id, sol["cliente_id"], anterior["id"]),
+                    )
+                registrar_evento_con_cursor(
+                    cur,
+                    event="portal.reemision_emitida",
+                    actor_type="sistema",
+                    actor_ref="cuenta_corriente",
+                    ip=None,
+                    method=None,
+                    path=None,
+                    status_code=200,
+                    success=True,
+                    request_id=None,
+                    metadata={
+                        "solicitud_anterior_id": int(anterior["id"]),
+                        "solicitud_nueva_id": int(solicitud_id),
+                        "tracking_anterior": anterior.get("tracking"),
+                        "tracking_nuevo": sol.get("tracking"),
+                        "cargo_anterior_id": int(anterior["cargo_id"]),
+                        "cargo_nuevo_id": int(fila["id"]),
+                    },
                 )
 
     if fila:

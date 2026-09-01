@@ -86,7 +86,7 @@ def paso_de_estado(estado: str) -> str | None:
         # DESPACHADO es el estado terminal que la tabla tiene hoy; ENTREGADO
         # queda contemplado para cuando el tracking escriba la entrega.
         return "despachados"
-    if estado == "CANCELADO":
+    if estado in ("CANCELADO", "REEMPLAZADO"):
         return None  # no espera acción de nadie
     print(f"[panel] estado sin mapear en el embudo: {estado!r}")
     return None

@@ -79,11 +79,16 @@
 {# Resumen de lo que estás viendo ahora — se recalcula con cada filtro, así
    sirve para responder "¿cuánto llevo gastado en lo despachado?". #}
 {% if solicitudes %}
-{% set total_ars = solicitudes | map(attribute='precio_tauro_ars') | select | sum %}
+{% set resumen = namespace(total_ars=0) %}
+{% for envio in solicitudes %}
+    {% if envio.estado != 'REEMPLAZADO' %}
+        {% set resumen.total_ars = resumen.total_ars + (envio.precio_tauro_ars or 0) %}
+    {% endif %}
+{% endfor %}
 <p class="envios-resumen">
     Mostrando {{ pagina_desde }}–{{ pagina_hasta }} de {{ total_resultados }}
     envío{{ "s" if total_resultados != 1 }} ·
-    <b>$ {{ "{:,.0f}".format(total_ars).replace(",", ".") }}</b> cotizado en esta página
+    <b>$ {{ "{:,.0f}".format(resumen.total_ars).replace(",", ".") }}</b> cotizado en esta página (sólo guías vigentes)
 </p>
 {% endif %}
 
@@ -114,6 +119,7 @@
                 "GUIA_LISTA": ("ok",    "Guía lista"),
                 "DESPACHADO": ("ok",    "Enviado"),
                 "ENTREGADO":  ("ok",    "Entregado"),
+                "REEMPLAZADO": ("muted", "Reemplazado"),
                 "CANCELADO":  ("muted", "Cancelado"),
             } %}
             {% set estados_tracking = {
@@ -122,7 +128,9 @@
                 "RETENIDO":        ("error", "Retenido, verificar"),
             } %}
             {% for s in solicitudes %}
-                {% if s.tracking_estado %}
+                {% if s.estado == 'REEMPLAZADO' %}
+                    {% set b = estados.get(s.estado) %}
+                {% elif s.tracking_estado %}
                     {% set b = estados_tracking.get(s.tracking_estado, ("muted", "Rastreo pendiente")) %}
                 {% elif (s.courier or '')|upper == 'DHL' and s.tracking %}
                     {% set b = ("muted", "Rastreo pendiente") %}
@@ -159,9 +167,16 @@
                             {% set turl = url_tracking(s.courier, s.tracking) %}
                             <a href="{{ turl }}" target="_blank" rel="noopener" class="track-link mono">{{ s.tracking }}</a>
                         {% endif %}
+                        {% if s.estado == 'REEMPLAZADO' and s.tracking_vigente %}
+                            <small class="tracking-updated">Reemplazado por {{ s.tracking_vigente }}</small>
+                        {% elif s.reemplaza_solicitud_id and s.tracking_anterior %}
+                            <small class="tracking-updated">Corrige {{ s.tracking_anterior }}</small>
+                        {% endif %}
                     </td>
                     <td class="mono" data-label="Importe cotizado">
-                        {% if s.precio_final_cliente_ars or s.precio_tauro_ars %}
+                        {% if s.estado == 'REEMPLAZADO' %}
+                            <span style="color:var(--fg-3);">Sin cargo</span>
+                        {% elif s.precio_final_cliente_ars or s.precio_tauro_ars %}
                             $ {{ "{:,.0f}".format(s.precio_final_cliente_ars or s.precio_tauro_ars).replace(",", ".") }}
                         {% else %}
                             —
@@ -175,7 +190,7 @@
                     </td>
                     <td>
                         <div class="row-actions">
-                            {% if s.tiene_label %}
+                            {% if s.tiene_label and s.estado != 'REEMPLAZADO' %}
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-sm">Guía PDF</a>
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}

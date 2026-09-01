@@ -59,6 +59,7 @@ from servicios.solicitudes_guia import (
     obtener_factura_comercial_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
     idempotency_hash_origen_tienda,
+    validar_reemision_cliente,
 )
 from servicios.carriers import courier_default_cliente
 from servicios.carrier_contract import Ambito, public_catalog
@@ -1867,8 +1868,11 @@ def envio_nuevo_form(
     ambito: str = "",
     courier: str = "",
     quote_id: str = "",
+    corregir: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    if corregir:
+        ambito = "internacional"
     quote_id = _quote_id_portal(quote_id)
     if quote_id and not (ambito or "").strip():
         ambito = "internacional"
@@ -1899,6 +1903,104 @@ def envio_nuevo_form(
     pedido_info = None
     cotizacion_web = None
     error = None
+    reemision_origen = None
+    if corregir:
+        reemision_origen = obtener_solicitud_de_cliente(corregir, cliente)
+        elegible = validar_reemision_cliente(corregir, cliente)
+        if not elegible.get("ok"):
+            destino_error = int(
+                elegible.get("reemision_existente_id") or corregir
+            )
+            return RedirectResponse(
+                url=(f"/portal/envios/{destino_error}?error="
+                     f"{quote(str(elegible.get('error') or 'No se puede corregir'))}"),
+                status_code=303,
+            )
+        bultos = reemision_origen.get("bultos") or []
+        if isinstance(bultos, str):
+            try:
+                import json
+                bultos = json.loads(bultos)
+            except (TypeError, ValueError):
+                bultos = []
+        if not bultos:
+            cantidad_cajas = int(reemision_origen.get("cantidad") or 1)
+            bultos = [{
+                "producto_alias": reemision_origen.get("producto_alias") or "",
+                "cantidad": cantidad_cajas,
+                "unidades_aduana": cantidad_cajas,
+                "peso_kg": (float(reemision_origen.get("peso_kg") or 0)
+                            / max(cantidad_cajas, 1)),
+                "largo_cm": reemision_origen.get("largo_cm"),
+                "ancho_cm": reemision_origen.get("ancho_cm"),
+                "alto_cm": reemision_origen.get("alto_cm"),
+                "valor_unitario_usd": (float(
+                    reemision_origen.get("valor_declarado_usd") or 0
+                ) / max(cantidad_cajas, 1)),
+                "descripcion_en": reemision_origen.get("producto_alias") or "",
+                "hs_code": "",
+                "pais_origen": reemision_origen.get("remitente_pais") or "AR",
+            }]
+        filas = []
+        for bulto in bultos:
+            b = dict(bulto)
+            b["producto"] = b.get("producto") or b.get("producto_alias") or ""
+            b.setdefault("unidades_aduana", b.get("cantidad") or 1)
+            filas.append(b)
+        form = {
+            "reemplaza_solicitud_id": str(corregir),
+            "reemision_motivo": "Corrección solicitada por el cliente",
+            "rem_nombre": reemision_origen.get("remitente_nombre") or "",
+            "rem_contacto": reemision_origen.get("remitente_contacto") or "",
+            "rem_documento": reemision_origen.get("remitente_documento") or "",
+            "rem_email": reemision_origen.get("remitente_email") or "",
+            "rem_telefono": reemision_origen.get("remitente_telefono") or "",
+            "rem_direccion": reemision_origen.get("remitente_direccion") or "",
+            "rem_ciudad": reemision_origen.get("remitente_ciudad") or "",
+            "rem_estado": reemision_origen.get("remitente_estado") or "",
+            "rem_zip": reemision_origen.get("remitente_zip") or "",
+            "rem_pais": reemision_origen.get("remitente_pais") or "AR",
+            "destino_pais": reemision_origen.get("destino_pais") or "",
+            "dest_nombre": reemision_origen.get("dest_nombre") or "",
+            "dest_contacto": reemision_origen.get("dest_contacto") or "",
+            "dest_documento": reemision_origen.get("dest_documento") or "",
+            "dest_email": reemision_origen.get("dest_email") or "",
+            "dest_telefono": reemision_origen.get("dest_telefono") or "",
+            "dest_direccion": reemision_origen.get("dest_direccion") or "",
+            "dest_ciudad": reemision_origen.get("dest_ciudad") or "",
+            "dest_estado": reemision_origen.get("dest_estado") or "",
+            "dest_zip": reemision_origen.get("dest_zip") or "",
+            "observaciones": reemision_origen.get("observaciones") or "",
+            "precio_cliente_final_ars": (
+                reemision_origen.get("precio_cliente_final_ars") or ""
+            ),
+            "tax_paga": reemision_origen.get("tax_paga") or "",
+            "intl_courier": "dhl",
+            "precio_cotizado_ars": reemision_origen.get("precio_tauro_ars") or "",
+            "bultos": filas,
+        }
+        remitente_correccion = {
+            "nombre": form["rem_nombre"], "contacto": form["rem_contacto"],
+            "documento": form["rem_documento"], "email": form["rem_email"],
+            "telefono": form["rem_telefono"], "direccion": form["rem_direccion"],
+            "ciudad": form["rem_ciudad"], "estado": form["rem_estado"],
+            "cp": form["rem_zip"], "pais": form["rem_pais"],
+        }
+        return templates.TemplateResponse(
+            request=request, name="portal/envio_nuevo.html",
+            context={
+                "cliente": cliente, "ambito": "internacional",
+                "productos": get_productos(cliente),
+                "paises_destino": _paises_con_nacional(),
+                "remitente": remitente_correccion,
+                "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
+                "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+                "form": form, "pedido_tienda": None, "cotizacion_web": None,
+                "reemision_origen": reemision_origen,
+                "tax_paga_default": tax_paga_cliente(cliente),
+                "courier_default": "dhl", "error": None,
+            },
+        )
     if quote_id and not pedido_tienda:
         try:
             from servicios.leads import obtener_cotizacion
@@ -2016,6 +2118,7 @@ def envio_nuevo_form(
             # el selector del wizard arranca con este elegido.
             "courier_default": courier_default_cliente(cliente),
             "error": error,
+            "reemision_origen": reemision_origen,
         },
     )
 
@@ -2087,6 +2190,8 @@ def envio_nuevo_post(
     # Si el envío nació de un pedido de la tienda, al crearse la solicitud
     # el pedido pasa de PENDIENTE a CONVERTIDO.
     pedido_tienda_id: str = Form(""),
+    reemplaza_solicitud_id: str = Form(""),
+    reemision_motivo: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
     if _ambito_post(ambito) != "internacional":
@@ -2101,6 +2206,12 @@ def envio_nuevo_post(
     # FormInfo, no una lista enviada por el navegador.
     if not isinstance(bulto_unidades_aduana, (list, tuple)):
         bulto_unidades_aduana = []
+    # Invocaciones directas de tests/consumidores internos conservan el
+    # FormInfo de FastAPI en parámetros nuevos que no enviaron.
+    if not isinstance(reemplaza_solicitud_id, str):
+        reemplaza_solicitud_id = ""
+    if not isinstance(reemision_motivo, str):
+        reemision_motivo = ""
 
     # Normalizar filas de bultos: pares (producto, cantidad) sin filas vacías.
     # Fallback legacy: producto_alias + cantidad sueltos = una sola fila.
@@ -2267,13 +2378,28 @@ def envio_nuevo_post(
         # tienda se perdía, el pedido quedaba "pendiente" para siempre y se
         # podía terminar despachando dos veces.
         "pedido_tienda_id": pedido_tienda_id,
+        "reemplaza_solicitud_id": reemplaza_solicitud_id,
+        "reemision_motivo": reemision_motivo,
     }
 
     error_step = 1
     pedido_origen = None
+    reemision_origen = None
     origen_tienda: dict = {}
     idempotency_tienda = ""
     try:
+        reemplaza_id = _id_opt(reemplaza_solicitud_id)
+        if reemplaza_id:
+            reemision_origen = obtener_solicitud_de_cliente(reemplaza_id, cliente)
+            elegible = validar_reemision_cliente(
+                reemplaza_id, cliente, consultar_courier=True,
+            )
+            if not elegible.get("ok"):
+                raise ValueError(
+                    str(elegible.get("error") or "La guía ya no se puede corregir.")
+                )
+            if (intl_courier or "").strip().lower() != "dhl":
+                raise ValueError("La corrección debe volver a emitirse con DHL.")
         if (pedido_tienda_id or "").strip():
             pedido_origen = _origen_pedido_tienda_verificado(
                 cliente, pedido_tienda_id,
@@ -2604,6 +2730,8 @@ def envio_nuevo_post(
             # los envíos ya despachados no cambian de manos.
             tax_paga=normalizar_tax(tax_paga, tax_paga_cliente(cliente)),
             idempotency_key_hash=idempotency_tienda,
+            reemplaza_solicitud_id=reemplaza_id,
+            reemision_motivo=reemision_motivo,
             **origen_tienda,
             **courier_extra,
         )
@@ -2652,6 +2780,7 @@ def envio_nuevo_post(
                 # y el default de impuestos configurados del cliente.
                 "tax_paga_default": tax_paga_cliente(cliente),
                 "courier_default": courier_default_cliente(cliente),
+                "reemision_origen": reemision_origen,
             },
         )
 
@@ -2662,6 +2791,22 @@ def envio_nuevo_post(
         except Exception as e:
             print(f"[integraciones] no pude marcar convertido el pedido "
                   f"{pedido_origen['pedido_id']}: {type(e).__name__}")
+
+    if _id_opt(reemplaza_solicitud_id):
+        from servicios.solicitudes_guia import emitir_guia_como_cliente
+        resultado_emision = emitir_guia_como_cliente(
+            int(solicitud_creada["id"]), cliente,
+        )
+        if resultado_emision.get("ok"):
+            return RedirectResponse(
+                url=f"/portal/envios/{solicitud_creada['id']}?ok=reemision",
+                status_code=303,
+            )
+        return RedirectResponse(
+            url=(f"/portal/envios/{solicitud_creada['id']}?error="
+                 f"{quote(str(resultado_emision.get('error') or 'No se pudo emitir'))}"),
+            status_code=303,
+        )
 
     return RedirectResponse(
         url="/portal/envios?tipo=internacional&ok=solicitado",
@@ -2687,10 +2832,20 @@ def envio_detalle(
         ambito_envio(s) == "internacional"
         and _cliente_puede_emitir_courier(cliente, s.get("courier") or "")
     )
+    puede_corregir = False
+    if ((s.get("courier") or "").upper() == "DHL"
+            and s.get("estado") == "GUIA_LISTA" and s.get("tracking")
+            and not s.get("reemplazada_por_solicitud_id")):
+        puede_corregir = bool(
+            validar_reemision_cliente(solicitud_id, cliente).get("ok")
+        )
 
     return templates.TemplateResponse(
         request=request, name="portal/envio_detalle.html",
-        context={"cliente": cliente, "s": s, "puede_emitir": puede_emitir},
+        context={
+            "cliente": cliente, "s": s, "puede_emitir": puede_emitir,
+            "puede_corregir": puede_corregir,
+        },
     )
 
 

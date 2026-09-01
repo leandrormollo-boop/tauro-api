@@ -944,7 +944,11 @@ class DHLClient(CarrierBase):
                 timeout=30,
             )
             if resp.status_code != 200:
-                return {"encontrado": False, "error": f"DHL {resp.status_code}"}
+                return {
+                    "encontrado": False,
+                    "error": f"DHL {resp.status_code}",
+                    "http_status": int(resp.status_code),
+                }
             envios = (resp.json().get("shipments") or [])
             if not envios:
                 return {"encontrado": False, "error": "Sin datos de tracking"}
