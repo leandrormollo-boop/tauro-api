@@ -106,8 +106,8 @@ class OCAConfig:
     password: str = ""
     origin_mode: str = ""
     destination_mode: str = ""
-    connect_timeout_seconds: Decimal = Decimal("1")
-    read_timeout_seconds: Decimal = Decimal("3")
+    connect_timeout_seconds: Decimal = Decimal("0.5")
+    read_timeout_seconds: Decimal = Decimal("1.3")
     max_response_bytes: int = _SAFE_XML_LIMIT
     fallback_markup_pct: Decimal = Decimal("25")
 
@@ -135,11 +135,11 @@ class OCAConfig:
             origin_mode=str(values.get("OCA_ORIGIN_MODE") or "").strip().lower(),
             destination_mode=str(values.get("OCA_DESTINATION_MODE") or "").strip().lower(),
             connect_timeout_seconds=_decimal_config(
-                values.get("OCA_CONNECT_TIMEOUT_SECONDS") or "1",
+                values.get("OCA_CONNECT_TIMEOUT_SECONDS") or "0.5",
                 "OCA_CONNECT_TIMEOUT_SECONDS",
             ),
             read_timeout_seconds=_decimal_config(
-                values.get("OCA_READ_TIMEOUT_SECONDS") or "3",
+                values.get("OCA_READ_TIMEOUT_SECONDS") or "1.3",
                 "OCA_READ_TIMEOUT_SECONDS",
             ),
             max_response_bytes=_integer_config(
@@ -163,6 +163,10 @@ class OCAConfig:
             float(self.read_timeout_seconds),
         )
 
+    @property
+    def callback_timeout_budget_seconds(self) -> float:
+        return float(self.connect_timeout_seconds + self.read_timeout_seconds)
+
     def configuration_errors(self) -> tuple[str, ...]:
         errors: list[str] = []
         if self.environment not in {"qa", "production"}:
@@ -185,7 +189,9 @@ class OCAConfig:
             errors.append("connect_timeout")
         if not Decimal("0.1") <= self.read_timeout_seconds <= Decimal("5"):
             errors.append("read_timeout")
-        if self.connect_timeout_seconds + self.read_timeout_seconds > Decimal("5"):
+        # Un carrito mixto requiere dos cotizaciones secuenciales. Reservamos
+        # 0,4 s del SLA global de 4 s para parseo, DB y serialización.
+        if self.connect_timeout_seconds + self.read_timeout_seconds > Decimal("1.8"):
             errors.append("timeout_budget")
         if not 1_024 <= self.max_response_bytes <= _SAFE_XML_LIMIT:
             errors.append("response_limit")
@@ -427,13 +433,12 @@ def _payload(request: QuoteRequest, config: OCAConfig) -> dict[str, str]:
 
 
 def _default_pricing_loader(customer_id: str, fallback_pct: float) -> dict:
-    from servicios.pricing import get_pricing_config
+    from servicios.pricing import get_pricing_nacional_estricto
 
-    return get_pricing_config(
-        customer_id,
-        fallback_pct=fallback_pct,
-        ambito="nacional",
-    )
+    # Se conserva la firma del contrato del adapter, pero el fallback global
+    # nunca es válido para cotizaciones nacionales publicadas en Tiendanube.
+    _ = fallback_pct
+    return get_pricing_nacional_estricto(customer_id)
 
 
 def _safe_service_code(value: str, fallback: str) -> str:

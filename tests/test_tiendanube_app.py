@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+from starlette.requests import Request
 
 
 class _Response:
@@ -35,6 +36,7 @@ class _Cursor:
     def __init__(self, respuestas=()):
         self.respuestas = iter(respuestas)
         self.ejecutadas = []
+        self.rowcount = 1
 
     def __enter__(self):
         return self
@@ -118,6 +120,9 @@ def test_api_envia_authorization_actual_y_header_legacy(monkeypatch):
     headers = llamadas[0][1]["headers"]
     assert headers["Authorization"] == "Bearer token"
     assert headers["Authentication"] == "bearer token"
+    assert llamadas[0][0][1].startswith(
+        "https://api.tiendanube.com/2025-03/123/"
+    )
 
 
 def test_cookie_oauth_esta_firmada_y_no_admite_cambiar_owner(monkeypatch):
@@ -136,7 +141,7 @@ def test_webhooks_requeridos_cubren_lifecycle_pedidos_y_privacidad():
 
     assert set(WEBHOOKS_REQUERIDOS) == {
         "order/created", "order/updated", "order/cancelled",
-        "app/uninstalled", "app/suspended",
+        "app/uninstalled", "app/suspended", "app/resumed",
         "store/redact", "customers/redact", "customers/data_request",
     }
 
@@ -178,7 +183,7 @@ def test_registro_crea_solo_faltantes_y_verifica_despues(monkeypatch):
         return _Response(201, {})
 
     monkeypatch.setattr(tiendanube_app, "_api", api)
-    assert len(tiendanube_app.registrar_webhooks("123", "token")) == 8
+    assert len(tiendanube_app.registrar_webhooks("123", "token")) == 9
     assert "order/created" not in posts
     assert set(posts) == set(tiendanube_app.WEBHOOKS_REQUERIDOS) - {"order/created"}
 
@@ -478,6 +483,628 @@ def test_reconciliacion_completa_instalacion_parcial_sin_reinstall(monkeypatch):
     assert confirmadas == ["123"]
 
 
+def test_evento_resumed_reactiva_misma_generacion(monkeypatch):
+    from servicios import tiendanube_app
+
+    llamadas = []
+    monkeypatch.setattr(
+        tiendanube_app,
+        "reactivar",
+        lambda store_id, generation: llamadas.append((store_id, generation)) or True,
+    )
+
+    assert tiendanube_app._procesar_evento({
+        "evento": "app/resumed",
+        "store_id": "123",
+        "install_generation": "gen-1",
+    }) == "REACTIVADA"
+    assert llamadas == [("123", "gen-1")]
+
+
+def test_reactivar_rehabilita_binding_y_mismo_shipping(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    cursor = _Cursor([{
+        "install_generation": "gen-1",
+        "cliente_id": "melcior",
+    }])
+    conn = _Conn(cursor)
+    shipping = []
+    monkeypatch.setattr(tiendanube_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(tiendanube_app, "get_conn", lambda: conn)
+    monkeypatch.setattr(
+        tiendanube_shipping, "reactivar", lambda store_id: shipping.append(store_id)
+    )
+
+    assert tiendanube_app.reactivar("123", "gen-1") is True
+    assert shipping == ["123"]
+    assert any("SET activa = TRUE" in sql for sql, _ in cursor.ejecutadas)
+    assert any("APP_RESUMED" in str(params) for _, params in cursor.ejecutadas)
+    assert conn.commits == 1
+
+
+def test_admin_link_solo_acepta_tienda_del_cliente(monkeypatch):
+    from endpoints import portal_cliente
+    from servicios import tiendanube_app
+
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/portal/tienda/tiendanube/pedidos",
+        "query_string": b"store=123&id=pedido-1&id=pedido-2",
+        "headers": [],
+    })
+    monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
+        "cliente_id": "MELCIOR",
+        "estado": "ACTIVA",
+        "webhooks_ready": True,
+    })
+    monkeypatch.setattr(
+        portal_cliente,
+        "listar_pedidos_tiendanube_seleccionados",
+        lambda *_args, **_kwargs: [
+            {
+                "id": 7,
+                "plataforma": "tiendanube",
+                "pedido_externo_id": "pedido-1",
+                "destinatario": {},
+                "items": [],
+            },
+        ],
+    )
+
+    response = portal_cliente.tienda_tiendanube_admin_link(
+        request, cliente="MELCIOR"
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.context["pedidos"]] == [7]
+    assert response.context["solicitados"] == 2
+    assert response.context["faltantes"] == 1
+
+
+def test_consulta_admin_link_acota_cliente_tienda_plataforma_y_estado(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _Cursor([[]])
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(
+        integraciones_tienda, "get_conn", lambda: _Conn(cursor),
+    )
+
+    assert integraciones_tienda.listar_pedidos_tiendanube_seleccionados(
+        "MELCIOR", "123", ["pedido-1", "pedido-1", "pedido-2"],
+    ) == []
+    sql, params = cursor.ejecutadas[0]
+    normalized = " ".join(sql.split())
+    assert "UPPER(p.cliente_id) = UPPER(%s)" in normalized
+    assert "UPPER(t.cliente_id) = UPPER(%s)" in normalized
+    assert "p.estado = 'PENDIENTE'" in normalized
+    assert "p.plataforma = 'tiendanube'" in normalized
+    assert "t.plataforma = 'tiendanube'" in normalized
+    assert "LOWER(t.dominio) = %s" in normalized
+    assert params == (
+        "MELCIOR",
+        "MELCIOR",
+        "123.tiendanube",
+        ["pedido-1", "pedido-2"],
+        100,
+    )
+
+
+def test_admin_link_rechaza_tienda_ajena(monkeypatch):
+    from endpoints import portal_cliente
+    from servicios import tiendanube_app
+
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/portal/tienda/tiendanube/pedidos",
+        "query_string": b"store=123&id=pedido-1",
+        "headers": [],
+    })
+    monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
+        "cliente_id": "OTRO",
+        "estado": "ACTIVA",
+        "webhooks_ready": True,
+    })
+
+    response = portal_cliente.tienda_tiendanube_admin_link(
+        request, cliente="MELCIOR"
+    )
+
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+
+
+def test_customers_redact_anonimiza_copias_derivadas_y_crea_tombstone(
+    monkeypatch,
+):
+    from servicios import integraciones_tienda, tiendanube_app
+
+    cursor = _Cursor([
+        [{"solicitud_id": 77}],
+        [{"id": 88}],
+    ])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(tiendanube_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(tiendanube_app, "get_conn", lambda: conn)
+
+    result = tiendanube_app._procesar_customers_redact({
+        "store_id": "123",
+        "install_generation": "gen-1",
+        "payload": {"orders_to_redact": ["pedido-1"]},
+    })
+    sql = "\n".join(query for query, _params in cursor.ejecutadas)
+
+    assert result == "REDACTADO"
+    assert "INSERT INTO tiendanube_pedidos_redactados" in sql
+    assert "UPDATE pedidos_tienda" in sql
+    assert "UPDATE solicitudes_guia" in sql
+    assert "UPDATE envios" in sql
+    assert "UPDATE recolecciones" in sql
+    assert "DELETE FROM direcciones" in sql
+    assert "DELETE FROM pedidos_huerfanos" in sql
+    assert "label_pdf = NULL" in sql
+    assert conn.commits == 1
+
+
+def test_guardar_pedido_tiendanube_no_reintroduce_orden_redactada(monkeypatch):
+    from servicios import integraciones_tienda
+
+    cursor = _Cursor([None])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "get_conn", lambda: conn)
+
+    with pytest.raises(
+        integraciones_tienda.TiendaNoOperativaError,
+        match="Tiendanube ya no está operativa",
+    ):
+        integraciones_tienda.guardar_pedido(
+            "MELCIOR",
+            1,
+            "tiendanube",
+            {"pedido_externo_id": "pedido-1"},
+            dominio_verificado="123.tiendanube",
+            install_generation_verificada="gen-1",
+        )
+
+    sql = "\n".join(query for query, _params in cursor.ejecutadas)
+    assert "pg_advisory_xact_lock" in sql
+    assert "tiendanube_pedidos_redactados" in sql
+    assert "INSERT INTO pedidos_tienda" not in sql
+    assert conn.commits == 0
+
+
+def test_marcar_enviado_actualiza_solo_fulfillment_tauro(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
+        "access_token": "token",
+        "estado": "ACTIVA",
+        "webhooks_ready": True,
+    })
+    monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda _store: {
+        "carrier_id": "carrier-tauro",
+    })
+    llamadas = []
+
+    def api(_store, _token, method, path, payload=None, **_kwargs):
+        llamadas.append((method, path, payload))
+        if method == "GET":
+            return _Response(200, [
+                {
+                    "id": "ffo-tauro",
+                    "status": "PACKED",
+                    "shipping": {
+                        "type": "ship",
+                        "carrier": {"carrier_id": "carrier-tauro"},
+                        "option": {"code": "tauro_nacional_domicilio"},
+                    },
+                },
+                {
+                    "id": "ffo-otro",
+                    "status": "PACKED",
+                    "shipping": {
+                        "type": "ship",
+                        "carrier": {"carrier_id": "otro"},
+                        "option": {"code": "otro"},
+                    },
+                },
+            ])
+        return _Response(200, {})
+
+    monkeypatch.setattr(tiendanube_app, "_api", api)
+
+    assert tiendanube_app.marcar_enviado(
+        "123", "pedido-1", "TRACK-1", "https://tracking.example/TRACK-1"
+    ) is True
+    patches = [call for call in llamadas if call[0] == "PATCH"]
+    assert len(patches) == 1
+    assert patches[0][1].endswith("/fulfillment-orders/ffo-tauro")
+    assert patches[0][2] == {
+        "status": "DISPATCHED",
+        "tracking_info": {
+            "code": "TRACK-1",
+            "url": "https://tracking.example/TRACK-1",
+            "notify_customer": True,
+        },
+    }
+    assert not [call for call in llamadas if call[1].endswith("/fulfill")]
+
+
+def test_marcar_enviado_legacy_usa_endpoint_fulfill(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
+        "access_token": "token",
+        "estado": "ACTIVA",
+        "webhooks_ready": True,
+    })
+    monkeypatch.setattr(
+        tiendanube_shipping, "configuracion", lambda _store: {"carrier_id": "carrier"}
+    )
+    llamadas = []
+
+    def api(_store, _token, method, path, payload=None, **_kwargs):
+        llamadas.append((method, path, payload))
+        return _Response(404, {}) if method == "GET" else _Response(200, {})
+
+    monkeypatch.setattr(tiendanube_app, "_api", api)
+
+    assert tiendanube_app.marcar_enviado("123", "pedido-1", "TRACK-1") is True
+    assert llamadas[-1] == (
+        "POST",
+        "orders/pedido-1/fulfill",
+        {"shipping_tracking_number": "TRACK-1", "notify_customer": True},
+    )
+
+
+def test_no_hace_fallback_legacy_si_fulfillment_es_de_otro_carrier(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
+        "access_token": "token",
+        "estado": "ACTIVA",
+        "webhooks_ready": True,
+    })
+    monkeypatch.setattr(
+        tiendanube_shipping, "configuracion", lambda _store: {"carrier_id": "tauro"}
+    )
+    llamadas = []
+
+    def api(_store, _token, method, path, payload=None, **_kwargs):
+        llamadas.append((method, path, payload))
+        return _Response(200, [{
+            "id": "ffo-otro",
+            "shipping": {
+                "type": "ship",
+                "carrier": {"carrier_id": "otro"},
+                "option": {"code": "otro"},
+            },
+        }])
+
+    monkeypatch.setattr(tiendanube_app, "_api", api)
+
+    assert tiendanube_app.marcar_enviado("123", "pedido-1", "TRACK-1") is False
+    assert [call[0] for call in llamadas] == ["GET"]
+
+
+def test_filtra_fulfillments_de_otro_carrier():
+    from servicios.tiendanube_app import fulfillment_orders_tauro
+
+    order = {"fulfillments": [
+        {
+            "id": "tauro",
+            "shipping": {
+                "type": "ship",
+                "carrier": {"id": "carrier-tauro"},
+                "option": {"code": "codigo-legacy-distinto"},
+            },
+        },
+        {
+            "id": "otro",
+            "shipping": {
+                "type": "ship",
+                "carrier": {"carrier_id": "otro"},
+                "option": {"code": "otro"},
+            },
+        },
+    ]}
+
+    assert [item["id"] for item in fulfillment_orders_tauro(
+        order, "carrier-tauro"
+    )] == ["tauro"]
+
+
+def test_pedido_sin_ffo_ni_option_code_se_reintenta_en_vez_de_descartarse(
+    monkeypatch,
+):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_resolver_instalacion_operativa",
+        lambda _evento: {
+            "access_token": "token",
+            "cliente_id": "MELCIOR",
+            "install_generation": "gen-1",
+        },
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_api",
+        lambda *_args, **_kwargs: _Response(
+            200,
+            {"id": 9, "fulfillments": [], "shipping": "carrier-id"},
+        ),
+    )
+    monkeypatch.setattr(
+        tiendanube_shipping,
+        "configuracion",
+        lambda _store: {"carrier_id": "carrier-id"},
+    )
+
+    with pytest.raises(
+        tiendanube_app.TiendanubeRetryableError,
+        match="FULFILLMENT_PENDIENTE",
+    ):
+        tiendanube_app._procesar_pedido_evento({
+            "store_id": "123",
+            "evento": "order/created",
+            "payload": {"id": "9"},
+        })
+
+
+def test_pedido_con_ffo_tauro_y_otro_carrier_bloquea_multi_cd(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_resolver_instalacion_operativa",
+        lambda _evento: {
+            "access_token": "token",
+            "cliente_id": "MELCIOR",
+            "install_generation": "gen-1",
+        },
+    )
+    order = {
+        "id": 9,
+        "fulfillments": [
+            {
+                "id": "tauro",
+                "shipping": {
+                    "type": "ship",
+                    "option": {"code": "tauro_nacional_domicilio"},
+                    "carrier": {"carrier_id": "carrier-tauro"},
+                },
+            },
+            {
+                "id": "otro",
+                "shipping": {
+                    "type": "ship",
+                    "option": {"code": "otro"},
+                    "carrier": {"carrier_id": "carrier-otro"},
+                },
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_api",
+        lambda *_args, **_kwargs: _Response(200, order),
+    )
+    monkeypatch.setattr(
+        tiendanube_shipping,
+        "configuracion",
+        lambda _store: {"carrier_id": "carrier-tauro"},
+    )
+
+    with pytest.raises(
+        tiendanube_app.TiendanubeRetryableError,
+        match="MULTI_CD_NO_SOPORTADO",
+    ):
+        tiendanube_app._procesar_pedido_evento({
+            "store_id": "123",
+            "evento": "order/created",
+            "payload": {"id": "9"},
+        })
+
+
+def test_fallo_db_de_privacidad_se_convierte_en_reintento(monkeypatch):
+    from servicios import tiendanube_app
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_procesar_customers_redact",
+        lambda _evento: (_ for _ in ()).throw(RuntimeError("db caída")),
+    )
+
+    with pytest.raises(
+        tiendanube_app.TiendanubeRetryableError,
+        match="EVENTO_TRANSITORIO_CUSTOMERS_REDACT",
+    ):
+        tiendanube_app._procesar_evento({
+            "evento": "customers/redact",
+            "store_id": "123",
+        })
+
+
+def test_fallo_db_de_pedido_se_convierte_en_reintento(monkeypatch):
+    from servicios import tiendanube_app
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_procesar_pedido_evento",
+        lambda _evento: (_ for _ in ()).throw(RuntimeError("db caída")),
+    )
+
+    with pytest.raises(
+        tiendanube_app.TiendanubeRetryableError,
+        match="EVENTO_TRANSITORIO_ORDER_CREATED",
+    ):
+        tiendanube_app._procesar_evento({
+            "evento": "order/created",
+            "store_id": "123",
+        })
+
+
+def test_uninstall_atrasado_no_desactiva_reinstalacion_con_token_vigente(
+    monkeypatch,
+):
+    from servicios import tiendanube_app
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "instalacion",
+        lambda _store: {"estado": "ACTIVA", "access_token": "token-g2"},
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_api",
+        lambda *_args, **_kwargs: _Response(200, {"id": 123}),
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "desinstalar",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("no debe desinstalar G2")
+        ),
+    )
+
+    with pytest.raises(
+        tiendanube_app.TiendanubeQuarantineError,
+        match="TOKEN_ACTUAL_VIGENTE",
+    ):
+        tiendanube_app._procesar_evento({
+            "evento": "app/uninstalled",
+            "store_id": "123",
+            "install_generation": "gen-2",
+        })
+
+
+def test_uninstall_con_token_revocado_aplica_lifecycle(monkeypatch):
+    from servicios import tiendanube_app
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "instalacion",
+        lambda _store: {"estado": "ACTIVA", "access_token": "token-revocado"},
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_api",
+        lambda *_args, **_kwargs: _Response(401),
+    )
+    applied = []
+    monkeypatch.setattr(
+        tiendanube_app,
+        "desinstalar",
+        lambda store, generation: applied.append((store, generation)) or True,
+    )
+
+    assert tiendanube_app._procesar_evento({
+        "evento": "app/uninstalled",
+        "store_id": "123",
+        "install_generation": "gen-2",
+    }) == "DESINSTALADA"
+    assert applied == [("123", "gen-2")]
+
+
+def test_suspended_con_api_402_aplica_suspension(monkeypatch):
+    from servicios import tiendanube_app
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "instalacion",
+        lambda _store: {"estado": "ACTIVA", "access_token": "token-suspendido"},
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_api",
+        lambda *_args, **_kwargs: _Response(402),
+    )
+    applied = []
+    monkeypatch.setattr(
+        tiendanube_app,
+        "suspender",
+        lambda store, generation: applied.append((store, generation)) or True,
+    )
+
+    assert tiendanube_app._procesar_evento({
+        "evento": "app/suspended",
+        "store_id": "123",
+        "install_generation": "gen-2",
+    }) == "SUSPENDIDA"
+    assert applied == [("123", "gen-2")]
+
+
+def test_worker_persiste_cuarentena_visible(monkeypatch):
+    from servicios import tiendanube_app
+
+    evento = {
+        "evento_id": "evt-stale-1",
+        "evento": "store/redact",
+        "store_id": "123",
+        "intentos": 1,
+    }
+    entregados = iter((evento, None))
+    monkeypatch.setattr(
+        tiendanube_app, "_tomar_evento", lambda: next(entregados)
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "_procesar_evento",
+        lambda _evento: (_ for _ in ()).throw(
+            tiendanube_app.TiendanubeQuarantineError("TOKEN_ACTUAL_VIGENTE")
+        ),
+    )
+    cursor = _Cursor()
+    conn = _Conn(cursor)
+    monkeypatch.setattr(tiendanube_app, "get_conn", lambda: conn)
+
+    assert tiendanube_app.procesar_cola_eventos(limite=1) == {
+        "procesados": 0,
+        "errores": 1,
+    }
+    sql = "\n".join(query for query, _params in cursor.ejecutadas)
+    assert "SET estado = %s" in sql
+    assert "INSERT INTO tiendanube_privacidad_solicitudes" in sql
+    assert any(
+        params == ("evt-stale-1", "123", "store/redact")
+        for _query, params in cursor.ejecutadas
+    )
+
+
+def test_store_redact_tardio_no_borra_reinstalacion_activa(monkeypatch):
+    from servicios import integraciones_tienda, tiendanube_app
+
+    cursor = _Cursor([{
+        "estado": "ACTIVA",
+        "install_generation": "gen-nueva",
+    }])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(tiendanube_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(tiendanube_app, "get_conn", lambda: conn)
+
+    with pytest.raises(
+        tiendanube_app.TiendanubeError,
+        match="STORE_REDACT_INSTALACION_ACTIVA",
+    ):
+        tiendanube_app._procesar_store_redact({
+            "store_id": "123",
+            "install_generation": "gen-nueva",
+        })
+
+    sql = "\n".join(query for query, _params in cursor.ejecutadas)
+    assert "FOR UPDATE" in sql
+    assert "DELETE FROM tiendas_conectadas" not in sql
+    assert conn.commits == 0
+
+
 @pytest.mark.parametrize("accion", ["desinstalar", "suspender"])
 def test_lifecycle_desactiva_binding_y_shipping(monkeypatch, accion):
     from servicios import tiendanube_app
@@ -507,6 +1134,7 @@ def test_schema_declara_cola_lifecycle_claim_y_privacidad():
         "tiendanube_lifecycle_eventos",
         "tiendanube_webhook_eventos",
         "tiendanube_privacidad_solicitudes",
+        "tiendanube_pedidos_redactados",
     ):
         assert f"CREATE TABLE IF NOT EXISTS {nombre}" in schema
     assert "claim_token_hash" in schema

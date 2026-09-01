@@ -75,7 +75,8 @@ from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
     reiniciar_integracion_shopify_cliente,
     limpiar_espejo_shopify_huerfano_cliente,
-    listar_pedidos, contar_pendientes, obtener_pedido,
+    listar_pedidos, listar_pedidos_tiendanube_seleccionados,
+    contar_pendientes, obtener_pedido,
     marcar_convertido, descartar_pedido,
 )
 from servicios.politica_envio import (
@@ -2968,6 +2969,69 @@ def tienda_tiendanube_instalar(cliente: str = Depends(cliente_actual)):
         httponly=True, max_age=600, samesite="lax", secure=COOKIE_SECURE,
     )
     return resp
+
+
+@router.get("/tienda/tiendanube/pedidos")
+def tienda_tiendanube_admin_link(
+    request: Request,
+    cliente: str = Depends(cliente_actual),
+):
+    """Destino autenticado para los admin links individual y masivo."""
+    store_id = str(request.query_params.get("store") or "").strip()
+    order_ids = [
+        str(value).strip()[:80]
+        for value in request.query_params.getlist("id")[:100]
+        if str(value).strip()
+    ]
+    if not store_id.isdigit():
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "Tiendanube no informó una tienda válida."
+            ),
+            status_code=303,
+        )
+    try:
+        from servicios.tiendanube_app import instalacion
+
+        instalada = instalacion(store_id) or {}
+        owner = str(instalada.get("cliente_id") or "").strip().upper()
+        operativa = (
+            owner == cliente.strip().upper()
+            and instalada.get("estado") == "ACTIVA"
+            and bool(instalada.get("webhooks_ready"))
+        )
+    except Exception as exc:
+        print(f"[tiendanube] admin link no validado: {type(exc).__name__}")
+        operativa = False
+    if not operativa:
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "La tienda indicada no está vinculada a tu cuenta TAURO."
+            ),
+            status_code=303,
+        )
+    # El link individual/masivo tiene que ejecutar una acción real sobre los
+    # IDs seleccionados. La vista usa sólo pedidos ya importados, acotados al
+    # owner autenticado y a esta tienda; nunca consulta ni muestra otra cuenta.
+    seleccion = listar_pedidos_tiendanube_seleccionados(
+        cliente,
+        store_id,
+        order_ids,
+    )
+    encontrados = {
+        str(pedido.get("pedido_externo_id") or "") for pedido in seleccion
+    }
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/tiendanube_pedidos.html",
+        context={
+            "cliente": cliente,
+            "store_id": store_id,
+            "pedidos": seleccion,
+            "solicitados": len(order_ids),
+            "faltantes": len(set(order_ids) - encontrados),
+        },
+    )
 
 
 @router.post("/tienda/desconectar")

@@ -472,7 +472,7 @@ def servir_estado():
 
 @app.get("/privacidad", include_in_schema=False)
 def servir_privacidad():
-    """Política de privacidad — Shopify la exige para publicar la app."""
+    """Política de privacidad pública para las integraciones de tiendas."""
     from servicios.paginas_legales import pagina_privacidad
     return HTMLResponse(pagina_privacidad())
 
@@ -481,6 +481,13 @@ def servir_privacidad():
 def servir_terminos():
     from servicios.paginas_legales import pagina_terminos
     return HTMLResponse(pagina_terminos())
+
+
+@app.get("/ayuda/tiendanube", include_in_schema=False)
+def servir_ayuda_tiendanube():
+    """Requisitos y diagnóstico público del medio TAURO Nacional."""
+    from servicios.paginas_legales import pagina_ayuda_tiendanube
+    return HTMLResponse(pagina_ayuda_tiendanube())
 
 
 @app.get("/", include_in_schema=False)

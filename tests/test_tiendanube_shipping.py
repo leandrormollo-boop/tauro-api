@@ -1,5 +1,7 @@
 import asyncio
+from datetime import date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -8,6 +10,8 @@ from servicios.tiendanube_shipping import (
     ShippingAuthenticationError,
     ShippingContractError,
     ShippingUnavailableError,
+    _add_business_days,
+    _holiday_calendar,
     cotizar_callback,
     hash_callback_token,
 )
@@ -171,6 +175,49 @@ def test_rechaza_producto_sin_peso_y_medidas():
         )
 
 
+def test_rechaza_paquete_que_supera_limite_contractual(monkeypatch):
+    monkeypatch.setenv("TAURO_NACIONAL_MAX_PACKAGE_WEIGHT_KG", "0.5")
+
+    with pytest.raises(ShippingContractError, match="límites contractuales"):
+        cotizar_callback(
+            _payload(),
+            TOKEN,
+            installation_loader=_installation,
+            config_loader=_config,
+            adapters=[FakeAdapter()],
+        )
+
+
+def test_shipping_habilitado_falla_cerrado_sin_limites(monkeypatch):
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
+
+    with pytest.raises(ShippingUnavailableError, match="límites contractuales"):
+        cotizar_callback(
+            _payload(),
+            TOKEN,
+            installation_loader=_installation,
+            config_loader=_config,
+            adapters=[FakeAdapter()],
+        )
+
+
+def test_fecha_habil_salta_fin_de_semana_y_feriado():
+    timezone = ZoneInfo("America/Argentina/Buenos_Aires")
+    friday = datetime(2026, 9, 4, 10, tzinfo=timezone)
+    holidays = _holiday_calendar("2026-09-07")
+
+    result = _add_business_days(friday, 1, holidays)
+
+    assert result.date() == date(2026, 9, 8)
+
+
+def test_shipping_habilitado_rechaza_calendario_de_otro_anio(monkeypatch):
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
+
+    with pytest.raises(ShippingUnavailableError, match="año en curso"):
+        _holiday_calendar("2000-01-01")
+
+
 def test_devuelve_solo_precio_final_sin_costo_ni_margen():
     adapter = FakeAdapter()
     response = cotizar_callback(
@@ -208,3 +255,21 @@ def test_carrito_mixto_cotiza_total_al_merchant_y_solo_pago_al_comprador():
     rate = response["rates"][0]
     assert rate["price"] == 7000.0
     assert rate["price_merchant"] == 12000.0
+
+
+def test_deadline_global_descarta_cotizacion_tardia(monkeypatch):
+    from servicios import tiendanube_shipping
+
+    clock = iter((0.0, 0.0, 4.1))
+    monkeypatch.setattr(
+        tiendanube_shipping.time, "monotonic", lambda: next(clock)
+    )
+
+    with pytest.raises(ShippingUnavailableError, match="tarifas nacionales"):
+        cotizar_callback(
+            _payload(),
+            TOKEN,
+            installation_loader=_installation,
+            config_loader=_config,
+            adapters=[FakeAdapter()],
+        )

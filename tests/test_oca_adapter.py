@@ -114,8 +114,8 @@ def _env(**changes):
         "OCA_PASSWORD": "password",
         "OCA_ORIGIN_MODE": "domicilio",
         "OCA_DESTINATION_MODE": "domicilio",
-        "OCA_CONNECT_TIMEOUT_SECONDS": "1",
-        "OCA_READ_TIMEOUT_SECONDS": "3",
+        "OCA_CONNECT_TIMEOUT_SECONDS": "0.5",
+        "OCA_READ_TIMEOUT_SECONDS": "1.3",
     }
     values.update(changes)
     return values
@@ -151,6 +151,17 @@ def test_rejects_incomplete_or_unsafe_configuration(name, value):
     with pytest.raises(OCAConfigurationError, match="configuración aprobada"):
         register_oca_from_env(values)
     assert registration_status(values)["ready"] is False
+
+
+def test_rejects_timeout_budget_without_margin_for_tiendanube():
+    values = _env(
+        OCA_CONNECT_TIMEOUT_SECONDS="0.8",
+        OCA_READ_TIMEOUT_SECONDS="1.1",
+    )
+
+    with pytest.raises(OCAConfigurationError):
+        register_oca_from_env(values)
+    assert "timeout_budget" in OCAConfig.from_env(values).configuration_errors()
 
 
 def test_configuration_repr_and_errors_never_expose_credentials():
@@ -206,7 +217,7 @@ def test_quote_posts_exact_official_parameters_to_qa_with_bounded_timeout():
                     "CantidadPaquetes": "3",
                     "ValorDeclarado": "40000",
                 },
-                "timeout": (1.0, 3.0),
+                "timeout": (0.5, 1.3),
                 "headers": {"Accept": "application/xml, text/xml"},
                 "stream": True,
                 "allow_redirects": False,

@@ -1,9 +1,9 @@
 # ============================================================
 # Páginas legales públicas
 # ============================================================
-# Shopify exige URLs públicas de privacidad y términos para publicar una
-# app en el App Store. Van en código (y no en un CMS) para que existan
-# siempre, sin depender de la base ni de nadie que las cargue.
+# Los marketplaces exigen URLs públicas de privacidad y términos para publicar
+# apps. Van en código (y no en un CMS) para que existan siempre, sin depender
+# de la base ni de una carga manual.
 # ============================================================
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ _LAYOUT = """<!DOCTYPE html>
 <body><div class="wrap">
   <a class="marca" href="/web">TAURO <span>SOLUTIONS</span></a>
   <h1>{titulo}</h1>
-  <p class="fecha">Última actualización: julio de 2026</p>
+  <p class="fecha">Última actualización: {fecha}</p>
   {cuerpo}
   <div class="pie">
     Tauro Solutions · Logística internacional · Buenos Aires, Argentina<br>
@@ -176,11 +176,86 @@ Buenos Aires.</p>
 """
 
 
+_AYUDA_TIENDANUBE = """
+<p>Esta guía explica qué necesita <b>TAURO Nacional</b> para mostrar una
+cotización de entrega a domicilio en el checkout de Tiendanube. La opción se
+muestra únicamente cuando la integración está activa y existe una tarifa real
+para el envío.</p>
+
+<h2>Alcance de la integración</h2>
+<ul>
+  <li>Cotiza envíos nacionales con origen y destino dentro de Argentina.</li>
+  <li>La primera versión contempla entrega de domicilio a domicilio.</li>
+  <li>La cobertura se valida para cada carrito; una instalación activa no
+      garantiza cobertura para todos los códigos postales.</li>
+  <li>No cotiza envíos internacionales desde el checkout de Tiendanube.</li>
+</ul>
+
+<h2>Datos necesarios para cotizar</h2>
+<p>Revisá estos datos en Tiendanube si el medio de envío no aparece:</p>
+<ul>
+  <li>El domicilio de origen y el domicilio del comprador deben estar en
+      Argentina y tener un código postal de cuatro dígitos.</li>
+  <li>Cada producto o variante del carrito debe tener cantidad, peso mayor a
+      cero y las tres dimensiones: largo, ancho y alto.</li>
+  <li>El carrito debe operar en pesos argentinos (ARS) y tener un valor
+      declarado positivo.</li>
+  <li>El comprador debe informar un teléfono para la entrega.</li>
+</ul>
+<p>Los límites máximos, artículos admitidos y demás condiciones dependen del
+operador y del acuerdo vigente de cada comercio. Confirmalos con TAURO antes de
+ofrecer productos especiales; esta página no reemplaza esas condiciones.</p>
+
+<h2>Por qué puede no aparecer una cotización</h2>
+<ul>
+  <li>Falta el peso, una medida, el precio o la cantidad de algún producto.</li>
+  <li>El origen, el destino, la moneda o el código postal no cumplen los
+      requisitos anteriores.</li>
+  <li>El operador no tiene cobertura o no devuelve una tarifa para esa ruta y
+      ese paquete.</li>
+  <li>La tienda todavía no está vinculada con una cuenta TAURO, o la
+      integración está suspendida.</li>
+  <li>El servicio de cotización está temporalmente indisponible. En ese caso no
+      mostramos un precio estimado ni inventado.</li>
+</ul>
+
+<h2>Envío gratis y carritos mixtos</h2>
+<p>Las promociones de envío gratis se configuran en Tiendanube. Cuando un
+carrito combina productos bonificados con productos que pagan envío, TAURO
+calcula por separado la parte que corresponde cobrar al comprador y conserva
+el costo total del envío para el comercio. Si esa separación no puede
+calcularse con una tarifa válida, el medio no se ofrece.</p>
+<p>Las condiciones comerciales, descuentos y cargos aplicables son los
+acordados con cada comercio; no se publican importes fijos en esta guía.</p>
+
+<h2>Privacidad</h2>
+<p>Para cotizar y gestionar un pedido recibimos de Tiendanube los datos
+logísticos necesarios, como domicilio, contacto del destinatario, productos y
+medidas. No pedimos ni almacenamos datos de tarjetas. Podés conocer cómo
+tratamos, conservamos o eliminamos la información en nuestra
+<a href="/privacidad">política de privacidad</a>.</p>
+
+<h2>Soporte</h2>
+<p>Escribinos a <a href="mailto:cotizaciones@taurosolutions.ar">
+cotizaciones@taurosolutions.ar</a>. Para ayudarnos a revisar una cotización,
+indicá la URL de tu tienda y el número de pedido o carrito si existe. No envíes
+contraseñas, tokens ni datos de tarjeta por correo.</p>
+"""
+
+
 def pagina_privacidad() -> str:
     return _LAYOUT.format(titulo="Política de privacidad",
+                          fecha="julio de 2026",
                           cuerpo=_PRIVACIDAD, contacto=CONTACTO)
 
 
 def pagina_terminos() -> str:
     return _LAYOUT.format(titulo="Términos del servicio",
+                          fecha="julio de 2026",
                           cuerpo=_TERMINOS, contacto=CONTACTO)
+
+
+def pagina_ayuda_tiendanube() -> str:
+    return _LAYOUT.format(titulo="Ayuda de TAURO Nacional para Tiendanube",
+                          fecha="septiembre de 2026",
+                          cuerpo=_AYUDA_TIENDANUBE, contacto=CONTACTO)

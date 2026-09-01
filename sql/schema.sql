@@ -732,12 +732,91 @@ CREATE TABLE IF NOT EXISTS tiendanube_privacidad_solicitudes (
     customer_id TEXT NOT NULL DEFAULT '',
     recursos    JSONB NOT NULL DEFAULT '[]'::jsonb,
     estado      TEXT NOT NULL DEFAULT 'PENDIENTE',
+    resolucion  TEXT,
     creado_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     resuelto_at TIMESTAMPTZ,
     UNIQUE(store_id, tipo, request_id)
 );
+ALTER TABLE IF EXISTS tiendanube_privacidad_solicitudes
+    ADD COLUMN IF NOT EXISTS resolucion TEXT;
 CREATE INDEX IF NOT EXISTS ix_tiendanube_privacidad_pendientes
     ON tiendanube_privacidad_solicitudes(estado, creado_at);
+
+-- Tombstone de privacidad: un order/updated atrasado no puede reintroducir
+-- datos personales después de customers/redact o store/redact.
+CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
+    dominio           TEXT NOT NULL,
+    pedido_externo_id TEXT NOT NULL,
+    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (dominio, pedido_externo_id)
+);
+
+-- Shipping Carrier: sólo se persisten hashes de los secretos de callback.
+-- Eliminar esta configuración durante store/redact borra también la evidencia
+-- de labels por las FKs ON DELETE CASCADE definidas debajo.
+CREATE TABLE IF NOT EXISTS tiendanube_shipping_config (
+    store_id                  TEXT PRIMARY KEY,
+    callback_token_hash       TEXT NOT NULL,
+    label_callback_token_hash TEXT,
+    carrier_id                TEXT NOT NULL,
+    carrier_option_id         TEXT NOT NULL,
+    activa                    BOOLEAN NOT NULL DEFAULT TRUE,
+    creada_en                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE IF EXISTS tiendanube_shipping_config
+    ADD COLUMN IF NOT EXISTS label_callback_token_hash TEXT;
+
+-- Labels API: registro canónico y outbox idempotente. Mientras el adapter
+-- nacional no esté homologado, generate_payload sólo conserva IDs y la huella
+-- del payload original; no conserva datos personales del destinatario.
+CREATE TABLE IF NOT EXISTS tiendanube_labels (
+    store_id                    TEXT NOT NULL,
+    label_id                    TEXT NOT NULL,
+    fulfillment_order_id        TEXT NOT NULL,
+    generate_payload            JSONB,
+    generate_fingerprint        CHAR(64),
+    generate_payload_complete   BOOLEAN NOT NULL DEFAULT FALSE,
+    estado                      TEXT NOT NULL,
+    external_operation_id       TEXT,
+    tracking_number             TEXT,
+    creada_en                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (store_id, label_id),
+    FOREIGN KEY (store_id)
+        REFERENCES tiendanube_shipping_config(store_id)
+        ON DELETE CASCADE
+);
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS generate_payload_complete
+        BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS tiendanube_label_outbox (
+    id                      BIGSERIAL PRIMARY KEY,
+    store_id                TEXT NOT NULL,
+    label_id                TEXT NOT NULL,
+    operacion               TEXT NOT NULL
+        CHECK (operacion IN ('GENERATE', 'CANCEL')),
+    payload                 JSONB NOT NULL,
+    payload_fingerprint     CHAR(64) NOT NULL,
+    payload_complete        BOOLEAN NOT NULL DEFAULT FALSE,
+    estado                  TEXT NOT NULL,
+    intentos                INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_en      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_error_codigo     TEXT,
+    creada_en               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    procesada_en            TIMESTAMPTZ,
+    UNIQUE (store_id, label_id, operacion),
+    FOREIGN KEY (store_id, label_id)
+        REFERENCES tiendanube_labels(store_id, label_id)
+        ON DELETE CASCADE
+);
+ALTER TABLE IF EXISTS tiendanube_label_outbox
+    ADD COLUMN IF NOT EXISTS payload_complete
+        BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tiendanube_label_outbox_pendiente
+    ON tiendanube_label_outbox(estado, proximo_intento_en, id);
 
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (

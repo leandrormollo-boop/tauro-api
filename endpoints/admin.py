@@ -738,8 +738,13 @@ def admin_shopify_privacidad(
             "seccion": "shopify_privacidad",
             "solicitudes": solicitudes,
             "flash_ok": (
-                "Solicitud marcada como resuelta."
-                if request.query_params.get("ok") == "resuelta" else None
+                "Cuarentena revisada; se preservó la instalación vigente."
+                if request.query_params.get("ok") == "cuarentena"
+                else (
+                    "Solicitud marcada como resuelta."
+                    if request.query_params.get("ok") == "resuelta"
+                    else None
+                )
             ),
             "flash_error": error or None,
         },
@@ -839,6 +844,182 @@ def admin_shopify_privacidad_resolver(
     )
     return RedirectResponse(
         url="/admin/shopify/privacidad?ok=resuelta", status_code=303,
+    )
+
+
+# ── Privacidad Tiendanube ──────────────────────────────────
+
+@router.get("/tiendanube/privacidad", response_class=HTMLResponse)
+def admin_tiendanube_privacidad(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    solicitudes = []
+    error = ""
+    try:
+        from servicios.tiendanube_privacidad import listar_pendientes
+        solicitudes = listar_pendientes()
+    except Exception as exc:
+        print(f"[admin] privacidad Tiendanube no disponible: {type(exc).__name__}")
+        error = "No pudimos leer las solicitudes de privacidad. Reintentá en unos minutos."
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/tiendanube_privacidad.html",
+        context={
+            "seccion": "tiendanube_privacidad",
+            "solicitudes": solicitudes,
+            "flash_ok": (
+                "Solicitud marcada como resuelta."
+                if request.query_params.get("ok") == "resuelta" else None
+            ),
+            "flash_error": error or None,
+        },
+    )
+
+
+@router.get("/tiendanube/privacidad/{solicitud_id}/datos.json")
+def admin_tiendanube_privacidad_descargar(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.tiendanube_privacidad import generar_exportacion
+        exportacion = generar_exportacion(solicitud_id)
+    except (TypeError, ValueError):
+        exportacion = None
+    except Exception as exc:
+        print(f"[admin] exportacion Tiendanube no disponible: {type(exc).__name__}")
+        return JSONResponse(
+            {"ok": False, "error": "No pudimos generar la exportación."},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    if not exportacion:
+        return JSONResponse(
+            {"ok": False, "error": "Solicitud no encontrada."},
+            status_code=404,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    request_id = str(exportacion["solicitud"]["request_id"])
+    store_id = str(exportacion["solicitud"]["store_id"])
+    registrar_desde_request(
+        request,
+        event="tiendanube.privacy.download",
+        actor_type="admin",
+        actor_ref=f"{store_id}:{solicitud_id}",
+        status_code=200,
+        metadata={
+            "store_id": store_id,
+            "cantidad_recursos": len(
+                exportacion["solicitud"]["resources_requested"]
+            ),
+        },
+    )
+    nombre_request = "".join(
+        caracter
+        for caracter in request_id
+        if caracter.isascii() and (caracter.isalnum() or caracter in "-_")
+    )[:80] or str(solicitud_id)
+    return Response(
+        content=json_dumps_pretty(exportacion),
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="tiendanube-data-request-{nombre_request}.json"'
+            ),
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post("/tiendanube/privacidad/{solicitud_id}/resolver")
+def admin_tiendanube_privacidad_resolver(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.tiendanube_privacidad import marcar_resuelta
+        resultado = marcar_resuelta(solicitud_id)
+    except (TypeError, ValueError):
+        resultado = None
+    except Exception as exc:
+        print(f"[admin] no pude resolver privacidad Tiendanube: {type(exc).__name__}")
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=db", status_code=303,
+        )
+    if not resultado:
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=no_encontrada", status_code=303,
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="tiendanube.privacy.resolve",
+        actor_type="admin",
+        actor_ref=f"{resultado['store_id']}:{solicitud_id}",
+        status_code=303,
+        metadata={
+            "store_id": resultado["store_id"],
+            "cantidad_recursos": int(resultado.get("cantidad_recursos") or 0),
+        },
+    )
+    return RedirectResponse(
+        url="/admin/tiendanube/privacidad?ok=resuelta", status_code=303,
+    )
+
+
+@router.post("/tiendanube/privacidad/cuarentena/{solicitud_id}/resolver")
+def admin_tiendanube_cuarentena_resolver(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    accion = "MANTENER_INSTALACION_ACTUAL"
+    try:
+        from servicios.tiendanube_privacidad import resolver_cuarentena
+        resultado = resolver_cuarentena(solicitud_id, accion)
+    except (TypeError, ValueError):
+        resultado = None
+    except Exception as exc:
+        print(f"[admin] cuarentena Tiendanube no resuelta: {type(exc).__name__}")
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=db", status_code=303,
+        )
+    if not resultado:
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=no_encontrada", status_code=303,
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="tiendanube.quarantine.resolve",
+        actor_type="admin",
+        actor_ref=f"{resultado['store_id']}:{solicitud_id}",
+        status_code=303,
+        metadata={
+            "store_id": resultado["store_id"],
+            "tipo": resultado["tipo"],
+            "accion": accion,
+        },
+    )
+    return RedirectResponse(
+        url="/admin/tiendanube/privacidad?ok=cuarentena", status_code=303,
     )
 
 

@@ -16,6 +16,10 @@ PRICING_MODES = {
 }
 
 
+class PricingNacionalNoConfigurado(ValueError):
+    """El cliente no tiene una regla nacional explícita y válida."""
+
+
 def normalizar_pricing(markup_tipo: str, markup_valor: Optional[float], fallback_pct: float = 25.0) -> dict:
     """Normaliza la regla de pricing para guardar o calcular."""
     tipo = (markup_tipo or "PCT").strip().upper()
@@ -125,6 +129,46 @@ def get_pricing_config(cliente: str, fallback_pct: float = 25.0,
         row.get("markup_valor"),
         fallback_pct=legacy_pct,
     )
+
+
+def get_pricing_nacional_estricto(cliente: str) -> dict:
+    """Obtiene pricing nacional sin heredar márgenes internacionales.
+
+    Tiendanube nunca debe publicar una tarifa nacional calculada con el
+    fallback global o con la regla internacional del cliente. Ante cualquier
+    ausencia o valor inválido se falla de forma cerrada.
+    """
+    cliente_normalizado = (cliente or "").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT markup_nac_tipo, markup_nac_valor
+                FROM clientes
+                WHERE cliente_id = %s AND activo = TRUE
+                """,
+                (cliente_normalizado,),
+            )
+            row = cur.fetchone()
+
+    tipo = str((row or {}).get("markup_nac_tipo") or "").strip().upper()
+    raw_valor = (row or {}).get("markup_nac_valor")
+    try:
+        valor = float(raw_valor)
+    except (TypeError, ValueError):
+        valor = math.nan
+
+    valido = math.isfinite(valor) and (
+        (tipo == "PCT" and 0 <= valor <= 300)
+        or (tipo == "FIJO_ARS" and valor >= 0)
+        or (tipo == "MULTIPLICADOR" and valor >= 1)
+    )
+    if not valido:
+        raise PricingNacionalNoConfigurado(
+            "El cliente no tiene un pricing nacional explícito y válido."
+        )
+
+    return {"tipo": tipo, "valor": valor}
 
 
 def aplicar_pricing(

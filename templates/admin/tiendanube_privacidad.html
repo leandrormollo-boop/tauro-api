@@ -1,0 +1,62 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Privacidad Tiendanube{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:24px;">
+  <div>
+    <div class="eyebrow">Tiendanube · Privacidad</div>
+    <h1 style="margin:4px 0 8px;">Privacidad y cuarentenas</h1>
+    <p style="color:var(--fg-3);max-width:760px;margin:0;">
+      Atendé solicitudes de acceso y revisá eventos destructivos contradictorios.
+      Una cuarentena nunca desactiva una instalación vigente automáticamente.
+    </p>
+  </div>
+  <span class="admin-badge">{{ solicitudes|length }} pendiente{% if solicitudes|length != 1 %}s{% endif %}</span>
+</div>
+
+{% if solicitudes %}
+  <div style="display:grid;gap:12px;">
+  {% for s in solicitudes %}
+    <section class="card" style="padding:18px;display:grid;gap:14px;">
+      <div style="display:flex;flex-wrap:wrap;gap:10px 24px;align-items:flex-start;justify-content:space-between;">
+        <div>
+          <div class="eyebrow">Tienda {{ s.store_id }}</div>
+          <h2 style="font-size:18px;margin:4px 0;">
+            {% if s.tipo == 'customers/data_request' %}Solicitud{% else %}Cuarentena {{ s.tipo }}{% endif %}
+            {{ s.request_id }}
+          </h2>
+          <div style="font-size:12px;color:var(--fg-4);">
+            {% if s.tipo == 'customers/data_request' %}
+              {{ s.cantidad_recursos }} recurso{% if s.cantidad_recursos != 1 %}s{% endif %} ·
+            {% endif %}
+            recibida {{ s.creado_at.strftime('%d/%m/%Y %H:%M') if s.creado_at else '—' }}
+          </div>
+        </div>
+        <span class="admin-badge">{{ s.estado|replace('_', ' ') }}</span>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;gap:10px;">
+        {% if s.tipo == 'customers/data_request' %}
+        <a class="btn btn-primary btn-sm"
+           href="/admin/tiendanube/privacidad/{{ s.id }}/datos.json">Descargar JSON</a>
+        <form method="POST" action="/admin/tiendanube/privacidad/{{ s.id }}/resolver"
+              data-confirm="¿Confirmás que los datos ya fueron entregados por el canal correspondiente?">
+          <button class="btn btn-ghost btn-sm" type="submit">Marcar resuelta</button>
+        </form>
+        {% else %}
+        <form method="POST" action="/admin/tiendanube/privacidad/cuarentena/{{ s.id }}/resolver"
+              data-confirm="¿Confirmás que verificaste el evento atrasado y querés preservar la instalación vigente?">
+          <button class="btn btn-primary btn-sm" type="submit">Preservar instalación vigente</button>
+        </form>
+        {% endif %}
+      </div>
+    </section>
+  {% endfor %}
+  </div>
+{% else %}
+  <section class="card" style="padding:28px;text-align:center;">
+    <h2 style="margin:0 0 8px;">No hay solicitudes pendientes</h2>
+    <p style="margin:0;color:var(--fg-3);">Las próximas solicitudes o cuarentenas firmadas de Tiendanube aparecerán acá automáticamente.</p>
+  </section>
+{% endif %}
+{% endblock %}

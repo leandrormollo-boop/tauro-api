@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 from servicios.tiendanube_preflight import evaluate_preflight
@@ -32,7 +33,7 @@ def test_preflight_no_expone_valores_de_secretos(monkeypatch, tmp_path):
     assert next(c for c in result["checks"] if c["code"] == "oauth_credentials")["ok"]
 
 
-def test_preflight_acepta_oca_qa_solo_con_configuracion_y_uat_completos(tmp_path):
+def test_preflight_bloquea_oca_quote_only_aunque_qa_este_aprobado(tmp_path):
     bundle = tmp_path / "tiendanube_nube_app" / "dist" / "main.min.js"
     bundle.parent.mkdir(parents=True)
     bundle.write_text("export{}", encoding="utf-8")
@@ -46,6 +47,13 @@ def test_preflight_acepta_oca_qa_solo_con_configuracion_y_uat_completos(tmp_path
         "TIENDANUBE_SHIPPING_ENABLED": "true",
         "TAURO_NACIONAL_RATES_READY": "true",
         "TIENDANUBE_HOMOLOGATION_APPROVED": "true",
+        "TAURO_NACIONAL_MAX_PACKAGE_WEIGHT_KG": "25",
+        "TAURO_NACIONAL_MAX_LENGTH_CM": "100",
+        "TAURO_NACIONAL_MAX_WIDTH_CM": "100",
+        "TAURO_NACIONAL_MAX_HEIGHT_CM": "100",
+        "TAURO_NACIONAL_MAX_TOTAL_WEIGHT_KG": "100",
+        "TAURO_NACIONAL_MAX_TOTAL_VOLUME_M3": "1",
+        "TAURO_NACIONAL_HOLIDAYS": f"{date.today().year}-01-01",
         "OCA_ADAPTER_ENABLED": "true",
         "OCA_UAT_APPROVED": "true",
         "OCA_ENVIRONMENT": "qa",
@@ -58,7 +66,28 @@ def test_preflight_acepta_oca_qa_solo_con_configuracion_y_uat_completos(tmp_path
         "OCA_DESTINATION_MODE": "domicilio",
     }
 
+    app = tmp_path / "servicios" / "tiendanube_app.py"
+    app.parent.mkdir(parents=True)
+    app.write_text(
+        'WEBHOOKS=("app/resumed",)\ndef reactivar(): pass\n'
+        'PATH="/fulfillment-orders"\nSTATUS="DISPATCHED"',
+        encoding="utf-8",
+    )
+    portal = tmp_path / "endpoints" / "portal_cliente.py"
+    portal.parent.mkdir(parents=True)
+    portal.write_text('/tienda/tiendanube/pedidos', encoding="utf-8")
+    icon = tmp_path / "docs" / "tiendanube" / "assets" / "tauro-nacional-icon-600.png"
+    icon.parent.mkdir(parents=True)
+    icon.write_bytes(
+        b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+        + (600).to_bytes(4, "big") + (600).to_bytes(4, "big")
+    )
+
     result = evaluate_preflight(env, repository_root=tmp_path)
 
-    assert result["ready_for_release"] is True
-    assert result["blockers"] == []
+    assert result["ready_for_release"] is False
+    assert result["blockers"] == [
+        "national_fulfillment_capabilities",
+        "labels_callback_contract",
+        "labels_worker",
+    ]

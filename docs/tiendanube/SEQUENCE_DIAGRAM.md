@@ -38,10 +38,8 @@ sequenceDiagram
     TN-->>API: Pedido completo
     API->>DB: Crear solicitud pendiente
     M->>API: Revisar y autorizar emisión
-    API->>C: Emitir con idempotency key
-    C-->>API: Tracking + etiqueta
-    API->>TN: Informar fulfillment/tracking
-    API->>DB: Guardar resultado y auditoría
+    API->>DB: Mantener emisión bloqueada hasta aprobar UAT OCA
+    Note over API,C: Emisión, etiqueta y tracking se habilitan sólo después de UAT
 
     alt app/suspended
         TN->>API: Webhook firmado
@@ -57,6 +55,12 @@ sequenceDiagram
         API-->>TN: 200 después de persistir
     end
 ```
+
+El diagrama refleja el release candidate actual. La cotización, recepción del
+pedido y revisión manual están implementadas. La emisión de guías, cancelación,
+retiro y tracking permanecen deliberadamente bloqueados hasta completar las
+credenciales QA, la prueba UAT y la aprobación operativa de OCA. Recién entonces
+se ampliará este flujo y se registrará `callback_labels_url` en Tiendanube.
 
 ## Datos que no salen de TAURO
 
