@@ -141,7 +141,10 @@
           <td class="mono">$ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>
             {% if e.estado == 'CANCELADO' %}
-              <span class="badge error">CANCELADO</span>
+              <span class="badge error">ANULADO</span>
+              {% if e.solicitud_id %}
+              <small style="display:block;color:var(--fg-4);margin-top:4px;">Oculto del portal</small>
+              {% endif %}
             {% elif e.nro_fc %}
               <span class="badge ok">FACTURADO</span>
             {% else %}
@@ -152,8 +155,10 @@
             {% if e.estado == 'ACTIVO' and not e.nro_fc %}
             <a href="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/facturar"
                class="btn btn-sm btn-primary">Facturar</a>
-            <form method="POST" action="/admin/envios/{{ e.id }}/cancelar" style="display:inline;">
-              <button type="submit" class="btn btn-sm btn-ghost" style="color:var(--error)">Cancelar</button>
+            <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/anular"
+                  style="display:inline;"
+                  data-confirm="¿Anular este envío? Se descontará de la cuenta corriente y dejará de mostrarse en el portal del cliente. El registro seguirá guardado en ADMIN para auditoría.">
+              <button type="submit" class="btn btn-sm btn-ghost" style="color:var(--error)">Anular prueba</button>
             </form>
             {% elif e.nro_fc and e.tiene_factura_pdf %}
             <a href="/admin/envios/{{ e.id }}/factura" class="btn btn-sm btn-ghost">Ver PDF</a>

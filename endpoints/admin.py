@@ -1362,13 +1362,19 @@ def admin_cliente_detail(
             # Envíos paginados
             cur.execute(
                 """
-                SELECT id, cliente_id, fecha, nro_fc, monto_ars, estado,
-                       descripcion, tracking, created_at, factura_nombre,
-                       solicitud_id, ambito,
-                       (factura_pdf IS NOT NULL) AS tiene_factura_pdf
-                FROM envios
-                WHERE cliente_id = %s
-                ORDER BY fecha DESC, id DESC
+                SELECT e.id, e.cliente_id, e.fecha, e.nro_fc, e.monto_ars,
+                       e.estado, e.descripcion, e.tracking, e.created_at,
+                       e.factura_nombre, e.solicitud_id, e.ambito,
+                       s.estado AS solicitud_estado,
+                       (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO')
+                           AS oculto_cliente,
+                       (e.factura_pdf IS NOT NULL) AS tiene_factura_pdf
+                FROM envios e
+                LEFT JOIN solicitudes_guia s
+                  ON s.id = e.solicitud_id
+                 AND s.cliente_id = e.cliente_id
+                WHERE e.cliente_id = %s
+                ORDER BY e.fecha DESC, e.id DESC
                 LIMIT %s OFFSET %s
                 """,
                 (cliente_id, PAGE_SIZE, offset),
@@ -1419,6 +1425,11 @@ def admin_cliente_detail(
         flash_ok = "Cliente creado."
     elif ok == "pwd_actualizada":
         flash_ok = "Contraseña actualizada. Pasala al cliente."
+    elif ok == "envio_anulado":
+        flash_ok = (
+            "Envío anulado: se descontó de la cuenta corriente y ya no "
+            "es visible en el portal del cliente. El registro quedó auditado."
+        )
     if pwd_error == "corta":
         flash_ok = None  # priorizar error
         # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
@@ -2053,6 +2064,37 @@ def admin_envio_cancelar(
         )
     cliente_id = resultado["cliente_id"]
     return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
+
+
+@router.post("/clientes/{cliente_id}/envios/{envio_id}/anular")
+def admin_envio_anular(
+    cliente_id: str,
+    envio_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Anula el cargo con ownership; el registro histórico nunca se borra."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    cliente_normalizado = cliente_id.strip().upper()
+    resultado = cancelar_envio(
+        envio_id,
+        cliente_id=cliente_normalizado,
+        actor_tipo="admin",
+        actor_ref="admin",
+    )
+    if not resultado:
+        return Response(
+            content=(
+                "No se puede anular este envío. Si ya tiene factura, "
+                "requiere una nota de crédito documentada."
+            ),
+            status_code=409,
+        )
+    return RedirectResponse(
+        url=f"/admin/clientes/{cliente_normalizado}?ok=envio_anulado",
+        status_code=303,
+    )
 
 
 # ── Solicitudes de guía ─────────────────────────────────────

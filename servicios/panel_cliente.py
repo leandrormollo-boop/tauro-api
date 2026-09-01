@@ -234,9 +234,17 @@ def embudo_envios(cliente_id: str) -> list[dict]:
                 cur.execute(
                     """
                     SELECT estado, COUNT(*) AS n
-                    FROM solicitudes_guia
-                    WHERE cliente_id = %s
-                    GROUP BY estado
+                    FROM solicitudes_guia s
+                    WHERE s.cliente_id = %s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    GROUP BY s.estado
                     """,
                     (cliente_id,),
                 )
@@ -306,7 +314,19 @@ def checklist_arranque(cliente_id: str) -> dict:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) AS n FROM solicitudes_guia WHERE cliente_id = %s",
+                    """
+                    SELECT COUNT(*) AS n
+                    FROM solicitudes_guia s
+                    WHERE s.cliente_id = %s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    """,
                     (cliente_id,),
                 )
                 fila = cur.fetchone()

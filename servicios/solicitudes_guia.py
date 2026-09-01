@@ -494,6 +494,14 @@ def listar_solicitudes_cliente(
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.cliente_id = %s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 ORDER BY s.created_at DESC
             """
             params = [cliente_id.strip().upper()]
@@ -575,8 +583,15 @@ def contar_guias_listas(cliente_id: str) -> int:
             cur.execute(
                 """
                 SELECT COUNT(*) AS n
-                FROM solicitudes_guia
-                WHERE cliente_id = %s AND estado = 'GUIA_LISTA'
+                FROM solicitudes_guia s
+                WHERE s.cliente_id = %s AND s.estado = 'GUIA_LISTA'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (cliente_id.strip().upper(),),
             )
@@ -789,6 +804,14 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.id = %s AND s.cliente_id = %s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )
@@ -802,9 +825,17 @@ def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[byt
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT label_pdf
-                FROM solicitudes_guia
-                WHERE id=%s AND cliente_id=%s
+                SELECT s.label_pdf
+                FROM solicitudes_guia s
+                WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )
@@ -1032,7 +1063,19 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    "SELECT label_pdf FROM solicitudes_guia WHERE id=%s AND cliente_id=%s",
+                    """
+                    SELECT s.label_pdf
+                    FROM solicitudes_guia s
+                    WHERE s.id=%s AND s.cliente_id=%s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    """,
                     (solicitud_id, cliente_id.strip().upper()),
                 )
             else:
@@ -1054,8 +1097,19 @@ def obtener_factura_comercial_pdf(
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    """SELECT commercial_invoice_pdf FROM solicitudes_guia
-                       WHERE id=%s AND cliente_id=%s""",
+                    """
+                    SELECT s.commercial_invoice_pdf
+                    FROM solicitudes_guia s
+                    WHERE s.id=%s AND s.cliente_id=%s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    """,
                     (solicitud_id, cliente_id.strip().upper()),
                 )
             else:
