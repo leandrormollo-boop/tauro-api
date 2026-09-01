@@ -2896,6 +2896,108 @@ def admin_factura_courier_pdf(
     )
 
 
+@router.post(
+    "/conciliacion-couriers/facturas/{factura_id}/items/{item_id}/match-manual"
+)
+def admin_factura_courier_match_manual(
+    factura_id: int,
+    item_id: int,
+    identificador_envio: str = Form(...),
+    monto_asignado: str = Form(""),
+    motivo: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import proponer_match_manual
+    from servicios.numeros_humanos import parse_importe_humano
+    try:
+        monto = (
+            parse_importe_humano(monto_asignado)
+            if str(monto_asignado or "").strip() else None
+        )
+        resultado = proponer_match_manual(
+            item_id,
+            factura_id_esperada=factura_id,
+            identificador_envio=identificador_envio,
+            monto_asignado=monto,
+            motivo=motivo,
+            actor="admin",
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                 f"?error={quote(str(exc))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+             "?ok=match_manual"),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/conciliacion-couriers/facturas/{factura_id}/matches/{match_id}/confirmar"
+)
+def admin_factura_courier_match_confirmar(
+    factura_id: int,
+    match_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import confirmar_match
+    try:
+        resultado = confirmar_match(
+            match_id, actor="admin", factura_id_esperada=factura_id,
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                 f"?error={quote(str(exc))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=(f"/admin/conciliacion-couriers/facturas/"
+             f"{resultado['factura_id']}?ok=match_confirmado"),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/conciliacion-couriers/facturas/{factura_id}/matches/{match_id}/rechazar"
+)
+def admin_factura_courier_match_rechazar(
+    factura_id: int,
+    match_id: int,
+    motivo: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import rechazar_match
+    try:
+        resultado = rechazar_match(
+            match_id, actor="admin", motivo=motivo,
+            factura_id_esperada=factura_id,
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                 f"?error={quote(str(exc))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=(f"/admin/conciliacion-couriers/facturas/"
+             f"{resultado['factura_id']}?ok=match_rechazado"),
+        status_code=303,
+    )
+
+
 @router.post("/conciliacion-couriers/facturas/{factura_id}/confirmar")
 def admin_factura_courier_confirmar(
     factura_id: int,
@@ -2922,6 +3024,28 @@ def admin_factura_courier_confirmar(
         )
     return RedirectResponse(
         url="/admin/conciliacion-couriers?ok=calculada", status_code=303,
+    )
+
+
+@router.get(
+    "/conciliacion-couriers/envios/{solicitud_id}",
+    response_class=HTMLResponse,
+)
+def admin_conciliacion_envio_detalle(
+    request: Request,
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.conciliacion_couriers import obtener_control_envio
+    envio = obtener_control_envio(solicitud_id)
+    if not envio:
+        return Response(content="Envío no encontrado.", status_code=404)
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/conciliacion_envio_detalle.html",
+        context={"seccion": "conciliacion_couriers", "envio": envio},
     )
 
 

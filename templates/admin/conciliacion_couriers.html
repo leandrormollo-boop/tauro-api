@@ -47,6 +47,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         <td class="mono">{% if e.conciliacion_id %}Final cliente {{ dinero(e.precio_cliente_final_ars) }}<br><small>Diferencia {{ dinero(e.ajuste_cliente_ars) }} · {{ e.peso_final_facturado_kg or '—' }} kg</small>{% else %}—{% endif %}</td>
         <td><span class="badge {% if e.control_estado == 'CONCILIADO' %}ok{% elif e.control_estado in ('BASE_PENDIENTE','DIFERENCIA_PENDIENTE') %}warn{% else %}muted{% endif %}">{{ e.control_estado.replace('_',' ')|title }}</span></td>
         <td>
+          <a href="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}" class="btn btn-ghost btn-sm" style="margin-bottom:5px;">Abrir control</a>
           {% if e.control_estado == 'BASE_PENDIENTE' %}
           <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/snapshot" data-confirm="¿Congelar este costo estimado como base histórica? Después no podrá modificarse.">
             <input name="costo_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Costo estimado ARS" style="width:155px;margin-bottom:5px;">
@@ -62,7 +63,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
           <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/calcular">
             <button class="btn btn-primary btn-sm">Calcular diferencia</button>
           </form>
-          {% else %}<a href="/admin/pedidos?buscar={{ e.tracking or e.solicitud_id }}" class="btn btn-ghost btn-sm">Ver envío</a>{% endif %}
+          {% endif %}
         </td>
       </tr>
     {% else %}<tr><td colspan="6" class="empty">No hay envíos con estos filtros.</td></tr>{% endfor %}

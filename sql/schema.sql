@@ -2157,6 +2157,7 @@ CREATE OR REPLACE FUNCTION tauro_validar_ajuste_cliente()
 RETURNS TRIGGER AS $$
 DECLARE
     conciliacion_actual RECORD;
+    precio_previo NUMERIC(18,4);
 BEGIN
     IF TG_OP = 'UPDATE' AND (
         OLD.conciliacion_id IS DISTINCT FROM NEW.conciliacion_id
@@ -2179,12 +2180,26 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Conciliación inexistente: %', NEW.conciliacion_id;
     END IF;
+    SELECT COALESCE((
+               SELECT anterior.precio_cliente_final_ars
+                 FROM conciliaciones_envio anterior
+                WHERE anterior.solicitud_id = conciliacion_actual.solicitud_id
+                  AND anterior.version < (
+                      SELECT version FROM conciliaciones_envio
+                       WHERE id = NEW.conciliacion_id
+                  )
+                  AND anterior.estado = 'CERRADA'
+                ORDER BY anterior.version DESC
+                LIMIT 1
+           ), conciliacion_actual.precio_cliente_inicial_ars)
+      INTO precio_previo;
     IF conciliacion_actual.solicitud_id <> NEW.solicitud_id
-       OR ABS(conciliacion_actual.precio_cliente_inicial_ars
+       OR ABS(precio_previo
             - NEW.precio_anterior_ars) > 0.02
        OR ABS(conciliacion_actual.precio_cliente_final_ars
             - NEW.precio_nuevo_ars) > 0.02
-       OR ABS(conciliacion_actual.ajuste_cliente_ars - NEW.monto_ars) > 0.02 THEN
+       OR ABS(NEW.precio_nuevo_ars - NEW.precio_anterior_ars
+            - NEW.monto_ars) > 0.02 THEN
         RAISE EXCEPTION 'El ajuste no coincide con la conciliación';
     END IF;
     IF NEW.estado IN ('APROBADO','APLICADO')

@@ -128,6 +128,31 @@ def _snapshot_basico(
     )
 
 
+def _crear_cargo_activo(get_conn, solicitud_id: int, *, monto: str = "10000"):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cliente_id, tracking FROM solicitudes_guia WHERE id = %s
+                """,
+                (int(solicitud_id),),
+            )
+            solicitud = cur.fetchone()
+            cur.execute(
+                """
+                INSERT INTO envios (
+                    cliente_id, fecha, monto_ars, estado, descripcion,
+                    tracking, solicitud_id, ambito
+                ) VALUES (%s, CURRENT_DATE, %s, 'ACTIVO', 'Envío de prueba',
+                          %s, %s, 'INTERNACIONAL')
+                """,
+                (
+                    solicitud["cliente_id"], Decimal(monto),
+                    solicitud["tracking"], int(solicitud_id),
+                ),
+            )
+
+
 def _confirmar_todos(get_conn, solicitud_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -401,3 +426,262 @@ def test_db_bloquea_mutar_snapshot_borrar_factura_y_sobreasignar_item(
                         item["importe"], item["importe_ars"],
                     ),
                 )
+
+
+def test_match_manual_exige_cargo_evidencia_y_confirmacion(
+    conciliacion_db,
+):
+    solicitud_id = _crear_solicitud(
+        conciliacion_db,
+        sufijo="MANUAL",
+        tracking="DHL-REAL-99",
+        precio=Decimal("10000"),
+    )
+    _crear_cargo_activo(conciliacion_db, solicitud_id)
+    factura = conciliacion.registrar_factura_courier(
+        courier="DHL",
+        tipo_documento="FC",
+        numero="FC-MANUAL",
+        moneda="ARS",
+        total="15000",
+        actor="parser@test",
+        archivo_sha256="e" * 64,
+        items=[{
+            "linea_numero": 1,
+            "tracking": "TRACKING-ERRONEO",
+            "importe": "15000",
+        }],
+    )
+    assert conciliacion.matchear_items_exactos(factura["id"])["sin_match"] == 1
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM facturas_courier_items WHERE factura_id=%s",
+                (factura["id"],),
+            )
+            item_id = int(cur.fetchone()["id"])
+
+    propuesta = conciliacion.proponer_match_manual(
+        item_id,
+        factura_id_esperada=factura["id"],
+        identificador_envio=f"#{solicitud_id}",
+        motivo="Tracking incorrecto informado por courier",
+        actor="admin@test",
+    )
+    assert propuesta["solicitud_id"] == solicitud_id
+    assert propuesta["monto_asignado"] == Decimal("15000.0000")
+    confirmado = conciliacion.confirmar_match(
+        propuesta["id"], actor="auditor@test"
+    )
+    assert confirmado["duplicado"] is False
+
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT estado, metodo, evidencia_uri FROM factura_courier_item_matches"
+            )
+            match = cur.fetchone()
+            assert match["estado"] == "CONFIRMADO"
+            assert match["metodo"] == "MANUAL"
+            assert match["evidencia_uri"].startswith("admin://match-manual/")
+            cur.execute(
+                """
+                SELECT evento FROM auditoria_facturas_courier
+                 WHERE solicitud_id=%s ORDER BY id
+                """,
+                (solicitud_id,),
+            )
+            assert [fila["evento"] for fila in cur.fetchall()] == [
+                "MATCH_MANUAL_PROPUESTO", "MATCH_CONFIRMADO"
+            ]
+
+
+def test_rechazo_de_match_conserva_historial_y_libera_el_importe(
+    conciliacion_db,
+):
+    solicitud_id = _crear_solicitud(
+        conciliacion_db,
+        sufijo="RECHAZO",
+        tracking="DHL-RECHAZO",
+    )
+    factura = conciliacion.registrar_factura_courier(
+        courier="DHL",
+        tipo_documento="FC",
+        numero="FC-RECHAZO",
+        moneda="ARS",
+        total="100",
+        actor="parser@test",
+        archivo_sha256="f" * 64,
+        items=[{
+            "linea_numero": 1,
+            "tracking": "DHL-RECHAZO",
+            "importe": "100",
+        }],
+    )
+    conciliacion.matchear_items_exactos(factura["id"], actor="matcher@test")
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM factura_courier_item_matches")
+            match_id = int(cur.fetchone()["id"])
+    conciliacion.rechazar_match(
+        match_id,
+        actor="admin@test",
+        motivo="La factura corresponde a otra operación",
+    )
+    detalle = conciliacion.obtener_factura_courier_control(factura["id"])
+    assert detalle["items"][0]["remanente"] == Decimal("100.0000")
+    assert detalle["items"][0]["matches"][0]["match_estado"] == "RECHAZADO"
+
+
+def test_diferencia_posterior_genera_solo_movimiento_incremental(
+    conciliacion_db,
+):
+    solicitud_id = _crear_solicitud(
+        conciliacion_db,
+        sufijo="INCREMENTAL",
+        tracking="DHL-INCREMENTAL",
+        precio=Decimal("10000"),
+    )
+    _crear_cargo_activo(conciliacion_db, solicitud_id)
+    _snapshot_basico(
+        solicitud_id,
+        costo="5000",
+        precio="10000",
+        margen="5000",
+        coti_id="COTI-INCREMENTAL",
+    )
+    primera = conciliacion.registrar_factura_courier(
+        courier="DHL",
+        tipo_documento="FC",
+        numero="FC-INCREMENTAL-1",
+        moneda="ARS",
+        total="15000",
+        actor="parser@test",
+        archivo_sha256="1" * 64,
+        items=[{
+            "linea_numero": 1,
+            "tracking": "DHL-INCREMENTAL",
+            "importe": "15000",
+        }],
+    )
+    conciliacion.matchear_items_exactos(primera["id"])
+    _confirmar_todos(conciliacion_db, solicitud_id)
+    calculo_1 = conciliacion.calcular_conciliacion_envio(
+        solicitud_id, actor="auditor@test"
+    )
+    conciliacion.aprobar_y_aplicar_ajuste_cliente(
+        calculo_1["ajuste_id"], actor="admin@test", referencia="FC-1"
+    )
+
+    adicional = conciliacion.registrar_factura_courier(
+        courier="DHL",
+        tipo_documento="ND",
+        numero="ND-INCREMENTAL-2",
+        moneda="ARS",
+        total="2000",
+        actor="parser@test",
+        archivo_sha256="2" * 64,
+        items=[{
+            "linea_numero": 1,
+            "tracking": "DHL-INCREMENTAL",
+            "importe": "2000",
+            "concepto_tipo": "MANEJO",
+        }],
+    )
+    conciliacion.matchear_items_exactos(adicional["id"])
+    _confirmar_todos(conciliacion_db, solicitud_id)
+    calculo_2 = conciliacion.calcular_conciliacion_envio(
+        solicitud_id, actor="auditor@test"
+    )
+
+    assert calculo_2["precio_cliente_final_ars"] == Decimal("22000.0000")
+    assert calculo_2["ajuste_cliente_ars"] == Decimal("12000.0000")
+    assert calculo_2["movimiento_cliente_ars"] == Decimal("2000.0000")
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT monto_ars, precio_anterior_ars, precio_nuevo_ars
+                  FROM ajustes_cliente WHERE id=%s
+                """,
+                (calculo_2["ajuste_id"],),
+            )
+            ajuste = cur.fetchone()
+            assert ajuste == {
+                "monto_ars": Decimal("2000.0000"),
+                "precio_anterior_ars": Decimal("20000.0000"),
+                "precio_nuevo_ars": Decimal("22000.0000"),
+            }
+
+
+def test_linea_prorrateada_no_habilita_revision_hasta_completar_asignacion(
+    conciliacion_db,
+):
+    primero = _crear_solicitud(
+        conciliacion_db,
+        sufijo="PRORRATEO_A",
+        tracking="DHL-PRORRATEO-A",
+        precio=Decimal("100"),
+    )
+    segundo = _crear_solicitud(
+        conciliacion_db,
+        sufijo="PRORRATEO_B",
+        tracking="DHL-PRORRATEO-B",
+        precio=Decimal("100"),
+    )
+    _crear_cargo_activo(conciliacion_db, primero, monto="100")
+    _crear_cargo_activo(conciliacion_db, segundo, monto="100")
+    _snapshot_basico(
+        primero,
+        costo="50",
+        precio="100",
+        margen="50",
+        coti_id="COTI-PRORRATEO_A",
+    )
+    factura = conciliacion.registrar_factura_courier(
+        courier="DHL",
+        tipo_documento="FC",
+        numero="FC-PRORRATEO",
+        moneda="ARS",
+        total="100",
+        actor="parser@test",
+        archivo_sha256="3" * 64,
+        items=[{
+            "linea_numero": 1,
+            "tracking": "AGRUPADO-SIN-COINCIDENCIA",
+            "importe": "100",
+        }],
+    )
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM facturas_courier_items WHERE factura_id=%s",
+                (factura["id"],),
+            )
+            item_id = int(cur.fetchone()["id"])
+    match_a = conciliacion.proponer_match_manual(
+        item_id,
+        identificador_envio=f"#{primero}",
+        monto_asignado="40",
+        motivo="Prorrateo documentado entre dos envíos",
+        actor="admin@test",
+    )
+    match_b = conciliacion.proponer_match_manual(
+        item_id,
+        identificador_envio=f"#{segundo}",
+        monto_asignado="60",
+        motivo="Prorrateo documentado entre dos envíos",
+        actor="admin@test",
+    )
+    conciliacion.confirmar_match(match_a["id"], actor="auditor@test")
+    borrador = conciliacion.calcular_conciliacion_envio(
+        primero, actor="auditor@test"
+    )
+    assert borrador["estado"] == "BORRADOR"
+
+    conciliacion.confirmar_match(match_b["id"], actor="auditor@test")
+    listo = conciliacion.calcular_conciliacion_envio(
+        primero, actor="auditor@test"
+    )
+    assert listo["duplicado"] is True
+    assert listo["estado"] == "PARA_REVISION"

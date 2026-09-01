@@ -765,6 +765,11 @@ def matchear_items_exactos(
                   JOIN facturas_courier f ON f.id = i.factura_id
                  WHERE i.factura_id = %s
                    AND i.estado <> 'IGNORADO'
+                   AND NOT EXISTS (
+                       SELECT 1 FROM factura_courier_item_matches existente
+                        WHERE existente.item_id = i.id
+                          AND existente.estado IN ('PROPUESTO','CONFIRMADO')
+                   )
                  ORDER BY i.linea_numero
                  FOR UPDATE OF i
                 """,
@@ -833,7 +838,264 @@ def matchear_items_exactos(
     return {"propuestos": propuestos, "sin_match": sin_match}
 
 
-def confirmar_match(match_id: int, *, actor: str) -> dict[str, Any]:
+def _actualizar_estado_factura(cur, factura_id: int) -> str:
+    """Deriva el estado desde cobertura confirmada, sin confiar en la UI."""
+    cur.execute(
+        """
+        SELECT CASE
+                 WHEN f.estado = 'ANULADA' THEN 'ANULADA'
+                 WHEN NOT EXISTS (
+                     SELECT 1
+                       FROM facturas_courier_items i
+                      WHERE i.factura_id = f.id
+                        AND i.estado <> 'IGNORADO'
+                        AND COALESCE((
+                            SELECT SUM(m.monto_asignado)
+                              FROM factura_courier_item_matches m
+                             WHERE m.item_id = i.id
+                               AND m.estado = 'CONFIRMADO'
+                        ), 0) < i.importe - %s
+                 ) AND NOT EXISTS (
+                     SELECT 1
+                       FROM facturas_courier_items i
+                       JOIN factura_courier_item_matches m ON m.item_id = i.id
+                      WHERE i.factura_id = f.id AND m.estado = 'PROPUESTO'
+                 ) THEN 'CONCILIADA'
+                 ELSE 'PARCIAL'
+               END AS estado
+          FROM facturas_courier f
+         WHERE f.id = %s
+        """,
+        (CENTAVO_CONTROL, int(factura_id)),
+    )
+    fila = cur.fetchone()
+    if not fila:
+        raise ConciliacionCourierError("La factura courier no existe.")
+    estado = fila["estado"]
+    cur.execute(
+        """
+        UPDATE facturas_courier
+           SET estado = %s, updated_at = NOW()
+         WHERE id = %s AND estado IS DISTINCT FROM %s
+        """,
+        (estado, int(factura_id), estado),
+    )
+    return estado
+
+
+def proponer_match_manual(
+    item_id: int,
+    *,
+    factura_id_esperada: int | None = None,
+    identificador_envio: str,
+    actor: str,
+    motivo: str,
+    monto_asignado: Any | None = None,
+) -> dict[str, Any]:
+    """Propone una excepción manual con evidencia y saldo controlado.
+
+    ``identificador_envio`` acepta ``#123`` para un ID interno inequívoco o
+    un tracking completo. Un número sin ``#`` se busca como tracking y como
+    ID; si ambas vías apuntan a envíos distintos, se exige usar ``#ID``.
+    """
+    actor = _texto(actor)
+    motivo = _texto(motivo)
+    identificador = _texto(identificador_envio)
+    if not actor:
+        raise ConciliacionCourierError("Falta identificar al operador.")
+    if len(motivo) < 8:
+        raise ConciliacionCourierError(
+            "Explicá el motivo del match manual (mínimo 8 caracteres)."
+        )
+    if not identificador:
+        raise ConciliacionCourierError("Indicá el tracking o #ID del envío.")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT i.id, i.factura_id, i.importe, i.importe_ars,
+                       i.tipo_cambio_ars, i.estado AS item_estado,
+                       f.courier, f.estado AS factura_estado
+                  FROM facturas_courier_items i
+                  JOIN facturas_courier f ON f.id = i.factura_id
+                 WHERE i.id = %s
+                 FOR UPDATE OF i, f
+                """,
+                (int(item_id),),
+            )
+            item = cur.fetchone()
+            if not item:
+                raise ConciliacionCourierError("La línea de factura no existe.")
+            if (
+                factura_id_esperada is not None
+                and int(item["factura_id"]) != int(factura_id_esperada)
+            ):
+                raise ConciliacionCourierError(
+                    "La línea no pertenece a la factura indicada."
+                )
+            if item["factura_estado"] == "ANULADA":
+                raise ConciliacionCourierError(
+                    "Una factura anulada no puede vincularse."
+                )
+            if item["item_estado"] == "IGNORADO":
+                raise ConciliacionCourierError(
+                    "Una línea ignorada no puede vincularse."
+                )
+
+            if identificador.startswith("#"):
+                id_texto = identificador[1:].strip()
+                if not id_texto.isdigit():
+                    raise ConciliacionCourierError(
+                        "El ID interno debe escribirse como #123."
+                    )
+                cur.execute(
+                    """
+                    SELECT s.id, s.cliente_id, s.tracking, s.courier,
+                           e.estado AS cargo_estado
+                      FROM solicitudes_guia s
+                      LEFT JOIN envios e ON e.solicitud_id = s.id
+                     WHERE s.id = %s
+                       AND UPPER(BTRIM(s.courier)) = UPPER(BTRIM(%s))
+                    """,
+                    (int(id_texto), item["courier"]),
+                )
+            else:
+                tracking = normalizar_tracking(identificador)
+                if not tracking:
+                    raise ConciliacionCourierError("El tracking no es válido.")
+                es_id = identificador.isdigit()
+                cur.execute(
+                    """
+                    SELECT s.id, s.cliente_id, s.tracking, s.courier,
+                           e.estado AS cargo_estado
+                      FROM solicitudes_guia s
+                      LEFT JOIN envios e ON e.solicitud_id = s.id
+                     WHERE UPPER(BTRIM(s.courier)) = UPPER(BTRIM(%s))
+                       AND (
+                           NULLIF(REGEXP_REPLACE(
+                               UPPER(BTRIM(s.tracking)), '[^A-Z0-9]', '', 'g'
+                           ), '') = %s
+                           OR (%s AND s.id = %s)
+                       )
+                     ORDER BY s.id
+                    """,
+                    (
+                        item["courier"], tracking, es_id,
+                        int(identificador) if es_id else -1,
+                    ),
+                )
+            candidatos = list(cur.fetchall())
+            ids = {int(fila["id"]) for fila in candidatos}
+            if not candidatos:
+                raise ConciliacionCourierError(
+                    "No existe un envío de ese courier con ese tracking o ID."
+                )
+            if len(ids) != 1:
+                raise ConciliacionCourierError(
+                    "La referencia es ambigua. Usá el ID interno con formato #123."
+                )
+            solicitud = candidatos[0]
+            if solicitud.get("cargo_estado") != "ACTIVO":
+                raise ConciliacionCourierError(
+                    "El envío elegido no tiene un cargo activo en cuenta corriente."
+                )
+            cur.execute(
+                """
+                SELECT id
+                  FROM conciliaciones_envio
+                 WHERE solicitud_id = %s
+                   AND estado IN ('BORRADOR','PARA_REVISION','APROBADA','RECLAMADA')
+                 LIMIT 1
+                """,
+                (int(solicitud["id"]),),
+            )
+            if cur.fetchone():
+                raise ConciliacionCourierError(
+                    "El envío tiene una conciliación abierta; resolvela antes de sumar otra línea."
+                )
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(monto_asignado), 0) AS asignado
+                  FROM factura_courier_item_matches
+                 WHERE item_id = %s AND estado IN ('PROPUESTO','CONFIRMADO')
+                """,
+                (int(item_id),),
+            )
+            asignado = _decimal(cur.fetchone()["asignado"], "Monto asignado")
+            remanente = (
+                _decimal(item["importe"], "Importe de línea") - asignado
+            ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
+            if remanente <= CENTAVO_CONTROL:
+                raise ConciliacionCourierError(
+                    "La línea ya está totalmente asignada."
+                )
+            monto = (
+                _dinero(monto_asignado, "Monto a asignar", permite_cero=False)
+                if monto_asignado is not None and _texto(monto_asignado)
+                else remanente
+            )
+            if monto > remanente + CENTAVO_CONTROL:
+                raise ConciliacionCourierError(
+                    "El monto manual supera el saldo disponible de la línea."
+                )
+            monto_ars = (monto * _decimal(
+                item["tipo_cambio_ars"], "Tipo de cambio"
+            )).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
+            evidencia = f"admin://match-manual/{hashlib.sha256(motivo.encode('utf-8')).hexdigest()}"
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO factura_courier_item_matches (
+                        item_id, solicitud_id, monto_asignado,
+                        monto_asignado_ars, metodo, confianza, estado,
+                        evidencia_uri, creado_por
+                    ) VALUES (%s, %s, %s, %s, 'MANUAL', NULL, 'PROPUESTO', %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        int(item_id), int(solicitud["id"]), monto,
+                        monto_ars, evidencia, actor,
+                    ),
+                )
+            except Exception as exc:
+                if getattr(exc, "pgcode", None) == "23505":
+                    raise ConciliacionCourierError(
+                        "Esa línea ya tiene un match histórico con el envío elegido."
+                    ) from exc
+                raise
+            match_id = int(cur.fetchone()["id"])
+            _registrar_auditoria(
+                cur,
+                evento="MATCH_MANUAL_PROPUESTO",
+                actor=actor,
+                factura_id=int(item["factura_id"]),
+                item_id=int(item_id),
+                solicitud_id=int(solicitud["id"]),
+                metadata={
+                    "match_id": match_id,
+                    "monto_asignado": str(monto),
+                    "monto_asignado_ars": str(monto_ars),
+                    "motivo": motivo,
+                },
+            )
+            _actualizar_estado_factura(cur, int(item["factura_id"]))
+            return {
+                "id": match_id,
+                "factura_id": int(item["factura_id"]),
+                "solicitud_id": int(solicitud["id"]),
+                "cliente_id": solicitud["cliente_id"],
+                "monto_asignado": monto,
+                "monto_asignado_ars": monto_ars,
+            }
+
+
+def confirmar_match(
+    match_id: int,
+    *,
+    actor: str,
+    factura_id_esperada: int | None = None,
+) -> dict[str, Any]:
     """Confirma una propuesta; no aprueba todavía ningún ajuste al cliente."""
     actor = _texto(actor)
     if not actor:
@@ -843,9 +1105,11 @@ def confirmar_match(match_id: int, *, actor: str) -> dict[str, Any]:
             cur.execute(
                 """
                 SELECT m.id, m.estado, m.item_id, m.solicitud_id,
-                       i.factura_id
+                       i.factura_id, i.estado AS item_estado,
+                       f.estado AS factura_estado
                   FROM factura_courier_item_matches m
                   JOIN facturas_courier_items i ON i.id = m.item_id
+                  JOIN facturas_courier f ON f.id = i.factura_id
                  WHERE m.id = %s
                  FOR UPDATE OF m
                 """,
@@ -854,12 +1118,32 @@ def confirmar_match(match_id: int, *, actor: str) -> dict[str, Any]:
             match = cur.fetchone()
             if not match:
                 raise ConciliacionCourierError("El match no existe.")
+            if (
+                factura_id_esperada is not None
+                and int(match["factura_id"]) != int(factura_id_esperada)
+            ):
+                raise ConciliacionCourierError(
+                    "El match no pertenece a la factura indicada."
+                )
+            if match["factura_estado"] == "ANULADA":
+                raise ConciliacionCourierError(
+                    "Una factura anulada no puede confirmarse."
+                )
+            if match["item_estado"] == "IGNORADO":
+                raise ConciliacionCourierError(
+                    "Una línea ignorada no puede confirmarse."
+                )
             if match["estado"] == "RECHAZADO":
                 raise ConciliacionCourierError(
                     "Un match rechazado no puede confirmarse."
                 )
             if match["estado"] == "CONFIRMADO":
-                return {"id": int(match_id), "duplicado": True}
+                return {
+                    "id": int(match_id),
+                    "factura_id": int(match["factura_id"]),
+                    "solicitud_id": int(match["solicitud_id"]),
+                    "duplicado": True,
+                }
             cur.execute(
                 """
                 UPDATE factura_courier_item_matches
@@ -878,7 +1162,82 @@ def confirmar_match(match_id: int, *, actor: str) -> dict[str, Any]:
                 solicitud_id=int(match["solicitud_id"]),
                 metadata={"match_id": int(match_id)},
             )
-            return {"id": int(match_id), "duplicado": False}
+            _actualizar_estado_factura(cur, int(match["factura_id"]))
+            return {
+                "id": int(match_id),
+                "factura_id": int(match["factura_id"]),
+                "solicitud_id": int(match["solicitud_id"]),
+                "duplicado": False,
+            }
+
+
+def rechazar_match(
+    match_id: int,
+    *,
+    actor: str,
+    motivo: str,
+    factura_id_esperada: int | None = None,
+) -> dict[str, Any]:
+    """Rechaza una propuesta conservando el registro y su motivo."""
+    actor = _texto(actor)
+    motivo = _texto(motivo)
+    if not actor:
+        raise ConciliacionCourierError("Falta identificar al operador.")
+    if len(motivo) < 8:
+        raise ConciliacionCourierError(
+            "Explicá el motivo del rechazo (mínimo 8 caracteres)."
+        )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT m.id, m.estado, m.item_id, m.solicitud_id,
+                       i.factura_id
+                  FROM factura_courier_item_matches m
+                  JOIN facturas_courier_items i ON i.id = m.item_id
+                 WHERE m.id = %s
+                 FOR UPDATE OF m
+                """,
+                (int(match_id),),
+            )
+            match = cur.fetchone()
+            if not match:
+                raise ConciliacionCourierError("El match no existe.")
+            if (
+                factura_id_esperada is not None
+                and int(match["factura_id"]) != int(factura_id_esperada)
+            ):
+                raise ConciliacionCourierError(
+                    "El match no pertenece a la factura indicada."
+                )
+            if match["estado"] != "PROPUESTO":
+                raise ConciliacionCourierError(
+                    "Sólo se puede rechazar un match todavía propuesto."
+                )
+            cur.execute(
+                """
+                UPDATE factura_courier_item_matches
+                   SET estado = 'RECHAZADO', motivo_rechazo = %s,
+                       updated_at = NOW()
+                 WHERE id = %s AND estado = 'PROPUESTO'
+                """,
+                (motivo, int(match_id)),
+            )
+            _registrar_auditoria(
+                cur,
+                evento="MATCH_RECHAZADO",
+                actor=actor,
+                factura_id=int(match["factura_id"]),
+                item_id=int(match["item_id"]),
+                solicitud_id=int(match["solicitud_id"]),
+                metadata={"match_id": int(match_id), "motivo": motivo},
+            )
+            _actualizar_estado_factura(cur, int(match["factura_id"]))
+            return {
+                "id": int(match_id),
+                "factura_id": int(match["factura_id"]),
+                "solicitud_id": int(match["solicitud_id"]),
+            }
 
 
 def _max_decimal(filas: list[dict[str, Any]], campo: str) -> Decimal | None:
@@ -957,8 +1316,15 @@ def calcular_conciliacion_envio(
                 """
                 SELECT m.id AS match_id, m.monto_asignado_ars,
                        i.id AS item_id, i.concepto_tipo, i.signo,
+                       i.importe AS item_importe,
                        i.peso_real_kg, i.peso_volumetrico_kg,
                        i.peso_facturado_kg, i.peso_base, i.estado AS item_estado,
+                       COALESCE((
+                           SELECT SUM(confirmado.monto_asignado)
+                             FROM factura_courier_item_matches confirmado
+                            WHERE confirmado.item_id = i.id
+                              AND confirmado.estado = 'CONFIRMADO'
+                       ), 0) AS item_asignado_confirmado,
                        f.id AS factura_id, f.tipo_documento, f.estado AS factura_estado,
                        f.archivo_sha256, f.evidencia_uri
                   FROM factura_courier_item_matches m
@@ -1032,6 +1398,9 @@ def calcular_conciliacion_envio(
             evidencia_completa = pendientes == 0 and all(
                 bool(fila.get("archivo_sha256") or fila.get("evidencia_uri"))
                 and fila["item_estado"] != "OBSERVADO"
+                and _decimal(
+                    fila["item_asignado_confirmado"], "Monto confirmado"
+                ) >= _decimal(fila["item_importe"], "Importe de línea") - CENTAVO_CONTROL
                 for fila in filas
             )
             evidencias = [
@@ -1066,10 +1435,31 @@ def calcular_conciliacion_envio(
             )
             existente = cur.fetchone()
             if existente:
+                estado_existente = existente["estado"]
+                if estado_existente == "BORRADOR" and evidencia_completa:
+                    cur.execute(
+                        """
+                        UPDATE conciliaciones_envio
+                           SET estado = 'PARA_REVISION',
+                               evidencia_completa = TRUE,
+                               updated_at = NOW()
+                         WHERE id = %s AND estado = 'BORRADOR'
+                        """,
+                        (int(existente["id"]),),
+                    )
+                    _registrar_auditoria(
+                        cur,
+                        evento="EVIDENCIA_CONCILIACION_COMPLETADA",
+                        actor=actor,
+                        solicitud_id=int(solicitud_id),
+                        conciliacion_id=int(existente["id"]),
+                        metadata={"version": int(existente["version"])},
+                    )
+                    estado_existente = "PARA_REVISION"
                 return {
                     "id": int(existente["id"]),
                     "version": int(existente["version"]),
-                    "estado": existente["estado"],
+                    "estado": estado_existente,
                     "duplicado": True,
                 }
             cur.execute(
@@ -1134,10 +1524,31 @@ def calcular_conciliacion_envio(
                 ),
             )
             conciliacion_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """
+                SELECT precio_cliente_final_ars
+                  FROM conciliaciones_envio
+                 WHERE solicitud_id = %s
+                   AND version < %s
+                   AND estado = 'CERRADA'
+                 ORDER BY version DESC
+                 LIMIT 1
+                """,
+                (int(solicitud_id), version),
+            )
+            anterior = cur.fetchone()
+            precio_anterior_movimiento = (
+                anterior["precio_cliente_final_ars"]
+                if anterior else calculo["precio_cliente_inicial_ars"]
+            )
+            movimiento_cliente = (
+                calculo["precio_cliente_final_ars"]
+                - _decimal(precio_anterior_movimiento, "Precio anterior")
+            ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
             ajuste_id = None
-            if abs(calculo["ajuste_cliente_ars"]) > CENTAVO_CONTROL:
+            if abs(movimiento_cliente) > CENTAVO_CONTROL:
                 tipo_ajuste = (
-                    "DEBITO" if calculo["ajuste_cliente_ars"] > 0 else "CREDITO"
+                    "DEBITO" if movimiento_cliente > 0 else "CREDITO"
                 )
                 cur.execute(
                     """
@@ -1152,8 +1563,8 @@ def calcular_conciliacion_envio(
                     """,
                     (
                         conciliacion_id, int(solicitud_id), tipo_ajuste,
-                        calculo["ajuste_cliente_ars"],
-                        calculo["precio_cliente_inicial_ars"],
+                        movimiento_cliente,
+                        precio_anterior_movimiento,
                         calculo["precio_cliente_final_ars"],
                         f"conciliacion:{conciliacion_id}", motivo, actor,
                     ),
@@ -1171,6 +1582,7 @@ def calcular_conciliacion_envio(
                     "estado": estado,
                     "formula_version": "MARGEN_PROTEGIDO_V1",
                     "evidencia_completa": evidencia_completa,
+                    "movimiento_cliente_ars": str(movimiento_cliente),
                 },
             )
             return {
@@ -1189,6 +1601,7 @@ def calcular_conciliacion_envio(
                     calculo["precio_cliente_final_ars"]
                 ),
                 "ajuste_cliente_ars": calculo["ajuste_cliente_ars"],
+                "movimiento_cliente_ars": movimiento_cliente,
                 "duplicado": False,
             }
 
@@ -1472,19 +1885,120 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                 SELECT i.id, i.linea_numero, i.tracking_raw, i.concepto_tipo,
                        i.descripcion, i.importe, i.moneda, i.importe_ars,
                        i.peso_facturado_kg, i.peso_base, i.estado,
-                       m.id AS match_id, m.estado AS match_estado,
-                       m.solicitud_id, s.cliente_id
+                       COALESCE(SUM(m.monto_asignado) FILTER (
+                           WHERE m.estado IN ('PROPUESTO','CONFIRMADO')
+                       ), 0) AS monto_asignado
                 FROM facturas_courier_items i
                 LEFT JOIN factura_courier_item_matches m ON m.item_id = i.id
-                LEFT JOIN solicitudes_guia s ON s.id = m.solicitud_id
                 WHERE i.factura_id = %s
-                ORDER BY i.linea_numero, m.id
+                GROUP BY i.id
+                ORDER BY i.linea_numero
                 """,
                 (int(factura_id),),
             )
             resultado = dict(factura)
-            resultado["items"] = [dict(fila) for fila in cur.fetchall()]
+            items = [dict(fila) for fila in cur.fetchall()]
+            mapa = {int(item["id"]): item for item in items}
+            for item in items:
+                item["remanente"] = (
+                    _decimal(item["importe"], "Importe")
+                    - _decimal(item["monto_asignado"], "Monto asignado")
+                ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
+                item["matches"] = []
+            cur.execute(
+                """
+                SELECT m.id, m.item_id, m.estado AS match_estado, m.metodo,
+                       m.monto_asignado, m.monto_asignado_ars,
+                       m.solicitud_id, m.motivo_rechazo,
+                       m.creado_por, m.confirmado_por, m.confirmado_at,
+                       s.cliente_id, s.tracking
+                  FROM factura_courier_item_matches m
+                  JOIN facturas_courier_items i ON i.id = m.item_id
+                  JOIN solicitudes_guia s ON s.id = m.solicitud_id
+                 WHERE i.factura_id = %s
+                 ORDER BY i.linea_numero, m.id
+                """,
+                (int(factura_id),),
+            )
+            for fila in cur.fetchall():
+                match = dict(fila)
+                mapa[int(match["item_id"])]["matches"].append(match)
+            resultado["items"] = items
             return resultado
+
+
+def obtener_control_envio(solicitud_id: int) -> dict[str, Any] | None:
+    """Expediente ADMIN de una guía: base, documentos, cálculo y auditoría."""
+    control = listar_control_envios(buscar=str(int(solicitud_id)), limite=1000)
+    envio = next(
+        (
+            dict(fila) for fila in control["items"]
+            if int(fila["solicitud_id"]) == int(solicitud_id)
+        ),
+        None,
+    )
+    if not envio:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT m.id AS match_id, m.estado AS match_estado,
+                       m.metodo, m.monto_asignado, m.monto_asignado_ars,
+                       m.created_at AS match_created_at,
+                       i.id AS item_id, i.linea_numero, i.tracking_raw,
+                       i.concepto_tipo, i.descripcion, i.peso_facturado_kg,
+                       i.peso_base, f.id AS factura_id, f.courier,
+                       f.tipo_documento, f.numero, f.fecha_emision,
+                       f.moneda, f.estado AS factura_estado
+                  FROM factura_courier_item_matches m
+                  JOIN facturas_courier_items i ON i.id = m.item_id
+                  JOIN facturas_courier f ON f.id = i.factura_id
+                 WHERE m.solicitud_id = %s
+                 ORDER BY f.fecha_emision NULLS LAST, f.id, i.linea_numero
+                """,
+                (int(solicitud_id),),
+            )
+            envio["documentos"] = [dict(fila) for fila in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT c.id, c.version, c.estado,
+                       c.precio_cliente_inicial_ars,
+                       c.costo_courier_estimado_ars,
+                       c.margen_tauro_protegido_ars,
+                       c.costo_courier_real_ars,
+                       c.precio_cliente_final_ars,
+                       c.ajuste_cliente_ars,
+                       c.peso_cotizado_kg, c.peso_final_facturado_kg,
+                       c.peso_base_facturado, c.motivo_diferencia,
+                       c.evidencia_completa, c.calculado_por,
+                       c.calculado_at, c.aprobado_por, c.aprobado_at,
+                       a.id AS ajuste_id, a.tipo AS ajuste_tipo,
+                       a.monto_ars AS movimiento_cliente_ars,
+                       a.precio_anterior_ars AS movimiento_desde_ars,
+                       a.precio_nuevo_ars AS movimiento_hasta_ars,
+                       a.estado AS ajuste_estado
+                  FROM conciliaciones_envio c
+                  LEFT JOIN ajustes_cliente a ON a.conciliacion_id = c.id
+                 WHERE c.solicitud_id = %s
+                 ORDER BY c.version DESC
+                """,
+                (int(solicitud_id),),
+            )
+            envio["conciliaciones"] = [dict(fila) for fila in cur.fetchall()]
+            cur.execute(
+                """
+                SELECT id, evento, factura_id, item_id, conciliacion_id,
+                       ajuste_id, actor, metadata, created_at
+                  FROM auditoria_facturas_courier
+                 WHERE solicitud_id = %s
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT 500
+                """,
+                (int(solicitud_id),),
+            )
+            envio["auditoria"] = [dict(fila) for fila in cur.fetchall()]
+    return envio
 
 
 def obtener_factura_courier_pdf(factura_id: int) -> tuple[bytes, str] | None:
@@ -1504,7 +2018,7 @@ def obtener_factura_courier_pdf(factura_id: int) -> tuple[bytes, str] | None:
 
 
 def confirmar_y_calcular_factura(factura_id: int, *, actor: str) -> dict[str, Any]:
-    """Confirma los matches exactos visibles y calcula cada envío afectado."""
+    """Confirma propuestas y calcula los envíos ya confirmados del documento."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1518,9 +2032,23 @@ def confirmar_y_calcular_factura(factura_id: int, *, actor: str) -> dict[str, An
                 (int(factura_id),),
             )
             propuestas = [dict(fila) for fila in cur.fetchall()]
-    if not propuestas:
-        raise ConciliacionCourierError("La factura no tiene matches exactos pendientes.")
-    solicitudes = sorted({int(fila["solicitud_id"]) for fila in propuestas})
+            cur.execute(
+                """
+                SELECT DISTINCT m.solicitud_id
+                  FROM factura_courier_item_matches m
+                  JOIN facturas_courier_items i ON i.id = m.item_id
+                 WHERE i.factura_id = %s AND m.estado = 'CONFIRMADO'
+                """,
+                (int(factura_id),),
+            )
+            confirmadas = [int(fila["solicitud_id"]) for fila in cur.fetchall()]
+    if not propuestas and not confirmadas:
+        raise ConciliacionCourierError(
+            "La factura no tiene matches propuestos ni confirmados."
+        )
+    solicitudes = sorted(
+        {int(fila["solicitud_id"]) for fila in propuestas} | set(confirmadas)
+    )
     for fila in propuestas:
         confirmar_match(int(fila["id"]), actor=actor)
     calculadas = []
@@ -1532,20 +2060,7 @@ def confirmar_y_calcular_factura(factura_id: int, *, actor: str) -> dict[str, An
             errores.append({"solicitud_id": solicitud_id, "error": str(exc)})
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE facturas_courier f
-                SET estado = CASE WHEN NOT EXISTS (
-                    SELECT 1 FROM facturas_courier_items i
-                    LEFT JOIN factura_courier_item_matches m
-                      ON m.item_id=i.id AND m.estado='CONFIRMADO'
-                    WHERE i.factura_id=f.id AND m.id IS NULL
-                ) THEN 'CONCILIADA' ELSE 'PARCIAL' END,
-                    updated_at=NOW()
-                WHERE f.id=%s
-                """,
-                (int(factura_id),),
-            )
+            _actualizar_estado_factura(cur, int(factura_id))
     return {
         "matches_confirmados": len(propuestas),
         "conciliaciones": calculadas,
