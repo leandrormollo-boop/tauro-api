@@ -1390,6 +1390,51 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS courier_error TE
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS cargo_pendiente BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS cargo_error TEXT;
 
+-- Snapshot de rastreo que consume el portal. Se mantiene separado del estado
+-- operativo de la solicitud: el job diario consulta únicamente guías DHL
+-- pendientes y una entrega confirmada queda excluida definitivamente.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_estado TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_estado_courier TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_descripcion TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_consultado_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_actualizado_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_finalizado_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_error TEXT;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_error_at TIMESTAMPTZ;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'solicitudes_guia'::regclass
+          AND conname = 'ck_solicitudes_tracking_estado'
+    ) THEN
+        ALTER TABLE solicitudes_guia
+            ADD CONSTRAINT ck_solicitudes_tracking_estado
+            CHECK (
+                tracking_estado IS NULL
+                OR tracking_estado IN (
+                    'PROCESO_ENTREGA', 'ENTREGADO', 'RETENIDO'
+                )
+            );
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_solicitudes_tracking_dhl_pendiente
+    ON solicitudes_guia (tracking_consultado_at ASC NULLS FIRST, id)
+    WHERE UPPER(courier) = 'DHL'
+      AND tracking IS NOT NULL AND BTRIM(tracking) <> ''
+      AND estado NOT IN ('CANCELADO', 'ENTREGADO')
+      AND (tracking_estado IS NULL OR tracking_estado <> 'ENTREGADO');
+
 -- ── Recolecciones de couriers ──────────────────────────────
 -- Esquema canónico: no se crea ni se modifica desde el primer request. Las
 -- operaciones externas no son idempotentes, por eso los estados transitorios

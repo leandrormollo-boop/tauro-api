@@ -355,6 +355,9 @@ def listar_solicitudes_cliente(
                        peso_kg, valor_declarado_usd, precio_tauro_ars,
                        precio_tauro_usd, precio_cliente_final_ars, tracking,
                        guia_url, created_at, courier, bultos,
+                       tracking_estado, tracking_estado_courier,
+                       tracking_descripcion, tracking_consultado_at,
+                       tracking_actualizado_at, tracking_finalizado_at,
                        (label_pdf IS NOT NULL) AS tiene_label,
                        (commercial_invoice_pdf IS NOT NULL)
                            AS tiene_factura_comercial
@@ -413,6 +416,8 @@ def listar_envios_api(
                        destino_pais, dest_nombre, dest_ciudad, dest_estado,
                        peso_kg, valor_declarado_usd, precio_tauro_ars,
                        precio_tauro_usd, tracking, guia_url,
+                       tracking_estado, tracking_estado_courier,
+                       tracking_descripcion, tracking_actualizado_at,
                        (label_pdf IS NOT NULL) AS tiene_label,
                        (commercial_invoice_pdf IS NOT NULL)
                            AS tiene_factura_comercial,
@@ -523,7 +528,16 @@ def actualizar_solicitud_guia(
                 cur.execute(
                     """
                     UPDATE solicitudes_guia
-                    SET estado=%s, tracking=%s, guia_url=%s, updated_at=NOW()
+                    SET estado=%s, tracking=%s, guia_url=%s,
+                        tracking_estado=NULL,
+                        tracking_estado_courier=NULL,
+                        tracking_descripcion=NULL,
+                        tracking_consultado_at=NULL,
+                        tracking_actualizado_at=NULL,
+                        tracking_finalizado_at=NULL,
+                        tracking_error=NULL,
+                        tracking_error_at=NULL,
+                        updated_at=NOW()
                     WHERE id=%s
                       AND estado NOT IN ('EMITIENDO', 'VERIFICAR_COURIER')
                     RETURNING id
@@ -683,6 +697,10 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                 UPDATE solicitudes_guia
                 SET estado='GUIA_LISTA', tracking=%s, label_pdf=%s,
                     commercial_invoice_pdf=%s, courier=%s,
+                    tracking_estado=NULL, tracking_estado_courier=NULL,
+                    tracking_descripcion=NULL, tracking_consultado_at=NULL,
+                    tracking_actualizado_at=NULL, tracking_finalizado_at=NULL,
+                    tracking_error=NULL, tracking_error_at=NULL,
                     courier_message_reference=COALESCE(%s, courier_message_reference),
                     courier_error=NULL, cargo_pendiente=TRUE, cargo_error=NULL,
                     guia_generada_at=NOW(), updated_at=NOW()

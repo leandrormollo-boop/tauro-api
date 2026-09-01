@@ -116,8 +116,19 @@
                 "ENTREGADO":  ("ok",    "Entregado"),
                 "CANCELADO":  ("muted", "Cancelado"),
             } %}
+            {% set estados_tracking = {
+                "PROCESO_ENTREGA": ("accent", "Proceso de entrega"),
+                "ENTREGADO":       ("ok", "Entregado"),
+                "RETENIDO":        ("error", "Retenido, verificar"),
+            } %}
             {% for s in solicitudes %}
-                {% set b = estados.get(s.estado, ("muted", (s.estado or "—").replace("_", " ").capitalize())) %}
+                {% if s.tracking_estado %}
+                    {% set b = estados_tracking.get(s.tracking_estado, ("muted", "Rastreo pendiente")) %}
+                {% elif (s.courier or '')|upper == 'DHL' and s.tracking %}
+                    {% set b = ("muted", "Rastreo pendiente") %}
+                {% else %}
+                    {% set b = estados.get(s.estado, ("muted", (s.estado or "—").replace("_", " ").capitalize())) %}
+                {% endif %}
                 <tr>
                     <td data-label="Envío">
                         {% if s.bultos and s.bultos|length > 1 %}
@@ -139,6 +150,11 @@
                             <span><strong>{{ (s.courier or '—')|upper }}</strong> · {{ 'Nacional' if tipo_filtro == 'nacional' else 'Internacional' }}</span>
                             <span class="badge {{ b[0] }}">{{ b[1] }}</span>
                         </span>
+                        {% if s.tracking_estado == 'RETENIDO' and s.tracking_descripcion %}
+                            <small class="tracking-alert">{{ s.tracking_descripcion }}</small>
+                        {% elif s.tracking_estado and s.tracking_actualizado_at %}
+                            <small class="tracking-updated">Actualizado {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M") }}</small>
+                        {% endif %}
                         {% if s.tracking %}
                             {% set turl = url_tracking(s.courier, s.tracking) %}
                             <a href="{{ turl }}" target="_blank" rel="noopener" class="track-link mono">{{ s.tracking }}</a>
