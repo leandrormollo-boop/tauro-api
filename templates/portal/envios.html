@@ -27,13 +27,15 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% endif %}
 
 {# Los dos ámbitos quedan siempre a un click, sin pantalla intermedia. El
-   filtro de estado se conserva al cambiar de pestaña y la página vuelve a 1. #}
+   filtro de estado y la búsqueda se conservan al cambiar de pestaña; la
+   página vuelve a 1. #}
 {% set con_paso = ("&paso=" ~ paso_filtro) if paso_filtro else "" %}
+{% set con_busqueda = ("&buscar=" ~ (busqueda_filtro|urlencode)) if busqueda_filtro else "" %}
 <nav class="chips-tipo envios-scope-tabs" aria-label="Ámbito de los envíos">
-    <a href="/portal/envios?tipo=nacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="page"{% endif %}>
+    <a href="/portal/envios?tipo=nacional{{ con_paso }}{{ con_busqueda }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="page"{% endif %}>
         <span aria-hidden="true">🇦🇷</span> Nacionales <b>{{ total_nacionales }}</b>
     </a>
-    <a href="/portal/envios?tipo=internacional{{ con_paso }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="page"{% endif %}>
+    <a href="/portal/envios?tipo=internacional{{ con_paso }}{{ con_busqueda }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="page"{% endif %}>
         <span aria-hidden="true">🌐</span> Internacionales <b>{{ total_internacionales }}</b>
     </a>
 </nav>
@@ -42,6 +44,31 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 <div class="msg warn scope-unclassified">
     {{ total_sin_clasificar }} envío{{ 's' if total_sin_clasificar != 1 else '' }} histórico{{ 's' if total_sin_clasificar != 1 else '' }} necesita{{ 'n' if total_sin_clasificar != 1 else '' }} revisión de ámbito. No lo{{ 's' if total_sin_clasificar != 1 else '' }} mezclamos hasta clasificarlo{{ 's' if total_sin_clasificar != 1 else '' }}.
 </div>
+{% endif %}
+
+{% if total_sin_filtrar %}
+<form method="GET" action="/portal/envios" class="envios-search" role="search">
+    <input type="hidden" name="tipo" value="{{ tipo_filtro }}">
+    {% if paso_filtro %}<input type="hidden" name="paso" value="{{ paso_filtro }}">{% endif %}
+    <label for="envios-buscar">
+        <strong>Buscar envío</strong>
+        <span>Por código de tracking</span>
+    </label>
+    <div class="envios-search-control">
+        <span class="envios-search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </span>
+        <input type="search" id="envios-buscar" name="buscar"
+               value="{{ busqueda_filtro }}"
+               placeholder="Ej. 888244412640" autocomplete="off"
+               autocapitalize="characters" spellcheck="false">
+        {% if busqueda_filtro %}
+        <a href="/portal/envios?tipo={{ tipo_filtro }}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}"
+           class="envios-search-clear" aria-label="Limpiar búsqueda">Limpiar</a>
+        {% endif %}
+        <button type="submit" class="btn btn-primary btn-sm">Buscar</button>
+    </div>
+</form>
 {% endif %}
 
 {% if not total_sin_filtrar %}
@@ -66,11 +93,11 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% set solo_tipo = ("?tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 {% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 <nav class="chips-embudo" aria-label="Filtrar por estado">
-    <a href="/portal/envios{{ solo_tipo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
-        <b>{{ total_sin_filtrar }}</b> Todos
+    <a href="/portal/envios{{ solo_tipo }}{{ con_busqueda }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
+        <b>{{ total_busqueda }}</b> Todos
     </a>
     {% for c in chips %}
-    <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}"
+    <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_busqueda }}"
        class="chip-e {% if paso_filtro == c.clave %}on{% endif %} {% if c.cantidad and c.accion_de == 'cliente' %}espera{% endif %}"
        {% if paso_filtro == c.clave %}aria-current="true"{% endif %}
        title="{{ c.detalle }}">
@@ -88,7 +115,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% endfor %}
 <p class="envios-resumen">
     Mostrando {{ pagina_desde }}–{{ pagina_hasta }} de {{ total_resultados }}
-    envío{{ "s" if total_resultados != 1 }} ·
+    envío{{ "s" if total_resultados != 1 }}{% if busqueda_filtro %} para <span class="mono">“{{ busqueda_filtro }}”</span>{% endif %} ·
     <b>{{ dinero_ars(total_pagina.valor) }}</b> total final en esta página
 </p>
 {% endif %}
@@ -96,8 +123,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% if not solicitudes %}
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
-    <div class="msg envios-empty-filter">No hay envíos que coincidan con estos filtros.
-        <a href="/portal/envios?tipo={{ tipo_filtro }}">Quitar filtro de estado</a>
+    <div class="msg envios-empty-filter">
+        {% if busqueda_filtro %}No encontramos el tracking “{{ busqueda_filtro }}” con estos filtros.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
+        <a href="/portal/envios?tipo={{ tipo_filtro }}">Limpiar filtros</a>
     </div>
 {% else %}
 <div class="card envios-card">
@@ -148,7 +176,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% endif %}
                     </td>
                     <td data-label="Destino">
-                        {{ s.dest_nombre }}
+                        <span class="envio-destination-name">{{ s.dest_nombre }}</span>
                         <br><small style="color:var(--fg-3)">{{ s.dest_ciudad or "—" }}, {{ s.destino_pais }}</small>
                     </td>
                     <td data-label="Servicio y estado" class="envio-service-cell">
@@ -216,14 +244,14 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <nav class="envios-pagination" aria-label="Páginas de envíos">
             {% if pagina_actual > 1 %}
             <a class="page-arrow" aria-label="Página anterior"
-               href="/portal/envios?pagina={{ pagina_actual - 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}">‹</a>
+               href="/portal/envios?pagina={{ pagina_actual - 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}{{ con_busqueda }}">‹</a>
             {% else %}
             <span class="page-arrow disabled" aria-label="No hay página anterior" aria-disabled="true">‹</span>
             {% endif %}
 
             {% for numero in paginas_visibles %}
                 {% if numero %}
-                <a href="/portal/envios?pagina={{ numero }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}"
+                <a href="/portal/envios?pagina={{ numero }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}{{ con_busqueda }}"
                    class="page-number {% if numero == pagina_actual %}on{% endif %}"
                    {% if numero == pagina_actual %}aria-current="page"{% endif %}>{{ numero }}</a>
                 {% else %}
@@ -233,7 +261,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 
             {% if pagina_actual < total_paginas %}
             <a class="page-arrow" aria-label="Página siguiente"
-               href="/portal/envios?pagina={{ pagina_actual + 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}">›</a>
+               href="/portal/envios?pagina={{ pagina_actual + 1 }}{% if tipo_filtro %}&tipo={{ tipo_filtro }}{% endif %}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}{{ con_busqueda }}">›</a>
             {% else %}
             <span class="page-arrow disabled" aria-label="No hay página siguiente" aria-disabled="true">›</span>
             {% endif %}

@@ -1697,6 +1697,7 @@ def envios_view(
     ok: Optional[str] = None,
     tipo: str = "",
     paso: str = "",
+    buscar: str = "",
     pagina: str = "1",
     cliente: str = Depends(cliente_actual),
 ):
@@ -1707,7 +1708,13 @@ def envios_view(
     # portal tenía antes de incorporar operadores nacionales.
     tipo = _ambito_portal(tipo) or "internacional"
     historial = listar_solicitudes_cliente(cliente, limite=None)
-    vista = preparar_historial_envios(historial, tipo, paso, pagina)
+    vista = preparar_historial_envios(
+        historial,
+        tipo=tipo,
+        paso=paso,
+        pagina=pagina,
+        buscar=buscar,
+    )
 
     from servicios.configuracion_couriers_cliente import mapa_permisos
     permisos_emision = mapa_permisos(cliente, "emitir")
