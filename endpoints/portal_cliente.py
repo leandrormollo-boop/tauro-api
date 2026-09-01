@@ -106,10 +106,12 @@ templates.env.globals["ambito_envio"] = ambito_envio
 
 AMBITOS_PORTAL = {"nacional", "internacional"}
 AMBITOS_CUENTA = {"consolidado", "nacional", "internacional"}
-TIPOS_MOVIMIENTO_CUENTA = {"todos", "cargos", "pagos", "revision"}
+TIPOS_MOVIMIENTO_CUENTA = {
+    "todos", "cargos", "pagos", "diferencias", "revision",
+}
 # Mantiene el resumen y una página completa de movimientos dentro del viewport
 # de escritorio; el resto queda accesible con paginación explícita.
-MOVIMIENTOS_CUENTA_POR_PAGINA = 3
+MOVIMIENTOS_CUENTA_POR_PAGINA = 10
 _IDEMPOTENCY_KEY_MIN_LEN = 32
 _IDEMPOTENCY_KEY_MAX_LEN = 128
 _IDEMPOTENCY_KEY_CHARS = frozenset(

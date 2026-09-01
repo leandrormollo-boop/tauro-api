@@ -107,12 +107,21 @@ def get_facturado_real(cliente: str) -> float:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT COALESCE(SUM(monto_ars), 0) AS total
-                FROM envios
-                WHERE cliente_id = %s
-                  AND estado NOT IN ('CANCELADO', 'NC')
+                SELECT
+                    COALESCE((
+                        SELECT SUM(monto_ars) FROM envios
+                        WHERE cliente_id=%s
+                          AND estado NOT IN ('CANCELADO','NC')
+                    ), 0)
+                    + COALESCE((
+                        SELECT SUM(a.monto_ars)
+                        FROM ajustes_cliente a
+                        JOIN envios e ON e.solicitud_id=a.solicitud_id
+                        WHERE e.cliente_id=%s AND e.estado='ACTIVO'
+                          AND a.estado='APLICADO'
+                    ), 0) AS total
                 """,
-                (cliente,),
+                (cliente, cliente),
             )
             row = cur.fetchone()
     return round(float(row["total"]) if row else 0.0, 2)
@@ -264,17 +273,25 @@ def get_resumen_clientes_bulk(solo_activos: bool = True) -> List[Dict[str, Any]]
             FROM pagos
             WHERE COALESCE(estado, 'APROBADO') = 'APROBADO'
             GROUP BY cliente_id
+        ),
+        aju AS (
+            SELECT e.cliente_id, COALESCE(SUM(a.monto_ars), 0) AS ajuste
+            FROM ajustes_cliente a
+            JOIN envios e ON e.solicitud_id = a.solicitud_id
+            WHERE a.estado = 'APLICADO' AND e.estado = 'ACTIVO'
+            GROUP BY e.cliente_id
         )
         SELECT
             c.cliente_id,
             c.email,
             c.nombre,
             c.activo,
-            COALESCE(fact.facturado, 0) AS facturado,
+            COALESCE(fact.facturado, 0) + COALESCE(aju.ajuste, 0) AS facturado,
             COALESCE(pag.pagado, 0)    AS pagado
         FROM clientes c
         LEFT JOIN fact ON fact.cliente_id = c.cliente_id
         LEFT JOIN pag  ON pag.cliente_id  = c.cliente_id
+        LEFT JOIN aju  ON aju.cliente_id  = c.cliente_id
         {where_activos}
         ORDER BY c.cliente_id
     """
@@ -310,20 +327,32 @@ def saldo(cliente: str, total_facturado_ars: float) -> Dict[str, float]:
 
 def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
     """Arma el resumen con Decimal y verifica que ningún crédito se duplique."""
-    debe_nac = _decimal_monto(fila.get("debe_nacional"))
-    debe_int = _decimal_monto(fila.get("debe_internacional"))
-    debe_sc = _decimal_monto(fila.get("debe_sin_clasificar"))
+    envios_nac = _decimal_monto(fila.get("debe_nacional"))
+    envios_int = _decimal_monto(fila.get("debe_internacional"))
+    envios_sc = _decimal_monto(fila.get("debe_sin_clasificar"))
     facturado_nac = _decimal_monto(fila.get("facturado_nacional"))
     facturado_int = _decimal_monto(fila.get("facturado_internacional"))
     facturado_sc = _decimal_monto(fila.get("facturado_sin_clasificar"))
-    pendiente_nac = debe_nac - facturado_nac
-    pendiente_int = debe_int - facturado_int
-    pendiente_sc = debe_sc - facturado_sc
-    haber_nac = _decimal_monto(fila.get("haber_nacional"))
-    haber_int = _decimal_monto(fila.get("haber_internacional"))
+    ajuste_debito_nac = _decimal_monto(fila.get("ajuste_debito_nacional"))
+    ajuste_debito_int = _decimal_monto(fila.get("ajuste_debito_internacional"))
+    ajuste_debito_sc = _decimal_monto(fila.get("ajuste_debito_sin_clasificar"))
+    ajuste_credito_nac = _decimal_monto(fila.get("ajuste_credito_nacional"))
+    ajuste_credito_int = _decimal_monto(fila.get("ajuste_credito_internacional"))
+    ajuste_credito_sc = _decimal_monto(fila.get("ajuste_credito_sin_clasificar"))
+    debe_nac = envios_nac + ajuste_debito_nac
+    debe_int = envios_int + ajuste_debito_int
+    debe_sc = envios_sc + ajuste_debito_sc
+    pendiente_nac = envios_nac - facturado_nac + ajuste_debito_nac
+    pendiente_int = envios_int - facturado_int + ajuste_debito_int
+    pendiente_sc = envios_sc - facturado_sc + ajuste_debito_sc
+    pagos_aplicados_nac = _decimal_monto(fila.get("haber_nacional"))
+    pagos_aplicados_int = _decimal_monto(fila.get("haber_internacional"))
+    haber_nac = pagos_aplicados_nac + ajuste_credito_nac
+    haber_int = pagos_aplicados_int + ajuste_credito_int
+    haber_sc = ajuste_credito_sc
     aprobado = _decimal_monto(fila.get("pagos_aprobados"))
     pendiente = _decimal_monto(fila.get("pagos_pendientes"))
-    aplicado = haber_nac + haber_int
+    aplicado = pagos_aplicados_nac + pagos_aplicados_int
     if aplicado > aprobado:
         raise RuntimeError(
             "Invariante contable rota: las aplicaciones superan los pagos aprobados."
@@ -332,8 +361,8 @@ def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
     saldo_nac = debe_nac - haber_nac
     saldo_int = debe_int - haber_int
     debe_total = debe_nac + debe_int + debe_sc
-    saldo_antes_sin_imputar = saldo_nac + saldo_int + debe_sc
-    saldo_consolidado = debe_total - aprobado
+    saldo_antes_sin_imputar = saldo_nac + saldo_int + debe_sc - haber_sc
+    saldo_consolidado = debe_total - haber_sc - ajuste_credito_nac - ajuste_credito_int - aprobado
     if aplicado + sin_imputar != aprobado:
         raise RuntimeError("Invariante contable rota: el crédito aprobado no cierra.")
     if saldo_antes_sin_imputar - sin_imputar != saldo_consolidado:
@@ -344,6 +373,9 @@ def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
         "debe_ars": debe_nac,
         "haber_ars": haber_nac,
         "saldo_ars": saldo_nac,
+        "envios_ars": envios_nac,
+        "diferencias_debito_ars": ajuste_debito_nac,
+        "diferencias_credito_ars": ajuste_credito_nac,
     }
     internacional = {
         "facturado_ars": facturado_int,
@@ -351,18 +383,33 @@ def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
         "debe_ars": debe_int,
         "haber_ars": haber_int,
         "saldo_ars": saldo_int,
+        "envios_ars": envios_int,
+        "diferencias_debito_ars": ajuste_debito_int,
+        "diferencias_credito_ars": ajuste_credito_int,
     }
     consolidado = {
         "facturado_ars": facturado_nac + facturado_int + facturado_sc,
         "pendiente_facturacion_ars": pendiente_nac + pendiente_int + pendiente_sc,
         "debe_ars": debe_total,
         # Consolidado sí reconoce todo pago aprobado, incluso lo no imputado.
-        "haber_ars": aprobado,
+        "haber_ars": aprobado + ajuste_credito_nac + ajuste_credito_int + haber_sc,
         "haber_aplicado_ars": aplicado,
         "pagos_aprobados_ars": aprobado,
         "credito_aprobado_sin_imputar_ars": sin_imputar,
         "saldo_antes_credito_sin_imputar_ars": saldo_antes_sin_imputar,
         "saldo_ars": saldo_consolidado,
+        "envios_ars": envios_nac + envios_int + envios_sc,
+        "pagos_ars": aprobado,
+        "diferencias_debito_ars": (
+            ajuste_debito_nac + ajuste_debito_int + ajuste_debito_sc
+        ),
+        "diferencias_credito_ars": (
+            ajuste_credito_nac + ajuste_credito_int + ajuste_credito_sc
+        ),
+        "diferencias_netas_ars": (
+            ajuste_debito_nac + ajuste_debito_int + ajuste_debito_sc
+            - ajuste_credito_nac - ajuste_credito_int - ajuste_credito_sc
+        ),
     }
     return {
         "nacional": nacional,
@@ -429,6 +476,33 @@ def resumen_cuenta_por_ambito(cliente: str) -> Dict[str, Any]:
                       AND COALESCE(p.estado, 'APROBADO') = 'APROBADO'
                       AND pa.estado = 'APLICADA'
                 ),
+                ajustes AS (
+                    SELECT
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE e.ambito='NACIONAL' AND a.tipo='DEBITO'
+                        ), 0) AS ajuste_debito_nacional,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE e.ambito='INTERNACIONAL' AND a.tipo='DEBITO'
+                        ), 0) AS ajuste_debito_internacional,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE (e.ambito IS NULL OR e.ambito NOT IN ('NACIONAL','INTERNACIONAL'))
+                              AND a.tipo='DEBITO'
+                        ), 0) AS ajuste_debito_sin_clasificar,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE e.ambito='NACIONAL' AND a.tipo='CREDITO'
+                        ), 0) AS ajuste_credito_nacional,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE e.ambito='INTERNACIONAL' AND a.tipo='CREDITO'
+                        ), 0) AS ajuste_credito_internacional,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE (e.ambito IS NULL OR e.ambito NOT IN ('NACIONAL','INTERNACIONAL'))
+                              AND a.tipo='CREDITO'
+                        ), 0) AS ajuste_credito_sin_clasificar
+                    FROM ajustes_cliente a
+                    JOIN envios e ON e.solicitud_id=a.solicitud_id
+                    WHERE e.cliente_id=%s AND e.estado='ACTIVO'
+                      AND a.estado='APLICADO'
+                ),
                 pagos_totales AS (
                     SELECT
                         COALESCE(SUM(monto_ars) FILTER (
@@ -440,10 +514,11 @@ def resumen_cuenta_por_ambito(cliente: str) -> Dict[str, Any]:
                     FROM pagos
                     WHERE cliente_id = %s
                 )
-                SELECT cargos.*, aplicaciones.*, pagos_totales.*
-                FROM cargos CROSS JOIN aplicaciones CROSS JOIN pagos_totales
+                SELECT cargos.*, aplicaciones.*, ajustes.*, pagos_totales.*
+                FROM cargos CROSS JOIN aplicaciones CROSS JOIN ajustes
+                CROSS JOIN pagos_totales
                 """,
-                (cliente, cliente, cliente),
+                (cliente, cliente, cliente, cliente),
             )
             fila = cur.fetchone()
     return _armar_resumen_ambitos(fila or {})
@@ -477,7 +552,7 @@ def movimientos_cuenta_paginados(
     tipo_filtro = str(tipo or "todos").strip().lower()
     if ambito_filtro not in {"consolidado", "nacional", "internacional"}:
         raise ValueError("El filtro de ámbito no es válido.")
-    if tipo_filtro not in {"todos", "cargos", "pagos", "revision"}:
+    if tipo_filtro not in {"todos", "cargos", "pagos", "diferencias", "revision"}:
         raise ValueError("El filtro de tipo de movimiento no es válido.")
     pagina = max(1, int(pagina))
     page_size = max(1, min(int(page_size), 100))
@@ -511,6 +586,7 @@ def movimientos_cuenta_paginados(
                 (NULLIF(BTRIM(e.nro_fc), '') IS NOT NULL) AS facturado,
                 e.id AS envio_id,
                 NULL::integer AS pago_id,
+                e.solicitud_id,
                 CASE WHEN e.factura_pdf IS NOT NULL
                      THEN '/portal/facturas/' || e.id::text || '/pdf' END AS archivo_url
             FROM envios e
@@ -525,6 +601,7 @@ def movimientos_cuenta_paginados(
                 BTRIM(CONCAT_WS(' ', p.metodo, p.referencia)), p.referencia,
                 0::numeric, pa.monto_ars, pa.monto_ars, 'APROBADO',
                 FALSE, NULL::integer, p.id,
+                NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END
             FROM pagos_aplicaciones pa
@@ -541,6 +618,7 @@ def movimientos_cuenta_paginados(
                 0::numeric, p.monto_ars - COALESCE(ap.aplicado, 0),
                 p.monto_ars - COALESCE(ap.aplicado, 0), 'APROBADO',
                 FALSE, NULL::integer, p.id,
+                NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END
             FROM pagos p
@@ -556,11 +634,32 @@ def movimientos_cuenta_paginados(
                 BTRIM(CONCAT_WS(' ', p.metodo, p.referencia)), p.referencia,
                 0::numeric, 0::numeric, p.monto_ars, 'PENDIENTE',
                 FALSE, NULL::integer, p.id,
+                NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END
             FROM pagos p
             WHERE p.cliente_id = %s
               AND p.estado = 'PENDIENTE'
+
+            UNION ALL
+
+            SELECT
+                a.aplicado_at::date, a.aplicado_at, 35, a.id,
+                'DIFERENCIA',
+                CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
+                     THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
+                BTRIM(CONCAT_WS(' ', 'Diferencia envío', s.tracking)),
+                COALESCE(c.motivo_diferencia, a.motivo),
+                CASE WHEN a.tipo='DEBITO' THEN ABS(a.monto_ars) ELSE 0 END,
+                CASE WHEN a.tipo='CREDITO' THEN ABS(a.monto_ars) ELSE 0 END,
+                ABS(a.monto_ars), a.estado, FALSE, e.id, NULL::integer,
+                a.solicitud_id, NULL::text
+            FROM ajustes_cliente a
+            JOIN conciliaciones_envio c ON c.id=a.conciliacion_id
+            JOIN envios e ON e.solicitud_id=a.solicitud_id
+            JOIN solicitudes_guia s ON s.id=a.solicitud_id
+            WHERE e.cliente_id=%s AND e.estado='ACTIVO'
+              AND a.estado='APLICADO'
         ),
         filtrados AS (
             SELECT * FROM movimientos
@@ -569,14 +668,15 @@ def movimientos_cuenta_paginados(
                   %s = 'todos'
                   OR (%s = 'cargos' AND tipo IN ('FC', 'PENDIENTE_FACTURA'))
                   OR (%s = 'pagos' AND tipo = 'PAGO')
+                  OR (%s = 'diferencias' AND tipo = 'DIFERENCIA')
                   OR (%s = 'revision' AND tipo = 'PAGO_PENDIENTE')
               )
         )
     """
     filtros = (
-        cliente, cliente, cliente, cliente,
+        cliente, cliente, cliente, cliente, cliente,
         ambito_sql, ambito_sql,
-        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
+        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
     )
     with get_conn() as conn:
         with conn.cursor() as cur:

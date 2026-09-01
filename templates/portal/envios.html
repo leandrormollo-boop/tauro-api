@@ -161,10 +161,13 @@
                         {% endif %}
                     </td>
                     <td class="mono" data-label="Importe cotizado">
-                        {% if s.precio_tauro_ars %}
-                            $ {{ "{:,.0f}".format(s.precio_tauro_ars).replace(",", ".") }}
+                        {% if s.precio_final_cliente_ars or s.precio_tauro_ars %}
+                            $ {{ "{:,.0f}".format(s.precio_final_cliente_ars or s.precio_tauro_ars).replace(",", ".") }}
                         {% else %}
                             —
+                        {% endif %}
+                        {% if s.diferencia_cliente_ars %}
+                            <br><small style="color:var(--warn);">Diferencia {{ "+" if s.diferencia_cliente_ars > 0 else "−" }} $ {{ "{:,.0f}".format(s.diferencia_cliente_ars|abs).replace(",", ".") }}</small>
                         {% endif %}
                         {% if s.precio_cliente_final_ars %}
                             <br><small style="color:var(--fg-3)"><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;">a tu cliente</span> $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>

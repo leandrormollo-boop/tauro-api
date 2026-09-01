@@ -75,6 +75,13 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         {{ tarjeta_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}
     </div>
 
+    <dl class="account-reconciliation" aria-label="Totales de la cuenta corriente">
+        <div><dt>Suma de envíos</dt><dd>{{ dinero(total.envios_ars) }}</dd></div>
+        <div><dt>Pagos aprobados</dt><dd>{{ dinero(total.pagos_ars) }}</dd></div>
+        <div><dt>Diferencias débito</dt><dd>{{ dinero(total.diferencias_debito_ars) }}</dd></div>
+        <div><dt>Diferencias crédito</dt><dd>{{ dinero(total.diferencias_credito_ars) }}</dd></div>
+    </dl>
+
     <dl class="account-reconciliation" aria-label="Partidas pendientes de imputación o clasificación">
         <div>
             <dt>Crédito sin imputar</dt>
@@ -156,7 +163,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 
 <div class="account-history-head">
     <nav class="account-movement-filters" aria-label="Filtrar movimientos">
-        {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Cargos"), ("pagos", "Pagos"), ("revision", "En revisión")) %}
+        {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos / FC"), ("pagos", "Pagos"), ("diferencias", "Diferencias"), ("revision", "En revisión")) %}
         <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ clave }}"
            class="{% if tipo_filtro == clave %}is-active{% endif %}"
            {% if tipo_filtro == clave %}aria-current="page"{% endif %}>{{ etiqueta }}</a>
@@ -194,6 +201,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                             <span class="badge ok">Pago aplicado</span>
                         {% elif m.tipo == 'PENDIENTE_FACTURA' %}
                             <span class="badge warn">A facturar</span>
+                        {% elif m.tipo == 'DIFERENCIA' %}
+                            <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">Diferencia aplicada</span>
                         {% else %}
                             <span class="badge">Factura</span>
                         {% endif %}
@@ -202,6 +211,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if m.referencia %}<small>Ref. {{ m.referencia }}</small>{% endif %}
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
                         {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener" class="account-document-link">Ver comprobante o factura ↗</a>{% endif %}
+                        {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}" class="account-document-link">Ver envío →</a>{% endif %}
                     </td>
                     {% if ambito_filtro == 'consolidado' %}
                     <td data-label="Ámbito"><span class="badge muted">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span></td>

@@ -92,3 +92,27 @@ def test_item_en_usd_exige_conversion_ars_coherente():
             },
             moneda_documento="USD",
         )
+
+
+def test_parsea_tabla_excel_con_tracking_repetido_y_pesos():
+    items = conciliacion.parsear_lineas_factura_texto(
+        "tracking;importe;concepto;peso_facturado;peso_base;descripcion\n"
+        "DHL-001;10.000;FLETE;3,2;VOLUMETRICO;Flete\n"
+        "DHL-001;500;COMBUSTIBLE;;;Recargo",
+        moneda="ARS",
+        tipo_cambio_ars="1",
+    )
+
+    assert [item["tracking"] for item in items] == ["DHL-001", "DHL-001"]
+    assert [item["importe"] for item in items] == [
+        Decimal("10000"), Decimal("500")
+    ]
+    assert items[0]["peso_facturado_kg"] == "3.2"
+    assert items[0]["peso_base"] == "VOLUMETRICO"
+
+
+def test_parseo_de_factura_rechaza_linea_sin_tracking():
+    with pytest.raises(conciliacion.ConciliacionCourierError, match="tracking"):
+        conciliacion.parsear_lineas_factura_texto(
+            ";15000;FLETE", moneda="ARS", tipo_cambio_ars="1"
+        )

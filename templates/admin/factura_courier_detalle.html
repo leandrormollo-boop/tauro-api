@@ -1,0 +1,15 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Factura {{ factura.numero }}{% endblock %}
+{% block content %}
+<div class="page-title page-title-row"><div><div class="eyebrow">{{ factura.courier }} · {{ factura.tipo_documento }}</div><h1>{{ factura.numero }}</h1><p>{{ factura.moneda }} {{ factura.total }} · {{ factura.estado|title }}</p></div><div style="display:flex;gap:8px;"><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver</a>{% if factura.tiene_evidencia %}<a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/pdf" target="_blank" class="btn btn-ghost">Ver PDF</a>{% endif %}</div></div>
+{% if request.query_params.get('ok') %}<div class="msg ok">Factura cargada. Revisá las coincidencias antes de confirmar.</div>{% endif %}
+{% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+<div class="card">
+  <div class="card-head"><div><h3>Líneas y matches</h3><p>El sistema sólo propone matches exactos de courier + tracking. Confirmarlos calcula la diferencia de cada envío.</p></div>
+  {% set pendientes = factura['items'] | selectattr('match_estado', 'equalto', 'PROPUESTO') | list %}
+  {% if pendientes %}<form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar todos los matches exactos visibles y calcular las diferencias? Todavía no se aplicarán al cliente."><button class="btn btn-primary">Confirmar matches y calcular</button></form>{% endif %}</div>
+  <div class="table-wrap"><table><thead><tr><th>Línea</th><th>Tracking</th><th>Concepto</th><th>Importe</th><th>Peso facturado</th><th>Match</th></tr></thead><tbody>
+  {% for i in factura['items'] %}<tr><td class="mono">{{ i.linea_numero }}</td><td class="mono">{{ i.tracking_raw or '—' }}</td><td>{{ i.concepto_tipo }}<br><small>{{ i.descripcion or '' }}</small></td><td class="mono">{{ i.moneda }} {{ i.importe }}<br><small>ARS {{ i.importe_ars }}</small></td><td>{{ i.peso_facturado_kg or '—' }} kg<br><small>{{ (i.peso_base or '').replace('_',' ')|title }}</small></td><td>{% if i.match_id %}<span class="badge {% if i.match_estado == 'CONFIRMADO' %}ok{% else %}warn{% endif %}">{{ i.match_estado|title }}</span><br><strong>{{ i.cliente_id }}</strong> · envío #{{ i.solicitud_id }}{% else %}<span class="badge error">Sin match exacto</span><br><small>Revisar tracking o carga manual.</small>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}

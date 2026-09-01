@@ -1656,6 +1656,8 @@ CREATE TABLE IF NOT EXISTS facturas_courier (
     evidencia_uri            TEXT,
     archivo_nombre           TEXT,
     archivo_sha256           TEXT,
+    archivo_pdf              BYTEA,
+    archivo_mime             TEXT,
     metadatos_origen         JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1695,6 +1697,10 @@ CREATE TABLE IF NOT EXISTS facturas_courier (
         courier, tipo_documento, numero_normalizado
     )
 );
+ALTER TABLE IF EXISTS facturas_courier
+    ADD COLUMN IF NOT EXISTS archivo_pdf BYTEA;
+ALTER TABLE IF EXISTS facturas_courier
+    ADD COLUMN IF NOT EXISTS archivo_mime TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_courier_archivo
     ON facturas_courier (archivo_sha256)
     WHERE archivo_sha256 IS NOT NULL;

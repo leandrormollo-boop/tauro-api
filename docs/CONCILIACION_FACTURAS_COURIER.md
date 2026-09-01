@@ -52,7 +52,7 @@ saldo del cliente y no aplica un cobro sin aprobación humana.
 - Los documentos financieros no se borran; se anulan o rechazan.
 - El precio final debe respetar la fórmula de margen también en PostgreSQL.
 - Aprobar una conciliación exige evidencia completa e identidad del operador.
-- La aplicación al saldo queda fuera del proceso automático.
+- La aplicación al saldo sólo existe como aprobación manual en ADMIN.
 
 ## Flujo previsto
 
@@ -68,13 +68,15 @@ saldo del cliente y no aplica un cobro sin aprobación humana.
 
 ## Estado de implementación
 
-La migración, el servicio determinístico y sus controles PostgreSQL están
-implementados. Todavía faltan, en fases separadas:
+Ya están implementados el snapshot automático para envíos nuevos, la carga
+manual de factura PDF con líneas pegadas desde Excel, el match exacto, la
+bandeja ADMIN, la aprobación humana, el movimiento separado en cuenta
+corriente y la vista de precio/peso final en el portal del cliente.
 
-- conectar el snapshot al momento exacto de creación de cada guía;
-- ingestión de Gmail/PDF y plantilla de importación Excel/Sheets;
-- bandeja de revisión y aprobación en ADMIN;
-- vista de precio inicial/final en el portal del cliente;
-- asiento idempotente del ajuste aprobado en la cuenta corriente.
+Los envíos históricos sin información suficiente quedan marcados como
+`BASE_PENDIENTE`: ADMIN debe informar el costo estimado original; el sistema
+no lo infiere ni lo inventa.
 
-Ninguna de esas integraciones debe activar cobros automáticos por defecto.
+La automatización pendiente es el conector de ingreso desde correo: descargar
+el adjunto de Gmail, extraer las líneas a la misma estructura y dejarlo en la
+misma bandeja. Ese conector tampoco deberá aprobar diferencias por sí solo.
