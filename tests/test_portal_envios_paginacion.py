@@ -118,7 +118,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "&tipo={{ tipo_filtro }}" in html
     assert "&paso={{ paso_filtro }}" in html
     assert "Mostrando {{ pagina_desde }}–{{ pagina_hasta }}" in html
-    assert "cotizado en esta página" in html
+    assert "total final en esta página" in html
     assert "{% if not tipo_filtro %}" not in html
     assert "envios-scope-tabs" in html
     assert "Nacionales <b>{{ total_nacionales }}</b>" in html

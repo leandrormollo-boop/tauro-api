@@ -1991,6 +1991,8 @@ CREATE TABLE IF NOT EXISTS conciliaciones_envio (
     costo_courier_real_ars       NUMERIC(18,4) NOT NULL,
     precio_cliente_final_ars     NUMERIC(18,4) NOT NULL,
     ajuste_cliente_ars           NUMERIC(18,4) NOT NULL,
+    diferencia_flete_ars         NUMERIC(18,4) NOT NULL DEFAULT 0,
+    tax_cliente_ars              NUMERIC(18,4) NOT NULL DEFAULT 0,
     peso_cotizado_kg             NUMERIC(12,3),
     peso_real_facturado_kg       NUMERIC(12,3),
     peso_volumetrico_facturado_kg NUMERIC(12,3),
@@ -2036,6 +2038,13 @@ CREATE TABLE IF NOT EXISTS conciliaciones_envio (
             + precio_cliente_inicial_ars
         ) <= 0.02
     ),
+    CONSTRAINT ck_conciliacion_componentes CHECK (
+        ABS(
+            ajuste_cliente_ars
+            - diferencia_flete_ars
+            - tax_cliente_ars
+        ) <= 0.02
+    ),
     CONSTRAINT ck_conciliacion_pesos CHECK (
         COALESCE(peso_cotizado_kg, 0) >= 0
         AND COALESCE(peso_real_facturado_kg, 0) >= 0
@@ -2062,6 +2071,44 @@ CREATE TABLE IF NOT EXISTS conciliaciones_envio (
             AND aprobado_at IS NOT NULL AND evidencia_completa)
     )
 );
+-- Las conciliaciones anteriores no distinguían el TAX del resto del ajuste.
+-- Al migrarlas se conserva exactamente el total histórico: todo queda como
+-- diferencia de flete y TAX en cero. Los cálculos nuevos ya guardan ambos
+-- componentes por separado.
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ADD COLUMN IF NOT EXISTS diferencia_flete_ars NUMERIC(18,4);
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ADD COLUMN IF NOT EXISTS tax_cliente_ars NUMERIC(18,4);
+UPDATE conciliaciones_envio
+   SET diferencia_flete_ars = ajuste_cliente_ars
+ WHERE diferencia_flete_ars IS NULL;
+UPDATE conciliaciones_envio
+   SET tax_cliente_ars = 0
+ WHERE tax_cliente_ars IS NULL;
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ALTER COLUMN diferencia_flete_ars SET DEFAULT 0,
+    ALTER COLUMN diferencia_flete_ars SET NOT NULL,
+    ALTER COLUMN tax_cliente_ars SET DEFAULT 0,
+    ALTER COLUMN tax_cliente_ars SET NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'conciliaciones_envio'::regclass
+           AND conname = 'ck_conciliacion_componentes'
+    ) THEN
+        ALTER TABLE conciliaciones_envio
+            ADD CONSTRAINT ck_conciliacion_componentes CHECK (
+                ABS(
+                    ajuste_cliente_ars
+                    - diferencia_flete_ars
+                    - tax_cliente_ars
+                ) <= 0.02
+            ) NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE conciliaciones_envio
+    VALIDATE CONSTRAINT ck_conciliacion_componentes;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_conciliacion_envio_activa
     ON conciliaciones_envio (solicitud_id)
     WHERE estado IN ('BORRADOR','PARA_REVISION','APROBADA','RECLAMADA');
@@ -2079,6 +2126,8 @@ BEGIN
        OR OLD.costo_courier_real_ars IS DISTINCT FROM NEW.costo_courier_real_ars
        OR OLD.precio_cliente_final_ars IS DISTINCT FROM NEW.precio_cliente_final_ars
        OR OLD.ajuste_cliente_ars IS DISTINCT FROM NEW.ajuste_cliente_ars
+       OR OLD.diferencia_flete_ars IS DISTINCT FROM NEW.diferencia_flete_ars
+       OR OLD.tax_cliente_ars IS DISTINCT FROM NEW.tax_cliente_ars
        OR OLD.peso_cotizado_kg IS DISTINCT FROM NEW.peso_cotizado_kg
        OR OLD.peso_real_facturado_kg IS DISTINCT FROM NEW.peso_real_facturado_kg
        OR OLD.peso_volumetrico_facturado_kg IS DISTINCT FROM NEW.peso_volumetrico_facturado_kg

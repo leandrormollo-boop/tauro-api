@@ -2817,6 +2817,25 @@ async def admin_factura_courier_post(
             moneda=moneda,
             tipo_cambio_ars=tipo_cambio,
         )
+        tax_importe_raw = str(form.get("tax_importe") or "").strip()
+        if tax_importe_raw:
+            tax_tracking = str(form.get("tax_tracking") or "").strip()
+            if not tax_tracking:
+                raise ValueError("Indicá el tracking al que corresponde el TAX.")
+            tax_importe = parse_importe_humano(tax_importe_raw)
+            if tax_importe <= 0:
+                raise ValueError("El TAX debe ser mayor a cero.")
+            items.append({
+                "linea_numero": len(items) + 1,
+                "tracking": tax_tracking,
+                "importe": tax_importe,
+                "moneda": moneda,
+                "tipo_cambio_ars": tipo_cambio,
+                "concepto_tipo": "IMPUESTO",
+                "peso_base": "NO_INFORMADO",
+                "descripcion": "TAX informado por ADMIN",
+                "datos_crudos": {"origen": "casillero_tax_admin"},
+            })
         archivo = form.get("archivo_pdf")
         contenido = await leer_comprobante_con_tope(archivo)
         if not contenido:

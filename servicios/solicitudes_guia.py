@@ -473,6 +473,11 @@ def listar_solicitudes_cliente(
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
                        COALESCE(fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -481,6 +486,7 @@ def listar_solicitudes_cliente(
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
+                           c.diferencia_flete_ars, c.tax_cliente_ars,
                            c.peso_cotizado_kg, c.peso_final_facturado_kg,
                            c.peso_base_facturado, c.motivo_diferencia
                     FROM conciliaciones_envio c
@@ -762,6 +768,11 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
                        COALESCE(fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -770,6 +781,7 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
+                           c.diferencia_flete_ars, c.tax_cliente_ars,
                            c.peso_cotizado_kg, c.peso_final_facturado_kg,
                            c.peso_base_facturado, c.motivo_diferencia
                     FROM conciliaciones_envio c
@@ -818,6 +830,11 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
                        COALESCE(fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -827,6 +844,7 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                 LEFT JOIN LATERAL (
                     SELECT ce.precio_cliente_inicial_ars,
                            ce.precio_cliente_final_ars, ce.ajuste_cliente_ars,
+                           ce.diferencia_flete_ars, ce.tax_cliente_ars,
                            ce.peso_cotizado_kg, ce.peso_final_facturado_kg,
                            ce.peso_base_facturado, ce.motivo_diferencia
                     FROM conciliaciones_envio ce

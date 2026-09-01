@@ -23,6 +23,14 @@
     <div class="form-group"><label>Período hasta</label><input type="date" name="periodo_hasta"></div>
   </div>
   <div class="form-group"><label>Factura PDF *</label><input type="file" name="archivo_pdf" required accept=".pdf,application/pdf"><small>Se conserva como evidencia interna y nunca se muestra al cliente.</small></div>
+  <div class="card" style="margin:14px 0;padding:16px;background:var(--surface-2);">
+    <div class="card-head"><div><h3>TAX del envío <span class="badge muted">Opcional</span></h3><p>Usalo cuando la factura trae un TAX adicional para una guía. Quedará separado de la diferencia de flete en el portal del cliente.</p></div></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label>Tracking del TAX</label><input name="tax_tracking" placeholder="Ej. 1234567890"></div>
+      <div class="form-group"><label>Importe TAX (moneda de la factura)</label><input name="tax_importe" inputmode="decimal" data-numero="monto" placeholder="0,00"></div>
+    </div>
+    <small>El total del documento debe incluir este importe. Si ya pegaste el TAX como una línea IMPUESTO o ADUANA, dejá estos casilleros vacíos.</small>
+  </div>
   <div class="form-group"><label>Líneas de la factura *</label><textarea name="lineas" rows="12" required placeholder="tracking;importe;concepto;peso_facturado;peso_base;descripcion&#10;1234567890;15000;FLETE;3,2;VOLUMETRICO;Flete internacional"></textarea><small>Pegá desde Excel usando tabulaciones o punto y coma. Conceptos: FLETE, COMBUSTIBLE, IMPUESTO, ADUANA, MANEJO, SEGURO, DESCUENTO u OTRO. Un tracking puede repetirse en varias líneas.</small></div>
   <div style="display:flex;gap:10px;"><button class="btn btn-primary">Cargar y proponer matches</button><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Cancelar</a></div>
 </form>

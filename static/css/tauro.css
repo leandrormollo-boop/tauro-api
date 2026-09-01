@@ -3097,7 +3097,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   vertical-align: middle;
   overflow-wrap: anywhere;
 }
-.envios-table tbody tr { height: 68px; }
+.envios-table tbody tr { min-height: 82px; }
 .envios-table th:last-child,
 .envios-table td:last-child {
   position: static;
@@ -3138,6 +3138,62 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   white-space: nowrap;
   font-size: 10.5px;
 }
+.envio-price-cell { font-variant-numeric: tabular-nums; }
+.envio-price-cell > span { display: flex; align-items: center; gap: 5px; }
+.envio-price-cell small {
+  min-width: 42px;
+  color: var(--fg-4);
+  font-family: var(--font-sans);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.envio-price-extra {
+  width: max-content;
+  max-width: 100%;
+  margin: 3px 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font-size: 9.5px;
+}
+.envio-price-extra b { font-family: var(--font-sans); font-size: 9px; }
+.envio-price-extra.diferencia {
+  color: #ffd08a;
+  background: rgba(245, 166, 35, .11);
+  border-color: rgba(245, 166, 35, .28);
+}
+.envio-price-extra.tax {
+  color: #ff9fbd;
+  background: rgba(255, 82, 137, .10);
+  border-color: rgba(255, 82, 137, .26);
+}
+.envio-price-final { color: var(--fg-1); font-size: 11px; font-weight: 750; }
+.envio-account-extra {
+  margin: 5px 0;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+.envio-account-extra span { display: flex; flex-direction: column; gap: 2px; }
+.envio-account-extra small { color: inherit; opacity: .72; font-size: 10px; }
+.envio-account-extra.diferencia {
+  color: #ffd08a;
+  background: rgba(245, 166, 35, .11);
+  border-color: rgba(245, 166, 35, .28);
+}
+.envio-account-extra.tax {
+  color: #ff9fbd;
+  background: rgba(255, 82, 137, .10);
+  border-color: rgba(255, 82, 137, .26);
+}
+.envio-account-total {
+  margin-top: 8px;
+  padding-top: 11px;
+  border-top: 1px solid var(--line-soft);
+}
+.envio-account-total strong { color: var(--accent-soft); font-size: 16px; }
 .envios-table .row-actions {
   justify-content: flex-end;
   gap: 4px;

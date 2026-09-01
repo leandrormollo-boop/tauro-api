@@ -1364,6 +1364,18 @@ def calcular_conciliacion_envio(
                 )
                 for fila in filas
             )
+            tax_cliente = sum(
+                (
+                    _decimal(fila["monto_asignado_ars"], "TAX asignado")
+                    * Decimal(signo_documento(fila["tipo_documento"]))
+                    * Decimal(int(fila["signo"]))
+                    for fila in filas
+                    if fila["concepto_tipo"] in {"IMPUESTO", "ADUANA"}
+                ),
+                Decimal("0"),
+            ).quantize(
+                CUATRO_DECIMALES, rounding=ROUND_HALF_UP
+            )
             calculo = calcular_precio_con_margen_protegido(
                 costo_courier_real_ars=costo_real,
                 margen_tauro_protegido_ars=(
@@ -1373,6 +1385,9 @@ def calcular_conciliacion_envio(
                     snapshot["precio_cliente_inicial_ars"]
                 ),
             )
+            diferencia_flete = (
+                calculo["ajuste_cliente_ars"] - tax_cliente
+            ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
             peso_cotizado = snapshot.get("peso_facturable_cotizado_kg")
             peso_cotizado = (
                 _decimal(peso_cotizado, "Peso cotizado")
@@ -1498,6 +1513,7 @@ def calcular_conciliacion_envio(
                     margen_tauro_protegido_ars,
                     costo_courier_real_ars,
                     precio_cliente_final_ars, ajuste_cliente_ars,
+                    diferencia_flete_ars, tax_cliente_ars,
                     peso_cotizado_kg, peso_real_facturado_kg,
                     peso_volumetrico_facturado_kg, peso_final_facturado_kg,
                     peso_base_facturado, motivo_diferencia,
@@ -1505,7 +1521,7 @@ def calcular_conciliacion_envio(
                     evidencia_completa, calculado_por
                 ) VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, 'MARGEN_PROTEGIDO_V1',
+                    %s, %s, %s, %s, %s, %s, %s, 'MARGEN_PROTEGIDO_V1',
                     %s, %s, %s, %s
                 )
                 RETURNING id
@@ -1517,7 +1533,8 @@ def calcular_conciliacion_envio(
                     calculo["margen_tauro_protegido_ars"],
                     calculo["costo_courier_real_ars"],
                     calculo["precio_cliente_final_ars"],
-                    calculo["ajuste_cliente_ars"], peso_cotizado,
+                    calculo["ajuste_cliente_ars"], diferencia_flete,
+                    tax_cliente, peso_cotizado,
                     peso_real, peso_volumetrico, peso_final, peso_base,
                     motivo, calculo_hash, Json(evidencias),
                     evidencia_completa, actor,
@@ -1583,6 +1600,8 @@ def calcular_conciliacion_envio(
                     "formula_version": "MARGEN_PROTEGIDO_V1",
                     "evidencia_completa": evidencia_completa,
                     "movimiento_cliente_ars": str(movimiento_cliente),
+                    "diferencia_flete_ars": str(diferencia_flete),
+                    "tax_cliente_ars": str(tax_cliente),
                 },
             )
             return {
@@ -1601,6 +1620,8 @@ def calcular_conciliacion_envio(
                     calculo["precio_cliente_final_ars"]
                 ),
                 "ajuste_cliente_ars": calculo["ajuste_cliente_ars"],
+                "diferencia_flete_ars": diferencia_flete,
+                "tax_cliente_ars": tax_cliente,
                 "movimiento_cliente_ars": movimiento_cliente,
                 "duplicado": False,
             }
@@ -1774,6 +1795,8 @@ def listar_control_envios(
                        con.costo_courier_real_ars,
                        con.precio_cliente_final_ars,
                        con.ajuste_cliente_ars,
+                       con.diferencia_flete_ars,
+                       con.tax_cliente_ars,
                        con.peso_cotizado_kg,
                        con.peso_final_facturado_kg,
                        con.peso_base_facturado,
@@ -1969,6 +1992,7 @@ def obtener_control_envio(solicitud_id: int) -> dict[str, Any] | None:
                        c.costo_courier_real_ars,
                        c.precio_cliente_final_ars,
                        c.ajuste_cliente_ars,
+                       c.diferencia_flete_ars, c.tax_cliente_ars,
                        c.peso_cotizado_kg, c.peso_final_facturado_kg,
                        c.peso_base_facturado, c.motivo_diferencia,
                        c.evidencia_completa, c.calculado_por,
@@ -2079,7 +2103,8 @@ def listar_ajustes_para_revision(limite: int = 200) -> list[dict[str, Any]]:
                        c.id AS conciliacion_id, c.estado AS conciliacion_estado,
                        c.evidencia_completa, c.peso_cotizado_kg,
                        c.peso_final_facturado_kg, c.peso_base_facturado,
-                       c.motivo_diferencia,
+                       c.motivo_diferencia, c.diferencia_flete_ars,
+                       c.tax_cliente_ars,
                        s.cliente_id, s.tracking, s.courier
                 FROM ajustes_cliente a
                 JOIN conciliaciones_envio c ON c.id = a.conciliacion_id

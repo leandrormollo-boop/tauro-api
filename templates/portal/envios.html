@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Mis envíos{% endblock %}
+{% macro dinero_ars(valor) -%}
+$ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}
+{%- endmacro %}
 
 {% block content %}
 <section class="envios-page">
@@ -79,11 +82,14 @@
 {# Resumen de lo que estás viendo ahora — se recalcula con cada filtro, así
    sirve para responder "¿cuánto llevo gastado en lo despachado?". #}
 {% if solicitudes %}
-{% set total_ars = solicitudes | map(attribute='precio_tauro_ars') | select | sum %}
+{% set total_pagina = namespace(valor=0) %}
+{% for envio in solicitudes %}
+    {% set total_pagina.valor = total_pagina.valor + (envio.precio_final_cliente_ars or envio.precio_tauro_ars or 0) %}
+{% endfor %}
 <p class="envios-resumen">
     Mostrando {{ pagina_desde }}–{{ pagina_hasta }} de {{ total_resultados }}
     envío{{ "s" if total_resultados != 1 }} ·
-    <b>$ {{ "{:,.0f}".format(total_ars).replace(",", ".") }}</b> cotizado en esta página
+    <b>{{ dinero_ars(total_pagina.valor) }}</b> total final en esta página
 </p>
 {% endif %}
 
@@ -102,7 +108,7 @@
                     <th>Envío</th>
                     <th>Destino</th>
                     <th>Servicio y estado</th>
-                    <th>Importe cotizado</th>
+                    <th>Precio del envío</th>
                     <th></th>
                 </tr>
             </thead>
@@ -160,15 +166,17 @@
                             <a href="{{ turl }}" target="_blank" rel="noopener" class="track-link mono">{{ s.tracking }}</a>
                         {% endif %}
                     </td>
-                    <td class="mono" data-label="Importe cotizado">
-                        {% if s.precio_final_cliente_ars or s.precio_tauro_ars %}
-                            $ {{ "{:,.0f}".format(s.precio_final_cliente_ars or s.precio_tauro_ars).replace(",", ".") }}
-                        {% else %}
-                            —
-                        {% endif %}
-                        {% if s.diferencia_cliente_ars %}
-                            <br><small style="color:var(--warn);">Diferencia {{ "+" if s.diferencia_cliente_ars > 0 else "−" }} $ {{ "{:,.0f}".format(s.diferencia_cliente_ars|abs).replace(",", ".") }}</small>
-                        {% endif %}
+                    <td class="mono envio-price-cell" data-label="Precio del envío">
+                        {% if s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
+                            <span class="envio-price-initial"><small>Inicial</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
+                            {% if s.diferencia_flete_ars %}
+                                <span class="envio-price-extra diferencia"><b>Diferencia</b><span>{{ "+" if s.diferencia_flete_ars > 0 else "−" }} {{ dinero_ars(s.diferencia_flete_ars|abs) }}</span></span>
+                            {% endif %}
+                            {% if s.tax_cliente_ars %}
+                                <span class="envio-price-extra tax"><b>TAX</b><span>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</span></span>
+                            {% endif %}
+                            <span class="envio-price-final"><small>Total final</small>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span>
+                        {% else %}—{% endif %}
                         {% if s.precio_cliente_final_ars %}
                             <br><small style="color:var(--fg-3)"><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;">a tu cliente</span> $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
                         {% endif %}

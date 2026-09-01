@@ -325,6 +325,80 @@ def test_fc_nc_y_lineas_repetidas_por_tracking_se_suman_con_signo(
     assert resultado["ajuste_cliente_ars"] == Decimal("1000.0000")
 
 
+def test_conciliacion_separa_diferencia_de_flete_y_tax(
+    conciliacion_db,
+):
+    solicitud_id = _crear_solicitud(
+        conciliacion_db,
+        sufijo="FLETE_TAX",
+        tracking="DHL-FLETE-TAX",
+        precio=Decimal("15000"),
+    )
+    _snapshot_basico(
+        solicitud_id,
+        costo="10000",
+        precio="15000",
+        margen="5000",
+        coti_id="COTI-FLETE_TAX",
+    )
+    factura = conciliacion.registrar_factura_courier(
+        courier="DHL",
+        tipo_documento="FC",
+        numero="FC-FLETE-TAX",
+        moneda="ARS",
+        subtotal="15000",
+        impuestos="2000",
+        total="17000",
+        actor="parser@test",
+        archivo_sha256="9" * 64,
+        items=[
+            {
+                "linea_numero": 1,
+                "tracking": "DHL-FLETE-TAX",
+                "concepto_tipo": "FLETE",
+                "importe": "15000",
+            },
+            {
+                "linea_numero": 2,
+                "tracking": "DHL-FLETE-TAX",
+                "concepto_tipo": "IMPUESTO",
+                "importe": "2000",
+            },
+        ],
+    )
+    assert conciliacion.matchear_items_exactos(factura["id"])["propuestos"] == 2
+    assert len(_confirmar_todos(conciliacion_db, solicitud_id)) == 2
+
+    resultado = conciliacion.calcular_conciliacion_envio(
+        solicitud_id, actor="auditor@test"
+    )
+
+    assert resultado["costo_courier_real_ars"] == Decimal("17000.0000")
+    assert resultado["precio_cliente_final_ars"] == Decimal("22000.0000")
+    assert resultado["ajuste_cliente_ars"] == Decimal("7000.0000")
+    assert resultado["diferencia_flete_ars"] == Decimal("5000.0000")
+    assert resultado["tax_cliente_ars"] == Decimal("2000.0000")
+    assert (
+        resultado["diferencia_flete_ars"] + resultado["tax_cliente_ars"]
+        == resultado["ajuste_cliente_ars"]
+    )
+
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT diferencia_flete_ars, tax_cliente_ars
+                  FROM conciliaciones_envio
+                 WHERE solicitud_id = %s
+                """,
+                (solicitud_id,),
+            )
+            assert cur.fetchone() == {
+                "diferencia_flete_ars": Decimal("5000.0000"),
+                "tax_cliente_ars": Decimal("2000.0000"),
+            }
+
+
 def test_db_bloquea_mutar_snapshot_borrar_factura_y_sobreasignar_item(
     conciliacion_db,
 ):
