@@ -293,7 +293,9 @@ camposPeriodo.forEach(function (campo) {
                                 </button>
                             {% endif %}
                             {% if s.tiene_label and s.estado != 'REEMPLAZADO' %}
-                                <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-sm">Guía PDF</a>
+                                <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-primary btn-sm">
+                                    {% if s.tiene_factura_comercial %}Guía + invoice{% else %}Guía PDF{% endif %}
+                                </a>
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}
                                 {% if tipo_filtro == 'internacional' and s.estado == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}

@@ -3,12 +3,16 @@
 # ============================================================
 
 import hashlib
+import io
 import json
+import re
+import unicodedata
 import uuid
 from decimal import Decimal
 from typing import Any, Optional
 
 import psycopg2
+from pypdf import PdfReader, PdfWriter
 
 from core.database import get_conn
 from servicios.couriers_urls import ambito_envio
@@ -1848,6 +1852,121 @@ def obtener_factura_comercial_pdf(
     if not row or not row["commercial_invoice_pdf"]:
         return None
     return bytes(row["commercial_invoice_pdf"])
+
+
+def _segmento_nombre_pdf(valor: Optional[str], respaldo: str) -> str:
+    """Convierte datos visibles en un segmento ASCII seguro para HTTP."""
+    texto = unicodedata.normalize("NFKD", str(valor or ""))
+    texto = texto.encode("ascii", "ignore").decode("ascii")
+    texto = re.sub(r'[\x00-\x1f\x7f"/\\;]+', " ", texto)
+    texto = re.sub(r"[^A-Za-z0-9 ._()-]+", " ", texto)
+    texto = re.sub(r"\s+", " ", texto).strip(" ._-()").upper()
+    return (texto or respaldo)[:64].rstrip(" ._-()")
+
+
+def nombre_archivo_documentos_envio(
+    *, cliente_nombre: Optional[str], dest_nombre: Optional[str],
+    destino_pais: Optional[str],
+) -> str:
+    """Nombre estable: TAURO - CLIENTE - DESTINATARIO - PAIS.pdf."""
+    cliente = _segmento_nombre_pdf(cliente_nombre, "CLIENTE")
+    destinatario = _segmento_nombre_pdf(dest_nombre, "DESTINATARIO")
+    pais = _segmento_nombre_pdf(destino_pais, "PAIS")
+    return f"TAURO - {cliente} - {destinatario} - {pais}.pdf"
+
+
+def unir_guia_e_invoice_pdf(
+    guia_pdf: bytes, invoice_pdf: Optional[bytes] = None,
+) -> bytes:
+    """Une etiquetas e invoice, en ese orden, sin omitir errores de mezcla.
+
+    Las guías históricas pueden no tener invoice; en ese caso se conserva el
+    PDF original. Cuando sí existe invoice, un error debe ser visible: devolver
+    sólo la etiqueta haría creer al cliente que descargó el legajo completo.
+    """
+    if not guia_pdf:
+        raise ValueError("La guía no contiene un PDF descargable.")
+    if not invoice_pdf:
+        return bytes(guia_pdf)
+
+    writer = PdfWriter()
+    total_paginas = 0
+    try:
+        for contenido in (guia_pdf, invoice_pdf):
+            reader = PdfReader(io.BytesIO(bytes(contenido)), strict=False)
+            if reader.is_encrypted and reader.decrypt("") == 0:
+                raise ValueError("Uno de los documentos PDF está protegido.")
+            if not reader.pages:
+                raise ValueError("Uno de los documentos PDF no tiene páginas.")
+            for pagina in reader.pages:
+                writer.add_page(pagina)
+                total_paginas += 1
+        salida = io.BytesIO()
+        writer.write(salida)
+        unificado = salida.getvalue()
+        verificacion = PdfReader(io.BytesIO(unificado), strict=False)
+        if len(verificacion.pages) != total_paginas:
+            raise ValueError("El PDF unificado perdió páginas.")
+        return unificado
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("No se pudieron unificar la guía y la invoice.") from exc
+
+
+def preparar_documentos_envio_portal(
+    solicitud_id: int, cliente_id: str,
+) -> Optional[dict]:
+    """Devuelve el legajo PDF del envío sólo a su cliente propietario.
+
+    La consulta reúne documentos y metadatos en una sola lectura para que la
+    autorización, la mezcla y el nombre correspondan siempre al mismo envío.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.label_pdf, s.commercial_invoice_pdf,
+                       COALESCE(NULLIF(BTRIM(c.nombre), ''), s.cliente_id)
+                           AS cliente_nombre,
+                       s.dest_nombre, s.destino_pais
+                FROM solicitudes_guia s
+                LEFT JOIN clientes c ON c.cliente_id=s.cliente_id
+                WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.estado <> 'CANCELADO'
+                  AND s.estado <> 'REEMPLAZADO'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM envios e
+                      WHERE e.solicitud_id=s.id
+                        AND e.cliente_id=s.cliente_id
+                        AND e.estado='CANCELADO'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM solicitudes_guia_reemisiones r
+                      WHERE r.solicitud_nueva_id=s.id
+                        AND (r.estado <> 'EMITIDA'
+                             OR s.cargo_pendiente=TRUE)
+                  )
+                """,
+                (solicitud_id, cliente_id.strip().upper()),
+            )
+            row = cur.fetchone()
+    if not row or not row.get("label_pdf"):
+        return None
+    pdf = unir_guia_e_invoice_pdf(
+        bytes(row["label_pdf"]),
+        bytes(row["commercial_invoice_pdf"])
+        if row.get("commercial_invoice_pdf") else None,
+    )
+    return {
+        "pdf": pdf,
+        "incluye_invoice": bool(row.get("commercial_invoice_pdf")),
+        "filename": nombre_archivo_documentos_envio(
+            cliente_nombre=row.get("cliente_nombre"),
+            dest_nombre=row.get("dest_nombre"),
+            destino_pais=row.get("destino_pais"),
+        ),
+    }
 
 
 def cargar_envio_externo(

@@ -55,7 +55,8 @@ from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
 )
 from servicios.solicitudes_guia import (
-    crear_solicitud_guia, listar_solicitudes_cliente, obtener_label_pdf,
+    crear_solicitud_guia, listar_solicitudes_cliente,
+    preparar_documentos_envio_portal,
     obtener_factura_comercial_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
     idempotency_hash_origen_tienda,
@@ -1791,15 +1792,23 @@ def envios_view(
 
 @router.get("/envios/{solicitud_id}/guia.pdf")
 def descargar_guia(solicitud_id: int, cliente: str = Depends(cliente_actual)):
-    """Descarga el label PDF de la guía. Solo si la solicitud es del cliente logueado."""
-    pdf = obtener_label_pdf(solicitud_id, cliente_id=cliente)
-    if not pdf:
+    """Descarga guía + invoice en un PDF, sólo para el cliente propietario."""
+    try:
+        documentos = preparar_documentos_envio_portal(solicitud_id, cliente)
+    except ValueError:
+        raise HTTPException(
+            status_code=500,
+            detail=("No pudimos preparar la guía junto con la invoice. "
+                    "Contactá a TAURO para revisar el documento."),
+        )
+    if not documentos:
         return RedirectResponse(url="/portal/envios", status_code=303)
     return Response(
-        content=pdf,
+        content=documentos["pdf"],
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="guia-tauro-{solicitud_id}.pdf"',
+            "Content-Disposition":
+                f'attachment; filename="{documentos["filename"]}"',
             "Cache-Control": "private, no-store",
         },
     )

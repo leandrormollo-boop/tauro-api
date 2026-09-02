@@ -118,10 +118,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 {% if s.reemplazada_por_solicitud_id %}<br><a href="/portal/envios/{{ s.reemplazada_por_solicitud_id }}">Descargar la guía final →</a>{% endif %}
             </div>
         {% elif s.tiene_label %}
-            <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-full">⬇ Descargar guía PDF</a>
-            {% if s.tiene_factura_comercial %}
-            <a href="/portal/envios/{{ s.id }}/factura-comercial.pdf" target="_blank" class="btn btn-ghost btn-full" style="margin-top:8px;">Factura comercial PDF</a>
-            {% endif %}
+            <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-primary btn-full">
+                {% if s.tiene_factura_comercial %}⬇ Descargar guía + invoice PDF{% else %}⬇ Descargar guía PDF{% endif %}
+            </a>
             {% if puede_corregir %}
             <a href="/portal/envios/nuevo?corregir={{ s.id }}" class="btn btn-ghost btn-full" style="margin-top:8px;">
                 Corregir datos y reemplazar guía
@@ -131,7 +130,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             </p>
             {% endif %}
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
-                {% if s.bultos and s.bultos|length %}El PDF trae una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}Imprimí la etiqueta y pegala en la caja.{% endif %}
+                {% if s.bultos and s.bultos|length %}El PDF comienza con una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}El PDF comienza con la etiqueta para imprimir y pegar en la caja.{% endif %}
+                {% if s.tiene_factura_comercial %} La invoice comercial está incluida al final del mismo archivo.{% endif %}
             </p>
             {% if ambito == 'internacional' and s.estado == 'GUIA_LISTA' and courier_codigo != 'ENVIA' %}
             {# El paso que sigue a tener la etiqueta: que pasen a buscarla.
