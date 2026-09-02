@@ -176,6 +176,17 @@ def test_declara_aduana_con_hs_code_sin_puntos():
     assert contenido["declaredValue"] == 200
 
 
+def test_hs_code_opcional_no_bloquea_la_emision():
+    envio = {**ENVIO, "bultos": [{**ENVIO["bultos"][0], "hs_code": ""}]}
+    cap, resultado = _emitir_capturando(envio)
+    item = cap["body"]["content"]["exportDeclaration"]["lineItems"][0]
+    assert resultado["encontrado"]
+    assert item["commodityCodes"] == []
+    assert item["price"] == 100
+    assert item["quantity"]["value"] == 2
+    assert cap["body"]["content"]["declaredValue"] == 200
+
+
 def test_usa_la_cuenta_de_exportacion_para_salidas():
     cap, _ = _emitir_capturando()
     assert cap["body"]["accounts"][0]["number"] == "741622792"

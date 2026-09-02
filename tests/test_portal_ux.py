@@ -200,12 +200,19 @@ def test_paquete_e_invoice_estan_separados_y_sin_perder_multibulto():
     invoice = html[html.index('class="form-section shipment-step shipment-step-invoice"'):
                    html.index('class="submit-bar"')]
     for campo in ("bulto_peso", "bulto_largo", "bulto_ancho", "bulto_alto",
-                  "bulto_cantidad", "bulto_valor_usd"):
+                  "bulto_cantidad"):
         assert f'name="{campo}"' in paquete
         assert f'name="{campo}"' not in invoice
-    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_hs", "bulto_pais_fab"):
+    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_valor_usd",
+                  "bulto_hs", "bulto_pais_fab"):
         assert f'name="{campo}"' in invoice
         assert f'name="{campo}"' not in paquete
+
+    assert 'name="bulto_valor_usd" class="bulto-valor"' in invoice
+    assert "DHL calcula cantidad × valor unitario" in invoice
+    assert "data-invoice-line-total" in invoice
+    hs = invoice[invoice.index('name="bulto_hs"'):invoice.index('name="bulto_hs"') + 180]
+    assert "required" not in hs
 
     assert 'id="invoice-list"' in html
     assert "function invoiceDe(row)" in html
@@ -222,7 +229,8 @@ def test_error_aduanero_reabre_la_hoja_de_invoice():
     assert "errores_paquete = []" in fuente
     assert "errores_invoice = []" in fuente
     assert "error_step = 4" in fuente
-    assert "la descripción en inglés para la invoice comercial" in fuente
+    assert "te falta el nombre del producto en inglés" in fuente
+    assert "te falta el valor unitario en USD" in fuente
 
 
 def test_opciones_secundarias_del_paquete_no_alargan_el_paso_principal():

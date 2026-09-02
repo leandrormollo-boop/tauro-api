@@ -350,7 +350,7 @@
             <div class="shipment-step-heading">
                 <div>
                     <h4><span class="n">3</span> Información del paquete <span class="badge ok">Cajas</span></h4>
-                    <p>Peso, medidas, valor declarado y cantidad. Todo lo físico queda en esta pantalla.</p>
+                    <p>Peso, medidas y cantidad de cajas. Acá sólo va la información física del envío.</p>
                 </div>
                 <span class="shipment-step-counter"><b data-package-types>{{ filas|length }}</b> tipo{% if filas|length != 1 %}s{% endif %} de caja</span>
             </div>
@@ -403,47 +403,48 @@
                                 <label>Cajas iguales</label>
                                 <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
                             </div>
-                            <div class="form-group shipment-declared-value">
-                                <label>Valor declarado unitario</label>
-                                <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_usd" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_unitario_usd or '' }}" required></div>
-                            </div>
                         </div>
                     </div>
                 </article>
                 {% endfor %}
             </div>
             <button type="button" id="btn-add-bulto" class="btn-add-bulto">+ Agregar otro tipo de caja</button>
-            <p class="shipment-step-help">Si todas las cajas son iguales, indicá la cantidad en una sola fila. Agregá otra únicamente cuando cambien el peso, las medidas o el contenido.</p>
+            <p class="shipment-step-help">Si todas las cajas son iguales, indicá la cantidad en una sola fila. Agregá otra únicamente cuando cambien el peso o las medidas.</p>
         </div>
 
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
             <div class="shipment-step-heading">
                 <div>
                     <h4><span class="n">4</span> Contenido para la invoice comercial <span class="badge warn">Aduana</span></h4>
-                    <p>Una línea clara por cada tipo de caja. Estos datos viajan a DHL y a la aduana.</p>
+                    <p>Declaración por ítem: producto, cantidad y valor unitario. DHL calcula cantidad × valor unitario.</p>
                 </div>
-                <span class="shipment-step-counter">Descripción en inglés</span>
+                <span class="shipment-step-counter">Valores en USD</span>
             </div>
 
             <div id="invoice-list">
                 {% for f in filas %}
                 <article class="bulto-row shipment-invoice-card" data-invoice-bulto data-bulto-index="{{ loop.index0 }}">
                     <div class="shipment-box-head">
-                        <div><span>Invoice comercial</span><strong>Contenido de caja <b data-box-number>{{ loop.index }}</b></strong></div>
+                        <div><span>Invoice comercial</span><strong>Ítem <b data-box-number>{{ loop.index }}</b></strong></div>
                         <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
                     </div>
                     <div class="bulto-invoice">
                         <div class="form-group shipment-content-field">
-                            <label>Descripción del contenido (en inglés)</label>
+                            <label>Nombre del producto (en inglés)</label>
                             <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
                         </div>
                         <div class="form-group">
-                            <label>Unidades</label>
+                            <label>Cantidad de unidades</label>
                             <input type="text" name="bulto_unidades_aduana" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
+                        <div class="form-group shipment-declared-value">
+                            <label>Valor unitario</label>
+                            <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_usd" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_unitario_usd or '' }}" required></div>
+                            <small class="invoice-line-total" data-invoice-line-total>Subtotal: USD —</small>
+                        </div>
                         <div class="form-group">
-                            <label>HS code</label>
-                            <input type="text" name="bulto_hs" class="bulto-hs" placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}" required>
+                            <label>HS code <span class="field-optional">(opcional)</span></label>
+                            <input type="text" name="bulto_hs" class="bulto-hs" placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}">
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
@@ -458,7 +459,7 @@
                 </article>
                 {% endfor %}
             </div>
-            <div class="invoice-note"><strong>Dato aduanero:</strong> describí qué producto es, material y uso. Evitá términos genéricos como “samples” o “goods”.</div>
+            <div class="invoice-note"><strong>Importante:</strong> el valor unitario es el precio de una unidad del producto, no el valor total de la caja. El subtotal se calcula automáticamente.</div>
 
             <details class="shipment-extra-options" {% if form.precio_cliente_final_ars or form.observaciones %}open{% endif %}>
                 <summary>
@@ -727,8 +728,48 @@
     fisicos.forEach(actualizarReferenciaPaquete);
   }
 
+  function numeroInvoice(valor) {
+    var limpio = String(valor || "").trim().replace(/\s/g, "");
+    if (!limpio) return NaN;
+    if (limpio.indexOf(",") >= 0 && limpio.indexOf(".") >= 0) {
+      limpio = limpio.lastIndexOf(",") > limpio.lastIndexOf(".")
+        ? limpio.replace(/\./g, "").replace(",", ".")
+        : limpio.replace(/,/g, "");
+    } else if (limpio.indexOf(",") >= 0) {
+      limpio = limpio.replace(",", ".");
+    }
+    return Number(limpio);
+  }
+
+  function actualizarSubtotalInvoice(invoice) {
+    if (!invoice) return;
+    var cantidad = numeroInvoice(((invoice.querySelector(".bulto-unidades-aduana") || {}).value || ""));
+    var unitario = numeroInvoice(((invoice.querySelector(".bulto-valor") || {}).value || ""));
+    var total = invoice.querySelector("[data-invoice-line-total]");
+    if (!total) return;
+    total.textContent = Number.isFinite(cantidad) && cantidad > 0 && Number.isFinite(unitario) && unitario > 0
+      ? "Subtotal: USD " + (cantidad * unitario).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
+      : "Subtotal: USD —";
+  }
+
+  function wireInvoiceRow(invoice) {
+    if (!invoice) return;
+    [".bulto-unidades-aduana", ".bulto-valor"].forEach(function (sel) {
+      var el = invoice.querySelector(sel);
+      if (el) el.addEventListener("input", function () {
+        actualizarSubtotalInvoice(invoice);
+        refreshLivePrice();
+      });
+    });
+    [".bulto-desc", ".bulto-hs", ".bulto-pais-fab"].forEach(function (sel) {
+      var el = invoice.querySelector(sel);
+      if (el) el.addEventListener(el.tagName === "SELECT" ? "change" : "input", refreshLivePrice);
+    });
+    actualizarSubtotalInvoice(invoice);
+  }
+
   // Elegir un producto precarga SU declaración de invoice en la fila
-  // (valor, descripción, HS del catálogo) — editable después.
+  // (valor unitario del ítem, descripción y HS) — editable después.
   document.getElementById("bultos-list").addEventListener("change", function (e) {
     if (!e.target.classList.contains("bulto-producto")) return;
     var row = e.target.closest("[data-bulto]");
@@ -743,9 +784,10 @@
     setea(row, ".bulto-largo", op.dataset.largo);
     setea(row, ".bulto-ancho", op.dataset.ancho);
     setea(row, ".bulto-alto", op.dataset.alto);
-    setea(row, ".bulto-valor", op.dataset.valor);
+    setea(invoice, ".bulto-valor", op.dataset.valor);
     setea(invoice, ".bulto-desc", op.dataset.desc);
     setea(invoice, ".bulto-hs", op.dataset.hs);
+    actualizarSubtotalInvoice(invoice);
     actualizarReferenciaPaquete(row);
     refreshLivePrice();
   });
@@ -765,7 +807,7 @@
         largo_cm: v(row, ".bulto-largo"),
         ancho_cm: v(row, ".bulto-ancho"),
         alto_cm: v(row, ".bulto-alto"),
-        valor_unitario_usd: v(row, ".bulto-valor"),
+        valor_unitario_usd: v(invoice, ".bulto-valor"),
         descripcion_en: v(invoice, ".bulto-desc"),
         hs_code: v(invoice, ".bulto-hs"),
         pais_origen: v(invoice, ".bulto-pais-fab"),
@@ -817,6 +859,7 @@
     bultosList.appendChild(nueva);
     invoiceList.appendChild(nuevaInvoice);
     wireBultoRow(nueva);
+    wireInvoiceRow(nuevaInvoice);
     renumerarBultos();
     window.setTimeout(function () {
       nueva.classList.remove("is-entering");
@@ -826,6 +869,7 @@
   }
 
   bultoRows().forEach(wireBultoRow);
+  invoiceRows().forEach(wireInvoiceRow);
   renumerarBultos();
   if (btnAddBulto) btnAddBulto.addEventListener("click", function () {
     agregarBulto("", 1);

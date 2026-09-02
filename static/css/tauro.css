@@ -3813,13 +3813,21 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .field-optional { color: var(--fg-4); font-weight: 400; }
 .wizard-compacto .bulto-fisico {
   display: grid;
-  grid-template-columns: repeat(5, minmax(72px, 1fr)) minmax(118px, 1.35fr);
+  grid-template-columns: repeat(5, minmax(72px, 1fr));
   gap: 7px;
 }
 .wizard-compacto .bulto-invoice {
   display: grid;
-  grid-template-columns: minmax(280px, 2fr) minmax(90px, .55fr) minmax(110px, .7fr) minmax(190px, 1.15fr);
+  grid-template-columns: minmax(240px, 2fr) minmax(115px, .75fr) minmax(125px, .8fr) minmax(120px, .75fr) minmax(170px, 1.1fr);
   gap: 8px;
+}
+.invoice-line-total {
+  display: block;
+  margin-top: 3px;
+  color: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  white-space: nowrap;
 }
 .wizard-compacto .shipment-package-card .form-group,
 .wizard-compacto .shipment-invoice-card .form-group { min-width: 0; margin-bottom: 6px; }

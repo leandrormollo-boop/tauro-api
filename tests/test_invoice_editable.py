@@ -5,8 +5,9 @@ Leandro (05/08): "en donde se carga el producto no permite completar la
 declaración de la invoice. Para el portal tenés que entender perfectamente
 cómo se realiza una guía en estos couriers."
 
-Cómo se realiza de verdad: FedEx/DHL/UPS exigen por ítem descripción en
-inglés, valor unitario, HS code y país de fabricación — y el VALOR REAL DE
+Cómo se realiza de verdad: FedEx/DHL/UPS usan por ítem descripción en
+inglés, valor unitario, cantidad y país de fabricación; el HS puede omitirse
+en DHL — y el VALOR REAL DE
 VENTA cambia entre envíos. Declarar el default del catálogo cuando se vendió
 a otro precio es un problema en la aduana. Igual que en MyDHL+ o Ship
 Manager: el producto precarga, el cliente corrige para ese envío.
@@ -30,8 +31,28 @@ def _html():
 
 def test_cada_renglon_tiene_los_campos_de_la_invoice():
     html = _html()
-    for campo in ("bulto_desc_en", "bulto_valor_usd", "bulto_hs", "bulto_pais_fab"):
+    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_valor_usd",
+                  "bulto_hs", "bulto_pais_fab"):
         assert f'name="{campo}"' in html, f"falta {campo} en el renglón del producto"
+
+
+def test_valor_unitario_esta_en_invoice_y_no_en_paquete():
+    html = _html()
+    paquete = html[html.index("shipment-step-package"):html.index("shipment-step-invoice")]
+    invoice = html[html.index("shipment-step-invoice"):html.index('class="submit-bar"')]
+    assert 'name="bulto_valor_usd"' not in paquete
+    assert 'name="bulto_valor_usd"' in invoice
+    assert "cantidad × valor unitario" in invoice
+    assert "actualizarSubtotalInvoice(invoice)" in html
+    assert "refreshLivePrice()" in html
+
+
+def test_hs_code_es_opcional_en_el_formulario():
+    html = _html()
+    inicio = html.index('name="bulto_hs"')
+    campo = html[inicio:inicio + 180]
+    assert "required" not in campo
+    assert "(opcional)" in html[html.rfind("<label", 0, inicio):inicio]
 
 
 def test_elegir_producto_precarga_su_invoice():

@@ -2691,7 +2691,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
                     "ancho": _numero_requerido(b.get("ancho_cm"), f"Caja {i}: ancho"),
                     "alto": _numero_requerido(b.get("alto_cm"), f"Caja {i}: alto"),
                     "valor_unitario_usd": _numero_requerido(
-                        b.get("valor_unitario_usd"), f"Caja {i}: valor declarado", importe=True
+                        b.get("valor_unitario_usd"), f"Ítem {i}: valor unitario", importe=True
                     ),
                     "unidades": _entero_requerido(b.get("cantidad"), f"Caja {i}: cantidad"),
                     "unidades_aduana": _entero_requerido(
@@ -2741,15 +2741,6 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     # bultos) es el MISMO contrato para los dos, por eso todo el armado de
     # arriba se comparte y sumar un courier no duplica esta función.
     courier = (courier or "FEDEX").upper()
-    if courier == "DHL":
-        lineas_aduana = (datos_envio.get("bultos") or
-                          [datos_envio.get("commodity") or {}])
-        if any(not str(linea.get("hs_code") or "").strip()
-               for linea in lineas_aduana):
-            _liberar_reserva(solicitud_id)
-            return {"ok": False, "error":
-                    "Falta el HS code de la mercadería. No llamamos a DHL ni "
-                    "generamos ningún cargo; completalo antes de emitir."}
     if courier == "DHL":
         from core.dhl_client import DHLClient
         cliente_courier = DHLClient()

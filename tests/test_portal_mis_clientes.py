@@ -291,5 +291,5 @@ def test_error_de_invoice_vuelve_directo_al_paso_cuatro(monkeypatch):
         pedido_tienda_id="", cliente="MELCIOR",
     )
 
-    assert "descripción en inglés para la invoice comercial" in respuesta["context"]["error"]
+    assert "nombre del producto en inglés" in respuesta["context"]["error"]
     assert respuesta["context"]["form"]["initial_step"] == 4

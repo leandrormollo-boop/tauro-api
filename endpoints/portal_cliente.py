@@ -2217,9 +2217,9 @@ def envio_nuevo_post(
     # Unidades COMERCIALES declaradas en aduana, independientes de las
     # cajas fisicas. Ejemplo: una caja puede contener ocho camisas.
     bulto_unidades_aduana: list[str] = Form([]),
-    # Declaración de invoice POR RENGLÓN (Leandro 05/08): el valor real de
-    # venta cambia entre envíos; declarar el default del catálogo cuando se
-    # vendió a otro precio es un problema en la aduana. Vacío = catálogo.
+    # Declaración de invoice POR ÍTEM (Leandro 02/09): este importe es el
+    # valor de UNA unidad comercial, nunca el total de la caja. DHL calcula
+    # unidades_aduana × valor_unitario_usd. Vacío = catálogo.
     # Carga libre (guía HAILU 05/08): peso y medidas por caja, sin catálogo.
     bulto_peso: list[str] = Form([]),
     bulto_largo: list[str] = Form([]),
@@ -2401,14 +2401,14 @@ def envio_nuevo_post(
         if v:
             try:
                 valor = _numero_form(
-                    v, f"Caja {i + 1}: el valor declarado", importe=True,
+                    v, f"Ítem {i + 1}: el valor unitario", importe=True,
                     minimo=0.01,
                 )
                 if valor > 0:
                     fila["valor_unitario_usd"] = round(valor, 2)
                     fila_form["valor_unitario_usd"] = fila["valor_unitario_usd"]
             except ValueError as exc:
-                errores_paquete.append(str(exc))
+                errores_invoice.append(str(exc))
         filas.append(fila)
     # Form viejo cacheado (pre multi-bulto): ahí "cantidad" significaba
     # unidades dentro de UNA caja — se respeta esa semántica para que el
@@ -2582,8 +2582,7 @@ def envio_nuevo_post(
             # obligatorios. Este endpoint queda exclusivamente internacional
             # hasta que Andreani/OCA directos estén integrados.
             obligatorios = [("peso_kg", "el peso"), ("largo_cm", "el largo"),
-                            ("ancho_cm", "el ancho"), ("alto_cm", "el alto"),
-                            ("valor_unitario_usd", "el valor declarado en USD")]
+                            ("ancho_cm", "el ancho"), ("alto_cm", "el alto")]
             faltan = [nombre for clave, nombre in obligatorios if not fila.get(clave)]
             if faltan:
                 donde = f"la caja {i}" if len(filas) > 1 else "la caja"
@@ -2596,12 +2595,15 @@ def envio_nuevo_post(
         if errores_invoice:
             raise ValueError(errores_invoice[0])
         for i, fila in enumerate(filas, start=1):
-            if (fila.get("producto") or "").strip():
-                continue
             if not fila.get("descripcion_en"):
-                donde = f"la caja {i}" if len(filas) > 1 else "la caja"
+                donde = f"el ítem {i}" if len(filas) > 1 else "el ítem"
                 raise ValueError(
-                    f"En {donde} te falta la descripción en inglés para la invoice comercial."
+                    f"En {donde} te falta el nombre del producto en inglés."
+                )
+            if not fila.get("valor_unitario_usd"):
+                donde = f"el ítem {i}" if len(filas) > 1 else "el ítem"
+                raise ValueError(
+                    f"En {donde} te falta el valor unitario en USD. No cargues el total de la caja."
                 )
 
         courier_extra = {}
@@ -2703,14 +2705,6 @@ def envio_nuevo_post(
             if faltan_contacto:
                 raise ValueError(
                     "Para emitir con DHL completá " + " y ".join(faltan_contacto) + "."
-                )
-            sin_hs = [i for i, b in enumerate(bultos_detalle or [], start=1)
-                      if not str(b.get("hs_code") or "").strip()]
-            if sin_hs:
-                cajas = ", ".join(str(i) for i in sin_hs)
-                raise ValueError(
-                    f"Para emitir con DHL completá el HS code de "
-                    f"{'la caja' if len(sin_hs) == 1 else 'las cajas'} {cajas}."
                 )
 
         precio_final = _numero_form(
