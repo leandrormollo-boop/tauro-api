@@ -88,20 +88,22 @@
       class="card" style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px;padding:14px;margin-bottom:16px;align-items:end;">
   <label style="margin:0;">Año
     <select name="anio" data-periodo-admin>
+      <option value="" {% if not periodo.anio %}selected{% endif %}>Todos los años</option>
       {% for opcion in periodo.anios %}
       <option value="{{ opcion }}" {% if opcion == periodo.anio %}selected{% endif %}>{{ opcion }}</option>
       {% endfor %}
     </select>
   </label>
   <label style="margin:0;">Mes
-    <select name="mes" data-periodo-admin>
+    <select name="mes" data-periodo-admin {% if not periodo.anio %}disabled{% endif %}>
+      <option value="" {% if not periodo.mes %}selected{% endif %}>Todos los meses</option>
       {% for numero, nombre in periodo.meses %}
       <option value="{{ numero }}" {% if numero == periodo.mes %}selected{% endif %}>{{ nombre }}</option>
       {% endfor %}
     </select>
   </label>
   <label style="margin:0;">Período
-    <select name="semana" data-periodo-admin>
+    <select name="semana" data-periodo-admin {% if not periodo.mes %}disabled{% endif %}>
       {% for numero, nombre in periodo.semanas %}
       <option value="{{ numero }}" {% if numero == periodo.semana %}selected{% endif %}>{{ nombre }}</option>
       {% endfor %}
@@ -110,9 +112,17 @@
   <noscript><button type="submit" class="btn btn-primary btn-sm">Aplicar período</button></noscript>
 </form>
 <script nonce="{{ request.state.csp_nonce }}">
-document.querySelectorAll("#admin-periodo-form [data-periodo-admin]").forEach(function (campo) {
+var formularioPeriodoAdmin = document.getElementById("admin-periodo-form");
+formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function (campo) {
   campo.addEventListener("change", function () {
-    document.getElementById("admin-periodo-form").requestSubmit();
+    if (campo.name === "anio" && !campo.value) {
+      formularioPeriodoAdmin.elements.mes.disabled = true;
+      formularioPeriodoAdmin.elements.semana.disabled = true;
+    }
+    if (campo.name === "mes" && !campo.value) {
+      formularioPeriodoAdmin.elements.semana.disabled = true;
+    }
+    formularioPeriodoAdmin.requestSubmit();
   });
 });
 </script>

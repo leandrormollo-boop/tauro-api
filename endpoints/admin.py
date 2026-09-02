@@ -1571,6 +1571,11 @@ def admin_cliente_detail(
             periodo = normalizar_periodo(
                 anio, mes, semana, periodos_disponibles,
             )
+            filtro_fecha_sql = ""
+            filtro_fecha_params = []
+            if periodo["desde"] is not None:
+                filtro_fecha_sql = " AND fecha >= %s AND fecha < %s"
+                filtro_fecha_params = [periodo["desde"], periodo["hasta"]]
 
             # Conteos y montos del período en una sola consulta determinística.
             cur.execute(
@@ -1596,9 +1601,9 @@ def admin_cliente_detail(
                            WHERE estado='ACTIVO'
                        ), 0) AS total_ars
                 FROM envios
-                WHERE cliente_id=%s AND fecha >= %s AND fecha < %s
-                """,
-                (cliente_id, periodo["desde"], periodo["hasta"]),
+                WHERE cliente_id=%s
+                """ + filtro_fecha_sql,
+                tuple([cliente_id, *filtro_fecha_params]),
             )
             resumen_fila = cur.fetchone() or {}
             total_envios = int(resumen_fila.get("n") or 0)
@@ -1618,6 +1623,9 @@ def admin_cliente_detail(
             offset = (page - 1) * PAGE_SIZE
 
             # Envíos paginados
+            filtro_fecha_envio_sql = ""
+            if periodo["desde"] is not None:
+                filtro_fecha_envio_sql = " AND e.fecha >= %s AND e.fecha < %s"
             cur.execute(
                 """
                 SELECT e.id, e.cliente_id, e.fecha, e.nro_fc, e.monto_ars,
@@ -1632,14 +1640,13 @@ def admin_cliente_detail(
                   ON s.id = e.solicitud_id
                  AND s.cliente_id = e.cliente_id
                 WHERE e.cliente_id = %s
-                  AND e.fecha >= %s AND e.fecha < %s
+                """ + filtro_fecha_envio_sql + """
                 ORDER BY e.fecha DESC, e.id DESC
                 LIMIT %s OFFSET %s
                 """,
-                (
-                    cliente_id, periodo["desde"], periodo["hasta"],
-                    PAGE_SIZE, offset,
-                ),
+                tuple([
+                    cliente_id, *filtro_fecha_params, PAGE_SIZE, offset,
+                ]),
             )
             envios = [dict(r) for r in cur.fetchall()]
 
@@ -1696,11 +1703,13 @@ def admin_cliente_detail(
         flash_ok = None  # priorizar error
         # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
 
-    filtros_periodo = {
-        "anio": periodo["anio"],
-        "mes": periodo["mes"],
-        "semana": periodo["semana"],
-    }
+    filtros_periodo = {}
+    if periodo["anio"]:
+        filtros_periodo["anio"] = periodo["anio"]
+    if periodo["mes"]:
+        filtros_periodo["mes"] = periodo["mes"]
+    if periodo["semana"]:
+        filtros_periodo["semana"] = periodo["semana"]
     def _url_pagina(numero: int) -> str:
         return (
             f"/admin/clientes/{cliente_id}?"

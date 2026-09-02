@@ -34,19 +34,33 @@ def test_semana_cuatro_cierra_correctamente_febrero_bisiesto():
     )
 
 
-def test_default_es_el_ultimo_mes_con_actividad_y_query_invalida_es_segura():
-    ultimo = normalizar_periodo(
+def test_default_es_todo_el_historial_y_query_invalida_es_segura():
+    completo = normalizar_periodo(
         "", "", "", [(2026, 8), (2026, 5)], hoy=date(2026, 9, 1)
     )
     manipulada = normalizar_periodo(
         "SQL", "99", "8", [(2026, 8)], hoy=date(2026, 9, 1)
     )
 
-    assert (ultimo["anio"], ultimo["mes"], ultimo["semana"]) == (2026, 8, 0)
-    assert ultimo["etiqueta"] == "Agosto 2026"
+    assert (completo["anio"], completo["mes"], completo["semana"]) == (0, 0, 0)
+    assert completo["desde"] is None and completo["hasta"] is None
+    assert completo["etiqueta"] == "Todo el historial"
     assert (manipulada["anio"], manipulada["mes"], manipulada["semana"]) == (
-        2026, 8, 0
+        0, 0, 0
     )
+
+
+def test_anio_mes_y_semana_se_aplican_en_jerarquia():
+    anual = normalizar_periodo("2026", "", "", [(2026, 8)])
+    mensual = normalizar_periodo("2026", "8", "", [(2026, 8)])
+
+    assert (anual["desde"], anual["hasta"], anual["etiqueta"]) == (
+        date(2026, 1, 1), date(2027, 1, 1), "Año 2026"
+    )
+    assert (mensual["desde"], mensual["hasta"], mensual["etiqueta"]) == (
+        date(2026, 8, 1), date(2026, 9, 1), "Agosto 2026"
+    )
+    assert normalizar_periodo("", "8", "2", [(2026, 8)])["activo"] is False
 
 
 def test_resumen_del_periodo_no_cobra_canceladas_ni_reemplazadas():
@@ -123,6 +137,53 @@ def test_endpoint_portal_aplica_el_rango_al_cliente_autenticado(monkeypatch):
     )
 
 
+def test_buscador_portal_descarta_todos_los_filtros_activos(monkeypatch):
+    from endpoints import portal_cliente as portal
+    from servicios import configuracion_couriers_cliente as permisos
+
+    llamadas = []
+    argumentos_vista = []
+    monkeypatch.setattr(
+        portal, "periodos_solicitudes_cliente", lambda _cliente: [(2026, 8)]
+    )
+    monkeypatch.setattr(
+        portal, "listar_solicitudes_cliente",
+        lambda cliente, **kw: llamadas.append((cliente, kw)) or [],
+    )
+    monkeypatch.setattr(
+        portal, "preparar_historial_envios",
+        lambda _historial, **kw: argumentos_vista.append(kw) or {
+            "solicitudes": [], "tipo_filtro": "", "paso_filtro": "",
+            "chips": [], "total_sin_filtrar": 0, "total_busqueda": 0,
+            "total_resultados": 0, "pagina_actual": 1, "total_paginas": 1,
+            "paginas_visibles": [1], "pagina_desde": 0, "pagina_hasta": 0,
+            "tiene_historial": False, "total_nacionales": 0,
+            "total_internacionales": 0, "total_sin_clasificar": 0,
+            "resumen_periodo": {}, "busqueda_filtro": "TRACK-123",
+        },
+    )
+    monkeypatch.setattr(permisos, "mapa_permisos", lambda *_args: {})
+    monkeypatch.setattr(
+        portal.templates, "TemplateResponse",
+        lambda *, context, **_kw: SimpleNamespace(status_code=200, context=context),
+    )
+
+    respuesta = portal.envios_view(
+        SimpleNamespace(), tipo="nacional", paso="despachados",
+        buscar=" TRACK-123 ", anio="2026", mes="8", semana="2",
+        cliente="WAIMAO",
+    )
+
+    assert llamadas == [("WAIMAO", {
+        "limite": None, "desde": None, "hasta": None,
+    })]
+    assert argumentos_vista == [{
+        "tipo": "", "paso": "", "pagina": "1", "buscar": "TRACK-123",
+    }]
+    assert respuesta.context["periodo"]["etiqueta"] == "Todo el historial"
+    assert respuesta.context["periodo_query"] == ""
+
+
 def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
     portal_html = (RAIZ / "templates/portal/envios.html").read_text()
     admin_html = (RAIZ / "templates/admin/cliente_detail.html").read_text()
@@ -134,6 +195,7 @@ def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
         assert nombre in portal_html
         assert nombre in admin_html
     assert "requestSubmit()" in portal_html and "requestSubmit()" in admin_html
+    assert "Todos los años" in portal_html and "Todos los meses" in portal_html
     assert "Guías emitidas" in portal_html
     assert "Envíos vigentes" in admin_html
     assert "fecha >= %s AND fecha < %s" in admin_py

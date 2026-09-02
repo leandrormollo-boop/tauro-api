@@ -10,8 +10,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Operaciones</div>
-            <h1><span aria-hidden="true">{% if tipo_filtro == 'nacional' %}🇦🇷{% else %}🌐{% endif %}</span> Mis envíos {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}</h1>
-            <p>{% if tipo_filtro == 'nacional' %}Operaciones dentro de Argentina, sin mezclar con tu actividad internacional.{% else %}Importaciones y exportaciones, separadas de tus envíos dentro de Argentina.{% endif %}</p>
+            <h1><span aria-hidden="true">{% if tipo_filtro == 'nacional' %}🇦🇷{% elif tipo_filtro == 'internacional' %}🌐{% else %}📦{% endif %}</span> Mis envíos{% if tipo_filtro %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</h1>
+            <p>{% if tipo_filtro == 'nacional' %}Operaciones dentro de Argentina, sin mezclar con tu actividad internacional.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones, separadas de tus envíos dentro de Argentina.{% else %}Todo tu historial nacional e internacional, ordenado del más reciente al más antiguo.{% endif %}</p>
         </div>
         <div class="envios-page-actions">
             {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para
@@ -31,23 +31,24 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
       style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px;padding:14px;margin-bottom:14px;align-items:end;">
     <input type="hidden" name="tipo" value="{{ tipo_filtro }}">
     {% if paso_filtro %}<input type="hidden" name="paso" value="{{ paso_filtro }}">{% endif %}
-    {% if busqueda_filtro %}<input type="hidden" name="buscar" value="{{ busqueda_filtro }}">{% endif %}
     <label style="margin:0;">Año
         <select name="anio" data-periodo-envios>
+            <option value="" {% if not periodo.anio %}selected{% endif %}>Todos los años</option>
             {% for opcion in periodo.anios %}
             <option value="{{ opcion }}" {% if opcion == periodo.anio %}selected{% endif %}>{{ opcion }}</option>
             {% endfor %}
         </select>
     </label>
     <label style="margin:0;">Mes
-        <select name="mes" data-periodo-envios>
+        <select name="mes" data-periodo-envios {% if not periodo.anio %}disabled{% endif %}>
+            <option value="" {% if not periodo.mes %}selected{% endif %}>Todos los meses</option>
             {% for numero, nombre in periodo.meses %}
             <option value="{{ numero }}" {% if numero == periodo.mes %}selected{% endif %}>{{ nombre }}</option>
             {% endfor %}
         </select>
     </label>
     <label style="margin:0;">Período
-        <select name="semana" data-periodo-envios>
+        <select name="semana" data-periodo-envios {% if not periodo.mes %}disabled{% endif %}>
             {% for numero, nombre in periodo.semanas %}
             <option value="{{ numero }}" {% if numero == periodo.semana %}selected{% endif %}>{{ nombre }}</option>
             {% endfor %}
@@ -56,9 +57,18 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <noscript><button type="submit" class="btn btn-primary btn-sm">Aplicar período</button></noscript>
 </form>
 <script nonce="{{ request.state.csp_nonce }}">
-document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(function (campo) {
+var formularioPeriodo = document.getElementById("envios-periodo-form");
+var camposPeriodo = formularioPeriodo.querySelectorAll("[data-periodo-envios]");
+camposPeriodo.forEach(function (campo) {
     campo.addEventListener("change", function () {
-        document.getElementById("envios-periodo-form").requestSubmit();
+        if (campo.name === "anio" && !campo.value) {
+            formularioPeriodo.elements.mes.disabled = true;
+            formularioPeriodo.elements.semana.disabled = true;
+        }
+        if (campo.name === "mes" && !campo.value) {
+            formularioPeriodo.elements.semana.disabled = true;
+        }
+        formularioPeriodo.requestSubmit();
     });
 });
 </script>
@@ -67,30 +77,25 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
    filtro de estado y la búsqueda se conservan al cambiar de pestaña; la
    página vuelve a 1. #}
 {% set con_paso = ("&paso=" ~ paso_filtro) if paso_filtro else "" %}
-{% set con_periodo = "&" ~ periodo_query %}
+{% set con_periodo = ("&" ~ periodo_query) if periodo_query else "" %}
 {% set con_busqueda = ("&buscar=" ~ (busqueda_filtro|urlencode)) if busqueda_filtro else "" %}
 <nav class="chips-tipo envios-scope-tabs" aria-label="Ámbito de los envíos">
-    <a href="/portal/envios?tipo=nacional{{ con_paso }}{{ con_busqueda }}{{ con_periodo }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="page"{% endif %}>
+    <a href="/portal/envios?tipo=nacional{{ con_paso }}{{ con_periodo }}" class="btn btn-sm {% if tipo_filtro == 'nacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'nacional' %} aria-current="page"{% endif %}>
         <span aria-hidden="true">🇦🇷</span> Nacionales <b>{{ total_nacionales }}</b>
     </a>
-    <a href="/portal/envios?tipo=internacional{{ con_paso }}{{ con_busqueda }}{{ con_periodo }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="page"{% endif %}>
+    <a href="/portal/envios?tipo=internacional{{ con_paso }}{{ con_periodo }}" class="btn btn-sm {% if tipo_filtro == 'internacional' %}btn-primary{% else %}btn-ghost{% endif %}"{% if tipo_filtro == 'internacional' %} aria-current="page"{% endif %}>
         <span aria-hidden="true">🌐</span> Internacionales <b>{{ total_internacionales }}</b>
     </a>
 </nav>
 
 {% if total_sin_clasificar %}
 <div class="msg warn scope-unclassified">
-    {{ total_sin_clasificar }} envío{{ 's' if total_sin_clasificar != 1 else '' }} histórico{{ 's' if total_sin_clasificar != 1 else '' }} necesita{{ 'n' if total_sin_clasificar != 1 else '' }} revisión de ámbito. No lo{{ 's' if total_sin_clasificar != 1 else '' }} mezclamos hasta clasificarlo{{ 's' if total_sin_clasificar != 1 else '' }}.
+    {{ total_sin_clasificar }} envío{{ 's' if total_sin_clasificar != 1 else '' }} histórico{{ 's' if total_sin_clasificar != 1 else '' }} necesita{{ 'n' if total_sin_clasificar != 1 else '' }} revisión de ámbito.{% if tipo_filtro %} No lo{{ 's' if total_sin_clasificar != 1 else '' }} mezclamos hasta clasificarlo{{ 's' if total_sin_clasificar != 1 else '' }}.{% else %} Figura{{ 'n' if total_sin_clasificar != 1 else '' }} igualmente en el historial completo.{% endif %}
 </div>
 {% endif %}
 
-{% if total_sin_filtrar %}
+{% if tiene_historial %}
 <form method="GET" action="/portal/envios" class="envios-search" role="search">
-    <input type="hidden" name="tipo" value="{{ tipo_filtro }}">
-    {% if paso_filtro %}<input type="hidden" name="paso" value="{{ paso_filtro }}">{% endif %}
-    <input type="hidden" name="anio" value="{{ periodo.anio }}">
-    <input type="hidden" name="mes" value="{{ periodo.mes }}">
-    <input type="hidden" name="semana" value="{{ periodo.semana }}">
     <label for="envios-buscar">
         <strong>Buscar envío</strong>
         <span>Por código de tracking</span>
@@ -101,7 +106,7 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
                placeholder="Ej. 888244412640" autocomplete="off"
                autocapitalize="characters" spellcheck="false">
         {% if busqueda_filtro %}
-        <a href="/portal/envios?tipo={{ tipo_filtro }}{% if paso_filtro %}&paso={{ paso_filtro }}{% endif %}{{ con_periodo }}"
+        <a href="/portal/envios"
            class="envios-search-clear" aria-label="Limpiar búsqueda">Limpiar</a>
         {% endif %}
         <button type="submit" class="btn btn-primary btn-sm">Buscar</button>
@@ -113,7 +118,7 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
 <div class="card">
     <div class="empty" style="padding:48px 20px;">
         <img src="/static/img/logo-mark-white.png" alt="" style="height:40px;width:auto;opacity:.85;">
-        <p style="color:var(--fg-2);font-size:15px;margin:14px 0 4px;font-weight:600;">Todavía no hiciste envíos {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}</p>
+        <p style="color:var(--fg-2);font-size:15px;margin:14px 0 4px;font-weight:600;">Todavía no hiciste envíos{% if tipo_filtro %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</p>
         <p style="font-size:13px;margin-bottom:18px;">Cuando crees el primero lo vas a ver acá, con tracking y guía.</p>
         <div class="home-empty-actions">
             <a href="/portal/envios/nuevo?ambito={{ tipo_filtro }}" class="btn btn-primary">Nuevo envío</a>
@@ -130,6 +135,7 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
    internacional para que los dos se puedan combinar. #}
 {% set solo_tipo = ("?tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 {% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
+{% if not busqueda_filtro %}
 <nav class="chips-embudo" aria-label="Filtrar por estado">
     <a href="/portal/envios{{ solo_tipo }}{{ con_busqueda }}{{ con_periodo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
         <b>{{ total_busqueda }}</b> Todos
@@ -143,6 +149,7 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
     </a>
     {% endfor %}
 </nav>
+{% endif %}
 
 <div class="card" style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:14px 18px;margin-bottom:14px;">
     <div style="min-width:180px;">
@@ -179,7 +186,7 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
     <div class="msg envios-empty-filter">
-        {% if busqueda_filtro %}No encontramos el tracking “{{ busqueda_filtro }}” con estos filtros.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
+        {% if busqueda_filtro %}No encontramos el tracking “{{ busqueda_filtro }}” en todo tu historial.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
         <a href="/portal/envios?tipo={{ tipo_filtro }}{{ con_periodo }}">Ver todo el período</a>
     </div>
 {% else %}
@@ -239,7 +246,7 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
                     </td>
                     <td data-label="Servicio y estado" class="envio-service-cell">
                         <span class="service-head">
-                            <span><strong>{{ (s.courier or '—')|upper }}</strong> · {{ 'Nacional' if tipo_filtro == 'nacional' else 'Internacional' }}</span>
+                            <span><strong>{{ (s.courier or '—')|upper }}</strong> · {% if s._ambito_portal == 'nacional' %}Nacional{% elif s._ambito_portal == 'internacional' %}Internacional{% else %}Sin clasificar{% endif %}</span>
                             <span class="badge {{ b[0] }}">{{ b[1] }}</span>
                         </span>
                         {% if s.tracking_estado == 'RETENIDO' and s.tracking_descripcion %}
@@ -304,7 +311,7 @@ document.querySelectorAll("#envios-periodo-form [data-periodo-envios]").forEach(
         </table>
     </div>
     <div class="envios-card-footer">
-        <p class="table-note">Cargos y facturas: <a href="/portal/cuenta?ambito={{ tipo_filtro }}">Ver cuenta {{ tipo_filtro }} →</a></p>
+        <p class="table-note">Cargos y facturas: <a href="/portal/cuenta{% if tipo_filtro %}?ambito={{ tipo_filtro }}{% endif %}">{% if tipo_filtro %}Ver cuenta {{ tipo_filtro }}{% else %}Ver cuenta corriente{% endif %} →</a></p>
         {% if total_paginas > 1 %}
         <nav class="envios-pagination" aria-label="Páginas de envíos">
             {% if pagina_actual > 1 %}

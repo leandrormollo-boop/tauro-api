@@ -79,29 +79,36 @@ def normalizar_periodo(
     *,
     hoy: date | None = None,
 ) -> dict:
-    """Normaliza query strings y elige el último mes con actividad por default."""
+    """Normaliza filtros opcionales; vacío significa todo el historial.
+
+    La jerarquía evita períodos ambiguos: primero año, después mes y recién
+    entonces semana. Por eso un mes sin año o una semana sin mes se ignoran.
+    """
     hoy = hoy or date.today()
     disponibles = _periodos_validos(periodos_disponibles)
-    ultimo = disponibles[0] if disponibles else (hoy.year, hoy.month)
-
-    anio_valor = _entero(anio, ultimo[0])
+    anio_valor = _entero(anio, 0)
     if not 2000 <= anio_valor <= 2100:
-        anio_valor = ultimo[0]
+        anio_valor = 0
 
-    meses_del_anio = [m for a, m in disponibles if a == anio_valor]
-    mes_default = meses_del_anio[0] if meses_del_anio else (
-        hoy.month if anio_valor == hoy.year else 1
-    )
-    mes_valor = _entero(mes, mes_default)
+    mes_valor = _entero(mes, 0) if anio_valor else 0
     if not 1 <= mes_valor <= 12:
-        mes_valor = mes_default
+        mes_valor = 0
 
-    semana_valor = _entero(semana, 0)
-    if semana_valor not in {0, 1, 2, 3, 4}:
+    semana_valor = _entero(semana, 0) if mes_valor else 0
+    if semana_valor not in {1, 2, 3, 4}:
         semana_valor = 0
 
-    desde, hasta = rango_periodo(anio_valor, mes_valor, semana_valor)
-    if semana_valor:
+    if not anio_valor:
+        desde = hasta = None
+        etiqueta = "Todo el historial"
+    elif not mes_valor:
+        desde = date(anio_valor, 1, 1)
+        hasta = date(anio_valor + 1, 1, 1)
+        etiqueta = f"Año {anio_valor}"
+    else:
+        desde, hasta = rango_periodo(anio_valor, mes_valor, semana_valor)
+
+    if anio_valor and mes_valor and semana_valor:
         ultimo_dia = hasta.day - 1 if hasta.month == mes_valor else calendar.monthrange(
             anio_valor, mes_valor
         )[1]
@@ -109,7 +116,7 @@ def normalizar_periodo(
             f"{desde.day}–{ultimo_dia} de "
             f"{_NOMBRE_MES[mes_valor].lower()} de {anio_valor}"
         )
-    else:
+    elif anio_valor and mes_valor:
         etiqueta = f"{_NOMBRE_MES[mes_valor]} {anio_valor}"
 
     anios = sorted(
@@ -125,5 +132,6 @@ def normalizar_periodo(
         "anios": anios,
         "meses": MESES,
         "semanas": SEMANAS,
+        "activo": bool(anio_valor),
         "tiene_actividad_historica": bool(disponibles),
     }

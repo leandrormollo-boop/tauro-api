@@ -180,7 +180,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert 'class="track-link mono"' in html
     # Los links de tipo y de paso no incluyen `pagina`: cambiar un filtro
     # siempre vuelve a la primera hoja.
-    assert '/portal/envios?tipo=internacional{{ con_paso }}{{ con_busqueda }}{{ con_periodo }}' in html
+    assert '/portal/envios?tipo=internacional{{ con_paso }}{{ con_periodo }}' in html
     assert '/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_busqueda }}{{ con_periodo }}' in html
 
 
@@ -188,9 +188,10 @@ def test_endpoint_real_usa_el_contrato_paginado_de_historial():
     endpoint = (RAIZ / "endpoints" / "portal_cliente.py").read_text(encoding="utf-8")
 
     assert "buscar: str = \"\"" in endpoint
-    assert "buscar=buscar" in endpoint
+    assert "buscar=busqueda_global" in endpoint
     assert 'pagina: str = "1"' in endpoint
-    assert 'tipo = _ambito_portal(tipo) or "internacional"' in endpoint
+    assert 'tipo = _ambito_portal(tipo)' in endpoint
+    assert 'tipo, paso, anio, mes, semana = "", "", "", "", ""' in endpoint
     assert "periodos_solicitudes_cliente(cliente)" in endpoint
     assert 'desde=periodo["desde"]' in endpoint
     assert 'hasta=periodo["hasta"]' in endpoint

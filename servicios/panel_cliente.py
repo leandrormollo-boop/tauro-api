@@ -143,6 +143,8 @@ def preparar_historial_envios(
     from servicios.couriers_urls import ambito_envio
 
     historial = list(solicitudes or [])
+    for solicitud in historial:
+        solicitud["_ambito_portal"] = ambito_envio(solicitud)
     tiene_historial = bool(historial)
 
     tipo = (tipo or "").strip().lower()
@@ -151,9 +153,11 @@ def preparar_historial_envios(
 
     por_tipo = historial
     if tipo == "nacional":
-        por_tipo = [s for s in historial if ambito_envio(s) == "nacional"]
+        por_tipo = [s for s in historial if s["_ambito_portal"] == "nacional"]
     elif tipo == "internacional":
-        por_tipo = [s for s in historial if ambito_envio(s) == "internacional"]
+        por_tipo = [
+            s for s in historial if s["_ambito_portal"] == "internacional"
+        ]
 
     vigentes_periodo = [
         s for s in por_tipo
@@ -239,9 +243,15 @@ def preparar_historial_envios(
         "pagina_hasta": fin,
         "tiene_historial": tiene_historial,
         "resumen_periodo": resumen_periodo,
-        "total_nacionales": sum(ambito_envio(s) == "nacional" for s in historial),
-        "total_internacionales": sum(ambito_envio(s) == "internacional" for s in historial),
-        "total_sin_clasificar": sum(ambito_envio(s) == "sin_clasificar" for s in historial),
+        "total_nacionales": sum(
+            s["_ambito_portal"] == "nacional" for s in historial
+        ),
+        "total_internacionales": sum(
+            s["_ambito_portal"] == "internacional" for s in historial
+        ),
+        "total_sin_clasificar": sum(
+            s["_ambito_portal"] == "sin_clasificar" for s in historial
+        ),
     }
 
 

@@ -277,7 +277,8 @@ def test_envios_distingue_precio_inicial_diferencias_y_cuenta_corriente():
     assert "total final en esta página" in html
     assert "Cargos y facturas:" in html
     assert "No suma guías canceladas o reemplazadas" in html
-    assert "/portal/cuenta?ambito={{ tipo_filtro }}" in html
+    assert "?ambito={{ tipo_filtro }}{% endif %}" in html
+    assert "Ver cuenta corriente" in html
     assert "Tu costo" not in html
 
 

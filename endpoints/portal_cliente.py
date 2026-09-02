@@ -1709,10 +1709,13 @@ def envios_view(
 ):
     # Esta es la vista de historial, no un preview: no ocultar silenciosamente
     # los envíos anteriores al límite por defecto del servicio.
-    # Ya no hay una pantalla intermedia: el historial abre separado y las dos
-    # pestañas quedan siempre visibles. Internacional conserva el flujo que el
-    # portal tenía antes de incorporar operadores nacionales.
-    tipo = _ambito_portal(tipo) or "internacional"
+    # Sin query se muestra el historial completo. El buscador es global: no
+    # hereda ámbito, estado ni período de la pantalla desde la que se ejecutó.
+    busqueda_global = str(buscar or "").strip()[:80]
+    if busqueda_global:
+        tipo, paso, anio, mes, semana = "", "", "", "", ""
+    else:
+        tipo = _ambito_portal(tipo)
     periodos_disponibles = periodos_solicitudes_cliente(cliente)
     periodo = normalizar_periodo(
         anio, mes, semana, periodos_disponibles,
@@ -1728,7 +1731,7 @@ def envios_view(
         tipo=tipo,
         paso=paso,
         pagina=pagina,
-        buscar=buscar,
+        buscar=busqueda_global,
     )
     # El período puede no tener filas aunque el cliente sí tenga historia. La
     # pantalla debe decir "sin envíos en agosto", no "nunca hiciste envíos".
@@ -1745,17 +1748,21 @@ def envios_view(
             )
         )
 
+    periodo_parametros = {}
+    if periodo["anio"]:
+        periodo_parametros["anio"] = periodo["anio"]
+    if periodo["mes"]:
+        periodo_parametros["mes"] = periodo["mes"]
+    if periodo["semana"]:
+        periodo_parametros["semana"] = periodo["semana"]
+
     return templates.TemplateResponse(
         request=request, name="portal/envios.html",
         context={
             "cliente": cliente,
             **vista,
             "periodo": periodo,
-            "periodo_query": urlencode({
-                "anio": periodo["anio"],
-                "mes": periodo["mes"],
-                "semana": periodo["semana"],
-            }),
+            "periodo_query": urlencode(periodo_parametros),
             "puede_emitir": puede_emitir,
             "flash_ok": (
                 ("Solicitud creada. Podés emitir la guía vos mismo desde el botón "
