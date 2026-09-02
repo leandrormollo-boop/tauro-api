@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS productos (
     ancho_cm         REAL NOT NULL,
     alto_cm          REAL NOT NULL,
     peso_kg          REAL NOT NULL,
-    valor_usd_default REAL NOT NULL DEFAULT 0,
+    valor_usd_default NUMERIC(14,2) NOT NULL DEFAULT 0,
     imagen_url       TEXT,                            -- imagen de la tienda/CDN
     plataforma       TEXT,                            -- shopify / tiendanube / manual
     tienda_dominio   TEXT,

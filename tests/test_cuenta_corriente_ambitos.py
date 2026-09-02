@@ -27,7 +27,7 @@ def test_schema_aplicaciones_es_explicito_concurrente_y_sin_backfill():
     assert "INSERT INTO pagos_aplicaciones SELECT" not in schema
 
 
-def test_migracion_decimal_incluye_tope_deuda_y_markup_nacional():
+def test_migracion_decimal_incluye_todo_dinero_y_schema_nuevo_es_decimal():
     schema = (RAIZ / "sql" / "schema.sql").read_text(encoding="utf-8")
     migracion = (RAIZ / "scripts" / "migrar_dinero_numeric.sql").read_text(
         encoding="utf-8"
@@ -43,10 +43,24 @@ def test_migracion_decimal_incluye_tope_deuda_y_markup_nacional():
     assert "tope_deuda_ars NUMERIC(14,2)" in schema
     assert "['clientes','markup_nac_valor','14,4']" in migracion
     assert "['clientes','tope_deuda_ars','14,2']" in migracion
+    assert "valor_usd_default NUMERIC(14,2)" in schema
+    assert "['productos','valor_usd_default','14,2']" in migracion
     assert "('clientes', 'markup_nac_valor')" in preflight
     assert "('clientes', 'tope_deuda_ars')" in preflight
     assert "('clientes', 'markup_nac_valor', 14, 4)" in postflight
     assert "('clientes', 'tope_deuda_ars', 14, 2)" in postflight
+
+
+def test_menu_admin_oculta_migracion_sin_eliminar_sus_rutas():
+    menu = (RAIZ / "templates" / "admin" / "base_admin.html").read_text(
+        encoding="utf-8"
+    )
+    endpoints = (RAIZ / "endpoints" / "admin.py").read_text(encoding="utf-8")
+
+    assert 'href="/admin/migracion"' not in menu
+    assert '@router.get("/migracion"' in endpoints
+    assert '@router.post("/migracion/run")' in endpoints
+    assert '@router.post("/migracion/numeric")' in endpoints
 
 
 def test_schema_idempotencia_y_fc_unica_global_normalizada_con_preflight():
