@@ -6,7 +6,7 @@ Duración objetivo: 10–15 minutos, grabado en español y sin secretos visibles
    Tiendanube.
 2. Aceptar únicamente los permisos mínimos declarados en la ficha.
 3. Completar el alta de un merchant nuevo en TAURO.
-4. Mostrar que el medio **TAURO Nacional** quedó disponible y configurable.
+4. Mostrar que el medio **TAURO Solutions Ar** quedó disponible y configurable.
 5. Repetir con una cuenta TAURO existente y demostrar login/vinculación.
 6. Cotizar un carrito AR→AR con peso y medidas válidas.
 7. Cotizar un carrito mixto con un producto de envío gratis.

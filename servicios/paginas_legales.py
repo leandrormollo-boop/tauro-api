@@ -177,7 +177,7 @@ Buenos Aires.</p>
 
 
 _AYUDA_TIENDANUBE = """
-<p>Esta guía explica qué necesita <b>TAURO Nacional</b> para mostrar una
+<p>Esta guía explica qué necesita <b>TAURO Solutions Ar</b> para mostrar una
 cotización de entrega a domicilio en el checkout de Tiendanube. La opción se
 muestra únicamente cuando la integración está activa y existe una tarifa real
 para el envío.</p>
@@ -256,6 +256,6 @@ def pagina_terminos() -> str:
 
 
 def pagina_ayuda_tiendanube() -> str:
-    return _LAYOUT.format(titulo="Ayuda de TAURO Nacional para Tiendanube",
+    return _LAYOUT.format(titulo="Ayuda de TAURO Solutions Ar para Tiendanube",
                           fecha="septiembre de 2026",
                           cuerpo=_AYUDA_TIENDANUBE, contacto=CONTACTO)

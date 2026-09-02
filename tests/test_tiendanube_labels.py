@@ -574,7 +574,7 @@ def test_reconcilia_carrier_remoto_tras_fallo_db_sin_duplicar(monkeypatch):
         if method == "GET" and path == "shipping_carriers":
             return _Response(200, [{
                 "id": 77,
-                "name": "TAURO Nacional",
+                "name": "TAURO Solutions Ar",
                 "active": True,
                 "callback_url": (
                     "https://api.tauro.test/integraciones/tiendanube/"

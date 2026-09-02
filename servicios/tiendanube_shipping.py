@@ -1,4 +1,4 @@
-"""Borde de Shipping Carrier para TAURO Nacional en Tiendanube.
+"""Borde de Shipping Carrier para TAURO Solutions Ar en Tiendanube.
 
 El callback traduce el contrato de Tiendanube al ``CarrierAdapter`` neutral de
 TAURO. Nunca inventa tarifas: si no hay un adapter nacional registrado y
@@ -34,7 +34,7 @@ from servicios.carrier_contract import Ambito, Capacidad
 
 
 RATE_CODE = "tauro_nacional_domicilio"
-RATE_NAME = "TAURO Nacional · Entrega a domicilio"
+RATE_NAME = "TAURO Solutions Ar · Entrega a domicilio"
 _TRUE = {"1", "true", "yes", "si", "sí", "on"}
 _ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 _CALLBACK_DEADLINE_SECONDS = 4.0
@@ -294,7 +294,7 @@ def _reconciliar_shipping_remoto(
 
     matches: list[dict] = []
     for carrier in carriers:
-        if not isinstance(carrier, Mapping) or carrier.get("name") != "TAURO Nacional":
+        if not isinstance(carrier, Mapping) or carrier.get("name") != "TAURO Solutions Ar":
             continue
         rate_token = _callback_token_from_url(
             carrier.get("callback_url"), base, "rates"
@@ -595,7 +595,7 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
         f"{base}/integraciones/tiendanube/shipping/rates/{token_callback}"
     )
     carrier_payload: dict[str, object] = {
-        "name": "TAURO Nacional",
+        "name": "TAURO Solutions Ar",
         "callback_url": callback_url,
         "types": "ship",
     }
@@ -735,7 +735,7 @@ def _address(raw: Mapping, field: str) -> dict:
     postal_code = "".join(ch for ch in str(raw.get("postal_code") or "") if ch.isdigit())
     if country != "AR" or len(postal_code) != 4:
         raise ShippingContractError(
-            "TAURO Nacional requiere origen y destino AR con código postal de 4 dígitos."
+            "TAURO Solutions Ar requiere origen y destino AR con código postal de 4 dígitos."
         )
     return {
         "pais": "AR",
@@ -841,7 +841,7 @@ def _quote_request(payload: Mapping, customer_id: str, *, paid_only=False) -> Qu
         raise ShippingContractError("El carrito no contiene productos.")
     currency = str(payload.get("currency") or "").strip().upper()
     if currency != "ARS":
-        raise ShippingContractError("TAURO Nacional cotiza únicamente en ARS.")
+        raise ShippingContractError("TAURO Solutions Ar cotiza únicamente en ARS.")
     return QuoteRequest(
         request_id=_request_id(payload, "paid" if paid_only else "full"),
         customer_id=str(customer_id),

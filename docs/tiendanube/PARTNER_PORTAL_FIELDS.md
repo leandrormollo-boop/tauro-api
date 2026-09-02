@@ -1,6 +1,6 @@
 # Configuración del Portal de Partners
 
-Valores candidatos para **TAURO Nacional**. Los secretos no se copian a este
+Valores candidatos para **TAURO Solutions Ar**. Los secretos no se copian a este
 archivo ni a tickets de homologación.
 
 ## Aplicación
@@ -11,7 +11,7 @@ archivo ni a tickets de homologación.
 - Tipo de entrega: `ship`.
 - Envío internacional: no.
 - Multi-CD: no en la primera versión.
-- Handle candidato: `tauro-nacional` (confirmar disponibilidad en el portal).
+- Handle: `tauro-solutions-ar`.
 
 ## URLs
 
@@ -39,7 +39,7 @@ solicitar Products ni Locations mientras el producto no use esos endpoints.
 
 ## Admin links
 
-Crear dos links con el texto **TAURO Nacional - Gestionar envíos**:
+Crear dos links con el texto **TAURO Solutions Ar - Gestionar envíos**:
 
 1. Detalle de pedido.
 2. Acción masiva en el listado de pedidos.

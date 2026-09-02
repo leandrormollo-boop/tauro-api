@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_pagina_ayuda_tiendanube_explica_requisitos_y_falla_cerrada():
     html = " ".join(pagina_ayuda_tiendanube().split())
 
-    assert "TAURO Nacional" in html
+    assert "TAURO Solutions Ar" in html
     assert "Argentina" in html
     assert "código postal de cuatro dígitos" in html
     assert "peso mayor a cero" in html

@@ -485,7 +485,7 @@ def servir_terminos():
 
 @app.get("/ayuda/tiendanube", include_in_schema=False)
 def servir_ayuda_tiendanube():
-    """Requisitos y diagnóstico público del medio TAURO Nacional."""
+    """Requisitos y diagnóstico público del medio TAURO Solutions Ar."""
     from servicios.paginas_legales import pagina_ayuda_tiendanube
     return HTMLResponse(pagina_ayuda_tiendanube())
 

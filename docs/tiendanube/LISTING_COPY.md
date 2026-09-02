@@ -5,7 +5,7 @@ cerrar emisión/etiqueta/cancelación/tracking OCA con evidencia de UAT.
 
 ## Identidad
 
-- Nombre: **TAURO Nacional**
+- Nombre: **TAURO Solutions Ar**
 - Categoría: **Envíos / Shipping**
 - País inicial: **Argentina**
 - Soporte: **cotizaciones@taurosolutions.ar**
@@ -21,11 +21,11 @@ Cotizá envíos nacionales y gestioná pedidos desde TAURO.
 
 ### Envíos nacionales desde un solo portal
 
-TAURO Nacional conecta tu tienda con la operación logística de TAURO para que
+TAURO Solutions Ar conecta tu tienda con la operación logística de TAURO para que
 tus compradores vean una opción de entrega a domicilio en el checkout y vos
 puedas administrar los pedidos desde un único portal.
 
-### ¿Qué es TAURO Nacional?
+### ¿Qué es TAURO Solutions Ar?
 
 Es la aplicación de TAURO Solutions para integrar cotizaciones y pedidos de
 Tiendanube con una operación logística nacional en Argentina.
@@ -34,7 +34,7 @@ Tiendanube con una operación logística nacional en Argentina.
 
 - Calcula el envío según origen, destino, peso, medidas y valor declarado.
 - Muestra el precio final y la fecha estimada antes de finalizar la compra.
-- Importa únicamente pedidos que eligieron la opción TAURO Nacional.
+- Importa únicamente pedidos que eligieron la opción TAURO Solutions Ar.
 - Deja cada solicitud pendiente de revisión antes de emitir un envío.
 - Sincroniza el despacho y el tracking con Fulfillment Orders cuando la guía
   fue realmente emitida.
@@ -62,7 +62,7 @@ TAURO apruebe estructura, impuestos y condiciones para comercios Tiendanube.
 
 ## Instalación
 
-1. Instalá TAURO Nacional desde Tiendanube.
+1. Instalá TAURO Solutions Ar desde Tiendanube.
 2. Aceptá los permisos solicitados.
 3. Creá o vinculá tu cuenta TAURO.
 4. Activá el medio de envío desde el panel de Tiendanube.

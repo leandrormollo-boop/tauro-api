@@ -1,4 +1,4 @@
-# FAQ de homologación Shipping · TAURO Nacional
+# FAQ de homologación Shipping · TAURO Solutions Ar
 
 Documento candidato basado en la plantilla oficial de métodos de envío. Los
 campos `[DEFINIR]` deben aprobarse antes de compartirlo con Tiendanube.
@@ -7,7 +7,7 @@ campos `[DEFINIR]` deben aprobarse antes de compartirlo con Tiendanube.
 
 ### 1.1. ¿Qué método logístico utiliza y para qué sirve?
 
-TAURO Nacional integra Tiendanube con la operación nacional de TAURO
+TAURO Solutions Ar integra Tiendanube con la operación nacional de TAURO
 Solutions. Cotiza entregas a domicilio en Argentina, importa los pedidos que
 eligieron esa opción y centraliza su gestión operativa.
 
@@ -69,7 +69,7 @@ Panel y preferencias: `https://taurosolutions.ar/portal/tienda`.
 - SLA/OTD, pérdidas y extravíos: `[CONFIRMAR CONTRATO OCA]`.
 - Alcance de origen y destino: Argentina, entrega domicilio→domicilio en la
   primera versión; cobertura validada en cada cotización.
-- El comprador elige TAURO Nacional en checkout.
+- El comprador elige TAURO Solutions Ar en checkout.
 - Tiendanube notifica el pedido mediante webhook y TAURO importa solamente los
   Fulfillment Orders de su carrier.
 - Recibir una venta no emite una guía automáticamente.

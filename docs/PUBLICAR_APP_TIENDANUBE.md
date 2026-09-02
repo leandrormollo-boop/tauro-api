@@ -1,4 +1,4 @@
-# TAURO Nacional en Tiendanube
+# TAURO Solutions Ar en Tiendanube
 
 Estado de trabajo actualizado: 01/09/2026.
 
@@ -14,7 +14,7 @@ la homologación síncrona de Tiendanube.
 - Ingreso del pedido al portal TAURO sin emitir una guía automáticamente.
 - Contrato de Fulfillment Orders preparado para actualizar tracking; la
   ejecución OCA permanece bloqueada hasta UAT.
-- Callback de tarifas `TAURO Nacional` protegido por token por tienda.
+- Callback de tarifas `TAURO Solutions Ar` protegido por token por tienda.
 - Contrato fail-closed: sin adapter nacional operativo no se publica tarifa.
 - Soporte de carrito mixto con `price` y `price_merchant` separados.
 - Extensión NubeSDK aislada, sin DOM, en `tiendanube_nube_app/`.
@@ -26,7 +26,7 @@ la homologación síncrona de Tiendanube.
 
 ## Bloqueadores externos y comerciales
 
-1. Crear o confirmar la app **TAURO Nacional** en Partners, categoría Shipping.
+1. Crear o confirmar la app **TAURO Solutions Ar** en Partners, categoría Shipping.
 2. Confirmar con Partners los scopes mínimos candidatos: `write_shipping`,
    `read_orders`, `write_fulfillment_orders` y `read_customers`.
 3. Pedir al Platform Team de Tiendanube acceso a Shipping API para la cuenta y

@@ -6,7 +6,7 @@ import {
   TAURO_NACIONAL_CODE,
 } from "../src/main";
 
-describe("TAURO Nacional NubeSDK", () => {
+describe("TAURO Solutions Ar NubeSDK", () => {
   it("etiqueta solamente la opcion perteneciente a TAURO", () => {
     const labels = buildTauroLabels([
       { id: "tauro-1", code: TAURO_NACIONAL_CODE },
@@ -15,7 +15,7 @@ describe("TAURO Nacional NubeSDK", () => {
 
     expect(labels).toEqual({
       "tauro-1": {
-        title: "TAURO Nacional",
+        title: "TAURO Solutions Ar",
         description: "Entrega a domicilio con seguimiento de punta a punta.",
       },
     });
