@@ -90,7 +90,7 @@ def test_endpoint_portal_aplica_el_rango_al_cliente_autenticado(monkeypatch):
     monkeypatch.setattr(
         portal,
         "preparar_historial_envios",
-        lambda *_args: {
+        lambda *_args, **_kwargs: {
             "solicitudes": [], "tipo_filtro": "internacional",
             "paso_filtro": "", "chips": [], "total_sin_filtrar": 0,
             "total_resultados": 0, "pagina_actual": 1, "total_paginas": 1,
@@ -142,3 +142,5 @@ def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
     inicio = solicitudes.index("def periodos_solicitudes_cliente")
     fin = solicitudes.index("def listar_envios_api", inicio)
     assert "label_pdf" not in solicitudes[inicio:fin]
+    assert "s.estado <> 'CANCELADO'" in solicitudes[inicio:fin]
+    assert "cargo_cancelado.estado='CANCELADO'" in solicitudes[inicio:fin]

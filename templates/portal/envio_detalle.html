@@ -3,6 +3,9 @@
 {% set courier_nombre = (s.courier or "FedEx")|upper|title if (s.courier or "FEDEX")|upper != "FEDEX" else "FedEx" %}
 {% set ambito = ambito_envio(s) %}
 {% block title %}Envío #{{ s.id }}{% endblock %}
+{% macro dinero_ars(valor) -%}
+$ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }} ARS
+{%- endmacro %}
 
 {% block content %}
 {% set estados_orden = ["SOLICITADO", "EN_PROCESO", "GUIA_LISTA", "DESPACHADO"] %}
@@ -246,17 +249,23 @@
         </div>
         <div class="mini-row">
             <span>Precio inicial aceptado</span>
-            <strong>$ {{ "{:,.0f}".format(s.precio_inicial_cliente_ars or s.precio_tauro_ars or 0).replace(",", ".") }} ARS</strong>
+            <strong>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
-        {% if s.diferencia_cliente_ars %}
-        <div class="mini-row">
-            <span>Diferencia por facturación final</span>
-            <strong style="color:var(--warn);">{{ "+" if s.diferencia_cliente_ars > 0 else "−" }} $ {{ "{:,.0f}".format(s.diferencia_cliente_ars|abs).replace(",", ".") }} ARS</strong>
+        {% if s.diferencia_flete_ars %}
+        <div class="mini-row envio-account-extra diferencia">
+            <span><b>Diferencia</b><small>Costo adicional de flete</small></span>
+            <strong>{{ "+" if s.diferencia_flete_ars > 0 else "−" }} {{ dinero_ars(s.diferencia_flete_ars|abs) }}</strong>
         </div>
         {% endif %}
-        <div class="mini-row">
+        {% if s.tax_cliente_ars %}
+        <div class="mini-row envio-account-extra tax">
+            <span><b>TAX</b><small>Impuesto adicional del envío</small></span>
+            <strong>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</strong>
+        </div>
+        {% endif %}
+        <div class="mini-row envio-account-total">
             <span>Precio final del envío</span>
-            <strong>$ {{ "{:,.0f}".format(s.precio_final_cliente_ars or s.precio_tauro_ars or 0).replace(",", ".") }} ARS</strong>
+            <strong>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
         {% if s.peso_final_facturado_kg is not none %}
         <hr class="divider">

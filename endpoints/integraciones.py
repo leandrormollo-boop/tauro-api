@@ -307,7 +307,8 @@ def tiendanube_callback(request: Request, code: str = "", state: str = ""):
 
     from servicios.tiendanube_app import (
         app_configurada, canjear_token, guardar_instalacion,
-        registrar_webhooks, datos_tienda, vincular_cliente,
+        registrar_webhooks, confirmar_webhooks, datos_tienda,
+        validar_oauth_cookie, vincular_cliente, TiendanubeWebhookError,
     )
 
     def _pag(titulo: str, texto: str, boton: str = "", status: int = 200):
@@ -349,8 +350,33 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
         n = info.get("name")
         nombre = (n.get("es") or n.get("pt") or "") if isinstance(n, dict) else str(n or "")
 
-    guardar_instalacion(store_id, token, nombre)
-    eventos = registrar_webhooks(store_id, token)
+    claim_cookie = guardar_instalacion(store_id, token, nombre)
+    try:
+        eventos = registrar_webhooks(store_id, token)
+        from servicios.tiendanube_shipping import registrar_shipping_carrier
+        shipping = registrar_shipping_carrier(store_id, token)
+        if not shipping.get("ready"):
+            raise TiendanubeWebhookError(
+                "El medio de envío nacional todavía no quedó operativo."
+            )
+        if not confirmar_webhooks(store_id, eventos):
+            raise TiendanubeWebhookError("No se pudo habilitar la instalación.")
+    except Exception as exc:
+        print(f"[tiendanube] instalación pendiente: {type(exc).__name__}")
+        resp = _pag(
+            "Instalación pendiente",
+            "La autorización quedó guardada, pero no pudimos verificar todas "
+            "las notificaciones obligatorias. No vamos a declarar la tienda "
+            "operativa hasta completar esa verificación.",
+            '<a href="https://taurosolutions.ar/portal/tienda">Continuar en TAURO</a>',
+            status=502,
+        )
+        if claim_cookie:
+            resp.set_cookie(
+                key="tn_claim", value=claim_cookie, httponly=True,
+                max_age=86400, samesite="lax", secure=True,
+            )
+        return resp
 
     # Vinculación anti-CSRF: sólo se ata la tienda a una cuenta si el navegador
     # trae la cookie `tn_oauth` que sembró el botón del portal (state:cliente).
@@ -360,27 +386,32 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
     dueno = None
     try:
         cookie = request.cookies.get("tn_oauth") or ""
-        if cookie and ":" in cookie:
-            state_cookie, cliente_cookie = cookie.split(":", 1)
-            if state_cookie and (not state or state == state_cookie):
-                dueno = cliente_cookie
-                vincular_cliente(store_id, dueno)
+        cliente_cookie = validar_oauth_cookie(cookie, state)
+        if cliente_cookie:
+            dueno = cliente_cookie
+            vincular_cliente(store_id, dueno)
     except Exception as e:
         print(f"[tiendanube] no pude vincular la tienda: {type(e).__name__}")
 
     print(f"[tiendanube] instalación procesada · {len(eventos)} webhook(s) · "
           f"{'con claim' if dueno else 'ownerless'}")
 
-    if dueno:
+    ya_vinculada = bool(dueno or not claim_cookie)
+    if ya_vinculada:
         texto = ("Listo: desde ahora cada venta con envío aparece en tu portal "
                  "lista para generar la guía con un click.")
     else:
-        texto = ("Tu tienda quedó conectada. Entrá al portal, sección "
-                 "<b>Mi tienda</b>, e instalá desde el botón de Tiendanube para "
-                 "atarla a tu cuenta y empezar a recibir tus ventas.")
+        texto = ("Tu tienda quedó instalada. Iniciá sesión o creá tu cuenta "
+                 "TAURO en este mismo navegador: la vincularemos de forma "
+                 "segura, sin pedirte que reinstales la app.")
     resp = _pag("¡Tienda conectada!", texto,
                 '<a href="https://taurosolutions.ar/portal/tienda">Ver mis pedidos</a>')
     resp.delete_cookie("tn_oauth")   # de un solo uso
+    if claim_cookie and not dueno:
+        resp.set_cookie(
+            key="tn_claim", value=claim_cookie, httponly=True,
+            max_age=86400, samesite="lax", secure=True,
+        )
     return resp
 
 
@@ -396,17 +427,16 @@ async def tiendanube_webhook(request: Request):
     import json as _json
     import os as _os
 
-    from servicios.integraciones_tienda import (
-        verificar_hmac_tiendanube, guardar_pedido, cancelar_pedido_externo,
-    )
+    from servicios.integraciones_tienda import verificar_hmac_tiendanube
     from servicios.tiendanube_app import (
-        app_configurada, instalacion, parsear_pedido, _api, desinstalar,
+        app_configurada, encolar_webhook, lanzar_procesamiento_eventos,
+        webhook_evento_id, EVENTOS_ACEPTADOS,
     )
 
     cuerpo = await request.body()
     if not app_configurada():
         print("[tiendanube] webhook recibido pero la app no está configurada")
-        return {"ok": True, "estado": "app_no_configurada"}
+        return JSONResponse({"ok": False}, status_code=503)
 
     secreto = _os.getenv("TIENDANUBE_CLIENT_SECRET", "")
     firma = request.headers.get("x-linkedstore-hmac-sha256", "")
@@ -419,52 +449,21 @@ async def tiendanube_webhook(request: Request):
     except Exception:
         return JSONResponse({"ok": False, "error": "JSON inválido"}, status_code=400)
 
-    store_id = str(datos.get("store_id") or "")
-    evento = datos.get("event") or ""
-    pedido_id = str(datos.get("id") or "")
+    if not isinstance(datos, dict):
+        return JSONResponse({"ok": False}, status_code=400)
+    store_id = str(datos.get("store_id") or "").strip()
+    evento = str(datos.get("event") or "").strip().lower()
+    if not store_id or evento not in EVENTOS_ACEPTADOS:
+        return JSONResponse({"ok": False}, status_code=400)
 
-    if evento == "app/uninstalled":
-        desinstalar(store_id)
-        print("[tiendanube] app/uninstalled procesado")
-        return {"ok": True}
-
-    inst = instalacion(store_id)
-    if not inst or not inst.get("cliente_id"):
-        print("[tiendanube] evento ownerless")
-        return {"ok": True, "estado": "sin_vincular"}
-
-    # El webhook sólo trae el id: el pedido completo se pide a la API.
-    r = _api(store_id, inst["access_token"], "GET", f"orders/{pedido_id}")
-    if r is None or r.status_code != 200:
-        print("[tiendanube] no pude leer el pedido")
-        return {"ok": True, "estado": "pedido_no_leido"}
-
-    pedido = parsear_pedido(r.json())
-    if not pedido:
-        print("[tiendanube] pedido sin dirección de envío, ignorado")
-        return {"ok": True, "ignorado": "sin_direccion_envio"}
-
-    from servicios.integraciones_tienda import tienda_por_dominio
-    tienda = tienda_por_dominio(f"{store_id}.tiendanube")
-    if not tienda:
-        return {"ok": True, "estado": "tienda_no_registrada"}
-
-    if evento == "order/cancelled" or pedido.get("cancelado"):
-        cancelar_pedido_externo(tienda["id"], pedido["pedido_externo_id"])
-        print("[tiendanube] pedido cancelado → fuera de pendientes")
-        return {"ok": True, "cancelado": True}
-
-    creado = guardar_pedido(inst["cliente_id"], tienda["id"], "tiendanube", pedido)
-    print(f"[tiendanube] pedido {'guardado' if creado else 'actualizado'}")
-
-    if creado:
-        try:
-            from servicios.integraciones_tienda import id_de_pedido
-            from servicios.solicitud_automatica import intentar_en_segundo_plano
-            pid = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
-            if pid:
-                intentar_en_segundo_plano(pid)
-        except Exception as e:
-            print(f"[tiendanube] armado automático no iniciado: {type(e).__name__}")
-
-    return {"ok": True, "nuevo": creado}
+    entrega_id = request.headers.get("x-linkedstore-event-id", "")
+    evento_id = webhook_evento_id(datos, cuerpo, entrega_id)
+    try:
+        nuevo = encolar_webhook(evento_id, datos)
+    except Exception as exc:
+        # Sin commit durable, un 2xx perdería el evento. Tiendanube reintentará.
+        print(f"[tiendanube] no pude persistir webhook: {type(exc).__name__}")
+        return JSONResponse({"ok": False}, status_code=503)
+    if nuevo:
+        lanzar_procesamiento_eventos()
+    return {"ok": True, "encolado": nuevo, "duplicado": not nuevo}

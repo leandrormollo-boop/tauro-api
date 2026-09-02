@@ -20,6 +20,7 @@ estructuras vacías y la página sale igual, sin el bloque.
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+import re
 
 from core.database import get_conn
 
@@ -119,19 +120,25 @@ def _paginas_visibles(actual: int, total: int) -> list[int | None]:
     return visibles
 
 
+def _normalizar_busqueda_tracking(valor) -> str:
+    """Compara códigos pegados aunque vengan con espacios o guiones."""
+    return re.sub(r"[^A-Z0-9]", "", str(valor or "").upper())
+
+
 def preparar_historial_envios(
     solicitudes,
     tipo: str = "",
     paso: str = "",
     pagina=1,
     por_pagina: int = ENVIOS_POR_PAGINA,
+    buscar: str = "",
 ) -> dict:
     """Filtra y pagina el historial del cliente con una única regla de UI.
 
     ``solicitudes`` ya debe venir aislado por cliente. El filtro de tipo se
-    aplica antes de contar los pasos; el filtro de paso se aplica antes de
-    paginar. Así los números, las filas y las páginas siempre describen el
-    mismo conjunto.
+    aplica antes de contar los pasos; la búsqueda por tracking y el filtro de
+    paso se aplican antes de paginar. Así un código se encuentra aunque el
+    envío esté en una página posterior del historial.
     """
     from servicios.couriers_urls import ambito_envio
 
@@ -172,8 +179,26 @@ def preparar_historial_envios(
     }
 
     total_sin_filtrar = len(por_tipo)
+    busqueda = str(buscar or "").strip()[:80]
+    tracking_buscado = _normalizar_busqueda_tracking(busqueda)
+    filtradas = por_tipo
+    if tracking_buscado:
+        filtradas = [
+            solicitud
+            for solicitud in filtradas
+            if tracking_buscado
+            in _normalizar_busqueda_tracking(solicitud.get("tracking"))
+        ]
+    else:
+        # Una cadena compuesta sólo por separadores no debe ocultar envíos ni
+        # quedar presentada como una búsqueda activa.
+        busqueda = ""
+
+    # Los contadores describen la búsqueda activa. Sin búsqueda mantienen el
+    # comportamiento histórico porque ``filtradas`` equivale a ``por_tipo``.
+    total_busqueda = len(filtradas)
     conteos: dict[str, int] = {}
-    for solicitud in por_tipo:
+    for solicitud in filtradas:
         clave = paso_de_estado(solicitud.get("estado"))
         if clave:
             conteos[clave] = conteos.get(clave, 0) + 1
@@ -186,11 +211,10 @@ def preparar_historial_envios(
     paso = (paso or "").strip().lower()
     if paso in {chip["clave"] for chip in chips}:
         filtradas = [
-            s for s in por_tipo if paso_de_estado(s.get("estado")) == paso
+            s for s in filtradas if paso_de_estado(s.get("estado")) == paso
         ]
     else:
         paso = ""
-        filtradas = por_tipo
 
     por_pagina = max(1, int(por_pagina or ENVIOS_POR_PAGINA))
     total_resultados = len(filtradas)
@@ -203,8 +227,10 @@ def preparar_historial_envios(
         "solicitudes": filtradas[inicio:fin],
         "tipo_filtro": tipo,
         "paso_filtro": paso,
+        "busqueda_filtro": busqueda,
         "chips": chips,
         "total_sin_filtrar": total_sin_filtrar,
+        "total_busqueda": total_busqueda,
         "total_resultados": total_resultados,
         "pagina_actual": pagina_actual,
         "total_paginas": total_paginas,
@@ -233,9 +259,17 @@ def embudo_envios(cliente_id: str) -> list[dict]:
                 cur.execute(
                     """
                     SELECT estado, COUNT(*) AS n
-                    FROM solicitudes_guia
-                    WHERE cliente_id = %s
-                    GROUP BY estado
+                    FROM solicitudes_guia s
+                    WHERE s.cliente_id = %s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    GROUP BY s.estado
                     """,
                     (cliente_id,),
                 )
@@ -305,7 +339,19 @@ def checklist_arranque(cliente_id: str) -> dict:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) AS n FROM solicitudes_guia WHERE cliente_id = %s",
+                    """
+                    SELECT COUNT(*) AS n
+                    FROM solicitudes_guia s
+                    WHERE s.cliente_id = %s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    """,
                     (cliente_id,),
                 )
                 fila = cur.fetchone()

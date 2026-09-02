@@ -643,6 +643,181 @@ CREATE TABLE IF NOT EXISTS config_envio_tienda (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Tiendanube: OAuth, lifecycle y claim seguro posterior. Una instalación
+-- iniciada desde la App Store puede existir sin cliente TAURO; el navegador
+-- que completó OAuth recibe el secreto y acá sólo se conserva su hash.
+CREATE TABLE IF NOT EXISTS tiendanube_instalaciones (
+    id                   SERIAL PRIMARY KEY,
+    store_id             TEXT NOT NULL UNIQUE,
+    access_token         TEXT NOT NULL,
+    cliente_id           TEXT,
+    nombre               TEXT,
+    estado               TEXT NOT NULL DEFAULT 'ACTIVA',
+    install_generation   TEXT,
+    webhooks_ready       BOOLEAN NOT NULL DEFAULT FALSE,
+    webhooks_verified_at TIMESTAMPTZ,
+    claim_token_hash     TEXT,
+    claim_expires_at     TIMESTAMPTZ,
+    instalada_en         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    suspendida_en        TIMESTAMPTZ,
+    desinstalada_en      TIMESTAMPTZ,
+    redactada_en         TIMESTAMPTZ
+);
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS estado TEXT NOT NULL DEFAULT 'ACTIVA';
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS webhooks_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS webhooks_verified_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS claim_token_hash TEXT;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS actualizada_en TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS suspendida_en TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS desinstalada_en TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS redactada_en TIMESTAMPTZ;
+UPDATE tiendanube_instalaciones
+   SET install_generation = md5(
+       store_id || ':' || instalada_en::text || ':' || random()::text
+   )
+ WHERE install_generation IS NULL OR BTRIM(install_generation) = '';
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ALTER COLUMN install_generation SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS tiendanube_lifecycle_eventos (
+    id                 BIGSERIAL PRIMARY KEY,
+    store_id           TEXT NOT NULL,
+    evento             TEXT NOT NULL,
+    install_generation TEXT NOT NULL,
+    recibido_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_tiendanube_lifecycle_store
+    ON tiendanube_lifecycle_eventos(store_id, recibido_at DESC);
+
+-- El endpoint sólo responde 2xx después de este INSERT. El worker puede
+-- reiniciarse, recuperar PROCESANDO stale y aplicar backoff sin perder eventos.
+CREATE TABLE IF NOT EXISTS tiendanube_webhook_eventos (
+    evento_id          TEXT PRIMARY KEY,
+    store_id           TEXT NOT NULL,
+    evento             TEXT NOT NULL,
+    recurso_id         TEXT NOT NULL DEFAULT '',
+    install_generation TEXT NOT NULL,
+    payload            JSONB NOT NULL,
+    estado             TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos           INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_error       TEXT,
+    recibido_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at         TIMESTAMPTZ,
+    procesado_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_tiendanube_webhook_pendientes
+    ON tiendanube_webhook_eventos(estado, proximo_intento_at, recibido_at);
+
+-- No persiste email, teléfono ni identificación del consumidor. La solicitud
+-- conserva sólo referencias necesarias para responder al merchant.
+CREATE TABLE IF NOT EXISTS tiendanube_privacidad_solicitudes (
+    id          BIGSERIAL PRIMARY KEY,
+    request_id  TEXT NOT NULL,
+    store_id    TEXT NOT NULL,
+    tipo        TEXT NOT NULL,
+    customer_id TEXT NOT NULL DEFAULT '',
+    recursos    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    estado      TEXT NOT NULL DEFAULT 'PENDIENTE',
+    resolucion  TEXT,
+    creado_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resuelto_at TIMESTAMPTZ,
+    UNIQUE(store_id, tipo, request_id)
+);
+ALTER TABLE IF EXISTS tiendanube_privacidad_solicitudes
+    ADD COLUMN IF NOT EXISTS resolucion TEXT;
+CREATE INDEX IF NOT EXISTS ix_tiendanube_privacidad_pendientes
+    ON tiendanube_privacidad_solicitudes(estado, creado_at);
+
+-- Tombstone de privacidad: un order/updated atrasado no puede reintroducir
+-- datos personales después de customers/redact o store/redact.
+CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
+    dominio           TEXT NOT NULL,
+    pedido_externo_id TEXT NOT NULL,
+    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (dominio, pedido_externo_id)
+);
+
+-- Shipping Carrier: sólo se persisten hashes de los secretos de callback.
+-- Eliminar esta configuración durante store/redact borra también la evidencia
+-- de labels por las FKs ON DELETE CASCADE definidas debajo.
+CREATE TABLE IF NOT EXISTS tiendanube_shipping_config (
+    store_id                  TEXT PRIMARY KEY,
+    callback_token_hash       TEXT NOT NULL,
+    label_callback_token_hash TEXT,
+    carrier_id                TEXT NOT NULL,
+    carrier_option_id         TEXT NOT NULL,
+    activa                    BOOLEAN NOT NULL DEFAULT TRUE,
+    creada_en                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE IF EXISTS tiendanube_shipping_config
+    ADD COLUMN IF NOT EXISTS label_callback_token_hash TEXT;
+
+-- Labels API: registro canónico y outbox idempotente. Mientras el adapter
+-- nacional no esté homologado, generate_payload sólo conserva IDs y la huella
+-- del payload original; no conserva datos personales del destinatario.
+CREATE TABLE IF NOT EXISTS tiendanube_labels (
+    store_id                    TEXT NOT NULL,
+    label_id                    TEXT NOT NULL,
+    fulfillment_order_id        TEXT NOT NULL,
+    generate_payload            JSONB,
+    generate_fingerprint        CHAR(64),
+    generate_payload_complete   BOOLEAN NOT NULL DEFAULT FALSE,
+    estado                      TEXT NOT NULL,
+    external_operation_id       TEXT,
+    tracking_number             TEXT,
+    creada_en                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (store_id, label_id),
+    FOREIGN KEY (store_id)
+        REFERENCES tiendanube_shipping_config(store_id)
+        ON DELETE CASCADE
+);
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS generate_payload_complete
+        BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE TABLE IF NOT EXISTS tiendanube_label_outbox (
+    id                      BIGSERIAL PRIMARY KEY,
+    store_id                TEXT NOT NULL,
+    label_id                TEXT NOT NULL,
+    operacion               TEXT NOT NULL
+        CHECK (operacion IN ('GENERATE', 'CANCEL')),
+    payload                 JSONB NOT NULL,
+    payload_fingerprint     CHAR(64) NOT NULL,
+    payload_complete        BOOLEAN NOT NULL DEFAULT FALSE,
+    estado                  TEXT NOT NULL,
+    intentos                INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_en      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_error_codigo     TEXT,
+    creada_en               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    procesada_en            TIMESTAMPTZ,
+    UNIQUE (store_id, label_id, operacion),
+    FOREIGN KEY (store_id, label_id)
+        REFERENCES tiendanube_labels(store_id, label_id)
+        ON DELETE CASCADE
+);
+ALTER TABLE IF EXISTS tiendanube_label_outbox
+    ADD COLUMN IF NOT EXISTS payload_complete
+        BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tiendanube_label_outbox_pendiente
+    ON tiendanube_label_outbox(estado, proximo_intento_en, id);
+
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (
     id           SERIAL PRIMARY KEY,
@@ -2077,6 +2252,8 @@ CREATE TABLE IF NOT EXISTS conciliaciones_envio (
     costo_courier_real_ars       NUMERIC(18,4) NOT NULL,
     precio_cliente_final_ars     NUMERIC(18,4) NOT NULL,
     ajuste_cliente_ars           NUMERIC(18,4) NOT NULL,
+    diferencia_flete_ars         NUMERIC(18,4) NOT NULL DEFAULT 0,
+    tax_cliente_ars              NUMERIC(18,4) NOT NULL DEFAULT 0,
     peso_cotizado_kg             NUMERIC(12,3),
     peso_real_facturado_kg       NUMERIC(12,3),
     peso_volumetrico_facturado_kg NUMERIC(12,3),
@@ -2122,6 +2299,13 @@ CREATE TABLE IF NOT EXISTS conciliaciones_envio (
             + precio_cliente_inicial_ars
         ) <= 0.02
     ),
+    CONSTRAINT ck_conciliacion_componentes CHECK (
+        ABS(
+            ajuste_cliente_ars
+            - diferencia_flete_ars
+            - tax_cliente_ars
+        ) <= 0.02
+    ),
     CONSTRAINT ck_conciliacion_pesos CHECK (
         COALESCE(peso_cotizado_kg, 0) >= 0
         AND COALESCE(peso_real_facturado_kg, 0) >= 0
@@ -2148,6 +2332,44 @@ CREATE TABLE IF NOT EXISTS conciliaciones_envio (
             AND aprobado_at IS NOT NULL AND evidencia_completa)
     )
 );
+-- Las conciliaciones anteriores no distinguían el TAX del resto del ajuste.
+-- Al migrarlas se conserva exactamente el total histórico: todo queda como
+-- diferencia de flete y TAX en cero. Los cálculos nuevos ya guardan ambos
+-- componentes por separado.
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ADD COLUMN IF NOT EXISTS diferencia_flete_ars NUMERIC(18,4);
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ADD COLUMN IF NOT EXISTS tax_cliente_ars NUMERIC(18,4);
+UPDATE conciliaciones_envio
+   SET diferencia_flete_ars = ajuste_cliente_ars
+ WHERE diferencia_flete_ars IS NULL;
+UPDATE conciliaciones_envio
+   SET tax_cliente_ars = 0
+ WHERE tax_cliente_ars IS NULL;
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ALTER COLUMN diferencia_flete_ars SET DEFAULT 0,
+    ALTER COLUMN diferencia_flete_ars SET NOT NULL,
+    ALTER COLUMN tax_cliente_ars SET DEFAULT 0,
+    ALTER COLUMN tax_cliente_ars SET NOT NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'conciliaciones_envio'::regclass
+           AND conname = 'ck_conciliacion_componentes'
+    ) THEN
+        ALTER TABLE conciliaciones_envio
+            ADD CONSTRAINT ck_conciliacion_componentes CHECK (
+                ABS(
+                    ajuste_cliente_ars
+                    - diferencia_flete_ars
+                    - tax_cliente_ars
+                ) <= 0.02
+            ) NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE conciliaciones_envio
+    VALIDATE CONSTRAINT ck_conciliacion_componentes;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_conciliacion_envio_activa
     ON conciliaciones_envio (solicitud_id)
     WHERE estado IN ('BORRADOR','PARA_REVISION','APROBADA','RECLAMADA');
@@ -2165,6 +2387,8 @@ BEGIN
        OR OLD.costo_courier_real_ars IS DISTINCT FROM NEW.costo_courier_real_ars
        OR OLD.precio_cliente_final_ars IS DISTINCT FROM NEW.precio_cliente_final_ars
        OR OLD.ajuste_cliente_ars IS DISTINCT FROM NEW.ajuste_cliente_ars
+       OR OLD.diferencia_flete_ars IS DISTINCT FROM NEW.diferencia_flete_ars
+       OR OLD.tax_cliente_ars IS DISTINCT FROM NEW.tax_cliente_ars
        OR OLD.peso_cotizado_kg IS DISTINCT FROM NEW.peso_cotizado_kg
        OR OLD.peso_real_facturado_kg IS DISTINCT FROM NEW.peso_real_facturado_kg
        OR OLD.peso_volumetrico_facturado_kg IS DISTINCT FROM NEW.peso_volumetrico_facturado_kg

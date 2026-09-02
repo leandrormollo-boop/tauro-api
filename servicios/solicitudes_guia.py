@@ -798,6 +798,11 @@ def listar_solicitudes_cliente(
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
                        COALESCE(fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -825,6 +830,7 @@ def listar_solicitudes_cliente(
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
+                           c.diferencia_flete_ars, c.tax_cliente_ars,
                            c.peso_cotizado_kg, c.peso_final_facturado_kg,
                            c.peso_base_facturado, c.motivo_diferencia
                     FROM conciliaciones_envio c
@@ -832,6 +838,14 @@ def listar_solicitudes_cliente(
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.cliente_id = %s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
             """
             params = [cliente_id.strip().upper()]
             if desde is not None:
@@ -880,6 +894,14 @@ def periodos_solicitudes_cliente(cliente_id: str) -> list[tuple[int, int]]:
                 FROM solicitudes_guia s
                 LEFT JOIN envios e ON e.solicitud_id=s.id
                 WHERE s.cliente_id=%s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios cargo_cancelado
+                      WHERE cargo_cancelado.solicitud_id=s.id
+                        AND cargo_cancelado.cliente_id=s.cliente_id
+                        AND cargo_cancelado.estado='CANCELADO'
+                  )
                 ORDER BY anio DESC, mes DESC
                 """,
                 (cliente_id.strip().upper(),),
@@ -962,8 +984,15 @@ def contar_guias_listas(cliente_id: str) -> int:
             cur.execute(
                 """
                 SELECT COUNT(*) AS n
-                FROM solicitudes_guia
-                WHERE cliente_id = %s AND estado = 'GUIA_LISTA'
+                FROM solicitudes_guia s
+                WHERE s.cliente_id = %s AND s.estado = 'GUIA_LISTA'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (cliente_id.strip().upper(),),
             )
@@ -1166,6 +1195,11 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
                        COALESCE(fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -1180,6 +1214,7 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
+                           c.diferencia_flete_ars, c.tax_cliente_ars,
                            c.peso_cotizado_kg, c.peso_final_facturado_kg,
                            c.peso_base_facturado, c.motivo_diferencia
                     FROM conciliaciones_envio c
@@ -1187,6 +1222,14 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.id = %s AND s.cliente_id = %s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )
@@ -1203,7 +1246,15 @@ def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[byt
                 SELECT label_pdf
                 FROM solicitudes_guia s
                 WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.estado <> 'CANCELADO'
                   AND s.estado <> 'REEMPLAZADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                   AND NOT EXISTS (
                       SELECT 1 FROM solicitudes_guia_reemisiones r
                       WHERE r.solicitud_nueva_id=s.id
@@ -1245,6 +1296,11 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
                        COALESCE(fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -1260,6 +1316,7 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                 LEFT JOIN LATERAL (
                     SELECT ce.precio_cliente_inicial_ars,
                            ce.precio_cliente_final_ars, ce.ajuste_cliente_ars,
+                           ce.diferencia_flete_ars, ce.tax_cliente_ars,
                            ce.peso_cotizado_kg, ce.peso_final_facturado_kg,
                            ce.peso_base_facturado, ce.motivo_diferencia
                     FROM conciliaciones_envio ce
@@ -1458,7 +1515,14 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
                 cur.execute(
                     """SELECT s.label_pdf FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
+                         AND s.estado <> 'CANCELADO'
                          AND s.estado <> 'REEMPLAZADO'
+                         AND NOT EXISTS (
+                           SELECT 1 FROM envios e
+                           WHERE e.solicitud_id=s.id
+                             AND e.cliente_id=s.cliente_id
+                             AND e.estado = 'CANCELADO'
+                         )
                          AND NOT EXISTS (
                            SELECT 1 FROM solicitudes_guia_reemisiones r
                            WHERE r.solicitud_nueva_id=s.id
@@ -1488,7 +1552,14 @@ def obtener_factura_comercial_pdf(
                 cur.execute(
                     """SELECT s.commercial_invoice_pdf FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
+                         AND s.estado <> 'CANCELADO'
                          AND s.estado <> 'REEMPLAZADO'
+                         AND NOT EXISTS (
+                           SELECT 1 FROM envios e
+                           WHERE e.solicitud_id=s.id
+                             AND e.cliente_id=s.cliente_id
+                             AND e.estado = 'CANCELADO'
+                         )
                          AND NOT EXISTS (
                            SELECT 1 FROM solicitudes_guia_reemisiones r
                            WHERE r.solicitud_nueva_id=s.id

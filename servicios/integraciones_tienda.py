@@ -45,6 +45,15 @@ def _bloquear_dominio_shopify(cur, dominio: str) -> None:
     )
 
 
+def _bloquear_dominio_tiendanube(cur, dominio: str) -> None:
+    """Serializa pedidos y redacciones de una tienda Tiendanube."""
+    dominio = (dominio or "").strip().lower()
+    cur.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+        (f"tauro:tiendanube:{dominio}",),
+    )
+
+
 def _registrar_cancelacion_shopify_con_cursor(
     cur,
     dominio: str,
@@ -169,6 +178,12 @@ def _ensure_tablas() -> None:
                 ALTER TABLE pedidos_huerfanos
                     ADD COLUMN IF NOT EXISTS install_generation TEXT;
                 CREATE TABLE IF NOT EXISTS shopify_pedidos_redactados (
+                    dominio           TEXT NOT NULL,
+                    pedido_externo_id TEXT NOT NULL,
+                    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (dominio, pedido_externo_id)
+                );
+                CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
                     dominio           TEXT NOT NULL,
                     pedido_externo_id TEXT NOT NULL,
                     redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -862,8 +877,10 @@ def guardar_pedido(
     install_generation_verificada = str(
         install_generation_verificada or ""
     ).strip()
-    if plataforma == "shopify" and not dominio_verificado:
-        raise TiendaNoOperativaError("Falta verificar la instalación Shopify.")
+    if plataforma in {"shopify", "tiendanube"} and not dominio_verificado:
+        raise TiendaNoOperativaError(
+            f"Falta verificar la instalación {plataforma}."
+        )
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -937,6 +954,50 @@ def guardar_pedido(
                         )
                     raise TiendaNoOperativaError(
                         "La instalación Shopify ya no está operativa."
+                    )
+            elif plataforma == "tiendanube":
+                # El mismo lock se toma en customers/store redact. Así un
+                # order/update que ya estaba en vuelo no puede reintroducir
+                # datos personales después de confirmar la eliminación.
+                _bloquear_dominio_tiendanube(cur, dominio_verificado)
+                cur.execute(
+                    """
+                    SELECT t.id
+                      FROM tiendas_conectadas t
+                      JOIN tiendanube_instalaciones i
+                        ON LOWER(t.dominio) = LOWER(i.store_id || '.tiendanube')
+                     WHERE t.id = %s
+                       AND UPPER(t.cliente_id) = %s
+                       AND t.plataforma = 'tiendanube'
+                       AND t.activa = TRUE
+                       AND LOWER(t.dominio) = %s
+                       AND i.estado = 'ACTIVA'
+                       AND i.webhooks_ready = TRUE
+                       AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+                       AND UPPER(COALESCE(i.cliente_id, '')) = %s
+                       AND (%s = '' OR i.install_generation = %s)
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM tiendanube_pedidos_redactados r
+                            WHERE LOWER(r.dominio) = %s
+                              AND r.pedido_externo_id = %s
+                       )
+                     LIMIT 1
+                    """,
+                    (
+                        tienda_id,
+                        cliente_id,
+                        dominio_verificado,
+                        cliente_id,
+                        install_generation_verificada,
+                        install_generation_verificada,
+                        dominio_verificado,
+                        str(pedido.get("pedido_externo_id") or ""),
+                    ),
+                )
+                if cur.fetchone() is None:
+                    raise TiendaNoOperativaError(
+                        "La instalación Tiendanube ya no está operativa."
                     )
             cur.execute("""
                 INSERT INTO pedidos_tienda
@@ -1401,6 +1462,53 @@ def listar_pedidos(cliente_id: str, estado: str = "PENDIENTE", limite: int = 100
                 LIMIT %s
             """, (cliente_id, estado, limite))
             return [dict(r) for r in cur.fetchall()]
+
+
+def listar_pedidos_tiendanube_seleccionados(
+    cliente_id: str,
+    store_id: str,
+    pedido_ids: list[str],
+    *,
+    limite: int = 100,
+) -> list[dict]:
+    """Resuelve un admin link dentro del tenant y la tienda indicados."""
+    _ensure_tablas()
+    store_id = str(store_id or "").strip()
+    ids = list(dict.fromkeys(
+        str(value or "").strip()[:80]
+        for value in pedido_ids[:100]
+        if str(value or "").strip()
+    ))
+    if not store_id.isdigit() or not ids:
+        return []
+    limite = max(1, min(int(limite), 100))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.*
+                  FROM pedidos_tienda p
+                  JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                 WHERE UPPER(p.cliente_id) = UPPER(%s)
+                   AND UPPER(t.cliente_id) = UPPER(%s)
+                   AND p.estado = 'PENDIENTE'
+                   AND p.plataforma = 'tiendanube'
+                   AND t.plataforma = 'tiendanube'
+                   AND t.activa = TRUE
+                   AND LOWER(t.dominio) = %s
+                   AND p.pedido_externo_id = ANY(%s)
+                 ORDER BY p.id DESC
+                 LIMIT %s
+                """,
+                (
+                    cliente_id,
+                    cliente_id,
+                    f"{store_id}.tiendanube",
+                    ids,
+                    limite,
+                ),
+            )
+            return [dict(row) for row in cur.fetchall()]
 
 
 def contar_pendientes(cliente_id: str) -> int:

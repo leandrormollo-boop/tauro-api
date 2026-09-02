@@ -755,8 +755,13 @@ def admin_shopify_privacidad(
             "seccion": "shopify_privacidad",
             "solicitudes": solicitudes,
             "flash_ok": (
-                "Solicitud marcada como resuelta."
-                if request.query_params.get("ok") == "resuelta" else None
+                "Cuarentena revisada; se preservó la instalación vigente."
+                if request.query_params.get("ok") == "cuarentena"
+                else (
+                    "Solicitud marcada como resuelta."
+                    if request.query_params.get("ok") == "resuelta"
+                    else None
+                )
             ),
             "flash_error": error or None,
         },
@@ -856,6 +861,182 @@ def admin_shopify_privacidad_resolver(
     )
     return RedirectResponse(
         url="/admin/shopify/privacidad?ok=resuelta", status_code=303,
+    )
+
+
+# ── Privacidad Tiendanube ──────────────────────────────────
+
+@router.get("/tiendanube/privacidad", response_class=HTMLResponse)
+def admin_tiendanube_privacidad(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    solicitudes = []
+    error = ""
+    try:
+        from servicios.tiendanube_privacidad import listar_pendientes
+        solicitudes = listar_pendientes()
+    except Exception as exc:
+        print(f"[admin] privacidad Tiendanube no disponible: {type(exc).__name__}")
+        error = "No pudimos leer las solicitudes de privacidad. Reintentá en unos minutos."
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/tiendanube_privacidad.html",
+        context={
+            "seccion": "tiendanube_privacidad",
+            "solicitudes": solicitudes,
+            "flash_ok": (
+                "Solicitud marcada como resuelta."
+                if request.query_params.get("ok") == "resuelta" else None
+            ),
+            "flash_error": error or None,
+        },
+    )
+
+
+@router.get("/tiendanube/privacidad/{solicitud_id}/datos.json")
+def admin_tiendanube_privacidad_descargar(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.tiendanube_privacidad import generar_exportacion
+        exportacion = generar_exportacion(solicitud_id)
+    except (TypeError, ValueError):
+        exportacion = None
+    except Exception as exc:
+        print(f"[admin] exportacion Tiendanube no disponible: {type(exc).__name__}")
+        return JSONResponse(
+            {"ok": False, "error": "No pudimos generar la exportación."},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    if not exportacion:
+        return JSONResponse(
+            {"ok": False, "error": "Solicitud no encontrada."},
+            status_code=404,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    request_id = str(exportacion["solicitud"]["request_id"])
+    store_id = str(exportacion["solicitud"]["store_id"])
+    registrar_desde_request(
+        request,
+        event="tiendanube.privacy.download",
+        actor_type="admin",
+        actor_ref=f"{store_id}:{solicitud_id}",
+        status_code=200,
+        metadata={
+            "store_id": store_id,
+            "cantidad_recursos": len(
+                exportacion["solicitud"]["resources_requested"]
+            ),
+        },
+    )
+    nombre_request = "".join(
+        caracter
+        for caracter in request_id
+        if caracter.isascii() and (caracter.isalnum() or caracter in "-_")
+    )[:80] or str(solicitud_id)
+    return Response(
+        content=json_dumps_pretty(exportacion),
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="tiendanube-data-request-{nombre_request}.json"'
+            ),
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post("/tiendanube/privacidad/{solicitud_id}/resolver")
+def admin_tiendanube_privacidad_resolver(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    try:
+        from servicios.tiendanube_privacidad import marcar_resuelta
+        resultado = marcar_resuelta(solicitud_id)
+    except (TypeError, ValueError):
+        resultado = None
+    except Exception as exc:
+        print(f"[admin] no pude resolver privacidad Tiendanube: {type(exc).__name__}")
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=db", status_code=303,
+        )
+    if not resultado:
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=no_encontrada", status_code=303,
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="tiendanube.privacy.resolve",
+        actor_type="admin",
+        actor_ref=f"{resultado['store_id']}:{solicitud_id}",
+        status_code=303,
+        metadata={
+            "store_id": resultado["store_id"],
+            "cantidad_recursos": int(resultado.get("cantidad_recursos") or 0),
+        },
+    )
+    return RedirectResponse(
+        url="/admin/tiendanube/privacidad?ok=resuelta", status_code=303,
+    )
+
+
+@router.post("/tiendanube/privacidad/cuarentena/{solicitud_id}/resolver")
+def admin_tiendanube_cuarentena_resolver(
+    solicitud_id: int,
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    accion = "MANTENER_INSTALACION_ACTUAL"
+    try:
+        from servicios.tiendanube_privacidad import resolver_cuarentena
+        resultado = resolver_cuarentena(solicitud_id, accion)
+    except (TypeError, ValueError):
+        resultado = None
+    except Exception as exc:
+        print(f"[admin] cuarentena Tiendanube no resuelta: {type(exc).__name__}")
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=db", status_code=303,
+        )
+    if not resultado:
+        return RedirectResponse(
+            url="/admin/tiendanube/privacidad?error=no_encontrada", status_code=303,
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    registrar_desde_request(
+        request,
+        event="tiendanube.quarantine.resolve",
+        actor_type="admin",
+        actor_ref=f"{resultado['store_id']}:{solicitud_id}",
+        status_code=303,
+        metadata={
+            "store_id": resultado["store_id"],
+            "tipo": resultado["tipo"],
+            "accion": accion,
+        },
+    )
+    return RedirectResponse(
+        url="/admin/tiendanube/privacidad?ok=cuarentena", status_code=303,
     )
 
 
@@ -1439,13 +1620,20 @@ def admin_cliente_detail(
             # Envíos paginados
             cur.execute(
                 """
-                SELECT id, cliente_id, fecha, nro_fc, monto_ars, estado,
-                       descripcion, tracking, created_at, factura_nombre,
-                       solicitud_id, ambito,
-                       (factura_pdf IS NOT NULL) AS tiene_factura_pdf
-                FROM envios
-                WHERE cliente_id = %s AND fecha >= %s AND fecha < %s
-                ORDER BY fecha DESC, id DESC
+                SELECT e.id, e.cliente_id, e.fecha, e.nro_fc, e.monto_ars,
+                       e.estado, e.descripcion, e.tracking, e.created_at,
+                       e.factura_nombre, e.solicitud_id, e.ambito,
+                       s.estado AS solicitud_estado,
+                       (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO')
+                           AS oculto_cliente,
+                       (e.factura_pdf IS NOT NULL) AS tiene_factura_pdf
+                FROM envios e
+                LEFT JOIN solicitudes_guia s
+                  ON s.id = e.solicitud_id
+                 AND s.cliente_id = e.cliente_id
+                WHERE e.cliente_id = %s
+                  AND e.fecha >= %s AND e.fecha < %s
+                ORDER BY e.fecha DESC, e.id DESC
                 LIMIT %s OFFSET %s
                 """,
                 (
@@ -1499,6 +1687,11 @@ def admin_cliente_detail(
         flash_ok = "Cliente creado."
     elif ok == "pwd_actualizada":
         flash_ok = "Contraseña actualizada. Pasala al cliente."
+    elif ok == "envio_anulado":
+        flash_ok = (
+            "Envío anulado: se descontó de la cuenta corriente y ya no "
+            "es visible en el portal del cliente. El registro quedó auditado."
+        )
     if pwd_error == "corta":
         flash_ok = None  # priorizar error
         # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
@@ -2147,6 +2340,37 @@ def admin_envio_cancelar(
     return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
 
 
+@router.post("/clientes/{cliente_id}/envios/{envio_id}/anular")
+def admin_envio_anular(
+    cliente_id: str,
+    envio_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Anula el cargo con ownership; el registro histórico nunca se borra."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    cliente_normalizado = cliente_id.strip().upper()
+    resultado = cancelar_envio(
+        envio_id,
+        cliente_id=cliente_normalizado,
+        actor_tipo="admin",
+        actor_ref="admin",
+    )
+    if not resultado:
+        return Response(
+            content=(
+                "No se puede anular este envío. Si ya tiene factura, "
+                "requiere una nota de crédito documentada."
+            ),
+            status_code=409,
+        )
+    return RedirectResponse(
+        url=f"/admin/clientes/{cliente_normalizado}?ok=envio_anulado",
+        status_code=303,
+    )
+
+
 # ── Solicitudes de guía ─────────────────────────────────────
 
 @router.get("/guias-reemplazadas", response_class=HTMLResponse)
@@ -2172,7 +2396,7 @@ def admin_guias_reemplazadas(
     mensajes = {
         "consultado": "Tracking anterior consultado en DHL.",
         "cerrado": "Control cerrado con su constancia de revisión.",
-        "reabierto": "Control reabierto; volverá a verificarse diariamente.",
+        "reabierto": "Control reabierto; volverá al control único programado.",
     }
     return templates.TemplateResponse(
         request=request,
@@ -3019,6 +3243,25 @@ async def admin_factura_courier_post(
             moneda=moneda,
             tipo_cambio_ars=tipo_cambio,
         )
+        tax_importe_raw = str(form.get("tax_importe") or "").strip()
+        if tax_importe_raw:
+            tax_tracking = str(form.get("tax_tracking") or "").strip()
+            if not tax_tracking:
+                raise ValueError("Indicá el tracking al que corresponde el TAX.")
+            tax_importe = parse_importe_humano(tax_importe_raw)
+            if tax_importe <= 0:
+                raise ValueError("El TAX debe ser mayor a cero.")
+            items.append({
+                "linea_numero": len(items) + 1,
+                "tracking": tax_tracking,
+                "importe": tax_importe,
+                "moneda": moneda,
+                "tipo_cambio_ars": tipo_cambio,
+                "concepto_tipo": "IMPUESTO",
+                "peso_base": "NO_INFORMADO",
+                "descripcion": "TAX informado por ADMIN",
+                "datos_crudos": {"origen": "casillero_tax_admin"},
+            })
         archivo = form.get("archivo_pdf")
         contenido = await leer_comprobante_con_tope(archivo)
         if not contenido:

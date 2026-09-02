@@ -25,7 +25,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
   <div class="card"><small>Precio aceptado</small><h2>{{ dinero(envio.precio_tauro_ars) }}</h2><p>{{ envio.peso_kg or '—' }} kg emitido</p></div>
   <div class="card"><small>Costo estimado interno</small><h2>{{ dinero(envio.costo_courier_estimado_ars) if envio.snapshot_id else 'Pendiente' }}</h2><p>{% if envio.snapshot_id %}Margen protegido {{ dinero(envio.margen_tauro_protegido_ars) }}{% else %}Falta congelar la base{% endif %}</p></div>
   <div class="card"><small>Costo real courier</small><h2>{{ dinero(envio.costo_courier_real_ars) if envio.conciliacion_id else 'Pendiente' }}</h2><p>Dato interno, nunca visible al cliente</p></div>
-  <div class="card"><small>Precio final cliente</small><h2>{{ dinero(envio.precio_cliente_final_ars) if envio.conciliacion_id else dinero(envio.precio_tauro_ars) }}</h2><p>{% if envio.conciliacion_id %}Diferencia acumulada {{ dinero(envio.ajuste_cliente_ars) }}{% else %}Sin factura conciliada{% endif %}</p></div>
+  <div class="card"><small>Precio final cliente</small><h2>{{ dinero(envio.precio_cliente_final_ars) if envio.conciliacion_id else dinero(envio.precio_tauro_ars) }}</h2><p>{% if envio.conciliacion_id %}Diferencia {{ dinero(envio.diferencia_flete_ars) }} · TAX {{ dinero(envio.tax_cliente_ars) }}{% else %}Sin factura conciliada{% endif %}</p></div>
 </div>
 
 <div class="card" style="margin-bottom:18px;">
@@ -78,7 +78,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
       <tr>
         <td class="mono">v{{ c.version }}<br><small>{{ c.calculado_at.strftime('%d/%m/%Y %H:%M') if c.calculado_at else '' }}</small></td>
         <td class="mono">Real {{ dinero(c.costo_courier_real_ars) }}<br><small>Margen {{ dinero(c.margen_tauro_protegido_ars) }}</small></td>
-        <td class="mono">{{ dinero(c.precio_cliente_inicial_ars) }} → <strong>{{ dinero(c.precio_cliente_final_ars) }}</strong><br><small>Diferencia acumulada {{ dinero(c.ajuste_cliente_ars) }}</small></td>
+        <td class="mono">{{ dinero(c.precio_cliente_inicial_ars) }} → <strong>{{ dinero(c.precio_cliente_final_ars) }}</strong><br><small>Diferencia {{ dinero(c.diferencia_flete_ars) }} · TAX {{ dinero(c.tax_cliente_ars) }}</small></td>
         <td>{% if c.ajuste_id %}<span class="badge {% if c.ajuste_tipo == 'CREDITO' %}ok{% else %}warn{% endif %}">{{ c.ajuste_tipo|title }} {{ dinero(c.movimiento_cliente_ars|abs) }}</span><br><small>{{ dinero(c.movimiento_desde_ars) }} → {{ dinero(c.movimiento_hasta_ars) }} · {{ c.ajuste_estado|title }}</small>{% else %}Sin movimiento{% endif %}</td>
         <td>{{ c.peso_cotizado_kg or '—' }} → {{ c.peso_final_facturado_kg or '—' }} kg<br><small>{{ c.motivo_diferencia.replace('_',' ')|title }}</small></td>
         <td><span class="badge {% if c.estado == 'CERRADA' %}ok{% elif c.estado == 'PARA_REVISION' %}warn{% else %}muted{% endif %}">{{ c.estado.replace('_',' ')|title }}</span></td>

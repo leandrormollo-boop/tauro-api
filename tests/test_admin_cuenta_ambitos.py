@@ -163,6 +163,48 @@ def test_admin_no_permite_cancelar_una_fc_facturada(monkeypatch, admin_autentica
     assert "nota de crédito" in respuesta.body.decode("utf-8")
 
 
+def test_admin_anula_con_ownership_y_confirma_ocultamiento(
+    monkeypatch, admin_autenticado,
+):
+    llamadas = []
+    monkeypatch.setattr(
+        admin,
+        "cancelar_envio",
+        lambda *args, **kwargs: llamadas.append((args, kwargs)) or {
+            "id": 77,
+            "cliente_id": "WAIMAO",
+        },
+    )
+
+    respuesta = admin.admin_envio_anular(
+        cliente_id="waimao",
+        envio_id=77,
+        admin_token="token",
+    )
+
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"] == (
+        "/admin/clientes/WAIMAO?ok=envio_anulado"
+    )
+    assert llamadas == [((77,), {
+        "cliente_id": "WAIMAO",
+        "actor_tipo": "admin",
+        "actor_ref": "admin",
+    })]
+
+
+def test_admin_explica_que_anular_no_borra_la_auditoria():
+    plantilla = (
+        Path(admin.__file__).resolve().parents[1]
+        / "templates" / "admin" / "cliente_detail.html"
+    ).read_text(encoding="utf-8")
+
+    assert "Anular prueba" in plantilla
+    assert "dejará de mostrarse en el portal del cliente" in plantilla
+    assert "seguirá guardado en ADMIN para auditoría" in plantilla
+    assert "Oculto del portal" in plantilla
+
+
 def test_detalle_admin_no_carga_binarios_de_facturas_en_el_listado():
     fuente = Path(admin.__file__).read_text(encoding="utf-8")
     plantilla = (
@@ -175,7 +217,9 @@ def test_detalle_admin_no_carga_binarios_de_facturas_en_el_listado():
         fuente.index("# Pagos con su imputación")
     ]
     assert "SELECT * FROM envios" not in bloque
-    assert "(factura_pdf IS NOT NULL) AS tiene_factura_pdf" in bloque
+    assert "(e.factura_pdf IS NOT NULL) AS tiene_factura_pdf" in bloque
+    assert "LEFT JOIN solicitudes_guia s" in bloque
+    assert "AS oculto_cliente" in bloque
     assert "e.tiene_factura_pdf" in plantilla
 
 
