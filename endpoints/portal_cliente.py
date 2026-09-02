@@ -75,7 +75,8 @@ from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
     reiniciar_integracion_shopify_cliente,
     limpiar_espejo_shopify_huerfano_cliente,
-    listar_pedidos, contar_pendientes, obtener_pedido,
+    listar_pedidos, listar_pedidos_tiendanube_seleccionados,
+    contar_pendientes, obtener_pedido,
     marcar_convertido, descartar_pedido,
 )
 from servicios.politica_envio import (
@@ -2736,6 +2737,26 @@ def tienda_view(
     error: Optional[str] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    # Una instalación iniciada desde Tiendanube llega ownerless y deja un
+    # claim HttpOnly de un solo uso. Tras login/alta, esta vista lo consume:
+    # no se listan tiendas ajenas y el merchant no debe reinstalar la app.
+    claim_cookie = request.cookies.get("tn_claim") or ""
+    borrar_claim = bool(claim_cookie)
+    if claim_cookie:
+        try:
+            from servicios.tiendanube_app import instalacion, reclamar_con_token
+            store_claim = reclamar_con_token(claim_cookie, cliente)
+            vinculada = instalacion(store_claim) or {}
+            if vinculada.get("webhooks_ready"):
+                ok = ok or "tiendanube_conectada"
+            else:
+                error = error or (
+                    "La instalación quedó asociada a tu cuenta, pero todavía "
+                    "estamos verificando sus notificaciones y el medio de envío."
+                )
+        except Exception as exc:
+            print(f"[portal] claim Tiendanube rechazado: {type(exc).__name__}")
+            error = error or "No pudimos vincular la instalación de Tiendanube. Volvé a instalarla o contactá a soporte."
     # Detrás del proxy de Railway, request.base_url viene en http:// —
     # y una URL de webhook en http no sirve: Shopify exige https.
     base_url = (BASE_URL or str(request.base_url)).rstrip("/")
@@ -2789,7 +2810,7 @@ def tienda_view(
         shopify_app_activa = _shopify_ok()
     except Exception:
         shopify_app_activa = False
-    return templates.TemplateResponse(
+    respuesta = templates.TemplateResponse(
         request=request, name="portal/tienda.html",
         context={
             "cliente": cliente,
@@ -2808,6 +2829,9 @@ def tienda_view(
             "flash_error": error,
         },
     )
+    if borrar_claim:
+        respuesta.delete_cookie("tn_claim")
+    return respuesta
 
 
 @router.post("/tienda/reclamar")
@@ -2936,7 +2960,9 @@ def tienda_tiendanube_instalar(cliente: str = Depends(cliente_actual)):
     no de un callback disparado por un tercero). Sin app configurada, vuelve
     al portal con aviso.
     """
-    from servicios.tiendanube_app import app_configurada, url_instalacion
+    from servicios.tiendanube_app import (
+        app_configurada, firmar_oauth_cookie, url_instalacion,
+    )
     if not app_configurada():
         return RedirectResponse(
             url="/portal/tienda?error=" + quote(
@@ -2948,10 +2974,73 @@ def tienda_tiendanube_instalar(cliente: str = Depends(cliente_actual)):
     # El state se ata al cliente: cookie httponly/secure, 10 min, y guarda a
     # quién vincular cuando Tiendanube devuelva el code.
     resp.set_cookie(
-        key="tn_oauth", value=f"{state}:{cliente}",
+        key="tn_oauth", value=firmar_oauth_cookie(state, cliente),
         httponly=True, max_age=600, samesite="lax", secure=COOKIE_SECURE,
     )
     return resp
+
+
+@router.get("/tienda/tiendanube/pedidos")
+def tienda_tiendanube_admin_link(
+    request: Request,
+    cliente: str = Depends(cliente_actual),
+):
+    """Destino autenticado para los admin links individual y masivo."""
+    store_id = str(request.query_params.get("store") or "").strip()
+    order_ids = [
+        str(value).strip()[:80]
+        for value in request.query_params.getlist("id")[:100]
+        if str(value).strip()
+    ]
+    if not store_id.isdigit():
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "Tiendanube no informó una tienda válida."
+            ),
+            status_code=303,
+        )
+    try:
+        from servicios.tiendanube_app import instalacion
+
+        instalada = instalacion(store_id) or {}
+        owner = str(instalada.get("cliente_id") or "").strip().upper()
+        operativa = (
+            owner == cliente.strip().upper()
+            and instalada.get("estado") == "ACTIVA"
+            and bool(instalada.get("webhooks_ready"))
+        )
+    except Exception as exc:
+        print(f"[tiendanube] admin link no validado: {type(exc).__name__}")
+        operativa = False
+    if not operativa:
+        return RedirectResponse(
+            url="/portal/tienda?error=" + quote(
+                "La tienda indicada no está vinculada a tu cuenta TAURO."
+            ),
+            status_code=303,
+        )
+    # El link individual/masivo tiene que ejecutar una acción real sobre los
+    # IDs seleccionados. La vista usa sólo pedidos ya importados, acotados al
+    # owner autenticado y a esta tienda; nunca consulta ni muestra otra cuenta.
+    seleccion = listar_pedidos_tiendanube_seleccionados(
+        cliente,
+        store_id,
+        order_ids,
+    )
+    encontrados = {
+        str(pedido.get("pedido_externo_id") or "") for pedido in seleccion
+    }
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/tiendanube_pedidos.html",
+        context={
+            "cliente": cliente,
+            "store_id": store_id,
+            "pedidos": seleccion,
+            "solicitados": len(order_ids),
+            "faltantes": len(set(order_ids) - encontrados),
+        },
+    )
 
 
 @router.post("/tienda/desconectar")
