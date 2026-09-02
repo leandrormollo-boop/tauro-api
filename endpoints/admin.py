@@ -1629,8 +1629,21 @@ def admin_cliente_detail(
             cur.execute(
                 """
                 SELECT e.id, e.cliente_id, e.fecha, e.nro_fc, e.monto_ars,
-                       e.estado, e.descripcion, e.tracking, e.created_at,
+                       e.estado, e.descripcion,
+                       CASE
+                           WHEN e.solicitud_id IS NOT NULL THEN 'Flete'
+                           ELSE COALESCE(
+                               NULLIF(BTRIM(e.descripcion), ''), 'Envío'
+                           )
+                       END AS concepto,
+                       COALESCE(
+                           NULLIF(BTRIM(e.tracking), ''),
+                           NULLIF(BTRIM(s.tracking), '')
+                       ) AS tracking,
+                       e.created_at,
                        e.factura_nombre, e.solicitud_id, e.ambito,
+                       NULLIF(BTRIM(s.dest_nombre), '') AS destinatario,
+                       NULLIF(BTRIM(s.remitente_nombre), '') AS remitente,
                        s.estado AS solicitud_estado,
                        (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO')
                            AS oculto_cliente,

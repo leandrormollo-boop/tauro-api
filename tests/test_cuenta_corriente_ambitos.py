@@ -595,7 +595,12 @@ class _CursorMovimientos:
                 "debe_ars": Decimal("10.25"), "haber_ars": Decimal("0"),
                 "monto_ars": Decimal("10.25"), "estado": "ACTIVO",
                 "facturado": True, "envio_id": 9, "pago_id": None,
+                "solicitud_id": 19,
                 "archivo_url": "/portal/facturas/9/pdf",
+                "numero_guia": "TRACK-9", "destinatario": "Destino SA",
+                "remitente": "Origen SA",
+                "valor_envio_ars": Decimal("10.2500"),
+                "numero_factura": "FC-1",
             }]
 
     def fetchone(self):
@@ -615,11 +620,20 @@ def test_movimientos_paginados_filtra_en_sql_y_conserva_factura(monkeypatch):
     assert pagina["total_resultados"] == 1
     assert pagina["items"][0]["tipo"] == "FC"
     assert pagina["items"][0]["debe_ars"] == Decimal("10.25")
+    assert pagina["items"][0]["valor_envio_ars"] == Decimal("10.25")
+    assert pagina["items"][0]["numero_guia"] == "TRACK-9"
+    assert pagina["items"][0]["destinatario"] == "Destino SA"
+    assert pagina["items"][0]["remitente"] == "Origen SA"
     assert pagina["items"][0]["archivo_url"] == "/portal/facturas/9/pdf"
     sql = cursor.ejecutadas[0][0]
     assert "WHERE estado = 'APLICADA'" in sql
     assert "p.estado = 'PENDIENTE'" in sql
     assert "0::numeric, 0::numeric, p.monto_ars, 'PENDIENTE'" in sql
+    assert "LEFT JOIN solicitudes_guia s" in sql
+    assert "AS numero_guia" in sql
+    assert "AS destinatario" in sql
+    assert "AS remitente" in sql
+    assert "AS valor_envio_ars" in sql
     assert cursor.ejecutadas[0][1][5:7] == ("NACIONAL", "NACIONAL")
 
 

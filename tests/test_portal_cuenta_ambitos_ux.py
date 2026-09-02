@@ -225,6 +225,40 @@ def test_template_muestra_invariantes_tabs_paginacion_y_copy_seguro():
     assert "&pagina={{ numero }}" in html
 
 
+def test_movimientos_separan_y_ordenan_los_datos_del_envio():
+    portal_html = (
+        RAIZ / "templates" / "portal" / "cuenta.html"
+    ).read_text(encoding="utf-8")
+    admin_html = (
+        RAIZ / "templates" / "admin" / "cliente_detail.html"
+    ).read_text(encoding="utf-8")
+    admin_py = (RAIZ / "endpoints" / "admin.py").read_text(encoding="utf-8")
+    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+
+    columnas = (
+        "Concepto", "N.º de guía", "Destinatario", "Fecha", "Remitente",
+        "Valor del envío",
+    )
+    tablas = (
+        portal_html[portal_html.index('<table class="account-table">'):],
+        admin_html[admin_html.index('<table class="admin-shipments-table">'):],
+    )
+    for html in tablas:
+        posiciones = [html.index(f">{columna}<") for columna in columnas]
+        assert posiciones == sorted(posiciones)
+
+    assert 'data-label="Concepto"' in portal_html
+    assert 'data-label="N.º de guía"' in portal_html
+    assert 'data-label="Destinatario"' in portal_html
+    assert 'data-label="Remitente"' in portal_html
+    assert 'data-label="Valor del envío"' in portal_html
+    assert "NULLIF(BTRIM(s.dest_nombre), '') AS destinatario" in admin_py
+    assert "NULLIF(BTRIM(s.remitente_nombre), '') AS remitente" in admin_py
+    assert "WHEN e.solicitud_id IS NOT NULL THEN 'Flete'" in admin_py
+    assert ".admin-shipments-table" in css
+    assert '.account-table td[data-label="Concepto"]' in css
+
+
 def test_resumen_consolidado_no_desborda_sobre_los_ambitos():
     css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
 

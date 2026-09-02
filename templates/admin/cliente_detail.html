@@ -160,15 +160,16 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
     {% endif %}
   </div>
   <div class="table-wrap">
-    <table>
+    <table class="admin-shipments-table">
       <thead>
         <tr>
+          <th>Concepto</th>
+          <th>N.º de guía</th>
+          <th>Destinatario</th>
           <th>Fecha</th>
-          <th>Nro. FC</th>
-          <th>Descripción</th>
-          <th>Tracking</th>
+          <th>Remitente</th>
+          <th>Valor del envío</th>
           <th>Ámbito</th>
-          <th>Monto ARS</th>
           <th>Estado</th>
           <th></th>
         </tr>
@@ -176,10 +177,15 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
       <tbody>
         {% for e in envios %}
         <tr>
+          <td class="admin-shipment-concept">
+            <strong>{{ e.concepto or "Envío" }}</strong>
+            {% if e.nro_fc %}<small>FC {{ e.nro_fc }}</small>{% endif %}
+          </td>
+          <td class="mono admin-shipment-guide">{{ e.tracking or "—" }}</td>
+          <td class="admin-shipment-person">{{ e.destinatario or "—" }}</td>
           <td class="mono">{{ e.fecha.strftime("%d/%m/%Y") if e.fecha else "—" }}</td>
-          <td class="mono">{{ e.nro_fc or "—" }}</td>
-          <td style="color:var(--fg-3)">{{ e.descripcion or "—" }}</td>
-          <td class="mono" style="font-size:11px">{{ e.tracking or "—" }}</td>
+          <td class="admin-shipment-person">{{ e.remitente or "—" }}</td>
+          <td class="mono admin-shipment-value">$ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>
             {% if e.ambito == 'NACIONAL' %}
               <span class="badge ok">NACIONAL</span>
@@ -203,7 +209,6 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
               {% endif %}
             {% endif %}
           </td>
-          <td class="mono">$ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>
             {% if e.estado == 'CANCELADO' %}
               <span class="badge error">ANULADO</span>
@@ -231,7 +236,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" style="color:var(--fg-4);text-align:center;padding:16px;">Sin cargos.</td></tr>
+        <tr><td colspan="9" style="color:var(--fg-4);text-align:center;padding:16px;">Sin cargos.</td></tr>
         {% endfor %}
       </tbody>
     </table>

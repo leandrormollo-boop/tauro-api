@@ -577,7 +577,10 @@ def movimientos_cuenta_paginados(
                      THEN 'FC' ELSE 'PENDIENTE_FACTURA' END AS tipo,
                 CASE WHEN e.ambito IN ('NACIONAL', 'INTERNACIONAL')
                      THEN e.ambito ELSE 'SIN_CLASIFICAR' END AS ambito,
-                COALESCE(NULLIF(BTRIM(e.nro_fc), ''), e.descripcion, '') AS concepto,
+                CASE
+                    WHEN e.solicitud_id IS NOT NULL THEN 'Flete'
+                    ELSE COALESCE(NULLIF(BTRIM(e.descripcion), ''), 'Envío')
+                END AS concepto,
                 NULL::text AS referencia,
                 e.monto_ars AS debe_ars,
                 0::numeric AS haber_ars,
@@ -588,8 +591,19 @@ def movimientos_cuenta_paginados(
                 NULL::integer AS pago_id,
                 e.solicitud_id,
                 CASE WHEN e.factura_pdf IS NOT NULL
-                     THEN '/portal/facturas/' || e.id::text || '/pdf' END AS archivo_url
+                     THEN '/portal/facturas/' || e.id::text || '/pdf' END AS archivo_url,
+                COALESCE(
+                    NULLIF(BTRIM(e.tracking), ''),
+                    NULLIF(BTRIM(s.tracking), '')
+                ) AS numero_guia,
+                NULLIF(BTRIM(s.dest_nombre), '') AS destinatario,
+                NULLIF(BTRIM(s.remitente_nombre), '') AS remitente,
+                e.monto_ars AS valor_envio_ars,
+                NULLIF(BTRIM(e.nro_fc), '') AS numero_factura
             FROM envios e
+            LEFT JOIN solicitudes_guia s
+              ON s.id = e.solicitud_id
+             AND s.cliente_id = e.cliente_id
             WHERE e.cliente_id = %s
               AND e.estado NOT IN ('CANCELADO', 'NC')
               AND e.monto_ars > 0
@@ -598,12 +612,13 @@ def movimientos_cuenta_paginados(
 
             SELECT
                 p.fecha, pa.updated_at, 30, pa.id, 'PAGO', pa.ambito,
-                BTRIM(CONCAT_WS(' ', p.metodo, p.referencia)), p.referencia,
+                COALESCE(NULLIF(BTRIM(p.metodo), ''), 'Pago'), p.referencia,
                 0::numeric, pa.monto_ars, pa.monto_ars, 'APROBADO',
                 FALSE, NULL::integer, p.id,
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
-                     THEN '/portal/pagos/' || p.id::text || '/comprobante' END
+                     THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
+                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text
             FROM pagos_aplicaciones pa
             JOIN pagos p ON p.id = pa.pago_id
             WHERE p.cliente_id = %s
@@ -614,13 +629,14 @@ def movimientos_cuenta_paginados(
 
             SELECT
                 p.fecha, p.created_at, 20, p.id, 'PAGO', 'SIN_IMPUTAR',
-                BTRIM(CONCAT_WS(' ', 'Crédito sin imputar', p.metodo)), p.referencia,
+                'Crédito sin imputar', p.referencia,
                 0::numeric, p.monto_ars - COALESCE(ap.aplicado, 0),
                 p.monto_ars - COALESCE(ap.aplicado, 0), 'APROBADO',
                 FALSE, NULL::integer, p.id,
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
-                     THEN '/portal/pagos/' || p.id::text || '/comprobante' END
+                     THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
+                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text
             FROM pagos p
             LEFT JOIN aplicaciones_pago ap ON ap.pago_id = p.id
             WHERE p.cliente_id = %s
@@ -631,12 +647,13 @@ def movimientos_cuenta_paginados(
 
             SELECT
                 p.fecha, p.created_at, 10, p.id, 'PAGO_PENDIENTE', 'SIN_IMPUTAR',
-                BTRIM(CONCAT_WS(' ', p.metodo, p.referencia)), p.referencia,
+                COALESCE(NULLIF(BTRIM(p.metodo), ''), 'Pago informado'), p.referencia,
                 0::numeric, 0::numeric, p.monto_ars, 'PENDIENTE',
                 FALSE, NULL::integer, p.id,
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
-                     THEN '/portal/pagos/' || p.id::text || '/comprobante' END
+                     THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
+                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text
             FROM pagos p
             WHERE p.cliente_id = %s
               AND p.estado = 'PENDIENTE'
@@ -648,12 +665,25 @@ def movimientos_cuenta_paginados(
                 'DIFERENCIA',
                 CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                      THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
-                BTRIM(CONCAT_WS(' ', 'Diferencia envío', s.tracking)),
+                CASE
+                    WHEN ABS(c.tax_cliente_ars) > 0
+                     AND ABS(c.diferencia_flete_ars) > 0 THEN 'Diferencia + TAX'
+                    WHEN ABS(c.tax_cliente_ars) > 0 THEN 'TAX'
+                    ELSE 'Diferencia de envío'
+                END,
                 COALESCE(c.motivo_diferencia, a.motivo),
                 CASE WHEN a.tipo='DEBITO' THEN ABS(a.monto_ars) ELSE 0 END,
                 CASE WHEN a.tipo='CREDITO' THEN ABS(a.monto_ars) ELSE 0 END,
                 ABS(a.monto_ars), a.estado, FALSE, e.id, NULL::integer,
-                a.solicitud_id, NULL::text
+                a.solicitud_id, NULL::text,
+                COALESCE(
+                    NULLIF(BTRIM(s.tracking), ''),
+                    NULLIF(BTRIM(e.tracking), '')
+                ),
+                NULLIF(BTRIM(s.dest_nombre), ''),
+                NULLIF(BTRIM(s.remitente_nombre), ''),
+                a.precio_nuevo_ars,
+                NULLIF(BTRIM(e.nro_fc), '')
             FROM ajustes_cliente a
             JOIN conciliaciones_envio c ON c.id=a.conciliacion_id
             JOIN envios e ON e.solicitud_id=a.solicitud_id
@@ -701,7 +731,9 @@ def movimientos_cuenta_paginados(
         item.pop("origen_id", None)
         if item.get("fecha"):
             item["fecha"] = item["fecha"].strftime("%d/%m/%Y")
-        for campo in ("debe_ars", "haber_ars", "monto_ars"):
+        for campo in ("debe_ars", "haber_ars", "monto_ars", "valor_envio_ars"):
+            if item.get(campo) is None and campo == "valor_envio_ars":
+                continue
             item[campo] = Decimal(str(item.get(campo) or 0)).quantize(_CENTAVO)
     desde = offset + 1 if total else 0
     hasta = min(offset + len(items), total)

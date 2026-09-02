@@ -182,9 +182,13 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             <caption class="sr-only">Movimientos de la cuenta {{ ambito_filtro }}</caption>
             <thead>
                 <tr>
-                    <th scope="col">Fecha</th>
-                    <th scope="col">Detalle</th>
-                    {% if ambito_filtro == 'consolidado' %}<th scope="col">Ámbito</th>{% endif %}
+                    <th scope="col" class="account-col-concept">Concepto</th>
+                    <th scope="col" class="account-col-guide">N.º de guía</th>
+                    <th scope="col" class="account-col-person">Destinatario</th>
+                    <th scope="col" class="account-col-date">Fecha</th>
+                    <th scope="col" class="account-col-person">Remitente</th>
+                    <th scope="col" class="amount-column account-col-shipment-value">Valor del envío</th>
+                    {% if ambito_filtro == 'consolidado' %}<th scope="col" class="account-col-scope">Ámbito</th>{% endif %}
                     <th scope="col" class="amount-column">Debe</th>
                     <th scope="col" class="amount-column">Haber</th>
                 </tr>
@@ -192,8 +196,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             <tbody>
                 {% for m in filas %}
                 <tr>
-                    <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
-                    <td data-label="Detalle">
+                    <td data-label="Concepto">
                         <span class="account-movement-heading">
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}
                             <span class="badge warn">En revisión</span>
@@ -209,10 +212,18 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {{ m.concepto or '—' }}
                         </span>
                         {% if m.referencia %}<small>Ref. {{ m.referencia }}</small>{% endif %}
+                        {% if m.numero_factura %}<small>FC {{ m.numero_factura }}</small>{% endif %}
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
                         {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener" class="account-document-link">Ver comprobante o factura ↗</a>{% endif %}
+                    </td>
+                    <td class="mono" data-label="N.º de guía">
+                        {{ m.numero_guia or '—' }}
                         {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}" class="account-document-link">Ver envío →</a>{% endif %}
                     </td>
+                    <td data-label="Destinatario">{{ m.destinatario or '—' }}</td>
+                    <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
+                    <td data-label="Remitente">{{ m.remitente or '—' }}</td>
+                    <td class="mono amount-column account-shipment-value" data-label="Valor del envío">{% if m.valor_envio_ars is not none %}{{ dinero(m.valor_envio_ars) }}{% else %}—{% endif %}</td>
                     {% if ambito_filtro == 'consolidado' %}
                     <td data-label="Ámbito"><span class="badge muted">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span></td>
                     {% endif %}
