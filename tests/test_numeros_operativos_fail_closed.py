@@ -130,9 +130,11 @@ def test_recotizacion_dhl_legacy_valida_conserva_cajas_como_unidades(monkeypatch
         return {"opciones": [{
             "id": "dhl", "precio_ars": 100_000,
             "precio_usd": 100, "servicio": "Express",
+            "_base_interna": {"tarifa": "privada"},
         }]}
 
     monkeypatch.setattr("servicios.api_b2b.cotizar_couriers_cliente", cotizar)
+    monkeypatch.setattr(sg, "_congelar_base_recotizada", lambda *_args: True)
 
     salida = sg._recotizar_dhl_antes_de_emitir(solicitud)
 

@@ -228,7 +228,7 @@ Tiene pricing separado. Prioridad: parámetros por courier `WEB_MARKUP_PCT_<COUR
 
 ### Costo interno y momento de persistencia
 
-El costo estimado se guarda al cotizar en `cotizaciones.costo_fedex_usd` y, cuando el cliente acepta/crea la solicitud, en `envio_cotizacion_snapshots` con moneda, dólar, costo original, costo ARS, precio y margen. El snapshot es inmutable. La solicitud guarda sólo los precios visibles/comerciales; los endpoints cliente no exponen costo ni markup. El costo final documentado se guarda después, en ítems de `facturas_courier`.
+El costo estimado se guarda al cotizar en `cotizaciones.costo_fedex_usd` y, cuando el cliente acepta/crea la solicitud, en `envio_cotizacion_snapshots` con moneda, dólar, costo original, costo ARS, precio y margen. Para las cotizaciones multicourier sin `coti_id`, la recotización inmediatamente anterior a la emisión pide una base privada al motor y la registra antes del POST irreversible. Esa clave privada no existe en la respuesta pública. Una reemisión DHL falla cerrada si no obtiene un snapshot propio: nunca reutiliza la FK de la guía anterior ni llega al courier “SIN BASE”. El snapshot es inmutable. La solicitud guarda sólo los precios visibles/comerciales; los endpoints cliente no exponen costo ni markup. El costo final documentado se guarda después, en ítems de `facturas_courier`.
 
 ## 5. Conciliación courier
 
@@ -388,5 +388,6 @@ Los prefijos ya están incorporados debajo.
 - 1 septiembre: conciliación endurecida; factura courier por envío; separación de diferencia/tax; búsqueda y filtros mensuales/semanales; anulación, corrección y reemplazo seguro de guías DHL; mejoras visuales y branding Tiendanube.
 - 2 septiembre: verificación inline del envío, seguro y valores por caja, factura comercial y guía PDF unificadas, cotizador en modal, detalle de cuenta corriente organizado e importación histórica de MELCIOR por mes. También se completó en producción la última conversión monetaria pendiente, `productos.valor_usd_default` de REAL a NUMERIC(14,2), con backups y comparación fila por fila.
 - 2 septiembre, limpieza operativa: se conservaron cuatro cuentas como `test`, se cancelaron las solicitudes #2, #3 y las pruebas de WAIMAO, y se reparó con auditoría la guía `9802908161` cuyo cargo ya estaba cancelado. Dashboard, bandejas y selectores pasan a excluir datos de prueba; Tracking FedEx queda oculto y con errores sanitizados.
+- 2 septiembre, snapshots de reemisión: la recotización DHL captura costo, dólar, precio, margen y pesos en un canal interno antes de emitir, sin ampliar la respuesta cliente. Las reemisiones fallan cerradas si no tienen snapshot propio. En producción se reconstruyó con evidencia la relación WAIMAO #52 → #53, se conservaron cargos separados y se verificó que ambos trackings muestran base interna en conciliación; el acta está en `docs/REEMISION_WAIMAO_52_53_ACTA.md`.
 
 Este historial resume los commits visibles de `origin/main`; no atribuye autoría personal cuando el commit no la documenta. Para una auditoría exacta se debe consultar `git log --date=iso` y el diff de cada hash.

@@ -396,6 +396,7 @@ def cotizar_couriers_cliente(
     cliente_id: str, destino_pais: str, bultos: list,
     destino_real: dict = None, origen_real: dict = None,
     asegurar_carga: bool = False,
+    incluir_base_interna: bool = False,
 ) -> dict:
     """
     Las 3 opciones de courier para UN cliente del portal, cada una con SU
@@ -468,6 +469,7 @@ def cotizar_couriers_cliente(
         paquetes=piezas,
         pricing_por_courier=acceso_couriers["pricing_por_courier"],
         couriers_habilitados=acceso_couriers["couriers_habilitados"],
+        incluir_base_interna=incluir_base_interna,
     )
 
     opciones = [t for t in tarjetas if t.get("estado") == "cotizado"]

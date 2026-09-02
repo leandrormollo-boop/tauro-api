@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import os
+from decimal import Decimal
 
 from core.database import get_conn
 from core.fedex_client import FedExClient
@@ -568,15 +569,17 @@ def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
                              dolar: float, pricing_cliente: dict,
                              paquetes: list = None,
                              pricing_por_courier: dict[str, dict] | None = None,
-                             couriers_habilitados: set[str] | None = None) -> list[dict]:
+                             couriers_habilitados: set[str] | None = None,
+                             incluir_base_interna: bool = False) -> list[dict]:
     """
     PRECIO DEL PORTAL: los 3 couriers con la regla de ESE cliente.
 
     `pricing_cliente` es lo que devuelve pricing.get_pricing_config(cliente):
     {"tipo": "FIJO_ARS", "valor": 95000.0} para WAIMAO, por ejemplo.
 
-    Devuelve SÓLO precios finales. Ninguna clave con el costo ni el margen:
-    el cliente ve lo que le cobramos y nada más (regla de Leandro, 01/08/2026).
+    Por defecto devuelve SÓLO precios finales. ``incluir_base_interna`` está
+    reservado al control previo a emitir: agrega una clave privada que nunca
+    debe cruzar un endpoint y permite congelar el costo exacto del courier.
     Lo vigila tests/test_no_fuga_costo.py.
     """
     from servicios.pricing import aplicar_pricing
@@ -615,13 +618,58 @@ def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
         # Las claves se eligen a mano: aplicar_pricing devuelve además
         # markup_valor y markup_pct_equivalente, y con eso el cliente despeja
         # nuestro costo con una resta.
-        salida.append({
+        tarjeta = {
             **base,
             "estado": "cotizado",
             "servicio": crudo["servicio"],
             "dias_estimados": crudo["dias_estimados"],
             "precio_ars": precio["precio_final_ars"],
             "precio_usd": precio["precio_final_usd"],
-        })
+        }
+        if incluir_base_interna:
+            cambio = Decimal(str(dolar)) if es_usd else Decimal("1")
+            costo_nativo = Decimal(str(crudo["costo"]))
+            costo_exacto_ars = costo_nativo * cambio
+            precio_ars = Decimal(str(precio["precio_final_ars"]))
+            piezas = paquetes if paquetes is not None else [paquete]
+            peso_real = sum(
+                Decimal(str((pieza or {}).get("peso_kg") or 0))
+                for pieza in piezas
+            )
+            peso_volumetrico = sum(
+                (
+                    Decimal(str((pieza or {}).get("largo_cm") or 0))
+                    * Decimal(str((pieza or {}).get("ancho_cm") or 0))
+                    * Decimal(str((pieza or {}).get("alto_cm") or 0))
+                    / Decimal("5000")
+                )
+                for pieza in piezas
+            )
+            peso_facturable = sum(
+                max(
+                    Decimal(str((pieza or {}).get("peso_kg") or 0)),
+                    (
+                        Decimal(str((pieza or {}).get("largo_cm") or 0))
+                        * Decimal(str((pieza or {}).get("ancho_cm") or 0))
+                        * Decimal(str((pieza or {}).get("alto_cm") or 0))
+                        / Decimal("5000")
+                    ),
+                )
+                for pieza in piezas
+            )
+            tarjeta["_base_interna"] = {
+                "moneda_courier": moneda,
+                "tipo_cambio_ars": str(cambio),
+                "costo_courier_estimado": str(costo_nativo),
+                "costo_courier_estimado_ars": str(costo_exacto_ars),
+                "precio_cliente_inicial_ars": str(precio_ars),
+                "margen_tauro_protegido_ars": str(precio_ars - costo_exacto_ars),
+                "markup_tipo": precio["markup_tipo"],
+                "markup_valor": str(precio["markup_valor"]),
+                "peso_real_cotizado_kg": str(peso_real),
+                "peso_volumetrico_cotizado_kg": str(peso_volumetrico),
+                "peso_facturable_cotizado_kg": str(peso_facturable),
+            }
+        salida.append(tarjeta)
 
     return salida

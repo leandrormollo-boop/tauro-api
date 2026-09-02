@@ -51,6 +51,7 @@ def _congelar_cotizacion_aceptada_con_cursor(
     solicitud: dict,
     *,
     costo_estimado_manual_ars: Optional[float] = None,
+    base_interna: Optional[dict] = None,
 ) -> bool:
     """Congela costo estimado, precio aceptado y margen para conciliar luego.
 
@@ -60,22 +61,46 @@ def _congelar_cotizacion_aceptada_con_cursor(
     """
     courier = str(solicitud.get("courier") or "").strip().upper()
     coti_id = str(solicitud.get("coti_id") or "").strip()
-    if courier not in {"DHL", "FEDEX", "ANDREANI", "OCA"} or not coti_id:
+    if courier not in {"DHL", "FEDEX", "ANDREANI", "OCA"}:
         return False
-    cur.execute(
-        """
-        SELECT costo_fedex_usd, precio_final_usd, precio_final_ars,
-               markup_tipo, markup_valor, peso_kg, peso_usado_kg
-        FROM cotizaciones
-        WHERE coti_id = %s AND cliente_id = %s
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (coti_id, solicitud["cliente_id"]),
-    )
-    cotizacion = cur.fetchone()
+    cotizacion = None
+    if coti_id and not base_interna:
+        cur.execute(
+            """
+            SELECT costo_fedex_usd, precio_final_usd, precio_final_ars,
+                   markup_tipo, markup_valor, peso_kg, peso_usado_kg
+            FROM cotizaciones
+            WHERE coti_id = %s AND cliente_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (coti_id, solicitud["cliente_id"]),
+        )
+        cotizacion = cur.fetchone()
     precio_aceptado = Decimal(str(solicitud.get("precio_tauro_ars") or 0))
-    if cotizacion:
+    if base_interna:
+        moneda = str(base_interna.get("moneda_courier") or "").strip().upper()
+        costo_nativo = Decimal(str(base_interna.get("costo_courier_estimado")))
+        tipo_cambio = Decimal(str(base_interna.get("tipo_cambio_ars")))
+        costo_ars = Decimal(str(base_interna.get("costo_courier_estimado_ars")))
+        precio_base = Decimal(str(base_interna.get("precio_cliente_inicial_ars")))
+        margen_base = Decimal(str(base_interna.get("margen_tauro_protegido_ars")))
+        if moneda not in {"USD", "ARS"}:
+            raise ValueError("La tarifa privada tiene una moneda no soportada.")
+        if abs(precio_base - precio_aceptado) > Decimal("0.02"):
+            raise ValueError("La tarifa privada no coincide con el precio aceptado.")
+        if abs(costo_nativo * tipo_cambio - costo_ars) > Decimal("0.02"):
+            raise ValueError("La conversión de la tarifa privada no es consistente.")
+        if abs(precio_base - costo_ars - margen_base) > Decimal("0.02"):
+            raise ValueError("El margen de la tarifa privada no es consistente.")
+        markup_tipo = base_interna.get("markup_tipo")
+        markup_valor = base_interna.get("markup_valor")
+        peso_real = base_interna.get("peso_real_cotizado_kg")
+        peso_volumetrico = base_interna.get("peso_volumetrico_cotizado_kg")
+        peso_facturable = base_interna.get("peso_facturable_cotizado_kg")
+        margen = margen_base
+        fuente = "recotizacion_pre_emision"
+    elif cotizacion:
         precio_usd = Decimal(str(cotizacion.get("precio_final_usd") or 0))
         precio_log_ars = Decimal(str(cotizacion.get("precio_final_ars") or 0))
         costo_nativo = Decimal(str(cotizacion.get("costo_fedex_usd") or 0))
@@ -87,6 +112,7 @@ def _congelar_cotizacion_aceptada_con_cursor(
         markup_tipo = cotizacion.get("markup_tipo")
         markup_valor = cotizacion.get("markup_valor")
         peso_real = cotizacion.get("peso_kg")
+        peso_volumetrico = None
         peso_facturable = cotizacion.get("peso_usado_kg")
         fuente = "cotizaciones"
     elif costo_estimado_manual_ars is not None:
@@ -97,11 +123,12 @@ def _congelar_cotizacion_aceptada_con_cursor(
         markup_tipo = None
         markup_valor = None
         peso_real = solicitud.get("peso_kg")
+        peso_volumetrico = None
         peso_facturable = solicitud.get("peso_kg")
         fuente = "carga_manual_admin"
     else:
         return False
-    margen = precio_aceptado - costo_ars
+    margen = precio_aceptado - costo_ars if not base_interna else margen
     if tipo_cambio <= 0 or costo_ars < 0 or margen < Decimal("-0.02"):
         raise ValueError("La cotización aceptada no conserva un margen válido.")
     margen = max(Decimal("0"), margen)
@@ -125,11 +152,12 @@ def _congelar_cotizacion_aceptada_con_cursor(
             costo_courier_estimado, costo_courier_estimado_ars,
             precio_cliente_inicial_ars, margen_tauro_protegido_ars,
             markup_tipo, markup_valor,
-            peso_real_cotizado_kg, peso_facturable_cotizado_kg,
+            peso_real_cotizado_kg, peso_volumetrico_cotizado_kg,
+            peso_facturable_cotizado_kg,
             bultos, origen_calculo, aceptado_at
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s
+            %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s
         )
         ON CONFLICT (solicitud_id) DO NOTHING
         """,
@@ -137,13 +165,59 @@ def _congelar_cotizacion_aceptada_con_cursor(
             int(solicitud["id"]), coti_id, courier,
             solicitud.get("servicio_courier"), moneda, tipo_cambio,
             costo_nativo, costo_ars, precio_aceptado, margen,
-            markup_tipo, markup_valor, peso_real, peso_facturable,
+            markup_tipo, markup_valor, peso_real, peso_volumetrico, peso_facturable,
             json.dumps(solicitud.get("bultos") or []),
             json.dumps({"fuente": fuente, "snapshot_sha256": huella}),
             solicitud.get("created_at"),
         ),
     )
     return True
+
+
+def _congelar_base_recotizada(solicitud: dict, base_interna: dict) -> bool:
+    """Persiste la tarifa privada antes de la operación irreversible."""
+    if not isinstance(base_interna, dict):
+        return False
+    from servicios.conciliacion_couriers import registrar_snapshot_cotizacion
+
+    resultado = registrar_snapshot_cotizacion(
+        solicitud_id=int(solicitud["id"]),
+        coti_id=str(solicitud.get("coti_id") or "").strip() or None,
+        courier=str(solicitud.get("courier") or "").strip().upper(),
+        servicio_courier=solicitud.get("servicio_courier"),
+        moneda_courier=base_interna.get("moneda_courier"),
+        tipo_cambio_ars=base_interna.get("tipo_cambio_ars"),
+        costo_courier_estimado=base_interna.get("costo_courier_estimado"),
+        precio_cliente_inicial_ars=base_interna.get("precio_cliente_inicial_ars"),
+        margen_tauro_protegido_ars=base_interna.get("margen_tauro_protegido_ars"),
+        markup_tipo=base_interna.get("markup_tipo"),
+        markup_valor=base_interna.get("markup_valor"),
+        peso_real_cotizado_kg=base_interna.get("peso_real_cotizado_kg"),
+        peso_volumetrico_cotizado_kg=(
+            base_interna.get("peso_volumetrico_cotizado_kg")
+        ),
+        peso_facturable_cotizado_kg=(
+            base_interna.get("peso_facturable_cotizado_kg")
+        ),
+        bultos=solicitud.get("bultos") or [],
+        origen_calculo={"fuente": "recotizacion_pre_emision"},
+        aceptado_at=solicitud.get("created_at"),
+        actor="sistema:emision_courier",
+    )
+    return bool(resultado.get("id"))
+
+
+def _reemision_tiene_snapshot(solicitud: dict) -> bool:
+    """Una reemisión jamás puede llegar al courier sin su base propia."""
+    if not solicitud.get("reemplaza_solicitud_id"):
+        return True
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM envio_cotizacion_snapshots WHERE solicitud_id=%s",
+                (int(solicitud["id"]),),
+            )
+            return cur.fetchone() is not None
 
 
 def _error_ambito_no_emitible(solicitud: dict) -> Optional[str]:
@@ -2332,6 +2406,7 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
                 "estado": sol.get("remitente_estado") or "",
             },
             asegurar_carga=bool(sol.get("asegurar_carga")),
+            incluir_base_interna=True,
         )
     except Exception as e:
         print(f"[solicitudes] no pude recotizar DHL antes de emitir {sol['id']}: {e}")
@@ -2352,6 +2427,17 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
         opcion.get("precio_ars"), "Precio DHL actual", importe=True, minimo=0.001
     )
     if abs(actual - anterior) <= 0.5:
+        base_interna = opcion.get("_base_interna")
+        try:
+            congelada = _congelar_base_recotizada(sol, base_interna)
+        except Exception as e:
+            print(f"[solicitudes] tarifa privada inconsistente para {sol['id']}: "
+                  f"{type(e).__name__}")
+            congelada = False
+        if not congelada:
+            return {"ok": False, "error":
+                    "No pudimos guardar la base interna de la tarifa DHL. "
+                    "No emitimos ni cobramos nada; probá de nuevo o pedí ayuda a Tauro."}
         return {"ok": True}
 
     with get_conn() as conn:
@@ -2536,6 +2622,21 @@ def generar_guia(solicitud_id: int, ya_reservada: bool = False) -> dict:
     error_ambito = _error_ambito_no_emitible(sol)
     if error_ambito:
         return {"ok": False, "error": error_ambito}
+
+    # El flujo cliente congela la base al recotizar. El admin puede llegar
+    # directo al despachador: en una reemisión DHL recuperamos la tarifa acá,
+    # todavía antes del POST irreversible. Ninguna guía reemplazada se emite
+    # si no existe una fila propia (no se reutiliza la FK de la guía vieja).
+    if not _reemision_tiene_snapshot(sol):
+        if courier == "DHL":
+            recotizacion = _recotizar_dhl_antes_de_emitir(sol)
+            if not recotizacion.get("ok"):
+                return recotizacion
+            sol = obtener_solicitud(solicitud_id) or sol
+        if not _reemision_tiene_snapshot(sol):
+            return {"ok": False, "error":
+                    "La guía de reemplazo no tiene una base interna confirmada. "
+                    "No se emitió ni se generó ningún cargo."}
 
     # El admin también pasa por una guarda productiva. El cliente ya la
     # verifica dentro de _reservar_credito_cliente(), pero el botón del admin
