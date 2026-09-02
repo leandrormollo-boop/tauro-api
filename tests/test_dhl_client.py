@@ -376,6 +376,24 @@ def test_una_sola_caja_sigue_yendo_por_el_GET():
     assert get.called and not post.called
 
 
+def test_seguro_fuerza_post_rates_y_envia_valor_total_ii():
+    bultos = [
+        {**BULTOS[0], "valor_declarado_caja_usd": 125,
+         "asegurar_carga": True},
+        {**BULTOS[1], "valor_declarado_caja_usd": 275,
+         "asegurar_carga": True},
+    ]
+    out, kw = _post(bultos=bultos)
+    assert out["encontrado"]
+    assert kw["json"]["valueAddedServices"] == [{
+        "serviceCode": "II", "value": 400.0, "currency": "USD",
+    }]
+
+    out, kw = _post(bultos=[bultos[0]])
+    assert out["encontrado"]
+    assert kw["json"]["valueAddedServices"][0]["serviceCode"] == "II"
+
+
 # ── create_shipment: las reglas de negocio de Leandro (01/08) ──
 
 SHIPPER_CN = {

@@ -99,6 +99,44 @@ def test_solicita_data_staging_guia_y_factura_comercial():
     }
 
 
+def test_seguro_se_emite_como_ii_por_el_valor_total_de_las_cajas():
+    envio = {
+        **ENVIO,
+        "asegurar_carga": True,
+        "bultos": [{
+            **ENVIO["bultos"][0],
+            "unidades_aduana": 4,
+            "valor_unitario_usd": 100,
+            "valor_declarado_caja_usd": 200,
+        }],
+    }
+    cap, resultado = _emitir_capturando(envio)
+    assert resultado["encontrado"]
+    assert cap["body"]["content"]["declaredValue"] == 400.0
+    assert cap["body"]["valueAddedServices"] == [
+        {"serviceCode": "PV"},
+        {"serviceCode": "II", "value": 400.0, "currency": "USD"},
+    ]
+
+
+def test_dhl_bloquea_si_valor_por_caja_no_coincide_con_invoice():
+    envio = {
+        **ENVIO,
+        "asegurar_carga": True,
+        "bultos": [{
+            **ENVIO["bultos"][0],
+            "unidades_aduana": 4,
+            "valor_unitario_usd": 100,
+            "valor_declarado_caja_usd": 100,
+        }],
+    }
+    with mock.patch("core.dhl_client.requests.post") as post:
+        resultado = _cliente().create_shipment(envio)
+    assert not resultado["encontrado"]
+    assert "no coincide con la invoice" in resultado["error"]
+    post.assert_not_called()
+
+
 def test_exportador_argentino_sin_cuit_valido_no_llega_a_dhl():
     envio = {**ENVIO, "shipper": {**ENVIO["shipper"], "documento": "20-1"}}
     with mock.patch("core.dhl_client.requests.post") as post:

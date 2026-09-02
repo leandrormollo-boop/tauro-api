@@ -68,7 +68,8 @@ def test_el_portal_acepta_la_caja_tal_como_viene_en_la_guia():
     piezas, det, err = _piezas_del_catalogo("WAIMAO", [CAJA_HAILU])
     assert err is None, err
     assert piezas[0] == {"peso_kg": 3.9, "largo_cm": 48.0,
-                         "ancho_cm": 47.0, "alto_cm": 20.0}
+                         "ancho_cm": 47.0, "alto_cm": 20.0,
+                         "valor_declarado_caja_usd": 120.0}
     assert det[0]["descripcion_en"].startswith("8 SHIRTS 60% POLYESTER")
     assert det[0]["cantidad"] == 1
     assert det[0]["unidades_aduana"] == 8

@@ -395,6 +395,7 @@ def obtener_precio_envio(
 def cotizar_couriers_cliente(
     cliente_id: str, destino_pais: str, bultos: list,
     destino_real: dict = None, origen_real: dict = None,
+    asegurar_carga: bool = False,
 ) -> dict:
     """
     Las 3 opciones de courier para UN cliente del portal, cada una con SU
@@ -438,6 +439,11 @@ def cotizar_couriers_cliente(
     piezas, detalle, error = _piezas_del_catalogo(cliente_id, bultos)
     if error:
         return {"encontrado": False, "motivo": error}
+    # El seguro es un servicio del envío completo, pero el adaptador de cada
+    # courier recibe piezas. La marca y el valor por caja viajan en cada pieza
+    # para que DHL pueda sumar exactamente el monto asegurado en POST /rates.
+    for pieza in piezas:
+        pieza["asegurar_carga"] = bool(asegurar_carga)
 
     def _direccion(real: dict, iso: str) -> dict:
         """La dirección real si la hay; si no, la de referencia del país."""
@@ -580,15 +586,45 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
         # ambos conceptos por separado.
         fila["unidades_aduana"] = unidades_aduana
 
+        # Los errores físicos tienen prioridad: si una caja supera el tope,
+        # hay que informarlo aunque la invoice todavía esté incompleta.
         if float(fila.get("peso_kg") or 0) > MAX_KG_POR_CAJA:
             return [], [], (f"peso_excedido: cada caja pesa {fila['peso_kg']}kg "
                             f"y el máximo es {MAX_KG_POR_CAJA}kg.")
+
+        valor_unitario = _num(fila.get("valor_unitario_usd"), importe=True)
+        if valor_unitario in (None, numero_invalido):
+            return [], [], ("caja_incompleta: el valor unitario de la invoice "
+                            "debe ser mayor a cero")
+
+        valor_caja_explicito = b.get("valor_declarado_caja_usd") not in (None, "")
+        valor_caja = _num(
+            b.get("valor_declarado_caja_usd"), importe=True,
+        )
+        if valor_caja is numero_invalido:
+            return [], [], ("caja_incompleta: el valor declarado por caja debe "
+                            "ser un monto válido mayor a cero")
+        total_invoice = round(float(valor_unitario) * unidades_aduana, 2)
+        if valor_caja is None:
+            # Compatibilidad con solicitudes/API anteriores: antes sólo se
+            # guardaba el total comercial. Se reparte entre las cajas sin
+            # alterar el valor declarado total de la invoice.
+            valor_caja = round(total_invoice / cantidad, 2)
+        total_cajas_declarado = round(float(valor_caja) * cantidad, 2)
+        if valor_caja_explicito and abs(total_cajas_declarado - total_invoice) > 0.02:
+            return [], [], (
+                "valor_declarado_no_coincide: el total declarado de las cajas "
+                f"(USD {total_cajas_declarado:.2f}) debe coincidir con el subtotal "
+                f"de la invoice (USD {total_invoice:.2f})"
+            )
+        fila["valor_declarado_caja_usd"] = round(float(valor_caja), 2)
 
         total_cajas += cantidad
         for _ in range(cantidad):
             piezas.append({
                 "peso_kg": fila["peso_kg"], "largo_cm": fila["largo_cm"],
                 "ancho_cm": fila["ancho_cm"], "alto_cm": fila["alto_cm"],
+                "valor_declarado_caja_usd": fila["valor_declarado_caja_usd"],
             })
         detalle.append(fila)
 

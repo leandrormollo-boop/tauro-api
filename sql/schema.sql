@@ -1363,6 +1363,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     ancho_cm                 REAL,
     alto_cm                  REAL,
     valor_declarado_usd      REAL,
+    asegurar_carga           BOOLEAN NOT NULL DEFAULT FALSE,
     ruta_id                  TEXT,
     coti_id                  TEXT,
     precio_tauro_ars         REAL,
@@ -1447,7 +1448,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_solicitudes_cliente_idempotency
 
 -- Multi-bulto: lista JSON de cajas del envío. Cada elemento:
 --   {producto_alias, cantidad, peso_kg, largo_cm, ancho_cm, alto_cm,
---    valor_unitario_usd, hs_code, descripcion_en}
+--    valor_declarado_caja_usd, valor_unitario_usd, hs_code, descripcion_en}
 -- cantidad = cajas IDÉNTICAS de ese producto (cada caja viaja como pieza
 -- con su propio label). Los campos legacy (producto_alias, cantidad,
 -- peso_kg, ...) guardan el primer bulto + totales para retrocompat.
@@ -1457,6 +1458,10 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS bultos JSONB;
 -- guardado porque define el incoterm de la guía: si el cliente cambia su
 -- default mañana, los envíos ya despachados no pueden cambiar de manos.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS tax_paga TEXT;
+-- Protección elegida para ESTE envío. En DHL se cotiza y emite como el
+-- servicio adicional II, por el valor declarado total de todas las cajas.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS asegurar_carga BOOLEAN NOT NULL DEFAULT FALSE;
 -- Empresa y CONTACTO separados (guía real de HAILU, 05/08): los couriers
 -- piden companyName (razón social) Y personName (quién atiende). Antes un
 -- solo campo forzaba a elegir, y la emisión ponía como empresa al cliente

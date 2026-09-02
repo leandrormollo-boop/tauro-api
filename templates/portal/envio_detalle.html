@@ -217,7 +217,13 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     <td class="mono">x{{ b.cantidad }}</td>
                     <td class="mono">{{ b.largo_cm }}×{{ b.ancho_cm }}×{{ b.alto_cm }} cm</td>
                     <td class="mono">{{ b.peso_kg }} kg</td>
-                    <td class="num">USD {{ b.valor_unitario_usd }} c/u</td>
+                    <td class="num">
+                        {% if b.valor_declarado_caja_usd %}
+                            USD {{ b.valor_declarado_caja_usd }} por caja
+                        {% else %}
+                            USD {{ b.valor_unitario_usd }} por unidad
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             {% else %}
@@ -239,6 +245,10 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="mini-row">
         <span>Valor declarado total</span>
         <strong>USD {{ s.valor_declarado_usd }}</strong>
+    </div>
+    <div class="mini-row">
+        <span>Protección de carga</span>
+        <strong>{{ "Asegurada" if s.asegurar_carga else "Sin seguro" }}</strong>
     </div>
 </div>
 

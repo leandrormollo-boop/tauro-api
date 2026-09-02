@@ -281,6 +281,7 @@ def _sin_label(row: dict) -> dict:
         "valor_declarado_usd": "valor declarado",
         "bultos": "cajas e invoice comercial",
         "tax_paga": "responsable de impuestos",
+        "asegurar_carga": "protección de carga",
         "observaciones": "observaciones",
     }
     row["reemision_cambios"] = [etiquetas.get(c, c) for c in campos]
@@ -295,7 +296,8 @@ _CAMPOS_REEMISION_AUDITABLES = (
     "dest_documento", "dest_email", "dest_telefono", "dest_direccion",
     "dest_ciudad", "dest_estado", "dest_zip", "producto_alias",
     "cantidad", "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
-    "valor_declarado_usd", "bultos", "tax_paga", "observaciones",
+    "valor_declarado_usd", "bultos", "tax_paga", "asegurar_carga",
+    "observaciones",
 )
 
 
@@ -753,6 +755,8 @@ def crear_solicitud_guia(
     # Quién paga los impuestos de destino EN ESTE envío (DESTINATARIO |
     # CLIENTE). Define el incoterm de la guía, por eso se congela acá.
     tax_paga: Optional[str] = None,
+    # Protección opcional de la carga. En DHL se cotiza y emite como VAS II.
+    asegurar_carga: bool = False,
     api_referencia: str = "",
     idempotency_key_hash: str = "",
     request_fingerprint: str = "",
@@ -806,7 +810,8 @@ def crear_solicitud_guia(
                            dest_telefono, dest_direccion, dest_ciudad,
                            dest_estado, dest_zip, producto_alias, cantidad,
                            peso_kg, largo_cm, ancho_cm, alto_cm,
-                           valor_declarado_usd, bultos, tax_paga, observaciones
+                           valor_declarado_usd, bultos, tax_paga,
+                           asegurar_carga, observaciones
                     FROM solicitudes_guia
                     WHERE id=%s AND cliente_id=%s
                     FOR UPDATE
@@ -898,6 +903,7 @@ def crear_solicitud_guia(
                     courier, servicio_courier, tax_paga,
                     remitente_contacto, dest_contacto,
                     api_referencia, idempotency_key_hash, request_fingerprint,
+                    asegurar_carga,
                     origen_plataforma, origen_dominio, origen_pedido_externo_id
                 )
                 VALUES (
@@ -911,7 +917,7 @@ def crear_solicitud_guia(
                     %s, %s, %s,
                     %s, %s,
                     %s, %s, %s,
-                    %s, %s, %s
+                    %s, %s, %s, %s
                 )
                 ON CONFLICT (cliente_id, idempotency_key_hash)
                     WHERE idempotency_key_hash IS NOT NULL
@@ -962,6 +968,7 @@ def crear_solicitud_guia(
                     _clean(api_referencia),
                     _clean(idempotency_key_hash),
                     _clean(request_fingerprint),
+                    bool(asegurar_carga),
                     origen_plataforma_norm,
                     origen_dominio_norm,
                     origen_pedido_norm,
@@ -2050,6 +2057,24 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
                     importe=True,
                     minimo=0.001,
                 ),
+                "valor_declarado_caja_usd": (
+                    parse_float_formulario(
+                        bulto.get("valor_declarado_caja_usd"),
+                        f"Bulto {indice}, valor declarado por caja",
+                        importe=True,
+                        minimo=0.001,
+                    )
+                    if bulto.get("valor_declarado_caja_usd") not in (None, "")
+                    else round(
+                        parse_float_formulario(
+                            bulto.get("valor_unitario_usd"),
+                            f"Bulto {indice}, valor unitario",
+                            importe=True,
+                            minimo=0.001,
+                        ) * unidades / cantidad,
+                        2,
+                    )
+                ),
                 "unidades_aduana": unidades,
                 "hs_code": bulto.get("hs_code") or "",
                 "pais_origen": (
@@ -2087,6 +2112,7 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
             ),
             "descripcion_en": sol.get("producto_alias") or "Merchandise",
             "valor_unitario_usd": total / cantidad,
+            "valor_declarado_caja_usd": total / cantidad,
             "pais_origen": sol.get("remitente_pais") or "AR",
         }]
 
@@ -2104,6 +2130,7 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
                 "cp": sol.get("remitente_zip") or "",
                 "estado": sol.get("remitente_estado") or "",
             },
+            asegurar_carga=bool(sol.get("asegurar_carga")),
         )
     except Exception as e:
         print(f"[solicitudes] no pude recotizar DHL antes de emitir {sol['id']}: {e}")
@@ -2693,6 +2720,27 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
                     "valor_unitario_usd": _numero_requerido(
                         b.get("valor_unitario_usd"), f"Ítem {i}: valor unitario", importe=True
                     ),
+                    "valor_declarado_caja_usd": (
+                        _numero_requerido(
+                            b.get("valor_declarado_caja_usd"),
+                            f"Caja {i}: valor declarado por caja",
+                            importe=True,
+                        )
+                        if b.get("valor_declarado_caja_usd") not in (None, "")
+                        else round(
+                            _numero_requerido(
+                                b.get("valor_unitario_usd"),
+                                f"Ítem {i}: valor unitario",
+                                importe=True,
+                            ) * _entero_requerido(
+                                b.get("unidades_aduana"),
+                                f"Caja {i}: unidades de aduana",
+                            ) / _entero_requerido(
+                                b.get("cantidad"), f"Caja {i}: cantidad",
+                            ),
+                            2,
+                        )
+                    ),
                     "unidades": _entero_requerido(b.get("cantidad"), f"Caja {i}: cantidad"),
                     "unidades_aduana": _entero_requerido(
                         b.get("unidades_aduana"), f"Caja {i}: unidades de aduana"
@@ -2736,6 +2784,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     # Quién paga los impuestos en ESTE envío: se decidió al crearlo y se
     # congeló ahí. Sin esto FedEx vuelve al SENDER fijo con la cuenta de TAURO.
     datos_envio["tax_paga"] = sol.get("tax_paga")
+    datos_envio["asegurar_carga"] = bool(sol.get("asegurar_carga"))
 
     # El cliente del courier se elige acá: el payload (shipper/recipient/
     # bultos) es el MISMO contrato para los dos, por eso todo el armado de

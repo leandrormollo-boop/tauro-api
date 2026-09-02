@@ -1594,7 +1594,8 @@ async def api_precio_envio_multi(
                 # el submit — peso, medidas y la invoice de esta caja.
                 **{k: b.get(k) for k in (
                     "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
-                    "valor_unitario_usd", "descripcion_en", "hs_code",
+                    "valor_declarado_caja_usd", "valor_unitario_usd",
+                    "descripcion_en", "hs_code",
                     "pais_origen",
                 ) if b.get(k) not in (None, "")},
             })
@@ -1611,14 +1612,27 @@ async def api_precio_envio_multi(
         precio = cotizar_couriers_cliente(
             cliente, destino, bultos,
             destino_real=destino_real, origen_real=origen_real,
+            asegurar_carga=(
+                body.get("asegurar_carga") is True
+                or str(body.get("asegurar_carga") or "").strip().upper()
+                in {"SI", "SÍ", "1", "TRUE"}
+            ),
         )
     except Exception as e:
         print(f"[portal] api_precio_multi error: {type(e).__name__}")
         return JSONResponse({"ok": False, "motivo": "error_cotizando"}, status_code=200)
 
     if not precio.get("encontrado"):
+        motivo = precio.get("motivo") or "sin_precio"
+        seguro_pedido = (
+            body.get("asegurar_carga") is True
+            or str(body.get("asegurar_carga") or "").strip().upper()
+            in {"SI", "SÍ", "1", "TRUE"}
+        )
+        if seguro_pedido and motivo == "sin_cobertura":
+            motivo = "seguro_no_disponible"
         return JSONResponse(
-            {"ok": False, "motivo": precio.get("motivo") or "sin_precio"},
+            {"ok": False, "motivo": motivo},
             status_code=200,
         )
 
@@ -1921,6 +1935,10 @@ def _precargar_envio_existente(origen: dict, *, corregir_id: int | None = None):
                 float(origen.get("valor_declarado_usd") or 0)
                 / max(cantidad_cajas, 1)
             ),
+            "valor_declarado_caja_usd": (
+                float(origen.get("valor_declarado_usd") or 0)
+                / max(cantidad_cajas, 1)
+            ),
             "descripcion_en": origen.get("producto_alias") or "",
             "hs_code": "",
             "pais_origen": origen.get("remitente_pais") or "AR",
@@ -1932,6 +1950,14 @@ def _precargar_envio_existente(origen: dict, *, corregir_id: int | None = None):
             fila.get("producto") or fila.get("producto_alias") or ""
         )
         fila.setdefault("unidades_aduana", fila.get("cantidad") or 1)
+        if fila.get("valor_declarado_caja_usd") in (None, ""):
+            cantidad_cajas = max(int(fila.get("cantidad") or 1), 1)
+            unidades = max(int(fila.get("unidades_aduana") or cantidad_cajas), 1)
+            fila["valor_declarado_caja_usd"] = round(
+                float(fila.get("valor_unitario_usd") or 0) * unidades
+                / cantidad_cajas,
+                2,
+            )
         filas.append(fila)
 
     courier = str(origen.get("courier") or "dhl").strip().lower()
@@ -1965,6 +1991,7 @@ def _precargar_envio_existente(origen: dict, *, corregir_id: int | None = None):
         "observaciones": origen.get("observaciones") or "",
         "precio_cliente_final_ars": origen.get("precio_cliente_final_ars") or "",
         "tax_paga": origen.get("tax_paga") or "",
+        "asegurar_carga": "SI" if origen.get("asegurar_carga") else "NO",
         "intl_courier": courier,
         # Siempre se vuelve a cotizar: repetir datos no conserva una tarifa
         # histórica que quizá ya cambió.
@@ -2107,6 +2134,7 @@ def envio_nuevo_form(
                     "ancho_cm": cotizacion_web["ancho_cm"],
                     "alto_cm": cotizacion_web["alto_cm"],
                     "valor_unitario_usd": cotizacion_web["valor_declarado_usd"],
+                    "valor_declarado_caja_usd": cotizacion_web["valor_declarado_usd"],
                     "descripcion_en": "",
                     "hs_code": "",
                     "pais_origen": cotizacion_web["origen"],
@@ -2225,6 +2253,10 @@ def envio_nuevo_post(
     bulto_largo: list[str] = Form([]),
     bulto_ancho: list[str] = Form([]),
     bulto_alto: list[str] = Form([]),
+    # Total de mercadería contenido EN CADA CAJA física. Se controla contra
+    # unidades de invoice × valor unitario para no asegurar/declarar montos
+    # distintos por accidente.
+    bulto_valor_caja_usd: list[str] = Form([]),
     bulto_desc_en: list[str] = Form([]),
     bulto_valor_usd: list[str] = Form([]),
     bulto_hs: list[str] = Form([]),
@@ -2240,6 +2272,7 @@ def envio_nuevo_post(
     # Quién paga los impuestos de destino EN ESTE envío. Viene con el default
     # del cliente ya seleccionado; acá se guarda lo que quedó elegido.
     tax_paga: str = Form(""),
+    asegurar_carga: str = Form("NO"),
     remitente_id: str = Form(""),
     # Remitente EDITABLE (05/08): lo que quedó en los campos manda sobre lo
     # que vino de la libreta. Para una importación el remitente es el
@@ -2287,6 +2320,13 @@ def envio_nuevo_post(
     # FormInfo, no una lista enviada por el navegador.
     if not isinstance(bulto_unidades_aduana, (list, tuple)):
         bulto_unidades_aduana = []
+    if not isinstance(bulto_valor_caja_usd, (list, tuple)):
+        bulto_valor_caja_usd = []
+    if not isinstance(asegurar_carga, str):
+        asegurar_carga = "NO"
+    asegurar_carga = asegurar_carga.strip().upper()
+    if asegurar_carga not in {"SI", "NO"}:
+        asegurar_carga = "NO"
     # Invocaciones directas de tests/consumidores internos conservan el
     # FormInfo de FastAPI en parámetros nuevos que no enviaron.
     if not isinstance(reemplaza_solicitud_id, str):
@@ -2304,7 +2344,8 @@ def envio_nuevo_post(
     errores_invoice = []
     n_filas = max(len(bulto_producto or []), len(bulto_cantidad or []),
                   len(bulto_peso or []), len(bulto_desc_en or []),
-                  len(bulto_unidades_aduana or []))
+                  len(bulto_unidades_aduana or []),
+                  len(bulto_valor_caja_usd or []))
     for i in range(n_filas):
         def _campo(lista, idx=i):
             v = lista[idx] if idx < len(lista or []) else ""
@@ -2323,6 +2364,7 @@ def envio_nuevo_post(
             "largo_cm": _campo(bulto_largo),
             "ancho_cm": _campo(bulto_ancho),
             "alto_cm": _campo(bulto_alto),
+            "valor_declarado_caja_usd": _campo(bulto_valor_caja_usd),
             "descripcion_en": _campo(bulto_desc_en),
             "valor_unitario_usd": _campo(bulto_valor_usd),
             "hs_code": _campo(bulto_hs),
@@ -2367,17 +2409,21 @@ def envio_nuevo_post(
         }
         # Caja manual: peso y medidas de ESTE envío (con catálogo, lo pisan).
         for lista, clave in ((bulto_peso, "peso_kg"), (bulto_largo, "largo_cm"),
-                             (bulto_ancho, "ancho_cm"), (bulto_alto, "alto_cm")):
+                             (bulto_ancho, "ancho_cm"), (bulto_alto, "alto_cm"),
+                             (bulto_valor_caja_usd, "valor_declarado_caja_usd")):
             v = _campo(lista)
             if v:
                 try:
                     etiquetas = {
                         "peso_kg": "el peso", "largo_cm": "el largo",
                         "ancho_cm": "el ancho", "alto_cm": "el alto",
+                        "valor_declarado_caja_usd": "el valor declarado por caja",
                     }
                     fila[clave] = _numero_form(
                         v, f"Caja {i + 1}: {etiquetas[clave]}",
-                        minimo=0.01 if clave == "peso_kg" else 1,
+                        importe=clave == "valor_declarado_caja_usd",
+                        minimo=(0.01 if clave in {"peso_kg", "valor_declarado_caja_usd"}
+                                else 1),
                         maximo=70 if clave == "peso_kg" else None,
                     )
                     fila_form[clave] = fila[clave]
@@ -2454,6 +2500,7 @@ def envio_nuevo_post(
         "intl_courier": intl_courier,
         "precio_cotizado_ars": precio_cotizado_ars,
         "tax_paga": tax_paga,
+        "asegurar_carga": asegurar_carga,
         # BUG corregido: sin esto, un error de validación re-renderizaba el
         # form con el hidden del pedido VACÍO — el vínculo con la venta de la
         # tienda se perdía, el pedido quedaba "pendiente" para siempre y se
@@ -2590,7 +2637,6 @@ def envio_nuevo_post(
                     f"En {donde} te falta {', '.join(faltan)}. "
                     "Completalos, o elegí un producto de tu catálogo y se cargan solos."
                 )
-
         error_step = 4
         if errores_invoice:
             raise ValueError(errores_invoice[0])
@@ -2629,8 +2675,14 @@ def envio_nuevo_post(
                     "cp": remitente.get("cp") or "",
                     "estado": remitente.get("estado") or "",
                 },
+                asegurar_carga=asegurar_carga == "SI",
             )
             if not multi.get("encontrado"):
+                if asegurar_carga == "SI" and multi.get("motivo") == "sin_cobertura":
+                    raise ValueError(
+                        "DHL no pudo cotizar este envío con protección de carga. "
+                        "Revisá el valor declarado o elegí sin seguro."
+                    )
                 raise ValueError(
                     f"No se pudo cotizar ese envío ({multi.get('motivo') or 'sin_precio'})."
                 )
@@ -2758,8 +2810,12 @@ def envio_nuevo_post(
             # valor unitario × cantidad por renglón), no de un default 100:
             # declarar 100 USD cuando la carga vale 960 es falsear la aduana.
             valor_declarado = round(sum(
-                float(b.get("valor_unitario_usd") or 0) * int(
-                    b.get("unidades_aduana") or b.get("cantidad") or 1
+                (
+                    float(b.get("valor_declarado_caja_usd"))
+                    * int(b.get("cantidad") or 1)
+                    if b.get("valor_declarado_caja_usd") not in (None, "")
+                    else float(b.get("valor_unitario_usd") or 0)
+                    * int(b.get("unidades_aduana") or b.get("cantidad") or 1)
                 )
                 for b in bultos_detalle
             ), 2) or (precio.get("valor_total_usd") or 100)
@@ -2804,6 +2860,7 @@ def envio_nuevo_post(
             # Se guarda POR ENVÍO: si el cliente cambia su default mañana,
             # los envíos ya despachados no cambian de manos.
             tax_paga=normalizar_tax(tax_paga, tax_paga_cliente(cliente)),
+            asegurar_carga=asegurar_carga == "SI",
             idempotency_key_hash=idempotency_tienda,
             reemplaza_solicitud_id=reemplaza_id,
             reemision_motivo=reemision_motivo,

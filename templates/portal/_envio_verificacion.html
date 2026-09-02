@@ -52,7 +52,7 @@
                     <article>
                         <span>Caja {{ loop.index }}</span>
                         <strong>{{ b.cantidad or 1 }} caja{{ "s" if (b.cantidad or 1)|int != 1 else "" }}</strong>
-                        <small>{{ b.largo_cm or "—" }} × {{ b.ancho_cm or "—" }} × {{ b.alto_cm or "—" }} cm · {{ b.peso_kg or "—" }} kg por caja</small>
+                        <small>{{ b.largo_cm or "—" }} × {{ b.ancho_cm or "—" }} × {{ b.alto_cm or "—" }} cm · {{ b.peso_kg or "—" }} kg por caja{% if b.valor_declarado_caja_usd %} · USD {{ b.valor_declarado_caja_usd }} declarados por caja{% endif %}</small>
                     </article>
                     {% endfor %}
                 {% else %}
@@ -78,6 +78,7 @@
                 {% endif %}
             </div>
             <div class="shipment-check-total"><span>Valor declarado total</span><strong>USD {{ s.valor_declarado_usd or "—" }}</strong></div>
+            <div class="shipment-check-total"><span>Protección de carga</span><strong>{{ "Asegurada" if s.asegurar_carga else "Sin seguro" }}</strong></div>
         </section>
 
         <section data-check-page="4" hidden>

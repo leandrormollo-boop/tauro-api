@@ -88,6 +88,25 @@ def test_crear_solicitud_persiste_nacional_o_internacional(monkeypatch):
     assert sql_nacional == sql_internacional
 
 
+def test_crear_solicitud_persiste_eleccion_de_seguro(monkeypatch):
+    cursor = _Cursor([{"id": 9}])
+    monkeypatch.setattr(solicitudes_guia, "get_conn", _conexion(cursor))
+    solicitudes_guia.crear_solicitud_guia(
+        cliente_id="TEST", producto_alias="CARGA", cantidad=1,
+        remitente_pais="AR", destino_pais="US",
+        dest_nombre="Persona", dest_documento="", dest_email="",
+        dest_telefono="", dest_direccion="Calle 1",
+        dest_ciudad="Miami", dest_estado="", dest_zip="33101", peso_kg=1,
+        largo_cm=10, ancho_cm=10, alto_cm=10,
+        valor_declarado_usd=100, ruta_id="R", coti_id="C",
+        precio_tauro_ars=1000, precio_tauro_usd=1,
+        asegurar_carga=True,
+    )
+    sql, params = cursor.ejecutadas[0]
+    assert "asegurar_carga" in sql
+    assert params[-4] is True
+
+
 @pytest.mark.parametrize(
     "origen,destino,origen_iso,destino_iso,ambito",
     [

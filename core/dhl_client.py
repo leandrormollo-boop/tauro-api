@@ -410,6 +410,27 @@ class DHLClient(CarrierBase):
                 for p in paquetes
             ],
         }
+        asegurar_carga = any(
+            p.get("asegurar_carga") is True
+            or str(p.get("asegurar_carga") or "").strip().upper() in {"SI", "SÍ", "1", "TRUE"}
+            for p in paquetes
+        )
+        if asegurar_carga:
+            try:
+                valor_asegurado = sum(
+                    float(p.get("valor_declarado_caja_usd")) for p in paquetes
+                )
+            except (TypeError, ValueError):
+                return {"encontrado": False,
+                        "error": "Cada caja asegurada necesita un valor declarado válido."}
+            if not math.isfinite(valor_asegurado) or valor_asegurado <= 0:
+                return {"encontrado": False,
+                        "error": "El valor total asegurado debe ser mayor a cero."}
+            cuerpo["valueAddedServices"] = [{
+                "serviceCode": "II",
+                "value": round(valor_asegurado, 2),
+                "currency": "USD",
+            }]
 
         try:
             resp = requests.post(
@@ -448,8 +469,14 @@ class DHLClient(CarrierBase):
             "dias_estimados": str,
         }
         """
-        # Varias cajas → POST /rates, que es el único que las acepta.
-        if paquetes is not None and len(paquetes) > 1:
+        # Varias cajas o seguro → POST /rates. El GET no permite enviar el
+        # valor monetario que exige el servicio de protección II.
+        seguro_solicitado = bool(paquetes) and any(
+            p.get("asegurar_carga") is True
+            or str(p.get("asegurar_carga") or "").strip().upper() in {"SI", "SÍ", "1", "TRUE"}
+            for p in paquetes
+        )
+        if paquetes is not None and (len(paquetes) > 1 or seguro_solicitado):
             return self.get_rates_multibulto(origen, destino, paquetes)
         if paquetes:
             paquete = paquetes[0]
@@ -699,6 +726,7 @@ class DHLClient(CarrierBase):
         # Para solicitudes históricas sin `unidades_aduana`, ambas cantidades
         # siguen coincidiendo y el payload conserva el comportamiento anterior.
         piezas, line_items, valor_total = [], [], 0.0
+        valor_total_cajas = 0.0
         total_cajas = 0
         for i, b in enumerate(bultos, start=1):
             try:
@@ -722,6 +750,31 @@ class DHLClient(CarrierBase):
             if not math.isfinite(peso_caja) or not 0 < peso_caja <= MAX_DHL_PACKAGE_KG:
                 return {"encontrado": False,
                         "error": f"Cada bulto DHL debe pesar hasta {MAX_DHL_PACKAGE_KG:g} kg."}
+            if not math.isfinite(valor_u) or valor_u <= 0:
+                return {"encontrado": False,
+                        "error": "El valor unitario de cada ítem debe ser mayor a cero."}
+            total_invoice_linea = round(valor_u * unidades_aduana, 2)
+            valor_caja_crudo = b.get("valor_declarado_caja_usd")
+            try:
+                valor_caja = (
+                    total_invoice_linea / cajas
+                    if valor_caja_crudo in (None, "")
+                    else float(valor_caja_crudo)
+                )
+            except (TypeError, ValueError):
+                return {"encontrado": False,
+                        "error": "Revisá el valor declarado por caja."}
+            if not math.isfinite(valor_caja) or valor_caja <= 0:
+                return {"encontrado": False,
+                        "error": "El valor declarado por caja debe ser mayor a cero."}
+            total_cajas_linea = round(valor_caja * cajas, 2)
+            if (valor_caja_crudo not in (None, "")
+                    and abs(total_cajas_linea - total_invoice_linea) > 0.02):
+                return {"encontrado": False, "error": (
+                    f"Caja {i}: el valor declarado de las cajas (USD "
+                    f"{total_cajas_linea:.2f}) no coincide con la invoice "
+                    f"(USD {total_invoice_linea:.2f})."
+                )}
             total_cajas += cajas
             peso_linea = round(peso_caja * cajas, 3)
             for _ in range(cajas):
@@ -733,7 +786,8 @@ class DHLClient(CarrierBase):
                         "height": round(float(b.get("alto_cm") or b.get("alto") or 10), 3),
                     },
                 })
-            valor_total += valor_u * unidades_aduana
+            valor_total += total_invoice_linea
+            valor_total_cajas += total_cajas_linea
             line_items.append({
                 "number": i,
                 "description": (b.get("descripcion_en") or b.get("producto_alias")
@@ -767,14 +821,27 @@ class DHLClient(CarrierBase):
         msg_ref = str(
             datos.get("message_reference") or f"tauro-ship-{uuid.uuid4().hex[:20]}"
         )[:36]
+        servicios_adicionales = [{
+            "serviceCode": self.DATA_STAGING_SERVICE_CODE,
+        }]
+        asegurar_carga = (
+            datos.get("asegurar_carga") is True
+            or str(datos.get("asegurar_carga") or "").strip().upper()
+            in {"SI", "SÍ", "1", "TRUE"}
+        )
+        if asegurar_carga:
+            servicios_adicionales.append({
+                "serviceCode": "II",
+                "value": round(valor_total_cajas, 2),
+                "currency": "USD",
+            })
+
         cuerpo = {
             "plannedShippingDateAndTime": self._fecha_envio(shipper.get("pais", "AR")),
             "pickup": {"isRequested": False},
             "productCode": self.product_code,
             "accounts": [{"typeCode": "shipper", "number": cuenta}],
-            "valueAddedServices": [{
-                "serviceCode": self.DATA_STAGING_SERVICE_CODE,
-            }],
+            "valueAddedServices": servicios_adicionales,
             "customerDetails": {
                 "shipperDetails": {
                     "postalAddress": self._direccion_envio(shipper),

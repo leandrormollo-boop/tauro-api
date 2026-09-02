@@ -350,7 +350,7 @@
             <div class="shipment-step-heading">
                 <div>
                     <h4><span class="n">3</span> Información del paquete <span class="badge ok">Cajas</span></h4>
-                    <p>Peso, medidas y cantidad de cajas. Acá sólo va la información física del envío.</p>
+                    <p>Peso, medidas, cantidad y valor total de mercadería dentro de cada caja.</p>
                 </div>
                 <span class="shipment-step-counter"><b data-package-types>{{ filas|length }}</b> tipo{% if filas|length != 1 %}s{% endif %} de caja</span>
             </div>
@@ -403,13 +403,18 @@
                                 <label>Cajas iguales</label>
                                 <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
                             </div>
+                            <div class="form-group shipment-box-value">
+                                <label>Valor por caja</label>
+                                <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_caja_usd" class="bulto-valor-caja" inputmode="decimal" data-numero="monto" value="{{ f.valor_declarado_caja_usd or '' }}" required></div>
+                                <small data-box-declared-total>Total cajas: USD —</small>
+                            </div>
                         </div>
                     </div>
                 </article>
                 {% endfor %}
             </div>
             <button type="button" id="btn-add-bulto" class="btn-add-bulto">+ Agregar otro tipo de caja</button>
-            <p class="shipment-step-help">Si todas las cajas son iguales, indicá la cantidad en una sola fila. Agregá otra únicamente cuando cambien el peso o las medidas.</p>
+            <p class="shipment-step-help">El valor por caja es el total de mercadería que contiene una caja. Si las cajas son iguales, indicá la cantidad en una sola fila.</p>
         </div>
 
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
@@ -460,6 +465,22 @@
                 {% endfor %}
             </div>
             <div class="invoice-note"><strong>Importante:</strong> el valor unitario es el precio de una unidad del producto, no el valor total de la caja. El subtotal se calcula automáticamente.</div>
+
+            {% set seguro_sel = (form.asegurar_carga or 'NO')|upper %}
+            <fieldset class="shipment-insurance-choice">
+                <legend>¿Querés asegurar la carga?</legend>
+                <p>La protección se calcula sobre el valor declarado total y se incluye en la cotización de DHL.</p>
+                <div class="shipment-insurance-options">
+                    <label>
+                        <input type="radio" name="asegurar_carga" value="NO" {% if seguro_sel != 'SI' %}checked{% endif %} required>
+                        <span><strong>Sin seguro</strong><small>No agregar protección de carga</small></span>
+                    </label>
+                    <label>
+                        <input type="radio" name="asegurar_carga" value="SI" {% if seguro_sel == 'SI' %}checked{% endif %} required>
+                        <span><strong>Asegurar carga</strong><small data-insurance-value>Protección por USD —</small></span>
+                    </label>
+                </div>
+            </fieldset>
 
             <details class="shipment-extra-options" {% if form.precio_cliente_final_ars or form.observaciones %}open{% endif %}>
                 <summary>
@@ -726,6 +747,7 @@
         (fisicos.length === 1 ? "tipo de caja" : "tipos de caja");
     }
     fisicos.forEach(actualizarReferenciaPaquete);
+    actualizarResumenSeguro();
   }
 
   function numeroInvoice(valor) {
@@ -750,6 +772,50 @@
     total.textContent = Number.isFinite(cantidad) && cantidad > 0 && Number.isFinite(unitario) && unitario > 0
       ? "Subtotal: USD " + (cantidad * unitario).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
       : "Subtotal: USD —";
+    var indice = invoiceRows().indexOf(invoice);
+    if (indice >= 0) actualizarDeclaracion(bultoRows()[indice]);
+  }
+
+  function actualizarResumenSeguro() {
+    var total = 0;
+    var completo = true;
+    bultoRows().forEach(function (row) {
+      var cajas = numeroInvoice(((row.querySelector(".bulto-cantidad") || {}).value || ""));
+      var porCaja = numeroInvoice(((row.querySelector(".bulto-valor-caja") || {}).value || ""));
+      if (!Number.isFinite(cajas) || cajas <= 0 || !Number.isFinite(porCaja) || porCaja <= 0) completo = false;
+      else total += cajas * porCaja;
+    });
+    var resumen = document.querySelector("[data-insurance-value]");
+    if (resumen) resumen.textContent = completo && total > 0
+      ? "Protección por USD " + total.toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
+      : "Protección por USD —";
+  }
+
+  function actualizarDeclaracion(row) {
+    if (!row) return;
+    var invoice = invoiceDe(row);
+    if (!invoice) return;
+    var cajas = numeroInvoice(((row.querySelector(".bulto-cantidad") || {}).value || ""));
+    var porCaja = numeroInvoice(((row.querySelector(".bulto-valor-caja") || {}).value || ""));
+    var unidades = numeroInvoice(((invoice.querySelector(".bulto-unidades-aduana") || {}).value || ""));
+    var unitario = numeroInvoice(((invoice.querySelector(".bulto-valor") || {}).value || ""));
+    var totalCajas = cajas * porCaja;
+    var totalInvoice = unidades * unitario;
+    var nota = row.querySelector("[data-box-declared-total]");
+    var valorInvoice = invoice.querySelector(".bulto-valor");
+    if (nota) {
+      nota.textContent = Number.isFinite(totalCajas) && totalCajas > 0
+        ? "Total cajas: USD " + totalCajas.toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
+        : "Total cajas: USD —";
+      nota.classList.toggle("is-mismatch", Number.isFinite(totalCajas) && Number.isFinite(totalInvoice) && Math.abs(totalCajas - totalInvoice) > 0.02);
+    }
+    if (valorInvoice) {
+      var difiere = Number.isFinite(totalCajas) && totalCajas > 0 && Number.isFinite(totalInvoice) && totalInvoice > 0 && Math.abs(totalCajas - totalInvoice) > 0.02;
+      valorInvoice.setCustomValidity(difiere
+        ? "El total declarado de las cajas debe coincidir con el subtotal de la invoice."
+        : "");
+    }
+    actualizarResumenSeguro();
   }
 
   function wireInvoiceRow(invoice) {
@@ -784,6 +850,7 @@
     setea(row, ".bulto-largo", op.dataset.largo);
     setea(row, ".bulto-ancho", op.dataset.ancho);
     setea(row, ".bulto-alto", op.dataset.alto);
+    setea(row, ".bulto-valor-caja", op.dataset.valor);
     setea(invoice, ".bulto-valor", op.dataset.valor);
     setea(invoice, ".bulto-desc", op.dataset.desc);
     setea(invoice, ".bulto-hs", op.dataset.hs);
@@ -807,6 +874,7 @@
         largo_cm: v(row, ".bulto-largo"),
         ancho_cm: v(row, ".bulto-ancho"),
         alto_cm: v(row, ".bulto-alto"),
+        valor_declarado_caja_usd: v(row, ".bulto-valor-caja"),
         valor_unitario_usd: v(invoice, ".bulto-valor"),
         descripcion_en: v(invoice, ".bulto-desc"),
         hs_code: v(invoice, ".bulto-hs"),
@@ -821,11 +889,12 @@
     if (sel) sel.addEventListener("change", refreshLivePrice);
     // Peso y medidas manuales también recotizan: el precio depende de la
     // caja, tenga o no producto del catálogo.
-    [".bulto-cantidad", ".bulto-peso", ".bulto-largo", ".bulto-ancho", ".bulto-alto"]
+    [".bulto-cantidad", ".bulto-peso", ".bulto-largo", ".bulto-ancho", ".bulto-alto", ".bulto-valor-caja"]
       .forEach(function (c) {
         var el = row.querySelector(c);
         if (el) el.addEventListener("input", function () {
           actualizarReferenciaPaquete(row);
+          actualizarDeclaracion(row);
           refreshLivePrice();
         });
       });
@@ -902,6 +971,10 @@
       var motivo = (data && data.motivo) || "";
       var msg = motivo.indexOf("peso_excedido") === 0
         ? motivo.replace("peso_excedido: ", "")
+        : motivo.indexOf("valor_declarado_no_coincide") === 0
+          ? motivo.replace("valor_declarado_no_coincide: ", "")
+        : motivo === "seguro_no_disponible"
+          ? "DHL no pudo cotizar este envío con protección de carga. Revisá los datos o probá sin seguro."
         : "No pudimos cotizar esa combinación todavía.";
       liveBox.innerHTML = "<strong style='color:var(--warn)'>Sin precio</strong><span>" + msg + "</span>";
     }
@@ -975,6 +1048,13 @@
     });
   });
   pintarBotonesCourier();
+  document.querySelectorAll('input[name="asegurar_carga"]').forEach(function (radio) {
+    radio.addEventListener("change", function () {
+      actualizarResumenSeguro();
+      refreshLivePrice();
+    });
+  });
+  actualizarResumenSeguro();
 
   function refreshLivePrice() {
     if (!liveBox || !countrySelect) return;
@@ -1019,6 +1099,7 @@
           origen_ciudad: (document.getElementById("rem_ciudad") || {}).value || "",
           origen_cp: (document.getElementById("rem_zip") || {}).value || "",
           origen_estado: (document.getElementById("rem_estado") || {}).value || "",
+          asegurar_carga: ((document.querySelector('input[name="asegurar_carga"]:checked') || {}).value || "NO") === "SI",
         }),
       })
         .then(function (r) { return r.json(); })

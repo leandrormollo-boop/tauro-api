@@ -221,7 +221,7 @@ def test_paquete_e_invoice_estan_separados_y_sin_perder_multibulto():
     assert "renumerarBultos()" in html
     assert ".shipment-package-main" in css
     assert ".wizard-compacto .bulto-invoice" in css
-    assert "grid-template-columns: repeat(5" in css
+    assert "grid-template-columns: repeat(6" in css
 
 
 def test_error_aduanero_reabre_la_hoja_de_invoice():

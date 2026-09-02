@@ -47,6 +47,39 @@ def test_valor_unitario_esta_en_invoice_y_no_en_paquete():
     assert "refreshLivePrice()" in html
 
 
+def test_valor_declarado_por_caja_y_seguro_son_explicitos():
+    html = _html()
+    paquete = html[html.index("shipment-step-package"):html.index("shipment-step-invoice")]
+    invoice = html[html.index("shipment-step-invoice"):html.index('class="submit-bar"')]
+    assert 'name="bulto_valor_caja_usd"' in paquete
+    assert 'name="bulto_valor_caja_usd"' not in invoice
+    assert 'name="asegurar_carga" value="NO"' in invoice
+    assert 'name="asegurar_carga" value="SI"' in invoice
+    assert 'data-insurance-value' in invoice
+    assert 'asegurar_carga:' in html
+
+
+def test_totales_de_caja_e_invoice_deben_coincidir():
+    piezas, detalle, error = b2b._piezas_del_catalogo("X", [{
+        "peso_kg": 2, "largo_cm": 30, "ancho_cm": 20, "alto_cm": 10,
+        "cantidad": 2, "unidades_aduana": 8,
+        "descripcion_en": "Cotton shirts", "valor_unitario_usd": 25,
+        "valor_declarado_caja_usd": 100,
+    }])
+    assert error is None
+    assert len(piezas) == 2
+    assert piezas[0]["valor_declarado_caja_usd"] == 100
+    assert detalle[0]["valor_declarado_caja_usd"] == 100
+
+    _, _, error = b2b._piezas_del_catalogo("X", [{
+        "peso_kg": 2, "largo_cm": 30, "ancho_cm": 20, "alto_cm": 10,
+        "cantidad": 2, "unidades_aduana": 8,
+        "descripcion_en": "Cotton shirts", "valor_unitario_usd": 25,
+        "valor_declarado_caja_usd": 80,
+    }])
+    assert error.startswith("valor_declarado_no_coincide:")
+
+
 def test_hs_code_es_opcional_en_el_formulario():
     html = _html()
     inicio = html.index('name="bulto_hs"')
@@ -64,7 +97,8 @@ def test_elegir_producto_precarga_su_invoice():
 
 def test_el_submit_recibe_los_overrides():
     firma = inspect.signature(pc.envio_nuevo_post)
-    for campo in ("bulto_desc_en", "bulto_valor_usd", "bulto_hs", "bulto_pais_fab"):
+    for campo in ("bulto_desc_en", "bulto_valor_usd", "bulto_valor_caja_usd",
+                  "bulto_hs", "bulto_pais_fab", "asegurar_carga"):
         assert campo in firma.parameters, f"el submit no recibe {campo}"
 
 
