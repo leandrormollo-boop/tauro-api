@@ -152,3 +152,30 @@ def test_cancelado_no_puede_generar_deuda(monkeypatch):
 
     with pytest.raises(imp.ImportacionHistoricaError, match="cancelado no puede generar saldo"):
         imp.validar_manifiesto(manifiesto)
+
+
+def test_bultos_historicos_conservan_medidas_y_repeticiones():
+    bultos = imp._bultos_historicos(
+        "40X40X15 X2 30X20X20", "17 KG"
+    )
+
+    assert bultos == [
+        {
+            "producto_alias": "Mercadería", "cantidad": 2,
+            "largo_cm": 40.0, "ancho_cm": 40.0, "alto_cm": 15.0,
+            "peso_kg": None,
+        },
+        {
+            "producto_alias": "Mercadería", "cantidad": 1,
+            "largo_cm": 30.0, "ancho_cm": 20.0, "alto_cm": 20.0,
+            "peso_kg": None,
+        },
+    ]
+
+
+def test_bulto_unico_recibe_el_peso_total_informado():
+    assert imp._bultos_historicos("20X20X20", "2 KG") == [{
+        "producto_alias": "Mercadería", "cantidad": 1,
+        "largo_cm": 20.0, "ancho_cm": 20.0, "alto_cm": 20.0,
+        "peso_kg": 2.0,
+    }]

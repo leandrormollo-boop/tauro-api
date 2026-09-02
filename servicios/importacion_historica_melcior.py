@@ -98,6 +98,59 @@ def _peso(valor: Any) -> Decimal | None:
     return peso if peso > 0 else None
 
 
+def _bultos_historicos(medidas_valor: Any, peso_valor: Any) -> list[dict[str, Any]]:
+    """Conserva las cajas informadas sin inventar peso por caja.
+
+    La planilla histórica usa tanto ``40X40X30 X2`` como secuencias de
+    medidas distintas. El peso disponible es el total del envío; sólo se lo
+    asignamos a una caja cuando la fuente describe una única caja.
+    """
+    medidas = _texto(medidas_valor, maximo=240)
+    peso_total = _peso(peso_valor)
+    patron = re.compile(
+        r"(?<!\d)(\d+(?:[.,]\d+)?)\s*[xX×]\s*"
+        r"(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?!\d)"
+    )
+    coincidencias = list(patron.finditer(medidas))
+    bultos: list[dict[str, Any]] = []
+    for indice, coincidencia in enumerate(coincidencias):
+        siguiente = (
+            coincidencias[indice + 1].start()
+            if indice + 1 < len(coincidencias)
+            else len(medidas)
+        )
+        sufijo = medidas[coincidencia.end():siguiente]
+        repeticion = re.search(r"[xX×]\s*(\d+)\b", sufijo)
+        cantidad = int(repeticion.group(1)) if repeticion else 1
+        if cantidad < 1 or cantidad > 100:
+            cantidad = 1
+        largo, ancho, alto = (
+            Decimal(valor.replace(",", ".")).quantize(Decimal("0.001"))
+            for valor in coincidencia.groups()
+        )
+        if min(largo, ancho, alto) <= 0:
+            continue
+        bultos.append({
+            "producto_alias": "Mercadería",
+            "cantidad": cantidad,
+            "largo_cm": float(largo),
+            "ancho_cm": float(ancho),
+            "alto_cm": float(alto),
+            "peso_kg": None,
+        })
+
+    cantidad_total = sum(int(bulto["cantidad"]) for bulto in bultos)
+    if cantidad_total == 1 and peso_total is not None:
+        bultos[0]["peso_kg"] = float(peso_total)
+    elif not bultos and peso_total is not None:
+        bultos.append({
+            "producto_alias": "Mercadería",
+            "cantidad": 1,
+            "peso_kg": float(peso_total),
+        })
+    return bultos
+
+
 def _pais(valor: Any) -> str:
     crudo = _texto(valor, maximo=30).upper()
     if crudo in PAISES_HISTORICOS:
@@ -390,15 +443,22 @@ def _crear_solicitud(cur, fila: dict[str, Any], idempotencia: str, fingerprint: 
     peso = _peso(fila.get("peso_fuente"))
     tracking = _texto(fila.get("tracking"), maximo=30) or None
     observaciones = "Envío histórico importado"
+    medidas_fuente = _texto(fila.get("medidas_fuente"), maximo=240)
+    peso_fuente = _texto(fila.get("peso_fuente"), maximo=80)
+    if medidas_fuente:
+        observaciones += f" · Medidas fuente: {medidas_fuente}"
+    if peso_fuente:
+        observaciones += f" · Peso fuente: {peso_fuente}"
+    if pais == "XX":
+        observaciones += " · País no informado en la planilla fuente"
     if fila.get("tracking_pendiente"):
         observaciones += " · PENDIENTE DE TRACKING"
     if fila.get("requiere_revision"):
         observaciones += " · REVISAR según planilla fuente"
     precio = _dinero(fila["importe_inicial_ars"], "Precio inicial")
     diferencia = _dinero(fila["diferencia_ars"], "Diferencia", permitir_negativo=True)
-    bultos = []
-    if peso is not None:
-        bultos = [{"producto_alias": "Mercadería", "cantidad": 1, "peso_kg": float(peso)}]
+    bultos = _bultos_historicos(medidas_fuente, peso_fuente)
+    cantidad_bultos = sum(int(bulto.get("cantidad") or 1) for bulto in bultos) or 1
     cur.execute(
         """
         INSERT INTO solicitudes_guia (
@@ -411,7 +471,7 @@ def _crear_solicitud(cur, fila: dict[str, Any], idempotencia: str, fingerprint: 
             idempotency_key_hash, request_fingerprint,
             guia_generada_at, created_at, updated_at
         ) VALUES (
-            %s, %s, %s, 1,
+            %s, %s, %s, %s,
             %s, 'AR', 'INTERNACIONAL',
             %s, %s, '', '', '',
             %s, %s, 0, %s, %s,
@@ -424,6 +484,7 @@ def _crear_solicitud(cur, fila: dict[str, Any], idempotencia: str, fingerprint: 
         """,
         (
             CLIENTE_ID, fila["estado_portal"], "Envío histórico MELCIOR 2026",
+            cantidad_bultos,
             _texto(fila.get("remitente"), maximo=160), pais,
             _texto(fila.get("destinatario"), maximo=160), observaciones,
             peso, f"AR-{pais}", f"HIST-{fila['mes']}-{fila['fila_cliente']}",
