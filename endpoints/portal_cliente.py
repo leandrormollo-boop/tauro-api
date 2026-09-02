@@ -2889,6 +2889,56 @@ def envio_nuevo_post(
     )
 
 
+# ── Verificación compacta dentro de Mis envíos ──────────────
+@router.get("/envios/{solicitud_id}/verificacion", response_class=HTMLResponse)
+def envio_verificacion(
+    request: Request,
+    solicitud_id: int,
+    cliente: str = Depends(cliente_actual),
+):
+    """Fragmento de sólo lectura para el modal de verificación.
+
+    La pertenencia se valida en el handler antes de leer la recolección. Así
+    un cliente nunca puede usar ids secuenciales para consultar datos ajenos.
+    Tampoco se exponen costos del courier ni márgenes internos de TAURO.
+    """
+    s = obtener_solicitud_de_cliente(solicitud_id, cliente)
+    if not s:
+        return HTMLResponse(
+            '<div class="msg error">Ese envío no está disponible en tu cuenta.</div>',
+            status_code=404,
+            headers={"Cache-Control": "private, no-store"},
+        )
+    if not (s.get("tracking") or s.get("tiene_label") or s.get("guia_url")):
+        return HTMLResponse(
+            '<div class="msg warn">La verificación estará disponible cuando se emita la guía.</div>',
+            status_code=409,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    from servicios.recolecciones import obtener_de_solicitud
+    recoleccion_error = False
+    try:
+        recoleccion = obtener_de_solicitud(cliente, solicitud_id)
+    except Exception as exc:
+        print(f"[portal] no pude leer el retiro del envío {solicitud_id}: "
+              f"{type(exc).__name__}")
+        recoleccion = None
+        recoleccion_error = True
+
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/_envio_verificacion.html",
+        context={
+            "cliente": cliente,
+            "s": s,
+            "recoleccion": recoleccion,
+            "recoleccion_error": recoleccion_error,
+        },
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 # ── Detalle de envío ────────────────────────────────────────
 # OJO: declarado DESPUÉS de /envios/nuevo para que "nuevo" no matchee
 # como {solicitud_id}.

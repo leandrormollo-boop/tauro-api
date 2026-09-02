@@ -485,6 +485,32 @@ def listar(cliente_id: str, limite: int = 50) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
 
 
+def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
+    """Última recolección ligada a una guía del cliente.
+
+    El doble filtro evita que un id de solicitud ajeno permita inferir datos
+    de retiro. Se incluyen también las canceladas para que la verificación
+    posterior a la emisión muestre la historia real, no un falso "sin retiro".
+    """
+    _ensure_tabla()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, courier, fecha, ready_time, close_time, bultos,
+                       peso_kg, direccion, instrucciones, estado,
+                       confirmation_code, ubicacion, created_at, updated_at
+                FROM recolecciones
+                WHERE cliente_id = %s AND solicitud_id = %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                ((cliente_id or "").strip().upper(), int(solicitud_id)),
+            )
+            fila = cur.fetchone()
+    return dict(fila) if fila else None
+
+
 def listar_admin(limite: int = 200) -> list[dict]:
     _ensure_tabla()
     with get_conn() as conn:

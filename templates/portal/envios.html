@@ -283,6 +283,15 @@ camposPeriodo.forEach(function (campo) {
                     </td>
                     <td>
                         <div class="row-actions">
+                            {% if s.tracking or s.tiene_label or s.guia_url %}
+                                <button type="button" class="btn btn-ghost btn-sm"
+                                        data-verificar-envio
+                                        data-verificar-url="/portal/envios/{{ s.id }}/verificacion"
+                                        data-detalle-url="/portal/envios/{{ s.id }}"
+                                        data-verificar-ref="{{ s.tracking or ('Envío #' ~ s.id) }}">
+                                    Verificar
+                                </button>
+                            {% endif %}
                             {% if s.tiene_label and s.estado != 'REEMPLAZADO' %}
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-primary btn-sm">Guía PDF</a>
                                 {# Guía emitida = hay algo que retirar. El form
@@ -343,6 +352,117 @@ camposPeriodo.forEach(function (campo) {
     </div>
 </div>
 {% endif %}
+
+<dialog class="shipment-verification-dialog" id="shipment-verification-dialog"
+        aria-labelledby="shipment-verification-title">
+    <div class="shipment-verification-panel">
+        <header class="shipment-verification-head">
+            <div>
+                <span>Control posterior a la emisión</span>
+                <h2 id="shipment-verification-title">Verificar envío</h2>
+            </div>
+            <button type="button" class="shipment-verification-close" data-verificar-cerrar aria-label="Cerrar verificación">×</button>
+        </header>
+        <div class="shipment-verification-content" data-verificar-contenido>
+            <div class="shipment-check-loading">Preparando el resumen del envío…</div>
+        </div>
+    </div>
+</dialog>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+    var dialog = document.getElementById("shipment-verification-dialog");
+    var content = dialog && dialog.querySelector("[data-verificar-contenido]");
+    var title = document.getElementById("shipment-verification-title");
+    var close = dialog && dialog.querySelector("[data-verificar-cerrar]");
+    var requestController = null;
+    var labels = ["Remitente", "Destinatario", "Cajas", "Contenido", "Recolección"];
+
+    if (!dialog || !content) return;
+
+    function wirePages() {
+        var root = content.querySelector("[data-shipment-check]");
+        if (!root) return;
+        var pages = Array.prototype.slice.call(root.querySelectorAll("[data-check-page]"));
+        var tabs = Array.prototype.slice.call(root.querySelectorAll("[data-check-tab]"));
+        var previous = root.querySelector("[data-check-prev]");
+        var next = root.querySelector("[data-check-next]");
+        var progress = root.querySelector("[data-check-progress]");
+
+        function showPage(index) {
+            index = Math.max(0, Math.min(index, pages.length - 1));
+            root.dataset.currentPage = String(index);
+            pages.forEach(function (page, pageIndex) { page.hidden = pageIndex !== index; });
+            tabs.forEach(function (tab, tabIndex) {
+                var active = tabIndex === index;
+                tab.classList.toggle("on", active);
+                if (active) tab.setAttribute("aria-current", "step");
+                else tab.removeAttribute("aria-current");
+            });
+            if (previous) previous.disabled = index === 0;
+            if (next) next.textContent = index === pages.length - 1 ? "Listo" : "Siguiente";
+            if (progress) progress.textContent = (index + 1) + " de " + pages.length + " · " + labels[index];
+        }
+
+        tabs.forEach(function (tab) {
+            tab.addEventListener("click", function () { showPage(Number(tab.dataset.checkTab)); });
+        });
+        if (previous) previous.addEventListener("click", function () {
+            showPage(Number(root.dataset.currentPage || 0) - 1);
+        });
+        if (next) next.addEventListener("click", function () {
+            var current = Number(root.dataset.currentPage || 0);
+            if (current >= pages.length - 1) dialog.close();
+            else showPage(current + 1);
+        });
+        showPage(0);
+    }
+
+    document.addEventListener("click", function (event) {
+        var button = event.target.closest("[data-verificar-envio]");
+        if (!button) return;
+        event.preventDefault();
+        if (typeof dialog.showModal !== "function") {
+            window.location.href = button.dataset.detalleUrl;
+            return;
+        }
+        if (requestController) requestController.abort();
+        requestController = new AbortController();
+        title.textContent = "Verificar " + (button.dataset.verificarRef || "envío");
+        content.innerHTML = '<div class="shipment-check-loading">Preparando el resumen del envío…</div>';
+        button.setAttribute("aria-busy", "true");
+        dialog.showModal();
+
+        fetch(button.dataset.verificarUrl, {
+            credentials: "same-origin",
+            headers: {"Accept": "text/html"},
+            signal: requestController.signal
+        }).then(function (response) {
+            return response.text().then(function (html) {
+                return {ok: response.ok, html: html};
+            });
+        }).then(function (result) {
+            content.innerHTML = result.html || '<div class="msg error">No pudimos cargar la verificación.</div>';
+            if (result.ok) wirePages();
+        }).catch(function (error) {
+            if (error.name !== "AbortError") {
+                content.innerHTML = '<div class="msg error">No pudimos cargar la verificación. Cerrá el cuadro y volvé a intentar.</div>';
+            }
+        }).finally(function () {
+            button.removeAttribute("aria-busy");
+        });
+    });
+
+    if (close) close.addEventListener("click", function () { dialog.close(); });
+    dialog.addEventListener("click", function (event) {
+        if (event.target === dialog) dialog.close();
+    });
+    dialog.addEventListener("close", function () {
+        if (requestController) requestController.abort();
+        requestController = null;
+    });
+})();
+</script>
 {% endif %}
 </section>
 {% endblock %}

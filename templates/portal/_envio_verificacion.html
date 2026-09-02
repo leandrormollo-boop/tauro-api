@@ -1,0 +1,116 @@
+<div class="shipment-check" data-shipment-check data-current-page="0">
+    <header class="shipment-check-summary">
+        <div>
+            <span>{{ (s.courier or "Courier")|upper }} · Envío #{{ s.id }}</span>
+            <strong>{{ s.tracking or "Guía emitida" }}</strong>
+        </div>
+        <span class="badge ok">Sólo lectura</span>
+    </header>
+
+    <nav class="shipment-check-tabs" aria-label="Secciones de la verificación">
+        {% for titulo in ("Remitente", "Destinatario", "Cajas", "Contenido", "Recolección") %}
+        <button type="button" data-check-tab="{{ loop.index0 }}"{% if loop.first %} class="on" aria-current="step"{% endif %}>
+            <span>{{ loop.index }}</span>{{ titulo }}
+        </button>
+        {% endfor %}
+    </nav>
+
+    <div class="shipment-check-pages" aria-live="polite">
+        <section data-check-page="0">
+            <div class="shipment-check-page-head"><span>1 de 5</span><h3>Datos del remitente</h3></div>
+            <div class="shipment-check-grid">
+                <div><small>Empresa / nombre</small><strong>{{ s.remitente_nombre or "—" }}</strong></div>
+                <div><small>Contacto</small><strong>{{ s.remitente_contacto or "—" }}</strong></div>
+                <div class="wide"><small>Dirección</small><strong>{{ s.remitente_direccion or "—" }}</strong></div>
+                <div><small>Ciudad / estado</small><strong>{{ s.remitente_ciudad or "—" }}{% if s.remitente_estado %}, {{ s.remitente_estado }}{% endif %}</strong></div>
+                <div><small>Código postal / país</small><strong>{{ s.remitente_zip or "—" }} · {{ s.remitente_pais or "—" }}</strong></div>
+                <div><small>Teléfono</small><strong>{{ s.remitente_telefono or "—" }}</strong></div>
+                <div><small>Email</small><strong>{{ s.remitente_email or "—" }}</strong></div>
+                {% if s.remitente_documento %}<div class="wide"><small>Documento fiscal</small><strong>{{ s.remitente_documento }}</strong></div>{% endif %}
+            </div>
+        </section>
+
+        <section data-check-page="1" hidden>
+            <div class="shipment-check-page-head"><span>2 de 5</span><h3>Datos del destinatario</h3></div>
+            <div class="shipment-check-grid">
+                <div><small>Empresa / nombre</small><strong>{{ s.dest_nombre or "—" }}</strong></div>
+                <div><small>Contacto</small><strong>{{ s.dest_contacto or "—" }}</strong></div>
+                <div class="wide"><small>Dirección</small><strong>{{ s.dest_direccion or "—" }}</strong></div>
+                <div><small>Ciudad / estado</small><strong>{{ s.dest_ciudad or "—" }}{% if s.dest_estado %}, {{ s.dest_estado }}{% endif %}</strong></div>
+                <div><small>Código postal / país</small><strong>{{ s.dest_zip or "—" }} · {{ s.destino_pais or "—" }}</strong></div>
+                <div><small>Teléfono</small><strong>{{ s.dest_telefono or "—" }}</strong></div>
+                <div><small>Email</small><strong>{{ s.dest_email or "—" }}</strong></div>
+                {% if s.dest_documento %}<div class="wide"><small>Documento fiscal</small><strong>{{ s.dest_documento }}</strong></div>{% endif %}
+            </div>
+        </section>
+
+        <section data-check-page="2" hidden>
+            <div class="shipment-check-page-head"><span>3 de 5</span><h3>Datos de las cajas</h3></div>
+            <div class="shipment-check-list">
+                {% if s.bultos and s.bultos|length %}
+                    {% for b in s.bultos %}
+                    <article>
+                        <span>Caja {{ loop.index }}</span>
+                        <strong>{{ b.cantidad or 1 }} caja{{ "s" if (b.cantidad or 1)|int != 1 else "" }}</strong>
+                        <small>{{ b.largo_cm or "—" }} × {{ b.ancho_cm or "—" }} × {{ b.alto_cm or "—" }} cm · {{ b.peso_kg or "—" }} kg por caja</small>
+                    </article>
+                    {% endfor %}
+                {% else %}
+                    <article><span>Paquete</span><strong>{{ s.cantidad or 1 }} caja{{ "s" if (s.cantidad or 1)|int != 1 else "" }}</strong><small>{{ s.largo_cm or "—" }} × {{ s.ancho_cm or "—" }} × {{ s.alto_cm or "—" }} cm · {{ s.peso_kg or "—" }} kg</small></article>
+                {% endif %}
+            </div>
+            <div class="shipment-check-total"><span>Peso total informado</span><strong>{{ s.peso_kg or "—" }} kg</strong></div>
+        </section>
+
+        <section data-check-page="3" hidden>
+            <div class="shipment-check-page-head"><span>4 de 5</span><h3>Contenido declarado</h3></div>
+            <div class="shipment-check-list">
+                {% if s.bultos and s.bultos|length %}
+                    {% for b in s.bultos %}
+                    <article>
+                        <span>Ítem {{ loop.index }}{% if b.hs_code %} · HS {{ b.hs_code }}{% else %} · Sin HS code{% endif %}</span>
+                        <strong>{{ b.descripcion_en or b.producto_alias or s.producto_alias or "Mercadería" }}</strong>
+                        <small>{{ b.unidades_aduana or b.cantidad or 1 }} unidad{{ "es" if (b.unidades_aduana or b.cantidad or 1)|int != 1 else "" }} × USD {{ b.valor_unitario_usd or "—" }}</small>
+                    </article>
+                    {% endfor %}
+                {% else %}
+                    <article><span>Contenido</span><strong>{{ s.producto_alias or "Mercadería" }}</strong><small>Valor declarado total: USD {{ s.valor_declarado_usd or "—" }}</small></article>
+                {% endif %}
+            </div>
+            <div class="shipment-check-total"><span>Valor declarado total</span><strong>USD {{ s.valor_declarado_usd or "—" }}</strong></div>
+        </section>
+
+        <section data-check-page="4" hidden>
+            <div class="shipment-check-page-head"><span>5 de 5</span><h3>Recolección programada</h3></div>
+            {% if recoleccion_error %}
+            <div class="shipment-check-empty">
+                <span aria-hidden="true">!</span>
+                <strong>No pudimos consultar la recolección</strong>
+                <p>Los demás datos del envío están disponibles. Cerrá el cuadro y volvé a intentar en unos minutos.</p>
+            </div>
+            {% elif recoleccion %}
+            <div class="shipment-check-grid">
+                <div><small>Estado</small><strong>{{ (recoleccion.estado or "—").replace("_", " ").title() }}</strong></div>
+                <div><small>Courier</small><strong>{{ (recoleccion.courier or s.courier or "—")|upper }}</strong></div>
+                <div><small>Fecha</small><strong>{{ recoleccion.fecha.strftime("%d/%m/%Y") if recoleccion.fecha else "—" }}</strong></div>
+                <div><small>Horario</small><strong>{{ recoleccion.ready_time or "—" }} a {{ recoleccion.close_time or "—" }}</strong></div>
+                <div class="wide"><small>Dirección de retiro</small><strong>{{ recoleccion.direccion or s.remitente_direccion or "—" }}</strong></div>
+                {% if recoleccion.confirmation_code %}<div><small>Confirmación</small><strong class="mono">{{ recoleccion.confirmation_code }}</strong></div>{% endif %}
+                {% if recoleccion.instrucciones %}<div class="wide"><small>Instrucciones</small><strong>{{ recoleccion.instrucciones }}</strong></div>{% endif %}
+            </div>
+            {% else %}
+            <div class="shipment-check-empty">
+                <span aria-hidden="true">○</span>
+                <strong>Recolección todavía no programada</strong>
+                <p>La guía está emitida, pero no encontramos un retiro vinculado a este envío.</p>
+            </div>
+            {% endif %}
+        </section>
+    </div>
+
+    <footer class="shipment-check-footer">
+        <button type="button" class="btn btn-ghost btn-sm" data-check-prev disabled>Anterior</button>
+        <span data-check-progress>1 de 5 · Remitente</span>
+        <button type="button" class="btn btn-primary btn-sm" data-check-next>Siguiente</button>
+    </footer>
+</div>

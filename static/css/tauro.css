@@ -3374,6 +3374,155 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
 .envios-empty-filter { margin-bottom: 0; }
 .envios-empty-filter a { margin-left: 4px; color: var(--accent-soft); }
 
+/* Verificación posterior a la emisión: se abre dentro de Mis envíos y no
+   reemplaza la pantalla ni pierde los filtros/página actuales. */
+.shipment-verification-dialog {
+  width: min(760px, calc(100vw - 32px));
+  height: min(560px, calc(100dvh - 32px));
+  max-width: 760px;
+  max-height: min(680px, calc(100dvh - 32px));
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(167, 139, 250, .38);
+  border-radius: 20px;
+  background: rgba(14, 12, 25, .97);
+  color: var(--fg);
+  box-shadow: 0 30px 110px rgba(0, 0, 0, .7), 0 0 0 1px rgba(255,255,255,.025) inset;
+}
+.shipment-verification-dialog::backdrop {
+  background: rgba(4, 3, 10, .72);
+  backdrop-filter: blur(7px);
+}
+.shipment-verification-panel { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+.shipment-verification-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--line-soft);
+  background: linear-gradient(135deg, rgba(124, 92, 246, .12), transparent 58%);
+}
+.shipment-verification-head span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+.shipment-verification-head h2 { margin: 0; color: var(--fg-1); font-size: 19px; }
+.shipment-verification-close {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--fg-3);
+  background: rgba(255,255,255,.025);
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+}
+.shipment-verification-close:hover { border-color: var(--accent); color: var(--fg-1); }
+.shipment-verification-content { flex: 1; min-height: 0; overflow: hidden; overscroll-behavior: contain; }
+.shipment-check-loading { display: grid; height: 100%; place-items: center; color: var(--fg-3); font-size: 12px; }
+.shipment-check { display: flex; height: 100%; min-height: 0; flex-direction: column; padding: 14px 18px 16px; }
+.shipment-check-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.shipment-check-summary > div { min-width: 0; }
+.shipment-check-summary span:first-child {
+  display: block;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.shipment-check-summary strong { display: block; overflow: hidden; margin-top: 2px; color: var(--fg-1); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.shipment-check-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; margin-bottom: 14px; }
+.shipment-check-tabs button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 5px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  color: var(--fg-4);
+  background: rgba(255,255,255,.018);
+  font-size: 9px;
+  cursor: pointer;
+}
+.shipment-check-tabs button span {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.05);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+.shipment-check-tabs button.on {
+  border-color: rgba(167, 139, 250, .58);
+  color: var(--accent-soft);
+  background: rgba(124, 92, 246, .13);
+}
+.shipment-check-tabs button.on span { color: #fff; background: var(--accent); }
+.shipment-check-pages { flex: 1; min-height: 0; overflow: auto; padding-right: 2px; scrollbar-gutter: stable; }
+.shipment-check-pages [data-check-page][hidden] { display: none; }
+.shipment-check-page-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.shipment-check-page-head h3 { order: -1; margin: 0; color: var(--fg-1); font-size: 15px; }
+.shipment-check-page-head span { color: var(--fg-4); font-family: var(--font-mono); font-size: 8px; text-transform: uppercase; }
+.shipment-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.shipment-check-grid > div,
+.shipment-check-list article {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(255,255,255,.018);
+}
+.shipment-check-grid .wide { grid-column: 1 / -1; }
+.shipment-check-grid small,
+.shipment-check-list article > span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.shipment-check-grid strong,
+.shipment-check-list article strong { display: block; overflow-wrap: anywhere; color: var(--fg-2); font-size: 11.5px; line-height: 1.35; }
+.shipment-check-list { display: grid; gap: 7px; }
+.shipment-check-list article { display: grid; grid-template-columns: minmax(90px, .65fr) minmax(140px, 1.35fr); align-items: center; column-gap: 12px; }
+.shipment-check-list article > span { margin: 0; }
+.shipment-check-list article small { grid-column: 2; margin-top: 2px; color: var(--fg-3); font-size: 10px; }
+.shipment-check-total { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; padding: 9px 11px; border-top: 1px solid var(--line-soft); color: var(--fg-3); font-size: 10px; }
+.shipment-check-total strong { color: var(--accent-soft); font-family: var(--font-mono); font-size: 12px; }
+.shipment-check-empty { display: grid; min-height: 190px; place-items: center; align-content: center; padding: 20px; text-align: center; }
+.shipment-check-empty > span { color: var(--accent-soft); font-size: 30px; }
+.shipment-check-empty strong { margin-top: 7px; color: var(--fg-2); font-size: 13px; }
+.shipment-check-empty p { max-width: 420px; margin: 5px 0 0; color: var(--fg-4); font-size: 10.5px; }
+.shipment-check-footer { display: grid; grid-template-columns: 100px 1fr 100px; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.shipment-check-footer span { color: var(--fg-4); font-family: var(--font-mono); font-size: 8.5px; text-align: center; text-transform: uppercase; }
+.shipment-check-footer .btn { width: 100%; }
+
 @media (max-width: 560px) {
   /* Cuatro filtros visibles en 2×2: ninguno queda escondido detrás de un
      scroll horizontal y siguen ocupando sólo dos líneas compactas. */
@@ -3420,14 +3569,26 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   .envio-service-cell .service-head { gap: 4px; font-size: 9.5px; }
   .envio-service-cell .badge { font-size: 7.5px; padding: 2px 5px; }
   .envio-service-cell .track-link { margin-top: 2px; font-size: 9px; }
-  .envios-table .row-actions { flex-wrap: nowrap; justify-content: stretch; }
-  .envios-table .row-actions > * { flex: 1 1 0; }
+  .envios-table .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); flex-wrap: wrap; justify-content: stretch; }
+  .envios-table .row-actions > * { min-width: 0; }
   .envios-table .row-actions .btn-sm { width: 100%; min-height: 44px; padding: 5px 4px; font-size: 9px; }
   .envios-card-footer { min-height: 34px; padding-top: 5px; }
   .envios-card-footer .table-note { display: none; }
   .envios-pagination { width: 100%; justify-content: center; margin: 0; }
   .envios-pagination .page-number,
   .envios-pagination .page-arrow { min-width: 44px; height: 44px; padding: 0 6px; }
+  .shipment-verification-dialog { width: calc(100vw - 14px); height: min(640px, calc(100dvh - 14px)); max-height: calc(100dvh - 14px); border-radius: 16px; }
+  .shipment-verification-head { padding: 12px; }
+  .shipment-verification-head h2 { font-size: 16px; }
+  .shipment-verification-content { min-height: 0; }
+  .shipment-check { min-height: 0; padding: 11px 12px 12px; }
+  .shipment-check-tabs { gap: 3px; }
+  .shipment-check-tabs button { min-height: 42px; padding: 5px 2px; font-size: 0; }
+  .shipment-check-tabs button span { width: 21px; height: 21px; font-size: 9px; }
+  .shipment-check-grid { grid-template-columns: 1fr; }
+  .shipment-check-grid .wide { grid-column: auto; }
+  .shipment-check-list article { grid-template-columns: 76px minmax(0, 1fr); padding: 9px; }
+  .shipment-check-footer { grid-template-columns: 86px 1fr 86px; }
 }
 /* ══════════════════════════════════════════════════════════════
    WIZARD DE UN PASO POR PANTALLA (Leandro, 06/08/2026)
