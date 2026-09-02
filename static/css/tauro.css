@@ -5514,3 +5514,150 @@ html[data-theme="light"] .tselect-options {
   }
   .theme-toggle-floating .theme-toggle-label { display: none; }
 }
+
+/* ── COTIZADOR EN VENTANA ─────────────────────────────────
+   Reutiliza el cotizador internacional real dentro de cualquier pantalla
+   del portal. El dialog nativo aporta foco, Escape y bloqueo del fondo. */
+.quote-window-dialog {
+  width: min(1160px, calc(100vw - 30px));
+  height: min(780px, calc(100dvh - 30px));
+  max-width: 1160px;
+  max-height: calc(100dvh - 30px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(167, 139, 250, .42);
+  border-radius: 22px;
+  background: rgba(12, 10, 21, .985);
+  color: var(--fg);
+  box-shadow: 0 34px 130px rgba(0,0,0,.76), 0 0 0 1px rgba(255,255,255,.025) inset;
+}
+.quote-window-dialog::backdrop {
+  background: rgba(4, 3, 10, .76);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.quote-window-panel { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+.quote-window-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 15px 18px 13px;
+  border-bottom: 1px solid rgba(167,139,250,.18);
+  background:
+    radial-gradient(circle at 18% -40%, rgba(124,92,246,.26), transparent 42%),
+    linear-gradient(135deg, rgba(124,92,246,.10), transparent 62%);
+}
+.quote-window-head > div:first-child { min-width: 0; }
+.quote-window-head > div:first-child > span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--accent-soft);
+  font: 500 8px/1.2 var(--font-mono);
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+.quote-window-head h2 { margin: 0; color: var(--fg-1); font-size: 19px; line-height: 1.15; }
+.quote-window-head p { margin: 4px 0 0; color: var(--fg-3); font-size: 10.5px; }
+.quote-window-head-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.quote-window-scope {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  padding: 6px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: rgba(255,255,255,.018);
+  color: var(--fg-3);
+  font-size: 9.5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.quote-window-scope:hover { border-color: rgba(167,139,250,.45); color: var(--fg-1); }
+.quote-window-scope > b { font: inherit; }
+.quote-window-scope.on {
+  border-color: rgba(167,139,250,.48);
+  background: rgba(124,92,246,.14);
+  color: var(--accent-soft);
+}
+.quote-window-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px 18px;
+  scrollbar-gutter: stable;
+}
+.quote-window-loading,
+.quote-window-failure {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  align-content: center;
+  padding: 30px;
+  color: var(--fg-3);
+  text-align: center;
+}
+.quote-window-loading::before {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 13px;
+  border: 2px solid rgba(167,139,250,.18);
+  border-top-color: var(--accent-soft);
+  border-radius: 50%;
+  content: "";
+  animation: quoteWindowSpin .75s linear infinite;
+}
+@keyframes quoteWindowSpin { to { transform: rotate(360deg); } }
+.quote-window-failure strong { color: var(--fg-1); font-size: 16px; }
+.quote-window-failure p { max-width: 460px; margin: 7px 0 15px; color: var(--fg-3); font-size: 11px; }
+.quote-screen-window::before { top: -55px; right: 0; width: 310px; height: 210px; }
+.quote-screen-window .quote-screen-head { align-items: center; margin-bottom: 9px; }
+.quote-screen-window .quote-screen-head .eyebrow,
+.quote-screen-window .quote-screen-head p { display: none; }
+.quote-screen-window .quote-screen-head h1 { font-size: 18px; }
+.quote-screen-window.national-quote-screen .quote-screen-head > a { display: none; }
+.quote-screen-window .quote-operator-strip { margin-bottom: 10px; }
+.quote-screen-window .quote-form-card { padding: 16px; }
+.quote-screen-window .quote-submit-row {
+  margin: 14px -16px -16px;
+  padding: 12px 16px 14px;
+}
+
+html[data-theme="light"] .quote-window-dialog {
+  border-color: rgba(118,85,215,.34);
+  background: rgba(248,247,250,.99);
+  box-shadow: 0 34px 100px rgba(36,25,55,.30), 0 0 0 1px #fff inset;
+}
+html[data-theme="light"] .quote-window-dialog::backdrop { background: rgba(35,28,47,.35); }
+html[data-theme="light"] .quote-window-head {
+  background: linear-gradient(135deg, rgba(118,85,215,.10), rgba(255,255,255,.7));
+}
+html[data-theme="light"] .quote-window-scope { background: rgba(255,255,255,.68); }
+html[data-theme="light"] .quote-window-scope.on { background: rgba(118,85,215,.10); }
+
+@media (max-width: 760px) {
+  .quote-window-dialog {
+    width: calc(100vw - 12px);
+    height: calc(100dvh - 12px);
+    max-height: calc(100dvh - 12px);
+    border-radius: 16px;
+  }
+  .quote-window-head { align-items: flex-start; padding: 11px 11px 10px; }
+  .quote-window-head h2 { font-size: 15px; }
+  .quote-window-head p { display: none; }
+  .quote-window-head-actions { gap: 4px; }
+  .quote-window-scope { min-width: 34px; min-height: 34px; justify-content: center; padding: 6px; }
+  .quote-window-scope > span { font-size: 14px; }
+  .quote-window-scope > b { display: none; }
+  .quote-window-content { padding: 10px; }
+  .quote-screen-window .quote-screen-head { margin-bottom: 7px; }
+  .quote-screen-window .quote-screen-head h1 { font-size: 16px; }
+  .quote-screen-window .quote-form-card { padding: 12px; }
+  .quote-screen-window .quote-submit-row {
+    margin: 12px -12px -12px;
+    padding: 11px 12px 13px;
+  }
+}

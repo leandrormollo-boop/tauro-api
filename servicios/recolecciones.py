@@ -344,7 +344,7 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
     if courier == "DHL" and not retiro_envio:
         return {"ok": False, "error": (
             "Para pedir un retiro DHL, abrí una guía emitida desde Mis envíos "
-            "y elegí Retiro. Así usamos su origen, cajas, medidas y valor reales."
+            "y elegí Programar retiro. Así usamos su origen, cajas, medidas y valor reales."
         )}
 
     cliente_api = _cliente_pickup(courier)

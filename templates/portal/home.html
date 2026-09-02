@@ -12,7 +12,7 @@
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 Nuevo envío
             </a>
-            <a href="/portal/cotizar" class="btn btn-hero-secondary">
+            <a href="/portal/cotizar" data-cotizar-ventana class="btn btn-hero-secondary">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
                 Cotizar envío
             </a>
@@ -126,7 +126,7 @@
     {% else %}
     <div class="home-scope-empty">
         <span>Sin envíos {{ titulo|lower }} todavía.</span>
-        <a href="/portal/cotizar?ambito={{ ambito }}" class="btn btn-ghost btn-sm">Cotizar</a>
+        <a href="/portal/cotizar?ambito={{ ambito }}" data-cotizar-ventana class="btn btn-ghost btn-sm">Cotizar</a>
     </div>
     {% endif %}
 </section>

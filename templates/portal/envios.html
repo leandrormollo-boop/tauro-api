@@ -122,7 +122,7 @@ camposPeriodo.forEach(function (campo) {
         <p style="font-size:13px;margin-bottom:18px;">Cuando crees el primero lo vas a ver acá, con tracking y guía.</p>
         <div class="home-empty-actions">
             <a href="/portal/envios/nuevo?ambito={{ tipo_filtro }}" class="btn btn-primary">Nuevo envío</a>
-            <a href="/portal/cotizar?ambito={{ tipo_filtro }}" class="btn btn-ghost">Cotizar</a>
+            <a href="/portal/cotizar?ambito={{ tipo_filtro }}" data-cotizar-ventana class="btn btn-ghost">Cotizar</a>
         </div>
     </div>
 </div>
@@ -299,7 +299,8 @@ camposPeriodo.forEach(function (campo) {
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}
                                 {% if tipo_filtro == 'internacional' and s.estado == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
-                                <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-sm">Retiro</a>
+                                <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-sm"
+                                   title="Programar la recolección con {{ (s.courier or 'el courier')|upper }}">Programar retiro</a>
                                 {% endif %}
                             {% elif s.guia_url and s.estado not in ('CANCELADO', 'REEMPLAZADO') %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>
