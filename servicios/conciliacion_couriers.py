@@ -1783,7 +1783,9 @@ def listar_control_envios(
                 f"""
                 SELECT s.id AS solicitud_id, s.cliente_id, s.created_at,
                        s.tracking, s.courier, s.dest_nombre, s.destino_pais,
-                       s.peso_kg, s.precio_tauro_ars, s.estado AS envio_estado,
+                       s.peso_kg, COALESCE(e.monto_ars, s.precio_tauro_ars)
+                           AS precio_tauro_ars,
+                       s.estado AS envio_estado,
                        e.id AS cargo_id, e.estado AS cargo_estado, e.ambito,
                        snap.id AS snapshot_id,
                        snap.costo_courier_estimado_ars,

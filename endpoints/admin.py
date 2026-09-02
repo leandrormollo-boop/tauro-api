@@ -4011,3 +4011,109 @@ def admin_migracion_numeric(
             url=f"/admin/migracion?error=numeric_fail&det={quote(str(e)[:150])}",
             status_code=303,
         )
+
+
+# ── Importación histórica controlada ───────────────────────
+
+@router.get("/importaciones-historicas", response_class=HTMLResponse)
+def admin_importaciones_historicas(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.importacion_historica_melcior import PERIODOS
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/importaciones_historicas.html",
+        context={
+            "seccion": "importaciones_historicas",
+            "periodos": PERIODOS,
+            "periodo_seleccionado": "ENERO",
+            "resultado": None,
+            "flash_ok": None,
+            "flash_error": None,
+        },
+    )
+
+
+@router.post("/importaciones-historicas/melcior", response_class=HTMLResponse)
+async def admin_importar_melcior_2026(
+    request: Request,
+    periodo: str = Form(""),
+    confirmacion: str = Form(""),
+    manifiesto: UploadFile = File(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.importacion_historica_melcior import (
+        MAX_MANIFEST_BYTES,
+        PERIODOS,
+        ImportacionHistoricaError,
+        importar_periodo,
+        leer_manifiesto,
+        resumen_periodo,
+    )
+
+    periodo_normalizado = str(periodo or "").strip().upper()
+    contexto = {
+        "seccion": "importaciones_historicas",
+        "periodos": PERIODOS,
+        "periodo_seleccionado": periodo_normalizado or "ENERO",
+        "resultado": None,
+        "flash_ok": None,
+        "flash_error": None,
+    }
+    if periodo_normalizado not in PERIODOS:
+        contexto["flash_error"] = "Elegí un mes válido o el cierre contable."
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=422,
+        )
+    if confirmacion.strip().upper() != "IMPORTAR MELCIOR 2026":
+        contexto["flash_error"] = 'Escribí "IMPORTAR MELCIOR 2026" para ejecutar.'
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=422,
+        )
+    nombre = str(manifiesto.filename or "")
+    if not nombre.lower().endswith(".json"):
+        contexto["flash_error"] = "El manifiesto debe ser un archivo .json."
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=422,
+        )
+    contenido = await manifiesto.read(MAX_MANIFEST_BYTES + 1)
+    try:
+        lote = leer_manifiesto(contenido)
+        previo = resumen_periodo(lote, periodo_normalizado)
+        resultado = importar_periodo(lote, periodo_normalizado, actor="admin")
+    except (ImportacionHistoricaError, ValueError) as exc:
+        contexto["flash_error"] = str(exc)
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=422,
+        )
+    except Exception as exc:
+        print(f"[admin] importación histórica MELCIOR: {type(exc).__name__}: {exc}")
+        contexto["flash_error"] = (
+            "La importación se revirtió completa. Revisá los logs antes de reintentar."
+        )
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=500,
+        )
+
+    previo_json = {
+        clave: str(valor) if isinstance(valor, Decimal) else valor
+        for clave, valor in previo.items()
+    }
+    contexto["resultado"] = {"esperado": previo_json, "obtenido": resultado}
+    contexto["flash_ok"] = (
+        f"{periodo_normalizado}: importación verificada y confirmada en una sola transacción."
+    )
+    return templates.TemplateResponse(
+        request=request, name="admin/importaciones_historicas.html", context=contexto,
+    )

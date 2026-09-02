@@ -1,0 +1,94 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Importaciones históricas{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <div class="eyebrow">Cuenta corriente</div>
+  <h1>Importación histórica controlada</h1>
+  <p>Carga MELCIOR 2026 por mes y verifica cada lote antes de confirmarlo.</p>
+</div>
+
+<div class="card" style="max-width:940px;">
+  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:22px;">
+    <div class="stat-card">
+      <div class="stat-label">Filas finales</div>
+      <div class="stat-value" style="font-size:22px;">556</div>
+      <small>545 cargos + 11 cancelados</small>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Diferencias</div>
+      <div class="stat-value" style="font-size:22px;">250</div>
+      <small>Ligadas a cada envío</small>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Tracking pendiente</div>
+      <div class="stat-value" style="font-size:22px;">3</div>
+      <small>Sin duplicar números</small>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Duplicados retirados</div>
+      <div class="stat-value" style="font-size:22px;">5</div>
+      <small>Con evidencia cruzada</small>
+    </div>
+  </div>
+
+  <div style="padding:14px 16px;border:1px solid var(--line-soft);border-radius:var(--radius-sm);background:var(--bg-elev-2);margin-bottom:22px;color:var(--fg-3);font-size:13px;line-height:1.55;">
+    Cada mes corre en una transacción independiente. Si la cantidad de envíos,
+    cargos o diferencias no coincide con el manifiesto auditado, el mes completo
+    se revierte. Repetir un mes correcto no duplica movimientos.
+  </div>
+
+  <form method="POST" action="/admin/importaciones-historicas/melcior" enctype="multipart/form-data"
+        data-confirm="¿Importar este período de MELCIOR 2026? La operación escribe envíos y movimientos contables en producción.">
+    <div style="display:grid;grid-template-columns:minmax(180px,.7fr) minmax(280px,1.3fr);gap:16px;">
+      <div class="form-group">
+        <label>Mes / etapa</label>
+        <select name="periodo" required>
+          {% for periodo in periodos %}
+          <option value="{{ periodo }}" {% if periodo == periodo_seleccionado %}selected{% endif %}>
+            {{ "Cierre contable" if periodo == "CIERRE" else periodo.title() }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Manifiesto auditado (.json)</label>
+        <input type="file" name="manifiesto" accept="application/json,.json" required>
+      </div>
+    </div>
+    <div class="form-group" style="max-width:460px;">
+      <label>Confirmación</label>
+      <input type="text" name="confirmacion" autocomplete="off"
+             placeholder="Escribí IMPORTAR MELCIOR 2026" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Importar y verificar período</button>
+  </form>
+</div>
+
+{% if resultado %}
+<div class="card" style="max-width:940px;margin-top:20px;">
+  <h2 style="font-size:18px;margin-top:0;">Control posterior al commit</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div>
+      <div class="stat-label">Esperado según planillas</div>
+      <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.18);padding:14px;border-radius:var(--radius-sm);font-size:12px;">{{ resultado.esperado | tojson(indent=2) }}</pre>
+    </div>
+    <div>
+      <div class="stat-label">Confirmado en el portal</div>
+      <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.18);padding:14px;border-radius:var(--radius-sm);font-size:12px;">{{ resultado.obtenido | tojson(indent=2) }}</pre>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<style>
+@media (max-width:900px) {
+  .card > div[style*="grid-template-columns:repeat(4"] { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
+  form > div[style*="grid-template-columns"] { grid-template-columns:1fr !important; }
+}
+@media (max-width:620px) {
+  .card > div[style*="grid-template-columns:repeat(4"],
+  .card > div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns:1fr !important; }
+}
+</style>
+{% endblock %}

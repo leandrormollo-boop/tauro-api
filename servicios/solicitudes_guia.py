@@ -1091,7 +1091,8 @@ def listar_solicitudes_cliente(
                        (s.label_pdf IS NOT NULL) AS tiene_label,
                        (s.commercial_invoice_pdf IS NOT NULL)
                            AS tiene_factura_comercial,
-                       COALESCE(fin.precio_cliente_inicial_ars,
+                       COALESCE(cargo_periodo.monto_ars,
+                                fin.precio_cliente_inicial_ars,
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
@@ -1100,7 +1101,9 @@ def listar_solicitudes_cliente(
                            AS diferencia_flete_ars,
                        COALESCE(fin.tax_cliente_ars, 0)
                            AS tax_cliente_ars,
-                       COALESCE(fin.precio_cliente_final_ars,
+                       COALESCE(cargo_periodo.monto_ars
+                                    + COALESCE(fin.ajuste_cliente_ars, 0),
+                                fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
                        fin.peso_base_facturado, fin.motivo_diferencia,
@@ -1473,7 +1476,8 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                        COALESCE(re_prev.motivo, re_next.motivo)
                            AS reemision_motivo,
                        re_prev.estado AS reemision_estado,
-                       COALESCE(fin.precio_cliente_inicial_ars,
+                       COALESCE(cargo.monto_ars,
+                                fin.precio_cliente_inicial_ars,
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
@@ -1482,7 +1486,9 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                            AS diferencia_flete_ars,
                        COALESCE(fin.tax_cliente_ars, 0)
                            AS tax_cliente_ars,
-                       COALESCE(fin.precio_cliente_final_ars,
+                       COALESCE(cargo.monto_ars
+                                    + COALESCE(fin.ajuste_cliente_ars, 0),
+                                fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
                        fin.peso_base_facturado, fin.motivo_diferencia
@@ -1567,7 +1573,8 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                        c.nombre AS cliente_nombre, c.telefono AS cliente_telefono,
                        c.direccion AS cliente_direccion, c.ciudad AS cliente_ciudad,
                        c.cp AS cliente_cp, c.pais AS cliente_pais,
-                       COALESCE(fin.precio_cliente_inicial_ars,
+                       COALESCE(cargo.monto_ars,
+                                fin.precio_cliente_inicial_ars,
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
                        COALESCE(fin.ajuste_cliente_ars, 0)
                            AS diferencia_cliente_ars,
@@ -1576,7 +1583,9 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                            AS diferencia_flete_ars,
                        COALESCE(fin.tax_cliente_ars, 0)
                            AS tax_cliente_ars,
-                       COALESCE(fin.precio_cliente_final_ars,
+                       COALESCE(cargo.monto_ars
+                                    + COALESCE(fin.ajuste_cliente_ars, 0),
+                                fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
                        fin.peso_base_facturado, fin.motivo_diferencia
@@ -1588,6 +1597,7 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                   ON re_next.solicitud_anterior_id=s.id
                 LEFT JOIN solicitudes_guia vigente
                   ON vigente.id=re_next.solicitud_nueva_id
+                LEFT JOIN envios cargo ON cargo.solicitud_id=s.id
                 LEFT JOIN LATERAL (
                     SELECT ce.precio_cliente_inicial_ars,
                            ce.precio_cliente_final_ars, ce.ajuste_cliente_ars,
