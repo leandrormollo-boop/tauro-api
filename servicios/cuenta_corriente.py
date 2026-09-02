@@ -260,7 +260,9 @@ def get_resumen_clientes_bulk(solo_activos: bool = True) -> List[Dict[str, Any]]
         resumen = get_resumen_clientes_bulk(solo_activos=True)
         # cada item: {cliente_id, email, nombre, facturado, pagado, saldo}
     """
-    where_activos = "WHERE c.activo = TRUE" if solo_activos else ""
+    where_activos = "WHERE c.test = FALSE"
+    if solo_activos:
+        where_activos += " AND c.activo = TRUE"
     sql = f"""
         WITH fact AS (
             SELECT cliente_id, COALESCE(SUM(monto_ars), 0) AS facturado

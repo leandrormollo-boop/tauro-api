@@ -206,6 +206,65 @@ def _clean(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def reconciliar_solicitudes_con_cargo_cancelado(
+    cliente_id: Optional[str] = None,
+) -> int:
+    """Cancela expedientes activos cuyo cargo ya fue cancelado.
+
+    Es una reparación idempotente de consistencia: conserva ambas filas y
+    deja auditoría dentro de la misma transacción. Se ejecuta antes de las
+    lecturas operativas para que una escritura histórica o manual nunca deje
+    una guía aparentemente activa frente al cliente o al administrador.
+    """
+    cliente = (cliente_id or "").strip().upper()
+    parametros: tuple = (cliente,) if cliente else ()
+    filtro_cliente = "AND s.cliente_id=%s" if cliente else ""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                UPDATE solicitudes_guia s
+                SET estado='CANCELADO', updated_at=NOW()
+                WHERE s.estado NOT IN ('CANCELADO', 'REEMPLAZADO')
+                  {filtro_cliente}
+                  AND EXISTS (
+                      SELECT 1 FROM envios e
+                      WHERE e.solicitud_id=s.id
+                        AND e.cliente_id=s.cliente_id
+                        AND e.estado='CANCELADO'
+                  )
+                RETURNING s.id, s.cliente_id
+                """,
+                parametros,
+            )
+            reparadas = [dict(fila) for fila in cur.fetchall()]
+            if reparadas:
+                from servicios.auditoria import registrar_evento_con_cursor
+                for fila in reparadas:
+                    registrar_evento_con_cursor(
+                        cur,
+                        event="sistema.solicitud_cancelada_por_cargo",
+                        actor_type="sistema",
+                        actor_ref="consistencia_cuenta_corriente",
+                        ip=None,
+                        method=None,
+                        path=None,
+                        status_code=200,
+                        success=True,
+                        request_id=None,
+                        metadata={
+                            "solicitud_id": int(fila["id"]),
+                            "cliente_id": fila["cliente_id"],
+                        },
+                    )
+    for fila in reparadas:
+        print(
+            "[solicitudes] cancelada por cargo CANCELADO: "
+            f"solicitud={fila['id']} cliente={fila['cliente_id']}"
+        )
+    return len(reparadas)
+
+
 def idempotency_hash_origen_tienda(
     *,
     cliente_id: str,
@@ -1067,6 +1126,8 @@ def listar_solicitudes_cliente(
     ``limite=None`` devuelve el historial completo. Las vistas de resumen
     deben pasar un número explícito para no traer filas innecesarias.
     """
+    cliente = cliente_id.strip().upper()
+    reconciliar_solicitudes_con_cargo_cancelado(cliente)
     with get_conn() as conn:
         with conn.cursor() as cur:
             # Columnas de listado: nunca traer el BYTEA de la guía. En el
@@ -1137,9 +1198,9 @@ def listar_solicitudes_cliente(
                     WHERE c.solicitud_id=s.id AND c.estado='CERRADA'
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
-                WHERE s.cliente_id = %s
+                WHERE s.cliente_id = %s AND s.test=FALSE
             """
-            params = [cliente_id.strip().upper()]
+            params = [cliente]
             if desde is not None:
                 query += """
                     AND COALESCE(
@@ -1185,7 +1246,7 @@ def periodos_solicitudes_cliente(cliente_id: str) -> list[tuple[int, int]]:
                     ))::int AS mes
                 FROM solicitudes_guia s
                 LEFT JOIN envios e ON e.solicitud_id=s.id
-                WHERE s.cliente_id=%s
+                WHERE s.cliente_id=%s AND s.test=FALSE
                 ORDER BY anio DESC, mes DESC
                 """,
                 (cliente_id.strip().upper(),),
@@ -1216,7 +1277,7 @@ def listar_envios_api(
     ambito = (ambito or "").strip().upper()
     estado = (estado or "").strip().upper()
 
-    condiciones = ["cliente_id=%s"]
+    condiciones = ["cliente_id=%s", "test=FALSE"]
     params: list = [cliente_id]
     if ambito:
         condiciones.append("ambito=%s")
@@ -1270,6 +1331,7 @@ def contar_guias_listas(cliente_id: str) -> int:
                 SELECT COUNT(*) AS n
                 FROM solicitudes_guia s
                 WHERE s.cliente_id = %s AND s.estado = 'GUIA_LISTA'
+                  AND s.test=FALSE
                   AND NOT EXISTS (
                       SELECT 1
                       FROM envios e
@@ -1286,10 +1348,11 @@ def contar_guias_listas(cliente_id: str) -> int:
 def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:
     """Solicitudes para la bandeja operativa del admin."""
     estado = (estado or "").strip().upper()
+    reconciliar_solicitudes_con_cargo_cancelado()
     params: list = []
-    where = ""
+    where = "WHERE c.test=FALSE AND s.test=FALSE"
     if estado:
-        where = "WHERE s.estado = %s"
+        where += " AND s.estado = %s"
         params.append(estado)
     params.append(limite)
 
@@ -1443,13 +1506,16 @@ def editar_solicitud_pre_emision(solicitud_id: int, campos: dict) -> None:
 
 
 def contar_solicitudes_pendientes() -> int:
+    reconciliar_solicitudes_con_cargo_cancelado()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT COUNT(*) AS n
-                FROM solicitudes_guia
-                WHERE estado IN ('SOLICITADO', 'EN_PROCESO', 'VERIFICAR_COURIER')
+                FROM solicitudes_guia s
+                JOIN clientes c ON c.cliente_id=s.cliente_id
+                WHERE s.estado IN ('SOLICITADO', 'EN_PROCESO', 'VERIFICAR_COURIER')
+                  AND s.test=FALSE AND c.test=FALSE
                 """
             )
             row = cur.fetchone()
@@ -1459,6 +1525,8 @@ def contar_solicitudes_pendientes() -> int:
 def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[dict]:
     """Una solicitud del cliente logueado (para la página de detalle del
     portal). Chequea pertenencia y no carga los bytes del label."""
+    cliente = cliente_id.strip().upper()
+    reconciliar_solicitudes_con_cargo_cancelado(cliente)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1510,9 +1578,9 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                     WHERE c.solicitud_id=s.id AND c.estado='CERRADA'
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
-                WHERE s.id = %s AND s.cliente_id = %s
+                WHERE s.id = %s AND s.cliente_id = %s AND s.test=FALSE
                 """,
-                (solicitud_id, cliente_id.strip().upper()),
+                (solicitud_id, cliente),
             )
             row = cur.fetchone()
     return _sin_label(dict(row)) if row else None
@@ -1527,6 +1595,7 @@ def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[byt
                 SELECT label_pdf
                 FROM solicitudes_guia s
                 WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.test=FALSE
                   AND s.estado <> 'CANCELADO'
                   AND s.estado <> 'REEMPLAZADO'
                   AND NOT EXISTS (
@@ -1800,6 +1869,7 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
                 cur.execute(
                     """SELECT s.label_pdf FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
+                         AND s.test=FALSE
                          AND s.estado <> 'CANCELADO'
                          AND s.estado <> 'REEMPLAZADO'
                          AND NOT EXISTS (
@@ -1837,6 +1907,7 @@ def obtener_factura_comercial_pdf(
                 cur.execute(
                     """SELECT s.commercial_invoice_pdf FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
+                         AND s.test=FALSE
                          AND s.estado <> 'CANCELADO'
                          AND s.estado <> 'REEMPLAZADO'
                          AND NOT EXISTS (
@@ -1943,6 +2014,7 @@ def preparar_documentos_envio_portal(
                 FROM solicitudes_guia s
                 LEFT JOIN clientes c ON c.cliente_id=s.cliente_id
                 WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.test=FALSE
                   AND s.estado <> 'CANCELADO'
                   AND s.estado <> 'REEMPLAZADO'
                   AND NOT EXISTS (

@@ -42,6 +42,7 @@ def resumen_por_cliente() -> list[dict]:
                     WHERE estado = 'PENDIENTE'
                     GROUP BY cliente_id
                 ) p ON p.cliente_id = c.cliente_id
+                WHERE c.test = FALSE
                 ORDER BY
                     (COALESCE(s.solicitadas, 0) + COALESCE(p.pendientes, 0)) DESC,
                     c.cliente_id
@@ -87,9 +88,13 @@ def total_pendiente_tauro() -> int:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT COUNT(*) AS n FROM solicitudes_guia WHERE estado = 'SOLICITADO'"
-                )
+                cur.execute("""
+                    SELECT COUNT(*) AS n
+                    FROM solicitudes_guia s
+                    JOIN clientes c ON c.cliente_id=s.cliente_id
+                    WHERE s.estado='SOLICITADO'
+                      AND s.test=FALSE AND c.test=FALSE
+                """)
                 return int(cur.fetchone()["n"])
     except Exception as e:
         print(f"[bandeja_admin] no pude contar pendientes: {e}")

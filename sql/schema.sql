@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     markup_tipo  TEXT    NOT NULL DEFAULT 'PCT', -- PCT | FIJO_ARS | MULTIPLICADOR
     markup_valor REAL,
     activo       BOOLEAN NOT NULL DEFAULT TRUE,
+    test         BOOLEAN NOT NULL DEFAULT FALSE,
     nombre       TEXT,
     cuit         TEXT,
     direccion    TEXT,
@@ -69,6 +70,10 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS tax_paga TEXT NOT NULL D
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS courier_default TEXT NOT NULL DEFAULT '';
 -- Password hasheado con bcrypt (login email + password)
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
+-- Las cuentas de prueba se conservan para auditoría, pero no contaminan
+-- tableros, selectores operativos ni saldos agregados del negocio.
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS test BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_clientes_operativos ON clientes(activo, test);
 
 -- Autogestión y pricing por cliente + courier. Sin fila no se habilita
 -- ninguna operación: cotizar, emitir y pedir pickups son opt-in explícito.
@@ -1462,6 +1467,10 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS tax_paga TEXT;
 -- servicio adicional II, por el valor declarado total de todas las cajas.
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS asegurar_carga BOOLEAN NOT NULL DEFAULT FALSE;
+-- Casos de QA/históricos que se preservan sin mostrarlos al cliente ni
+-- mezclarlos con la operación real.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS test BOOLEAN NOT NULL DEFAULT FALSE;
 -- Empresa y CONTACTO separados (guía real de HAILU, 05/08): los couriers
 -- piden companyName (razón social) Y personName (quién atiende). Antes un
 -- solo campo forzaba a elegir, y la emisión ponía como empresa al cliente

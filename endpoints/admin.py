@@ -264,7 +264,7 @@ def require_admin(admin_token: Optional[str] = Cookie(None)):
 def _get_clientes_lista():
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM clientes ORDER BY cliente_id")
+            cur.execute("SELECT * FROM clientes WHERE test=FALSE ORDER BY cliente_id")
             clientes = [dict(r) for r in cur.fetchall()]
     for cliente in clientes:
         cliente["pricing_desc"] = describir_pricing(cliente)
@@ -342,12 +342,16 @@ def _run_tracking_fedex_job(mode: str, limit: int | None, dry_run: bool, target:
                 "result": result,
             })
     except Exception as e:
+        print(f"[admin] tracking FedEx falló: {type(e).__name__}")
         with _TRACKING_LOCK:
             _TRACKING_STATUS.update({
                 "running": False,
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "returncode": -1,
-                "output": f"Error ejecutando tracking FedEx: {e}",
+                "output": (
+                    "No se pudo ejecutar Tracking FedEx. "
+                    "Revisá la configuración del servicio."
+                ),
                 "result": None,
             })
 
@@ -654,10 +658,17 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    (SELECT COUNT(*) FROM clientes WHERE activo=TRUE) AS clientes_activos,
-                    (SELECT COUNT(*) FROM envios)                     AS total_envios,
-                    (SELECT COUNT(*) FROM pagos)                      AS total_pagos,
-                    (SELECT COUNT(*) FROM productos WHERE activo=FALSE) AS productos_pendientes
+                    (SELECT COUNT(*) FROM clientes
+                     WHERE activo=TRUE AND test=FALSE) AS clientes_activos,
+                    (SELECT COUNT(*) FROM envios e
+                     JOIN clientes c ON c.cliente_id=e.cliente_id
+                     WHERE c.test=FALSE) AS total_envios,
+                    (SELECT COUNT(*) FROM pagos p
+                     JOIN clientes c ON c.cliente_id=p.cliente_id
+                     WHERE c.test=FALSE) AS total_pagos,
+                    (SELECT COUNT(*) FROM productos p
+                     JOIN clientes c ON c.cliente_id=p.cliente_id
+                     WHERE p.activo=FALSE AND c.test=FALSE) AS productos_pendientes
             """)
             stats_row = cur.fetchone()
             clientes_activos     = stats_row["clientes_activos"]
@@ -2846,7 +2857,11 @@ def admin_tracking_fedex(
     try:
         summary = get_tracking_summary()
     except Exception as e:
-        summary_error = str(e)
+        print(f"[admin] tracking FedEx no disponible: {type(e).__name__}")
+        summary_error = (
+            "La herramienta histórica de Tracking FedEx no está disponible. "
+            "No se expusieron detalles internos."
+        )
 
     return templates.TemplateResponse(
         request=request, name="admin/tracking_fedex.html",
