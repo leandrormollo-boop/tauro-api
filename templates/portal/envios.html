@@ -265,7 +265,7 @@ camposPeriodo.forEach(function (campo) {
                         {% endif %}
                     </td>
                     <td class="mono envio-price-cell" data-label="Precio del envío">
-                        {% if s.estado == 'REEMPLAZADO' %}
+                        {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                             <span style="color:var(--fg-3);">Sin cargo</span>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
                             <span class="envio-price-initial"><small>Inicial</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
@@ -290,7 +290,7 @@ camposPeriodo.forEach(function (campo) {
                                 {% if tipo_filtro == 'internacional' and s.estado == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-sm">Retiro</a>
                                 {% endif %}
-                            {% elif s.guia_url %}
+                            {% elif s.guia_url and s.estado not in ('CANCELADO', 'REEMPLAZADO') %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>
                             {% elif (s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente and not s.tracking and s.estado not in ('CANCELADO', 'EMITIENDO', 'VERIFICAR_COURIER') %}
                                 {# Estaba SOLO en el detalle, un click adentro, así que
@@ -302,6 +302,7 @@ camposPeriodo.forEach(function (campo) {
                                     <button type="submit" class="btn btn-primary btn-sm">Emitir guía</button>
                                 </form>
                             {% endif %}
+                            {% if s._ambito_portal == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-ghost btn-sm">Repetir</a>{% endif %}
                             <a href="/portal/envios/{{ s.id }}" class="btn btn-ghost btn-sm">Detalle</a>
                         </div>
                     </td>

@@ -204,5 +204,7 @@ def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
     inicio = solicitudes.index("def periodos_solicitudes_cliente")
     fin = solicitudes.index("def listar_envios_api", inicio)
     assert "label_pdf" not in solicitudes[inicio:fin]
-    assert "s.estado <> 'CANCELADO'" in solicitudes[inicio:fin]
-    assert "cargo_cancelado.estado='CANCELADO'" in solicitudes[inicio:fin]
+    # El período describe el historial completo; cancelar quita el cargo pero
+    # no borra el mes en el que el cliente realizó la operación.
+    assert "s.estado <> 'CANCELADO'" not in solicitudes[inicio:fin]
+    assert "cargo_cancelado.estado='CANCELADO'" not in solicitudes[inicio:fin]

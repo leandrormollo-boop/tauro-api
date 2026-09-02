@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Corregir guía DHL' if reemision_origen else 'Crear envío' }}{% endblock %}
+{% block title %}{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío') }}{% endblock %}
 
 {% block content %}
 {% if not ambito %}
@@ -16,11 +16,11 @@
 <div class="page-title page-title-row">
     <div>
         <div class="eyebrow"><span aria-hidden="true">🌐</span> Envío internacional</div>
-        <h1>{{ 'Corregir guía DHL' if reemision_origen else 'Nuevo envío internacional' }}</h1>
+        <h1>{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional') }}</h1>
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>{% if reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
+        <p>{% if reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
     </div>
     <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Administrar remitentes</a>
 </div>
@@ -38,6 +38,14 @@
     </div>
 {% endif %}
 
+{% if repeticion_origen %}
+    <div class="msg ok" role="status">
+        <strong>Repitiendo el envío #{{ repeticion_origen.id }}</strong><br>
+        Remitente, destinatario, cajas e invoice ya están precargados. Esto crea
+        un envío independiente: no modifica ni cancela el anterior.
+    </div>
+{% endif %}
+
 {% if cotizacion_web %}
     <div class="msg ok" role="status">
         Precargamos la cotización <b>{{ cotizacion_web.referencia }}</b>:
@@ -50,7 +58,7 @@
 {# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
    (es un atajo, no el camino principal) y ni aparece cuando el envío ya
    viene de una venta de la tienda: ahí no hay nada que pegar. #}
-{% if not pedido_tienda and not reemision_origen %}
+{% if not pedido_tienda and not reemision_origen and not repeticion_origen %}
 <details class="card" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
     <summary style="cursor:pointer;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:10px;font-size:13.5px;">
         ⚡ Atajo: ¿te llegó el pedido por mail? Pegalo y te completo el formulario
@@ -526,7 +534,7 @@
             <button type="button" id="wizard-back-final" class="btn btn-ghost">
                 ← Atrás
             </button>
-            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Cancelar</a>
+            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Cancelar</a>
             <button type="submit" class="btn btn-primary">
                 {{ 'Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud' }}
             </button>

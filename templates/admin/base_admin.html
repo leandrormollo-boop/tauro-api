@@ -162,7 +162,7 @@
       <a href="/admin/pedidos" {% if seccion == 'pedidos' %}class="active"{% endif %}>Solicitudes de guía</a>
       <a href="/admin/guias-reemplazadas" {% if seccion == 'guias_reemplazadas' %}class="active"{% endif %}
          style="display:flex;align-items:center;gap:8px;">
-        Guías reemplazadas
+        Guías descartadas
         {% if alertas_guias_reemplazadas() %}<span class="side-badge">{{ alertas_guias_reemplazadas() }}</span>{% endif %}
       </a>
       <a href="/admin/tracking-fedex" {% if seccion == 'tracking_fedex' %}class="active"{% endif %}>Tracking FedEx</a>

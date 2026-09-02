@@ -1,18 +1,18 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Guías reemplazadas{% endblock %}
+{% block title %}Guías descartadas{% endblock %}
 
 {% block content %}
 <div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
   <div>
     <div class="eyebrow">Control de riesgo DHL</div>
-    <h1>Guías reemplazadas</h1>
-    <p>Cada etiqueta descartada se controla una sola vez, siete días después del reemplazo.</p>
+    <h1>Guías reemplazadas y canceladas</h1>
+    <p>Cada etiqueta descartada se controla una sola vez, siete días después de la operación.</p>
   </div>
   <a href="/admin/guias-reemplazadas" class="btn btn-ghost btn-sm">Actualizar pantalla</a>
 </div>
 
 <div class="msg warn" style="margin-bottom:18px;">
-  <strong>Importante:</strong> reemplazar una guía en TAURO no anula físicamente la etiqueta en DHL.
+  <strong>Importante:</strong> reemplazar o cancelar una guía en TAURO no anula físicamente la etiqueta en DHL.
   A los 7 días, si el tracking anterior sigue sin recolección ni movimientos, la cancelación queda confirmada.
   Si registra un evento, este panel alerta pero <strong>no reactiva el cargo viejo</strong>:
   primero hay que comprobar la factura del courier y conciliar el caso.
@@ -48,7 +48,7 @@
     <table>
       <thead>
         <tr>
-          <th>Cliente / reemplazo</th>
+          <th>Cliente / operación</th>
           <th>Tracking descartado</th>
           <th>Tracking vigente</th>
           <th>Rastreo DHL de la guía vieja</th>
@@ -62,7 +62,8 @@
           <td style="min-width:175px;">
             <strong>{{ r.cliente_id }}</strong>
             <br><small style="color:var(--fg-4);">{{ r.cliente_nombre or '' }}</small>
-            <div class="mono" style="font-size:10px;margin-top:8px;">#{{ r.solicitud_anterior_id }} → #{{ r.solicitud_nueva_id }}</div>
+            <div style="margin-top:8px;"><span class="badge {% if r.operacion == 'CANCELACION' %}warn{% else %}accent{% endif %}">{{ 'Cancelación' if r.operacion == 'CANCELACION' else 'Reemplazo' }}</span></div>
+            <div class="mono" style="font-size:10px;margin-top:6px;">#{{ r.solicitud_anterior_id }}{% if r.solicitud_nueva_id %} → #{{ r.solicitud_nueva_id }}{% endif %}</div>
             <small style="color:var(--fg-4);">{{ r.completed_at.strftime("%d/%m/%Y %H:%M") if r.completed_at else "—" }}</small>
             {% if r.motivo %}<br><small style="color:var(--fg-3);">Motivo: {{ r.motivo }}</small>{% endif %}
           </td>
@@ -75,6 +76,10 @@
             {% endif %}
           </td>
           <td style="min-width:175px;">
+            {% if r.operacion == 'CANCELACION' %}
+            <span class="badge muted">Sin guía nueva</span>
+            <div style="font-size:12px;color:var(--fg-3);margin-top:8px;">El cliente canceló la operación.</div>
+            {% else %}
             <span class="badge ok">Vigente</span>
             <div class="mono" style="font-size:13px;margin:8px 0;">{{ r.tracking_nuevo or 'Pendiente' }}</div>
             {% if r.tracking_nuevo %}
@@ -82,6 +87,7 @@
             {% endif %}
             {% if r.nueva_tiene_label %}
               <br><a href="/admin/pedidos/{{ r.solicitud_nueva_id }}/guia.pdf" target="_blank" class="btn btn-sm btn-primary" style="margin-top:6px;">Descargar guía final</a>
+            {% endif %}
             {% endif %}
           </td>
           <td style="min-width:255px;">
@@ -119,7 +125,7 @@
             {% if r.cuenta_consistente %}
               <span class="badge ok">Consistente</span>
               <div style="font-size:12px;margin-top:8px;">Vieja: <strong>cancelada</strong></div>
-              <div style="font-size:12px;">Final: <strong>activa</strong></div>
+              <div style="font-size:12px;">{% if r.operacion == 'CANCELACION' %}Sin cargo nuevo{% else %}Final: <strong>activa</strong>{% endif %}</div>
             {% else %}
               <span class="badge error">Revisar cargos</span>
               <div style="font-size:12px;margin-top:8px;">Vieja: {{ r.cargo_anterior_estado or 'sin cargo' }}</div>

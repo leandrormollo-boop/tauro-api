@@ -229,11 +229,14 @@ def idempotency_hash_origen_tienda(
 
 def _sin_label(row: dict) -> dict:
     """Reemplaza PDFs por booleanos para no arrastrar BYTEA en las vistas."""
+    if (row.get("cargo_estado") == "CANCELADO"
+            and row.get("estado") != "REEMPLAZADO"):
+        row["estado"] = "CANCELADO"
     if "tiene_label" not in row:
         row["tiene_label"] = bool(row.get("label_pdf"))
     if "tiene_factura_comercial" not in row:
         row["tiene_factura_comercial"] = bool(row.get("commercial_invoice_pdf"))
-    if row.get("estado") == "REEMPLAZADO" or (
+    if row.get("estado") in {"CANCELADO", "REEMPLAZADO"} or (
         row.get("reemplaza_solicitud_id")
         and (row.get("cargo_pendiente")
              or row.get("reemision_estado") != "EMITIDA")
@@ -423,6 +426,288 @@ def validar_reemision_cliente(
 
     return {"ok": True, "tracking_anterior": str(fila["tracking"]),
             "cargo_monto_ars": fila.get("cargo_monto_ars")}
+
+
+def _validar_cancelacion_desde_fila(fila: dict) -> dict:
+    """Reglas determinísticas para cancelar sin borrar historia ni deuda real."""
+    if not fila:
+        return {"ok": False, "error": "Ese envío no existe o no es de tu cuenta."}
+    estado = str(fila.get("estado") or "").upper()
+    tracking = str(fila.get("tracking") or "").strip()
+    if estado == "CANCELADO":
+        return {"ok": False, "error": "Este envío ya está cancelado."}
+    if fila.get("control_existente_id"):
+        return {
+            "ok": False,
+            "error": "Este envío ya fue corregido o cancelado anteriormente.",
+        }
+    if fila.get("tiene_ajustes_contables"):
+        return {
+            "ok": False,
+            "error": "La guía tiene ajustes contables y requiere revisión de Tauro.",
+        }
+    if fila.get("tiene_recoleccion_activa"):
+        return {
+            "ok": False,
+            "error": "La guía tiene una recolección activa. Cancelala antes de cancelar el envío.",
+        }
+
+    # Una solicitud que todavía no llegó al courier puede cancelarse sin
+    # control de tracking ni movimiento contable.
+    if estado == "SOLICITADO" and not tracking and not fila.get("cargo_id"):
+        return {"ok": True, "modo": "SOLICITUD", "tracking_anterior": ""}
+
+    if str(fila.get("courier") or "").upper() != "DHL":
+        return {
+            "ok": False,
+            "error": "Por ahora sólo se pueden cancelar guías emitidas por DHL.",
+        }
+    if estado != "GUIA_LISTA" or not tracking:
+        return {
+            "ok": False,
+            "error": "Sólo se puede cancelar una guía DHL lista y todavía no despachada.",
+        }
+    if fila.get("tracking_estado"):
+        return {
+            "ok": False,
+            "error": "DHL ya informó movimientos. El envío no puede cancelarse desde el portal.",
+        }
+    if not fila.get("cargo_id") or fila.get("cargo_estado") != "ACTIVO":
+        return {
+            "ok": False,
+            "error": "El cargo necesita conciliación antes de cancelar el envío.",
+        }
+    if fila.get("cargo_pendiente"):
+        return {
+            "ok": False,
+            "error": "La guía todavía está registrando su cargo. Probá nuevamente en unos segundos.",
+        }
+    if str(fila.get("cargo_nro_fc") or "").strip():
+        return {
+            "ok": False,
+            "error": "La guía ya fue facturada. Tauro debe cancelarla con respaldo contable.",
+        }
+    return {
+        "ok": True,
+        "modo": "GUIA_DHL",
+        "tracking_anterior": tracking,
+        "cargo_monto_ars": fila.get("cargo_monto_ars"),
+    }
+
+
+def validar_cancelacion_cliente(
+    solicitud_id: int,
+    cliente_id: str,
+    *,
+    consultar_courier: bool = False,
+    cliente_dhl=None,
+) -> dict:
+    """Determina si el cliente puede cancelar sin riesgo operativo/contable."""
+    cliente_id = (cliente_id or "").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.id, s.cliente_id, s.estado, s.courier, s.tracking,
+                       s.tracking_estado, s.cargo_pendiente,
+                       e.id AS cargo_id, e.estado AS cargo_estado,
+                       e.nro_fc AS cargo_nro_fc, e.monto_ars AS cargo_monto_ars,
+                       r.id AS control_existente_id,
+                       EXISTS (
+                           SELECT 1 FROM ajustes_cliente a
+                           WHERE a.solicitud_id=s.id AND a.estado <> 'ANULADO'
+                       ) AS tiene_ajustes_contables,
+                       EXISTS (
+                           SELECT 1 FROM recolecciones p
+                           WHERE p.solicitud_id=s.id
+                             AND p.estado IN ('AGENDANDO', 'AGENDADA',
+                                              'CANCELANDO', 'VERIFICAR_COURIER')
+                       ) AS tiene_recoleccion_activa
+                FROM solicitudes_guia s
+                LEFT JOIN envios e ON e.solicitud_id=s.id
+                LEFT JOIN solicitudes_guia_reemisiones r
+                  ON r.solicitud_anterior_id=s.id
+                WHERE s.id=%s AND s.cliente_id=%s
+                """,
+                (int(solicitud_id), cliente_id),
+            )
+            fila = cur.fetchone()
+
+    resultado = _validar_cancelacion_desde_fila(dict(fila) if fila else {})
+    if not resultado.get("ok") or resultado.get("modo") != "GUIA_DHL":
+        return resultado
+    if not consultar_courier:
+        return resultado
+
+    if cliente_dhl is None:
+        from core.dhl_client import DHLClient
+        cliente_dhl = DHLClient()
+    try:
+        respuesta = cliente_dhl.track(resultado["tracking_anterior"])
+    except Exception as exc:
+        respuesta = {"encontrado": False, "error": type(exc).__name__}
+    eventos = [
+        evento for evento in (respuesta.get("eventos") or [])
+        if isinstance(evento, dict)
+    ] if isinstance(respuesta, dict) else []
+    if respuesta.get("encontrado") and eventos:
+        return {
+            "ok": False,
+            "error": "DHL ya registró movimientos. El envío no puede cancelarse desde el portal.",
+        }
+    if not respuesta.get("encontrado"):
+        estado_http = respuesta.get("http_status")
+        error = str(respuesta.get("error") or "")
+        if estado_http != 404 and error != "Sin datos de tracking":
+            return {
+                "ok": False,
+                "error": (
+                    "No pudimos confirmar con DHL que la guía siga sin movimientos. "
+                    "Probá nuevamente en unos minutos."
+                ),
+            }
+    return resultado
+
+
+def cancelar_solicitud_cliente(
+    solicitud_id: int,
+    cliente_id: str,
+    *,
+    motivo: str = "Cancelado por el cliente",
+) -> dict:
+    """Cancela solicitud+cargo y registra el tracking viejo en una transacción.
+
+    No borra el PDF ni la fila histórica. Las lecturas del portal dejan de
+    entregar esos documentos por estado y el tracking queda en vigilancia una
+    sola vez a los siete días, igual que una guía reemplazada.
+    """
+    from servicios.auditoria import registrar_evento_con_cursor
+
+    solicitud_id = int(solicitud_id)
+    cliente_id = (cliente_id or "").strip().upper()
+    motivo = " ".join(str(motivo or "").strip().split())[:300]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.id, s.cliente_id, s.estado, s.courier, s.tracking,
+                       s.tracking_estado, s.cargo_pendiente,
+                       EXISTS (
+                           SELECT 1 FROM solicitudes_guia_reemisiones r
+                           WHERE r.solicitud_anterior_id=s.id
+                       ) AS control_existente_id,
+                       EXISTS (
+                           SELECT 1 FROM ajustes_cliente a
+                           WHERE a.solicitud_id=s.id AND a.estado <> 'ANULADO'
+                       ) AS tiene_ajustes_contables,
+                       EXISTS (
+                           SELECT 1 FROM recolecciones p
+                           WHERE p.solicitud_id=s.id
+                             AND p.estado IN ('AGENDANDO', 'AGENDADA',
+                                              'CANCELANDO', 'VERIFICAR_COURIER')
+                       ) AS tiene_recoleccion_activa
+                FROM solicitudes_guia s
+                WHERE s.id=%s AND s.cliente_id=%s
+                FOR UPDATE
+                """,
+                (solicitud_id, cliente_id),
+            )
+            solicitud = cur.fetchone()
+            fila = dict(solicitud) if solicitud else {}
+            cur.execute(
+                """
+                SELECT id AS cargo_id, estado AS cargo_estado,
+                       nro_fc AS cargo_nro_fc, monto_ars AS cargo_monto_ars
+                FROM envios
+                WHERE solicitud_id=%s AND cliente_id=%s
+                ORDER BY id DESC LIMIT 1
+                FOR UPDATE
+                """,
+                (solicitud_id, cliente_id),
+            )
+            cargo = cur.fetchone()
+            if cargo:
+                fila.update(dict(cargo))
+            validacion = _validar_cancelacion_desde_fila(fila)
+            if not validacion.get("ok"):
+                return validacion
+
+            if validacion["modo"] == "GUIA_DHL":
+                cur.execute(
+                    """
+                    UPDATE envios
+                    SET estado='CANCELADO'
+                    WHERE id=%s AND cliente_id=%s AND estado='ACTIVO'
+                      AND NULLIF(BTRIM(nro_fc), '') IS NULL
+                    RETURNING id
+                    """,
+                    (fila["cargo_id"], cliente_id),
+                )
+                if not cur.fetchone():
+                    raise ValueError(
+                        "El cargo cambió mientras cancelábamos. No se modificó el envío."
+                    )
+
+            cur.execute(
+                """
+                UPDATE solicitudes_guia
+                SET estado='CANCELADO', updated_at=NOW()
+                WHERE id=%s AND cliente_id=%s AND estado=%s
+                RETURNING id
+                """,
+                (solicitud_id, cliente_id, fila["estado"]),
+            )
+            if not cur.fetchone():
+                raise ValueError(
+                    "El envío cambió mientras cancelábamos. No se aplicó la cancelación."
+                )
+
+            control_id = None
+            if validacion["modo"] == "GUIA_DHL":
+                cur.execute(
+                    """
+                    INSERT INTO solicitudes_guia_reemisiones (
+                        cliente_id, solicitud_anterior_id, solicitud_nueva_id,
+                        operacion, tracking_anterior, campos_modificados,
+                        motivo, estado, riesgo_estado, completed_at
+                    ) VALUES (%s, %s, NULL, 'CANCELACION', %s,
+                              '[]'::jsonb, %s, 'EMITIDA', 'VIGILAR', NOW())
+                    RETURNING id
+                    """,
+                    (
+                        cliente_id, solicitud_id,
+                        validacion["tracking_anterior"], motivo,
+                    ),
+                )
+                control_id = int(cur.fetchone()["id"])
+
+            registrar_evento_con_cursor(
+                cur,
+                event="portal.envio_cancelado",
+                actor_type="cliente",
+                actor_ref=cliente_id,
+                ip=None,
+                method=None,
+                path=None,
+                status_code=200,
+                success=True,
+                request_id=None,
+                metadata={
+                    "solicitud_id": solicitud_id,
+                    "cliente_id": cliente_id,
+                    "modo": validacion["modo"],
+                    "tracking": validacion.get("tracking_anterior") or None,
+                    "cargo_id": fila.get("cargo_id"),
+                    "control_id": control_id,
+                },
+            )
+    return {
+        "ok": True,
+        "solicitud_id": solicitud_id,
+        "modo": validacion["modo"],
+        "tracking_anterior": validacion.get("tracking_anterior") or "",
+        "control_id": control_id,
+    }
 
 
 def crear_solicitud_guia(
@@ -783,6 +1068,7 @@ def listar_solicitudes_cliente(
                        s.valor_declarado_usd, s.precio_tauro_ars,
                        s.precio_tauro_usd, s.precio_cliente_final_ars, s.tracking,
                        s.guia_url, s.created_at, s.courier, s.bultos,
+                       cargo_periodo.estado AS cargo_estado,
                        COALESCE(
                            cargo_periodo.fecha,
                            (s.created_at AT TIME ZONE
@@ -838,14 +1124,6 @@ def listar_solicitudes_cliente(
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.cliente_id = %s
-                  AND s.estado <> 'CANCELADO'
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM envios e
-                      WHERE e.solicitud_id = s.id
-                        AND e.cliente_id = s.cliente_id
-                        AND e.estado = 'CANCELADO'
-                  )
             """
             params = [cliente_id.strip().upper()]
             if desde is not None:
@@ -894,14 +1172,6 @@ def periodos_solicitudes_cliente(cliente_id: str) -> list[tuple[int, int]]:
                 FROM solicitudes_guia s
                 LEFT JOIN envios e ON e.solicitud_id=s.id
                 WHERE s.cliente_id=%s
-                  AND s.estado <> 'CANCELADO'
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM envios cargo_cancelado
-                      WHERE cargo_cancelado.solicitud_id=s.id
-                        AND cargo_cancelado.cliente_id=s.cliente_id
-                        AND cargo_cancelado.estado='CANCELADO'
-                  )
                 ORDER BY anio DESC, mes DESC
                 """,
                 (cliente_id.strip().upper(),),
@@ -1180,6 +1450,7 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
             cur.execute(
                 """
                 SELECT s.*,
+                       cargo.estado AS cargo_estado,
                        re_prev.solicitud_anterior_id AS reemplaza_solicitud_id,
                        re_prev.tracking_anterior,
                        re_next.solicitud_nueva_id AS reemplazada_por_solicitud_id,
@@ -1211,6 +1482,7 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                   ON re_next.solicitud_anterior_id=s.id
                 LEFT JOIN solicitudes_guia vigente
                   ON vigente.id=re_next.solicitud_nueva_id
+                LEFT JOIN envios cargo ON cargo.solicitud_id=s.id
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
@@ -1222,14 +1494,6 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.id = %s AND s.cliente_id = %s
-                  AND s.estado <> 'CANCELADO'
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM envios e
-                      WHERE e.solicitud_id = s.id
-                        AND e.cliente_id = s.cliente_id
-                        AND e.estado = 'CANCELADO'
-                  )
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )

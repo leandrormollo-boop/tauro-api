@@ -59,7 +59,8 @@ from servicios.solicitudes_guia import (
     obtener_factura_comercial_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
     idempotency_hash_origen_tienda,
-    validar_reemision_cliente, periodos_solicitudes_cliente,
+    validar_reemision_cliente, validar_cancelacion_cliente,
+    cancelar_solicitud_cliente, periodos_solicitudes_cliente,
 )
 from servicios.periodos_envios import normalizar_periodo
 from servicios.carriers import courier_default_cliente
@@ -1895,6 +1896,91 @@ def _origen_pedido_tienda_verificado(cliente_id: str, pedido_id_raw: str) -> dic
     }
 
 
+def _precargar_envio_existente(origen: dict, *, corregir_id: int | None = None):
+    """Convierte una solicitud histórica en los campos del wizard actual."""
+    bultos = origen.get("bultos") or []
+    if isinstance(bultos, str):
+        try:
+            import json
+            bultos = json.loads(bultos)
+        except (TypeError, ValueError):
+            bultos = []
+    if not bultos:
+        cantidad_cajas = int(origen.get("cantidad") or 1)
+        bultos = [{
+            "producto_alias": origen.get("producto_alias") or "",
+            "cantidad": cantidad_cajas,
+            "unidades_aduana": cantidad_cajas,
+            "peso_kg": (
+                float(origen.get("peso_kg") or 0) / max(cantidad_cajas, 1)
+            ),
+            "largo_cm": origen.get("largo_cm"),
+            "ancho_cm": origen.get("ancho_cm"),
+            "alto_cm": origen.get("alto_cm"),
+            "valor_unitario_usd": (
+                float(origen.get("valor_declarado_usd") or 0)
+                / max(cantidad_cajas, 1)
+            ),
+            "descripcion_en": origen.get("producto_alias") or "",
+            "hs_code": "",
+            "pais_origen": origen.get("remitente_pais") or "AR",
+        }]
+    filas = []
+    for bulto in bultos:
+        fila = dict(bulto)
+        fila["producto"] = (
+            fila.get("producto") or fila.get("producto_alias") or ""
+        )
+        fila.setdefault("unidades_aduana", fila.get("cantidad") or 1)
+        filas.append(fila)
+
+    courier = str(origen.get("courier") or "dhl").strip().lower()
+    if courier not in {"dhl", "fedex", "ups"}:
+        courier = "dhl"
+    form = {
+        "reemplaza_solicitud_id": str(corregir_id or ""),
+        "reemision_motivo": (
+            "Corrección solicitada por el cliente" if corregir_id else ""
+        ),
+        "rem_nombre": origen.get("remitente_nombre") or "",
+        "rem_contacto": origen.get("remitente_contacto") or "",
+        "rem_documento": origen.get("remitente_documento") or "",
+        "rem_email": origen.get("remitente_email") or "",
+        "rem_telefono": origen.get("remitente_telefono") or "",
+        "rem_direccion": origen.get("remitente_direccion") or "",
+        "rem_ciudad": origen.get("remitente_ciudad") or "",
+        "rem_estado": origen.get("remitente_estado") or "",
+        "rem_zip": origen.get("remitente_zip") or "",
+        "rem_pais": origen.get("remitente_pais") or "AR",
+        "destino_pais": origen.get("destino_pais") or "",
+        "dest_nombre": origen.get("dest_nombre") or "",
+        "dest_contacto": origen.get("dest_contacto") or "",
+        "dest_documento": origen.get("dest_documento") or "",
+        "dest_email": origen.get("dest_email") or "",
+        "dest_telefono": origen.get("dest_telefono") or "",
+        "dest_direccion": origen.get("dest_direccion") or "",
+        "dest_ciudad": origen.get("dest_ciudad") or "",
+        "dest_estado": origen.get("dest_estado") or "",
+        "dest_zip": origen.get("dest_zip") or "",
+        "observaciones": origen.get("observaciones") or "",
+        "precio_cliente_final_ars": origen.get("precio_cliente_final_ars") or "",
+        "tax_paga": origen.get("tax_paga") or "",
+        "intl_courier": courier,
+        # Siempre se vuelve a cotizar: repetir datos no conserva una tarifa
+        # histórica que quizá ya cambió.
+        "precio_cotizado_ars": "",
+        "bultos": filas,
+    }
+    remitente = {
+        "nombre": form["rem_nombre"], "contacto": form["rem_contacto"],
+        "documento": form["rem_documento"], "email": form["rem_email"],
+        "telefono": form["rem_telefono"], "direccion": form["rem_direccion"],
+        "ciudad": form["rem_ciudad"], "estado": form["rem_estado"],
+        "cp": form["rem_zip"], "pais": form["rem_pais"],
+    }
+    return form, remitente
+
+
 @router.get("/envios/nuevo", response_class=HTMLResponse)
 def envio_nuevo_form(
     request: Request,
@@ -1906,9 +1992,12 @@ def envio_nuevo_form(
     courier: str = "",
     quote_id: str = "",
     corregir: Optional[int] = None,
+    repetir: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
 ):
     if corregir:
+        repetir = None
+    if corregir or repetir:
         ambito = "internacional"
     quote_id = _quote_id_portal(quote_id)
     if quote_id and not (ambito or "").strip():
@@ -1941,101 +2030,55 @@ def envio_nuevo_form(
     cotizacion_web = None
     error = None
     reemision_origen = None
-    if corregir:
-        reemision_origen = obtener_solicitud_de_cliente(corregir, cliente)
-        elegible = validar_reemision_cliente(corregir, cliente)
-        if not elegible.get("ok"):
-            destino_error = int(
-                elegible.get("reemision_existente_id") or corregir
-            )
+    repeticion_origen = None
+    origen_existente_id = corregir or repetir
+    if origen_existente_id:
+        origen_existente = obtener_solicitud_de_cliente(
+            origen_existente_id, cliente
+        )
+        if not origen_existente:
             return RedirectResponse(
-                url=(f"/portal/envios/{destino_error}?error="
-                     f"{quote(str(elegible.get('error') or 'No se puede corregir'))}"),
+                url="/portal/envios?error=El+env%C3%ADo+no+est%C3%A1+disponible",
                 status_code=303,
             )
-        bultos = reemision_origen.get("bultos") or []
-        if isinstance(bultos, str):
-            try:
-                import json
-                bultos = json.loads(bultos)
-            except (TypeError, ValueError):
-                bultos = []
-        if not bultos:
-            cantidad_cajas = int(reemision_origen.get("cantidad") or 1)
-            bultos = [{
-                "producto_alias": reemision_origen.get("producto_alias") or "",
-                "cantidad": cantidad_cajas,
-                "unidades_aduana": cantidad_cajas,
-                "peso_kg": (float(reemision_origen.get("peso_kg") or 0)
-                            / max(cantidad_cajas, 1)),
-                "largo_cm": reemision_origen.get("largo_cm"),
-                "ancho_cm": reemision_origen.get("ancho_cm"),
-                "alto_cm": reemision_origen.get("alto_cm"),
-                "valor_unitario_usd": (float(
-                    reemision_origen.get("valor_declarado_usd") or 0
-                ) / max(cantidad_cajas, 1)),
-                "descripcion_en": reemision_origen.get("producto_alias") or "",
-                "hs_code": "",
-                "pais_origen": reemision_origen.get("remitente_pais") or "AR",
-            }]
-        filas = []
-        for bulto in bultos:
-            b = dict(bulto)
-            b["producto"] = b.get("producto") or b.get("producto_alias") or ""
-            b.setdefault("unidades_aduana", b.get("cantidad") or 1)
-            filas.append(b)
-        form = {
-            "reemplaza_solicitud_id": str(corregir),
-            "reemision_motivo": "Corrección solicitada por el cliente",
-            "rem_nombre": reemision_origen.get("remitente_nombre") or "",
-            "rem_contacto": reemision_origen.get("remitente_contacto") or "",
-            "rem_documento": reemision_origen.get("remitente_documento") or "",
-            "rem_email": reemision_origen.get("remitente_email") or "",
-            "rem_telefono": reemision_origen.get("remitente_telefono") or "",
-            "rem_direccion": reemision_origen.get("remitente_direccion") or "",
-            "rem_ciudad": reemision_origen.get("remitente_ciudad") or "",
-            "rem_estado": reemision_origen.get("remitente_estado") or "",
-            "rem_zip": reemision_origen.get("remitente_zip") or "",
-            "rem_pais": reemision_origen.get("remitente_pais") or "AR",
-            "destino_pais": reemision_origen.get("destino_pais") or "",
-            "dest_nombre": reemision_origen.get("dest_nombre") or "",
-            "dest_contacto": reemision_origen.get("dest_contacto") or "",
-            "dest_documento": reemision_origen.get("dest_documento") or "",
-            "dest_email": reemision_origen.get("dest_email") or "",
-            "dest_telefono": reemision_origen.get("dest_telefono") or "",
-            "dest_direccion": reemision_origen.get("dest_direccion") or "",
-            "dest_ciudad": reemision_origen.get("dest_ciudad") or "",
-            "dest_estado": reemision_origen.get("dest_estado") or "",
-            "dest_zip": reemision_origen.get("dest_zip") or "",
-            "observaciones": reemision_origen.get("observaciones") or "",
-            "precio_cliente_final_ars": (
-                reemision_origen.get("precio_cliente_final_ars") or ""
-            ),
-            "tax_paga": reemision_origen.get("tax_paga") or "",
-            "intl_courier": "dhl",
-            "precio_cotizado_ars": reemision_origen.get("precio_tauro_ars") or "",
-            "bultos": filas,
-        }
-        remitente_correccion = {
-            "nombre": form["rem_nombre"], "contacto": form["rem_contacto"],
-            "documento": form["rem_documento"], "email": form["rem_email"],
-            "telefono": form["rem_telefono"], "direccion": form["rem_direccion"],
-            "ciudad": form["rem_ciudad"], "estado": form["rem_estado"],
-            "cp": form["rem_zip"], "pais": form["rem_pais"],
-        }
+        if ambito_envio(origen_existente) != "internacional":
+            return RedirectResponse(
+                url=(f"/portal/envios/{origen_existente_id}?error="
+                     "Repetir+env%C3%ADos+nacionales+se+habilitar%C3%A1+con+OCA+y+Andreani"),
+                status_code=303,
+            )
+        if corregir:
+            reemision_origen = origen_existente
+            elegible = validar_reemision_cliente(corregir, cliente)
+            if not elegible.get("ok"):
+                destino_error = int(
+                    elegible.get("reemision_existente_id") or corregir
+                )
+                return RedirectResponse(
+                    url=(f"/portal/envios/{destino_error}?error="
+                         f"{quote(str(elegible.get('error') or 'No se puede corregir'))}"),
+                    status_code=303,
+                )
+        else:
+            repeticion_origen = origen_existente
+
+        form, remitente_precargado = _precargar_envio_existente(
+            origen_existente, corregir_id=corregir
+        )
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={
                 "cliente": cliente, "ambito": "internacional",
                 "productos": get_productos(cliente),
                 "paises_destino": _paises_con_nacional(),
-                "remitente": remitente_correccion,
+                "remitente": remitente_precargado,
                 "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
                 "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
                 "form": form, "pedido_tienda": None, "cotizacion_web": None,
                 "reemision_origen": reemision_origen,
+                "repeticion_origen": repeticion_origen,
                 "tax_paga_default": tax_paga_cliente(cliente),
-                "courier_default": "dhl", "error": None,
+                "courier_default": form["intl_courier"], "error": None,
             },
         )
     if quote_id and not pedido_tienda:
@@ -2156,6 +2199,7 @@ def envio_nuevo_form(
             "courier_default": courier_default_cliente(cliente),
             "error": error,
             "reemision_origen": reemision_origen,
+            "repeticion_origen": repeticion_origen,
         },
     )
 
@@ -2876,13 +2920,47 @@ def envio_detalle(
         puede_corregir = bool(
             validar_reemision_cliente(solicitud_id, cliente).get("ok")
         )
+    cancelacion = validar_cancelacion_cliente(solicitud_id, cliente)
 
     return templates.TemplateResponse(
         request=request, name="portal/envio_detalle.html",
         context={
             "cliente": cliente, "s": s, "puede_emitir": puede_emitir,
             "puede_corregir": puede_corregir,
+            "puede_cancelar": bool(cancelacion.get("ok")),
+            "cancelar_bloqueo": str(cancelacion.get("error") or ""),
         },
+    )
+
+
+@router.post("/envios/{solicitud_id}/cancelar")
+def cancelar_envio_portal(
+    solicitud_id: int,
+    cliente: str = Depends(cliente_actual),
+):
+    # La UI sólo anticipa la posibilidad. Antes de cambiar cuenta y etiqueta
+    # se consulta DHL en vivo y luego el servicio vuelve a validar bajo lock.
+    validacion = validar_cancelacion_cliente(
+        solicitud_id, cliente, consultar_courier=True
+    )
+    if not validacion.get("ok"):
+        return RedirectResponse(
+            url=(f"/portal/envios/{solicitud_id}?error="
+                 f"{quote(str(validacion.get('error') or 'No se pudo cancelar'))}"),
+            status_code=303,
+        )
+    try:
+        resultado = cancelar_solicitud_cliente(solicitud_id, cliente)
+    except ValueError as exc:
+        resultado = {"ok": False, "error": str(exc)}
+    if not resultado.get("ok"):
+        return RedirectResponse(
+            url=(f"/portal/envios/{solicitud_id}?error="
+                 f"{quote(str(resultado.get('error') or 'No se pudo cancelar'))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=f"/portal/envios/{solicitud_id}?ok=cancelado", status_code=303
     )
 
 

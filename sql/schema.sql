@@ -1519,18 +1519,21 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_tracking_dhl_pendiente
       AND estado <> 'REEMPLAZADO'
       AND (tracking_estado IS NULL OR tracking_estado <> 'ENTREGADO');
 
--- ── Corrección y reemisión de guías DHL ────────────────────
+-- ── Corrección, reemisión y cancelación de guías DHL ────────
 -- Una guía emitida no se modifica dentro de MyDHL. TAURO conserva la guía
--- anterior como historia, crea una solicitud nueva y enlaza ambas. La fila
--- anterior nunca se borra: su tracking explica qué se descartó; la nueva es
--- la única que puede quedar vigente y debitada en cuenta corriente.
+-- anterior como historia y, si se corrige, crea una solicitud nueva. Una
+-- cancelación no crea reemplazo: conserva el tracking descartado para el
+-- mismo control de riesgo. Ninguna operación borra la fila histórica.
 CREATE TABLE IF NOT EXISTS solicitudes_guia_reemisiones (
     id                       SERIAL PRIMARY KEY,
     cliente_id               TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
     solicitud_anterior_id    INTEGER NOT NULL UNIQUE
                                REFERENCES solicitudes_guia(id) ON DELETE CASCADE,
-    solicitud_nueva_id       INTEGER NOT NULL UNIQUE
+    solicitud_nueva_id       INTEGER UNIQUE
                                REFERENCES solicitudes_guia(id) ON DELETE CASCADE,
+    -- REEMPLAZO enlaza una guía nueva; CANCELACION conserva únicamente la
+    -- anterior para controlar a los 7 días que nadie haya usado la etiqueta.
+    operacion                 TEXT NOT NULL DEFAULT 'REEMPLAZO',
     tracking_anterior        TEXT NOT NULL,
     tracking_nuevo           TEXT,
     campos_modificados       JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -1558,6 +1561,8 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia_reemisiones (
         CHECK (solicitud_anterior_id <> solicitud_nueva_id),
     CONSTRAINT ck_solicitudes_guia_reemisiones_estado
         CHECK (estado IN ('PENDIENTE', 'EMITIDA', 'VERIFICAR_COURIER')),
+    CONSTRAINT ck_solicitudes_guia_reemisiones_operacion
+        CHECK (operacion IN ('REEMPLAZO', 'CANCELACION')),
     CONSTRAINT ck_solicitudes_guia_reemisiones_riesgo
         CHECK (riesgo_estado IN (
             'VIGILAR', 'ALERTA_MOVIMIENTO', 'CERRADA'
@@ -1565,6 +1570,9 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia_reemisiones (
 );
 -- Compatibilidad con bases que ya recibieron la primera versión de la tabla.
 ALTER TABLE solicitudes_guia_reemisiones
+    ALTER COLUMN solicitud_nueva_id DROP NOT NULL;
+ALTER TABLE solicitudes_guia_reemisiones
+    ADD COLUMN IF NOT EXISTS operacion TEXT NOT NULL DEFAULT 'REEMPLAZO',
     ADD COLUMN IF NOT EXISTS riesgo_estado TEXT NOT NULL DEFAULT 'VIGILAR',
     ADD COLUMN IF NOT EXISTS tracking_anterior_consultado_at TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS tracking_anterior_estado_courier TEXT,
@@ -1588,6 +1596,18 @@ BEGIN
             CHECK (riesgo_estado IN (
                 'VIGILAR', 'ALERTA_MOVIMIENTO', 'CERRADA'
             ));
+    END IF;
+END $$;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ck_solicitudes_guia_reemisiones_operacion'
+          AND conrelid = 'solicitudes_guia_reemisiones'::regclass
+    ) THEN
+        ALTER TABLE solicitudes_guia_reemisiones
+            ADD CONSTRAINT ck_solicitudes_guia_reemisiones_operacion
+            CHECK (operacion IN ('REEMPLAZO', 'CANCELACION'));
     END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS idx_reemisiones_cliente_fecha

@@ -1,4 +1,4 @@
-"""Control único a 7 días de guías DHL reemplazadas.
+"""Control único a 7 días de guías DHL reemplazadas o canceladas.
 
 Reemplazar una guía dentro de TAURO no invalida físicamente su etiqueta en
 DHL. Este módulo consulta el tracking anterior una vez al cumplirse 7 días:
@@ -27,6 +27,10 @@ _LOCK_NAME = "tauro:tracking:dhl:reemplazadas:diario:v1"
 
 def _texto(valor: Any, maximo: int = 300) -> str:
     return " ".join(str(valor or "").strip().split())[:maximo]
+
+
+def _id_opcional(valor: Any) -> Optional[int]:
+    return int(valor) if valor is not None else None
 
 
 def _clave_evento(par: tuple[int, dict]) -> tuple[str, int]:
@@ -221,8 +225,8 @@ def actualizar_tracking_reemplazado_dhl(
                             "solicitud_anterior_id": int(
                                 candidato["solicitud_anterior_id"]
                             ),
-                            "solicitud_nueva_id": int(
-                                candidato["solicitud_nueva_id"]
+                            "solicitud_nueva_id": _id_opcional(
+                                candidato.get("solicitud_nueva_id")
                             ),
                             "tracking_anterior": candidato["tracking_anterior"],
                             "estado_courier": normalizado.get("estado_courier"),
@@ -266,8 +270,8 @@ def actualizar_tracking_reemplazado_dhl(
                                 "solicitud_anterior_id": int(
                                     candidato["solicitud_anterior_id"]
                                 ),
-                                "solicitud_nueva_id": int(
-                                    candidato["solicitud_nueva_id"]
+                                "solicitud_nueva_id": _id_opcional(
+                                    candidato.get("solicitud_nueva_id")
                                 ),
                                 "tracking_anterior": candidato[
                                     "tracking_anterior"
@@ -446,7 +450,7 @@ def listar_reemisiones_admin(riesgo: str = "", limite: int = 500) -> list[dict]:
                 JOIN clientes c ON c.cliente_id=r.cliente_id
                 JOIN solicitudes_guia anterior
                   ON anterior.id=r.solicitud_anterior_id
-                JOIN solicitudes_guia nueva
+                LEFT JOIN solicitudes_guia nueva
                   ON nueva.id=r.solicitud_nueva_id
                 LEFT JOIN envios cargo_anterior
                   ON cargo_anterior.solicitud_id=r.solicitud_anterior_id
@@ -466,10 +470,16 @@ def listar_reemisiones_admin(riesgo: str = "", limite: int = 500) -> list[dict]:
             filas = []
             for fila in cur.fetchall():
                 item = dict(fila)
-                item["cuenta_consistente"] = (
-                    item.get("cargo_anterior_estado") == "CANCELADO"
-                    and item.get("cargo_nuevo_estado") == "ACTIVO"
-                )
+                if item.get("operacion") == "CANCELACION":
+                    item["cuenta_consistente"] = (
+                        item.get("cargo_anterior_estado") in {None, "CANCELADO"}
+                        and item.get("cargo_nuevo_estado") is None
+                    )
+                else:
+                    item["cuenta_consistente"] = (
+                        item.get("cargo_anterior_estado") == "CANCELADO"
+                        and item.get("cargo_nuevo_estado") == "ACTIVO"
+                    )
                 filas.append(item)
             return filas
 
@@ -542,7 +552,9 @@ def cerrar_control_reemision(reemision_id: int, nota: str) -> dict:
                 metadata={
                     "reemision_id": int(reemision_id),
                     "solicitud_anterior_id": int(fila["solicitud_anterior_id"]),
-                    "solicitud_nueva_id": int(fila["solicitud_nueva_id"]),
+                    "solicitud_nueva_id": _id_opcional(
+                        fila.get("solicitud_nueva_id")
+                    ),
                     "tracking_anterior": fila["tracking_anterior"],
                     "tuvo_movimiento": bool(fila.get("alerta_movimiento_at")),
                 },
@@ -584,7 +596,9 @@ def reabrir_control_reemision(reemision_id: int) -> dict:
                 metadata={
                     "reemision_id": int(reemision_id),
                     "solicitud_anterior_id": int(fila["solicitud_anterior_id"]),
-                    "solicitud_nueva_id": int(fila["solicitud_nueva_id"]),
+                    "solicitud_nueva_id": _id_opcional(
+                        fila.get("solicitud_nueva_id")
+                    ),
                 },
             )
     return {"ok": True}

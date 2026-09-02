@@ -18,11 +18,16 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <h1>{{ s.dest_nombre }} · {{ s.dest_ciudad or s.destino_pais }}</h1>
         <p>Creado el {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "—" }}.</p>
     </div>
-    <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos {{ ambito if ambito != 'sin_clasificar' else '' }}</a>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+        {% if ambito == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-primary btn-sm">Repetir envío</a>{% endif %}
+        <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos {{ ambito if ambito != 'sin_clasificar' else '' }}</a>
+    </div>
 </div>
 
 {% if request.query_params.get('ok') == 'reemision' %}
     <div class="msg ok">Corrección completada. Ésta es la guía final vigente y la única aplicada a tu cuenta corriente.</div>
+{% elif request.query_params.get('ok') == 'cancelado' %}
+    <div class="msg ok">Envío cancelado. La etiqueta quedó descartada, el cargo fue excluido de tu cuenta corriente y conservamos el tracking para control.</div>
 {% elif request.query_params.get('error') %}
     <div class="msg error">{{ request.query_params.get('error') }}</div>
 {% endif %}
@@ -45,7 +50,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         {% endif %}
     </div>
     {% else %}
-    <div class="msg error">Este envío fue cancelado. Si fue un error, {% set _ay = ayuda() %}<a href="{{ _ay.whatsapp_url or _ay.mail_url }}"{% if _ay.whatsapp_url %} target="_blank" rel="noopener"{% endif %}>escribinos</a> y lo revisamos.</div>
+    <div class="msg warn">Este envío fue cancelado y no aplica a tu cuenta corriente. Podés usar <strong>Repetir envío</strong> para crear uno nuevo con los mismos datos.</div>
     {% endif %}
 {% else %}
 {% if s.estado == "VERIFICAR_COURIER" %}
@@ -80,6 +85,24 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 </div>
 {% endif %}
 
+<div class="card" style="margin-bottom:16px;padding:16px 18px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+    <div>
+        <strong>Acciones del envío</strong>
+        <p style="margin:3px 0 0;color:var(--fg-3);font-size:12.5px;">Repetir crea uno independiente. Cancelar conserva el historial pero descarta esta operación.</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        {% if ambito == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-ghost btn-sm">Repetir envío</a>{% endif %}
+        {% if puede_cancelar %}
+        <form method="POST" action="/portal/envios/{{ s.id }}/cancelar"
+              data-confirm="¿Cancelar este envío? La etiqueta dejará de estar disponible y el cargo se quitará de tu cuenta corriente. Si DHL ya recibió físicamente el paquete, la cancelación será rechazada.">
+            <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--error);border-color:color-mix(in srgb,var(--error) 45%,var(--line));">Cancelar envío</button>
+        </form>
+        {% elif s.estado not in ('CANCELADO', 'REEMPLAZADO', 'ENTREGADO') and cancelar_bloqueo %}
+        <span title="{{ cancelar_bloqueo }}" style="font-size:12px;color:var(--fg-4);max-width:360px;">No cancelable: {{ cancelar_bloqueo }}</span>
+        {% endif %}
+    </div>
+</div>
+
 <!-- ── Guía y tracking ─────────────────────────────────────── -->
 <div class="grid-2" style="margin-bottom:16px;">
     <div class="card">
@@ -89,9 +112,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 <p>Etiquetas para imprimir y pegar en cada caja.</p>
             </div>
         </div>
-        {% if s.estado == 'REEMPLAZADO' %}
+        {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
             <div class="empty" style="padding:14px;">
-                El PDF anterior fue descartado para evitar usar una etiqueta inválida.
+                El PDF fue descartado para evitar usar una etiqueta inválida.
                 {% if s.reemplazada_por_solicitud_id %}<br><a href="/portal/envios/{{ s.reemplazada_por_solicitud_id }}">Descargar la guía final →</a>{% endif %}
             </div>
         {% elif s.tiene_label %}

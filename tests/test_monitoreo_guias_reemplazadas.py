@@ -256,7 +256,8 @@ def test_contrato_de_schema_scheduler_y_admin():
     assert "INTERVAL '7 days'" in servicio
     assert "r.riesgo_estado='VIGILAR'" in servicio
     assert '@router.get("/guias-reemplazadas"' in admin
-    assert "Guías reemplazadas" in menu
+    assert "Guías descartadas" in menu
+    assert "Guías reemplazadas y canceladas" in pantalla
     assert "no reactiva el cargo viejo" in pantalla
     assert "control único a 7 días" in pantalla
     assert "único control en la fecha programada" in pantalla

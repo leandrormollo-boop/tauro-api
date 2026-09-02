@@ -1,4 +1,4 @@
-"""Un cargo anulado deja de verse sin borrar la historia administrativa."""
+"""Un envío cancelado conserva historia pero jamás entrega documentos."""
 
 from pathlib import Path
 
@@ -10,7 +10,7 @@ def _bloque(fuente: str, inicio: str, fin: str) -> str:
     return fuente.split(inicio, 1)[1].split(fin, 1)[0]
 
 
-def test_listado_del_portal_excluye_solicitud_y_cargo_cancelados():
+def test_listado_del_portal_incluye_cancelados_como_historia():
     fuente = (RAIZ / "servicios" / "solicitudes_guia.py").read_text(
         encoding="utf-8"
     )
@@ -20,14 +20,13 @@ def test_listado_del_portal_excluye_solicitud_y_cargo_cancelados():
         "def listar_envios_api(",
     )
 
-    assert "s.estado <> 'CANCELADO'" in listado
-    assert "NOT EXISTS" in listado
-    assert "e.solicitud_id = s.id" in listado
-    assert "e.cliente_id = s.cliente_id" in listado
-    assert "e.estado = 'CANCELADO'" in listado
+    assert "s.estado <> 'CANCELADO'" not in listado
+    assert "cargo_periodo.estado AS cargo_estado" in listado
+    assert 'row["estado"] = "CANCELADO"' in fuente
+    assert 'row.get("estado") in {"CANCELADO", "REEMPLAZADO"}' in fuente
 
 
-def test_anulado_tampoco_se_abre_por_url_directa_ni_descarga_documentos():
+def test_cancelado_se_abre_por_url_directa_pero_no_descarga_documentos():
     fuente = (RAIZ / "servicios" / "solicitudes_guia.py").read_text(
         encoding="utf-8"
     )
@@ -48,7 +47,8 @@ def test_anulado_tampoco_se_abre_por_url_directa_ni_descarga_documentos():
         "def cargar_envio_externo(",
     )
 
-    for bloque in (detalle, label_api, documentos):
+    assert "s.estado <> 'CANCELADO'" not in detalle
+    for bloque in (label_api, documentos):
         assert "s.estado <> 'CANCELADO'" in bloque
         assert "e.estado = 'CANCELADO'" in bloque
 
