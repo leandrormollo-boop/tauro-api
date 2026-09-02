@@ -211,6 +211,41 @@ SELECT
           AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%ENTREGADO%'
           AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%RETENIDO%'
     ) AS tracking_dhl_estado_controlado,
+    TO_REGCLASS('envio_cotizacion_snapshots') IS NOT NULL
+        AS envio_cotizacion_snapshots_existe,
+    TO_REGCLASS('facturas_courier') IS NOT NULL
+        AS facturas_courier_existe,
+    TO_REGCLASS('facturas_courier_items') IS NOT NULL
+        AS facturas_courier_items_existe,
+    TO_REGCLASS('factura_courier_item_matches') IS NOT NULL
+        AS factura_courier_item_matches_existe,
+    TO_REGCLASS('conciliaciones_envio') IS NOT NULL
+        AS conciliaciones_envio_existe,
+    TO_REGCLASS('ajustes_cliente') IS NOT NULL
+        AS ajustes_cliente_existe,
+    TO_REGCLASS('auditoria_facturas_courier') IS NOT NULL
+        AS auditoria_facturas_courier_existe,
+    (
+        SELECT COUNT(*) = 4 AND COALESCE(BOOL_AND(
+            data_type = 'numeric'
+            AND numeric_precision = 18 AND numeric_scale = 4
+        ), FALSE)
+        FROM information_schema.columns
+        WHERE table_schema = CURRENT_SCHEMA()
+          AND table_name = 'envio_cotizacion_snapshots'
+          AND column_name IN (
+              'costo_courier_estimado',
+              'costo_courier_estimado_ars',
+              'precio_cliente_inicial_ars',
+              'margen_tauro_protegido_ars'
+          )
+    ) AS snapshots_importes_numeric_18_4,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('facturas_courier')
+          AND c.conname = 'uq_factura_courier_documento'
+          AND c.contype = 'u' AND c.convalidated
+    ) AS factura_courier_documento_unico,
     EXISTS (
         SELECT 1
         FROM pg_class indice
@@ -220,7 +255,79 @@ SELECT
         )
           AND i.indrelid = TO_REGCLASS('solicitudes_guia')
           AND i.indisvalid AND i.indisready AND i.indpred IS NOT NULL
-    ) AS tracking_dhl_indice_pendiente
+    ) AS tracking_dhl_indice_pendiente,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS('uq_factura_courier_archivo')
+          AND i.indrelid = TO_REGCLASS('facturas_courier')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+          AND i.indpred IS NOT NULL
+    ) AS factura_courier_archivo_unico,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('factura_courier_item_matches')
+          AND t.tgname = 'trg_validar_match_factura_courier'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS trigger_match_courier_habilitado,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('ajustes_cliente')
+          AND t.tgname = 'trg_validar_ajuste_cliente'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS trigger_ajuste_cliente_habilitado,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('envio_cotizacion_snapshots')
+          AND t.tgname = 'trg_snapshot_inmutable'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS trigger_snapshot_inmutable_habilitado,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('envio_cotizacion_snapshots')
+          AND t.tgname = 'trg_validar_snapshot_cotizacion'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS trigger_snapshot_consistente_habilitado,
+    (
+        SELECT COUNT(*) = 4
+        FROM pg_trigger t
+        WHERE (t.tgrelid, t.tgname) IN (
+            (TO_REGCLASS('facturas_courier'),
+                'trg_proteger_factura_con_items'),
+            (TO_REGCLASS('facturas_courier_items'),
+                'trg_proteger_item_matcheado'),
+            (TO_REGCLASS('conciliaciones_envio'),
+                'trg_proteger_calculo_conciliacion'),
+            (TO_REGCLASS('auditoria_facturas_courier'),
+                'trg_auditoria_courier_append_only')
+        )
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS mutaciones_financieras_bloqueadas,
+    (
+        SELECT COUNT(*) = 6
+        FROM pg_trigger t
+        WHERE t.tgrelid IN (
+            TO_REGCLASS('facturas_courier'),
+            TO_REGCLASS('facturas_courier_items'),
+            TO_REGCLASS('factura_courier_item_matches'),
+            TO_REGCLASS('conciliaciones_envio'),
+            TO_REGCLASS('ajustes_cliente'),
+            TO_REGCLASS('auditoria_facturas_courier')
+        )
+          AND t.tgname LIKE 'trg_no_delete_%'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS borrado_financiero_bloqueado,
+    (
+        SELECT COUNT(*) = 3 AND COALESCE(BOOL_AND(c.convalidated), FALSE)
+        FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('conciliaciones_envio')
+          AND c.conname IN (
+              'ck_conciliacion_formula_final',
+              'ck_conciliacion_formula_ajuste',
+              'ck_conciliacion_aprobacion'
+          )
+    ) AS formulas_conciliacion_validadas
 """
 
 _READINESS_CONTABLE_CAMPOS = (
@@ -245,6 +352,23 @@ _READINESS_CONTABLE_CAMPOS = (
     "tracking_dhl_columnas_existen",
     "tracking_dhl_estado_controlado",
     "tracking_dhl_indice_pendiente",
+    "envio_cotizacion_snapshots_existe",
+    "facturas_courier_existe",
+    "facturas_courier_items_existe",
+    "factura_courier_item_matches_existe",
+    "conciliaciones_envio_existe",
+    "ajustes_cliente_existe",
+    "auditoria_facturas_courier_existe",
+    "snapshots_importes_numeric_18_4",
+    "factura_courier_documento_unico",
+    "factura_courier_archivo_unico",
+    "trigger_match_courier_habilitado",
+    "trigger_ajuste_cliente_habilitado",
+    "trigger_snapshot_inmutable_habilitado",
+    "trigger_snapshot_consistente_habilitado",
+    "mutaciones_financieras_bloqueadas",
+    "borrado_financiero_bloqueado",
+    "formulas_conciliacion_validadas",
 )
 
 

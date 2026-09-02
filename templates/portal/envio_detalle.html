@@ -3,6 +3,9 @@
 {% set courier_nombre = (s.courier or "FedEx")|upper|title if (s.courier or "FEDEX")|upper != "FEDEX" else "FedEx" %}
 {% set ambito = ambito_envio(s) %}
 {% block title %}Envío #{{ s.id }}{% endblock %}
+{% macro dinero_ars(valor) -%}
+$ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }} ARS
+{%- endmacro %}
 
 {% block content %}
 {% set estados_orden = ["SOLICITADO", "EN_PROCESO", "GUIA_LISTA", "DESPACHADO"] %}
@@ -203,30 +206,43 @@
     <div class="card">
         <div class="card-head">
             <div>
-                <h3>Precios</h3>
-                <p>Lo que pagás a Tauro y lo que le cobrás a tu cliente.</p>
+                <h3>Cuenta del envío</h3>
+                <p>Precio aceptado y diferencias aprobadas por factura del operador.</p>
             </div>
         </div>
         <div class="mini-row">
-            <span>Tu costo Tauro</span>
-            <strong>$ {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }} ARS</strong>
+            <span>Precio inicial aceptado</span>
+            <strong>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
-        {% if s.precio_tauro_usd %}
-        <div class="mini-row">
-            <span>Equivalente</span>
-            <strong>USD {{ s.precio_tauro_usd }}</strong>
+        {% if s.diferencia_flete_ars %}
+        <div class="mini-row envio-account-extra diferencia">
+            <span><b>Diferencia</b><small>Costo adicional de flete</small></span>
+            <strong>{{ "+" if s.diferencia_flete_ars > 0 else "−" }} {{ dinero_ars(s.diferencia_flete_ars|abs) }}</strong>
         </div>
         {% endif %}
-        {% if s.precio_cliente_final_ars %}
+        {% if s.tax_cliente_ars %}
+        <div class="mini-row envio-account-extra tax">
+            <span><b>TAX</b><small>Impuesto adicional del envío</small></span>
+            <strong>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</strong>
+        </div>
+        {% endif %}
+        <div class="mini-row envio-account-total">
+            <span>Precio final del envío</span>
+            <strong>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
+        </div>
+        {% if s.peso_final_facturado_kg is not none %}
+        <hr class="divider">
         <div class="mini-row">
-            <span>Precio a tu cliente</span>
-            <strong>$ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }} ARS</strong>
+            <span>Peso emitido / cotizado</span>
+            <strong>{{ s.peso_cotizado_kg or s.peso_kg }} kg</strong>
         </div>
         <div class="mini-row">
-            <span>Tu margen</span>
-            <strong class="{% if s.precio_cliente_final_ars > (s.precio_tauro_ars or 0) %}ok{% endif %}" style="color:var(--ok);">
-                $ {{ "{:,.0f}".format(s.precio_cliente_final_ars - (s.precio_tauro_ars or 0)).replace(",", ".") }} ARS
-            </strong>
+            <span>Peso final facturado</span>
+            <strong>{{ s.peso_final_facturado_kg }} kg · {{ (s.peso_base_facturado or 'otro').replace('_', ' ')|title }}</strong>
+        </div>
+        <div class="mini-row">
+            <span>Motivo</span>
+            <strong>{{ (s.motivo_diferencia or 'otro').replace('_', ' ')|title }}</strong>
         </div>
         {% endif %}
         {% if s.observaciones %}

@@ -86,7 +86,7 @@ def test_cuenta_usa_solo_cliente_de_sesion_y_normaliza_filtros(monkeypatch):
 
     assert llamadas == [
         ("resumen", "CLIENTE_SESION"),
-        ("movimientos", "CLIENTE_SESION", "nacional", "pagos", 3, 3),
+        ("movimientos", "CLIENTE_SESION", "nacional", "pagos", 3, 10),
     ]
     assert respuesta["context"]["ambito_filtro"] == "nacional"
     assert respuesta["context"]["saldo"]["saldo_pendiente_ars"] == Decimal("500")
@@ -108,7 +108,7 @@ def test_query_manipulada_vuelve_a_consolidado_y_pagina_uno(monkeypatch):
         cliente="CLIENTE_SESION",
     )
 
-    assert recibidos == [("CLIENTE_SESION", "consolidado", "todos", 1, 3)]
+    assert recibidos == [("CLIENTE_SESION", "consolidado", "todos", 1, 10)]
 
 
 def test_cuenta_genera_clave_opaca_nueva_por_render(monkeypatch):
@@ -223,3 +223,12 @@ def test_template_muestra_invariantes_tabs_paginacion_y_copy_seguro():
     assert "paymentDetails.open = true" in html
     assert "movimientos.paginas_visibles" in html
     assert "&pagina={{ numero }}" in html
+
+
+def test_resumen_consolidado_no_desborda_sobre_los_ambitos():
+    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+
+    assert "grid-template-columns: minmax(300px, 1fr) minmax(0, 2fr);" in css
+    assert ".account-total-card > div { min-width: 0; }" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+    assert "text-overflow: ellipsis;" in css

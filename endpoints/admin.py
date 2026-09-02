@@ -1543,13 +1543,19 @@ def admin_cliente_detail(
             # Envíos paginados
             cur.execute(
                 """
-                SELECT id, cliente_id, fecha, nro_fc, monto_ars, estado,
-                       descripcion, tracking, created_at, factura_nombre,
-                       solicitud_id, ambito,
-                       (factura_pdf IS NOT NULL) AS tiene_factura_pdf
-                FROM envios
-                WHERE cliente_id = %s
-                ORDER BY fecha DESC, id DESC
+                SELECT e.id, e.cliente_id, e.fecha, e.nro_fc, e.monto_ars,
+                       e.estado, e.descripcion, e.tracking, e.created_at,
+                       e.factura_nombre, e.solicitud_id, e.ambito,
+                       s.estado AS solicitud_estado,
+                       (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO')
+                           AS oculto_cliente,
+                       (e.factura_pdf IS NOT NULL) AS tiene_factura_pdf
+                FROM envios e
+                LEFT JOIN solicitudes_guia s
+                  ON s.id = e.solicitud_id
+                 AND s.cliente_id = e.cliente_id
+                WHERE e.cliente_id = %s
+                ORDER BY e.fecha DESC, e.id DESC
                 LIMIT %s OFFSET %s
                 """,
                 (cliente_id, PAGE_SIZE, offset),
@@ -1600,6 +1606,11 @@ def admin_cliente_detail(
         flash_ok = "Cliente creado."
     elif ok == "pwd_actualizada":
         flash_ok = "Contraseña actualizada. Pasala al cliente."
+    elif ok == "envio_anulado":
+        flash_ok = (
+            "Envío anulado: se descontó de la cuenta corriente y ya no "
+            "es visible en el portal del cliente. El registro quedó auditado."
+        )
     if pwd_error == "corta":
         flash_ok = None  # priorizar error
         # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
@@ -2236,6 +2247,37 @@ def admin_envio_cancelar(
     return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
 
 
+@router.post("/clientes/{cliente_id}/envios/{envio_id}/anular")
+def admin_envio_anular(
+    cliente_id: str,
+    envio_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Anula el cargo con ownership; el registro histórico nunca se borra."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    cliente_normalizado = cliente_id.strip().upper()
+    resultado = cancelar_envio(
+        envio_id,
+        cliente_id=cliente_normalizado,
+        actor_tipo="admin",
+        actor_ref="admin",
+    )
+    if not resultado:
+        return Response(
+            content=(
+                "No se puede anular este envío. Si ya tiene factura, "
+                "requiere una nota de crédito documentada."
+            ),
+            status_code=409,
+        )
+    return RedirectResponse(
+        url=f"/admin/clientes/{cliente_normalizado}?ok=envio_anulado",
+        status_code=303,
+    )
+
+
 # ── Solicitudes de guía ─────────────────────────────────────
 
 @router.get("/pedidos", response_class=HTMLResponse)
@@ -2859,6 +2901,9 @@ async def admin_envio_realizado_post(
     peso_kg: str = Form("1"),
     tracking: str = Form(...),
     precio_ars: str = Form(...),
+    costo_courier_estimado_ars: str = Form(...),
+    courier: str = Form("FEDEX"),
+    origen_pais: str = Form("AR"),
     observaciones: str = Form(""),
     guia_pdf: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
@@ -2882,6 +2927,12 @@ async def admin_envio_realizado_post(
         precio_num = _numero_form(
             precio_ars, "Precio al cliente", importe=True, minimo=0.01
         )
+        costo_estimado_num = _numero_form(
+            costo_courier_estimado_ars,
+            "Costo courier estimado",
+            importe=True,
+            minimo=0,
+        )
         pdf = await leer_comprobante_con_tope(guia_pdf)
         resultado = cargar_envio_externo(
             cliente_id=cliente_id,
@@ -2896,6 +2947,9 @@ async def admin_envio_realizado_post(
             precio_tauro_ars=precio_num,
             label_pdf=pdf or None,
             observaciones=observaciones,
+            courier=courier,
+            origen_pais=origen_pais,
+            costo_courier_estimado_ars=costo_estimado_num,
         )
     except Exception as e:
         resultado = {"ok": False, "error": str(e)}
@@ -2910,6 +2964,425 @@ async def admin_envio_realizado_post(
 
 
 # ── Verificación de pagos informados por clientes ───────────
+
+@router.get("/conciliacion-couriers", response_class=HTMLResponse)
+def admin_conciliacion_couriers(
+    request: Request,
+    cliente: str = "",
+    courier: str = "",
+    estado: str = "",
+    buscar: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Control financiero por envío; costos reales nunca salen al portal."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.conciliacion_couriers import (
+        listar_ajustes_para_revision,
+        listar_control_envios,
+        listar_facturas_courier_control,
+    )
+    control = listar_control_envios(
+        cliente=cliente, courier=courier, estado=estado, buscar=buscar,
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/conciliacion_couriers.html",
+        context={
+            "seccion": "conciliacion_couriers",
+            "control": control,
+            "facturas": listar_facturas_courier_control(),
+            "ajustes": listar_ajustes_para_revision(),
+            "clientes": _get_clientes_lista(),
+            "filtros": {
+                "cliente": cliente, "courier": courier,
+                "estado": estado, "buscar": buscar,
+            },
+        },
+    )
+
+
+@router.get("/conciliacion-couriers/nueva", response_class=HTMLResponse)
+def admin_factura_courier_form(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/factura_courier_form.html",
+        context={"seccion": "conciliacion_couriers"},
+    )
+
+
+@router.post("/conciliacion-couriers/nueva")
+async def admin_factura_courier_post(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import (
+        matchear_items_exactos,
+        parsear_lineas_factura_texto,
+        registrar_factura_courier,
+    )
+    from servicios.cuenta_corriente import leer_comprobante_con_tope
+    from servicios.numeros_humanos import parse_importe_humano
+    try:
+        form = await request.form()
+        moneda = str(form.get("moneda") or "ARS").strip().upper()
+        tipo_cambio = parse_importe_humano(form.get("tipo_cambio_ars") or "1")
+        items = parsear_lineas_factura_texto(
+            str(form.get("lineas") or ""),
+            moneda=moneda,
+            tipo_cambio_ars=tipo_cambio,
+        )
+        tax_importe_raw = str(form.get("tax_importe") or "").strip()
+        if tax_importe_raw:
+            tax_tracking = str(form.get("tax_tracking") or "").strip()
+            if not tax_tracking:
+                raise ValueError("Indicá el tracking al que corresponde el TAX.")
+            tax_importe = parse_importe_humano(tax_importe_raw)
+            if tax_importe <= 0:
+                raise ValueError("El TAX debe ser mayor a cero.")
+            items.append({
+                "linea_numero": len(items) + 1,
+                "tracking": tax_tracking,
+                "importe": tax_importe,
+                "moneda": moneda,
+                "tipo_cambio_ars": tipo_cambio,
+                "concepto_tipo": "IMPUESTO",
+                "peso_base": "NO_INFORMADO",
+                "descripcion": "TAX informado por ADMIN",
+                "datos_crudos": {"origen": "casillero_tax_admin"},
+            })
+        archivo = form.get("archivo_pdf")
+        contenido = await leer_comprobante_con_tope(archivo)
+        if not contenido:
+            raise ValueError("Adjuntá la factura PDF del courier.")
+        factura = registrar_factura_courier(
+            courier=str(form.get("courier") or ""),
+            tipo_documento=str(form.get("tipo_documento") or "FC"),
+            numero=str(form.get("numero") or ""),
+            moneda=moneda,
+            total=parse_importe_humano(form.get("total") or "0"),
+            subtotal=parse_importe_humano(form.get("subtotal") or "0"),
+            impuestos=parse_importe_humano(form.get("impuestos") or "0"),
+            fecha_emision=form.get("fecha_emision") or None,
+            fecha_vencimiento=form.get("fecha_vencimiento") or None,
+            periodo_desde=form.get("periodo_desde") or None,
+            periodo_hasta=form.get("periodo_hasta") or None,
+            items=items,
+            archivo_nombre=getattr(archivo, "filename", "") or "factura.pdf",
+            archivo_contenido=contenido,
+            metadatos_origen={"canal": "admin_manual"},
+            actor="admin",
+        )
+        matchear_items_exactos(factura["id"], actor="admin")
+        return RedirectResponse(
+            url=f"/admin/conciliacion-couriers/facturas/{factura['id']}?ok=cargada",
+            status_code=303,
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"/admin/conciliacion-couriers/nueva?error={quote(str(exc))}",
+            status_code=303,
+        )
+
+
+@router.get(
+    "/conciliacion-couriers/facturas/{factura_id}",
+    response_class=HTMLResponse,
+)
+def admin_factura_courier_detalle(
+    request: Request,
+    factura_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.conciliacion_couriers import obtener_factura_courier_control
+    factura = obtener_factura_courier_control(factura_id)
+    if not factura:
+        return Response(content="Factura courier no encontrada.", status_code=404)
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/factura_courier_detalle.html",
+        context={"seccion": "conciliacion_couriers", "factura": factura},
+    )
+
+
+@router.get("/conciliacion-couriers/facturas/{factura_id}/pdf")
+def admin_factura_courier_pdf(
+    factura_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.conciliacion_couriers import obtener_factura_courier_pdf
+    resultado = obtener_factura_courier_pdf(factura_id)
+    if not resultado:
+        return Response(content="PDF no disponible.", status_code=404)
+    contenido, nombre = resultado
+    nombre = "".join(c for c in nombre if c.isalnum() or c in "._-") or "factura.pdf"
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.post(
+    "/conciliacion-couriers/facturas/{factura_id}/items/{item_id}/match-manual"
+)
+def admin_factura_courier_match_manual(
+    factura_id: int,
+    item_id: int,
+    identificador_envio: str = Form(...),
+    monto_asignado: str = Form(""),
+    motivo: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import proponer_match_manual
+    from servicios.numeros_humanos import parse_importe_humano
+    try:
+        monto = (
+            parse_importe_humano(monto_asignado)
+            if str(monto_asignado or "").strip() else None
+        )
+        resultado = proponer_match_manual(
+            item_id,
+            factura_id_esperada=factura_id,
+            identificador_envio=identificador_envio,
+            monto_asignado=monto,
+            motivo=motivo,
+            actor="admin",
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                 f"?error={quote(str(exc))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+             "?ok=match_manual"),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/conciliacion-couriers/facturas/{factura_id}/matches/{match_id}/confirmar"
+)
+def admin_factura_courier_match_confirmar(
+    factura_id: int,
+    match_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import confirmar_match
+    try:
+        resultado = confirmar_match(
+            match_id, actor="admin", factura_id_esperada=factura_id,
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                 f"?error={quote(str(exc))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=(f"/admin/conciliacion-couriers/facturas/"
+             f"{resultado['factura_id']}?ok=match_confirmado"),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/conciliacion-couriers/facturas/{factura_id}/matches/{match_id}/rechazar"
+)
+def admin_factura_courier_match_rechazar(
+    factura_id: int,
+    match_id: int,
+    motivo: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import rechazar_match
+    try:
+        resultado = rechazar_match(
+            match_id, actor="admin", motivo=motivo,
+            factura_id_esperada=factura_id,
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                 f"?error={quote(str(exc))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=(f"/admin/conciliacion-couriers/facturas/"
+             f"{resultado['factura_id']}?ok=match_rechazado"),
+        status_code=303,
+    )
+
+
+@router.post("/conciliacion-couriers/facturas/{factura_id}/confirmar")
+def admin_factura_courier_confirmar(
+    factura_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import confirmar_y_calcular_factura
+    try:
+        resultado = confirmar_y_calcular_factura(factura_id, actor="admin")
+        if resultado["errores"]:
+            errores = "; ".join(error["error"] for error in resultado["errores"][:3])
+            return RedirectResponse(
+                url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                     f"?error={quote(errores)}"),
+                status_code=303,
+            )
+    except Exception as exc:
+        return RedirectResponse(
+            url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+                 f"?error={quote(str(exc))}"),
+            status_code=303,
+        )
+    return RedirectResponse(
+        url="/admin/conciliacion-couriers?ok=calculada", status_code=303,
+    )
+
+
+@router.get(
+    "/conciliacion-couriers/envios/{solicitud_id}",
+    response_class=HTMLResponse,
+)
+def admin_conciliacion_envio_detalle(
+    request: Request,
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.conciliacion_couriers import obtener_control_envio
+    envio = obtener_control_envio(solicitud_id)
+    if not envio:
+        return Response(content="Envío no encontrado.", status_code=404)
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/conciliacion_envio_detalle.html",
+        context={"seccion": "conciliacion_couriers", "envio": envio},
+    )
+
+
+@router.post("/conciliacion-couriers/envios/{solicitud_id}/snapshot")
+def admin_conciliacion_snapshot_manual(
+    solicitud_id: int,
+    costo_estimado_ars: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import registrar_snapshot_manual_ars
+    from servicios.numeros_humanos import parse_importe_humano
+    try:
+        registrar_snapshot_manual_ars(
+            solicitud_id,
+            costo_estimado_ars=parse_importe_humano(costo_estimado_ars),
+            actor="admin",
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url="/admin/conciliacion-couriers?ok=base", status_code=303,
+    )
+
+
+@router.post("/conciliacion-couriers/envios/{solicitud_id}/calcular")
+def admin_conciliacion_calcular_envio(
+    solicitud_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import calcular_conciliacion_envio
+    try:
+        calcular_conciliacion_envio(solicitud_id, actor="admin")
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url="/admin/conciliacion-couriers?ok=calculada", status_code=303,
+    )
+
+
+@router.post("/conciliacion-couriers/diferencias/{ajuste_id}/aplicar")
+def admin_conciliacion_aplicar_diferencia(
+    ajuste_id: int,
+    referencia: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import aprobar_y_aplicar_ajuste_cliente
+    try:
+        aprobar_y_aplicar_ajuste_cliente(
+            ajuste_id, actor="admin", referencia=referencia,
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url="/admin/conciliacion-couriers?ok=aplicada", status_code=303,
+    )
+
+
+@router.post("/conciliacion-couriers/conciliaciones/{conciliacion_id}/cerrar")
+def admin_conciliacion_cerrar_sin_diferencia(
+    conciliacion_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import cerrar_conciliacion_sin_diferencia
+    try:
+        cerrar_conciliacion_sin_diferencia(conciliacion_id, actor="admin")
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url="/admin/conciliacion-couriers?ok=sin_diferencia", status_code=303,
+    )
+
 
 @router.get("/pagos/pendientes", response_class=HTMLResponse)
 def admin_pagos_pendientes(request: Request, admin_token: Optional[str] = Cookie(None)):

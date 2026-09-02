@@ -215,6 +215,22 @@ def test_resumen_falla_cerrado_si_aplicaciones_superan_aprobado():
         })
 
 
+def test_diferencias_aplicadas_suman_debito_o_credito_sin_reescribir_envio():
+    resumen = cc._armar_resumen_ambitos({
+        "debe_internacional": "10000",
+        "ajuste_debito_internacional": "10000",
+        "ajuste_credito_internacional": "2500",
+        "haber_internacional": "5000",
+        "pagos_aprobados": "5000",
+    })
+
+    assert resumen["internacional"]["envios_ars"] == Decimal("10000.00")
+    assert resumen["internacional"]["debe_ars"] == Decimal("20000.00")
+    assert resumen["internacional"]["haber_ars"] == Decimal("7500.00")
+    assert resumen["internacional"]["saldo_ars"] == Decimal("12500.00")
+    assert resumen["consolidado"]["diferencias_netas_ars"] == Decimal("7500.00")
+
+
 class _CursorResolver:
     def __init__(self, *, estado="PENDIENTE", monto="100.00", aplicaciones=None):
         self.estado = estado
@@ -604,7 +620,7 @@ def test_movimientos_paginados_filtra_en_sql_y_conserva_factura(monkeypatch):
     assert "WHERE estado = 'APLICADA'" in sql
     assert "p.estado = 'PENDIENTE'" in sql
     assert "0::numeric, 0::numeric, p.monto_ars, 'PENDIENTE'" in sql
-    assert cursor.ejecutadas[0][1][4:6] == ("NACIONAL", "NACIONAL")
+    assert cursor.ejecutadas[0][1][5:7] == ("NACIONAL", "NACIONAL")
 
 
 class _CursorClasificar:

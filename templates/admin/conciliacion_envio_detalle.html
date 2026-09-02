@@ -1,0 +1,101 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Control envío #{{ envio.solicitud_id }}{% endblock %}
+
+{% macro dinero(valor) -%}
+$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-title page-title-row">
+  <div>
+    <div class="eyebrow">Expediente financiero · {{ envio.cliente_id }}</div>
+    <h1>Envío {{ envio.tracking or ('#' ~ envio.solicitud_id) }}</h1>
+    <p>{{ envio.courier|upper }} · {{ envio.dest_nombre or envio.destino_pais }} · guía interna #{{ envio.solicitud_id }}</p>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a href="/admin/conciliacion-couriers?cliente={{ envio.cliente_id }}" class="btn btn-ghost">Volver al control</a>
+    <a href="/admin/pedidos?buscar={{ envio.tracking or envio.solicitud_id }}" class="btn btn-ghost">Ver operación</a>
+  </div>
+</div>
+
+{% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada correctamente.</div>{% endif %}
+{% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+
+<div class="dashboard-stats" style="margin-bottom:18px;">
+  <div class="card"><small>Precio aceptado</small><h2>{{ dinero(envio.precio_tauro_ars) }}</h2><p>{{ envio.peso_kg or '—' }} kg emitido</p></div>
+  <div class="card"><small>Costo estimado interno</small><h2>{{ dinero(envio.costo_courier_estimado_ars) if envio.snapshot_id else 'Pendiente' }}</h2><p>{% if envio.snapshot_id %}Margen protegido {{ dinero(envio.margen_tauro_protegido_ars) }}{% else %}Falta congelar la base{% endif %}</p></div>
+  <div class="card"><small>Costo real courier</small><h2>{{ dinero(envio.costo_courier_real_ars) if envio.conciliacion_id else 'Pendiente' }}</h2><p>Dato interno, nunca visible al cliente</p></div>
+  <div class="card"><small>Precio final cliente</small><h2>{{ dinero(envio.precio_cliente_final_ars) if envio.conciliacion_id else dinero(envio.precio_tauro_ars) }}</h2><p>{% if envio.conciliacion_id %}Diferencia {{ dinero(envio.diferencia_flete_ars) }} · TAX {{ dinero(envio.tax_cliente_ars) }}{% else %}Sin factura conciliada{% endif %}</p></div>
+</div>
+
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-head">
+    <div><h3>Estado y próxima acción</h3><p>El precio original permanece inmutable; cada diferencia posterior se aplica como un movimiento separado.</p></div>
+    <span class="badge {% if envio.control_estado == 'CONCILIADO' %}ok{% elif envio.control_estado in ('BASE_PENDIENTE','DIFERENCIA_PENDIENTE') %}warn{% else %}muted{% endif %}">{{ envio.control_estado.replace('_',' ')|title }}</span>
+  </div>
+  {% if envio.control_estado == 'BASE_PENDIENTE' %}
+  <form method="POST" action="/admin/conciliacion-couriers/envios/{{ envio.solicitud_id }}/snapshot" class="form-grid-3" data-confirm="¿Congelar este costo estimado como base histórica? Después no podrá modificarse.">
+    <div class="form-group"><label>Costo courier estimado ARS</label><input name="costo_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Ej. 100.000"></div>
+    <div class="form-group" style="align-self:end;"><button class="btn btn-primary">Guardar base inmutable</button></div>
+  </form>
+  {% elif envio.control_estado == 'LISTO_PARA_CALCULAR' %}
+  <form method="POST" action="/admin/conciliacion-couriers/envios/{{ envio.solicitud_id }}/calcular"><button class="btn btn-primary">Calcular diferencia</button></form>
+  {% elif envio.ajuste_id and envio.ajuste_estado == 'PROPUESTO' %}
+  <form method="POST" action="/admin/conciliacion-couriers/diferencias/{{ envio.ajuste_id }}/aplicar" class="form-grid-3" data-confirm="¿Aprobar y aplicar esta diferencia a la cuenta corriente?">
+    <div class="form-group"><label>Referencia del control</label><input name="referencia" placeholder="Factura / revisión interna"></div>
+    <div class="form-group" style="align-self:end;"><button class="btn btn-primary" {% if not envio.evidencia_completa %}disabled{% endif %}>Aprobar y aplicar diferencia</button></div>
+  </form>
+  {% elif envio.conciliacion_estado == 'PARA_REVISION' and not envio.ajuste_id %}
+  <form method="POST" action="/admin/conciliacion-couriers/conciliaciones/{{ envio.conciliacion_id }}/cerrar" data-confirm="¿Cerrar esta conciliación sin diferencia?"><button class="btn btn-primary">Cerrar sin diferencia</button></form>
+  {% else %}<p>No hay una decisión financiera pendiente para este envío.</p>{% endif %}
+</div>
+
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-head"><div><h3>Documentos courier vinculados</h3><p>Incluye FC, NC y ND con sus líneas y estados de match.</p></div></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Documento</th><th>Línea</th><th>Concepto</th><th>Importe asignado</th><th>Peso</th><th>Match</th></tr></thead>
+    <tbody>
+    {% for d in envio.documentos %}
+      <tr>
+        <td><a href="/admin/conciliacion-couriers/facturas/{{ d.factura_id }}"><strong>{{ d.tipo_documento }} {{ d.numero }}</strong></a><br><small>{{ d.fecha_emision or 'Sin fecha' }} · {{ d.factura_estado|title }}</small></td>
+        <td class="mono">#{{ d.linea_numero }}<br><small>{{ d.tracking_raw or 'Sin tracking' }}</small></td>
+        <td>{{ d.concepto_tipo }}<br><small>{{ d.descripcion or '' }}</small></td>
+        <td class="mono">{{ d.moneda }} {{ d.monto_asignado }}<br><small>ARS {{ d.monto_asignado_ars }}</small></td>
+        <td>{{ d.peso_facturado_kg or '—' }} kg<br><small>{{ d.peso_base.replace('_',' ')|title }}</small></td>
+        <td><span class="badge {% if d.match_estado == 'CONFIRMADO' %}ok{% elif d.match_estado == 'RECHAZADO' %}error{% else %}warn{% endif %}">{{ d.match_estado|title }}</span><br><small>{{ d.metodo.replace('_',' ')|title }}</small></td>
+      </tr>
+    {% else %}<tr><td colspan="6" class="empty">Todavía no hay líneas de factura vinculadas.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-head"><div><h3>Versiones de conciliación</h3><p>Cada nueva diferencia toma como base el último precio ya cerrado para evitar cargos duplicados.</p></div></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Versión</th><th>Cálculo interno</th><th>Precio cliente</th><th>Movimiento generado</th><th>Peso / motivo</th><th>Estado</th></tr></thead>
+    <tbody>
+    {% for c in envio.conciliaciones %}
+      <tr>
+        <td class="mono">v{{ c.version }}<br><small>{{ c.calculado_at.strftime('%d/%m/%Y %H:%M') if c.calculado_at else '' }}</small></td>
+        <td class="mono">Real {{ dinero(c.costo_courier_real_ars) }}<br><small>Margen {{ dinero(c.margen_tauro_protegido_ars) }}</small></td>
+        <td class="mono">{{ dinero(c.precio_cliente_inicial_ars) }} → <strong>{{ dinero(c.precio_cliente_final_ars) }}</strong><br><small>Diferencia {{ dinero(c.diferencia_flete_ars) }} · TAX {{ dinero(c.tax_cliente_ars) }}</small></td>
+        <td>{% if c.ajuste_id %}<span class="badge {% if c.ajuste_tipo == 'CREDITO' %}ok{% else %}warn{% endif %}">{{ c.ajuste_tipo|title }} {{ dinero(c.movimiento_cliente_ars|abs) }}</span><br><small>{{ dinero(c.movimiento_desde_ars) }} → {{ dinero(c.movimiento_hasta_ars) }} · {{ c.ajuste_estado|title }}</small>{% else %}Sin movimiento{% endif %}</td>
+        <td>{{ c.peso_cotizado_kg or '—' }} → {{ c.peso_final_facturado_kg or '—' }} kg<br><small>{{ c.motivo_diferencia.replace('_',' ')|title }}</small></td>
+        <td><span class="badge {% if c.estado == 'CERRADA' %}ok{% elif c.estado == 'PARA_REVISION' %}warn{% else %}muted{% endif %}">{{ c.estado.replace('_',' ')|title }}</span></td>
+      </tr>
+    {% else %}<tr><td colspan="6" class="empty">Todavía no se calculó ninguna conciliación.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <div class="card-head"><div><h3>Trazabilidad</h3><p>Registro append-only de decisiones y cálculos del envío.</p></div></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Fecha</th><th>Evento</th><th>Actor</th><th>Referencias</th></tr></thead>
+    <tbody>
+    {% for a in envio.auditoria %}<tr><td>{{ a.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</td><td><strong>{{ a.evento.replace('_',' ')|title }}</strong></td><td>{{ a.actor }}</td><td class="mono"><small>{% if a.factura_id %}FC #{{ a.factura_id }} {% endif %}{% if a.item_id %}· línea #{{ a.item_id }} {% endif %}{% if a.conciliacion_id %}· conciliación #{{ a.conciliacion_id }} {% endif %}{% if a.ajuste_id %}· ajuste #{{ a.ajuste_id }}{% endif %}</small></td></tr>
+    {% else %}<tr><td colspan="4" class="empty">No hay eventos auditados todavía.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

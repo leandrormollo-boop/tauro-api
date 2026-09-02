@@ -1,0 +1,89 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Control de envíos y facturas{% endblock %}
+
+{% macro dinero(valor) -%}
+$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-title page-title-row">
+  <div>
+    <div class="eyebrow">Administración financiera</div>
+    <h1>Control de envíos y facturas courier</h1>
+    <p>Cada guía se controla contra la factura final de DHL, FedEx, Andreani u OCA antes de actualizar al cliente.</p>
+  </div>
+  <a href="/admin/conciliacion-couriers/nueva" class="btn btn-primary">Cargar factura courier</a>
+</div>
+
+{% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada correctamente.</div>{% endif %}
+{% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+
+<div class="dashboard-stats" style="margin-bottom:18px;">
+  <div class="card"><small>Esperando factura</small><h2>{{ control.totales.get('ESPERANDO_FACTURA', 0) }}</h2></div>
+  <div class="card"><small>Base pendiente</small><h2>{{ control.totales.get('BASE_PENDIENTE', 0) }}</h2></div>
+  <div class="card"><small>Diferencias a aprobar</small><h2>{{ ajustes|length }}</h2></div>
+  <div class="card"><small>Conciliados</small><h2>{{ control.totales.get('CONCILIADO', 0) }}</h2></div>
+</div>
+
+<div class="card" style="margin-bottom:18px;">
+  <form method="GET" action="/admin/conciliacion-couriers" class="form-grid-4">
+    <div class="form-group"><label>Cliente</label><select name="cliente"><option value="">Todos</option>{% for c in clientes %}<option value="{{ c.cliente_id }}" {% if filtros.cliente == c.cliente_id %}selected{% endif %}>{{ c.cliente_id }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label>Courier</label><select name="courier"><option value="">Todos</option>{% for nombre in ('DHL','FEDEX','ANDREANI','OCA') %}<option value="{{ nombre }}" {% if filtros.courier|upper == nombre %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label>Estado de control</label><select name="estado"><option value="">Todos</option>{% for valor, etiqueta in (('ESPERANDO_FACTURA','Esperando factura'),('BASE_PENDIENTE','Base pendiente'),('MATCH_PENDIENTE','Match pendiente'),('DIFERENCIA_PENDIENTE','Diferencia pendiente'),('CONCILIADO','Conciliado')) %}<option value="{{ valor }}" {% if filtros.estado|upper == valor %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label>Tracking / destinatario</label><input name="buscar" value="{{ filtros.buscar }}" placeholder="Buscar"><button class="btn btn-ghost btn-sm" style="margin-top:8px;">Filtrar</button></div>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:22px;">
+  <div class="card-head"><div><h3>Control por envío</h3><p>{{ control.total }} registros en la vista actual.</p></div></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Cliente / tracking</th><th>Precio aceptado</th><th>Base interna</th><th>Factura final</th><th>Estado</th><th>Acción</th></tr></thead>
+    <tbody>
+    {% for e in control['items'] %}
+      <tr>
+        <td><strong>{{ e.cliente_id }}</strong><br><span class="mono">{{ e.tracking or ('#' ~ e.solicitud_id) }}</span><br><small>{{ e.courier|upper }} · {{ e.dest_nombre or e.destino_pais }}</small></td>
+        <td class="mono">{{ dinero(e.precio_tauro_ars) }}<br><small>{{ e.peso_kg or '—' }} kg emitido</small></td>
+        <td class="mono">{% if e.snapshot_id %}Costo est. {{ dinero(e.costo_courier_estimado_ars) }}<br><small>Margen protegido {{ dinero(e.margen_tauro_protegido_ars) }}</small>{% else %}<span class="badge warn">Sin base</span>{% endif %}</td>
+        <td class="mono">{% if e.conciliacion_id %}Final cliente {{ dinero(e.precio_cliente_final_ars) }}<br><small>Diferencia {{ dinero(e.ajuste_cliente_ars) }} · {{ e.peso_final_facturado_kg or '—' }} kg</small>{% else %}—{% endif %}</td>
+        <td><span class="badge {% if e.control_estado == 'CONCILIADO' %}ok{% elif e.control_estado in ('BASE_PENDIENTE','DIFERENCIA_PENDIENTE') %}warn{% else %}muted{% endif %}">{{ e.control_estado.replace('_',' ')|title }}</span></td>
+        <td>
+          <a href="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}" class="btn btn-ghost btn-sm" style="margin-bottom:5px;">Abrir control</a>
+          {% if e.control_estado == 'BASE_PENDIENTE' %}
+          <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/snapshot" data-confirm="¿Congelar este costo estimado como base histórica? Después no podrá modificarse.">
+            <input name="costo_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Costo estimado ARS" style="width:155px;margin-bottom:5px;">
+            <button class="btn btn-ghost btn-sm">Guardar base</button>
+          </form>
+          {% elif e.ajuste_id and e.ajuste_estado == 'PROPUESTO' %}
+          <a href="#ajuste-{{ e.ajuste_id }}" class="btn btn-primary btn-sm">Revisar diferencia</a>
+          {% elif e.conciliacion_estado == 'PARA_REVISION' and not e.ajuste_id %}
+          <form method="POST" action="/admin/conciliacion-couriers/conciliaciones/{{ e.conciliacion_id }}/cerrar" data-confirm="¿Confirmar que la factura no generó diferencia para este envío?">
+            <button class="btn btn-primary btn-sm">Cerrar sin diferencia</button>
+          </form>
+          {% elif e.control_estado == 'LISTO_PARA_CALCULAR' %}
+          <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/calcular">
+            <button class="btn btn-primary btn-sm">Calcular diferencia</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="6" class="empty">No hay envíos con estos filtros.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card" style="margin-bottom:22px;">
+  <div class="card-head"><div><h3>Facturas de operadores</h3><p>Documentos internos; el cliente nunca ve estos costos.</p></div><a href="/admin/conciliacion-couriers/nueva" class="btn btn-ghost btn-sm">+ Nueva factura</a></div>
+  <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Courier</th><th>Total</th><th>Líneas / matches</th><th>Estado</th><th></th></tr></thead><tbody>
+  {% for f in facturas %}<tr><td><strong>{{ f.tipo_documento }} {{ f.numero }}</strong><br><small>{{ f.fecha_emision or f.created_at.strftime('%d/%m/%Y') }}</small></td><td>{{ f.courier }}</td><td class="mono">{{ f.moneda }} {{ f.total }}</td><td>{{ f.lineas }} líneas · {{ f.confirmados }} confirmadas · {{ f.propuestos }} propuestas</td><td><span class="badge muted">{{ f.estado|title }}</span></td><td><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/facturas/{{ f.id }}">Controlar</a></td></tr>
+  {% else %}<tr><td colspan="6" class="empty">Todavía no se cargaron facturas courier.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="card">
+  <div class="card-head"><div><h3>Diferencias por aprobar</h3><p>Sólo la aprobación humana modifica el saldo del cliente.</p></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Cliente / envío</th><th>Inicial → final</th><th>Peso</th><th>Motivo</th><th>Decisión</th></tr></thead><tbody>
+  {% for a in ajustes %}<tr id="ajuste-{{ a.id }}"><td><strong>{{ a.cliente_id }}</strong><br><span class="mono">{{ a.tracking or a.solicitud_id }}</span> · {{ a.courier }}</td><td class="mono">{{ dinero(a.precio_anterior_ars) }} → <strong>{{ dinero(a.precio_nuevo_ars) }}</strong><br><span class="badge {% if a.tipo == 'CREDITO' %}ok{% else %}warn{% endif %}">{{ a.tipo|title }} {{ dinero(a.monto_ars|abs) }}</span><br><small>Diferencia {{ dinero(a.diferencia_flete_ars) }} · TAX {{ dinero(a.tax_cliente_ars) }}</small></td><td>{{ a.peso_cotizado_kg or '—' }} kg → <strong>{{ a.peso_final_facturado_kg or '—' }} kg</strong><br><small>{{ (a.peso_base_facturado or 'NO_INFORMADO').replace('_',' ')|title }}</small></td><td>{{ (a.motivo_diferencia or a.motivo or 'OTRO').replace('_',' ')|title }}<br><span class="badge {% if a.evidencia_completa %}ok{% else %}warn{% endif %}">{{ 'Evidencia completa' if a.evidencia_completa else 'Evidencia incompleta' }}</span></td><td><form method="POST" action="/admin/conciliacion-couriers/diferencias/{{ a.id }}/aplicar" data-confirm="¿Aprobar y aplicar esta diferencia a la cuenta corriente? El precio original no se reemplazará."><input name="referencia" placeholder="Referencia de control" style="width:170px;margin-bottom:5px;"><button class="btn btn-primary btn-sm" {% if not a.evidencia_completa %}disabled{% endif %}>Aprobar y aplicar</button></form></td></tr>
+  {% else %}<tr><td colspan="5" class="empty">No hay diferencias pendientes.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}

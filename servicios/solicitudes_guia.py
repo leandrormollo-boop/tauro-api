@@ -5,6 +5,7 @@
 import hashlib
 import json
 import uuid
+from decimal import Decimal
 from typing import Optional
 
 import psycopg2
@@ -36,6 +37,106 @@ ESTADOS_VALIDOS = ESTADOS_SOLICITUD + [ESTADO_EMITIENDO]
 
 class IdempotencyConflictError(ValueError):
     """La misma clave externa intentó crear dos pedidos distintos."""
+
+
+def _congelar_cotizacion_aceptada_con_cursor(
+    cur,
+    solicitud: dict,
+    *,
+    costo_estimado_manual_ars: Optional[float] = None,
+) -> bool:
+    """Congela costo estimado, precio aceptado y margen para conciliar luego.
+
+    El snapshot queda ligado a la solicitud y no cambia si el ADMIN modifica
+    el markup del cliente en el futuro. Para cargas externas, el costo base
+    debe ser informado explícitamente por el operador.
+    """
+    courier = str(solicitud.get("courier") or "").strip().upper()
+    coti_id = str(solicitud.get("coti_id") or "").strip()
+    if courier not in {"DHL", "FEDEX", "ANDREANI", "OCA"} or not coti_id:
+        return False
+    cur.execute(
+        """
+        SELECT costo_fedex_usd, precio_final_usd, precio_final_ars,
+               markup_tipo, markup_valor, peso_kg, peso_usado_kg
+        FROM cotizaciones
+        WHERE coti_id = %s AND cliente_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (coti_id, solicitud["cliente_id"]),
+    )
+    cotizacion = cur.fetchone()
+    precio_aceptado = Decimal(str(solicitud.get("precio_tauro_ars") or 0))
+    if cotizacion:
+        precio_usd = Decimal(str(cotizacion.get("precio_final_usd") or 0))
+        precio_log_ars = Decimal(str(cotizacion.get("precio_final_ars") or 0))
+        costo_nativo = Decimal(str(cotizacion.get("costo_fedex_usd") or 0))
+        if precio_usd <= 0 or precio_aceptado <= 0 or costo_nativo < 0:
+            raise ValueError("La cotización aceptada no tiene importes consistentes.")
+        tipo_cambio = precio_log_ars / precio_usd
+        costo_ars = costo_nativo * tipo_cambio
+        moneda = "USD"
+        markup_tipo = cotizacion.get("markup_tipo")
+        markup_valor = cotizacion.get("markup_valor")
+        peso_real = cotizacion.get("peso_kg")
+        peso_facturable = cotizacion.get("peso_usado_kg")
+        fuente = "cotizaciones"
+    elif costo_estimado_manual_ars is not None:
+        costo_nativo = Decimal(str(costo_estimado_manual_ars))
+        tipo_cambio = Decimal("1")
+        costo_ars = costo_nativo
+        moneda = "ARS"
+        markup_tipo = None
+        markup_valor = None
+        peso_real = solicitud.get("peso_kg")
+        peso_facturable = solicitud.get("peso_kg")
+        fuente = "carga_manual_admin"
+    else:
+        return False
+    margen = precio_aceptado - costo_ars
+    if tipo_cambio <= 0 or costo_ars < 0 or margen < Decimal("-0.02"):
+        raise ValueError("La cotización aceptada no conserva un margen válido.")
+    margen = max(Decimal("0"), margen)
+    huella_payload = {
+        "solicitud_id": int(solicitud["id"]),
+        "coti_id": coti_id,
+        "courier": courier,
+        "precio_ars": str(precio_aceptado),
+        "costo_nativo": str(costo_nativo),
+        "tipo_cambio": str(tipo_cambio),
+        "margen_ars": str(margen),
+    }
+    huella = hashlib.sha256(
+        json.dumps(huella_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    cur.execute(
+        """
+        INSERT INTO envio_cotizacion_snapshots (
+            solicitud_id, coti_id, courier, servicio_courier,
+            moneda_courier, tipo_cambio_ars,
+            costo_courier_estimado, costo_courier_estimado_ars,
+            precio_cliente_inicial_ars, margen_tauro_protegido_ars,
+            markup_tipo, markup_valor,
+            peso_real_cotizado_kg, peso_facturable_cotizado_kg,
+            bultos, origen_calculo, aceptado_at
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s
+        )
+        ON CONFLICT (solicitud_id) DO NOTHING
+        """,
+        (
+            int(solicitud["id"]), coti_id, courier,
+            solicitud.get("servicio_courier"), moneda, tipo_cambio,
+            costo_nativo, costo_ars, precio_aceptado, margen,
+            markup_tipo, markup_valor, peso_real, peso_facturable,
+            json.dumps(solicitud.get("bultos") or []),
+            json.dumps({"fuente": fuente, "snapshot_sha256": huella}),
+            solicitud.get("created_at"),
+        ),
+    )
+    return True
 
 
 def _error_ambito_no_emitible(solicitud: dict) -> Optional[str]:
@@ -183,6 +284,7 @@ def crear_solicitud_guia(
     origen_plataforma: str = "",
     origen_dominio: str = "",
     origen_pedido_externo_id: str = "",
+    costo_courier_estimado_ars: Optional[float] = None,
 ) -> dict:
     """Crea una solicitud de guía pendiente para gestión operativa.
 
@@ -309,6 +411,11 @@ def crear_solicitud_guia(
             row = cur.fetchone()
             if row:
                 resultado = dict(row)
+                _congelar_cotizacion_aceptada_con_cursor(
+                    cur,
+                    resultado,
+                    costo_estimado_manual_ars=costo_courier_estimado_ars,
+                )
                 resultado["_idempotent_replay"] = False
                 return resultado
 
@@ -350,20 +457,52 @@ def listar_solicitudes_cliente(
             # historial completo eso podría transferir cientos de PDFs sólo
             # para dibujar un tilde en cada fila.
             query = """
-                SELECT id, cliente_id, estado, producto_alias, cantidad,
-                       remitente_pais, ambito, destino_pais, dest_nombre, dest_ciudad, observaciones,
-                       peso_kg, valor_declarado_usd, precio_tauro_ars,
-                       precio_tauro_usd, precio_cliente_final_ars, tracking,
-                       guia_url, created_at, courier, bultos,
-                       tracking_estado, tracking_estado_courier,
-                       tracking_descripcion, tracking_consultado_at,
-                       tracking_actualizado_at, tracking_finalizado_at,
-                       (label_pdf IS NOT NULL) AS tiene_label,
-                       (commercial_invoice_pdf IS NOT NULL)
-                           AS tiene_factura_comercial
-                FROM solicitudes_guia
-                WHERE cliente_id = %s
-                ORDER BY created_at DESC
+                SELECT s.id, s.cliente_id, s.estado, s.producto_alias, s.cantidad,
+                       s.remitente_pais, s.ambito, s.destino_pais, s.dest_nombre,
+                       s.dest_ciudad, s.observaciones, s.peso_kg,
+                       s.valor_declarado_usd, s.precio_tauro_ars,
+                       s.precio_tauro_usd, s.precio_cliente_final_ars, s.tracking,
+                       s.guia_url, s.created_at, s.courier, s.bultos,
+                       s.tracking_estado, s.tracking_estado_courier,
+                       s.tracking_descripcion, s.tracking_consultado_at,
+                       s.tracking_actualizado_at, s.tracking_finalizado_at,
+                       (s.label_pdf IS NOT NULL) AS tiene_label,
+                       (s.commercial_invoice_pdf IS NOT NULL)
+                           AS tiene_factura_comercial,
+                       COALESCE(fin.precio_cliente_inicial_ars,
+                                s.precio_tauro_ars) AS precio_inicial_cliente_ars,
+                       COALESCE(fin.ajuste_cliente_ars, 0)
+                           AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
+                       COALESCE(fin.precio_cliente_final_ars,
+                                s.precio_tauro_ars) AS precio_final_cliente_ars,
+                       fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
+                       fin.peso_base_facturado, fin.motivo_diferencia
+                FROM solicitudes_guia s
+                LEFT JOIN LATERAL (
+                    SELECT c.precio_cliente_inicial_ars,
+                           c.precio_cliente_final_ars, c.ajuste_cliente_ars,
+                           c.diferencia_flete_ars, c.tax_cliente_ars,
+                           c.peso_cotizado_kg, c.peso_final_facturado_kg,
+                           c.peso_base_facturado, c.motivo_diferencia
+                    FROM conciliaciones_envio c
+                    WHERE c.solicitud_id=s.id AND c.estado='CERRADA'
+                    ORDER BY c.version DESC LIMIT 1
+                ) fin ON TRUE
+                WHERE s.cliente_id = %s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
+                ORDER BY s.created_at DESC
             """
             params = [cliente_id.strip().upper()]
             if limite is not None:
@@ -444,8 +583,15 @@ def contar_guias_listas(cliente_id: str) -> int:
             cur.execute(
                 """
                 SELECT COUNT(*) AS n
-                FROM solicitudes_guia
-                WHERE cliente_id = %s AND estado = 'GUIA_LISTA'
+                FROM solicitudes_guia s
+                WHERE s.cliente_id = %s AND s.estado = 'GUIA_LISTA'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (cliente_id.strip().upper(),),
             )
@@ -632,9 +778,40 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT *
-                FROM solicitudes_guia
-                WHERE id = %s AND cliente_id = %s
+                SELECT s.*,
+                       COALESCE(fin.precio_cliente_inicial_ars,
+                                s.precio_tauro_ars) AS precio_inicial_cliente_ars,
+                       COALESCE(fin.ajuste_cliente_ars, 0)
+                           AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
+                       COALESCE(fin.precio_cliente_final_ars,
+                                s.precio_tauro_ars) AS precio_final_cliente_ars,
+                       fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
+                       fin.peso_base_facturado, fin.motivo_diferencia
+                FROM solicitudes_guia s
+                LEFT JOIN LATERAL (
+                    SELECT c.precio_cliente_inicial_ars,
+                           c.precio_cliente_final_ars, c.ajuste_cliente_ars,
+                           c.diferencia_flete_ars, c.tax_cliente_ars,
+                           c.peso_cotizado_kg, c.peso_final_facturado_kg,
+                           c.peso_base_facturado, c.motivo_diferencia
+                    FROM conciliaciones_envio c
+                    WHERE c.solicitud_id=s.id AND c.estado='CERRADA'
+                    ORDER BY c.version DESC LIMIT 1
+                ) fin ON TRUE
+                WHERE s.id = %s AND s.cliente_id = %s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )
@@ -648,9 +825,17 @@ def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[byt
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT label_pdf
-                FROM solicitudes_guia
-                WHERE id=%s AND cliente_id=%s
+                SELECT s.label_pdf
+                FROM solicitudes_guia s
+                WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.estado <> 'CANCELADO'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM envios e
+                      WHERE e.solicitud_id = s.id
+                        AND e.cliente_id = s.cliente_id
+                        AND e.estado = 'CANCELADO'
+                  )
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )
@@ -671,9 +856,32 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                 SELECT s.*,
                        c.nombre AS cliente_nombre, c.telefono AS cliente_telefono,
                        c.direccion AS cliente_direccion, c.ciudad AS cliente_ciudad,
-                       c.cp AS cliente_cp, c.pais AS cliente_pais
+                       c.cp AS cliente_cp, c.pais AS cliente_pais,
+                       COALESCE(fin.precio_cliente_inicial_ars,
+                                s.precio_tauro_ars) AS precio_inicial_cliente_ars,
+                       COALESCE(fin.ajuste_cliente_ars, 0)
+                           AS diferencia_cliente_ars,
+                       COALESCE(fin.diferencia_flete_ars,
+                                fin.ajuste_cliente_ars, 0)
+                           AS diferencia_flete_ars,
+                       COALESCE(fin.tax_cliente_ars, 0)
+                           AS tax_cliente_ars,
+                       COALESCE(fin.precio_cliente_final_ars,
+                                s.precio_tauro_ars) AS precio_final_cliente_ars,
+                       fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
+                       fin.peso_base_facturado, fin.motivo_diferencia
                 FROM solicitudes_guia s
                 JOIN clientes c ON c.cliente_id = s.cliente_id
+                LEFT JOIN LATERAL (
+                    SELECT ce.precio_cliente_inicial_ars,
+                           ce.precio_cliente_final_ars, ce.ajuste_cliente_ars,
+                           ce.diferencia_flete_ars, ce.tax_cliente_ars,
+                           ce.peso_cotizado_kg, ce.peso_final_facturado_kg,
+                           ce.peso_base_facturado, ce.motivo_diferencia
+                    FROM conciliaciones_envio ce
+                    WHERE ce.solicitud_id=s.id AND ce.estado='CERRADA'
+                    ORDER BY ce.version DESC LIMIT 1
+                ) fin ON TRUE
                 WHERE s.id = %s
                 """,
                 (solicitud_id,),
@@ -855,7 +1063,19 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    "SELECT label_pdf FROM solicitudes_guia WHERE id=%s AND cliente_id=%s",
+                    """
+                    SELECT s.label_pdf
+                    FROM solicitudes_guia s
+                    WHERE s.id=%s AND s.cliente_id=%s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    """,
                     (solicitud_id, cliente_id.strip().upper()),
                 )
             else:
@@ -877,8 +1097,19 @@ def obtener_factura_comercial_pdf(
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    """SELECT commercial_invoice_pdf FROM solicitudes_guia
-                       WHERE id=%s AND cliente_id=%s""",
+                    """
+                    SELECT s.commercial_invoice_pdf
+                    FROM solicitudes_guia s
+                    WHERE s.id=%s AND s.cliente_id=%s
+                      AND s.estado <> 'CANCELADO'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM envios e
+                          WHERE e.solicitud_id = s.id
+                            AND e.cliente_id = s.cliente_id
+                            AND e.estado = 'CANCELADO'
+                      )
+                    """,
                     (solicitud_id, cliente_id.strip().upper()),
                 )
             else:
@@ -906,6 +1137,9 @@ def cargar_envio_externo(
     label_pdf: Optional[bytes] = None,
     dest_direccion: str = "",
     observaciones: str = "",
+    courier: str = "FEDEX",
+    origen_pais: str = "AR",
+    costo_courier_estimado_ars: Optional[float] = None,
 ) -> dict:
     """
     Alta de un envío YA REALIZADO por un canal externo (hoy: los que salen
@@ -960,7 +1194,9 @@ def cargar_envio_externo(
             coti_id=f"EXT-{uuid.uuid4().hex[:10]}",
             precio_tauro_ars=float(precio_tauro_ars),
             precio_tauro_usd=round(float(precio_tauro_ars) / dolar, 2) if dolar else 0,
-            remitente_pais="AR",
+            remitente_pais=(origen_pais or "AR").strip().upper(),
+            courier=(courier or "FEDEX").strip().upper(),
+            costo_courier_estimado_ars=costo_courier_estimado_ars,
         )
     except Exception as e:
         return {"ok": False, "error": f"No se pudo crear el envío: {e}"}
@@ -969,7 +1205,10 @@ def cargar_envio_externo(
     # guardar_guia_generada hace el resto: GUIA_LISTA + label + cargo
     # automático en cuenta corriente. El aviso a tienda sale limpio porque
     # no hay pedido vinculado.
-    guardar_guia_generada(sid, tracking, label_pdf, courier="FEDEX")
+    guardar_guia_generada(
+        sid, tracking, label_pdf,
+        courier=(courier or "FEDEX").strip().upper(),
+    )
     print(f"[solicitudes] envío externo cargado: solicitud {sid} · {cliente_id} · "
           f"{tracking} · ARS {precio_tauro_ars:,.0f}")
     return {"ok": True, "solicitud_id": sid}

@@ -14,6 +14,7 @@ def _envio(numero: int, courier: str, estado: str) -> dict:
         "id": numero,
         "courier": courier,
         "estado": estado,
+        "tracking": f"TRACK-{numero:04d}",
         "remitente_pais": "AR",
         "destino_pais": "AR" if nacional else "US",
     }
@@ -111,6 +112,47 @@ def test_filtro_sin_resultados_no_se_confunde_con_cliente_sin_historial():
     assert vista["pagina_actual"] == 1
 
 
+def test_buscador_encuentra_tracking_aunque_se_pegue_con_espacios_y_guiones():
+    historial = [
+        {**_envio(1, "FEDEX", "DESPACHADO"), "tracking": "888244412640"},
+        {**_envio(2, "DHL", "DESPACHADO"), "tracking": "2807257515"},
+    ]
+
+    vista = preparar_historial_envios(
+        historial,
+        tipo="internacional",
+        buscar=" 888 244-412640 ",
+    )
+
+    assert [s["id"] for s in vista["solicitudes"]] == [1]
+    assert vista["total_resultados"] == 1
+    assert vista["total_busqueda"] == 1
+    assert next(c for c in vista["chips"] if c["clave"] == "despachados")["cantidad"] == 1
+    assert vista["busqueda_filtro"] == "888 244-412640"
+
+
+def test_buscador_filtra_antes_de_paginar_y_se_combina_con_estado():
+    historial = [
+        {
+            **_envio(numero, "DHL", "DESPACHADO" if numero <= 15 else "GUIA_LISTA"),
+            "tracking": f"WAIMAO-{numero:03d}",
+        }
+        for numero in range(1, 19)
+    ]
+
+    segunda = preparar_historial_envios(
+        historial,
+        tipo="internacional",
+        paso="despachados",
+        pagina=2,
+        buscar="WAIMAO",
+    )
+
+    assert [s["id"] for s in segunda["solicitudes"]] == [11, 12, 13, 14, 15]
+    assert segunda["total_resultados"] == 15
+    assert segunda["total_paginas"] == 2
+
+
 def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     html = (RAIZ / "templates" / "portal" / "envios.html").read_text(encoding="utf-8")
 
@@ -118,22 +160,30 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "&tipo={{ tipo_filtro }}" in html
     assert "&paso={{ paso_filtro }}" in html
     assert "Mostrando {{ pagina_desde }}–{{ pagina_hasta }}" in html
-    assert "cotizado en esta página" in html
+    assert "total final en esta página" in html
     assert "{% if not tipo_filtro %}" not in html
     assert "envios-scope-tabs" in html
     assert "Nacionales <b>{{ total_nacionales }}</b>" in html
     assert "Internacionales <b>{{ total_internacionales }}</b>" in html
     assert "Cambiar ámbito" not in html
     assert "No hay envíos que coincidan con estos filtros" in html
+    assert 'role="search"' in html
+    assert 'name="buscar"' in html
+    assert 'placeholder="Ej. 888244412640"' in html
+    assert "envios-search-icon" not in html
+    assert "{{ con_busqueda }}" in html
+    assert 'class="envio-destination-name"' in html
+    assert 'class="track-link mono"' in html
     # Los links de tipo y de paso no incluyen `pagina`: cambiar un filtro
     # siempre vuelve a la primera hoja.
-    assert '/portal/envios?tipo=internacional{{ con_paso }}' in html
-    assert '/portal/envios?paso={{ c.clave }}{{ con_tipo }}' in html
+    assert '/portal/envios?tipo=internacional{{ con_paso }}{{ con_busqueda }}' in html
+    assert '/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_busqueda }}' in html
 
 
 def test_endpoint_real_usa_el_contrato_paginado_de_historial():
     endpoint = (RAIZ / "endpoints" / "portal_cliente.py").read_text(encoding="utf-8")
 
-    assert "preparar_historial_envios(historial, tipo, paso, pagina)" in endpoint
+    assert "buscar: str = \"\"" in endpoint
+    assert "buscar=buscar" in endpoint
     assert 'pagina: str = "1"' in endpoint
     assert 'tipo = _ambito_portal(tipo) or "internacional"' in endpoint

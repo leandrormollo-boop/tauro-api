@@ -107,10 +107,12 @@ templates.env.globals["ambito_envio"] = ambito_envio
 
 AMBITOS_PORTAL = {"nacional", "internacional"}
 AMBITOS_CUENTA = {"consolidado", "nacional", "internacional"}
-TIPOS_MOVIMIENTO_CUENTA = {"todos", "cargos", "pagos", "revision"}
+TIPOS_MOVIMIENTO_CUENTA = {
+    "todos", "cargos", "pagos", "diferencias", "revision",
+}
 # Mantiene el resumen y una página completa de movimientos dentro del viewport
 # de escritorio; el resto queda accesible con paginación explícita.
-MOVIMIENTOS_CUENTA_POR_PAGINA = 3
+MOVIMIENTOS_CUENTA_POR_PAGINA = 10
 _IDEMPOTENCY_KEY_MIN_LEN = 32
 _IDEMPOTENCY_KEY_MAX_LEN = 128
 _IDEMPOTENCY_KEY_CHARS = frozenset(
@@ -1696,6 +1698,7 @@ def envios_view(
     ok: Optional[str] = None,
     tipo: str = "",
     paso: str = "",
+    buscar: str = "",
     pagina: str = "1",
     cliente: str = Depends(cliente_actual),
 ):
@@ -1706,7 +1709,13 @@ def envios_view(
     # portal tenía antes de incorporar operadores nacionales.
     tipo = _ambito_portal(tipo) or "internacional"
     historial = listar_solicitudes_cliente(cliente, limite=None)
-    vista = preparar_historial_envios(historial, tipo, paso, pagina)
+    vista = preparar_historial_envios(
+        historial,
+        tipo=tipo,
+        paso=paso,
+        pagina=pagina,
+        buscar=buscar,
+    )
 
     from servicios.configuracion_couriers_cliente import mapa_permisos
     permisos_emision = mapa_permisos(cliente, "emitir")

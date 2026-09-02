@@ -27,7 +27,7 @@
         </select>
       </div>
       <div class="form-group">
-        <label>Tracking (el de la guía FedEx) *</label>
+        <label>Tracking de la guía *</label>
         <input type="text" name="tracking" required placeholder="874937552842" class="mono">
       </div>
     </div>
@@ -46,6 +46,16 @@
         <label>País (código) *</label>
         <input type="text" name="destino_pais" required maxlength="2"
                placeholder="US" style="text-transform:uppercase;">
+      </div>
+    </div>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Courier *</label>
+        <select name="courier" required><option>DHL</option><option>FEDEX</option><option>ANDREANI</option><option>OCA</option></select>
+      </div>
+      <div class="form-group">
+        <label>País de origen *</label>
+        <input type="text" name="origen_pais" value="AR" maxlength="2" required style="text-transform:uppercase;">
       </div>
     </div>
     <div class="form-group">
@@ -68,11 +78,16 @@
         <input type="text" name="peso_kg" inputmode="decimal" data-numero="decimal" value="1">
       </div>
     </div>
-    <div class="form-grid-2">
+    <div class="form-grid-3">
       <div class="form-group">
         <label>Precio al cliente (ARS) *</label>
         <input type="text" name="precio_ars" required inputmode="decimal" data-numero="monto"
                placeholder="85.500 — entra a su cuenta corriente">
+      </div>
+      <div class="form-group">
+        <label>Costo courier estimado (ARS) *</label>
+        <input type="text" name="costo_courier_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Base interna para conciliar">
+        <small style="color:var(--fg-4);">No se muestra al cliente. Congela el margen de este envío.</small>
       </div>
       <div class="form-group">
         <label>Guía PDF (opcional)</label>
