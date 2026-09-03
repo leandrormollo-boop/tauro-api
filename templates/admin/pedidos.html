@@ -15,7 +15,7 @@
   <a href="/admin/pedidos" class="btn btn-sm {% if not estado_filtro %}btn-primary{% else %}btn-ghost{% endif %}">Todos</a>
   {% for e in estados %}
     <a href="/admin/pedidos?estado={{ e }}" class="btn btn-sm {% if estado_filtro == e %}btn-primary{% else %}btn-ghost{% endif %}">
-      {{ e.replace("_", " ") }}
+      {{ estados_ui[e][0] }}
     </a>
   {% endfor %}
 </div>
@@ -47,6 +47,10 @@
           <td class="mono">
             #{{ s.id }}<br>
             <small style="color:var(--fg-4)">{{ s.created_at.strftime("%d/%m %H:%M") if s.created_at else "—" }}</small>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px;">
+              <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">{{ s.estado_operacion_ui.label }}</span>
+              <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">{{ s.estado_tracking_ui.label }}</span>
+            </div>
           </td>
           <td>
             <strong>{{ s.cliente_id }}</strong>
@@ -179,7 +183,7 @@
               {% endif %}
               <select name="estado">
                 {% for e in estados %}
-                  <option value="{{ e }}" {% if s.estado == e %}selected{% endif %}>{{ e.replace("_", " ") }}</option>
+                  <option value="{{ e }}" {% if s.estado == e %}selected{% endif %}>{{ estados_ui[e][0] }}</option>
                 {% endfor %}
               </select>
               <input type="text" name="tracking" placeholder="Tracking" value="{{ s.tracking or '' }}">

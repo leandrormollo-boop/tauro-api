@@ -53,7 +53,7 @@ def test_cancelado_se_abre_por_url_directa_pero_no_descarga_documentos():
         assert "e.estado = 'CANCELADO'" in bloque
 
 
-def test_contadores_del_portal_tampoco_incluyen_cargos_anulados():
+def test_contadores_separan_canceladas_sin_sumarlas_como_guias_listas():
     solicitudes = (RAIZ / "servicios" / "solicitudes_guia.py").read_text(
         encoding="utf-8"
     )
@@ -69,4 +69,4 @@ def test_contadores_del_portal_tampoco_incluyen_cargos_anulados():
     embudo = _bloque(panel, "def embudo_envios(", "def checklist_arranque(")
 
     assert "e.estado = 'CANCELADO'" in contador_guias
-    assert embudo.count("e.estado = 'CANCELADO'") >= 1
+    assert 'return "canceladas"' in panel

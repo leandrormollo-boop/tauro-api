@@ -1386,6 +1386,22 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_cliente
     ON solicitudes_guia(cliente_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_estado
     ON solicitudes_guia(estado, created_at DESC);
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'solicitudes_guia'::regclass
+          AND conname = 'ck_solicitudes_guia_estado'
+    ) THEN
+        ALTER TABLE solicitudes_guia
+            ADD CONSTRAINT ck_solicitudes_guia_estado
+            CHECK (estado IN (
+                'SOLICITADO', 'EN_PROCESO', 'EMITIENDO',
+                'VERIFICAR_COURIER', 'GUIA_LISTA', 'DESPACHADO',
+                'ENTREGADO', 'REEMPLAZADO', 'CANCELADO'
+            ));
+    END IF;
+END $$;
 -- Instalaciones anteriores a la columna de auditoría deben migrar antes de
 -- que emisión/conciliación la use. El CREATE TABLE no modifica una tabla ya
 -- existente, por eso este ALTER idempotente es obligatorio en producción.

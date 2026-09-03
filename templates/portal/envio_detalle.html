@@ -8,9 +8,10 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {%- endmacro %}
 
 {% block content %}
-{% set estados_orden = ["SOLICITADO", "EN_PROCESO", "GUIA_LISTA", "DESPACHADO"] %}
-{% set estados_labels = {"SOLICITADO": "Solicitado", "EN_PROCESO": "En proceso", "GUIA_LISTA": "Guía lista", "DESPACHADO": "Despachado"} %}
-{% set idx_actual = estados_orden.index(s.estado) if s.estado in estados_orden else -1 %}
+{% set estados_orden = ["SOLICITADO", "GUIA_LISTA", "DESPACHADO", "ENTREGADO"] %}
+{% set estados_labels = {"SOLICITADO": "Solicitado", "GUIA_LISTA": "Guía lista", "DESPACHADO": "Despachado", "ENTREGADO": "Entregado"} %}
+{% set idx_por_estado = {"SOLICITADO": 0, "EN_PROCESO": 0, "EMITIENDO": 0, "VERIFICAR_COURIER": 0, "GUIA_LISTA": 1, "DESPACHADO": 2, "ENTREGADO": 3} %}
+{% set idx_actual = idx_por_estado.get(s.estado, -1) %}
 
 <div class="page-title page-title-row">
     <div>
@@ -19,6 +20,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <p>Creado el {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "—" }}.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+        <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">Operación: {{ s.estado_operacion_ui.label }}</span>
+        <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">Tracking: {{ s.estado_tracking_ui.label }}</span>
         {% if ambito == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-primary btn-sm">Repetir envío</a>{% endif %}
         <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos {{ ambito if ambito != 'sin_clasificar' else '' }}</a>
     </div>
@@ -80,6 +83,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             ¡Tu guía está lista! Descargá el PDF, imprimí las etiquetas y prepará las cajas.
         {% elif s.estado == "DESPACHADO" %}
             Tu envío ya está en la red de {{ courier_nombre }}. Seguilo con el tracking de abajo.
+        {% elif s.estado == "ENTREGADO" %}
+            El courier confirmó la entrega del envío.
         {% endif %}
     </p>
 </div>

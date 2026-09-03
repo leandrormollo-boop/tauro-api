@@ -17,30 +17,13 @@ from pypdf import PdfReader, PdfWriter
 from core.database import get_conn
 from servicios.diferencias_cliente import presentar_diferencia
 from servicios.couriers_urls import ambito_envio
+from servicios.estados_envio import (
+    ESTADO_EMITIENDO,
+    ESTADOS_SOLICITUD,
+    ESTADOS_VALIDOS,
+    presentar_estados_envio,
+)
 from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
-
-
-ESTADOS_SOLICITUD = [
-    "SOLICITADO",
-    "EN_PROCESO",
-    # El courier pudo haber recibido una operación irreversible, pero TAURO
-    # no recibió una respuesta concluyente. No se vuelve a emitir hasta que
-    # una persona concilie la Message-Reference en el portal del courier.
-    "VERIFICAR_COURIER",
-    "GUIA_LISTA",
-    "DESPACHADO",
-    # La guía anterior de una reemisión se conserva para auditoría, pero su
-    # etiqueta deja de ser descargable y su cargo queda cancelado.
-    "REEMPLAZADO",
-    "CANCELADO",
-]
-
-# Estado transitorio: dura los segundos que tarda el courier en emitir.
-# Es la reserva que impide que dos clicks generen dos guías reales, y por
-# eso no se ofrece en el desplegable del admin — lo pone y lo saca el
-# sistema solo.
-ESTADO_EMITIENDO = "EMITIENDO"
-ESTADOS_VALIDOS = ESTADOS_SOLICITUD + [ESTADO_EMITIENDO]
 
 
 class IdempotencyConflictError(ValueError):
@@ -1299,7 +1282,7 @@ def listar_solicitudes_cliente(
                 query += " LIMIT %s"
                 params.append(max(1, int(limite)))
             cur.execute(query, tuple(params))
-            return [_sin_label(dict(r)) for r in cur.fetchall()]
+            return [presentar_estados_envio(_sin_label(dict(r))) for r in cur.fetchall()]
 
 
 def periodos_solicitudes_cliente(cliente_id: str) -> list[tuple[int, int]]:
@@ -1329,7 +1312,8 @@ def periodos_solicitudes_cliente(cliente_id: str) -> list[tuple[int, int]]:
             return [
                 (int(fila["anio"]), int(fila["mes"]))
                 for fila in cur.fetchall()
-                if fila.get("anio") and fila.get("mes")
+                if 2000 <= int(fila.get("anio") or 0) <= 2100
+                and 1 <= int(fila.get("mes") or 0) <= 12
             ]
 
 
@@ -1462,7 +1446,7 @@ def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:
                 """,
                 params,
             )
-            return [_sin_label(dict(r)) for r in cur.fetchall()]
+            return [presentar_estados_envio(_sin_label(dict(r))) for r in cur.fetchall()]
 
 
 def actualizar_solicitud_guia(
@@ -1674,7 +1658,7 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
         return None
     resultado = _sin_label(dict(row))
     resultado["diferencia_detalle"] = presentar_diferencia(resultado)
-    return resultado
+    return presentar_estados_envio(resultado)
 
 
 def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[bytes]:

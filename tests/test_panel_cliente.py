@@ -56,29 +56,27 @@ def _conn_falsa(filas=None, n=0):
 
 def test_ningun_estado_se_pierde_en_el_embudo():
     """
-    Con un envío en cada estado válido, el embudo tiene que contarlos todos
-    menos CANCELADO y REEMPLAZADO. Esos dos quedan sólo en el historial: no
-    esperan una acción operativa de nadie.
+    Con un envío en cada estado válido, los contadores tienen que incluirlos
+    todos. CANCELADO y REEMPLAZADO viven en la pestaña Canceladas.
     """
     filas = [{"estado": e, "n": 1} for e in ESTADOS_VALIDOS]
     with mock.patch.object(pc, "get_conn", _conn_falsa(filas, n=0)):
         pasos = pc.embudo_envios("TEST")
 
     contados = sum(p["cantidad"] for p in pasos)
-    esperados = len([
-        e for e in ESTADOS_VALIDOS if e not in ("CANCELADO", "REEMPLAZADO")
-    ])
+    esperados = len(ESTADOS_VALIDOS)
     assert contados == esperados, (
         f"se pierden {esperados - contados} envío(s): "
         f"algún estado de {ESTADOS_VALIDOS} no está mapeado en embudo_envios"
     )
 
 
-def test_cancelado_no_se_muestra():
+def test_cancelado_se_muestra_en_su_pestana():
     filas = [{"estado": "CANCELADO", "n": 7}]
     with mock.patch.object(pc, "get_conn", _conn_falsa(filas, n=0)):
         pasos = pc.embudo_envios("TEST")
-    assert sum(p["cantidad"] for p in pasos) == 0
+    canceladas = next(p for p in pasos if p["clave"] == "canceladas")
+    assert canceladas["cantidad"] == 7
 
 
 def test_el_estado_en_proceso_espera_a_tauro():

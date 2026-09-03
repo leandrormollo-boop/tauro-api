@@ -23,6 +23,7 @@ from decimal import Decimal, InvalidOperation
 import re
 
 from core.database import get_conn
+from servicios.estados_envio import presentar_estados_envio
 
 
 # ── Embudo de envíos ─────────────────────────────────────────
@@ -57,6 +58,13 @@ PASOS_EMBUDO = [
         "url": "/portal/envios?paso=despachados",
         "accion_de": None,
     },
+    {
+        "clave": "canceladas",
+        "titulo": "Canceladas",
+        "detalle": "Canceladas o reemplazadas",
+        "url": "/portal/envios?paso=canceladas",
+        "accion_de": None,
+    },
 ]
 
 
@@ -75,8 +83,8 @@ def paso_de_estado(estado: str) -> str | None:
     por su cuenta, el día que se agregue un estado uno contaría y el otro no,
     y el cliente vería una tarjeta que dice 3 llevándolo a una lista de 2.
 
-    Devuelve None para lo que no va al embudo (CANCELADO) y loguea lo que no
-    reconoce, porque un estado sin mapear desaparece sin dar error.
+    Los estados cancelado y reemplazado conservan su propia pestaña para que
+    los contadores siempre sumen el total visible.
     """
     estado = (estado or "").upper()
     if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO", "VERIFICAR_COURIER"):
@@ -90,7 +98,7 @@ def paso_de_estado(estado: str) -> str | None:
         # queda contemplado para cuando el tracking escriba la entrega.
         return "despachados"
     if estado in ("CANCELADO", "REEMPLAZADO"):
-        return None  # no espera acción de nadie
+        return "canceladas"
     print(f"[panel] estado sin mapear en el embudo: {estado!r}")
     return None
 
@@ -144,6 +152,7 @@ def preparar_historial_envios(
 
     historial = list(solicitudes or [])
     for solicitud in historial:
+        presentar_estados_envio(solicitud)
         solicitud["_ambito_portal"] = ambito_envio(solicitud)
     tiene_historial = bool(historial)
 
@@ -271,14 +280,6 @@ def embudo_envios(cliente_id: str) -> list[dict]:
                     SELECT estado, COUNT(*) AS n
                     FROM solicitudes_guia s
                     WHERE s.cliente_id = %s
-                      AND s.estado <> 'CANCELADO'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM envios e
-                          WHERE e.solicitud_id = s.id
-                            AND e.cliente_id = s.cliente_id
-                            AND e.estado = 'CANCELADO'
-                      )
                     GROUP BY s.estado
                     """,
                     (cliente_id,),

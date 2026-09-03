@@ -203,31 +203,7 @@ camposPeriodo.forEach(function (campo) {
                 </tr>
             </thead>
             <tbody>
-            {% set estados = {
-                "SOLICITADO": ("warn",  "Solicitado"),
-                "EN_PROCESO": ("warn",  "En proceso"),
-                "VERIFICAR_COURIER": ("warn", "Verificando"),
-                "GUIA_LISTA": ("ok",    "Guía lista"),
-                "DESPACHADO": ("ok",    "Enviado"),
-                "ENTREGADO":  ("ok",    "Entregado"),
-                "REEMPLAZADO": ("muted", "Reemplazado"),
-                "CANCELADO":  ("muted", "Cancelado"),
-            } %}
-            {% set estados_tracking = {
-                "PROCESO_ENTREGA": ("accent", "Proceso de entrega"),
-                "ENTREGADO":       ("ok", "Entregado"),
-                "RETENIDO":        ("error", "Retenido, verificar"),
-            } %}
             {% for s in solicitudes %}
-                {% if s.estado == 'REEMPLAZADO' %}
-                    {% set b = estados.get(s.estado) %}
-                {% elif s.tracking_estado %}
-                    {% set b = estados_tracking.get(s.tracking_estado, ("muted", "Rastreo pendiente")) %}
-                {% elif (s.courier or '')|upper == 'DHL' and s.tracking %}
-                    {% set b = ("muted", "Rastreo pendiente") %}
-                {% else %}
-                    {% set b = estados.get(s.estado, ("muted", (s.estado or "—").replace("_", " ").capitalize())) %}
-                {% endif %}
                 <tr>
                     <td data-label="Envío">
                         {% if s.bultos and s.bultos|length > 1 %}
@@ -247,7 +223,10 @@ camposPeriodo.forEach(function (campo) {
                     <td data-label="Servicio y estado" class="envio-service-cell">
                         <span class="service-head">
                             <span><strong>{{ (s.courier or '—')|upper }}</strong> · {% if s._ambito_portal == 'nacional' %}Nacional{% elif s._ambito_portal == 'internacional' %}Internacional{% else %}Sin clasificar{% endif %}</span>
-                            <span class="badge {{ b[0] }}">{{ b[1] }}</span>
+                            <span style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
+                                <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">{{ s.estado_operacion_ui.label }}</span>
+                                <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">{{ s.estado_tracking_ui.label }}</span>
+                            </span>
                         </span>
                         {% if s.tracking_estado == 'RETENIDO' and s.tracking_descripcion %}
                             <small class="tracking-alert">{{ s.tracking_descripcion }}</small>

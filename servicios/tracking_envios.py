@@ -200,7 +200,16 @@ def actualizar_tracking_dhl(
                 cur.execute(
                     """
                     UPDATE solicitudes_guia
-                    SET tracking_estado = %s,
+                    SET estado = CASE
+                            WHEN %s = 'ENTREGADO'
+                                 AND estado IN ('GUIA_LISTA', 'DESPACHADO')
+                                THEN 'ENTREGADO'
+                            WHEN %s = 'PROCESO_ENTREGA'
+                                 AND estado = 'GUIA_LISTA'
+                                THEN 'DESPACHADO'
+                            ELSE estado
+                        END,
+                        tracking_estado = %s,
                         tracking_estado_courier = %s,
                         tracking_descripcion = %s,
                         tracking_consultado_at = NOW(),
@@ -220,6 +229,8 @@ def actualizar_tracking_dhl(
                     RETURNING id
                     """,
                     (
+                        normalizado["estado"],
+                        normalizado["estado"],
                         normalizado["estado"],
                         normalizado.get("estado_courier") or "",
                         normalizado.get("descripcion") or "",

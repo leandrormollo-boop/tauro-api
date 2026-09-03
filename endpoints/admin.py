@@ -76,6 +76,7 @@ from servicios.solicitudes_guia import (
     generar_guia,
     obtener_label_pdf,
 )
+from servicios.estados_envio import ESTADOS_OPERACION_UI
 from servicios.tracking_fedex_tauro import (
     fedex_environment,
     get_tracking_summary,
@@ -2734,6 +2735,7 @@ def admin_pedidos(
             "seccion": "pedidos",
             "solicitudes": solicitudes,
             "estados": ESTADOS_SOLICITUD,
+            "estados_ui": ESTADOS_OPERACION_UI,
             "estado_filtro": estado,
             "flash_ok": flash_ok,
             "flash_error": guia_error,

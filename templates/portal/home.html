@@ -96,17 +96,6 @@
     </section>
 </div>
 
-{% set estados = {
-    "SOLICITADO": ("warn", "Solicitud recibida"),
-    "EN_PROCESO": ("warn", "En preparación"),
-    "EMITIENDO": ("warn", "Generando guía"),
-    "VERIFICAR_COURIER": ("warn", "Verificando"),
-    "GUIA_LISTA": ("ok", "Guía lista"),
-    "DESPACHADO": ("ok", "Enviado"),
-    "ENTREGADO": ("ok", "Entregado"),
-    "REEMPLAZADO": ("muted", "Reemplazado"),
-    "CANCELADO": ("muted", "Cancelado")
-} %}
 {% macro actividad_ambito(icono, titulo, ambito, solicitudes) %}
 <section class="card home-scope-card">
     <div class="home-scope-head">
@@ -116,10 +105,12 @@
     {% if solicitudes %}
     <div class="home-scope-list">
         {% for s in solicitudes %}
-        {% set estado = estados.get(s.estado, ("muted", (s.estado or "—").replace("_", " ").capitalize())) %}
         <a href="/portal/envios/{{ s.id }}" class="home-scope-row">
             <span><strong>{{ s.dest_ciudad or s.dest_nombre or "—" }}</strong><small>{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }} · {{ (s.courier or '—')|upper }}</small></span>
-            <span class="badge {{ estado[0] }}">{{ estado[1] }}</span>
+            <span style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
+                <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">{{ s.estado_operacion_ui.label }}</span>
+                <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">{{ s.estado_tracking_ui.label }}</span>
+            </span>
         </a>
         {% endfor %}
     </div>
