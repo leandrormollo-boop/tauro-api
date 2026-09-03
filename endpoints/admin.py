@@ -1910,6 +1910,7 @@ def admin_cliente_acceso_precios_guardar(
     ups_markup_valor: str = Form(""),
     courier_default: str = Form(""),
     tope_deuda_ars: str = Form(""),
+    es_reseller: str = Form(""),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -1975,10 +1976,10 @@ def admin_cliente_acceso_precios_guardar(
                 cur.execute(
                     """
                     UPDATE clientes
-                    SET courier_default=%s, tope_deuda_ars=%s
+                    SET courier_default=%s, tope_deuda_ars=%s, es_reseller=%s
                     WHERE cliente_id=%s
                     """,
-                    (courier_default_db, tope_db, cliente_id),
+                    (courier_default_db, tope_db, es_reseller == "1", cliente_id),
                 )
                 guardar_matriz_con_cursor(cur, cliente_id, configs)
                 from servicios.auditoria import registrar_desde_request_con_cursor
@@ -1994,6 +1995,7 @@ def admin_cliente_acceso_precios_guardar(
                         "couriers": resumen_auditoria(configs),
                         "courier_default": courier_default_db or None,
                         "tope_deuda_configurado": tope_db is not None,
+                        "es_reseller": es_reseller == "1",
                     },
                 )
         return RedirectResponse(
@@ -2030,6 +2032,7 @@ def admin_cliente_acceso_precios_guardar(
             matriz["courier_default"] = _courier_valido(courier_default)
             matriz["courier_default_configurado"] = _courier_valido(courier_default)
             matriz["tope_deuda_ars"] = tope_deuda_ars
+            matriz["es_reseller"] = es_reseller == "1"
         return templates.TemplateResponse(
             request=request,
             name="admin/cliente_acceso_precios.html",

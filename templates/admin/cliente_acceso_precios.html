@@ -33,7 +33,7 @@
   .tier-grid label { display:block;color:var(--fg-4);font-size:10px;margin-bottom:4px; }
   .tier-grid input { width:100%;margin:0; }
   .tier-note { grid-column:1/-1;color:var(--fg-4);font-size:10px;line-height:1.45; }
-  .access-settings { display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 18px;border-top:1px solid var(--line-soft);background:rgba(255,255,255,.015); }
+  .access-settings { display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:16px 18px;border-top:1px solid var(--line-soft);background:rgba(255,255,255,.015); }
   .access-settings .form-group { margin:0; }
   .access-warning { display:flex;gap:10px;align-items:flex-start;margin:14px 0 0;padding:11px 14px;border:1px solid rgba(245,158,11,.26);background:rgba(245,158,11,.07);border-radius:10px;color:var(--fg-3);font-size:12.5px; }
   .access-actions { display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:16px; }
@@ -174,6 +174,13 @@
           <input id="tope-deuda" type="text" name="tope_deuda_ars"
                  value="{% if matriz.tope_deuda_ars is not none %}{{ '%g'|format(matriz.tope_deuda_ars|float) }}{% endif %}"
                  placeholder="Vacío = sin tope" inputmode="decimal" data-numero="monto">
+        </div>
+        <div class="form-group">
+          <label for="es-reseller">Modo reseller</label>
+          <label style="display:flex;align-items:center;gap:9px;min-height:42px;cursor:pointer;">
+            <input id="es-reseller" type="checkbox" name="es_reseller" value="1" {% if matriz.es_reseller %}checked{% endif %}>
+            Puede editar el precio y descargar una cotización PDF
+          </label>
         </div>
       </div>
     </div>

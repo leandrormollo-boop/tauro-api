@@ -1340,6 +1340,8 @@ def cotizar_form(
     cliente: str = Depends(cliente_actual),
 ):
     ambito = _ambito_portal(ambito)
+    from servicios.cotizaciones_reseller import cliente_es_reseller
+    es_reseller = cliente_es_reseller(cliente)
     return templates.TemplateResponse(
         request=request, name="portal/cotizar.html",
         context={
@@ -1357,6 +1359,7 @@ def cotizar_form(
             "resultado_nacional": None,
             "error": None,
             "form": {"bultos": [{}]},
+            "es_reseller": es_reseller,
         },
     )
 
@@ -1469,6 +1472,9 @@ def cotizar_post(
     opciones = None
     no_disponibles = []
     resumen = None
+    paquetes = []
+    from servicios.cotizaciones_reseller import cliente_es_reseller, guardar_opciones
+    es_reseller = cliente_es_reseller(cliente)
     filas_bultos_form = [{
         "cantidad": "1", "peso_kg": peso_kg, "largo_cm": largo_cm,
         "ancho_cm": ancho_cm, "alto_cm": alto_cm,
@@ -1504,6 +1510,14 @@ def cotizar_post(
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
         resumen = comparacion["resumen"]
+        if es_reseller and opciones:
+            opciones = guardar_opciones(
+                cliente,
+                ruta=resumen["ruta"],
+                bultos=paquetes,
+                peso_facturable_kg=resumen["peso_usado_kg"],
+                opciones=opciones,
+            )
         if not comparacion["encontrado"]:
             estados = ",".join(
                 f"{item.get('id')}:{item.get('estado')}"
@@ -1545,6 +1559,31 @@ def cotizar_post(
             # Para que cada tarjeta de opción linkee a "crear envío" con el
             # destino ya elegido.
             "destino_sel": destino_pais,
+            "es_reseller": es_reseller,
+        },
+    )
+
+
+@router.post("/cotizaciones/reseller.pdf")
+def descargar_cotizacion_reseller(
+    quote_id: str = Form(...),
+    precio: str = Form(...),
+    cliente: str = Depends(cliente_actual),
+):
+    """Genera una copia comercial sin costo courier ni margen TAURO."""
+    from servicios.cotizaciones_reseller import generar_pdf
+
+    try:
+        contenido, nombre = generar_pdf(cliente, quote_id, precio)
+    except ValueError as exc:
+        return Response(content=str(exc), status_code=422, media_type="text/plain")
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+            "X-Robots-Tag": "noindex, nofollow",
         },
     )
 

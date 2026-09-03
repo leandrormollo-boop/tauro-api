@@ -25,6 +25,7 @@ def _cliente(**cambios):
         "puede_recolectar": False,
         "tope_deuda_ars": None,
         "courier_default": "",
+        "es_reseller": False,
     }
     base.update(cambios)
     return base
@@ -446,7 +447,7 @@ def test_post_admin_persiste_dhl_tramos_y_auditoria_en_la_misma_transaccion(
         params for sql, params in ejecutadas
         if "UPDATE clientes SET courier_default" in sql
     )
-    assert update_cliente == ("dhl", 500_000.0, "MELCIOR")
+    assert update_cliente == ("dhl", 500_000.0, False, "MELCIOR")
     filas = [
         params for sql, params in ejecutadas
         if "INSERT INTO cliente_courier_config" in sql
@@ -536,9 +537,10 @@ def test_roundtrip_admin_post_get_relee_permisos_y_default(monkeypatch):
                     if "SELECT cliente_id FROM clientes" in compacto:
                         self.una = {"cliente_id": base.cliente["cliente_id"]}
                     elif "UPDATE clientes SET courier_default" in compacto:
-                        default, tope, _cliente_id = params
-                        base.cliente["courier_default"] = default
-                        base.cliente["tope_deuda_ars"] = tope
+                            default, tope, es_reseller, _cliente_id = params
+                            base.cliente["courier_default"] = default
+                            base.cliente["tope_deuda_ars"] = tope
+                            base.cliente["es_reseller"] = es_reseller
                     elif "INSERT INTO cliente_courier_config" in compacto:
                         (_cliente_id, courier, cotizar, emitir, pickup,
                          tipo, valor, low_max, low_ars,

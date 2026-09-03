@@ -213,6 +213,7 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
         "activo": activa,
         "pricing_general": general,
         "tope_deuda_ars": cliente.get("tope_deuda_ars"),
+        "es_reseller": bool(cliente.get("es_reseller")),
         "courier_default": courier_default,
         "courier_default_configurado": courier_default_configurado,
         "couriers": couriers,
@@ -224,7 +225,8 @@ def leer_matriz_con_cursor(cur, cliente_id: str) -> dict | None:
     cur.execute(
         """
         SELECT cliente_id, nombre, activo, markup_pct, markup_tipo, markup_valor,
-               puede_emitir, puede_recolectar, tope_deuda_ars, courier_default
+               puede_emitir, puede_recolectar, tope_deuda_ars, courier_default,
+               es_reseller
         FROM clientes
         WHERE cliente_id = %s
         """,

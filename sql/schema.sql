@@ -73,6 +73,9 @@ ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS password_hash TEXT;
 -- Las cuentas de prueba se conservan para auditoría, pero no contaminan
 -- tableros, selectores operativos ni saldos agregados del negocio.
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS test BOOLEAN NOT NULL DEFAULT FALSE;
+-- Un reseller puede descargar una cotización comercial TAURO con un precio
+-- de reventa propio. El flag no altera guías, invoices ni costos internos.
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS es_reseller BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_clientes_operativos ON clientes(activo, test);
 
 -- Autogestión y pricing por cliente + courier. Sin fila no se habilita
@@ -1334,6 +1337,24 @@ ALTER TABLE IF EXISTS cotizaciones ADD COLUMN IF NOT EXISTS servicio_courier TEX
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cotizaciones_coti_id
     ON cotizaciones(coti_id)
     WHERE coti_id IS NOT NULL;
+
+-- Cotizaciones comerciales que un reseller descarga con su precio. Sólo
+-- persiste datos visibles: jamás costo courier, dólar ni margen TAURO.
+CREATE TABLE IF NOT EXISTS cotizaciones_reseller (
+    quote_id                TEXT PRIMARY KEY,
+    cliente_id              TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    ruta                    TEXT NOT NULL,
+    bultos                  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    peso_facturable_kg      NUMERIC(12,3) NOT NULL,
+    tiempo_estimado         TEXT NOT NULL,
+    precio_base_ars         NUMERIC(14,2) NOT NULL,
+    courier                 TEXT NOT NULL,
+    servicio                TEXT NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    vigente_hasta           TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cotizaciones_reseller_cliente_vigencia
+    ON cotizaciones_reseller(cliente_id, vigente_hasta DESC);
 
 -- ── Solicitudes de guía desde portal ────────────────────────
 CREATE TABLE IF NOT EXISTS solicitudes_guia (
