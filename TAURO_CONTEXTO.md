@@ -109,7 +109,7 @@ No existe una cabecera separada de “factura TAURO” ni una tabla de renglones
 
 ### Conciliación de facturas courier y diferencias
 
-`envio_cotizacion_snapshots`: foto inmutable al aceptar la cotización: solicitud/cotización/courier/servicio/moneda; `tipo_cambio_ars NUMERIC(18,6)`; costo estimado original y ARS, precio inicial y margen protegido `NUMERIC(18,4)`; regla aplicada; pesos `NUMERIC(12,3)`; bultos y origen de cálculo JSONB; fechas.
+`envio_cotizacion_snapshots`: foto inmutable al aceptar la cotización: solicitud/cotización/courier/servicio/moneda; `tipo_cambio_ars NUMERIC(18,6)`; costo estimado original y ARS, precio inicial y margen protegido `NUMERIC(18,4)`; regla aplicada; pesos `NUMERIC(12,3)`; bultos y origen de cálculo JSONB; fechas. Los históricos WAIMAO con evidencia en `TAURO 2026` se cargan de forma idempotente desde `COSTOINICIAL`, nunca desde `SALDO ARS`, y quedan identificados con `origen_calculo.fuente = IMPORT_SHEET_2026` más hash, hoja y fila de origen.
 
 `facturas_courier`: cabecera documental: courier, FC/NC/ND, número crudo y normalizado, factura referenciada, fechas y período, moneda; subtotal/impuestos/total `NUMERIC(18,4)`; estado; mensaje o URI de evidencia, nombre/hash/PDF/MIME y metadatos JSONB; timestamps. Documento más número normalizado y hash impiden duplicados.
 
@@ -229,6 +229,8 @@ Tiene pricing separado. Prioridad: parámetros por courier `WEB_MARKUP_PCT_<COUR
 ### Costo interno y momento de persistencia
 
 El costo estimado se guarda al cotizar en `cotizaciones.costo_fedex_usd` y, cuando el cliente acepta/crea la solicitud, en `envio_cotizacion_snapshots` con moneda, dólar, costo original, costo ARS, precio y margen. Para las cotizaciones multicourier sin `coti_id`, la recotización inmediatamente anterior a la emisión pide una base privada al motor y la registra antes del POST irreversible. Esa clave privada no existe en la respuesta pública. Una reemisión DHL falla cerrada si no obtiene un snapshot propio: nunca reutiliza la FK de la guía anterior ni llega al courier “SIN BASE”. El snapshot es inmutable. La solicitud guarda sólo los precios visibles/comerciales; los endpoints cliente no exponen costo ni markup. El costo final documentado se guarda después, en ítems de `facturas_courier`.
+
+Para envíos históricos, `scripts/importar_costos_waimao_2026.py` cruza por tracking la hoja madre y producción. El modo normal es dry-run; `--aplicar` exige un cargo activo, un único tracking, precio compatible y ausencia de contradicciones. En septiembre de 2026 recuperó 29 snapshots faltantes de WAIMAO, conservó 3 ya compatibles y dejó 14 envíos sin base porque la hoja no documenta su costo inicial. El acta y el hash de la evidencia están en `docs/IMPORTACION_COSTOS_WAIMAO_2026_ACTA.md`.
 
 ## 5. Conciliación courier
 
@@ -364,6 +366,7 @@ Los prefijos ya están incorporados debajo.
 - Estados de `solicitudes_guia.estado` no tienen un CHECK SQL único. Hoy la lista vive repartida entre servicios/UI; conviene centralizarla y validar transiciones en DB o una máquina de estados.
 - La web pública y el portal tienen reglas de pricing distintas y varios fallbacks de entorno/config; conviene publicar una matriz formal y alertar configuraciones heredadas.
 - Algunos “mock” encontrados están sólo en tests; no son deuda productiva. Los placeholders de formularios son ejemplos de UX, tampoco mocks funcionales.
+- WAIMAO conserva 14 envíos históricos activos sin snapshot porque `TAURO 2026` no tiene `COSTOINICIAL` para esos trackings. Hay factura courier (`SALDO ARS`) para parte de ellos, pero no debe usarse como costo aceptado inicial. Requieren evidencia de cotización o una decisión financiera documentada antes de completar la base.
 
 ### Migración Sheets → PostgreSQL
 
@@ -389,5 +392,6 @@ Los prefijos ya están incorporados debajo.
 - 2 septiembre: verificación inline del envío, seguro y valores por caja, factura comercial y guía PDF unificadas, cotizador en modal, detalle de cuenta corriente organizado e importación histórica de MELCIOR por mes. También se completó en producción la última conversión monetaria pendiente, `productos.valor_usd_default` de REAL a NUMERIC(14,2), con backups y comparación fila por fila.
 - 2 septiembre, limpieza operativa: se conservaron cuatro cuentas como `test`, se cancelaron las solicitudes #2, #3 y las pruebas de WAIMAO, y se reparó con auditoría la guía `9802908161` cuyo cargo ya estaba cancelado. Dashboard, bandejas y selectores pasan a excluir datos de prueba; Tracking FedEx queda oculto y con errores sanitizados.
 - 2 septiembre, snapshots de reemisión: la recotización DHL captura costo, dólar, precio, margen y pesos en un canal interno antes de emitir, sin ampliar la respuesta cliente. Las reemisiones fallan cerradas si no tienen snapshot propio. En producción se reconstruyó con evidencia la relación WAIMAO #52 → #53, se conservaron cargos separados y se verificó que ambos trackings muestran base interna en conciliación; el acta está en `docs/REEMISION_WAIMAO_52_53_ACTA.md`.
+- 3 septiembre, históricos WAIMAO: se cruzó la hoja madre `TAURO 2026` con producción y se importaron 29 costos iniciales faltantes como snapshots inmutables `IMPORT_SHEET_2026`; 3 existentes coincidieron y 14 casos sin evidencia quedaron pendientes. El proceso tiene dry-run, controles estrictos, auditoría, respaldo restaurable e idempotencia verificada; el acta está en `docs/IMPORTACION_COSTOS_WAIMAO_2026_ACTA.md`.
 
 Este historial resume los commits visibles de `origin/main`; no atribuye autoría personal cuando el commit no la documenta. Para una auditoría exacta se debe consultar `git log --date=iso` y el diff de cada hash.
