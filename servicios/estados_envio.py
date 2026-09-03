@@ -36,7 +36,7 @@ ESTADOS_OPERACION_UI = {
 }
 
 ESTADOS_TRACKING_UI = {
-    "PROCESO_ENTREGA": ("En camino", "accent"),
+    "PROCESO_ENTREGA": ("Proceso de entrega", "warn"),
     "RETENIDO": ("Retenido", "error"),
     "ENTREGADO": ("Entregado", "ok"),
 }

@@ -14,7 +14,24 @@ def test_presenta_dos_estados_con_vocabulario_canonico():
     })
 
     assert envio["estado_operacion_ui"]["label"] == "Guía lista"
-    assert envio["estado_tracking_ui"]["label"] == "En camino"
+    assert envio["estado_tracking_ui"] == {
+        "codigo": "PROCESO_ENTREGA",
+        "label": "Proceso de entrega",
+        "clase": "warn",
+    }
+
+
+def test_colores_de_tracking_siguen_la_regla_operativa():
+    casos = {
+        "PROCESO_ENTREGA": ("Proceso de entrega", "warn"),
+        "ENTREGADO": ("Entregado", "ok"),
+        "RETENIDO": ("Retenido", "error"),
+    }
+
+    for codigo, (label, clase) in casos.items():
+        presentado = presentar_estados_envio({"tracking_estado": codigo})
+        assert presentado["estado_tracking_ui"]["label"] == label
+        assert presentado["estado_tracking_ui"]["clase"] == clase
 
 
 def test_tracking_sin_snapshot_es_sin_movimientos():

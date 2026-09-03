@@ -18,6 +18,8 @@ Estado: primer corte implementado y verificado localmente. **No desplegado, no e
   borrarla, cancelarla ni modificar saldo, factura, pagos o estado operativo.
   La exclusión alcanza listados, panel, API, acceso directo, descarga de PDFs
   y acciones del cliente; admin y auditoría conservan el registro completo.
+- El tracking usa una semántica visual única en todas las pantallas: proceso
+  de entrega en amarillo, entregado en verde y retenido en rojo.
 
 No se cambiaron porcentajes comerciales existentes ni se aplicaron cargos, pagos, NC o ajustes a clientes reales.
 
@@ -28,7 +30,7 @@ Entorno: PostgreSQL 18.6 temporal, accesible exclusivamente por socket local; da
 | Control | Resultado |
 | --- | --- |
 | Suite antes de los cambios | 1.331 pruebas aprobadas + 5 subtests |
-| Suite final completa con PostgreSQL | **1.367 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
+| Suite final completa con PostgreSQL | **1.368 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
 | Revisión independiente agregada | 29 casos aprobados, 9 de ellos con PostgreSQL |
 | Revisión independiente sin URL de pruebas | 20 aprobados; los 9 de PostgreSQL se omiten expresamente, sin intentar una conexión por defecto |
 | `git diff --check` | Sin errores |
