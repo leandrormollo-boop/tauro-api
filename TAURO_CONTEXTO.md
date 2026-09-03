@@ -1,12 +1,12 @@
 # TAURO — CONTEXTO COMPLETO DEL SISTEMA
 
-Última revisión documental: 2 de septiembre de 2026.
+Última revisión documental: 3 de septiembre de 2026.
 
 ## 0. Alcance y fuente de verdad de este documento
 
 TAURO es una plataforma B2B de logística para clientes y tiendas e-commerce. Reúne una web pública, un portal autenticado para clientes, un panel administrativo, una API B2B, conexiones con couriers, conexiones con Shopify y Tiendanube, y contabilidad operativa de envíos, facturas y pagos.
 
-Este documento se relevó contra el checkout `.tmp/admin-courier-invoice-control`, commit `823b3bd` del repositorio `leandrormollo-boop/tauro-api`. Ese checkout sigue `origin/main` y, al momento del relevamiento, contiene la historia más reciente. La raíz `/Users/leanrmollo/Documents/TAURO` no es el checkout de la aplicación: es una carpeta de trabajo con auditorías, exportaciones y varios worktrees temporales. Por eso, para entender o modificar la aplicación no debe tomarse el `git log` de la raíz, que todavía no tiene commits.
+Este documento se relevó contra el checkout `.tmp/admin-courier-invoice-control`, rama `codex/admin-courier-invoice-control`, después de ejecutar las once tareas de estabilización operativa, contable y visual del 2–3 de septiembre de 2026. La raíz `/Users/leanrmollo/Documents/TAURO` no es el checkout de la aplicación: es una carpeta de trabajo con auditorías, exportaciones y varios worktrees temporales. Por eso, para entender o modificar la aplicación debe usarse este checkout o el commit correspondiente de la rama, no el `git log` de la raíz.
 
 La definición estructural canónica es `sql/schema.sql`. Los servicios son la fuente de verdad funcional. Los documentos antiguos, especialmente `docs/ARQUITECTURA_TAURO_API.md`, describen el MVP de Sheets/FedEx y no siempre representan producción.
 
@@ -59,7 +59,7 @@ El tipo correcto actual para dinero es NUMERIC, calculado en Python con Decimal.
 
 ### Núcleo de clientes y acceso
 
-`clientes`: cuenta comercial y tenant. `cliente_id TEXT` es la clave en mayúsculas; `email TEXT` es único; `api_key TEXT` es legado y debe quedar vacío, mientras la instalación vigente usa hash cuando está disponible; `password_hash TEXT` guarda bcrypt; `nombre`, `cuit`, `direccion`, `cp`, `ciudad`, `pais`, `telefono`, `notas` son datos fiscales y operativos; `activo BOOLEAN` habilita la cuenta; `test BOOLEAN` conserva cuentas de prueba sin incluirlas en dashboards, selectores ni listados operativos; `markup_pct REAL` es el porcentaje legado; `markup_tipo TEXT` y `markup_valor NUMERIC(14,4)` definen pricing internacional general; `markup_nac_tipo TEXT` y `markup_nac_valor NUMERIC(14,4)` definen pricing nacional; `puede_emitir` y `puede_recolectar` son permisos globales legados; `tope_deuda_ars NUMERIC(14,2)` bloquea emisión cuando el saldo excede el límite; `tax_paga` elige DESTINATARIO o CLIENTE; `courier_default` preselecciona courier; `created_at` audita alta.
+`clientes`: cuenta comercial y tenant. `cliente_id TEXT` es la clave en mayúsculas; `email TEXT` es único; `api_key TEXT` es legado y debe quedar vacío, mientras la instalación vigente usa hash cuando está disponible; `password_hash TEXT` guarda bcrypt; `nombre`, `cuit`, `direccion`, `cp`, `ciudad`, `pais`, `telefono`, `notas` son datos fiscales y operativos; `activo BOOLEAN` habilita la cuenta; `test BOOLEAN` conserva cuentas de prueba sin incluirlas en dashboards, selectores ni listados operativos; `es_reseller BOOLEAN` habilita la descarga de cotizaciones comerciales con precio de reventa propio sin alterar costos ni guías; `markup_pct REAL` es el porcentaje legado; `markup_tipo TEXT` y `markup_valor NUMERIC(14,4)` definen pricing internacional general; `markup_nac_tipo TEXT` y `markup_nac_valor NUMERIC(14,4)` definen pricing nacional; `puede_emitir` y `puede_recolectar` son permisos globales legados; `tope_deuda_ars NUMERIC(14,2)` bloquea emisión cuando el saldo excede el límite; `tax_paga` elige DESTINATARIO o CLIENTE; `courier_default` preselecciona courier; `created_at` audita alta.
 
 `cliente_courier_config`: permiso y pricing por cliente/courier. Clave compuesta `cliente_id + courier`; `puede_cotizar`, `puede_emitir`, `puede_recolectar`; `markup_tipo`; `markup_valor NUMERIC(14,4)`; tramo bajo `markup_low_max_usd NUMERIC(14,4)` y `markup_low_ars NUMERIC(14,4)`; tramo alto `markup_high_min_usd NUMERIC(14,4)` y `markup_high_usd NUMERIC(14,4)`; timestamps. La ausencia de fila no autoriza operaciones.
 
@@ -88,6 +88,8 @@ No existe una tabla independiente llamada `cajas`. Las cajas viven en `solicitud
 `cotizaciones`: log de precio. `id`, `coti_id`, cliente, ruta, ámbito, origen/destino ISO, courier y servicio; peso/dimensiones/peso facturable; `costo_fedex_usd NUMERIC(14,2)` después de migración; `markup_pct REAL`, `markup_tipo`, `markup_valor NUMERIC(14,4)`; `precio_final_usd` y `precio_final_ars NUMERIC(14,2)`; días, vigencia y creación.
 
 `cotizaciones_web`: cotización pública persistida: IDs, referencia, peso/dimensiones NUMERIC, valor declarado USD NUMERIC, opción recomendada, resumen JSONB, creación y vencimiento.
+
+`cotizaciones_reseller`: snapshot comercial temporal para un reseller. `quote_id TEXT` es la clave opaca; `cliente_id` es dueño y se valida también al descargar; `ruta TEXT`, `bultos JSONB`, `peso_facturable_kg NUMERIC(12,3)`, `tiempo_estimado`, `courier` y `servicio` contienen sólo información visible; `precio_base_ars NUMERIC(14,2)` es el mínimo que TAURO ya cotizó al reseller; `created_at` y `vigente_hasta` limitan su validez. No guarda costo courier, dólar, margen TAURO ni el precio final elegido para el PDF.
 
 `leads_cotizacion`: email asociado a cotización pública: `id`, email, origen, destino, peso, resumen, `cotizacion_id`, estado/intentos/error/claim/message-id del correo y timestamps.
 
@@ -196,7 +198,7 @@ Estados operativos observados y soportados:
 - EMITIENDO: reserva transaccional antes de llamar al courier, para impedir doble emisión. Automático al iniciar emisión desde portal habilitado o admin.
 - VERIFICAR_COURIER: la llamada pudo haber creado una guía, pero TAURO no obtuvo confirmación segura. Automático ante timeout/respuesta incierta. Sólo admin puede resolver como emitida o no emitida; no se reintenta a ciegas.
 - GUIA_LISTA: courier confirmó tracking/label, o admin cargó una etiqueta válida. Automático después de emisión o manual por admin. Al llegar aquí se crea el cargo en cuenta corriente una sola vez.
-- DESPACHADO: admin marca que la pieza fue entregada al courier o avanzó. Sólo admin en el flujo actual.
+- DESPACHADO: admin puede marcar que la pieza fue entregada al courier; además, el tracking diario lo aplica automáticamente cuando una guía en GUIA_LISTA entra en PROCESO_ENTREGA.
 - ENTREGADO: estado terminal visible. Puede marcarlo admin y el tracking diario DHL lo refleja automáticamente al detectar evento de entrega.
 - CANCELADO: solicitud anulada. El cliente puede cancelar una DHL elegible desde el portal; el admin también. La cancelación exige confirmación del courier y revierte/cancela el cargo cuando corresponde. No se usa como simple borrado.
 - REEMPLAZADO: la guía anterior fue cancelada y sustituida por otra. Lo dispara cliente/admin mediante el flujo de corrección DHL; crea vínculo de reemisión y monitoreo de riesgo.
@@ -207,7 +209,7 @@ Estados de tracking, independientes del estado operativo:
 - RETENIDO: hold, demora aduanera, excepción, intento fallido, daño u otra señal de intervención.
 - ENTREGADO: final; deja de consultarse automáticamente.
 
-El cliente sólo puede emitir si su cuenta está activa, tiene permiso específico para ese courier, la integración está productiva y el saldo no supera `tope_deuda_ars`. El admin puede emitir solicitudes, editar datos antes de emisión, cargar etiqueta faltante y resolver incertidumbres. Los jobs nunca inventan transiciones financieras: actualizan tracking o recuperan colas bajo reglas idempotentes.
+El cliente sólo puede emitir si su cuenta está activa, tiene permiso específico para ese courier, la integración está productiva y el saldo no supera `tope_deuda_ars`. El admin puede emitir solicitudes, editar datos antes de emisión, cargar etiqueta faltante y resolver incertidumbres. Los estados válidos están centralizados en `servicios/estados_envio.py` y reforzados por `ck_solicitudes_guia_estado` en PostgreSQL. Portal y admin presentan por separado el estado de operación y el estado de tracking. Los jobs nunca inventan transiciones financieras: actualizan tracking o recuperan colas bajo reglas idempotentes.
 
 ## 4. Pricing
 
@@ -233,6 +235,14 @@ Tiene pricing separado. Prioridad: parámetros por courier `WEB_MARKUP_PCT_<COUR
 El costo estimado se guarda al cotizar en `cotizaciones.costo_fedex_usd` y, cuando el cliente acepta/crea la solicitud, en `envio_cotizacion_snapshots` con moneda, dólar, costo original, costo ARS, precio y margen. Para las cotizaciones multicourier sin `coti_id`, la recotización inmediatamente anterior a la emisión pide una base privada al motor y la registra antes del POST irreversible. Esa clave privada no existe en la respuesta pública. Una reemisión DHL falla cerrada si no obtiene un snapshot propio: nunca reutiliza la FK de la guía anterior ni llega al courier “SIN BASE”. El snapshot es inmutable. La solicitud guarda sólo los precios visibles/comerciales; los endpoints cliente no exponen costo ni markup. El costo final documentado se guarda después, en ítems de `facturas_courier`.
 
 Para envíos históricos, `scripts/importar_costos_waimao_2026.py` cruza por tracking la hoja madre y producción. El modo normal es dry-run; `--aplicar` exige un cargo activo, un único tracking, precio compatible y ausencia de contradicciones. En septiembre de 2026 recuperó 29 snapshots faltantes de WAIMAO, conservó 3 ya compatibles y dejó 14 envíos sin base porque la hoja no documenta su costo inicial. El acta y el hash de la evidencia están en `docs/IMPORTACION_COSTOS_WAIMAO_2026_ACTA.md`.
+
+### Peso facturable y cajas
+
+El peso volumétrico se calcula por caja y luego se suma: para cada bulto se toma el mayor entre peso real y `largo × ancho × alto / divisor`, multiplicado por su cantidad. El divisor es 5000 para internacional y 4000 para nacional. Nunca se agregan primero todas las medidas ni se compara sólo el total físico contra un único volumen. El wizard muestra en vivo peso real, volumétrico y facturable por caja y totales; el detalle conserva la misma explicación y advierte cuando el volumen supera al peso real. Ejemplo internacional: una caja de 10 kg y 50 × 36 × 36 cm factura 12,96 kg, aproximadamente 13 kg.
+
+### Cotización reseller
+
+Si admin activa `es_reseller` en acceso y precios del cliente, cada opción cotizada genera un snapshot temporal sin datos internos. El reseller puede descargar un PDF TAURO con ruta, cajas, peso facturable, tiempo y precio. El formulario propone el precio que TAURO le cobra y sólo permite mantenerlo o aumentarlo; nunca reducirlo. La descarga valida sesión, propietario y vencimiento. El flag no cambia la cotización original, la guía, la factura ni la cuenta corriente.
 
 ## 5. Conciliación courier
 
@@ -289,7 +299,7 @@ Los prefijos ya están incorporados debajo.
 - GET `/meta-pixel.js`, `/styles.css`: recursos públicos.
 - GET `/guias`, `/guias/{slug}`: índice y guía por país.
 - GET `/calculadora-volumetrica`: calculadora de peso volumétrico.
-- GET `/sitemap.xml`: sitemap.
+- GET `/sitemap.xml`: sitemap; GET `/robots.txt`: permite indexar la web pública y bloquea portal/admin.
 - GET `/estado`: estado público del servicio.
 - GET `/privacidad`, `/terminos`, `/ayuda/tiendanube`: legales y ayuda.
 - GET `/health`, `/salud`: liveness y diagnóstico de salud.
@@ -318,6 +328,7 @@ Los prefijos ya están incorporados debajo.
 - `/cuenta?vista=movimientos|facturas|pendientes`, `/pagos/informar`, `/pagos/{id}/comprobante`: movimientos, documentos, pendientes y pagos.
 - `/facturas/{factura_id}/pdf`: factura TAURO agrupada; `/facturas-legacy/{envio_id}/pdf`: documento histórico individual.
 - `/cotizar` GET/POST, `/api/precio`, `/api/precio-multi`, `/api/parsear-pedido`: cotizador y helpers del wizard.
+- POST `/cotizaciones/reseller.pdf`: genera para una sesión reseller un PDF comercial temporal con un precio igual o mayor al precio TAURO.
 - `/envios`: listado; `/envios/nuevo` GET/POST: crear; `/envios/{id}`: detalle; `/envios/{id}/verificacion`: verificación; `/envios/{id}/emitir`: emitir; `/envios/{id}/cancelar`: cancelar/reemplazar; endpoints PDF: documentos.
 - `/tienda`: integración e-commerce; `/tienda/reclamar`, `/politica`, `/conectar`, `/desconectar`: ownership/configuración; `/tienda/tiendanube/instalar`, `/tienda/tiendanube/pedidos`: Tiendanube; `/tienda/reiniciar-shopify`, `/limpiar-shopify-legado`, `/pedidos/descartar`, `/sincronizar-catalogo`: operación Shopify.
 - `/clientes` GET/POST y `/clientes/{id}/eliminar`: destinatarios frecuentes.
@@ -351,6 +362,8 @@ Los prefijos ya están incorporados debajo.
 - Tiendanube OAuth/webhook: GET `/integraciones/tiendanube/callback`, POST `/integraciones/tiendanube/webhook`.
 - Tiendanube Shipping: POST `/integraciones/tiendanube/shipping/rates/{token}`, `/labels/{token}/generate`, `/labels/{token}/cancel`.
 
+Toda URL GET inexistente devuelve una página 404 HTML coherente con su superficie: navegación pública, navegación del portal sólo si hay sesión de cliente válida y navegación admin sólo si hay sesión administrativa válida. No se devuelve el JSON crudo de FastAPI para esos 404 ni se filtra navegación privada a usuarios anónimos. Los métodos o errores de API conservan respuestas de contrato y no se convierten indiscriminadamente en HTML.
+
 ## 10. Pendientes y deuda técnica
 
 - La facturación agrupada y los pagos documentales están conectados; queda completar el flujo explícito de anulación/NC en interfaz y decidir una estrategia asistida para reclasificar las 25 aplicaciones históricas que sólo identifican ámbito.
@@ -368,11 +381,17 @@ Los prefijos ya están incorporados debajo.
 - Backups: la política pide activar snapshots y probar restauración; no consta una restauración productiva reciente.
 - Worktrees temporales: hay muchas ramas/checkouts bajo `.tmp` con divergencias. Deben archivarse o documentarse para evitar desarrollar sobre una versión vieja.
 - Documentación histórica contradictoria: ROADMAP y arquitectura MVP todavía dicen Sheets, Render o features faltantes que ya existen. Deben rotularse o retirarse.
-- Campos escalares y `bultos JSONB` duplican cajas; se necesita una tabla `bultos` si se requieren consultas, constraints o conciliación por caja.
-- Estados de `solicitudes_guia.estado` no tienen un CHECK SQL único. Hoy la lista vive repartida entre servicios/UI; conviene centralizarla y validar transiciones en DB o una máquina de estados.
+- Campos escalares y `bultos JSONB` duplican cajas; se necesita una tabla `bultos` si se requieren consultas, constraints o conciliación por caja. El cálculo actual sí está centralizado y probado, pero la estructura todavía no permite FK/constraints por bulto.
+- Los valores posibles de `solicitudes_guia.estado` ya están centralizados y tienen CHECK SQL; todavía conviene evolucionar las transiciones permitidas hacia una máquina de estados única para que una escritura directa no pueda saltar arbitrariamente entre dos valores válidos.
 - La web pública y el portal tienen reglas de pricing distintas y varios fallbacks de entorno/config; conviene publicar una matriz formal y alertar configuraciones heredadas.
 - Algunos “mock” encontrados están sólo en tests; no son deuda productiva. Los placeholders de formularios son ejemplos de UX, tampoco mocks funcionales.
 - WAIMAO conserva 14 envíos históricos activos sin snapshot porque `TAURO 2026` no tiene `COSTOINICIAL` para esos trackings. Hay factura courier (`SALDO ARS`) para parte de ellos, pero no debe usarse como costo aceptado inicial. Requieren evidencia de cotización o una decisión financiera documentada antes de completar la base.
+- El modo reseller queda apagado por defecto. Después de aplicar el esquema en el entorno de destino, WAIMAO u otro cliente debe habilitarse de forma explícita desde `/admin/clientes/{cliente_id}/acceso-precios`; no se hardcodeó un cliente productivo en el código.
+- El dólar conserva un fallback histórico hardcodeado de 1450 para continuidad si faltan config y entorno. Es deliberado pero riesgoso: producción debe tener `COTIZACION_DOLAR_ARS` y monitoreo del job automático para no usarlo silenciosamente.
+- `servicios/rastreo.py` conserva el único TODO funcional explícito relevante: conectar el tracking genérico mediante `courier.track()` cuando haya credenciales/capacidad. DHL usa su job específico; FedEx y UPS no quedan resueltos por ese TODO.
+- `modelos/pedido.py` mantiene un comentario de estados antiguo y debe alinearse con los nueve estados operativos canónicos. No afecta la validación de base, pero puede confundir a quien use ese modelo como documentación.
+- La demostración de tracking de la web pública usa datos ilustrativos hardcodeados hasta que el visitante ingresa un tracking real. Es contenido visual, no evidencia operativa.
+- La suite completa pasa, pero emite avisos de compatibilidad Pydantic 2: todavía se usan `@validator`, `allow_reuse`, `min_items` y una configuración basada en clase que deben migrarse a `field_validator`, `min_length` y `ConfigDict` antes de Pydantic 3.
 
 ### Migración Sheets → PostgreSQL
 
@@ -402,5 +421,9 @@ Los prefijos ya están incorporados debajo.
 - 3 septiembre, facturación agrupada a clientes: se incorporaron cabeceras y renglones inmutables para FC/NC, selección por período y ámbito, PDF único, auditoría, bloqueo de doble facturación y vistas separadas de facturas/pendientes en el portal. La factura pasa a documentar cargos preexistentes sin duplicar deuda; el diseño contable conjunto está en `docs/DISENO_FACTURACION_PAGOS_DIFERENCIAS.md`.
 - 3 septiembre, pagos por documento: portal y admin permiten imputar a facturas o cargos, con pagos parciales, remanente a favor, aprobación de solicitudes y arrastre automático al facturar. Se preservaron las aplicaciones históricas por ámbito y se agregaron controles concurrentes para impedir sobrepago del pago o del documento.
 - 3 septiembre, explicación de diferencias: cuenta corriente y detalle del envío muestran pesos comparados o el concepto documentado por el courier, más la aclaración de traslado sin margen. La salida cliente usa una lista permitida y excluye costos internos y margen aun si esos datos existen en conciliación.
+- 3 septiembre, estados y tracking: se separaron visualmente operación y movimiento físico en portal/admin, se incorporó ENTREGADO como estado operativo terminal, el job DHL hace GUIA_LISTA → DESPACHADO → ENTREGADO según tracking y PostgreSQL rechaza estados fuera de la lista canónica. Los filtros por año excluyen valores inválidos y cancelados/reemplazados tienen su propia vista.
+- 3 septiembre, peso volumétrico: el cálculo pasó a una función Decimal única por bulto, con divisor 5000 internacional y 4000 nacional. Wizard y detalle muestran peso real, volumétrico y facturable por caja y total, para explicar antes de cotizar por qué una caja liviana puede facturar más kilos.
+- 3 septiembre, modo reseller: se agregó permiso administrable por cliente, snapshots comerciales sin costo/margen y PDF TAURO con precio de reventa editable únicamente hacia arriba. Se evitó habilitar por código a WAIMAO: el alta productiva sigue siendo una decisión explícita de admin.
+- 3 septiembre, limpieza final de interfaz: se eliminaron nombres de courier mal capitalizados y montos crudos en admin, la lista de clientes muestra la regla efectiva por courier y tramos, se agregaron advertencias de CP para Estados Unidos/Argentina, un 404 contextual y `robots.txt` que no indexa portal ni admin.
 
-Este historial resume los commits visibles de `origin/main`; no atribuye autoría personal cuando el commit no la documenta. Para una auditoría exacta se debe consultar `git log --date=iso` y el diff de cada hash.
+Este historial resume tanto la base visible de `origin/main` como los commits de la rama `codex/admin-courier-invoice-control`. No atribuye autoría personal cuando el commit no la documenta. Para una auditoría exacta se debe consultar `git log --date=iso` y el diff de cada hash.
