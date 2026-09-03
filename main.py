@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Header, HTTPException, Query, Request
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, validator
 from apscheduler.schedulers.background import BackgroundScheduler
 import hashlib
@@ -84,6 +86,7 @@ app = FastAPI(
     redoc_url=None if _ES_PROD else "/redoc",
     openapi_url=None if _ES_PROD else "/openapi.json",
 )
+templates = Jinja2Templates(directory="templates")
 
 # CORS: sólo los endpoints públicos necesitan cross-origin (el cotizador
 # puede embeberse). El portal y el admin viajan same-origin, así que abrir
@@ -678,6 +681,54 @@ async def error_global(request: Request, exc: Exception):
             "Cache-Control": "private, no-store",
             "X-Request-ID": referencia,
         },
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def error_http_con_diseno(request: Request, exc: StarletteHTTPException):
+    """Los GET inexistentes muestran una salida útil en vez del JSON crudo."""
+    if exc.status_code != 404 or request.method not in {"GET", "HEAD"}:
+        return JSONResponse(
+            {"detail": exc.detail},
+            status_code=exc.status_code,
+            headers=getattr(exc, "headers", None),
+        )
+
+    portal_session = False
+    if request.cookies.get("token"):
+        try:
+            from servicios.auth import validar_token
+            portal_session = bool(validar_token(request.cookies["token"]))
+        except Exception:
+            portal_session = False
+    admin_session = False
+    if request.cookies.get("admin_token"):
+        try:
+            from endpoints.admin import check_admin
+            admin_session = check_admin(request.cookies.get("admin_token"))
+        except Exception:
+            admin_session = False
+    return templates.TemplateResponse(
+        request=request,
+        name="error_404.html",
+        context={
+            "portal_session": portal_session,
+            "admin_session": admin_session,
+            "ruta": request.url.path,
+        },
+        status_code=404,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots_txt():
+    return Response(
+        "User-agent: *\nAllow: /web\nDisallow: /portal\nDisallow: /admin\n",
+        media_type="text/plain",
     )
 
 

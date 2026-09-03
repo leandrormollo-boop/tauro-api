@@ -90,6 +90,11 @@ from servicios.rate_limit import check_rate, reset_rate, client_ip
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
+from servicios.couriers_urls import nombre_courier
+from servicios.presentacion import dinero_ars, numero_ars
+templates.env.globals["nombre_courier"] = nombre_courier
+templates.env.globals["dinero_ars"] = dinero_ars
+templates.env.globals["numero_ars"] = numero_ars
 
 AMBITOS_CONTABLES = {"NACIONAL", "INTERNACIONAL"}
 MODOS_IMPUTACION = {"SIN_IMPUTAR", "NACIONAL", "INTERNACIONAL", "DIVIDIR"}
@@ -276,6 +281,17 @@ def _get_clientes_lista():
             clientes = [dict(r) for r in cur.fetchall()]
     for cliente in clientes:
         cliente["pricing_desc"] = describir_pricing(cliente)
+        matriz = obtener_matriz(cliente["cliente_id"])
+        cliente["pricing_por_courier"] = [
+            {
+                "nombre": fila["nombre"],
+                "descripcion": describir_pricing({
+                    "markup_tipo": fila["pricing"]["tipo"],
+                    "markup_valor": fila["pricing"]["valor"],
+                }) + (" · con tramos" if fila["pricing"].get("tramos_usd") else ""),
+            }
+            for fila in (matriz or {}).get("couriers", ())
+        ]
     return clientes
 
 

@@ -330,6 +330,7 @@
                 <div class="form-group">
                     <label for="dest_zip">Código postal</label>
                     <input type="text" name="dest_zip" id="dest_zip" required value="{{ form.dest_zip or '' }}">
+                    <small id="dest-zip-warning" class="warn" role="status" hidden></small>
                 </div>
             </div>
 
@@ -621,6 +622,7 @@
       // setear .value no dispara "change": recotizamos a mano para que
       // el precio en vivo refleje el nuevo destino al instante.
       refreshLivePrice();
+      warnDestinationPostal();
     });
     if (savedSelect.value) {
       avisoLibreta(savedSelect,
@@ -630,6 +632,28 @@
   }
 
   const countrySelect = document.getElementById("destino_pais");
+  const destinationPostal = document.getElementById("dest_zip");
+  const destinationPostalWarning = document.getElementById("dest-zip-warning");
+
+  function warnDestinationPostal() {
+    if (!countrySelect || !destinationPostal || !destinationPostalWarning) return;
+    const country = String(countrySelect.value || "").toUpperCase();
+    const postal = String(destinationPostal.value || "").trim().toUpperCase();
+    let message = "";
+    if (postal && country === "US" && !/^\d{5}$/.test(postal)) {
+      message = "Revisá el código postal: para Estados Unidos debe tener 5 dígitos.";
+    } else if (postal && country === "AR" && !(/^(\d{4}|[A-Z]\d{4}[A-Z]{3})$/.test(postal))) {
+      message = "Revisá el código postal: para Argentina usá 4 dígitos o un CPA completo.";
+    }
+    destinationPostalWarning.textContent = message;
+    destinationPostalWarning.hidden = !message;
+  }
+
+  if (countrySelect) countrySelect.addEventListener("change", warnDestinationPostal);
+  if (destinationPostal) destinationPostal.addEventListener("input", warnDestinationPostal);
+  var shipmentForm = document.querySelector('form[action="/portal/envios/nuevo"]');
+  if (shipmentForm) shipmentForm.addEventListener("submit", warnDestinationPostal);
+  warnDestinationPostal();
 
   // ── Remitente: elegir de la libreta precarga los campos editables ──
   // Mismo patrón que el destinatario. Y como el país de ORIGEN del envío

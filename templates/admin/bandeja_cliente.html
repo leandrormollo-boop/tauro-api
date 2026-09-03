@@ -29,7 +29,7 @@
                 <td>{{ s.dest_nombre }}</td>
                 <td>{{ s.dest_ciudad }}{% if s.destino_pais %} · {{ s.destino_pais }}{% endif %}</td>
                 <td>{{ s.producto_alias }}{% if s.cantidad and s.cantidad > 1 %} ×{{ s.cantidad }}{% endif %}</td>
-                <td class="mono">{% if s.precio_tauro_ars %}ARS {{ '{:,.0f}'.format(s.precio_tauro_ars)|replace(',', '.') }}{% else %}—{% endif %}</td>
+                <td class="mono">{% if s.precio_tauro_ars %}{{ dinero_ars(s.precio_tauro_ars) }} ARS{% else %}—{% endif %}</td>
                 <td>
                     {% if s.estado == 'SOLICITADO' %}<span class="badge warn">Solicitado</span>
                     {% else %}<span class="badge">{{ s.estado }}</span>{% endif %}

@@ -60,11 +60,11 @@
         {% for c in resumen_clientes %}
         <tr>
           <td><strong>{{ c.cliente_id }}</strong><br><small style="color:var(--fg-4)">{{ c.email }}</small></td>
-          <td class="mono">$ {{ "{:,.0f}".format(c.facturado) }}</td>
-          <td class="mono">$ {{ "{:,.0f}".format(c.pagado) }}</td>
+          <td class="mono">{{ dinero_ars(c.facturado) }}</td>
+          <td class="mono">{{ dinero_ars(c.pagado) }}</td>
           <td class="mono">
             <span class="badge {% if c.saldo > 0 %}warn{% elif c.saldo < 0 %}ok{% else %}muted{% endif %}">
-              $ {{ "{:,.0f}".format(c.saldo) }}
+              {{ dinero_ars(c.saldo) }}
             </span>
           </td>
           <td><a href="/admin/clientes/{{ c.cliente_id }}" class="btn btn-sm btn-ghost">Ver →</a></td>

@@ -96,7 +96,7 @@
     </div>
     <p style="color:var(--fg-4);font-size:12px;margin:2px 0 18px;">
       Ojo: cambiar peso o medidas NO recotiza. El precio al cliente sigue siendo el
-      cotizado (ARS {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }});
+      cotizado ({{ dinero_ars(s.precio_tauro_ars) }} ARS);
       si el cambio es grande, recotizá en vez de editar.
     </p>
 

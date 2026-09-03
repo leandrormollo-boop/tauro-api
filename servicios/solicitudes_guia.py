@@ -1900,7 +1900,8 @@ def _avisar_tienda_origen(solicitud_id: int, tracking: str, courier: str) -> Non
     plataforma = row["plataforma"]
     dominio = row["dominio"]
     pedido_ext = row["pedido_externo_id"]
-    courier_nombre = "FedEx" if courier.upper() == "FEDEX" else courier.title()
+    from servicios.couriers_urls import nombre_courier
+    courier_nombre = nombre_courier(courier)
 
     for intento in (1, 2, 3):
         try:

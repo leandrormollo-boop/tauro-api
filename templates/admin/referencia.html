@@ -31,8 +31,8 @@
                         <b>{{ f.pais }}</b> <small style="color:var(--fg-3)">({{ f.total_pais }})</small>
                         {% endif %}</td>
                     <td class="mono">{{ f.escalon }}</td>
-                    <td class="mono">$ {{ "{:,.0f}".format(f.desde).replace(",", ".") }} – {{ "{:,.0f}".format(f.hasta).replace(",", ".") }}</td>
-                    <td class="mono"><b>$ {{ "{:,.0f}".format(f.mediana).replace(",", ".") }}</b></td>
+                    <td class="mono">{{ dinero_ars(f.desde) }} – {{ dinero_ars(f.hasta) }}</td>
+                    <td class="mono"><b>{{ dinero_ars(f.mediana) }}</b></td>
                     {% if dolar %}<td class="mono">{{ f.mediana_usd }}</td>{% endif %}
                     <td class="mono">{{ f.envios }}</td>
                 </tr>
@@ -48,7 +48,7 @@
     {% for c in calibracion %}
         {% if c.ref %}
         <li><b>{{ c.ref }}</b> · {{ c.pais }} · {{ c.peso_kg }} kg ({{ c.dims }} cm)
-            → $ {{ "{:,.0f}".format(c.ars).replace(",", ".") }}</li>
+            → {{ dinero_ars(c.ars) }}</li>
         {% else %}
         <li style="color:var(--fg-3)">{{ c.nota }}</li>
         {% endif %}

@@ -108,10 +108,14 @@ templates = Jinja2Templates(directory="templates")
 
 # Helpers de courier disponibles en TODOS los templates del portal: la URL
 # de tracking y la división nacional/internacional salen de un solo lugar.
-from servicios.couriers_urls import ambito_envio, es_nacional, url_tracking
+from servicios.couriers_urls import ambito_envio, es_nacional, nombre_courier, url_tracking
+from servicios.presentacion import dinero_ars, numero_ars
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
 templates.env.globals["ambito_envio"] = ambito_envio
+templates.env.globals["nombre_courier"] = nombre_courier
+templates.env.globals["dinero_ars"] = dinero_ars
+templates.env.globals["numero_ars"] = numero_ars
 
 
 AMBITOS_PORTAL = {"nacional", "internacional"}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% set courier_codigo = (s.courier or "FEDEX")|upper %}
-{% set courier_nombre = (s.courier or "FedEx")|upper|title if (s.courier or "FEDEX")|upper != "FEDEX" else "FedEx" %}
+{% set courier_nombre = nombre_courier(s.courier or "FEDEX") %}
 {% set ambito = ambito_envio(s) %}
 {% block title %}Envío #{{ s.id }}{% endblock %}
 {% macro dinero_ars(valor) -%}
@@ -161,7 +161,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             </form>
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
                 Al emitir, el cargo de
-                <strong>$ {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }}</strong>
+                <strong>{{ dinero_ars(s.precio_tauro_ars) }}</strong>
                 entra a tu cuenta corriente. Si preferís, Tauro la emite por vos.
             </p>
         {% else %}

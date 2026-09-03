@@ -60,7 +60,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         <td><a href="/admin/conciliacion-couriers/facturas/{{ d.factura_id }}"><strong>{{ d.tipo_documento }} {{ d.numero }}</strong></a><br><small>{{ d.fecha_emision or 'Sin fecha' }} · {{ d.factura_estado|title }}</small></td>
         <td class="mono">#{{ d.linea_numero }}<br><small>{{ d.tracking_raw or 'Sin tracking' }}</small></td>
         <td>{{ d.concepto_tipo }}<br><small>{{ d.descripcion or '' }}</small></td>
-        <td class="mono">{{ d.moneda }} {{ d.monto_asignado }}<br><small>ARS {{ d.monto_asignado_ars }}</small></td>
+        <td class="mono">{{ d.moneda }} {{ d.monto_asignado }}<br><small>{{ dinero_ars(d.monto_asignado_ars) }} ARS</small></td>
         <td>{{ d.peso_facturado_kg or '—' }} kg<br><small>{{ d.peso_base.replace('_',' ')|title }}</small></td>
         <td><span class="badge {% if d.match_estado == 'CONFIRMADO' %}ok{% elif d.match_estado == 'RECHAZADO' %}error{% else %}warn{% endif %}">{{ d.match_estado|title }}</span><br><small>{{ d.metodo.replace('_',' ')|title }}</small></td>
       </tr>

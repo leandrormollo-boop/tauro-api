@@ -81,9 +81,9 @@
           </td>
           <td class="mono">
             Tauro<br>
-            <strong>$ {{ "{:,.0f}".format(s.precio_tauro_ars or 0).replace(",", ".") }}</strong>
+            <strong>{{ dinero_ars(s.precio_tauro_ars) }}</strong>
             {% if s.precio_cliente_final_ars %}
-              <br><small style="color:var(--fg-4)">Cliente $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
+              <br><small style="color:var(--fg-4)">Cliente {{ dinero_ars(s.precio_cliente_final_ars) }}</small>
             {% endif %}
             {% if s.cargo_pendiente %}
               <div class="msg warn" style="font-size:11px;margin-top:8px;padding:7px;">Cargo pendiente de conciliar</div>

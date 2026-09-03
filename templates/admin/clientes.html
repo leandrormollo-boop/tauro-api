@@ -29,7 +29,13 @@
           <td class="mono">{{ c.cliente_id }}</td>
           <td>{{ c.nombre or "—" }}</td>
           <td style="color:var(--fg-3)">{{ c.email }}</td>
-          <td class="mono">{{ c.pricing_desc }}</td>
+          <td class="mono">
+            {% for pricing in c.pricing_por_courier %}
+              <small style="display:block;"><strong>{{ pricing.nombre }}</strong>: {{ pricing.descripcion }}</small>
+            {% else %}
+              {{ c.pricing_desc }}
+            {% endfor %}
+          </td>
           <td>
             <span class="badge {% if c.activo %}ok{% else %}muted{% endif %}">
               {{ "Activo" if c.activo else "Inactivo" }}

@@ -88,7 +88,8 @@ _NOMBRES = {
 
 
 def nombre_courier(courier: str) -> str:
-    return _NOMBRES.get((courier or "").strip().upper(), (courier or "").strip().title())
+    original = (courier or "").strip()
+    return _NOMBRES.get(original.upper(), original)
 
 
 def normalizar_tracking(nro: str) -> str:
