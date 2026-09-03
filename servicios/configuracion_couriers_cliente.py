@@ -121,6 +121,10 @@ def _pricing_general(cliente: dict) -> dict | None:
     Sin regla no se inventa un 25 %: los couriers que heredan quedan sin
     precio y, por lo tanto, sin permiso efectivo de cotizar ni emitir.
     """
+    if cliente.get("pricing_rangos_internacional"):
+        from servicios.pricing_rangos import validar_rangos
+        return {"tipo": "RANGOS", "valor": 0,
+                "rangos_ars": validar_rangos(cliente["pricing_rangos_internacional"])}
     pct_general = cliente.get("markup_pct")
     try:
         return normalizar_pricing(
@@ -182,7 +186,11 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
         )
         tramos = _tramos_pricing(fila)
         if tramos and pricing is not None:
-            pricing = {**pricing, "tramos_usd": tramos}
+            # Los overrides existentes del courier conservan precedencia.
+            if pricing["tipo"] == "RANGOS":
+                pricing = _pricing_general({**cliente, "pricing_rangos_internacional": []})
+            if pricing is not None:
+                pricing = {**pricing, "tramos_usd": tramos}
         # Sin regla de precio (ni propia ni general) el courier no puede
         # cotizar ni emitir, aunque el admin haya tildado el permiso: un
         # precio igual al costo o con margen inventado nunca sale al portal.
@@ -255,7 +263,7 @@ def leer_matriz_con_cursor(cur, cliente_id: str) -> dict | None:
         """
         SELECT cliente_id, nombre, activo, markup_pct, markup_tipo, markup_valor,
                puede_emitir, puede_recolectar, tope_deuda_ars, courier_default,
-               es_reseller
+               es_reseller, pricing_rangos_internacional
         FROM clientes
         WHERE cliente_id = %s
         """,

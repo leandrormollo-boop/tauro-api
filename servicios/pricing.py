@@ -6,6 +6,7 @@ import math
 from typing import Optional
 
 from core.database import get_conn
+from servicios.pricing_rangos import calcular_rangos, validar_rangos
 from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
 
 
@@ -148,7 +149,8 @@ def get_pricing_config(
             cur.execute(
                 """
                 SELECT markup_pct, markup_tipo, markup_valor,
-                       markup_nac_tipo, markup_nac_valor
+                       markup_nac_tipo, markup_nac_valor,
+                       pricing_rangos_internacional, pricing_rangos_nacional
                 FROM clientes
                 WHERE cliente_id = %s AND activo = TRUE
                 """,
@@ -158,6 +160,10 @@ def get_pricing_config(
 
     if not row:
         raise PricingNoConfigurado(MENSAJE_SIN_PRICING)
+
+    rangos = row.get("pricing_rangos_nacional" if ambito == "nacional" else "pricing_rangos_internacional")
+    if rangos:
+        return {"tipo": "RANGOS", "valor": 0, "rangos_ars": validar_rangos(rangos)}
 
     if ambito == "nacional" and (row.get("markup_nac_tipo") or "").strip():
         return normalizar_pricing(
@@ -187,7 +193,7 @@ def get_pricing_nacional_estricto(cliente: str) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT markup_nac_tipo, markup_nac_valor
+                SELECT markup_nac_tipo, markup_nac_valor, pricing_rangos_nacional
                 FROM clientes
                 WHERE cliente_id = %s AND activo = TRUE
                 """,
@@ -195,6 +201,9 @@ def get_pricing_nacional_estricto(cliente: str) -> dict:
             )
             row = cur.fetchone()
 
+    if (row or {}).get("pricing_rangos_nacional"):
+        return {"tipo": "RANGOS", "valor": 0,
+                "rangos_ars": validar_rangos(row["pricing_rangos_nacional"])}
     tipo = str((row or {}).get("markup_nac_tipo") or "").strip().upper()
     raw_valor = (row or {}).get("markup_nac_valor")
     try:
@@ -228,6 +237,22 @@ def aplicar_pricing(
     ``costo > alto``. En los bordes y en el intervalo central se aplica la
     regla base, evitando huecos de pricing.
     """
+    if pricing.get("tipo") == "RANGOS":
+        from decimal import Decimal, ROUND_HALF_UP
+        from servicios.pricing_rangos import numero
+        cambio = numero(dolar)
+        if not cambio:
+            raise ValueError("El tipo de cambio debe ser mayor a cero.")
+        calculo = calcular_rangos(costo_ars, pricing.get("rangos_ars"))
+        precio = calculo["precio"]
+        costo = numero(costo_ars)
+        return {
+            "precio_final_ars": float(precio),
+            "precio_final_usd": float((precio / cambio).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+            "markup_pct_equivalente": float((calculo["ganancia"] / costo * 100).quantize(Decimal("0.01"))) if costo else 0.0,
+            "markup_tipo": "FIJO_ARS",
+            "markup_valor": float(calculo["ganancia"]),
+        }
     tipo = pricing["tipo"]
     valor = float(pricing["valor"])
     costo_ars = float(costo_ars or 0)

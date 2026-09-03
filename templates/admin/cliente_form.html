@@ -8,6 +8,7 @@
     <h1>{{ "Editar" if cliente else "Nuevo" }} cliente</h1>
   </div>
   {% if cliente %}
+  <a href="/admin/clientes/{{ cliente.cliente_id }}/tarifas" class="btn btn-primary btn-sm">Tarifas por rangos</a>
   <a href="/admin/clientes/{{ cliente.cliente_id }}/acceso-precios" class="btn btn-primary btn-sm">Acceso y precios</a>
   {% endif %}
 </div>
@@ -94,7 +95,7 @@
                placeholder="+54 11 1234-5678">
       </div>
       <div class="form-group">
-        <label>Regla de pricing *</label>
+        <label>Regla general internacional *</label>
         <select name="markup_tipo" id="markup_tipo" required>
           {% for value, label in pricing_modes.items() %}
             <option value="{{ value }}" {% if (cliente and (cliente.markup_tipo or 'PCT') == value) or (not cliente and value == 'PCT') %}selected{% endif %}>
@@ -104,6 +105,13 @@
         </select>
       </div>
     </div>
+
+    {% if cliente and cliente.get('pricing_rangos_internacional') %}
+    <div class="msg">Internacional: rangos activos. <a href="/admin/clientes/{{ cliente.cliente_id }}/tarifas">Ver tarifas vigentes</a></div>
+    {% endif %}
+    {% if cliente and cliente.get('pricing_rangos_nacional') %}
+    <div class="msg">Nacional: rangos activos. <a href="/admin/clientes/{{ cliente.cliente_id }}/tarifas">Ver tarifas vigentes</a></div>
+    {% endif %}
 
     <div class="form-group">
       <label>Valor de la regla *</label>

@@ -1,0 +1,95 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Tarifas · {{ cliente.cliente_id }}{% endblock %}
+{% block content %}
+<style>
+.tarifas-section {padding:20px 0;border-bottom:1px solid var(--border);}
+.tarifas-scroll {overflow-x:auto;max-width:100%;}
+.tarifas-table {width:100%;min-width:820px;table-layout:fixed;}
+.tarifas-table input,.tarifas-table select {width:100%;min-width:0;box-sizing:border-box;}
+.tarifas-table th {font-size:12px;white-space:normal;}
+.tarifas-table td {padding:8px;}
+.tarifas-table [data-remove] {width:32px;min-width:32px;height:32px;padding:0;}
+.tarifas-actions {display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;}
+</style>
+<div class="page-title"><div class="eyebrow">{{ cliente.cliente_id }}</div><h1>Tarifas por rangos</h1></div>
+<form method="post" id="tarifas-form">
+  <div class="form-group" style="max-width:320px">
+    <label for="perfil">Perfil comercial</label>
+    <select name="perfil" id="perfil">
+    {% for value,label in [('', 'Sin clasificar'),('PARTICULAR','Particular'),('ECOMMERCE','Tienda e-commerce'),('EXPORTADOR','Exportador habitual'),('MAYORISTA','Mayorista')] %}
+      <option value="{{ value }}" {% if cliente.perfil_comercial == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+    </select>
+  </div>
+  {% for ambito,titulo in [('internacional','Internacional'),('nacional','Nacional')] %}
+  <section class="tarifas-section" data-ambito="{{ ambito }}">
+    <h2>{{ titulo }} · Flete</h2>
+    <input type="hidden" name="{{ ambito }}" value="{{ cliente.get('pricing_rangos_' + ambito, [])|tojson|forceescape }}">
+    <div class="tarifas-scroll"><table class="tarifas-table">
+      <thead><tr><th>Desde ARS (incluido)</th><th>Hasta ARS (excluido)</th><th>Markup</th><th>Valor</th><th>Mínimo ARS</th><th style="width:48px"></th></tr></thead>
+      <tbody>
+      {% for fila in cliente.get('pricing_rangos_' + ambito, []) %}
+      <tr>
+        <td><input aria-label="Desde ARS" data-key="desde" type="number" min="0" step="0.01" required value="{{ fila.desde }}"></td>
+        <td><input aria-label="Hasta ARS" data-key="hasta" type="number" min="0" step="0.01" value="{{ fila.hasta if fila.hasta is not none else '' }}" placeholder="Sin límite"></td>
+        <td><select aria-label="Tipo de markup" data-key="tipo"><option value="FIJO_ARS" {% if fila.tipo == 'FIJO_ARS' %}selected{% endif %}>Fijo ARS</option><option value="PCT" {% if fila.tipo == 'PCT' %}selected{% endif %}>Porcentaje</option></select></td>
+        <td><input aria-label="Valor del markup" data-key="valor" type="number" min="0" step="0.0001" required value="{{ fila.valor }}"></td>
+        <td><input aria-label="Ganancia mínima ARS" data-key="minimo" type="number" min="0" step="0.01" value="{{ fila.minimo }}"></td>
+        <td><button type="button" class="btn btn-ghost" data-remove title="Quitar rango" aria-label="Quitar rango">−</button></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <button type="button" class="btn btn-ghost" data-add>+ Agregar rango</button>
+  </section>
+  {% endfor %}
+  {% if simulacion %}<div class="msg">Precio ARS {{ '{:,.2f}'.format(simulacion.precio) }} · Ganancia ARS {{ '{:,.2f}'.format(simulacion.ganancia) }}</div>{% endif %}
+  <section class="tarifas-section">
+    <h2>Simulación de rangos</h2>
+    <div class="form-grid-2">
+      <div class="form-group"><label for="ambito-prueba">Servicio</label><select name="ambito_prueba" id="ambito-prueba"><option value="internacional">Internacional</option><option value="nacional" {% if ambito_prueba == 'nacional' %}selected{% endif %}>Nacional</option></select></div>
+      <div class="form-group"><label for="costo-prueba">Costo del proveedor ARS</label><input id="costo-prueba" name="costo_prueba" inputmode="decimal" value="{{ costo_prueba or '' }}"></div>
+    </div>
+    <button class="btn btn-ghost" name="accion" value="simular">Simular</button>
+  </section>
+  <div class="tarifas-actions"><button class="btn btn-primary" name="accion" value="guardar">Guardar tarifas</button><a class="btn btn-ghost" href="/admin/clientes/{{ cliente.cliente_id }}/editar">Volver al cliente</a></div>
+</form>
+<template id="rango-row"><tr>
+  <td><input aria-label="Desde ARS" data-key="desde" type="number" min="0" step="0.01" required></td>
+  <td><input aria-label="Hasta ARS" data-key="hasta" type="number" min="0" step="0.01" placeholder="Sin límite"></td>
+  <td><select aria-label="Tipo de markup" data-key="tipo"><option value="FIJO_ARS">Fijo ARS</option><option value="PCT">Porcentaje</option></select></td>
+  <td><input aria-label="Valor del markup" data-key="valor" type="number" min="0" step="0.0001" required></td>
+  <td><input aria-label="Ganancia mínima ARS" data-key="minimo" type="number" min="0" step="0.01" value="0"></td>
+  <td><button type="button" class="btn btn-ghost" data-remove title="Quitar rango" aria-label="Quitar rango">−</button></td>
+</tr></template>
+<script nonce="{{ request.state.csp_nonce }}">
+document.querySelectorAll('[data-ambito]').forEach(section => {
+  const body = section.querySelector('tbody');
+  function sync() {
+    const rows = Array.from(body.rows).map(row => {
+      const data = {};
+      row.querySelectorAll('[data-key]').forEach(input => {data[input.dataset.key] = input.value;});
+      if (data.tipo === 'FIJO_ARS') {data.minimo = '0';}
+      row.querySelector('[data-key="minimo"]').disabled = data.tipo === 'FIJO_ARS';
+      data.minimo = data.minimo || '0';
+      data.hasta = data.hasta || null;
+      return data;
+    });
+    section.querySelector('input[type="hidden"]').value = JSON.stringify(rows);
+  }
+  section.addEventListener('input', sync);
+  section.addEventListener('change', sync);
+  section.addEventListener('click', event => {
+    if (event.target.closest('[data-remove]')) {event.target.closest('tr').remove(); sync();}
+    if (event.target.closest('[data-add]') && body.rows.length < 30) {
+      const last = body.rows[body.rows.length - 1];
+      const start = last ? last.querySelector('[data-key="hasta"]').value : '0';
+      const fragment = document.querySelector('#rango-row').content.cloneNode(true);
+      fragment.querySelector('[data-key="desde"]').value = start;
+      body.appendChild(fragment); sync();
+    }
+  });
+  sync();
+});
+</script>
+{% endblock %}

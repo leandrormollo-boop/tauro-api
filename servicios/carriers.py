@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import os
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from core.database import get_conn
 from core.fedex_client import FedExClient
@@ -618,6 +618,11 @@ def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
                 "error": "La cuenta no tiene una regla de precio para este operador.",
             })
             continue
+        if pricing_efectivo.get("tipo") == "RANGOS":
+            costo_exacto = Decimal(str(crudo["costo"]))
+            if es_usd:
+                costo_exacto *= Decimal(str(dolar))
+            costo_ars = float(costo_exacto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
         precio = aplicar_pricing(
             costo_usd=costo_usd, costo_ars=costo_ars,
             dolar=dolar, pricing=pricing_efectivo,

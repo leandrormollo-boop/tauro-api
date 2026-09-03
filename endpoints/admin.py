@@ -2104,6 +2104,78 @@ def admin_cliente_editar_form(
     )
 
 
+@router.get("/clientes/{cliente_id}/tarifas", response_class=HTMLResponse)
+def admin_tarifas_form(request: Request, cliente_id: str,
+                       admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM clientes WHERE cliente_id=%s", (cliente_id.upper(),))
+            row = cur.fetchone()
+    if not row:
+        return RedirectResponse(url="/admin/clientes", status_code=303)
+    return templates.TemplateResponse(request=request, name="admin/cliente_tarifas.html",
+        context={"seccion": "clientes", "cliente": dict(row)})
+
+
+@router.post("/clientes/{cliente_id}/tarifas", response_class=HTMLResponse)
+def admin_tarifas_guardar(request: Request, cliente_id: str,
+    internacional: str = Form(...), nacional: str = Form(...),
+    perfil: str = Form(""), accion: str = Form("simular"),
+    costo_prueba: str = Form(""), ambito_prueba: str = Form("internacional"),
+    admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    import json
+    from servicios.pricing_rangos import validar_rangos, calcular_rangos
+    cliente_id = cliente_id.strip().upper()
+    cliente = {"cliente_id": cliente_id, "perfil_comercial": perfil}
+    context = {"seccion": "clientes", "cliente": cliente,
+               "costo_prueba": costo_prueba, "ambito_prueba": ambito_prueba}
+    try:
+        reglas = {"internacional": validar_rangos(internacional), "nacional": validar_rangos(nacional)}
+        for ambito, filas in reglas.items():
+            cliente["pricing_rangos_" + ambito] = filas
+        if perfil not in ("", "PARTICULAR", "ECOMMERCE", "EXPORTADOR", "MAYORISTA"):
+            raise ValueError("Perfil comercial inválido.")
+        if accion == "simular":
+            if ambito_prueba not in reglas:
+                raise ValueError("Ámbito inválido.")
+            costo = parse_importe_humano(costo_prueba)
+            if costo is None:
+                raise ValueError("Ingresá el costo de prueba.")
+            context["simulacion"] = calcular_rangos(costo, reglas[ambito_prueba])
+        elif accion == "guardar":
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT pricing_rangos_internacional, pricing_rangos_nacional, perfil_comercial FROM clientes WHERE cliente_id=%s FOR UPDATE", (cliente_id,))
+                    anterior = cur.fetchone()
+                    if anterior is None:
+                        raise ValueError("Cliente inexistente.")
+                    cur.execute("UPDATE clientes SET pricing_rangos_internacional=%s::jsonb, pricing_rangos_nacional=%s::jsonb, perfil_comercial=%s WHERE cliente_id=%s",
+                        (json.dumps(reglas["internacional"]), json.dumps(reglas["nacional"]), perfil, cliente_id))
+                    from servicios.auditoria import registrar_desde_request_con_cursor
+                    registrar_desde_request_con_cursor(cur, request,
+                        event="admin.tarifas_rangos", actor_type="admin", actor_ref=cliente_id,
+                        status_code=303, metadata={"antes": dict(anterior), "despues": reglas, "perfil": perfil})
+            return RedirectResponse(url=f"/admin/clientes/{cliente_id}/tarifas?ok=guardado", status_code=303)
+        else:
+            raise ValueError("Acción inválida.")
+    except ValueError as exc:
+        context["flash_error"] = str(exc)
+        # Preservar las filas editadas para corregir errores sin reingresarlas.
+        for ambito, raw in (("internacional", internacional), ("nacional", nacional)):
+            try:
+                filas = json.loads(raw)
+                if isinstance(filas, list) and len(filas) <= 30 and all(isinstance(f, dict) for f in filas):
+                    cliente["pricing_rangos_" + ambito] = filas
+            except ValueError:
+                pass
+        return templates.TemplateResponse(request=request, name="admin/cliente_tarifas.html", context=context, status_code=422)
+    return templates.TemplateResponse(request=request, name="admin/cliente_tarifas.html", context=context)
+
+
 @router.post("/clientes/{cliente_id}/editar")
 def admin_cliente_editar(
     request: Request,

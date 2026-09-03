@@ -3229,6 +3229,10 @@ CREATE TRIGGER trg_auditoria_courier_append_only
 BEFORE UPDATE ON auditoria_facturas_courier
 FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_mutacion_auditoria();
 
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pricing_rangos_internacional JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pricing_rangos_nacional JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS perfil_comercial TEXT NOT NULL DEFAULT '';
+
 -- Valores default de config
 INSERT INTO config (parametro, valor) VALUES
     ('COTIZACION_DOLAR_ARS', '1450'),
