@@ -12,25 +12,42 @@ from core.fedex_client import FedExClient
 from modelos.cotizacion import (
     CotizacionInput, CotizacionOutput, calcular_peso_volumetrico,
 )
-from servicios.pricing import aplicar_pricing, normalizar_pricing, parse_monto_ars
+from servicios.pricing import (
+    PricingNoConfigurado, aplicar_pricing, parse_monto_ars,
+)
 from servicios.rutas import get_ruta, pais_a_iso2, ciudad_a_state
 from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
 
 
 COTIZACION_VALIDA_HORAS = 24
+# Rango sano del dólar ARS. Fuera de él el valor guardado es basura (0, mal
+# tipeado, con separadores rotos) y ningún precio debe calcularse con él.
+DOLAR_ARS_MIN = 100.0
+DOLAR_ARS_MAX = 100_000.0
+
+
+class DolarNoConfigurado(RuntimeError):
+    """No hay un tipo de cambio válido en ``config``; no se cotiza.
+
+    Antes se caía a un 1450 fijo del entorno y se seguía vendiendo con un
+    dólar viejo o inventado, subvaluando cada envío en silencio. Ahora el
+    cotizador falla cerrado y avisa; el dólar se corrige en /admin/config o
+    lo repone el job de dólar oficial.
+    """
+
+
+MENSAJE_SIN_DOLAR = (
+    "No hay un tipo de cambio válido configurado. TAURO debe cargarlo antes "
+    "de cotizar."
+)
 
 
 def _get_dolar_ars() -> float:
     """
-    Lee el tipo de cambio de config, tolerando formato argentino (1.450 -> 1450)
-    y con guarda de rango: un dólar ARS realista no baja de 100 ni supera 100.000.
-    Si el valor guardado es basura (0, mal tipeado, fuera de rango), usa el fallback
-    y deja una alerta en el log en vez de romper todos los precios en silencio.
+    Lee el tipo de cambio de la tabla ``config`` tolerando formato argentino
+    (1.450 -> 1450). Sin fila, sin valor o fuera de rango levanta
+    ``DolarNoConfigurado``: no existe fallback numérico.
     """
-    try:
-        fallback = parse_monto_ars(os.getenv("COTIZACION_DOLAR_ARS", "1450")) or 1450.0
-    except ValueError:
-        fallback = 1450.0
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -38,17 +55,22 @@ def _get_dolar_ars() -> float:
                     "SELECT valor FROM config WHERE parametro = 'COTIZACION_DOLAR_ARS'",
                 )
                 row = cur.fetchone()
-        if row and row["valor"] is not None:
-            valor = parse_monto_ars(row["valor"])
-            if valor is not None and 100 <= valor <= 100_000:
-                return valor
-            print(
-                f"[cotizador] ALERTA: COTIZACION_DOLAR_ARS fuera de rango "
-                f"({row['valor']!r} -> {valor}); usando fallback {fallback}"
-            )
     except Exception as e:
-        print(f"[cotizador] Error leyendo tipo de cambio: {e}")
-    return fallback
+        print(f"[cotizador] ALERTA: no se pudo leer COTIZACION_DOLAR_ARS: {e}")
+        raise DolarNoConfigurado(MENSAJE_SIN_DOLAR) from e
+
+    crudo = row["valor"] if row else None
+    try:
+        valor = parse_monto_ars(crudo) if crudo is not None else None
+    except ValueError:
+        valor = None
+    if valor is None or not (DOLAR_ARS_MIN <= valor <= DOLAR_ARS_MAX):
+        print(
+            f"[cotizador] ALERTA: COTIZACION_DOLAR_ARS ausente o fuera de rango "
+            f"({crudo!r} -> {valor}); cotización bloqueada hasta corregirlo"
+        )
+        raise DolarNoConfigurado(MENSAJE_SIN_DOLAR)
+    return valor
 
 
 def dolar_ars() -> float:
@@ -63,10 +85,11 @@ def dolar_ars() -> float:
     return _get_dolar_ars()
 
 
-def _pricing_courier_cliente(
-    cliente: str, courier: str, fallback_pct: float = 25.0,
-) -> dict:
-    """Regla efectiva y permiso antes de tocar un courier legacy."""
+def _pricing_courier_cliente(cliente: str, courier: str) -> dict:
+    """Regla efectiva y permiso antes de tocar un courier legacy.
+
+    Sin regla propia ni general se falla cerrado: no hay 25 % implícito.
+    """
     from servicios.configuracion_couriers_cliente import configuracion_cotizacion
 
     acceso = configuracion_cotizacion(cliente)
@@ -75,11 +98,16 @@ def _pricing_courier_cliente(
         raise ValueError(
             f"{courier.upper()} no está habilitado para cotizar en esta cuenta."
         )
-    return (
+    pricing = (
         acceso["pricing_por_courier"].get(courier)
         or acceso["pricing_general"]
-        or normalizar_pricing("PCT", fallback_pct)
     )
+    if not pricing:
+        raise PricingNoConfigurado(
+            f"{courier.upper()} no tiene una regla de precio configurada en "
+            "esta cuenta."
+        )
+    return pricing
 
 
 def cotizar_opciones(
@@ -94,8 +122,10 @@ def cotizar_opciones(
       {servicio, servicio_nombre, precio_final_ars, precio_final_usd,
        tarifa_lista_ars, dias_estimados, peso_usado_kg, coti_id, valida_hasta}
     Lanza ValueError si la ruta no existe o FedEx no devuelve tarifas.
+    ``markup_pct`` se conserva por compatibilidad de firma; la regla efectiva
+    sale siempre de la configuración del cliente.
     """
-    pricing = _pricing_courier_cliente(cliente, "fedex", markup_pct)
+    pricing = _pricing_courier_cliente(cliente, "fedex")
     ruta = get_ruta(input_data.ruta_id)
     if not ruta:
         raise ValueError(f"Ruta '{input_data.ruta_id}' no existe o está inactiva")
@@ -349,6 +379,8 @@ def cotizar_referencia_couriers(
                 motivo = "La conexión productiva necesita revisión de TAURO."
             elif tarjeta.get("estado") == "no_habilitado":
                 motivo = "No está habilitado para tu cuenta."
+            elif tarjeta.get("estado") == "sin_pricing":
+                motivo = "TAURO debe configurar el precio de tu cuenta para este operador."
             elif tarjeta.get("estado") == "proximamente":
                 motivo = "La integración todavía no está disponible."
             elif tarjeta.get("estado") == "sin_multibulto":
@@ -450,7 +482,7 @@ def cotizar_bultos(
     CotizacionOutput + piezas_total/peso_total_kg. Lanza ValueError si la
     ruta no existe o FedEx no tarifa.
     """
-    pricing = _pricing_courier_cliente(cliente, "fedex", markup_pct)
+    pricing = _pricing_courier_cliente(cliente, "fedex")
     ruta = get_ruta(ruta_id)
     if not ruta:
         raise ValueError(f"Ruta '{ruta_id}' no existe o está inactiva")
@@ -602,7 +634,7 @@ def cotizar(
     """Cotiza un envío. Lanza ValueError si la ruta no existe."""
 
     # 0. Permiso y regla efectiva ANTES de llamar a FedEx.
-    pricing = _pricing_courier_cliente(cliente, "fedex", markup_pct)
+    pricing = _pricing_courier_cliente(cliente, "fedex")
 
     # 1. Resolver ruta
     ruta = get_ruta(input_data.ruta_id)

@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 
 from core.database import get_conn
 from servicios.cuenta_corriente import (
-    registrar_pago, registrar_envio, facturar_cargo, cancelar_envio,
+    registrar_pago, registrar_envio, cancelar_envio,
     get_envios_cliente, get_pagos,
     get_facturado_real, total_pagado, saldo,
     get_resumen_clientes_bulk, listar_destinos_pago,
@@ -285,10 +285,14 @@ def _get_clientes_lista():
         cliente["pricing_por_courier"] = [
             {
                 "nombre": fila["nombre"],
-                "descripcion": describir_pricing({
-                    "markup_tipo": fila["pricing"]["tipo"],
-                    "markup_valor": fila["pricing"]["valor"],
-                }) + (" · con tramos" if fila["pricing"].get("tramos_usd") else ""),
+                "descripcion": (
+                    describir_pricing({
+                        "markup_tipo": fila["pricing"]["tipo"],
+                        "markup_valor": fila["pricing"]["valor"],
+                    }) + (" · con tramos" if fila["pricing"].get("tramos_usd") else "")
+                    if fila.get("pricing")
+                    else "Sin regla de precio"
+                ),
             }
             for fila in (matriz or {}).get("couriers", ())
         ]
@@ -2215,7 +2219,6 @@ async def admin_envio_nuevo(
     request: Request,
     cliente_id: str = Form(...),
     fecha: str = Form(...),
-    nro_fc: str = Form(""),
     monto_ars: str = Form(...),
     ambito: str = Form(...),
     # Default vacío permite que un form abierto antes del deploy reciba un
@@ -2224,14 +2227,30 @@ async def admin_envio_nuevo(
     descripcion: str = Form(""),
     tracking: str = Form(""),
     estado: str = Form("ACTIVO"),
+    # Se reciben sólo para rechazar formularios antiguos sin perder su FC.
+    nro_fc: str = Form(""),
     factura_pdf: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
+    """Alta manual de un cargo. La factura se documenta aparte, por lote.
+
+    Los campos legacy ``nro_fc`` y ``factura_pdf`` de ``envios`` ya no se
+    escriben: un formulario viejo que los envíe recibe un error explícito
+    antes de crear deuda. La documentación fiscal vive en facturas_cliente.
+    """
     if not _is_auth(admin_token):
         return _redirect_login()
 
     try:
         idempotency_key_normalizada = _idempotency_key_form(idempotency_key)
+        if (
+            isinstance(nro_fc, str) and nro_fc.strip()
+        ) or hasattr(factura_pdf, "read"):
+            raise ValueError(
+                "El formulario de facturación cambió. No se registró ningún "
+                "cargo. Cargá el cargo sin factura y documentalo desde el "
+                "facturador por lote, adjuntando allí el comprobante."
+            )
         monto_num = _importe_contable_form(monto_ars, "Monto ARS")
         ambito_normalizado = _ambito_contable_form(ambito)
         estado_normalizado = str(estado or "").strip().upper()
@@ -2239,23 +2258,18 @@ async def admin_envio_nuevo(
             raise ValueError(
                 "El alta manual admite cargos activos o cancelados; una NC no es una factura."
             )
-        from servicios.cuenta_corriente import leer_comprobante_con_tope
-        contenido_fc = await leer_comprobante_con_tope(factura_pdf)
         registrar_envio(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
             monto_ars=monto_num,
             ambito=ambito_normalizado,
-            nro_fc=nro_fc,
             estado=estado_normalizado,
             descripcion=descripcion,
             tracking=tracking,
-            factura_pdf=contenido_fc or None,
-            factura_nombre=(factura_pdf.filename if factura_pdf else "") or "",
             idempotency_key=idempotency_key_normalizada,
         )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
-    except Exception as e:
+    except ValueError as e:
         clientes = _get_clientes_lista()
         today = datetime.now().strftime("%Y-%m-%d")
         return templates.TemplateResponse(
@@ -2269,7 +2283,6 @@ async def admin_envio_nuevo(
                 "idempotency_key": _idempotency_key_para_reintento(idempotency_key),
                 "form_data": {
                     "fecha": fecha,
-                    "nro_fc": nro_fc,
                     "monto_ars": monto_ars,
                     "ambito": str(ambito or "").strip().upper(),
                     "descripcion": descripcion,
@@ -2540,11 +2553,14 @@ async def admin_facturar_cargo(
     request: Request,
     cliente_id: str,
     envio_id: int,
-    nro_fc: str = Form(...),
-    factura_pdf: UploadFile = File(...),
     admin_token: Optional[str] = Cookie(None),
 ):
-    """El endpoint viejo no escribe los campos legacy de ``envios``."""
+    """Ruta legacy conservada sólo para redirigir.
+
+    No lee el formulario: ``nro_fc`` y el PDF que enviaba la pantalla vieja
+    se descartan sin escribir ``envios``. El facturador por lote es la única
+    vía para documentar cargos.
+    """
     if not _is_auth(admin_token):
         return _redirect_login()
     return RedirectResponse(
@@ -3243,7 +3259,7 @@ async def admin_pago_nuevo(
             idempotency_key=idempotency_key_normalizada,
         )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
-    except Exception as e:
+    except ValueError as e:
         clientes = _get_clientes_lista()
         today = datetime.now().strftime("%Y-%m-%d")
         return templates.TemplateResponse(
@@ -3925,13 +3941,19 @@ def admin_resolver_pago(
         except ValueError as exc:
             return Response(content=str(exc), status_code=400, media_type="text/plain")
 
-    cambio = resolver_pago(
-        pago_id,
-        aprobar=aprobar,
-        aplicaciones=aplicaciones,
-        actor_tipo="admin",
-        actor_ref="admin",
-    )
+    try:
+        cambio = resolver_pago(
+            pago_id,
+            aprobar=aprobar,
+            aplicaciones=aplicaciones,
+            actor_tipo="admin",
+            actor_ref="admin",
+        )
+    except ValueError as exc:
+        # Un trigger contable (sobrepago, documento ya facturado, ámbito
+        # inválido) o una validación del servicio: conflicto de negocio, no
+        # un error del servidor. La transacción ya fue revertida.
+        return Response(content=str(exc), status_code=409, media_type="text/plain")
     if not cambio:
         print(f"[admin] pago {pago_id}: ya estaba resuelto, no se toca")
     return RedirectResponse(url="/admin/pagos/pendientes", status_code=303)

@@ -909,6 +909,23 @@ CREATE INDEX IF NOT EXISTS idx_pagos_cliente ON pagos(cliente_id);
 -- aprueba. Los que carga el admin nacen APROBADO (las filas viejas, con
 -- estado NULL, cuentan como aprobadas — eran cargas del admin).
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'APROBADO';
+-- NULL histórico equivale a APROBADO (cargas viejas del admin). Cualquier
+-- otro texto es un error de datos y no debe entrar al ledger.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'pagos'::regclass
+          AND conname = 'ck_pagos_estado'
+    ) THEN
+        ALTER TABLE pagos ADD CONSTRAINT ck_pagos_estado
+            CHECK (
+                estado IS NULL
+                OR estado IN ('PENDIENTE', 'APROBADO', 'RECHAZADO')
+            ) NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE pagos VALIDATE CONSTRAINT ck_pagos_estado;
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante BYTEA;
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_tipo TEXT;
 ALTER TABLE IF EXISTS pagos ADD COLUMN IF NOT EXISTS comprobante_nombre TEXT;
@@ -1262,6 +1279,51 @@ BEGIN
     END IF;
 END $$;
 ALTER TABLE envios VALIDATE CONSTRAINT ck_envios_idempotency_key;
+-- Estados contables del cargo. NC nunca es FC ni deuda pagable; se conserva
+-- como valor histórico legible. NOT VALID + VALIDATE: si una instalación
+-- trae un valor desconocido, el arranque falla con el nombre del constraint
+-- (ver scripts/preflight_estados_contables.sql) en vez de operar a ciegas.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'envios'::regclass
+          AND conname = 'ck_envios_estado'
+    ) THEN
+        ALTER TABLE envios ADD CONSTRAINT ck_envios_estado
+            CHECK (estado IN ('ACTIVO', 'CANCELADO', 'NC')) NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE envios VALIDATE CONSTRAINT ck_envios_estado;
+-- ── Legado de facturación por cargo: sólo lectura ───────────
+-- nro_fc, factura_pdf y factura_nombre documentaban una FC por cargo. Con
+-- facturas_cliente ese modelo quedó cerrado: la historia se conserva y se
+-- sigue mostrando (portal y admin), pero ninguna escritura nueva puede crear
+-- ni modificar una FC legacy. Un cargo nuevo nace con nro_fc NULL o ''
+-- (pendiente de facturar por lote). No se borra ninguna fila ni columna.
+CREATE OR REPLACE FUNCTION tauro_proteger_fc_legacy_envios()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        IF NULLIF(BTRIM(NEW.nro_fc), '') IS NOT NULL
+           OR NEW.factura_pdf IS NOT NULL
+           OR NULLIF(BTRIM(NEW.factura_nombre), '') IS NOT NULL THEN
+            RAISE EXCEPTION
+                'La factura por cargo (envios.nro_fc) es legado de sólo lectura; usá facturas_cliente';
+        END IF;
+    ELSIF NEW.nro_fc IS DISTINCT FROM OLD.nro_fc
+       OR NEW.factura_pdf IS DISTINCT FROM OLD.factura_pdf
+       OR NEW.factura_nombre IS DISTINCT FROM OLD.factura_nombre THEN
+        RAISE EXCEPTION
+            'La factura por cargo (envios.nro_fc) es legado de sólo lectura; usá facturas_cliente';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_proteger_fc_legacy_envios ON envios;
+CREATE TRIGGER trg_proteger_fc_legacy_envios
+BEFORE INSERT OR UPDATE ON envios
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_fc_legacy_envios();
 CREATE INDEX IF NOT EXISTS idx_envios_cliente ON envios(cliente_id);
 -- Cargo automático: cuando se emite una guía, el débito entra solo a la
 -- cuenta corriente (decisión de Leandro 28/07 — antes era doble carga manual
@@ -1407,6 +1469,12 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_cliente
     ON solicitudes_guia(cliente_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_solicitudes_guia_estado
     ON solicitudes_guia(estado, created_at DESC);
+-- Máquina de estados operativa única. Las consultas críticas usan
+-- NOT IN ('EMITIENDO','VERIFICAR_COURIER') y fallarían abiertas ante un
+-- estado desconocido; el CHECK lo impide. NOT VALID + VALIDATE separa el
+-- alta del control de historia: si una instalación trae un valor fuera de la
+-- lista, el arranque falla nombrando el constraint y el preflight
+-- (scripts/preflight_estados_contables.sql) muestra las filas a corregir.
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -1420,9 +1488,10 @@ BEGIN
                 'SOLICITADO', 'EN_PROCESO', 'EMITIENDO',
                 'VERIFICAR_COURIER', 'GUIA_LISTA', 'DESPACHADO',
                 'ENTREGADO', 'REEMPLAZADO', 'CANCELADO'
-            ));
+            )) NOT VALID;
     END IF;
 END $$;
+ALTER TABLE solicitudes_guia VALIDATE CONSTRAINT ck_solicitudes_guia_estado;
 -- Instalaciones anteriores a la columna de auditoría deben migrar antes de
 -- que emisión/conciliación la use. El CREATE TABLE no modifica una tabla ya
 -- existente, por eso este ALTER idempotente es obligatorio en producción.

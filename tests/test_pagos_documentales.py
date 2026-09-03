@@ -52,4 +52,3 @@ def test_factura_suma_pago_directo_y_arrastrado_sin_float():
     assert "pa.envio_id IN" in servicio
     assert "pa.estado='APLICADA'" in servicio
     assert "Decimal" in servicio
-

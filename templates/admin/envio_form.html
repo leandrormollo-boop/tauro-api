@@ -1,14 +1,19 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Cargar factura{% endblock %}
+{% block title %}Cargar cargo manual{% endblock %}
 
 {% block content %}
 <div class="page-title">
   <div class="eyebrow">Cuenta corriente</div>
-  <h1>Cargar factura / envío</h1>
+  <h1>Cargar cargo manual</h1>
 </div>
 
 <div class="card" style="max-width:560px;">
-  <form method="POST" action="/admin/envios/nuevo" enctype="multipart/form-data">
+  <p style="color:var(--fg-4);margin:0 0 14px;">
+    Este alta registra el débito en la cuenta corriente. La factura TAURO se
+    documenta después, por lote, desde la ficha del cliente: acá no se cargan
+    número de comprobante ni PDF.
+  </p>
+  <form method="POST" action="/admin/envios/nuevo">
     <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 
     <div class="form-group">
@@ -23,15 +28,9 @@
       </select>
     </div>
 
-    <div class="form-grid-2">
-      <div class="form-group">
-        <label>Fecha *</label>
-        <input type="date" name="fecha" required value="{{ form_data.fecha if form_data else today }}">
-      </div>
-      <div class="form-group">
-        <label>Nro. Factura</label>
-        <input type="text" name="nro_fc" value="{{ form_data.nro_fc if form_data else '' }}" placeholder="0106-00001234">
-      </div>
+    <div class="form-group">
+      <label>Fecha *</label>
+      <input type="date" name="fecha" required value="{{ form_data.fecha if form_data else today }}">
     </div>
 
     <div class="form-group">
@@ -69,14 +68,8 @@
       <small style="color:var(--fg-4);">Las notas de crédito no se cargan como facturas.</small>
     </div>
 
-    <div class="form-group">
-      <label>PDF de la factura (opcional)</label>
-      <input type="file" name="factura_pdf"
-             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
-    </div>
-
     <div style="display:flex;gap:12px;margin-top:8px;">
-      <button type="submit" class="btn btn-primary">Guardar factura</button>
+      <button type="submit" class="btn btn-primary">Guardar cargo</button>
       <a href="/admin/home" class="btn btn-ghost">Cancelar</a>
     </div>
   </form>

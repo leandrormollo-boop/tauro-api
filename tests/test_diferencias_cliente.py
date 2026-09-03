@@ -50,4 +50,3 @@ def test_portal_muestra_explicacion_en_cuenta_y_detalle():
         assert "margen_tauro" not in html
     assert "concepto_courier" in servicio
     assert "i.concepto_tipo <> 'FLETE'" in servicio
-

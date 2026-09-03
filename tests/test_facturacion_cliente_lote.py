@@ -67,4 +67,3 @@ def test_total_se_calcula_con_decimal_en_servicio():
     assert 'sum((p["monto"] for p in partidas), Decimal("0"))' in servicio
     assert "float(" not in servicio
     assert Decimal("2990000.00") + Decimal("10000.00") == Decimal("3000000.00")
-

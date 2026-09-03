@@ -353,7 +353,41 @@ SELECT
               'ck_conciliacion_formula_ajuste',
               'ck_conciliacion_aprobacion'
           )
-    ) AS formulas_conciliacion_validadas
+    ) AS formulas_conciliacion_validadas,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('solicitudes_guia')
+          AND c.conname = 'ck_solicitudes_guia_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%VERIFICAR_COURIER%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%GUIA_LISTA%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%REEMPLAZADO%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%CANCELADO%'
+    ) AS estados_operativos_controlados,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('envios')
+          AND c.conname = 'ck_envios_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%ACTIVO%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%CANCELADO%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%NC%'
+    ) AS estados_cargos_controlados,
+    EXISTS (
+        SELECT 1 FROM pg_constraint c
+        WHERE c.conrelid = TO_REGCLASS('pagos')
+          AND c.conname = 'ck_pagos_estado'
+          AND c.contype = 'c' AND c.convalidated
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%PENDIENTE%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%APROBADO%'
+          AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%RECHAZADO%'
+    ) AS estados_pagos_controlados,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('envios')
+          AND t.tgname = 'trg_proteger_fc_legacy_envios'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS legado_fc_envios_bloqueado
 """
 
 _READINESS_CONTABLE_CAMPOS = (
@@ -399,6 +433,10 @@ _READINESS_CONTABLE_CAMPOS = (
     "mutaciones_financieras_bloqueadas",
     "borrado_financiero_bloqueado",
     "formulas_conciliacion_validadas",
+    "estados_operativos_controlados",
+    "estados_cargos_controlados",
+    "estados_pagos_controlados",
+    "legado_fc_envios_bloqueado",
 )
 
 

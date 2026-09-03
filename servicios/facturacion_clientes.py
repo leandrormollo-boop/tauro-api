@@ -15,6 +15,7 @@ import psycopg2
 
 from core.database import get_conn
 from servicios.auditoria import registrar_evento_con_cursor
+from servicios.conflictos_db import mensaje_conflicto_db
 from servicios.cuenta_corriente import validar_comprobante
 
 
@@ -26,6 +27,15 @@ ESTADOS = frozenset({"EMITIDA", "ANULADA"})
 
 class FacturacionClienteError(RuntimeError):
     """El lote no cumple una invariante documental o contable."""
+
+
+class FacturacionConflictoError(FacturacionClienteError):
+    """La base rechazó la factura por una regla contable (trigger/constraint).
+
+    Ocurre, por ejemplo, cuando dos operadores facturan el mismo cargo en
+    paralelo: el primero gana y el segundo recibe este conflicto. Nada quedó
+    escrito; la transacción entera se revirtió.
+    """
 
 
 def _texto(valor: Any, maximo: int = 200) -> str:
@@ -402,10 +412,16 @@ def crear_factura_cliente(
                     "items": len(partidas),
                     "ambito": next(iter(ambitos)),
                 }
-    except psycopg2.errors.UniqueViolation as exc:
-        raise FacturacionClienteError(
-            "Ya existe una factura con ese tipo, punto de venta y número."
-        ) from exc
+    except psycopg2.Error as exc:
+        # Los triggers de exclusividad, cuadre e inmutabilidad levantan
+        # RaiseException; la numeración duplicada, UniqueViolation. Ambos son
+        # decisiones de negocio de la base, no fallas técnicas: se devuelven
+        # como conflicto legible. Cualquier otro error de PostgreSQL (conexión,
+        # permisos) sigue propagándose para que el operador vea un 500 real.
+        mensaje = mensaje_conflicto_db(exc)
+        if mensaje is None:
+            raise
+        raise FacturacionConflictoError(mensaje) from exc
 
 
 def listar_facturas_cliente(cliente_id: str) -> list[dict[str, Any]]:

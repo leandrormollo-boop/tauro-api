@@ -9,4 +9,3 @@
 {% for f in facturas %}<tr><td><strong>{{ f.numero_visible }}</strong>{% if f.cae %}<br><small>CAE {{ f.cae }}</small>{% endif %}</td><td>{{ f.fecha_emision.strftime('%d/%m/%Y') }}</td><td>{{ f.fecha_vencimiento.strftime('%d/%m/%Y') if f.fecha_vencimiento else '—' }}</td><td>{{ f['items'] }}</td><td class="mono">{{ dinero(f.total) }}</td><td class="mono">{{ dinero(f.pagado) }}</td><td class="mono">{{ dinero(f.saldo) }}</td><td><span class="badge {% if f.estado == 'EMITIDA' %}ok{% else %}error{% endif %}">{{ f.estado }}</span></td><td>{% if f.tiene_pdf %}<a class="btn btn-ghost btn-sm" target="_blank" href="/admin/clientes/{{ cliente_id }}/facturas/{{ f.id }}/pdf">Ver PDF</a>{% endif %}</td></tr>{% endfor %}
 </tbody></table></div></div>{% else %}<div class="card"><p>Todavía no hay facturas nuevas para este cliente.</p></div>{% endif %}
 {% endblock %}
-

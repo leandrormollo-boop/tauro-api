@@ -58,4 +58,3 @@ La verificación visual de `/admin/conciliacion-couriers` recorrió los 32 track
 ## Reversión
 
 Los snapshots financieros son inmutables y no deben borrarse manualmente. Ante una reversión justificada, restaurar la base completa desde el dump o preparar una intervención auditada específica comparando primero contra `codex_backup_snapshots_waimao_20260903`. No ejecutar un `DELETE` directo en producción.
-

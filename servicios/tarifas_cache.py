@@ -217,8 +217,14 @@ def refrescar_cache(paises: Optional[list[str]] = None) -> dict:
     # Misma fuente que el resto del sistema: la tabla `config`, no el entorno.
     # Estas tarifas quedan congeladas hasta el próximo refresco, así que
     # tomarlas con un dólar viejo se arrastra durante horas.
-    from servicios.cotizador import dolar_ars
-    dolar = dolar_ars()
+    from servicios.cotizador import DolarNoConfigurado, dolar_ars
+    try:
+        dolar = dolar_ars()
+    except DolarNoConfigurado as exc:
+        # Sin dólar válido no se congela ninguna tarifa: la cache vieja sigue
+        # sirviendo hasta que el admin corrija el tipo de cambio.
+        print(f"[tarifas_cache] refresco cancelado: {exc}")
+        return {"guardadas": 0, "fallidas": 0, "motivo": "sin_tipo_cambio"}
     markup = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
     destinos = {

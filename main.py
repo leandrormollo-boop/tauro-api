@@ -684,6 +684,36 @@ async def error_global(request: Request, exc: Exception):
     )
 
 
+from servicios.cotizador import DolarNoConfigurado as _DolarNoConfigurado
+from servicios.pricing import PricingNoConfigurado as _PricingNoConfigurado
+
+
+@app.exception_handler(_DolarNoConfigurado)
+async def error_sin_tipo_cambio(request: Request, exc: _DolarNoConfigurado):
+    """Fail-closed de precios: sin dólar válido no se cotiza ni se emite.
+
+    Es una indisponibilidad de configuración, no un bug: 503 con mensaje
+    claro y sin fallback numérico. El admin lo corrige en /admin/config.
+    """
+    print(f"[503] {request.method} {request.url.path} → {type(exc).__name__}")
+    return JSONResponse(
+        {"ok": False, "error": str(exc)},
+        status_code=503,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@app.exception_handler(_PricingNoConfigurado)
+async def error_sin_pricing(request: Request, exc: _PricingNoConfigurado):
+    """La cuenta no tiene regla de precio: conflicto de configuración (409)."""
+    print(f"[409] {request.method} {request.url.path} → {type(exc).__name__}")
+    return JSONResponse(
+        {"ok": False, "error": str(exc)},
+        status_code=409,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @app.exception_handler(StarletteHTTPException)
 async def error_http_con_diseno(request: Request, exc: StarletteHTTPException):
     """Los GET inexistentes muestran una salida útil en vez del JSON crudo."""
@@ -879,8 +909,19 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
         "descripcion_en": "Merchandise",
     }
 
-    from servicios.cotizador import dolar_ars
-    dolar = dolar_ars()          # tabla `config`, la misma que usa el portal
+    from servicios.cotizador import DolarNoConfigurado, dolar_ars
+    try:
+        dolar = dolar_ars()      # tabla `config`, la misma que usa el portal
+    except DolarNoConfigurado:
+        # Sin tipo de cambio válido no se publica ningún precio: mejor un
+        # cotizador caído que uno que subvalúa cada envío.
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "El cotizador no está disponible en este momento. "
+                "Probá de nuevo más tarde."
+            ),
+        )
     try:
         markup_pct = float(
             parse_configuracion_numerica(

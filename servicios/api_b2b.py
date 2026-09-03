@@ -123,7 +123,11 @@ def obtener_cliente_por_api_key(api_key: str) -> dict:
         "pais": row.get("pais") or "AR",
         "telefono": row.get("telefono") or "",
         "email": row.get("email") or "",
-        "markup_pct": float(row.get("markup_pct") or 25.0),
+        # Informativo: la regla efectiva la resuelve la matriz por courier.
+        # Sin porcentaje cargado se informa None, nunca un 25 % inventado.
+        "markup_pct": (
+            float(row["markup_pct"]) if row.get("markup_pct") is not None else None
+        ),
         "markup_tipo": row.get("markup_tipo") or "PCT",
         "markup_valor": row.get("markup_valor"),
     }

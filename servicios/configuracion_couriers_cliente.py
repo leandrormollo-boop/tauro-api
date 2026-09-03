@@ -14,7 +14,9 @@ from typing import Iterable
 from core.database import get_conn
 from servicios.carrier_contract import Ambito, Capacidad, carrier_spec, public_catalog
 from servicios.numeros_humanos import parse_importe_humano, parse_numero_humano
-from servicios.pricing import PRICING_MODES, normalizar_pricing
+from servicios.pricing import (
+    PRICING_MODES, PricingNoConfigurado, normalizar_pricing,
+)
 
 
 def _metadata_operable(courier_id: str) -> dict:
@@ -113,12 +115,28 @@ def normalizar_courier(valor: str) -> str:
     return courier if courier in COURIER_IDS else ""
 
 
-def _pricing_general(cliente: dict) -> dict:
-    return normalizar_pricing(
-        cliente.get("markup_tipo") or "PCT",
-        cliente.get("markup_valor"),
-        fallback_pct=float(cliente.get("markup_pct") or 25.0),
-    )
+def _pricing_general(cliente: dict) -> dict | None:
+    """Regla general del cliente o ``None`` si no tiene ninguna.
+
+    Sin regla no se inventa un 25 %: los couriers que heredan quedan sin
+    precio y, por lo tanto, sin permiso efectivo de cotizar ni emitir.
+    """
+    pct_general = cliente.get("markup_pct")
+    try:
+        return normalizar_pricing(
+            cliente.get("markup_tipo") or "PCT",
+            cliente.get("markup_valor"),
+            fallback_pct=float(pct_general) if pct_general is not None else None,
+        )
+    except PricingNoConfigurado:
+        return None
+
+
+def _pricing_especifico(tipo: str, valor) -> dict | None:
+    try:
+        return normalizar_pricing(tipo, valor)
+    except PricingNoConfigurado:
+        return None
 
 
 def _tramos_pricing(fila: dict | None) -> dict | None:
@@ -158,13 +176,17 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
         tipo_especifico = (fila.get("markup_tipo") or "").strip().upper() if fila else ""
         valor_especifico = fila.get("markup_valor") if fila else None
         pricing = (
-            normalizar_pricing(tipo_especifico, valor_especifico)
+            _pricing_especifico(tipo_especifico, valor_especifico)
             if tipo_especifico
             else general
         )
         tramos = _tramos_pricing(fila)
-        if tramos:
+        if tramos and pricing is not None:
             pricing = {**pricing, "tramos_usd": tramos}
+        # Sin regla de precio (ni propia ni general) el courier no puede
+        # cotizar ni emitir, aunque el admin haya tildado el permiso: un
+        # precio igual al costo o con margen inventado nunca sale al portal.
+        pricing_configurado = pricing is not None
         config_puede_cotizar = bool(fila["puede_cotizar"]) if fila else False
         config_puede_emitir = bool(fila["puede_emitir"]) if fila else False
         config_puede_recolectar = bool(fila["puede_recolectar"]) if fila else False
@@ -174,6 +196,7 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
             "estado_integracion": integracion["estado"],
             "detalle_integracion": integracion["detalle"],
             "configurado": configurado,
+            "pricing_configurado": pricing_configurado,
             # Configuración persistida (lo que ve/edita el admin) y permiso
             # efectivo (lo que puede ejecutar el portal) son deliberadamente
             # distintos. Si faltan credenciales, no borramos la decisión del
@@ -182,8 +205,14 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
             "config_puede_emitir": config_puede_emitir,
             "config_puede_recolectar": config_puede_recolectar,
             # Valores configurados/heredados para el formulario admin.
-            "puede_cotizar": integracion_disponible and config_puede_cotizar,
-            "puede_emitir": integracion_disponible and config_puede_emitir,
+            "puede_cotizar": (
+                integracion_disponible and config_puede_cotizar
+                and pricing_configurado
+            ),
+            "puede_emitir": (
+                integracion_disponible and config_puede_emitir
+                and pricing_configurado
+            ),
             "puede_recolectar": (
                 integracion_disponible and config_puede_recolectar
             ),
@@ -526,18 +555,24 @@ def mapa_permisos(cliente_id: str, permiso: str) -> dict[str, bool]:
 
 
 def configuracion_cotizacion(cliente_id: str) -> dict:
-    """Pricing y allow-list para el comparador del portal/API."""
+    """Pricing y allow-list para el comparador del portal/API.
+
+    ``pricing_general`` puede ser ``None`` (cliente sin regla). Un courier
+    sólo entra en ``couriers_habilitados`` si además de permiso e integración
+    tiene una regla de precio resuelta; no existe fallback de margen.
+    """
     matriz = obtener_matriz(cliente_id)
     if not matriz or not matriz["activo"]:
         return {
-            "pricing_general": normalizar_pricing("PCT", 25),
+            "pricing_general": None,
             "pricing_por_courier": {},
             "couriers_habilitados": set(),
         }
     return {
         "pricing_general": matriz["pricing_general"],
         "pricing_por_courier": {
-            c["id"]: c["pricing"] for c in matriz["couriers"]
+            c["id"]: c["pricing"]
+            for c in matriz["couriers"] if c["pricing"] is not None
         },
         "couriers_habilitados": {
             c["id"] for c in matriz["couriers"] if c["puede_cotizar"]

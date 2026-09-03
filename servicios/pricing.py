@@ -16,27 +16,55 @@ PRICING_MODES = {
 }
 
 
-class PricingNacionalNoConfigurado(ValueError):
+class PricingNoConfigurado(ValueError):
+    """No hay una regla de pricing explícita y válida.
+
+    TAURO nunca inventa un margen: sin regla no hay precio. Antes, un valor
+    ausente caía en 25 % (PCT), factor 1 (MULTIPLICADOR) o +0 ARS (FIJO_ARS),
+    es decir, en margen cero silencioso. Ahora se falla cerrado y el admin
+    debe cargar la regla.
+    """
+
+
+class PricingNacionalNoConfigurado(PricingNoConfigurado):
     """El cliente no tiene una regla nacional explícita y válida."""
 
 
-def normalizar_pricing(markup_tipo: str, markup_valor: Optional[float], fallback_pct: float = 25.0) -> dict:
-    """Normaliza la regla de pricing para guardar o calcular."""
+MENSAJE_SIN_PRICING = (
+    "La cuenta no tiene una regla de precio configurada. TAURO debe cargarla "
+    "antes de cotizar."
+)
+
+
+def normalizar_pricing(
+    markup_tipo: str,
+    markup_valor: Optional[float],
+    fallback_pct: Optional[float] = None,
+) -> dict:
+    """Normaliza la regla de pricing para guardar o calcular.
+
+    ``fallback_pct`` sólo se usa cuando el tipo es PCT y el valor específico
+    está vacío: es el porcentaje general que el admin cargó explícitamente
+    para el cliente, no un default del sistema. Sin valor y sin fallback, o
+    con FIJO_ARS/MULTIPLICADOR sin valor, se levanta ``PricingNoConfigurado``.
+    """
     tipo = (markup_tipo or "PCT").strip().upper()
     if tipo not in PRICING_MODES:
-        tipo = "PCT"
+        raise PricingNoConfigurado(MENSAJE_SIN_PRICING)
 
     if markup_valor is None:
-        valor = fallback_pct if tipo == "PCT" else (1.0 if tipo == "MULTIPLICADOR" else 0.0)
-    else:
+        if tipo != "PCT" or fallback_pct is None:
+            raise PricingNoConfigurado(MENSAJE_SIN_PRICING)
+        markup_valor = fallback_pct
+    try:
         valor = float(markup_valor)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise PricingNoConfigurado(MENSAJE_SIN_PRICING) from exc
+    if not math.isfinite(valor):
+        raise PricingNoConfigurado(MENSAJE_SIN_PRICING)
 
-    if tipo == "PCT":
-        valor = max(valor, 0.0)
-    elif tipo == "FIJO_ARS":
-        valor = max(valor, 0.0)
-    elif tipo == "MULTIPLICADOR":
-        valor = max(valor, 1.0)
+    if valor < (1.0 if tipo == "MULTIPLICADOR" else 0.0):
+        raise PricingNoConfigurado(MENSAJE_SIN_PRICING)
 
     return {"tipo": tipo, "valor": valor}
 
@@ -58,7 +86,9 @@ def parse_monto_ars(raw) -> Optional[float]:
     return resultado
 
 
-def parse_pricing_value(raw: str, markup_tipo: str, fallback_pct: float = 25.0) -> dict:
+def parse_pricing_value(
+    raw: str, markup_tipo: str, fallback_pct: Optional[float] = None,
+) -> dict:
     """
     Interpreta el valor tipeado en el admin respetando formatos ES/EN.
 
@@ -67,11 +97,15 @@ def parse_pricing_value(raw: str, markup_tipo: str, fallback_pct: float = 25.0) 
           "9.100" -> 9100 ; "14.000" -> 14000 ; "9.100,50" -> 9100.50
       - MULTIPLICADOR / PCT: el punto es decimal.
           "1.30" -> 1.30 ; "22.5" -> 22.5 ; "22,5" -> 22.5
+
+    Un FIJO_ARS o MULTIPLICADOR sin valor es un error del formulario, no un
+    margen cero implícito. Un PCT vacío sólo puede completarse con el
+    porcentaje general que el propio admin tipeó (``fallback_pct``).
     """
     raw = (raw or "").strip()
     valor = None
+    tipo = (markup_tipo or "PCT").strip().upper()
     if raw:
-        tipo = (markup_tipo or "PCT").strip().upper()
         numero = (
             parse_importe_humano(raw)
             if tipo == "FIJO_ARS"
@@ -84,11 +118,20 @@ def parse_pricing_value(raw: str, markup_tipo: str, fallback_pct: float = 25.0) 
             raise ValueError("El multiplicador no puede ser menor a 1.")
         if tipo in {"PCT", "FIJO_ARS"} and valor < 0:
             raise ValueError("El valor de pricing no puede ser negativo.")
-    return normalizar_pricing(markup_tipo, valor, fallback_pct=fallback_pct)
+    try:
+        return normalizar_pricing(markup_tipo, valor, fallback_pct=fallback_pct)
+    except PricingNoConfigurado:
+        raise ValueError(
+            f"Ingresá el valor de la ganancia para el tipo "
+            f"{PRICING_MODES.get(tipo, tipo)}."
+        ) from None
 
 
-def get_pricing_config(cliente: str, fallback_pct: float = 25.0,
-                       ambito: str = "internacional") -> dict:
+def get_pricing_config(
+    cliente: str,
+    fallback_pct: Optional[float] = None,
+    ambito: str = "internacional",
+) -> dict:
     """
     Lee la regla de pricing del cliente. Compatible con clientes viejos.
 
@@ -96,8 +139,8 @@ def get_pricing_config(cliente: str, fallback_pct: float = 25.0,
     de Leandro 28/07): el +$14.500 que tiene sentido sobre un FedEx a Miami
     casi triplica un Andreani de $8.000. Con ambito="nacional" se usa la
     regla nacional del cliente SI la tiene cargada; si no, cae a la regla
-    internacional de siempre — así los clientes existentes no cambian de
-    precio hasta que el admin les configure el margen nacional.
+    internacional del cliente. Un cliente inexistente, inactivo o sin regla
+    levanta ``PricingNoConfigurado``: nunca se responde con un 25 % inventado.
     """
     cliente = cliente.strip().upper()
     with get_conn() as conn:
@@ -114,7 +157,7 @@ def get_pricing_config(cliente: str, fallback_pct: float = 25.0,
             row = cur.fetchone()
 
     if not row:
-        return normalizar_pricing("PCT", fallback_pct, fallback_pct=fallback_pct)
+        raise PricingNoConfigurado(MENSAJE_SIN_PRICING)
 
     if ambito == "nacional" and (row.get("markup_nac_tipo") or "").strip():
         return normalizar_pricing(
@@ -123,7 +166,8 @@ def get_pricing_config(cliente: str, fallback_pct: float = 25.0,
             fallback_pct=fallback_pct,
         )
 
-    legacy_pct = float(row.get("markup_pct") or fallback_pct)
+    pct_general = row.get("markup_pct")
+    legacy_pct = float(pct_general) if pct_general is not None else fallback_pct
     return normalizar_pricing(
         row.get("markup_tipo") or "PCT",
         row.get("markup_valor"),
@@ -238,12 +282,20 @@ def aplicar_pricing(
     }
 
 
+DESCRIPCION_SIN_PRICING = "Sin regla de precio"
+
+
 def describir_pricing(row: dict) -> str:
-    pricing = normalizar_pricing(
-        row.get("markup_tipo") or "PCT",
-        row.get("markup_valor"),
-        fallback_pct=float(row.get("markup_pct") or 25.0),
-    )
+    """Texto para el admin. Sin regla dice exactamente eso, no un 25 %."""
+    pct_general = row.get("markup_pct")
+    try:
+        pricing = normalizar_pricing(
+            row.get("markup_tipo") or "PCT",
+            row.get("markup_valor"),
+            fallback_pct=float(pct_general) if pct_general is not None else None,
+        )
+    except PricingNoConfigurado:
+        return DESCRIPCION_SIN_PRICING
     tipo = pricing["tipo"]
     valor = pricing["valor"]
     if tipo == "FIJO_ARS":

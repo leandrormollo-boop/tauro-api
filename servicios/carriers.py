@@ -610,6 +610,14 @@ def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
             (pricing_por_courier or {}).get(crudo["id"])
             or pricing_cliente
         )
+        if not pricing_efectivo:
+            # Sin regla no hay precio: jamás se publica el costo del courier
+            # ni un margen inventado. El admin debe cargar la ganancia.
+            salida.append({
+                **base, "estado": "sin_pricing",
+                "error": "La cuenta no tiene una regla de precio para este operador.",
+            })
+            continue
         precio = aplicar_pricing(
             costo_usd=costo_usd, costo_ars=costo_ars,
             dolar=dolar, pricing=pricing_efectivo,

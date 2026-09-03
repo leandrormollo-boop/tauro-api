@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import math
 
 import requests
 
@@ -115,13 +116,26 @@ def actualizar_dolar_auto() -> dict:
     if nuevo is None:
         return {"ok": False, "motivo": "sin_dato_valido"}
 
-    # Referencia para el chequeo de salto: el valor en DB, o —si no hay
-    # (primer deploy, o lectura fallida)— el fallback de env. Así la guarda de
-    # salto NUNCA se saltea: sin red, un glitch de la fuente (1515 → 15150,
-    # dentro del rango amplio) repreciaría todo x10 en el primer arranque.
+    # La referencia debe estar configurada explícitamente. Sin ella no se
+    # inventa un dólar base ni se envían alertas de saltos contra un 1450 fijo.
+    # El primer valor se carga en config o, para esta guarda, en el entorno.
     actual = _valor_actual()
-    referencia = actual if (actual and actual > 0) else \
-        float(os.getenv("COTIZACION_DOLAR_ARS", "1450") or 1450)
+    from servicios.pricing import parse_monto_ars
+
+    def referencia_valida(raw):
+        try:
+            numero = parse_monto_ars(raw)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return numero if (
+            numero is not None and math.isfinite(numero)
+            and _RANGO[0] <= numero <= _RANGO[1]
+        ) else None
+
+    actual = referencia_valida(actual)
+    referencia = actual or referencia_valida(os.getenv("COTIZACION_DOLAR_ARS"))
+    if referencia is None:
+        return {"ok": False, "motivo": "sin_referencia_configurada"}
     if referencia and referencia > 0:
         salto = abs(nuevo - referencia) / referencia * 100
         if salto > SALTO_MAX_PCT:

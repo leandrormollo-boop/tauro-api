@@ -54,14 +54,12 @@ def test_cargo_manual_exige_y_envia_ambito(monkeypatch, admin_autenticado):
         request=admin_autenticado,
         cliente_id="melcior",
         fecha="2026-08-17",
-        nro_fc="0001-42",
         monto_ars="100.000,25",
         ambito="NACIONAL",
         idempotency_key=IDEMPOTENCY_KEY,
         descripcion="Cargo manual",
         tracking="ABC",
         estado="ACTIVO",
-        factura_pdf=None,
         admin_token="token",
     ))
 
@@ -70,6 +68,9 @@ def test_cargo_manual_exige_y_envia_ambito(monkeypatch, admin_autenticado):
     assert guardado[0]["ambito"] == "NACIONAL"
     assert guardado[0]["monto_ars"] == Decimal("100000.25")
     assert guardado[0]["idempotency_key"] == IDEMPOTENCY_KEY
+    # El alta manual ya no transporta datos de factura legacy.
+    assert "nro_fc" not in guardado[0]
+    assert "factura_pdf" not in guardado[0]
 
 
 def test_cargo_manual_rechaza_ambito_inventado(monkeypatch, admin_autenticado):
@@ -88,14 +89,12 @@ def test_cargo_manual_rechaza_ambito_inventado(monkeypatch, admin_autenticado):
         request=admin_autenticado,
         cliente_id="MELCIOR",
         fecha="2026-08-17",
-        nro_fc="",
         monto_ars="100.000",
         ambito="OTRO",
         idempotency_key=IDEMPOTENCY_KEY,
         descripcion="",
         tracking="",
         estado="ACTIVO",
-        factura_pdf=None,
         admin_token="token",
     ))
 
@@ -108,34 +107,15 @@ def test_cargo_manual_rechaza_ambito_inventado(monkeypatch, admin_autenticado):
 def test_admin_factura_cargo_legacy_redirige_al_lote_sin_escribir_envios(
     monkeypatch, admin_autenticado,
 ):
-    cargo = {
-        "id": 77,
-        "cliente_id": "MELCIOR",
-        "estado": "ACTIVO",
-        "nro_fc": "",
-        "monto_ars": Decimal("150000.00"),
-        "ambito": "INTERNACIONAL",
-    }
-    llamadas = []
-
-    monkeypatch.setattr(admin, "_cargo_para_facturar", lambda *_a: cargo)
-
-    async def leer_pdf(_archivo):
-        return b"%PDF-1.4 factura"
-
-    monkeypatch.setattr(cuenta_corriente, "leer_comprobante_con_tope", leer_pdf)
-    monkeypatch.setattr(
-        admin,
-        "facturar_cargo",
-        lambda **datos: llamadas.append(datos) or {**cargo, "nro_fc": "FC-100"},
-    )
+    # La función de escritura legacy ya no existe en ningún módulo: el
+    # endpoint viejo sólo redirige y no lee el formulario.
+    assert not hasattr(admin, "facturar_cargo")
+    assert not hasattr(cuenta_corriente, "facturar_cargo")
 
     respuesta = asyncio.run(admin.admin_facturar_cargo(
         request=admin_autenticado,
         cliente_id="melcior",
         envio_id=77,
-        nro_fc="FC-100",
-        factura_pdf=SimpleNamespace(filename="fc-100.pdf"),
         admin_token="token",
     ))
 
@@ -143,7 +123,6 @@ def test_admin_factura_cargo_legacy_redirige_al_lote_sin_escribir_envios(
     assert respuesta.headers["location"] == (
         "/admin/clientes/MELCIOR/facturas/nueva?envio=77"
     )
-    assert llamadas == []
 
 
 def test_admin_no_permite_cancelar_una_fc_facturada(monkeypatch, admin_autenticado):

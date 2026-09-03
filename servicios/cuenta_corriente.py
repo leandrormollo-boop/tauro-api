@@ -7,6 +7,7 @@
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import functools
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -14,12 +15,40 @@ import psycopg2
 
 from core.database import get_conn
 from servicios.auditoria import registrar_evento_con_cursor
+from servicios.conflictos_db import mensaje_conflicto_db
 from servicios.diferencias_cliente import presentar_diferencia
 
 
 _CENTAVO = Decimal("0.01")
 _AMBITOS_CONTABLES = ("NACIONAL", "INTERNACIONAL")
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+
+
+class ConflictoContableError(ValueError):
+    """La base rechazó la operación por una regla contable (trigger/constraint).
+
+    Es un ``ValueError`` para que los endpoints existentes, que ya muestran
+    ese tipo como mensaje al operador, lo traten como conflicto de negocio y
+    no como error del servidor. La transacción ya fue revertida.
+    """
+
+
+def _conflictos_como_valueerror(funcion):
+    """Convierte violaciones del schema en ``ConflictoContableError``.
+
+    Sólo traduce lo que ``servicios.conflictos_db`` reconoce como regla de
+    negocio; cualquier otro error de PostgreSQL se propaga sin cambios.
+    """
+    @functools.wraps(funcion)
+    def envoltura(*args, **kwargs):
+        try:
+            return funcion(*args, **kwargs)
+        except psycopg2.Error as exc:
+            mensaje = mensaje_conflicto_db(exc)
+            if mensaje is None:
+                raise
+            raise ConflictoContableError(mensaje) from exc
+    return envoltura
 
 
 def _decimal_monto(valor: Any, *, permitir_cero: bool = True) -> Decimal:
@@ -1225,6 +1254,7 @@ def _armar_aplicaciones_documentales(
     return salida
 
 
+@_conflictos_como_valueerror
 def registrar_pago(
     cliente_id: str,
     fecha: str,        # "YYYY-MM-DD"
@@ -1501,6 +1531,7 @@ def pagos_pendientes() -> List[Dict[str, Any]]:
     return filas
 
 
+@_conflictos_como_valueerror
 def resolver_pago(
     pago_id: int,
     aprobar: bool,
@@ -1687,239 +1718,114 @@ def get_comprobante(pago_id: int, cliente_id: Optional[str] = None):
             row["comprobante_nombre"] or f"comprobante_{pago_id}")
 
 
+@_conflictos_como_valueerror
 def registrar_envio(
     cliente_id: str,
     fecha: str,        # "YYYY-MM-DD"
     monto_ars: Any,
-    nro_fc: str = "",
     estado: str = "ACTIVO",
     descripcion: str = "",
     tracking: str = "",
-    factura_pdf: Optional[bytes] = None,
-    factura_nombre: str = "",
     ambito: str = "",
     actor_tipo: str = "admin",
     actor_ref: Optional[str] = None,
     idempotency_key: Optional[str] = None,
 ) -> int:
-    # La factura adjunta se valida por contenido igual que los comprobantes:
-    # acá sólo tiene sentido un PDF o una foto del documento.
-    if factura_pdf:
-        validar_comprobante(factura_pdf)
+    """Alta manual de un cargo (débito) en la cuenta corriente.
+
+    Nunca escribe ``envios.nro_fc``, ``factura_pdf`` ni ``factura_nombre``:
+    esas columnas son legado de sólo lectura, protegidas además por trigger.
+    La documentación fiscal se hace por lote en ``facturas_cliente``.
+    """
     ambito_normalizado = _ambito_contable(ambito)
     monto_decimal = _decimal_monto(monto_ars, permitir_cero=False)
     cliente_normalizado = cliente_id.upper()
     clave_idempotencia = _idempotency_key(idempotency_key)
-    fc = str(nro_fc or "").strip()
-    if fc and not _fc_normalizada(fc):
-        raise ValueError("Ingresá un número de factura válido.")
     estado_normalizado = str(estado or "").strip().upper()
     if estado_normalizado not in {"ACTIVO", "CANCELADO"}:
         raise ValueError("El cargo manual debe ser ACTIVO o CANCELADO; una NC no es FC.")
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO envios
+                    (cliente_id, fecha, monto_ars, estado, descripcion,
+                     tracking, ambito, idempotency_key)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (cliente_id, idempotency_key)
+                    WHERE idempotency_key IS NOT NULL
+                DO NOTHING
+                RETURNING id
+                """,
+                (cliente_normalizado, fecha, monto_decimal,
+                 estado_normalizado, descripcion, tracking,
+                 ambito_normalizado, clave_idempotencia),
+            )
+            insertado = cur.fetchone()
+            if not insertado:
                 cur.execute(
                     """
-                    INSERT INTO envios
-                        (cliente_id, fecha, nro_fc, monto_ars, estado, descripcion,
-                         tracking, factura_pdf, factura_nombre, ambito,
-                         idempotency_key)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (cliente_id, idempotency_key)
-                        WHERE idempotency_key IS NOT NULL
-                    DO NOTHING
-                    RETURNING id
-                    """,
-                    (cliente_normalizado, fecha, fc, monto_decimal,
-                     estado_normalizado, descripcion, tracking,
-                     psycopg2.Binary(factura_pdf) if factura_pdf else None,
-                     factura_nombre[:160] if factura_nombre else None,
-                     ambito_normalizado, clave_idempotencia),
-                )
-                insertado = cur.fetchone()
-                if not insertado:
-                    cur.execute(
-                        """
-                        SELECT id, fecha, nro_fc, monto_ars, estado, descripcion,
-                               tracking, ambito
-                        FROM envios
-                        WHERE cliente_id = %s AND idempotency_key = %s
-                        FOR UPDATE
-                        """,
-                        (cliente_normalizado, clave_idempotencia),
-                    )
-                    existente = cur.fetchone()
-                    if not existente:
-                        raise RuntimeError(
-                            "No se pudo recuperar el cargo idempotente."
-                        )
-                    misma_operacion = (
-                        _fecha_comparable(existente["fecha"])
-                        == _fecha_comparable(fecha)
-                        and _decimal_monto(
-                            existente["monto_ars"], permitir_cero=False
-                        ) == monto_decimal
-                        and _fc_normalizada(existente.get("nro_fc"))
-                        == _fc_normalizada(fc)
-                        and str(existente.get("estado") or "").upper()
-                        == estado_normalizado
-                        and str(existente.get("descripcion") or "")
-                        == str(descripcion or "")
-                        and str(existente.get("tracking") or "")
-                        == str(tracking or "")
-                        and str(existente.get("ambito") or "").upper()
-                        == ambito_normalizado
-                    )
-                    if not misma_operacion:
-                        raise ValueError(
-                            "La clave de idempotencia ya fue usada para otro cargo."
-                        )
-                    return int(existente["id"])
-
-                envio_id = int(insertado["id"])
-                registrar_evento_con_cursor(
-                    cur,
-                    event="cuenta.registrar_cargo_manual",
-                    actor_type=actor_tipo,
-                    actor_ref=actor_ref or "admin",
-                    ip=None,
-                    method=None,
-                    path=None,
-                    status_code=201,
-                    success=True,
-                    request_id=None,
-                    metadata={
-                        "envio_id": envio_id,
-                        "cliente_id": cliente_normalizado,
-                        "monto_ars": str(monto_decimal),
-                        "estado": estado_normalizado,
-                        "ambito": ambito_normalizado,
-                    },
-                )
-                return envio_id
-    except psycopg2.errors.UniqueViolation as exc:
-        constraint = getattr(getattr(exc, "diag", None), "constraint_name", "")
-        if constraint == "uq_envios_fc_normalizada":
-            raise ValueError(
-                "Ya existe una factura con ese número."
-            ) from exc
-        raise
-
-
-def facturar_cargo(
-    envio_id: int,
-    cliente_id: str,
-    nro_fc: str,
-    factura_pdf: bytes,
-    factura_nombre: str = "",
-    *,
-    actor_tipo: str = "admin",
-    actor_ref: Optional[str] = None,
-):
-    """Asocia evidencia de FC a un cargo activo sin alterar monto ni ámbito."""
-    cliente_normalizado = str(cliente_id or "").strip().upper()
-    if not cliente_normalizado:
-        raise ValueError("Falta el cliente propietario del cargo.")
-    fc = str(nro_fc or "").strip()
-    if not _fc_normalizada(fc):
-        raise ValueError("Ingresá un número de factura válido.")
-    contenido = bytes(factura_pdf or b"")
-    if not contenido:
-        raise ValueError("Adjuntá el PDF de la factura.")
-    if validar_comprobante(contenido) != "application/pdf":
-        raise ValueError("La factura debe adjuntarse en formato PDF.")
-    nombre = str(factura_nombre or "").strip()[:160]
-    if not nombre:
-        nombre = f"factura_{fc}.pdf"[:160]
-
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, cliente_id, monto_ars, estado, ambito, nro_fc,
-                           factura_pdf, factura_nombre
+                    SELECT id, fecha, monto_ars, estado, descripcion,
+                           tracking, ambito
                     FROM envios
-                    WHERE id = %s AND cliente_id = %s
+                    WHERE cliente_id = %s AND idempotency_key = %s
                     FOR UPDATE
                     """,
-                    (envio_id, cliente_normalizado),
+                    (cliente_normalizado, clave_idempotencia),
                 )
-                cargo = cur.fetchone()
-                if not cargo or str(cargo["estado"] or "").upper() != "ACTIVO":
-                    return False
-
-                fc_existente = str(cargo.get("nro_fc") or "").strip()
-                if fc_existente:
-                    mismo_payload = (
-                        fc_existente == fc
-                        and bytes(cargo.get("factura_pdf") or b"") == contenido
-                        and str(cargo.get("factura_nombre") or "") == nombre
+                existente = cur.fetchone()
+                if not existente:
+                    raise RuntimeError(
+                        "No se pudo recuperar el cargo idempotente."
                     )
-                    if not mismo_payload:
-                        raise ValueError(
-                            "El cargo ya está facturado con otro comprobante."
-                        )
-                    # Reintento exacto: garantiza el resultado sin nueva
-                    # escritura ni un segundo evento de auditoría.
-                    return {
-                        "id": int(cargo["id"]),
-                        "cliente_id": cargo["cliente_id"],
-                        "monto_ars": _decimal_monto(cargo["monto_ars"]),
-                        "ambito": cargo.get("ambito"),
-                        "nro_fc": fc_existente,
-                        "factura_nombre": cargo.get("factura_nombre"),
-                    }
+                misma_operacion = (
+                    _fecha_comparable(existente["fecha"])
+                    == _fecha_comparable(fecha)
+                    and _decimal_monto(
+                        existente["monto_ars"], permitir_cero=False
+                    ) == monto_decimal
+                    and str(existente.get("estado") or "").upper()
+                    == estado_normalizado
+                    and str(existente.get("descripcion") or "")
+                    == str(descripcion or "")
+                    and str(existente.get("tracking") or "")
+                    == str(tracking or "")
+                    and str(existente.get("ambito") or "").upper()
+                    == ambito_normalizado
+                )
+                if not misma_operacion:
+                    raise ValueError(
+                        "La clave de idempotencia ya fue usada para otro cargo."
+                    )
+                return int(existente["id"])
 
-                cur.execute(
-                    """
-                    UPDATE envios
-                    SET nro_fc = %s, factura_pdf = %s, factura_nombre = %s
-                    WHERE id = %s AND cliente_id = %s
-                      AND estado = 'ACTIVO'
-                      AND NULLIF(BTRIM(nro_fc), '') IS NULL
-                    RETURNING id, cliente_id, monto_ars, ambito, nro_fc,
-                              factura_nombre
-                    """,
-                    (
-                        fc,
-                        psycopg2.Binary(contenido),
-                        nombre,
-                        envio_id,
-                        cliente_normalizado,
-                    ),
-                )
-                actualizado = cur.fetchone()
-                if not actualizado:
-                    return False
-                resultado = dict(actualizado)
-                resultado["monto_ars"] = _decimal_monto(resultado["monto_ars"])
-                registrar_evento_con_cursor(
-                    cur,
-                    event="cuenta.facturar_cargo",
-                    actor_type=actor_tipo,
-                    actor_ref=actor_ref or "admin",
-                    ip=None,
-                    method=None,
-                    path=None,
-                    status_code=200,
-                    success=True,
-                    request_id=None,
-                    metadata={
-                        "envio_id": resultado["id"],
-                        "cliente_id": resultado["cliente_id"],
-                        "monto_ars": str(resultado["monto_ars"]),
-                        "ambito": resultado.get("ambito"),
-                        "nro_fc": resultado["nro_fc"],
-                    },
-                )
-                return resultado
-    except psycopg2.errors.UniqueViolation as exc:
-        constraint = getattr(getattr(exc, "diag", None), "constraint_name", "")
-        if constraint == "uq_envios_fc_normalizada":
-            raise ValueError("Ya existe una factura con ese número.") from exc
-        raise
+            envio_id = int(insertado["id"])
+            registrar_evento_con_cursor(
+                cur,
+                event="cuenta.registrar_cargo_manual",
+                actor_type=actor_tipo,
+                actor_ref=actor_ref or "admin",
+                ip=None,
+                method=None,
+                path=None,
+                status_code=201,
+                success=True,
+                request_id=None,
+                metadata={
+                    "envio_id": envio_id,
+                    "cliente_id": cliente_normalizado,
+                    "monto_ars": str(monto_decimal),
+                    "estado": estado_normalizado,
+                    "ambito": ambito_normalizado,
+                },
+            )
+            return envio_id
+
+
+# ``facturar_cargo`` (FC por cargo escribiendo envios.nro_fc/factura_pdf) fue
+# retirada: el legado quedó de sólo lectura y la base rechaza esas escrituras
+# con el trigger trg_proteger_fc_legacy_envios. La documentación fiscal vive
+# en servicios/facturacion_clientes.py.
 
 
 def clasificar_cargo_sin_ambito(

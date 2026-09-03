@@ -76,6 +76,9 @@ def _sembrar_tenants(get_conn_aislada) -> dict[str, int]:
     solicitudes: dict[str, int] = {}
     with get_conn_aislada() as conn:
         with conn.cursor() as cur:
+            # Sólo durante la siembra sintética: representan comprobantes
+            # anteriores al cierre del flujo legacy, no nuevas facturas.
+            cur.execute("ALTER TABLE envios DISABLE TRIGGER trg_proteger_fc_legacy_envios")
             for cliente, dominio in (("TENANT_A", DOMINIO_A), ("TENANT_B", DOMINIO_B)):
                 cur.execute(
                     "INSERT INTO clientes (cliente_id, email, nombre) VALUES (%s, %s, %s)",
@@ -198,6 +201,7 @@ def _sembrar_tenants(get_conn_aislada) -> dict[str, int]:
                         solicitud_id,
                     ),
                 )
+            cur.execute("ALTER TABLE envios ENABLE TRIGGER trg_proteger_fc_legacy_envios")
             cur.execute(
                 """
                 INSERT INTO shopify_gdpr_solicitudes

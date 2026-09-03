@@ -122,7 +122,7 @@
                    placeholder="{% if c.id == 'dhl' %}14.000{% else %}Valor{% endif %}"
                    inputmode="decimal" data-numero="pricing" data-pricing-select="{{ c.id }}-markup-tipo" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
           </div>
-          {% if not c.markup_tipo %}<div class="inherit-note">Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}</div>{% endif %}
+          {% if not c.markup_tipo %}<div class="inherit-note">{% if matriz.pricing_general %}Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}{% else %}Sin regla general: este operador no cotiza ni emite hasta cargar una ganancia.{% endif %}</div>{% endif %}
           {% if c.id == 'dhl' %}
           <details class="tier-pricing" {% if c.markup_low_max_usd is not none or c.markup_high_min_usd is not none %}open{% endif %}>
             <summary>Tramos opcionales por costo DHL</summary>

@@ -390,22 +390,29 @@ def test_cargo_manual_exige_ambito_y_persiste_decimal(monkeypatch):
         cc.registrar_envio("TEST", "2026-08-17", 100, ambito="")
     with pytest.raises(ValueError, match="NC no es FC"):
         cc.registrar_envio("TEST", "2026-08-17", 100, ambito="NACIONAL", estado="NC")
-    with pytest.raises(ValueError, match="número de factura válido"):
+    # El legado de factura por cargo quedó de sólo lectura: el alta manual
+    # ya no acepta número de FC ni PDF, ni siquiera vacíos.
+    with pytest.raises(TypeError):
         cc.registrar_envio(
-            "TEST", "2026-08-17", 100, nro_fc="---", ambito="NACIONAL"
+            "TEST", "2026-08-17", 100, nro_fc="0001-1", ambito="NACIONAL"
+        )
+    with pytest.raises(TypeError):
+        cc.registrar_envio(
+            "TEST", "2026-08-17", 100, factura_pdf=b"%PDF", ambito="NACIONAL"
         )
 
     cursor = _CursorEnvio()
     monkeypatch.setattr(cc, "get_conn", lambda: _conexion(cursor))
     monkeypatch.setattr(cc, "registrar_evento_con_cursor", lambda *_a, **_k: None)
     cc.registrar_envio(
-        "TEST", "2026-08-17", "100.105", nro_fc="   ",
-        descripcion="Cargo", ambito="nacional"
+        "TEST", "2026-08-17", "100.105", descripcion="Cargo", ambito="nacional"
     )
 
-    assert "factura_nombre, ambito" in cursor.sql
-    assert cursor.params[2] == ""
-    assert cursor.params[3] == Decimal("100.11")
+    assert "INSERT INTO envios" in cursor.sql
+    assert "nro_fc" not in cursor.sql
+    assert "factura_pdf" not in cursor.sql
+    assert "factura_nombre" not in cursor.sql
+    assert cursor.params[2] == Decimal("100.11")
     assert cursor.params[-2] == "NACIONAL"
     assert cursor.params[-1] is None
 
@@ -737,12 +744,12 @@ class _CursorEnvioIdempotente:
                 self.insertado = True
                 self.fila = {
                     "id": 44, "fecha": date.fromisoformat(params[1]),
-                    "nro_fc": params[2], "monto_ars": params[3],
-                    "estado": params[4], "descripcion": params[5],
-                    "tracking": params[6], "ambito": params[9],
+                    "monto_ars": params[2], "estado": params[3],
+                    "descripcion": params[4], "tracking": params[5],
+                    "ambito": params[6],
                 }
                 self.one = {"id": 44}
-        elif compacto.startswith("SELECT id, fecha, nro_fc"):
+        elif compacto.startswith("SELECT id, fecha, monto_ars"):
             self.one = dict(self.fila)
 
     def fetchone(self):
@@ -762,7 +769,7 @@ def test_registrar_envio_idempotente_no_duplica_auditoria_y_valida_payload(
     clave = "B" * 32
     argumentos = dict(
         cliente_id="test", fecha="2026-08-17", monto_ars="150.00",
-        nro_fc="FC-001", estado="ACTIVO", descripcion="Servicio",
+        estado="ACTIVO", descripcion="Servicio",
         tracking="TRACK-1", ambito="INTERNACIONAL",
         idempotency_key=clave,
     )
@@ -778,16 +785,20 @@ def test_registrar_envio_idempotente_no_duplica_auditoria_y_valida_payload(
     assert len(auditorias) == 1
 
 
-class _FcDuplicada(cc.psycopg2.errors.UniqueViolation):
+class _LegadoBloqueado(cc.psycopg2.errors.RaiseException):
     class _Diag:
-        constraint_name = "uq_envios_fc_normalizada"
+        constraint_name = ""
+        message_primary = (
+            "La factura por cargo (envios.nro_fc) es legado de sólo lectura; "
+            "usá facturas_cliente"
+        )
 
     @property
     def diag(self):
         return self._Diag()
 
 
-class _CursorFcDuplicada:
+class _CursorLegadoBloqueado:
     def __enter__(self):
         return self
 
@@ -795,156 +806,32 @@ class _CursorFcDuplicada:
         return None
 
     def execute(self, _sql, _params=None):
-        raise _FcDuplicada()
+        raise _LegadoBloqueado()
 
 
-def test_registrar_envio_traduce_conflicto_de_fc_sin_usar_tracking(monkeypatch):
-    monkeypatch.setattr(cc, "get_conn", lambda: _conexion(_CursorFcDuplicada()))
-    with pytest.raises(ValueError, match="factura con ese número"):
+def test_registrar_envio_traduce_trigger_legacy_en_conflicto_contable(monkeypatch):
+    """Si la base rechaza la escritura, el operador recibe un mensaje, no un 500."""
+    monkeypatch.setattr(cc, "get_conn", lambda: _conexion(_CursorLegadoBloqueado()))
+    with pytest.raises(cc.ConflictoContableError, match="sólo lectura"):
         cc.registrar_envio(
-            "TEST", "2026-08-17", "100", nro_fc="fc-001",
-            tracking="TRACK-PUEDE-REPETIR", ambito="NACIONAL",
+            "TEST", "2026-08-17", "100", tracking="TRACK-1", ambito="NACIONAL",
         )
 
 
-class _CursorFacturar:
-    def __init__(self, *, estado="ACTIVO"):
-        self.estado = estado
-        self.nro_fc = None
-        self.factura_pdf = None
-        self.factura_nombre = None
-        self.monto = Decimal("500.00")
-        self.ambito = "INTERNACIONAL"
-        self.one = None
-        self.ejecutadas = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return None
-
-    def execute(self, sql, params=None):
-        compacto = " ".join(sql.split())
-        self.ejecutadas.append((compacto, params))
-        self.one = None
-        if compacto.startswith("SELECT id, cliente_id, monto_ars, estado"):
-            if params[1] == "DUENO":
-                self.one = {
-                    "id": params[0], "cliente_id": "DUENO",
-                    "monto_ars": self.monto, "estado": self.estado,
-                    "ambito": self.ambito, "nro_fc": self.nro_fc,
-                    "factura_pdf": self.factura_pdf,
-                    "factura_nombre": self.factura_nombre,
-                }
-        elif compacto.startswith("UPDATE envios SET nro_fc"):
-            fc, binario, nombre, envio_id, cliente_id = params
-            if (
-                self.estado == "ACTIVO" and not self.nro_fc
-                and cliente_id == "DUENO"
-            ):
-                self.nro_fc = fc
-                self.factura_pdf = bytes(getattr(binario, "adapted", binario))
-                self.factura_nombre = nombre
-                self.one = {
-                    "id": envio_id, "cliente_id": cliente_id,
-                    "monto_ars": self.monto, "ambito": self.ambito,
-                    "nro_fc": fc, "factura_nombre": nombre,
-                }
-
-    def fetchone(self):
-        return self.one
-
-
-def test_facturar_cargo_es_atomico_idempotente_y_preserva_importes(monkeypatch):
-    cursor = _CursorFacturar()
-    auditorias = []
-    monkeypatch.setattr(cc, "get_conn", lambda: _conexion(cursor))
-    monkeypatch.setattr(
-        cc, "registrar_evento_con_cursor",
-        lambda *_a, **kwargs: auditorias.append(kwargs),
-    )
-    pdf = b"%PDF-1.4\nTAURO"
-
-    assert cc.facturar_cargo(
-        9, "OTRO", "FC-900", pdf, "fc-900.pdf"
-    ) is False
-    resultado = cc.facturar_cargo(
-        9, "dueno", "FC-900", pdf, "fc-900.pdf",
-        actor_tipo="admin", actor_ref="operador",
-    )
-    assert resultado == {
-        "id": 9, "cliente_id": "DUENO", "monto_ars": Decimal("500.00"),
-        "ambito": "INTERNACIONAL", "nro_fc": "FC-900",
-        "factura_nombre": "fc-900.pdf",
-    }
-    assert cursor.monto == Decimal("500.00")
-    assert cursor.ambito == "INTERNACIONAL"
-    assert len(auditorias) == 1
-    assert auditorias[0]["event"] == "cuenta.facturar_cargo"
-
-    # El mismo payload garantiza la misma factura, sin UPDATE ni audit extra.
-    updates_antes = sum(
-        sql.startswith("UPDATE envios SET nro_fc")
-        for sql, _ in cursor.ejecutadas
-    )
-    assert cc.facturar_cargo(
-        9, "DUENO", "FC-900", pdf, "fc-900.pdf"
-    ) == resultado
-    assert len(auditorias) == 1
-    assert sum(
-        sql.startswith("UPDATE envios SET nro_fc")
-        for sql, _ in cursor.ejecutadas
-    ) == updates_antes
-
-    with pytest.raises(ValueError, match="otro comprobante"):
-        cc.facturar_cargo(
-            9, "DUENO", "FC-900", b"%PDF-1.4\nDISTINTO", "fc-900.pdf"
-        )
-    with pytest.raises(ValueError, match="otro comprobante"):
-        cc.facturar_cargo(
-            9, "DUENO", "FC-901", pdf, "fc-900.pdf"
-        )
-
-    select_sql = next(
-        sql for sql, _ in cursor.ejecutadas
-        if sql.startswith("SELECT id, cliente_id, monto_ars, estado")
-    )
-    update_sql = next(
-        sql for sql, _ in cursor.ejecutadas
-        if sql.startswith("UPDATE envios SET nro_fc")
-    )
-    assert "FOR UPDATE" in select_sql
-    asignacion = update_sql.split("WHERE", 1)[0]
-    assert "monto_ars" not in asignacion
-    assert "ambito" not in asignacion
-
-
-class _CursorFacturarFcDuplicada(_CursorFacturar):
-    def execute(self, sql, params=None):
-        compacto = " ".join(sql.split())
-        if compacto.startswith("UPDATE envios SET nro_fc"):
-            raise _FcDuplicada()
-        super().execute(sql, params)
-
-
-def test_facturar_cargo_traduce_fc_global_duplicada(monkeypatch):
-    cursor = _CursorFacturarFcDuplicada()
-    monkeypatch.setattr(cc, "get_conn", lambda: _conexion(cursor))
-    with pytest.raises(ValueError, match="factura con ese número"):
-        cc.facturar_cargo(
-            9, "DUENO", "FC-REPETIDA", b"%PDF-1.4\nTAURO", "fc.pdf"
-        )
-
-
-def test_facturar_cargo_exige_pdf_antes_de_bloquear(monkeypatch):
-    cursor = _CursorFacturar()
-    monkeypatch.setattr(cc, "get_conn", lambda: _conexion(cursor))
-    with pytest.raises(ValueError, match="formato PDF"):
-        cc.facturar_cargo(
-            9, "DUENO", "FC-1", b"\x89PNGcontenido", "factura.png"
-        )
-    assert cursor.ejecutadas == []
+def test_facturar_cargo_legacy_fue_retirada_y_el_schema_bloquea_el_legado():
+    """La FC por cargo no se escribe más; la historia queda legible."""
+    assert not hasattr(cc, "facturar_cargo")
+    schema = (RAIZ / "sql" / "schema.sql").read_text(encoding="utf-8")
+    assert "trg_proteger_fc_legacy_envios" in schema
+    assert "BEFORE INSERT OR UPDATE ON envios" in schema
+    assert "NEW.nro_fc IS DISTINCT FROM OLD.nro_fc" in schema
+    assert "NEW.factura_pdf IS DISTINCT FROM OLD.factura_pdf" in schema
+    # Las columnas siguen existiendo: no se borra historia.
+    assert "ALTER TABLE IF EXISTS envios ADD COLUMN IF NOT EXISTS factura_pdf" in schema
+    assert "DROP COLUMN" not in schema[schema.index("CREATE TABLE IF NOT EXISTS envios ("):]
+    fuente = (RAIZ / "servicios" / "cuenta_corriente.py").read_text(encoding="utf-8")
+    assert "UPDATE envios SET nro_fc" not in fuente
+    assert "SET nro_fc" not in fuente
 
 
 class _CursorCancelar:

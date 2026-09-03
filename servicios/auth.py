@@ -554,8 +554,14 @@ def consumir_password_reset_token(token: str, password: str) -> bool:
     return True
 
 
-def get_markup_pct(cliente: str, default: float = 25.0) -> float:
-    """Lee MARKUP_PCT del cliente desde la tabla clientes."""
+def get_markup_pct(cliente: str, default=None):
+    """Lee MARKUP_PCT del cliente desde la tabla clientes.
+
+    Devuelve ``None`` (o el ``default`` explícito del caller) cuando el
+    cliente no existe, está inactivo o no tiene porcentaje: nunca un 25 %
+    implícito. La regla efectiva de precio la resuelve
+    ``configuracion_couriers_cliente``; este valor es sólo informativo.
+    """
     cliente = cliente.strip().upper()
     with get_conn() as conn:
         with conn.cursor() as cur:

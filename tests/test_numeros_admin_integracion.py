@@ -37,14 +37,12 @@ def test_factura_admin_interpreta_ambos_separadores_como_cien_mil(
         request=admin_aislado,
         cliente_id="MELCIOR",
         fecha="2026-08-10",
-        nro_fc="",
         monto_ars=texto,
         ambito="INTERNACIONAL",
         idempotency_key=IDEMPOTENCY_KEY,
         descripcion="",
         tracking="",
         estado="ACTIVO",
-        factura_pdf=None,
         admin_token="token-falso",
     ))
 
@@ -98,14 +96,12 @@ def test_importe_admin_invalido_no_registra_factura(monkeypatch, admin_aislado):
         request=admin_aislado,
         cliente_id="MELCIOR",
         fecha="2026-08-10",
-        nro_fc="",
         monto_ars="100.00.0",
         ambito="INTERNACIONAL",
         idempotency_key=IDEMPOTENCY_KEY,
         descripcion="",
         tracking="",
         estado="ACTIVO",
-        factura_pdf=None,
         admin_token="token-falso",
     ))
 

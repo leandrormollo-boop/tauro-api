@@ -2177,7 +2177,11 @@ def cargar_envio_externo(
             if cur.fetchone():
                 return {"ok": False, "error": f"El tracking {tracking} ya está cargado."}
 
-    dolar = dolar_ars()
+    from servicios.cotizador import DolarNoConfigurado
+    try:
+        dolar = dolar_ars()
+    except DolarNoConfigurado as exc:
+        return {"ok": False, "error": str(exc)}
     try:
         creada = crear_solicitud_guia(
             cliente_id=cliente_id.strip().upper(),

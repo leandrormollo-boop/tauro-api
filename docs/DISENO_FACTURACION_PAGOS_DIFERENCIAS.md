@@ -72,4 +72,3 @@ Al diseñar la migración, producción tenía 0 cargos con FC legacy, 594 cargos
 3. Ampliar aplicaciones de pago, cálculos de saldos y formularios portal/admin.
 4. Enriquecer las líneas de diferencia con pesos y concepto courier sin exponer costos.
 5. Ejecutar tests de concurrencia e invariantes sobre PostgreSQL aislado cuando `TAURO_TEST_DATABASE_URL` esté disponible, además de la suite unitaria completa.
-

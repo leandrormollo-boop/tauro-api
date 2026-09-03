@@ -1688,8 +1688,14 @@ def cotizar_para_checkout(payload: dict) -> dict:
 
     # El dólar sale de la tabla `config` (la que se edita en el admin), no de la
     # variable de entorno: si no, actualizar la cotización no movía el checkout.
-    from servicios.cotizador import dolar_ars
-    dolar = dolar_ars()
+    from servicios.cotizador import DolarNoConfigurado, dolar_ars
+    try:
+        dolar = dolar_ars()
+    except DolarNoConfigurado as exc:
+        # Fail-closed: sin tipo de cambio válido el checkout no muestra
+        # tarifas TAURO en vez de mostrar una subvaluada.
+        print(f"[shopify-rates] sin tipo de cambio válido: {exc}")
+        return {"rates": []}
     markup = float(os.getenv("WEB_MARKUP_PCT", "20"))
 
     # Quién es el comerciante: hace falta ANTES de pesar, porque las
