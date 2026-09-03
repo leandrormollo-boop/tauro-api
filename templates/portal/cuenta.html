@@ -242,7 +242,16 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% endif %}
                         {{ m.concepto or '—' }}
                         </span>
-                        {% if m.referencia %}<small>Ref. {{ m.referencia }}</small>{% endif %}
+                        {% if m.referencia and m.tipo != 'DIFERENCIA' %}<small>Ref. {{ m.referencia }}</small>{% endif %}
+                        {% if m.tipo == 'DIFERENCIA' and m.diferencia_detalle %}
+                          {% set d = m.diferencia_detalle %}
+                          {% if d.es_peso %}
+                          <small>Peso inicial {{ d.peso_inicial_kg }} kg · Peso facturado por el courier {{ d.peso_facturado_kg }} kg · Diferencia {{ d.diferencia_peso_kg }} kg{% if d.motivo == 'MIXTO' and d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
+                          {% else %}
+                          <small>{{ d.concepto_courier or d.motivo_legible }}</small>
+                          {% endif %}
+                          <small>{{ d.leyenda }}</small>
+                        {% endif %}
                         {% if m.numero_factura %}<small>FC {{ m.numero_factura }}</small>{% endif %}
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
                         {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener" class="account-document-link">Ver comprobante o factura ↗</a>{% endif %}

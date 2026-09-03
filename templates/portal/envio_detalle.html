@@ -300,20 +300,41 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <span>Precio final del envío</span>
             <strong>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
-        {% if s.peso_final_facturado_kg is not none %}
+        {% set d = s.diferencia_detalle %}
+        {% if d and d.es_peso %}
         <hr class="divider">
         <div class="mini-row">
-            <span>Peso emitido / cotizado</span>
-            <strong>{{ s.peso_cotizado_kg or s.peso_kg }} kg</strong>
+            <span>Peso inicial</span>
+            <strong>{{ d.peso_inicial_kg }} kg</strong>
         </div>
         <div class="mini-row">
-            <span>Peso final facturado</span>
-            <strong>{{ s.peso_final_facturado_kg }} kg · {{ (s.peso_base_facturado or 'otro').replace('_', ' ')|title }}</strong>
+            <span>Peso facturado por el courier</span>
+            <strong>{{ d.peso_facturado_kg }} kg · {{ (d.base_peso or 'otro').replace('_', ' ')|title }}</strong>
+        </div>
+        <div class="mini-row">
+            <span>Diferencia de peso</span>
+            <strong>{{ d.diferencia_peso_kg }} kg</strong>
         </div>
         <div class="mini-row">
             <span>Motivo</span>
-            <strong>{{ (s.motivo_diferencia or 'otro').replace('_', ' ')|title }}</strong>
+            <strong>
+              {% if d.motivo in ['PESO_REAL', 'PESO_VOLUMETRICO'] %}
+                {{ d.motivo_legible }}
+              {% elif d.motivo == 'MIXTO' %}
+                Peso y {{ d.concepto_courier or 'recargos del courier' }}
+              {% else %}
+                {{ d.concepto_courier or d.motivo_legible }}
+              {% endif %}
+            </strong>
         </div>
+        <p style="font-size:12px;color:var(--fg-3);margin-top:10px;">{{ d.leyenda }}</p>
+        {% elif s.diferencia_cliente_ars %}
+        <hr class="divider">
+        <div class="mini-row">
+          <span>Motivo de la diferencia</span>
+          <strong>{{ d.concepto_courier or d.motivo_legible }}</strong>
+        </div>
+        <p style="font-size:12px;color:var(--fg-3);margin-top:10px;">{{ d.leyenda }}</p>
         {% endif %}
         {% if s.observaciones %}
         <hr class="divider">

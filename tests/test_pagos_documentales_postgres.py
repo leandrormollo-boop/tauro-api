@@ -14,6 +14,7 @@ import pytest
 
 from servicios import cuenta_corriente
 from servicios import facturacion_clientes
+from servicios import solicitudes_guia
 
 
 DATABASE_URL = os.getenv("TAURO_TEST_DATABASE_URL", "").strip()
@@ -57,6 +58,7 @@ def cuenta_db(monkeypatch):
 
         monkeypatch.setattr(cuenta_corriente, "get_conn", conexion)
         monkeypatch.setattr(facturacion_clientes, "get_conn", conexion)
+        monkeypatch.setattr(solicitudes_guia, "get_conn", conexion)
         yield conexion
     finally:
         with admin.cursor() as cur:
@@ -172,3 +174,112 @@ def test_trigger_deriva_ambito_y_bloquea_sobrepago(cuenta_db):
                     "VALUES (%s,'INTERNACIONAL',5,'APLICADA',%s)",
                     (pago_id, envio_id),
                 )
+
+
+def test_diferencia_publica_usa_concepto_courier_sin_costos(cuenta_db):
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO clientes (cliente_id,email) "
+                "VALUES ('CLIENTE_DIF','dif@example.invalid')"
+            )
+            cur.execute(
+                """
+                INSERT INTO solicitudes_guia (
+                    cliente_id,producto_alias,destino_pais,dest_nombre,
+                    dest_direccion,dest_ciudad,dest_zip,tracking,ambito,courier
+                ) VALUES (
+                    'CLIENTE_DIF','Producto','US','Destino','Calle 1',
+                    'Miami','33101','TRACK-DIF','INTERNACIONAL','DHL'
+                ) RETURNING id
+                """
+            )
+            solicitud_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """
+                INSERT INTO envios (
+                    cliente_id,fecha,monto_ars,estado,tracking,solicitud_id,ambito
+                ) VALUES (
+                    'CLIENTE_DIF',CURRENT_DATE,100,'ACTIVO','TRACK-DIF',%s,
+                    'INTERNACIONAL'
+                )
+                """, (solicitud_id,),
+            )
+            cur.execute(
+                """
+                INSERT INTO facturas_courier (
+                    courier,tipo_documento,numero,moneda,total,estado
+                ) VALUES ('DHL','FC','QA-DIF','ARS',100,'CERRADA')
+                RETURNING id
+                """
+            )
+            factura_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """
+                INSERT INTO facturas_courier_items (
+                    factura_id,linea_numero,tracking_raw,concepto_tipo,
+                    descripcion,importe,moneda,tipo_cambio_ars,importe_ars,
+                    estado
+                ) VALUES (
+                    %s,1,'TRACK-DIF','MANEJO','Cargo por zona extendida',
+                    100,'ARS',1,100,'CONCILIADO'
+                ) RETURNING id
+                """, (factura_id,),
+            )
+            item_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """
+                INSERT INTO factura_courier_item_matches (
+                    item_id,solicitud_id,monto_asignado,monto_asignado_ars,
+                    metodo,estado,creado_por,confirmado_por,confirmado_at
+                ) VALUES (
+                    %s,%s,100,100,'EXACTO_TRACKING','CONFIRMADO',
+                    'test','test',NOW()
+                )
+                """, (item_id, solicitud_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO conciliaciones_envio (
+                    solicitud_id,version,estado,precio_cliente_inicial_ars,
+                    costo_courier_estimado_ars,margen_tauro_protegido_ars,
+                    costo_courier_real_ars,precio_cliente_final_ars,
+                    ajuste_cliente_ars,diferencia_flete_ars,tax_cliente_ars,
+                    motivo_diferencia,calculo_hash,evidencia_completa,
+                    calculado_por,aprobado_por,aprobado_at
+                ) VALUES (
+                    %s,1,'CERRADA',100,50,50,100,150,50,50,0,
+                    'RECARGO',%s,TRUE,'test','test',NOW()
+                ) RETURNING id
+                """, (solicitud_id, "d" * 64),
+            )
+            conciliacion_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """
+                INSERT INTO ajustes_cliente (
+                    conciliacion_id,solicitud_id,tipo,monto_ars,
+                    precio_anterior_ars,precio_nuevo_ars,estado,
+                    idempotency_key,motivo,propuesto_por,aprobado_por,
+                    aprobado_at,aplicado_por,aplicado_at,referencia_aplicacion
+                ) VALUES (
+                    %s,%s,'DEBITO',50,100,150,'APLICADO',%s,'RECARGO',
+                    'test','test',NOW(),'test',NOW(),'QA'
+                )
+                """, (conciliacion_id, solicitud_id, "dif-" + "x" * 40),
+            )
+
+    pagina = cuenta_corriente.movimientos_cuenta_paginados(
+        "CLIENTE_DIF", "internacional", "diferencias", 1, 10,
+    )
+    diferencia = pagina["items"][0]["diferencia_detalle"]
+    assert diferencia["concepto_courier"] == "Cargo por zona extendida"
+    assert diferencia["motivo_legible"] == "Recargo del courier"
+    assert "costo" not in diferencia and "margen" not in diferencia
+
+    envio = solicitudes_guia.obtener_solicitud_de_cliente(
+        solicitud_id, "CLIENTE_DIF",
+    )
+    assert envio["diferencia_detalle"]["concepto_courier"] == (
+        "Cargo por zona extendida"
+    )
+    assert "costo_courier_real_ars" not in envio["diferencia_detalle"]

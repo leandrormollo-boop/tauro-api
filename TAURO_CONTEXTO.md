@@ -243,6 +243,7 @@ Para envíos históricos, `scripts/importar_costos_waimao_2026.py` cruza por tra
 5. Fórmula: precio final cliente = costo courier real + margen TAURO protegido. Ajuste = precio final − precio inicial. Además se separa `diferencia_flete_ars` de `tax_cliente_ars`, cuya suma debe coincidir con el ajuste.
 6. El cálculo crea un `ajustes_cliente` PROPUESTO y no toca el saldo. Admin revisa evidencia y aplica la diferencia. Si es positiva genera débito; si es negativa, crédito. Una nueva factura posterior sólo aplica el incremento respecto del último precio final cerrado.
 7. La aplicación se vincula a la solicitud y por ella al cargo `envios`; es idempotente, auditada y no reescribe evidencia anterior.
+8. En el portal, la diferencia se transforma mediante una lista permitida de campos: peso inicial, peso facturado, diferencia de peso, base, motivo y descripción del concepto courier. Si no es peso se usa la descripción confirmada de la línea (por ejemplo zona extendida, combustible o impuesto). Cuenta corriente y detalle muestran “TAURO traslada la diferencia del courier sin agregar margen”; nunca reciben costo real, costo estimado ni margen protegido.
 
 ## 6. Facturación a clientes
 
@@ -400,5 +401,6 @@ Los prefijos ya están incorporados debajo.
 - 3 septiembre, históricos WAIMAO: se cruzó la hoja madre `TAURO 2026` con producción y se importaron 29 costos iniciales faltantes como snapshots inmutables `IMPORT_SHEET_2026`; 3 existentes coincidieron y 14 casos sin evidencia quedaron pendientes. El proceso tiene dry-run, controles estrictos, auditoría, respaldo restaurable e idempotencia verificada; el acta está en `docs/IMPORTACION_COSTOS_WAIMAO_2026_ACTA.md`.
 - 3 septiembre, facturación agrupada a clientes: se incorporaron cabeceras y renglones inmutables para FC/NC, selección por período y ámbito, PDF único, auditoría, bloqueo de doble facturación y vistas separadas de facturas/pendientes en el portal. La factura pasa a documentar cargos preexistentes sin duplicar deuda; el diseño contable conjunto está en `docs/DISENO_FACTURACION_PAGOS_DIFERENCIAS.md`.
 - 3 septiembre, pagos por documento: portal y admin permiten imputar a facturas o cargos, con pagos parciales, remanente a favor, aprobación de solicitudes y arrastre automático al facturar. Se preservaron las aplicaciones históricas por ámbito y se agregaron controles concurrentes para impedir sobrepago del pago o del documento.
+- 3 septiembre, explicación de diferencias: cuenta corriente y detalle del envío muestran pesos comparados o el concepto documentado por el courier, más la aclaración de traslado sin margen. La salida cliente usa una lista permitida y excluye costos internos y margen aun si esos datos existen en conciliación.
 
 Este historial resume los commits visibles de `origin/main`; no atribuye autoría personal cuando el commit no la documenta. Para una auditoría exacta se debe consultar `git log --date=iso` y el diff de cada hash.

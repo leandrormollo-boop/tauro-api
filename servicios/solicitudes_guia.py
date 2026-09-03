@@ -15,6 +15,7 @@ import psycopg2
 from pypdf import PdfReader, PdfWriter
 
 from core.database import get_conn
+from servicios.diferencias_cliente import presentar_diferencia
 from servicios.couriers_urls import ambito_envio
 from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
 
@@ -1633,7 +1634,8 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                                 fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
-                       fin.peso_base_facturado, fin.motivo_diferencia
+                       fin.peso_base_facturado, fin.motivo_diferencia,
+                       fin.conceptos_courier
                 FROM solicitudes_guia s
                 LEFT JOIN solicitudes_guia_reemisiones re_prev
                   ON re_prev.solicitud_nueva_id=s.id
@@ -1647,7 +1649,18 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
                            c.diferencia_flete_ars, c.tax_cliente_ars,
                            c.peso_cotizado_kg, c.peso_final_facturado_kg,
-                           c.peso_base_facturado, c.motivo_diferencia
+                           c.peso_base_facturado, c.motivo_diferencia,
+                           COALESCE((
+                               SELECT STRING_AGG(DISTINCT COALESCE(
+                                   NULLIF(BTRIM(i.descripcion), ''),
+                                   REPLACE(i.concepto_tipo, '_', ' ')
+                               ), ' · ')
+                               FROM factura_courier_item_matches m
+                               JOIN facturas_courier_items i ON i.id=m.item_id
+                               WHERE m.solicitud_id=s.id
+                                 AND m.estado='CONFIRMADO'
+                                 AND i.concepto_tipo <> 'FLETE'
+                           ), '') AS conceptos_courier
                     FROM conciliaciones_envio c
                     WHERE c.solicitud_id=s.id AND c.estado='CERRADA'
                     ORDER BY c.version DESC LIMIT 1
@@ -1657,7 +1670,11 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                 (solicitud_id, cliente),
             )
             row = cur.fetchone()
-    return _sin_label(dict(row)) if row else None
+    if not row:
+        return None
+    resultado = _sin_label(dict(row))
+    resultado["diferencia_detalle"] = presentar_diferencia(resultado)
+    return resultado
 
 
 def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[bytes]:

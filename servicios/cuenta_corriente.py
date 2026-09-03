@@ -14,6 +14,7 @@ import psycopg2
 
 from core.database import get_conn
 from servicios.auditoria import registrar_evento_con_cursor
+from servicios.diferencias_cliente import presentar_diferencia
 
 
 _CENTAVO = Decimal("0.01")
@@ -710,7 +711,8 @@ def movimientos_cuenta_paginados(
                     fc.tipo || ' ' || LPAD(fc.punto_venta::text, 4, '0')
                       || '-' || LPAD(fc.numero::text, 8, '0'),
                     NULLIF(BTRIM(e.nro_fc), '')
-                ) AS numero_factura
+                ) AS numero_factura,
+                NULL::jsonb AS diferencia_detalle
             FROM envios e
             LEFT JOIN solicitudes_guia s
               ON s.id = e.solicitud_id
@@ -736,7 +738,8 @@ def movimientos_cuenta_paginados(
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
-                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text
+                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text,
+                NULL::jsonb
             FROM pagos_aplicaciones pa
             JOIN pagos p ON p.id = pa.pago_id
             WHERE p.cliente_id = %s
@@ -754,7 +757,8 @@ def movimientos_cuenta_paginados(
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
-                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text
+                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text,
+                NULL::jsonb
             FROM pagos p
             LEFT JOIN aplicaciones_pago ap ON ap.pago_id = p.id
             WHERE p.cliente_id = %s
@@ -771,7 +775,8 @@ def movimientos_cuenta_paginados(
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
-                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text
+                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text,
+                NULL::jsonb
             FROM pagos p
             WHERE p.cliente_id = %s
               AND p.estado = 'PENDIENTE'
@@ -801,7 +806,29 @@ def movimientos_cuenta_paginados(
                 NULLIF(BTRIM(s.dest_nombre), ''),
                 NULLIF(BTRIM(s.remitente_nombre), ''),
                 a.precio_nuevo_ars,
-                NULLIF(BTRIM(e.nro_fc), '')
+                NULLIF(BTRIM(e.nro_fc), ''),
+                JSONB_BUILD_OBJECT(
+                    'peso_inicial_kg', c.peso_cotizado_kg,
+                    'peso_facturado_kg', c.peso_final_facturado_kg,
+                    'diferencia_peso_kg', CASE
+                        WHEN c.peso_cotizado_kg IS NOT NULL
+                         AND c.peso_final_facturado_kg IS NOT NULL
+                        THEN c.peso_final_facturado_kg-c.peso_cotizado_kg
+                    END,
+                    'base_peso', c.peso_base_facturado,
+                    'motivo', c.motivo_diferencia,
+                    'concepto_courier', COALESCE((
+                        SELECT STRING_AGG(DISTINCT COALESCE(
+                            NULLIF(BTRIM(i.descripcion), ''),
+                            REPLACE(i.concepto_tipo, '_', ' ')
+                        ), ' · ')
+                        FROM factura_courier_item_matches m
+                        JOIN facturas_courier_items i ON i.id=m.item_id
+                        WHERE m.solicitud_id=a.solicitud_id
+                          AND m.estado='CONFIRMADO'
+                          AND i.concepto_tipo <> 'FLETE'
+                    ), '')
+                )
             FROM ajustes_cliente a
             JOIN conciliaciones_envio c ON c.id=a.conciliacion_id
             JOIN envios e ON e.solicitud_id=a.solicitud_id
@@ -853,6 +880,10 @@ def movimientos_cuenta_paginados(
             if item.get(campo) is None and campo == "valor_envio_ars":
                 continue
             item[campo] = Decimal(str(item.get(campo) or 0)).quantize(_CENTAVO)
+        if item.get("tipo") == "DIFERENCIA":
+            item["diferencia_detalle"] = presentar_diferencia(
+                item.get("diferencia_detalle")
+            )
     desde = offset + 1 if total else 0
     hasta = min(offset + len(items), total)
     return {
