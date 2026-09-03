@@ -482,6 +482,7 @@ def validar_reemision_cliente(
                 LEFT JOIN solicitudes_guia_reemisiones r
                   ON r.solicitud_anterior_id=s.id
                 WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.test=FALSE AND s.visible_cliente=TRUE
                 """,
                 (int(solicitud_id), cliente_id),
             )
@@ -652,6 +653,7 @@ def validar_cancelacion_cliente(
                 LEFT JOIN solicitudes_guia_reemisiones r
                   ON r.solicitud_anterior_id=s.id
                 WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.test=FALSE AND s.visible_cliente=TRUE
                 """,
                 (int(solicitud_id), cliente_id),
             )
@@ -732,6 +734,7 @@ def cancelar_solicitud_cliente(
                        ) AS tiene_recoleccion_activa
                 FROM solicitudes_guia s
                 WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.test=FALSE AND s.visible_cliente=TRUE
                 FOR UPDATE
                 """,
                 (solicitud_id, cliente_id),
@@ -1258,6 +1261,7 @@ def listar_solicitudes_cliente(
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.cliente_id = %s AND s.test=FALSE
+                  AND s.visible_cliente=TRUE
             """
             params = [cliente]
             if desde is not None:
@@ -1306,6 +1310,7 @@ def periodos_solicitudes_cliente(cliente_id: str) -> list[tuple[int, int]]:
                 FROM solicitudes_guia s
                 LEFT JOIN envios e ON e.solicitud_id=s.id
                 WHERE s.cliente_id=%s AND s.test=FALSE
+                  AND s.visible_cliente=TRUE
                 ORDER BY anio DESC, mes DESC
                 """,
                 (cliente_id.strip().upper(),),
@@ -1337,7 +1342,7 @@ def listar_envios_api(
     ambito = (ambito or "").strip().upper()
     estado = (estado or "").strip().upper()
 
-    condiciones = ["cliente_id=%s", "test=FALSE"]
+    condiciones = ["cliente_id=%s", "test=FALSE", "visible_cliente=TRUE"]
     params: list = [cliente_id]
     if ambito:
         condiciones.append("ambito=%s")
@@ -1392,6 +1397,7 @@ def contar_guias_listas(cliente_id: str) -> int:
                 FROM solicitudes_guia s
                 WHERE s.cliente_id = %s AND s.estado = 'GUIA_LISTA'
                   AND s.test=FALSE
+                  AND s.visible_cliente=TRUE
                   AND NOT EXISTS (
                       SELECT 1
                       FROM envios e
@@ -1448,6 +1454,34 @@ def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:
                 params,
             )
             return [presentar_estados_envio(_sin_label(dict(r))) for r in cur.fetchall()]
+
+
+def cambiar_visibilidad_cliente(
+    solicitud_id: int,
+    visible: bool,
+) -> Optional[dict]:
+    """Muestra u oculta una solicitud en todos los accesos del cliente.
+
+    Es una preferencia de presentación reversible: no cambia el estado
+    operativo y no toca cargos, facturas, pagos, ajustes ni documentos.
+    El admin conserva siempre la fila y sus relaciones para auditoría.
+    """
+    if not isinstance(visible, bool):
+        raise ValueError("La visibilidad indicada no es válida.")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE solicitudes_guia
+                SET visible_cliente=%s, updated_at=NOW()
+                WHERE id=%s
+                RETURNING id, cliente_id, visible_cliente, test, estado,
+                          tracking
+                """,
+                (visible, int(solicitud_id)),
+            )
+            fila = cur.fetchone()
+    return dict(fila) if fila else None
 
 
 def actualizar_solicitud_guia(
@@ -1651,6 +1685,7 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
                 WHERE s.id = %s AND s.cliente_id = %s AND s.test=FALSE
+                  AND s.visible_cliente=TRUE
                 """,
                 (solicitud_id, cliente),
             )
@@ -1673,6 +1708,7 @@ def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[byt
                 FROM solicitudes_guia s
                 WHERE s.id=%s AND s.cliente_id=%s
                   AND s.test=FALSE
+                  AND s.visible_cliente=TRUE
                   AND s.estado <> 'CANCELADO'
                   AND s.estado <> 'REEMPLAZADO'
                   AND NOT EXISTS (
@@ -1948,6 +1984,7 @@ def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Op
                     """SELECT s.label_pdf FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
                          AND s.test=FALSE
+                         AND s.visible_cliente=TRUE
                          AND s.estado <> 'CANCELADO'
                          AND s.estado <> 'REEMPLAZADO'
                          AND NOT EXISTS (
@@ -1986,6 +2023,7 @@ def obtener_factura_comercial_pdf(
                     """SELECT s.commercial_invoice_pdf FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
                          AND s.test=FALSE
+                         AND s.visible_cliente=TRUE
                          AND s.estado <> 'CANCELADO'
                          AND s.estado <> 'REEMPLAZADO'
                          AND NOT EXISTS (
@@ -2093,6 +2131,7 @@ def preparar_documentos_envio_portal(
                 LEFT JOIN clientes c ON c.cliente_id=s.cliente_id
                 WHERE s.id=%s AND s.cliente_id=%s
                   AND s.test=FALSE
+                  AND s.visible_cliente=TRUE
                   AND s.estado <> 'CANCELADO'
                   AND s.estado <> 'REEMPLAZADO'
                   AND NOT EXISTS (
@@ -2498,6 +2537,7 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                 LEFT JOIN envios e_anterior
                   ON e_anterior.solicitud_id=r.solicitud_anterior_id
                 WHERE s.id = %s
+                  AND s.test=FALSE AND s.visible_cliente=TRUE
                 FOR UPDATE OF c, s
             """, (solicitud_id,))
             fila = cur.fetchone()

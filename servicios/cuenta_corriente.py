@@ -723,7 +723,9 @@ def movimientos_cuenta_paginados(
                  OR NULLIF(BTRIM(e.nro_fc), '') IS NOT NULL) AS facturado,
                 e.id AS envio_id,
                 NULL::integer AS pago_id,
-                e.solicitud_id,
+                CASE WHEN COALESCE(s.visible_cliente, TRUE)
+                               AND COALESCE(s.test, FALSE)=FALSE
+                     THEN e.solicitud_id END AS solicitud_id,
                 CASE WHEN fc.id IS NOT NULL AND fc.pdf IS NOT NULL
                      THEN '/portal/facturas/' || fc.id::text || '/pdf'
                      WHEN e.factura_pdf IS NOT NULL
@@ -827,7 +829,8 @@ def movimientos_cuenta_paginados(
                 CASE WHEN a.tipo='DEBITO' THEN ABS(a.monto_ars) ELSE 0 END,
                 CASE WHEN a.tipo='CREDITO' THEN ABS(a.monto_ars) ELSE 0 END,
                 ABS(a.monto_ars), a.estado, FALSE, e.id, NULL::integer,
-                a.solicitud_id, NULL::text,
+                CASE WHEN s.visible_cliente AND s.test=FALSE
+                     THEN a.solicitud_id END AS solicitud_id, NULL::text,
                 COALESCE(
                     NULLIF(BTRIM(s.tracking), ''),
                     NULLIF(BTRIM(e.tracking), '')

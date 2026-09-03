@@ -280,6 +280,8 @@ def embudo_envios(cliente_id: str) -> list[dict]:
                     SELECT estado, COUNT(*) AS n
                     FROM solicitudes_guia s
                     WHERE s.cliente_id = %s
+                      AND s.test=FALSE
+                      AND s.visible_cliente=TRUE
                     GROUP BY s.estado
                     """,
                     (cliente_id,),
@@ -354,6 +356,8 @@ def checklist_arranque(cliente_id: str) -> dict:
                     SELECT COUNT(*) AS n
                     FROM solicitudes_guia s
                     WHERE s.cliente_id = %s
+                      AND s.test=FALSE
+                      AND s.visible_cliente=TRUE
                       AND s.estado <> 'CANCELADO'
                       AND NOT EXISTS (
                           SELECT 1

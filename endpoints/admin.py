@@ -71,6 +71,7 @@ from servicios.carrier_contract import CARRIER_SPECS
 from servicios.solicitudes_guia import (
     ESTADOS_SOLICITUD,
     actualizar_solicitud_guia,
+    cambiar_visibilidad_cliente,
     contar_solicitudes_pendientes,
     listar_solicitudes_admin,
     generar_guia,
@@ -1700,7 +1701,11 @@ def admin_cliente_detail(
                        NULLIF(BTRIM(s.dest_nombre), '') AS destinatario,
                        NULLIF(BTRIM(s.remitente_nombre), '') AS remitente,
                        s.estado AS solicitud_estado,
-                       (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO')
+                       COALESCE(s.visible_cliente, TRUE) AS visible_cliente,
+                       COALESCE(s.test, FALSE) AS solicitud_test,
+                       (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO'
+                        OR COALESCE(s.test, FALSE)
+                        OR NOT COALESCE(s.visible_cliente, TRUE))
                            AS oculto_cliente,
                        (e.factura_pdf IS NOT NULL) AS tiene_factura_pdf,
                        fc.id AS factura_cliente_id,
@@ -1779,6 +1784,13 @@ def admin_cliente_detail(
             "Envío anulado: se descontó de la cuenta corriente y ya no "
             "es visible en el portal del cliente. El registro quedó auditado."
         )
+    elif ok == "envio_oculto":
+        flash_ok = (
+            "Envío ocultado del portal. Sigue intacto en admin y no cambió "
+            "el saldo, la factura ni su estado operativo."
+        )
+    elif ok == "envio_visible":
+        flash_ok = "Envío nuevamente visible en el portal del cliente."
     if pwd_error == "corta":
         flash_ok = None  # priorizar error
         # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
@@ -2762,6 +2774,12 @@ def admin_pedidos(
         flash_ok = "Verificación del courier conciliada y registrada."
     elif ok == "etiqueta":
         flash_ok = "Etiqueta PDF recuperada y adjuntada a la guía."
+    elif ok == "oculto":
+        flash_ok = (
+            "Envío ocultado del portal. No se modificaron el saldo ni la operación."
+        )
+    elif ok == "visible":
+        flash_ok = "Envío nuevamente visible en el portal del cliente."
 
     solicitudes = listar_solicitudes_admin(estado=estado)
     return templates.TemplateResponse(
@@ -2776,6 +2794,57 @@ def admin_pedidos(
             "flash_error": guia_error,
         },
     )
+
+
+@router.post("/pedidos/{solicitud_id}/visibilidad")
+def admin_pedido_visibilidad(
+    request: Request,
+    solicitud_id: int,
+    visible_cliente: str = Form(...),
+    volver_cliente: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Oculta o muestra un envío sin alterar operación ni cuenta corriente."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    valor = str(visible_cliente or "").strip()
+    if valor not in {"0", "1"}:
+        return Response(
+            content="La visibilidad indicada no es válida.",
+            status_code=400,
+            media_type="text/plain",
+        )
+
+    cambio = cambiar_visibilidad_cliente(solicitud_id, valor == "1")
+    if not cambio:
+        return Response(
+            content="La solicitud no existe.", status_code=404,
+            media_type="text/plain",
+        )
+
+    from servicios.auditoria import registrar_desde_request
+    visible = bool(cambio["visible_cliente"])
+    registrar_desde_request(
+        request,
+        event="admin.visibilidad_envio_cliente",
+        actor_type="admin",
+        actor_ref=str(cambio["cliente_id"]),
+        status_code=303,
+        metadata={
+            "solicitud_id": int(cambio["id"]),
+            "visible_cliente": visible,
+            "caso_test": bool(cambio.get("test")),
+        },
+    )
+
+    volver = str(volver_cliente or "").strip().upper()
+    if volver and volver == str(cambio["cliente_id"]).strip().upper():
+        estado = "envio_visible" if visible else "envio_oculto"
+        return RedirectResponse(
+            url=f"/admin/clientes/{quote(volver)}?ok={estado}", status_code=303,
+        )
+    estado = "visible" if visible else "oculto"
+    return RedirectResponse(url=f"/admin/pedidos?ok={estado}", status_code=303)
 
 
 def _notificar_estado_async(solicitud_id: int, estado: str):

@@ -876,6 +876,7 @@ def track_redirect(nro: str = "", cliente: str = Depends(cliente_actual)):
                 cur.execute("""
                     SELECT courier FROM solicitudes_guia
                     WHERE cliente_id = %s AND tracking = %s
+                      AND test=FALSE AND visible_cliente=TRUE
                     LIMIT 1
                 """, (cliente, nro))
                 fila = cur.fetchone()

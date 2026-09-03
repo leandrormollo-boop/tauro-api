@@ -218,10 +218,20 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
               {% if e.solicitud_id %}
               <small style="display:block;color:var(--fg-4);margin-top:4px;">Oculto del portal</small>
               {% endif %}
+            {% elif e.solicitud_test %}
+              <span class="badge warn">PRUEBA · OCULTO</span>
+              <small style="display:block;color:var(--fg-4);margin-top:4px;">No aparece en el portal</small>
             {% elif e.factura_cliente_id or e.nro_fc %}
               <span class="badge ok">FACTURADO</span>
             {% else %}
               <span class="badge warn">A FACTURAR</span>
+            {% endif %}
+            {% if e.solicitud_id and not e.solicitud_test and e.estado != 'CANCELADO' and e.solicitud_estado != 'CANCELADO' %}
+              {% if e.visible_cliente %}
+              <small style="display:block;color:var(--ok);margin-top:4px;">Visible en el portal</small>
+              {% else %}
+              <small style="display:block;color:var(--warn);margin-top:4px;">Oculto del portal</small>
+              {% endif %}
             {% endif %}
           </td>
           <td>
@@ -237,6 +247,19 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/{{ e.factura_cliente_id }}/pdf" class="btn btn-sm btn-ghost">Ver PDF</a>
             {% elif e.nro_fc and e.tiene_factura_pdf %}
             <a href="/admin/envios/{{ e.id }}/factura" class="btn btn-sm btn-ghost">Ver PDF</a>
+            {% endif %}
+            {% if e.solicitud_id and not e.solicitud_test %}
+            <form method="POST" action="/admin/pedidos/{{ e.solicitud_id }}/visibilidad"
+                  style="margin-top:6px;"
+                  data-confirm="{% if e.visible_cliente %}¿Ocultar este envío del portal? No se borrará ni cambiará el saldo, la factura o el estado operativo.{% else %}¿Volver a mostrar este envío en el portal del cliente?{% endif %}">
+              <input type="hidden" name="visible_cliente" value="{{ '0' if e.visible_cliente else '1' }}">
+              <input type="hidden" name="volver_cliente" value="{{ cliente.cliente_id }}">
+              <button type="submit" class="btn btn-sm btn-ghost">
+                {{ 'Ocultar del portal' if e.visible_cliente else 'Mostrar en portal' }}
+              </button>
+            </form>
+            {% elif e.solicitud_test %}
+            <small style="display:block;color:var(--fg-4);margin-top:6px;">Caso de prueba: oculto automáticamente.</small>
             {% endif %}
           </td>
         </tr>

@@ -50,6 +50,9 @@
             <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px;">
               <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">{{ s.estado_operacion_ui.label }}</span>
               <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">{{ s.estado_tracking_ui.label }}</span>
+              {% if not s.visible_cliente %}
+              <span class="badge warn" title="El admin conserva el registro; el cliente no puede verlo ni abrirlo">Oculto del portal</span>
+              {% endif %}
             </div>
           </td>
           <td>
@@ -146,6 +149,14 @@
             {% endif %}
           </td>
           <td style="min-width:250px;">
+            <form method="POST" action="/admin/pedidos/{{ s.id }}/visibilidad"
+                  style="margin-bottom:8px;"
+                  data-confirm="{% if s.visible_cliente %}¿Ocultar este envío del portal? No se borrará ni cambiará el saldo, la factura o el estado operativo.{% else %}¿Volver a mostrar este envío en el portal del cliente?{% endif %}">
+              <input type="hidden" name="visible_cliente" value="{{ '0' if s.visible_cliente else '1' }}">
+              <button type="submit" class="btn btn-sm btn-ghost">
+                {{ 'Ocultar del portal' if s.visible_cliente else 'Mostrar en portal' }}
+              </button>
+            </form>
             {% if conciliar_courier %}
             <div class="msg warn" style="font-size:11px;padding:7px;margin-bottom:8px;">
               {% if s.estado == 'EMITIENDO' %}La emisión quedó sin respuesta hace más de 10 minutos. {% endif %}

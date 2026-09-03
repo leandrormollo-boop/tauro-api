@@ -14,6 +14,10 @@ Estado: primer corte implementado y verificado localmente. **No desplegado, no e
 - Las reglas de precio ausentes o inválidas dejan de convertirse silenciosamente en 25%, cero o factor uno. Se conserva el 0% o importe fijo cero cuando están explícitamente configurados. Sin una regla válida, el permiso efectivo de cotizar/emitir queda cerrado.
 - El cotizador exige un tipo de cambio válido en `config`; ya no cae a un dólar fijo de 1450. Web y checkout manejan esa indisponibilidad sin publicar tarifas inventadas.
 - El actualizador del dólar también exige una referencia válida y explícita para controlar saltos. Sin referencia no actualiza ni envía una falsa alerta calculada contra 1450.
+- El admin puede ocultar o volver a mostrar una solicitud en el portal sin
+  borrarla, cancelarla ni modificar saldo, factura, pagos o estado operativo.
+  La exclusión alcanza listados, panel, API, acceso directo, descarga de PDFs
+  y acciones del cliente; admin y auditoría conservan el registro completo.
 
 No se cambiaron porcentajes comerciales existentes ni se aplicaron cargos, pagos, NC o ajustes a clientes reales.
 
@@ -24,7 +28,7 @@ Entorno: PostgreSQL 18.6 temporal, accesible exclusivamente por socket local; da
 | Control | Resultado |
 | --- | --- |
 | Suite antes de los cambios | 1.331 pruebas aprobadas + 5 subtests |
-| Suite final completa con PostgreSQL | **1.363 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
+| Suite final completa con PostgreSQL | **1.367 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
 | Revisión independiente agregada | 29 casos aprobados, 9 de ellos con PostgreSQL |
 | Revisión independiente sin URL de pruebas | 20 aprobados; los 9 de PostgreSQL se omiten expresamente, sin intentar una conexión por defecto |
 | `git diff --check` | Sin errores |
@@ -41,8 +45,13 @@ Los casos nuevos cubren, entre otros:
 - rechazo de estados inválidos y preservación de márgenes cero explícitos;
 - formularios viejos y ausencia de tipo de cambio o referencia para su actualización.
 - presentación y guardado del tope de deuda sin convertir importes grandes a notación científica.
+- visibilidad reversible de envíos, bloqueo de accesos directos y preservación
+  comprobada del cargo contable de una solicitud oculta.
 
-Pruebas nuevas: `tests/test_financial_stabilization_review.py`. La conexión debe indicarse siempre mediante una `TAURO_TEST_DATABASE_URL` exclusivamente de pruebas: las fixtures crean y eliminan schemas sintéticos.
+Pruebas nuevas: `tests/test_financial_stabilization_review.py` y
+`tests/test_visibilidad_envios_cliente.py`. La conexión debe indicarse siempre
+mediante una `TAURO_TEST_DATABASE_URL` exclusivamente de pruebas: las fixtures
+crean y eliminan schemas sintéticos.
 
 ## Trazabilidad y controles
 
@@ -51,7 +60,9 @@ Pruebas nuevas: `tests/test_financial_stabilization_review.py`. La conexión deb
 - Router TAURO: arquitectura con impacto financiero y seguridad; ruta de revisión crítica, controles determinísticos y revisión independiente.
 - Implementación inicial: Claude Code, modelo verificado `claude-fable-5-1`, por pedido explícito del usuario.
 - Revisión independiente, correcciones de cierre y ejecución de pruebas: Codex. Se detuvo el worker antes de retomar las escrituras, manteniendo un solo escritor.
-- No hubo commit, push, merge, despliegue ni cambios en bases remotas, cuentas de operadores o portales de tiendas.
+- El corte quedó versionado y publicado únicamente en la rama candidata; no
+  hubo merge a `main`, despliegue ni cambios en bases remotas, cuentas de
+  operadores o portales de tiendas.
 - Se retiró únicamente el template de código obsoleto `templates/admin/facturar_cargo_form.html`; es recuperable desde Git. No se eliminaron documentos de clientes.
 
 ## Antes de desplegar

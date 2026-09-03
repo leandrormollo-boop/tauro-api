@@ -1462,6 +1462,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     origen_plataforma        TEXT,
     origen_dominio           TEXT,
     origen_pedido_externo_id TEXT,
+    visible_cliente          BOOLEAN NOT NULL DEFAULT TRUE,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1577,6 +1578,11 @@ ALTER TABLE IF EXISTS solicitudes_guia
 -- mezclarlos con la operación real.
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS test BOOLEAN NOT NULL DEFAULT FALSE;
+-- Visibilidad comercial reversible. Permite retirar del portal una carga de
+-- demostración o un registro operativo sin borrarlo, cancelarlo ni alterar su
+-- cargo, factura, pago o trazabilidad interna.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS visible_cliente BOOLEAN NOT NULL DEFAULT TRUE;
 -- Empresa y CONTACTO separados (guía real de HAILU, 05/08): los couriers
 -- piden companyName (razón social) Y personName (quién atiende). Antes un
 -- solo campo forzaba a elegir, y la emisión ponía como empresa al cliente

@@ -94,7 +94,10 @@ def test_listados_y_dashboard_excluyen_datos_de_prueba():
     assert 'where_activos = "WHERE c.test = FALSE"' in cuenta
     assert "WHERE c.test = FALSE" in bandeja
     assert guias.count("s.test=FALSE") >= 7
-    assert 'condiciones = ["cliente_id=%s", "test=FALSE"]' in guias
+    assert (
+        'condiciones = ["cliente_id=%s", "test=FALSE", '
+        '"visible_cliente=TRUE"]'
+    ) in guias
 
 
 def test_tracking_fedex_queda_oculto_y_sus_errores_son_genericos():

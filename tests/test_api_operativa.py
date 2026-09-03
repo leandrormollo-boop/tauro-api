@@ -365,7 +365,10 @@ def test_listado_envios_sql_filtra_cliente_y_no_selecciona_costos():
     bloque = fuente.split("def listar_envios_api(", 1)[1].split(
         "def contar_guias_listas", 1
     )[0]
-    assert 'condiciones = ["cliente_id=%s", "test=FALSE"]' in bloque
+    assert (
+        'condiciones = ["cliente_id=%s", "test=FALSE", '
+        '"visible_cliente=TRUE"]'
+    ) in bloque
     assert "costo_" not in bloque
     assert "margen" not in bloque
     assert "label_pdf," not in bloque
