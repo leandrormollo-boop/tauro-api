@@ -162,6 +162,11 @@ def test_descarga_b2b_de_guia_es_privada_y_no_cacheable(monkeypatch):
         "obtener_label_de_cliente",
         lambda solicitud_id, cliente_id: b"%PDF-1.4\nprivado",
     )
+    monkeypatch.setattr(
+        solicitudes_guia,
+        "marcar_guia_descargada_cliente",
+        lambda solicitud_id, cliente_id: True,
+    )
 
     respuesta = main.descargar_guia_api(91, x_api_key="tauro_test")
 

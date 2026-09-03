@@ -166,6 +166,14 @@ def test_estado_pedido_y_label_siempre_filtran_por_cliente(monkeypatch):
         solicitudes_guia, "obtener_factura_comercial_pdf",
         lambda solicitud_id, cliente_id: b"%PDF-1.4\nINVOICE",
     )
+    descargas = []
+    monkeypatch.setattr(
+        solicitudes_guia,
+        "marcar_guia_descargada_cliente",
+        lambda solicitud_id, cliente_id: descargas.append(
+            (solicitud_id, cliente_id)
+        ) or True,
+    )
 
     estado = main.estado_pedido(91, x_api_key="tauro-qa")
     pdf = main.descargar_guia_api(91, x_api_key="tauro-qa")
@@ -177,6 +185,7 @@ def test_estado_pedido_y_label_siempre_filtran_por_cliente(monkeypatch):
     assert estado["factura_comercial_url"] == "/pedidos/91/factura-comercial.pdf"
     assert pdf.media_type == "application/pdf"
     assert bytes(pdf.body).startswith(b"%PDF")
+    assert descargas == [(91, "PESCA_JACKS_QA")]
     assert factura.media_type == "application/pdf"
     assert bytes(factura.body).startswith(b"%PDF")
 

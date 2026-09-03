@@ -124,8 +124,13 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             </div>
         {% elif s.tiene_label %}
             <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-primary btn-full">
-                {% if s.tiene_factura_comercial %}⬇ Descargar guía + invoice PDF{% else %}⬇ Descargar guía PDF{% endif %}
+                {% if s.guia_descargada_at %}⬇ Volver a descargar guía{% elif s.tiene_factura_comercial %}⬇ Descargar guía + invoice PDF{% else %}⬇ Descargar guía PDF{% endif %}
             </a>
+            {% if s.guia_descargada_at %}
+            <p style="color:var(--ok);font-size:12.5px;margin-top:8px;">
+                Guía descargada por primera vez el {{ s.guia_descargada_at.strftime("%d/%m/%Y a las %H:%M") }}. Podés descargarla nuevamente cuando quieras.
+            </p>
+            {% endif %}
             {% if puede_corregir %}
             <a href="/portal/envios/nuevo?corregir={{ s.id }}" class="btn btn-ghost btn-full" style="margin-top:8px;">
                 Corregir datos y reemplazar guía

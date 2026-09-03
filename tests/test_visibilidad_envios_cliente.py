@@ -14,7 +14,7 @@ import pytest
 from starlette.requests import Request
 
 from endpoints import admin as admin_endpoint
-from servicios import cuenta_corriente, solicitudes_guia
+from servicios import cuenta_corriente, panel_cliente, solicitudes_guia
 
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -43,6 +43,7 @@ def test_contrato_oculta_sin_cancelar_ni_borrar():
         "ADD COLUMN IF NOT EXISTS visible_cliente BOOLEAN NOT NULL DEFAULT TRUE"
         in schema
     )
+    assert "ADD COLUMN IF NOT EXISTS guia_descargada_at TIMESTAMPTZ" in schema
     cambio = _bloque(
         servicio,
         "def cambiar_visibilidad_cliente(",
@@ -78,6 +79,7 @@ def test_todos_los_accesos_del_cliente_exigen_visibilidad():
         assert "visible_cliente=TRUE" in _bloque(servicio, inicio, fin)
 
     assert panel.count("s.visible_cliente=TRUE") >= 2
+    assert "s.guia_descargada_at IS NOT NULL" in panel
     assert "AND s.test=FALSE AND s.visible_cliente=TRUE" in _bloque(
         servicio, "def validar_reemision_cliente(", "def _validar_cancelacion_desde_fila("
     )
@@ -174,6 +176,7 @@ def visibilidad_db(monkeypatch):
 
         monkeypatch.setattr(solicitudes_guia, "get_conn", conexion)
         monkeypatch.setattr(cuenta_corriente, "get_conn", conexion)
+        monkeypatch.setattr(panel_cliente, "get_conn", conexion)
         yield conexion
     finally:
         with admin.cursor() as cur:
@@ -263,3 +266,91 @@ def test_ocultar_es_reversible_y_conserva_cargo(visibilidad_db):
             )
             cargo_guardado = cur.fetchone()
     assert cargo_guardado == {"monto_ars": Decimal("1250.50"), "estado": "ACTIVO"}
+
+
+def test_primera_descarga_resuelve_recordatorio_sin_bloquear_redescarga(
+    visibilidad_db,
+):
+    pdf = b"%PDF-1.4\n%%EOF\n"
+    with visibilidad_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO clientes (cliente_id,email) "
+                "VALUES ('DESCARGAS','descargas@example.invalid')"
+            )
+            cur.execute(
+                """
+                INSERT INTO solicitudes_guia (
+                    cliente_id, producto_alias, destino_pais, dest_nombre,
+                    dest_direccion, dest_ciudad, dest_zip, estado, tracking,
+                    ambito, courier, label_pdf
+                ) VALUES (
+                    'DESCARGAS', 'Producto', 'US', 'Destino', 'Calle 1',
+                    'Miami', '33101', 'GUIA_LISTA', 'GUIA-DESCARGA',
+                    'INTERNACIONAL', 'DHL', %s
+                ) RETURNING id
+                """,
+                (psycopg2.Binary(pdf),),
+            )
+            solicitud_id = int(cur.fetchone()["id"])
+
+    assert solicitudes_guia.contar_guias_listas("DESCARGAS") == 1
+    embudo = {
+        paso["clave"]: paso["cantidad"]
+        for paso in panel_cliente.embudo_envios("DESCARGAS")
+    }
+    assert embudo["guia_lista"] == 1
+    assert solicitudes_guia.marcar_guia_descargada_cliente(
+        solicitud_id, "descargas"
+    ) is True
+    assert solicitudes_guia.contar_guias_listas("DESCARGAS") == 0
+    embudo = {
+        paso["clave"]: paso["cantidad"]
+        for paso in panel_cliente.embudo_envios("DESCARGAS")
+    }
+    assert embudo["guia_lista"] == 0
+    assert solicitudes_guia.obtener_label_de_cliente(
+        solicitud_id, "DESCARGAS"
+    ) == pdf
+
+    with visibilidad_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT guia_descargada_at,estado FROM solicitudes_guia WHERE id=%s",
+                (solicitud_id,),
+            )
+            primera = cur.fetchone()
+    assert primera["guia_descargada_at"] is not None
+    assert primera["estado"] == "GUIA_LISTA"
+
+    assert solicitudes_guia.marcar_guia_descargada_cliente(
+        solicitud_id, "DESCARGAS"
+    ) is False
+    with visibilidad_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT guia_descargada_at FROM solicitudes_guia WHERE id=%s",
+                (solicitud_id,),
+            )
+            repetida = cur.fetchone()
+    assert repetida["guia_descargada_at"] == primera["guia_descargada_at"]
+
+    # Historia anterior a esta columna: si el courier ya informó movimiento,
+    # la acción también está resuelta aunque no exista timestamp de descarga.
+    with visibilidad_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO solicitudes_guia (
+                    cliente_id, producto_alias, destino_pais, dest_nombre,
+                    dest_direccion, dest_ciudad, dest_zip, estado, tracking,
+                    tracking_estado, ambito, courier, label_pdf
+                ) VALUES (
+                    'DESCARGAS', 'Histórico', 'US', 'Destino 2', 'Calle 2',
+                    'Miami', '33101', 'GUIA_LISTA', 'GUIA-EN-CAMINO',
+                    'PROCESO_ENTREGA', 'INTERNACIONAL', 'DHL', %s
+                )
+                """,
+                (psycopg2.Binary(pdf),),
+            )
+    assert solicitudes_guia.contar_guias_listas("DESCARGAS") == 0

@@ -80,10 +80,19 @@ def test_descarga_portal_entrega_un_solo_pdf_con_nombre_comercial(monkeypatch):
         }
 
     monkeypatch.setattr(portal_cliente, "preparar_documentos_envio_portal", preparar)
+    marcadas = []
+    monkeypatch.setattr(
+        portal_cliente,
+        "marcar_guia_descargada_cliente",
+        lambda solicitud_id, cliente_id: marcadas.append(
+            (solicitud_id, cliente_id)
+        ) or True,
+    )
 
     respuesta = portal_cliente.descargar_guia(91, cliente="WAIMAO")
 
     assert llamadas == [(91, "WAIMAO")]
+    assert marcadas == [(91, "WAIMAO")]
     assert bytes(respuesta.body) == pdf
     assert respuesta.media_type == "application/pdf"
     assert respuesta.headers["content-disposition"] == (
@@ -150,12 +159,19 @@ def test_descarga_portal_falla_cerrada_si_no_puede_unificar(monkeypatch):
         raise ValueError("No se pudieron unificar la guía y la invoice.")
 
     monkeypatch.setattr(portal_cliente, "preparar_documentos_envio_portal", fallar)
+    marcadas = []
+    monkeypatch.setattr(
+        portal_cliente,
+        "marcar_guia_descargada_cliente",
+        lambda *_args: marcadas.append(True),
+    )
 
     with pytest.raises(HTTPException) as exc:
         portal_cliente.descargar_guia(91, cliente="WAIMAO")
 
     assert exc.value.status_code == 500
     assert "invoice" in exc.value.detail
+    assert marcadas == []
 
 
 def test_portal_ofrece_un_solo_boton_para_guia_e_invoice():

@@ -1409,11 +1409,15 @@ def listar_envios_b2b(
 def descargar_guia_api(solicitud_id: int, x_api_key: str = Header(default=None)):
     """Descarga autenticada de la etiqueta sin depender de la sesión web."""
     perfil = autenticar(x_api_key)
-    from servicios.solicitudes_guia import obtener_label_de_cliente
+    from servicios.solicitudes_guia import (
+        marcar_guia_descargada_cliente,
+        obtener_label_de_cliente,
+    )
 
     pdf = obtener_label_de_cliente(solicitud_id, perfil["cliente_id"])
     if not pdf:
         raise HTTPException(status_code=404, detail="La guía todavía no está disponible.")
+    marcar_guia_descargada_cliente(solicitud_id, perfil["cliente_id"])
     return Response(
         content=pdf,
         media_type="application/pdf",

@@ -1527,6 +1527,10 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS label_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS commercial_invoice_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS guia_generada_at TIMESTAMPTZ;
+-- Primera entrega efectiva del PDF al cliente. Las descargas posteriores
+-- siguen habilitadas, pero ya no alimentan recordatorios ni contadores.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS guia_descargada_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_alias TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_nombre TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS remitente_documento TEXT;

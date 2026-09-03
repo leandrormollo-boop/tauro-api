@@ -273,7 +273,7 @@ camposPeriodo.forEach(function (campo) {
                             {% endif %}
                             {% if s.tiene_label and s.estado != 'REEMPLAZADO' %}
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-primary btn-sm">
-                                    {% if s.tiene_factura_comercial %}Guía + invoice{% else %}Guía PDF{% endif %}
+                                    {% if s.guia_descargada_at %}Volver a descargar{% elif s.tiene_factura_comercial %}Guía + invoice{% else %}Guía PDF{% endif %}
                                 </a>
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}

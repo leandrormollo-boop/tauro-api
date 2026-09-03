@@ -1202,6 +1202,7 @@ def listar_solicitudes_cliente(
                        s.valor_declarado_usd, s.precio_tauro_ars,
                        s.precio_tauro_usd, s.precio_cliente_final_ars, s.tracking,
                        s.guia_url, s.created_at, s.courier, s.bultos,
+                       s.guia_descargada_at,
                        cargo_periodo.estado AS cargo_estado,
                        COALESCE(
                            cargo_periodo.fecha,
@@ -1371,7 +1372,8 @@ def listar_envios_api(
                        (label_pdf IS NOT NULL) AS tiene_label,
                        (commercial_invoice_pdf IS NOT NULL)
                            AS tiene_factura_comercial,
-                       created_at, updated_at, guia_generada_at
+                       created_at, updated_at, guia_generada_at,
+                       guia_descargada_at
                 FROM solicitudes_guia
                 WHERE {where}
                 ORDER BY created_at DESC, id DESC
@@ -1398,6 +1400,8 @@ def contar_guias_listas(cliente_id: str) -> int:
                 WHERE s.cliente_id = %s AND s.estado = 'GUIA_LISTA'
                   AND s.test=FALSE
                   AND s.visible_cliente=TRUE
+                  AND s.guia_descargada_at IS NULL
+                  AND s.tracking_estado IS NULL
                   AND NOT EXISTS (
                       SELECT 1
                       FROM envios e
@@ -1482,6 +1486,44 @@ def cambiar_visibilidad_cliente(
             )
             fila = cur.fetchone()
     return dict(fila) if fila else None
+
+
+def marcar_guia_descargada_cliente(
+    solicitud_id: int,
+    cliente_id: str,
+) -> bool:
+    """Registra sólo la primera descarga válida del PDF por su propietario.
+
+    Una repetición devuelve ``False`` y conserva la fecha original. No cambia
+    el estado del envío: descargar una etiqueta no demuestra que el paquete
+    haya sido despachado.
+    """
+    cliente = (cliente_id or "").strip().upper()
+    if not cliente:
+        return False
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE solicitudes_guia s
+                SET guia_descargada_at=NOW()
+                WHERE s.id=%s AND s.cliente_id=%s
+                  AND s.guia_descargada_at IS NULL
+                  AND s.visible_cliente=TRUE AND s.test=FALSE
+                  AND s.label_pdf IS NOT NULL
+                  AND s.estado NOT IN ('CANCELADO', 'REEMPLAZADO')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM envios e
+                      WHERE e.solicitud_id=s.id
+                        AND e.cliente_id=s.cliente_id
+                        AND e.estado='CANCELADO'
+                  )
+                RETURNING s.id
+                """,
+                (int(solicitud_id), cliente),
+            )
+            primera_descarga = cur.fetchone() is not None
+    return primera_descarga
 
 
 def actualizar_solicitud_guia(

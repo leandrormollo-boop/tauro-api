@@ -282,6 +282,13 @@ def embudo_envios(cliente_id: str) -> list[dict]:
                     WHERE s.cliente_id = %s
                       AND s.test=FALSE
                       AND s.visible_cliente=TRUE
+                      AND NOT (
+                          s.estado='GUIA_LISTA'
+                          AND (
+                              s.guia_descargada_at IS NOT NULL
+                              OR s.tracking_estado IS NOT NULL
+                          )
+                      )
                     GROUP BY s.estado
                     """,
                     (cliente_id,),

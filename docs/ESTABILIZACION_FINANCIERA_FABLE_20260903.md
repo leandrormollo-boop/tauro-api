@@ -20,6 +20,12 @@ Estado: primer corte implementado y verificado localmente. **No desplegado, no e
   y acciones del cliente; admin y auditoría conservan el registro completo.
 - El tracking usa una semántica visual única en todas las pantallas: proceso
   de entrega en amarillo, entregado en verde y retenido en rojo.
+- La primera descarga autenticada de la guía por el cliente se registra sin
+  modificar el estado operativo del envío. El aviso y contador de acción
+  pendiente dejan de incluirla, pero las descargas posteriores siguen habilitadas.
+  Las descargas del admin no resuelven la acción del cliente. Para la historia
+  anterior al registro, un estado de tracking informado por el courier también
+  resuelve el aviso; sin esa evidencia, la próxima descarga lo resolverá.
 
 No se cambiaron porcentajes comerciales existentes ni se aplicaron cargos, pagos, NC o ajustes a clientes reales.
 
@@ -30,7 +36,7 @@ Entorno: PostgreSQL 18.6 temporal, accesible exclusivamente por socket local; da
 | Control | Resultado |
 | --- | --- |
 | Suite antes de los cambios | 1.331 pruebas aprobadas + 5 subtests |
-| Suite final completa con PostgreSQL | **1.368 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
+| Suite final completa con PostgreSQL | **1.369 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
 | Revisión independiente agregada | 29 casos aprobados, 9 de ellos con PostgreSQL |
 | Revisión independiente sin URL de pruebas | 20 aprobados; los 9 de PostgreSQL se omiten expresamente, sin intentar una conexión por defecto |
 | `git diff --check` | Sin errores |
@@ -49,6 +55,8 @@ Los casos nuevos cubren, entre otros:
 - presentación y guardado del tope de deuda sin convertir importes grandes a notación científica.
 - visibilidad reversible de envíos, bloqueo de accesos directos y preservación
   comprobada del cargo contable de una solicitud oculta.
+- primera descarga persistida de forma idempotente, eliminación del recordatorio
+  y del contador, conservación del estado operativo y descarga repetida habilitada.
 
 Pruebas nuevas: `tests/test_financial_stabilization_review.py` y
 `tests/test_visibilidad_envios_cliente.py`. La conexión debe indicarse siempre

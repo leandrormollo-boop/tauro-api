@@ -61,6 +61,7 @@ from servicios.api_b2b import (
 )
 from servicios.solicitudes_guia import (
     crear_solicitud_guia, listar_solicitudes_cliente,
+    marcar_guia_descargada_cliente,
     preparar_documentos_envio_portal,
     obtener_factura_comercial_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
@@ -1906,6 +1907,7 @@ def descargar_guia(solicitud_id: int, cliente: str = Depends(cliente_actual)):
         )
     if not documentos:
         return RedirectResponse(url="/portal/envios", status_code=303)
+    marcar_guia_descargada_cliente(solicitud_id, cliente)
     return Response(
         content=documentos["pdf"],
         media_type="application/pdf",
