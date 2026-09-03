@@ -172,7 +172,7 @@
         <div class="form-group">
           <label for="tope-deuda">Tope de deuda para emitir (ARS)</label>
           <input id="tope-deuda" type="text" name="tope_deuda_ars"
-                 value="{% if matriz.tope_deuda_ars is not none %}{{ '%g'|format(matriz.tope_deuda_ars|float) }}{% endif %}"
+                 value="{% if matriz.tope_deuda_ars is not none %}{{ numero_ars(matriz.tope_deuda_ars) }}{% endif %}"
                  placeholder="Vacío = sin tope" inputmode="decimal" data-numero="monto">
         </div>
         <div class="form-group">

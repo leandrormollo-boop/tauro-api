@@ -10,6 +10,7 @@ import pytest
 from servicios import carriers
 from servicios import configuracion_couriers_cliente as config
 from servicios import solicitudes_guia
+from servicios.presentacion import numero_ars
 from endpoints import admin
 
 
@@ -37,6 +38,17 @@ def _dhl_produccion(monkeypatch):
     monkeypatch.setenv("DHL_API_SECRET", "s")
     monkeypatch.setenv("DHL_ACCOUNT_NUMBER_EXPO", "123456789")
     monkeypatch.setenv("DHL_ACCOUNT_NUMBER_IMPO", "987654321")
+
+
+def test_tope_deuda_grande_se_renderiza_sin_notacion_cientifica():
+    template = (
+        Path(__file__).resolve().parents[1]
+        / "templates" / "admin" / "cliente_acceso_precios.html"
+    ).read_text()
+
+    assert numero_ars(10_000_000) == "10.000.000,00"
+    assert "numero_ars(matriz.tope_deuda_ars)" in template
+    assert "'%g'|format(matriz.tope_deuda_ars|float)" not in template
 
 
 def test_sin_filas_conserva_pricing_pero_no_habilita_ninguna_operacion(monkeypatch):

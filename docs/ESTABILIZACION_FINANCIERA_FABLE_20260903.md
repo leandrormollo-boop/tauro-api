@@ -24,7 +24,7 @@ Entorno: PostgreSQL 18.6 temporal, accesible exclusivamente por socket local; da
 | Control | Resultado |
 | --- | --- |
 | Suite antes de los cambios | 1.331 pruebas aprobadas + 5 subtests |
-| Suite final completa con PostgreSQL | **1.362 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
+| Suite final completa con PostgreSQL | **1.363 pruebas aprobadas + 5 subtests, 0 fallas, 0 omitidas** |
 | Revisión independiente agregada | 29 casos aprobados, 9 de ellos con PostgreSQL |
 | Revisión independiente sin URL de pruebas | 20 aprobados; los 9 de PostgreSQL se omiten expresamente, sin intentar una conexión por defecto |
 | `git diff --check` | Sin errores |
@@ -40,6 +40,7 @@ Los casos nuevos cubren, entre otros:
 - repetición del schema conservando exactamente importe, número y PDF históricos;
 - rechazo de estados inválidos y preservación de márgenes cero explícitos;
 - formularios viejos y ausencia de tipo de cambio o referencia para su actualización.
+- presentación y guardado del tope de deuda sin convertir importes grandes a notación científica.
 
 Pruebas nuevas: `tests/test_financial_stabilization_review.py`. La conexión debe indicarse siempre mediante una `TAURO_TEST_DATABASE_URL` exclusivamente de pruebas: las fixtures crean y eliminan schemas sintéticos.
 
