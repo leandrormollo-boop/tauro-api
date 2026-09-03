@@ -13,7 +13,7 @@
 
     <div class="form-group">
       <label>Cliente *</label>
-      <select name="cliente_id" required>
+      <select name="cliente_id" id="pago-cliente" required>
         <option value="">— Seleccioná —</option>
         {% for c in clientes %}
         <option value="{{ c.cliente_id }}" {% if c.cliente_id == preselect_cliente %}selected{% endif %}>
@@ -46,31 +46,26 @@
       </select>
     </div>
 
+    <input type="hidden" name="seleccion_documental" value="1">
+    <select name="imputacion" required hidden aria-hidden="true"><option value="SIN_IMPUTAR" selected>Sin imputar</option></select>
     <div class="form-group">
-      <label>Imputación *</label>
-      {% set imputacion_actual = form_data.imputacion if form_data else 'SIN_IMPUTAR' %}
-      <select name="imputacion" required>
-        <option value="SIN_IMPUTAR" {% if imputacion_actual == 'SIN_IMPUTAR' %}selected{% endif %}>Sin imputar</option>
-        <option value="NACIONAL" {% if imputacion_actual == 'NACIONAL' %}selected{% endif %}>Todo a Nacional</option>
-        <option value="INTERNACIONAL" {% if imputacion_actual == 'INTERNACIONAL' %}selected{% endif %}>Todo a Internacional</option>
-        <option value="DIVIDIR" {% if imputacion_actual == 'DIVIDIR' %}selected{% endif %}>Dividir entre ambos</option>
-      </select>
-      <small style="color:var(--fg-4);">Sin imputar conserva el crédito disponible sin restarlo dos veces.</small>
+      <label>Imputar a facturas o envíos</label>
+      {% if preselect_cliente %}
+        {% if destinos_pago %}
+        <div id="destinos-pago" style="display:grid;gap:8px;max-height:340px;overflow:auto;">
+          {% for d in destinos_pago %}
+          <label style="display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);padding:10px;border-radius:8px;">
+            <input type="checkbox" name="destinos" value="{{ d.clave }}" data-saldo="{{ d.disponible }}">
+            <span><strong>{{ d.descripcion }}</strong>{% if d.tracking %} · {{ d.tracking }}{% endif %}<br>
+              <small>{{ d.fecha.strftime('%d/%m/%Y') }} · {{ d.ambito|title }} · saldo $ {{ "{:,.2f}".format(d.saldo).replace(',', 'X').replace('.', ',').replace('X', '.') }}</small>
+            </span>
+          </label>
+          {% endfor %}
+        </div>
+        {% else %}<small>No hay documentos con saldo para imputar. El pago completo quedará a favor.</small>{% endif %}
+      {% else %}<small>Elegí un cliente para cargar sus facturas y cargos pendientes.</small>{% endif %}
+      <p id="resumen-imputacion" style="margin-top:10px;color:var(--fg-3);">Imputado: $ 0,00 · A favor: $ 0,00</p>
     </div>
-
-    <div class="form-grid-2">
-      <div class="form-group">
-        <label>Monto a Nacional</label>
-        <input type="text" name="monto_nacional" inputmode="decimal" data-numero="monto"
-               value="{{ form_data.monto_nacional if form_data else '' }}" placeholder="Sólo si elegís Dividir">
-      </div>
-      <div class="form-group">
-        <label>Monto a Internacional</label>
-        <input type="text" name="monto_internacional" inputmode="decimal" data-numero="monto"
-               value="{{ form_data.monto_internacional if form_data else '' }}" placeholder="Sólo si elegís Dividir">
-      </div>
-    </div>
-    <p style="color:var(--fg-4);font-size:12px;margin-top:-8px;">Al dividir, la suma no puede superar el pago; cualquier remanente queda como crédito sin imputar.</p>
 
     <div class="form-group">
       <label>Referencia / CBU / Comprobante</label>
@@ -94,4 +89,28 @@
     </div>
   </form>
 </div>
+<script>
+(() => {
+  const cliente = document.getElementById('pago-cliente');
+  const monto = document.querySelector('[name="monto_ars"]');
+  const checks = [...document.querySelectorAll('[name="destinos"]')];
+  const resumen = document.getElementById('resumen-imputacion');
+  cliente?.addEventListener('change', () => {
+    if (cliente.value) location.href = '/admin/pagos/nuevo?cliente=' + encodeURIComponent(cliente.value);
+  });
+  const numero = value => Number(String(value || '').replace(/\./g, '').replace(',', '.')) || 0;
+  const dinero = value => value.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  const actualizar = () => {
+    const total = numero(monto?.value);
+    const elegido = checks.filter(c => c.checked).reduce((s,c) => s + numero(c.dataset.saldo), 0);
+    const imputado = Math.min(total, elegido);
+    const favor = Math.max(total - elegido, 0);
+    const parcial = Math.max(elegido - total, 0);
+    if (resumen) resumen.textContent = `Imputado: $ ${dinero(imputado)} · A favor: $ ${dinero(favor)}` + (parcial ? ` · Queda pendiente: $ ${dinero(parcial)}` : '');
+  };
+  monto?.addEventListener('input', actualizar);
+  checks.forEach(c => c.addEventListener('change', actualizar));
+  actualizar();
+})();
+</script>
 {% endblock %}

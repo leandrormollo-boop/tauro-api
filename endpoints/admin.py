@@ -29,7 +29,7 @@ from servicios.cuenta_corriente import (
     registrar_pago, registrar_envio, facturar_cargo, cancelar_envio,
     get_envios_cliente, get_pagos,
     get_facturado_real, total_pagado, saldo,
-    get_resumen_clientes_bulk,
+    get_resumen_clientes_bulk, listar_destinos_pago,
 )
 from servicios.facturacion_clientes import (
     FacturacionClienteError,
@@ -3147,13 +3147,21 @@ def admin_pago_form(
 
     clientes = _get_clientes_lista()
     today = datetime.now().strftime("%Y-%m-%d")
+    preselect_cliente = (cliente or "").upper()
+    try:
+        destinos_pago = (
+            listar_destinos_pago(preselect_cliente) if preselect_cliente else []
+        )
+    except RuntimeError:
+        destinos_pago = []
     return templates.TemplateResponse(
         request=request, name="admin/pago_form.html",
         context={
             "seccion": "pago_nuevo",
             "clientes": clientes,
             "today": today,
-            "preselect_cliente": (cliente or "").upper(),
+            "preselect_cliente": preselect_cliente,
+            "destinos_pago": destinos_pago,
             "idempotency_key": _nueva_idempotency_key(),
         },
     )
@@ -3173,6 +3181,7 @@ async def admin_pago_nuevo(
     imputacion: str = Form("SIN_IMPUTAR"),
     monto_nacional: str = Form(""),
     monto_internacional: str = Form(""),
+    destinos: Optional[list[str]] = Form(None),
     comprobante: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
@@ -3182,12 +3191,16 @@ async def admin_pago_nuevo(
     try:
         idempotency_key_normalizada = _idempotency_key_form(idempotency_key)
         monto_num = _importe_contable_form(monto_ars, "Monto ARS")
-        aplicaciones = _aplicaciones_pago_form(
-            monto_num,
-            imputacion,
-            monto_nacional,
-            monto_internacional,
-        )
+        # Las tabs viejas siguen entrando por ámbito. El formulario actual
+        # envía una lista documental, incluso vacía para dejar saldo a favor.
+        if isinstance(destinos, list) or destinos is None:
+            aplicaciones = {}
+            destinos_documentales = list(destinos or [])
+        else:
+            aplicaciones = _aplicaciones_pago_form(
+                monto_num, imputacion, monto_nacional, monto_internacional,
+            )
+            destinos_documentales = None
         from servicios.cuenta_corriente import leer_comprobante_con_tope
         contenido = await leer_comprobante_con_tope(comprobante)
         registrar_pago(
@@ -3201,6 +3214,7 @@ async def admin_pago_nuevo(
             # circuito PENDIENTE es sólo para pagos informados por clientes.
             estado="APROBADO",
             aplicaciones=aplicaciones,
+            destinos=destinos_documentales,
             actor_tipo="admin",
             actor_ref="admin",
             comprobante=contenido or None,
@@ -3218,6 +3232,7 @@ async def admin_pago_nuevo(
                 "clientes": clientes,
                 "today": today,
                 "preselect_cliente": cliente_id.upper(),
+                "destinos_pago": [],
                 "flash_error": str(e),
                 "idempotency_key": _idempotency_key_para_reintento(idempotency_key),
                 "form_data": {
@@ -3849,6 +3864,7 @@ def admin_resolver_pago(
     imputacion: str = Form("SIN_IMPUTAR"),
     monto_nacional: str = Form(""),
     monto_internacional: str = Form(""),
+    preservar_solicitud: str = Form(""),
     admin_token: Optional[str] = Cookie(None),
 ):
     """
@@ -3869,7 +3885,7 @@ def admin_resolver_pago(
 
     aprobar = decision_normalizada == "aprobar"
     aplicaciones = None
-    if aprobar:
+    if aprobar and preservar_solicitud != "1":
         # El monto del pago se toma de la base, nunca de un hidden editable. El
         # servicio vuelve a validar y bloquea la fila dentro de su transacción.
         with get_conn() as conn:

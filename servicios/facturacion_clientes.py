@@ -433,8 +433,41 @@ def listar_facturas_cliente(cliente_id: str) -> list[dict[str, Any]]:
                            ) ORDER BY i.id) FILTER (WHERE i.id IS NOT NULL),
                            '[]'::jsonb
                        ) AS detalle_items,
-                       0::numeric AS pagado,
-                       f.total AS saldo
+                       CASE WHEN f.tipo='FC' THEN LEAST(
+                           f.total,
+                           COALESCE((
+                               SELECT SUM(pa.monto_ars)
+                               FROM pagos_aplicaciones pa
+                               WHERE pa.factura_id=f.id
+                                 AND pa.estado='APLICADA'
+                           ), 0) + COALESCE((
+                               SELECT SUM(pa.monto_ars)
+                               FROM pagos_aplicaciones pa
+                               WHERE pa.envio_id IN (
+                                   SELECT ii.envio_id
+                                   FROM facturas_cliente_items ii
+                                   WHERE ii.factura_id=f.id
+                                     AND ii.envio_id IS NOT NULL
+                               ) AND pa.estado='APLICADA'
+                           ), 0)
+                       ) ELSE 0 END AS pagado,
+                       CASE WHEN f.tipo='FC' THEN GREATEST(
+                           f.total - COALESCE((
+                               SELECT SUM(pa.monto_ars)
+                               FROM pagos_aplicaciones pa
+                               WHERE pa.factura_id=f.id
+                                 AND pa.estado='APLICADA'
+                           ), 0) - COALESCE((
+                               SELECT SUM(pa.monto_ars)
+                               FROM pagos_aplicaciones pa
+                               WHERE pa.envio_id IN (
+                                   SELECT ii.envio_id
+                                   FROM facturas_cliente_items ii
+                                   WHERE ii.factura_id=f.id
+                                     AND ii.envio_id IS NOT NULL
+                               ) AND pa.estado='APLICADA'
+                           ), 0), 0
+                       ) ELSE 0 END AS saldo
                   FROM facturas_cliente f
              LEFT JOIN facturas_cliente_items i ON i.factura_id=f.id
              LEFT JOIN envios e ON e.id=i.envio_id
@@ -471,7 +504,29 @@ def obtener_factura_cliente(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT f.*, 0::numeric AS pagado, f.total AS saldo
+                SELECT f.*,
+                       CASE WHEN f.tipo='FC' THEN LEAST(f.total,
+                           COALESCE((SELECT SUM(pa.monto_ars)
+                             FROM pagos_aplicaciones pa
+                             WHERE pa.factura_id=f.id AND pa.estado='APLICADA'),0)
+                           + COALESCE((SELECT SUM(pa.monto_ars)
+                             FROM pagos_aplicaciones pa
+                             WHERE pa.envio_id IN (
+                                 SELECT i.envio_id FROM facturas_cliente_items i
+                                 WHERE i.factura_id=f.id AND i.envio_id IS NOT NULL
+                             ) AND pa.estado='APLICADA'),0)
+                       ) ELSE 0 END AS pagado,
+                       CASE WHEN f.tipo='FC' THEN GREATEST(f.total
+                           - COALESCE((SELECT SUM(pa.monto_ars)
+                             FROM pagos_aplicaciones pa
+                             WHERE pa.factura_id=f.id AND pa.estado='APLICADA'),0)
+                           - COALESCE((SELECT SUM(pa.monto_ars)
+                             FROM pagos_aplicaciones pa
+                             WHERE pa.envio_id IN (
+                                 SELECT i.envio_id FROM facturas_cliente_items i
+                                 WHERE i.factura_id=f.id AND i.envio_id IS NOT NULL
+                             ) AND pa.estado='APLICADA'),0), 0
+                       ) ELSE 0 END AS saldo
                   FROM facturas_cliente f
                  WHERE f.id=%s
                 """ + filtro_cliente,

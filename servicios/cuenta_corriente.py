@@ -8,7 +8,7 @@
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 import psycopg2
 
@@ -63,6 +63,26 @@ def _normalizar_aplicaciones(
             raise ValueError(f"El ámbito {ambito} está repetido.")
         normalizadas[ambito] = monto
     return normalizadas
+
+
+def _normalizar_destinos_documentales(
+    destinos: Optional[Iterable[Any]],
+) -> Optional[List[tuple[str, int]]]:
+    """Normaliza IDs opacos F:<factura> / E:<envío>; None preserva decisión."""
+    if destinos is None:
+        return None
+    normalizados: List[tuple[str, int]] = []
+    vistos = set()
+    for valor in destinos:
+        match = re.fullmatch(r"([FE]):([1-9][0-9]*)", str(valor or "").strip().upper())
+        if not match:
+            raise ValueError("La selección contiene un documento inválido.")
+        clave = (match.group(1), int(match.group(2)))
+        if clave in vistos:
+            raise ValueError("La selección contiene un documento repetido.")
+        vistos.add(clave)
+        normalizados.append(clave)
+    return normalizados
 
 
 def _idempotency_key(valor: Optional[str]) -> Optional[str]:
@@ -940,6 +960,240 @@ def validar_comprobante(contenido: bytes) -> str:
     raise ValueError("El comprobante tiene que ser una foto (JPG/PNG) o un PDF.")
 
 
+def listar_destinos_pago(cliente_id: str) -> List[Dict[str, Any]]:
+    """Facturas con saldo y cargos activos todavía no facturados.
+
+    Sólo las aplicaciones APLICADA son pago efectivo. Las SOLICITADA se
+    informan como reserva para no ofrecer dos veces el mismo saldo mientras
+    el comprobante espera revisión.
+    """
+    cliente = str(cliente_id or "").strip().upper()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH aplicaciones_factura AS (
+                    SELECT pa.factura_id,
+                           COALESCE(SUM(pa.monto_ars) FILTER (
+                               WHERE pa.estado='APLICADA'
+                           ), 0) AS pagado,
+                           COALESCE(SUM(pa.monto_ars) FILTER (
+                               WHERE pa.estado='SOLICITADA'
+                           ), 0) AS solicitado
+                      FROM pagos_aplicaciones pa
+                     WHERE pa.factura_id IS NOT NULL
+                     GROUP BY pa.factura_id
+                ),
+                aplicaciones_envio AS (
+                    SELECT pa.envio_id,
+                           COALESCE(SUM(pa.monto_ars) FILTER (
+                               WHERE pa.estado='APLICADA'
+                           ), 0) AS pagado,
+                           COALESCE(SUM(pa.monto_ars) FILTER (
+                               WHERE pa.estado='SOLICITADA'
+                           ), 0) AS solicitado
+                      FROM pagos_aplicaciones pa
+                     WHERE pa.envio_id IS NOT NULL
+                     GROUP BY pa.envio_id
+                ),
+                facturas AS (
+                    SELECT
+                        'F:' || f.id::text AS clave,
+                        'FACTURA'::text AS clase,
+                        f.id AS origen_id,
+                        f.fecha_emision AS fecha,
+                        f.tipo || ' ' || LPAD(f.punto_venta::text, 4, '0')
+                            || '-' || LPAD(f.numero::text, 8, '0') AS descripcion,
+                        NULL::text AS tracking,
+                        MIN(COALESCE(e.ambito, ea.ambito)) AS ambito,
+                        f.total AS total,
+                        COALESCE(af.pagado, 0)
+                            + COALESCE(SUM(ae.pagado), 0) AS pagado,
+                        COALESCE(af.solicitado, 0)
+                            + COALESCE(SUM(ae.solicitado), 0) AS solicitado
+                    FROM facturas_cliente f
+                    JOIN facturas_cliente_items i ON i.factura_id=f.id
+                    LEFT JOIN envios e ON e.id=i.envio_id
+                    LEFT JOIN ajustes_cliente a ON a.id=i.ajuste_id
+                    LEFT JOIN envios ea ON ea.solicitud_id=a.solicitud_id
+                    LEFT JOIN aplicaciones_factura af ON af.factura_id=f.id
+                    LEFT JOIN aplicaciones_envio ae ON ae.envio_id=i.envio_id
+                    WHERE f.cliente_id=%s AND f.tipo='FC' AND f.estado='EMITIDA'
+                    GROUP BY f.id, af.pagado, af.solicitado
+                ),
+                cargos AS (
+                    SELECT
+                        'E:' || e.id::text AS clave,
+                        'ENVIO'::text AS clase,
+                        e.id AS origen_id,
+                        e.fecha,
+                        COALESCE(NULLIF(BTRIM(e.descripcion), ''), 'Envío')
+                            AS descripcion,
+                        COALESCE(NULLIF(BTRIM(e.tracking), ''),
+                                 NULLIF(BTRIM(s.tracking), '')) AS tracking,
+                        e.ambito,
+                        e.monto_ars AS total,
+                        COALESCE(ae.pagado, 0) AS pagado,
+                        COALESCE(ae.solicitado, 0) AS solicitado
+                    FROM envios e
+                    LEFT JOIN solicitudes_guia s ON s.id=e.solicitud_id
+                    LEFT JOIN aplicaciones_envio ae ON ae.envio_id=e.id
+                    WHERE e.cliente_id=%s AND e.estado='ACTIVO'
+                      AND e.monto_ars > 0
+                      AND e.ambito IN ('NACIONAL','INTERNACIONAL')
+                      AND NULLIF(BTRIM(e.nro_fc), '') IS NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM facturas_cliente_items i
+                          JOIN facturas_cliente f ON f.id=i.factura_id
+                          WHERE i.envio_id=e.id AND f.estado='EMITIDA'
+                      )
+                )
+                SELECT *, GREATEST(total-pagado, 0) AS saldo,
+                          GREATEST(total-pagado-solicitado, 0) AS disponible
+                  FROM (
+                      SELECT * FROM facturas
+                      UNION ALL
+                      SELECT * FROM cargos
+                  ) destinos
+                 WHERE total > pagado
+                 ORDER BY CASE WHEN clase='FACTURA' THEN 0 ELSE 1 END,
+                          fecha, origen_id
+                """,
+                (cliente, cliente),
+            )
+            filas = [dict(fila) for fila in cur.fetchall()]
+    for fila in filas:
+        for campo in ("total", "pagado", "solicitado", "saldo", "disponible"):
+            fila[campo] = _decimal_monto(fila.get(campo))
+    return filas
+
+
+def _armar_aplicaciones_documentales(
+    cur,
+    *,
+    cliente_id: str,
+    monto_pago: Decimal,
+    destinos: List[tuple[str, int]],
+    pago_excluir: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Bloquea cada objetivo y distribuye el pago en el orden elegido."""
+    restante = monto_pago
+    salida: List[Dict[str, Any]] = []
+    for clase, origen_id in destinos:
+        if restante <= 0:
+            break
+        if clase == "F":
+            cur.execute(
+                """
+                SELECT id, cliente_id, tipo, estado, total
+                  FROM facturas_cliente WHERE id=%s FOR UPDATE
+                """,
+                (origen_id,),
+            )
+            documento = cur.fetchone()
+            if (
+                not documento or documento["cliente_id"] != cliente_id
+                or documento["tipo"] != "FC" or documento["estado"] != "EMITIDA"
+            ):
+                raise ValueError("Una factura seleccionada ya no está disponible.")
+            cur.execute(
+                """
+                SELECT MIN(COALESCE(e.ambito, ea.ambito)) AS ambito_min,
+                       MAX(COALESCE(e.ambito, ea.ambito)) AS ambito_max
+                  FROM facturas_cliente_items i
+             LEFT JOIN envios e ON e.id=i.envio_id
+             LEFT JOIN ajustes_cliente a ON a.id=i.ajuste_id
+             LEFT JOIN envios ea ON ea.solicitud_id=a.solicitud_id
+                 WHERE i.factura_id=%s
+                """,
+                (origen_id,),
+            )
+            estado_doc = cur.fetchone()
+            if (
+                not estado_doc
+                or estado_doc["ambito_min"] not in _AMBITOS_CONTABLES
+                or estado_doc["ambito_min"] != estado_doc["ambito_max"]
+            ):
+                raise ValueError("La factura no tiene un ámbito contable válido.")
+            # La aplicación directa a factura se repite una vez por cada ítem
+            # en el JOIN anterior. Se calcula aparte para evitar multiplicarla.
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(monto_ars), 0) AS directo
+                  FROM pagos_aplicaciones
+                 WHERE factura_id=%s
+                   AND estado IN ('SOLICITADA','APLICADA')
+                   AND (%s::integer IS NULL OR pago_id<>%s::integer)
+                """,
+                (origen_id, pago_excluir, pago_excluir),
+            )
+            directo = _decimal_monto(cur.fetchone()["directo"])
+            # cubierto sólo debe conservar las aplicaciones heredadas por
+            # envíos; el OR del JOIN también incluyó las directas por ítem.
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(pa.monto_ars), 0) AS heredado
+                  FROM pagos_aplicaciones pa
+                 WHERE pa.envio_id IN (
+                       SELECT envio_id FROM facturas_cliente_items
+                        WHERE factura_id=%s AND envio_id IS NOT NULL
+                 )
+                   AND pa.estado IN ('SOLICITADA','APLICADA')
+                   AND (%s::integer IS NULL OR pa.pago_id<>%s::integer)
+                """,
+                (origen_id, pago_excluir, pago_excluir),
+            )
+            cubierto = directo + _decimal_monto(cur.fetchone()["heredado"])
+            total = _decimal_monto(documento["total"])
+            ambito = estado_doc["ambito_min"]
+            objetivo = {"factura_id": origen_id, "envio_id": None}
+        else:
+            cur.execute(
+                """
+                SELECT id, cliente_id, estado, monto_ars, ambito
+                  FROM envios WHERE id=%s FOR UPDATE
+                """,
+                (origen_id,),
+            )
+            documento = cur.fetchone()
+            if (
+                not documento or documento["cliente_id"] != cliente_id
+                or documento["estado"] != "ACTIVO"
+                or documento["ambito"] not in _AMBITOS_CONTABLES
+            ):
+                raise ValueError("Un cargo seleccionado ya no está disponible.")
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM facturas_cliente_items i
+                    JOIN facturas_cliente f ON f.id=i.factura_id
+                    WHERE i.envio_id=%s AND f.estado='EMITIDA'
+                ) AS facturado,
+                COALESCE((
+                    SELECT SUM(pa.monto_ars) FROM pagos_aplicaciones pa
+                    WHERE pa.envio_id=%s
+                      AND pa.estado IN ('SOLICITADA','APLICADA')
+                      AND (%s::integer IS NULL OR pa.pago_id<>%s::integer)
+                ), 0) AS cubierto
+                """,
+                (origen_id, origen_id, pago_excluir, pago_excluir),
+            )
+            estado_doc = cur.fetchone()
+            if estado_doc["facturado"] and pago_excluir is None:
+                raise ValueError("Un cargo seleccionado ya fue facturado.")
+            total = _decimal_monto(documento["monto_ars"])
+            cubierto = _decimal_monto(estado_doc["cubierto"])
+            ambito = documento["ambito"]
+            objetivo = {"factura_id": None, "envio_id": origen_id}
+        disponible = total - cubierto
+        if disponible <= 0:
+            raise ValueError("Un documento seleccionado ya no tiene saldo disponible.")
+        monto = min(restante, disponible)
+        salida.append({**objetivo, "ambito": ambito, "monto": monto})
+        restante -= monto
+    return salida
+
+
 def registrar_pago(
     cliente_id: str,
     fecha: str,        # "YYYY-MM-DD"
@@ -951,6 +1205,7 @@ def registrar_pago(
     comprobante: Optional[bytes] = None,
     comprobante_nombre: str = "",
     aplicaciones: Optional[Mapping[str, Any]] = None,
+    destinos: Optional[Iterable[Any]] = None,
     actor_tipo: Optional[str] = None,
     actor_ref: Optional[str] = None,
     idempotency_key: Optional[str] = None,
@@ -967,6 +1222,9 @@ def registrar_pago(
     cliente_normalizado = cliente_id.upper()
     clave_idempotencia = _idempotency_key(idempotency_key)
     normalizadas = _normalizar_aplicaciones(aplicaciones) or {}
+    destinos_normalizados = _normalizar_destinos_documentales(destinos)
+    if normalizadas and destinos_normalizados:
+        raise ValueError("No mezcles imputación por ámbito y por documento.")
     if sum(normalizadas.values(), Decimal("0")) > monto_decimal:
         raise ValueError("Las aplicaciones superan el monto del pago.")
     if estado_normalizado == "RECHAZADO" and normalizadas:
@@ -1021,36 +1279,62 @@ def registrar_pago(
                     raise ValueError(
                         "La clave de idempotencia ya fue usada para otro pago."
                     )
-                cur.execute(
-                    """
-                    SELECT ambito, monto_ars, estado
-                    FROM pagos_aplicaciones
-                    WHERE pago_id = %s
-                    ORDER BY ambito
-                    """,
-                    (existente["id"],),
-                )
-                aplicaciones_existentes = {
-                    str(fila["ambito"]): (
-                        _decimal_monto(fila["monto_ars"]),
-                        str(fila["estado"]),
-                    )
-                    for fila in cur.fetchall()
-                }
                 estado_aplicacion_esperado = (
                     "SOLICITADA"
                     if estado_normalizado == "PENDIENTE"
                     else "APLICADA"
                 )
-                aplicaciones_esperadas = {
-                    ambito: (monto, estado_aplicacion_esperado)
-                    for ambito, monto in normalizadas.items()
-                }
-                if aplicaciones_existentes != aplicaciones_esperadas:
-                    raise ValueError(
-                        "La clave de idempotencia ya fue usada con otra "
-                        "aplicación contable."
+                cur.execute(
+                    """
+                    SELECT ambito, monto_ars, estado, factura_id, envio_id
+                      FROM pagos_aplicaciones
+                     WHERE pago_id=%s
+                     ORDER BY id
+                    """,
+                    (existente["id"],),
+                )
+                filas_existentes = [dict(fila) for fila in cur.fetchall()]
+                if destinos_normalizados is not None:
+                    esperadas = _armar_aplicaciones_documentales(
+                        cur,
+                        cliente_id=cliente_normalizado,
+                        monto_pago=monto_decimal,
+                        destinos=destinos_normalizados,
+                        pago_excluir=int(existente["id"]),
                     )
+                    firma_existente = [
+                        (
+                            fila.get("factura_id"), fila.get("envio_id"),
+                            _decimal_monto(fila["monto_ars"]), fila["estado"],
+                        ) for fila in filas_existentes
+                    ]
+                    firma_esperada = [
+                        (
+                            fila["factura_id"], fila["envio_id"], fila["monto"],
+                            estado_aplicacion_esperado,
+                        ) for fila in esperadas
+                    ]
+                    if firma_existente != firma_esperada:
+                        raise ValueError(
+                            "La clave de idempotencia ya fue usada con otra "
+                            "aplicación documental."
+                        )
+                else:
+                    aplicaciones_existentes = {
+                        str(fila["ambito"]): (
+                            _decimal_monto(fila["monto_ars"]), str(fila["estado"])
+                        )
+                        for fila in filas_existentes
+                    }
+                    aplicaciones_esperadas = {
+                        ambito: (monto, estado_aplicacion_esperado)
+                        for ambito, monto in normalizadas.items()
+                    }
+                    if aplicaciones_existentes != aplicaciones_esperadas:
+                        raise ValueError(
+                            "La clave de idempotencia ya fue usada con otra "
+                            "aplicación contable."
+                        )
                 # Reintento puro: no toca aplicaciones y no duplica auditoría.
                 return int(existente["id"])
 
@@ -1058,18 +1342,41 @@ def registrar_pago(
             estado_aplicacion = (
                 "SOLICITADA" if estado_normalizado == "PENDIENTE" else "APLICADA"
             )
-            for ambito in _AMBITOS_CONTABLES:
-                monto = normalizadas.get(ambito)
-                if monto is None:
-                    continue
-                cur.execute(
-                    """
-                    INSERT INTO pagos_aplicaciones
-                        (pago_id, ambito, monto_ars, estado, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW())
-                    """,
-                    (pago_id, ambito, monto, estado_aplicacion),
+            documentales = []
+            if destinos_normalizados is not None:
+                documentales = _armar_aplicaciones_documentales(
+                    cur,
+                    cliente_id=cliente_normalizado,
+                    monto_pago=monto_decimal,
+                    destinos=destinos_normalizados,
                 )
+                for aplicacion in documentales:
+                    cur.execute(
+                        """
+                        INSERT INTO pagos_aplicaciones (
+                            pago_id, ambito, monto_ars, estado,
+                            factura_id, envio_id, updated_at
+                        ) VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                        """,
+                        (
+                            pago_id, aplicacion["ambito"], aplicacion["monto"],
+                            estado_aplicacion, aplicacion["factura_id"],
+                            aplicacion["envio_id"],
+                        ),
+                    )
+            else:
+                for ambito in _AMBITOS_CONTABLES:
+                    monto = normalizadas.get(ambito)
+                    if monto is None:
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO pagos_aplicaciones
+                            (pago_id, ambito, monto_ars, estado, updated_at)
+                        VALUES (%s, %s, %s, %s, NOW())
+                        """,
+                        (pago_id, ambito, monto, estado_aplicacion),
+                    )
             registrar_evento_con_cursor(
                 cur,
                 event="cuenta.registrar_pago",
@@ -1091,6 +1398,14 @@ def registrar_pago(
                     "aplicaciones": {
                         clave: str(valor) for clave, valor in normalizadas.items()
                     },
+                    "documentos": [
+                        {
+                            "factura_id": fila["factura_id"],
+                            "envio_id": fila["envio_id"],
+                            "monto_ars": str(fila["monto"]),
+                        }
+                        for fila in documentales
+                    ],
                 },
             )
             return pago_id
@@ -1113,9 +1428,28 @@ def pagos_pendientes() -> List[Dict[str, Any]]:
                     COALESCE(SUM(pa.monto_ars) FILTER (
                         WHERE pa.estado = 'SOLICITADA'
                           AND pa.ambito = 'INTERNACIONAL'
-                    ), 0) AS monto_internacional
+                    ), 0) AS monto_internacional,
+                    COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
+                        'factura_id', pa.factura_id,
+                        'envio_id', pa.envio_id,
+                        'ambito', pa.ambito,
+                        'monto', pa.monto_ars,
+                        'documento', CASE
+                            WHEN f.id IS NOT NULL THEN
+                                f.tipo || ' ' || LPAD(f.punto_venta::text,4,'0')
+                                || '-' || LPAD(f.numero::text,8,'0')
+                            WHEN e.id IS NOT NULL THEN
+                                'Envío ' || COALESCE(NULLIF(BTRIM(e.tracking),''),
+                                                     e.id::text)
+                            ELSE 'Aplicación histórica ' || pa.ambito
+                        END
+                    ) ORDER BY pa.id) FILTER (
+                        WHERE pa.id IS NOT NULL AND pa.estado='SOLICITADA'
+                    ), '[]'::jsonb) AS detalle_aplicaciones
                 FROM pagos p
                 LEFT JOIN pagos_aplicaciones pa ON pa.pago_id = p.id
+                LEFT JOIN facturas_cliente f ON f.id=pa.factura_id
+                LEFT JOIN envios e ON e.id=pa.envio_id
                 WHERE p.estado = 'PENDIENTE'
                 GROUP BY p.id
                 ORDER BY p.created_at ASC
@@ -1147,10 +1481,9 @@ def resolver_pago(
     """
     Resuelve un pago y, al aprobar, puede fijar su imputación NACIONAL/INTERNACIONAL.
 
-    Sólo resuelve un PENDIENTE. Al aprobarlo, None descarta la solicitud del
-    cliente y deja todo como crédito sin imputar; un mapping explícito fija la
-    decisión atómicamente. Un APROBADO es inmutable en este flujo, incluso si
-    llega una segunda aprobación concurrente. Nunca hay FIFO ni backfill.
+    Sólo resuelve un PENDIENTE. Al aprobarlo, None confirma las aplicaciones
+    SOLICITADA que eligió el cliente; un mapping legacy explícito las reemplaza
+    por distribución de ámbito. Un APROBADO es inmutable en este flujo.
     """
     normalizadas = _normalizar_aplicaciones(aplicaciones)
     with get_conn() as conn:
@@ -1211,11 +1544,6 @@ def resolver_pago(
             ) > monto_pago:
                 raise ValueError("Las aplicaciones superan el monto del pago.")
 
-            # Una solicitud del cliente nunca se convierte en haber por sí
-            # sola. Si el caller no envía decisión explícita, se aprueba todo
-            # como crédito sin imputar.
-            if normalizadas is None:
-                normalizadas = {}
             cur.execute(
                 """
                 UPDATE pagos SET estado = 'APROBADO'
@@ -1228,7 +1556,17 @@ def resolver_pago(
                 return False
 
             cambio_aplicaciones = False
-            if normalizadas is not None:
+            if normalizadas is None:
+                cur.execute(
+                    """
+                    UPDATE pagos_aplicaciones
+                       SET estado='APLICADA', updated_at=NOW()
+                     WHERE pago_id=%s AND estado='SOLICITADA'
+                    """,
+                    (pago_id,),
+                )
+                cambio_aplicaciones = cur.rowcount > 0
+            else:
                 cur.execute(
                     """
                     SELECT ambito, monto_ars, estado
@@ -1287,6 +1625,7 @@ def resolver_pago(
                             clave: str(valor)
                             for clave, valor in (normalizadas or {}).items()
                         },
+                        "solicitud_documental_confirmada": normalizadas is None,
                     },
                 )
             return cambio

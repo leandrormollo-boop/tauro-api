@@ -105,6 +105,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data" id="payment-report-form">
         <input type="hidden" name="volver_ambito" value="{{ ambito_filtro }}">
         <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+        <input type="hidden" name="seleccion_documental" value="1">
+        <input type="radio" name="destino_pago" value="SIN_IMPUTAR" checked hidden disabled aria-hidden="true">
         <p class="account-payment-notice">La imputación es una solicitud. El pago no modifica tus saldos hasta que Tauro apruebe el comprobante.</p>
         <div class="form-grid-3 account-payment-basics">
             <div class="form-group">
@@ -116,30 +118,31 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                 <input type="text" name="metodo" id="pago-metodo" placeholder="Transferencia" value="Transferencia">
             </div>
             <div class="form-group">
+                <label for="pago-fecha">Fecha *</label>
+                <input type="date" name="fecha" id="pago-fecha" required value="{{ today }}">
+            </div>
+            <div class="form-group">
                 <label for="pago-ref">Referencia / operación</label>
                 <input type="text" name="referencia" id="pago-ref" placeholder="Nº de operación del banco">
             </div>
         </div>
 
         <fieldset class="account-allocation-options">
-            <legend>¿Dónde querés imputarlo?</legend>
-            <label><input type="radio" name="destino_pago" value="SIN_IMPUTAR" checked> <span>Sin imputar <small>Tauro lo revisa</small></span></label>
-            <label><input type="radio" name="destino_pago" value="NACIONAL"> <span>Nacional</span></label>
-            <label><input type="radio" name="destino_pago" value="INTERNACIONAL"> <span>Internacional</span></label>
-            <label><input type="radio" name="destino_pago" value="DIVIDIR"> <span>Dividir</span></label>
+            <legend>¿Qué querés pagar?</legend>
+            <p><small>Podés elegir documentos de ambos ámbitos: no hace falta Dividir el pago manualmente. Lo Sin imputar queda como saldo a favor.</small></p>
+            {% for d in destinos_pago %}
+            <label>
+              <input type="checkbox" name="destinos" value="{{ d.clave }}" data-saldo="{{ d.disponible }}">
+              <span><strong>{{ d.descripcion }}</strong>{% if d.tracking %} · {{ d.tracking }}{% endif %}
+                <small>{{ d.ambito|title }} · saldo {{ dinero(d.saldo) }}{% if d.solicitado %} · en revisión {{ dinero(d.solicitado) }}{% endif %}</small>
+              </span>
+            </label>
+            {% else %}
+            <p>No hay facturas ni cargos con saldo. Si informás un pago, quedará completo a favor.</p>
+            {% endfor %}
         </fieldset>
-
-        <div class="account-split-allocation" id="split-allocation" hidden>
-            <div class="form-group">
-                <label for="pago-nacional">Monto para Nacional</label>
-                <input type="text" name="monto_nacional" id="pago-nacional" inputmode="decimal" data-numero="monto" value="0" disabled>
-            </div>
-            <div class="form-group">
-                <label for="pago-internacional">Monto para Internacional</label>
-                <input type="text" name="monto_internacional" id="pago-internacional" inputmode="decimal" data-numero="monto" value="0" disabled>
-            </div>
-            <p id="payment-unallocated" aria-live="polite">Queda sin imputar: $ 0</p>
-            <p id="payment-allocation-error" class="account-allocation-error" role="alert" aria-live="assertive" tabindex="-1" hidden></p>
+        <div class="account-split-allocation">
+          <p id="payment-allocation-summary" aria-live="polite">Imputado: $ 0,00 · Te quedan $ 0,00 a favor</p>
         </div>
 
         <div class="account-payment-file-row">
@@ -307,12 +310,9 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
   if (!form) return;
   var paymentDetails = document.getElementById("informar-pago");
   var paymentOpener = document.querySelector("[data-open-payment]");
-  var split = document.getElementById("split-allocation");
   var total = document.getElementById("pago-monto");
-  var nacional = document.getElementById("pago-nacional");
-  var internacional = document.getElementById("pago-internacional");
-  var remainder = document.getElementById("payment-unallocated");
-  var allocationError = document.getElementById("payment-allocation-error");
+  var destinations = Array.from(form.querySelectorAll('[name="destinos"]'));
+  var summary = document.getElementById("payment-allocation-summary");
 
   function numberFromInput(value) {
     value = String(value || "").trim().replace(/\s/g, "");
@@ -329,10 +329,6 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }
 
-  function selectedDestination() {
-    return form.querySelector('[name="destino_pago"]:checked').value;
-  }
-
   function openPayment(event) {
     if (event) event.preventDefault();
     paymentDetails.open = true;
@@ -340,42 +336,27 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
   }
 
   function updateAllocation() {
-    var isSplit = selectedDestination() === "DIVIDIR";
-    split.hidden = !isSplit;
-    nacional.disabled = !isSplit;
-    internacional.disabled = !isSplit;
     var totalValue = numberFromInput(total.value);
-    var allocated = numberFromInput(nacional.value) + numberFromInput(internacional.value);
-    var pending = Math.max(0, totalValue - allocated);
-    remainder.textContent = "Queda sin imputar: $ " + pending.toLocaleString("es-AR", {
+    var selected = destinations.filter(function (item) { return item.checked; })
+      .reduce(function (sum, item) { return sum + numberFromInput(item.dataset.saldo); }, 0);
+    var allocated = Math.min(totalValue, selected);
+    var credit = Math.max(0, totalValue - selected);
+    var pending = Math.max(0, selected - totalValue);
+    function money(value) { return value.toLocaleString("es-AR", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    });
-    allocationError.hidden = true;
-    allocationError.textContent = "";
+    }); }
+    summary.textContent = "Imputado: $ " + money(allocated)
+      + " · Te quedan $ " + money(credit) + " a favor"
+      + (pending ? " · Queda pendiente: $ " + money(pending) : "");
   }
 
-  form.querySelectorAll('[name="destino_pago"]').forEach(function (radio) {
-    radio.addEventListener("change", updateAllocation);
+  destinations.forEach(function (checkbox) {
+    checkbox.addEventListener("change", updateAllocation);
   });
-  paymentOpener.addEventListener("click", openPayment);
+  if (paymentOpener) paymentOpener.addEventListener("click", openPayment);
   if (window.location.hash === "#informar-pago") openPayment();
-  [total, nacional, internacional].forEach(function (input) {
-    input.addEventListener("input", updateAllocation);
-  });
-  form.addEventListener("submit", function (event) {
-    if (selectedDestination() !== "DIVIDIR") return;
-    var totalValue = numberFromInput(total.value);
-    var allocated = numberFromInput(nacional.value) + numberFromInput(internacional.value);
-    if (allocated <= 0 || allocated > totalValue) {
-      event.preventDefault();
-      allocationError.textContent = allocated <= 0
-        ? "Indicá cuánto querés imputar a Nacional o Internacional."
-        : "La suma a imputar no puede superar el monto total del pago.";
-      allocationError.hidden = false;
-      allocationError.focus({ preventScroll: true });
-    }
-  });
+  total.addEventListener("input", updateAllocation);
   updateAllocation();
 })();
 </script>

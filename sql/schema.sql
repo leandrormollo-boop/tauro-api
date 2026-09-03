@@ -2812,6 +2812,220 @@ CREATE TRIGGER trg_proteger_factura_cliente_item
 BEFORE UPDATE ON facturas_cliente_items
 FOR EACH ROW EXECUTE FUNCTION tauro_proteger_factura_cliente_item();
 
+-- ── Imputación documental de pagos ────────────────────────
+-- Las filas históricas conservan factura_id/envio_id NULL y su ámbito
+-- explícito. Todo flujo nuevo apunta a una factura o a un cargo aún no
+-- facturado; el remanente del pago no genera fila y queda a favor.
+ALTER TABLE pagos_aplicaciones
+    ADD COLUMN IF NOT EXISTS factura_id BIGINT;
+ALTER TABLE pagos_aplicaciones
+    ADD COLUMN IF NOT EXISTS envio_id INTEGER;
+
+DO $$
+DECLARE
+    restriccion RECORD;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid='pagos_aplicaciones'::regclass
+           AND conname='pagos_aplicaciones_factura_id_fkey'
+    ) THEN
+        ALTER TABLE pagos_aplicaciones
+            ADD CONSTRAINT pagos_aplicaciones_factura_id_fkey
+            FOREIGN KEY (factura_id) REFERENCES facturas_cliente(id)
+            ON DELETE RESTRICT ON UPDATE RESTRICT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid='pagos_aplicaciones'::regclass
+           AND conname='pagos_aplicaciones_envio_id_fkey'
+    ) THEN
+        ALTER TABLE pagos_aplicaciones
+            ADD CONSTRAINT pagos_aplicaciones_envio_id_fkey
+            FOREIGN KEY (envio_id) REFERENCES envios(id)
+            ON DELETE RESTRICT ON UPDATE RESTRICT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid='pagos_aplicaciones'::regclass
+           AND conname='ck_pagos_aplicaciones_objetivo'
+    ) THEN
+        ALTER TABLE pagos_aplicaciones
+            ADD CONSTRAINT ck_pagos_aplicaciones_objetivo
+            CHECK (NUM_NONNULLS(factura_id, envio_id) <= 1);
+    END IF;
+
+    -- Quita sólo la UNIQUE legacy exacta (pago_id, ambito), cualquiera sea
+    -- el nombre que PostgreSQL le haya asignado. Los índices nuevos permiten
+    -- varias imputaciones del mismo ámbito a documentos distintos.
+    FOR restriccion IN
+        SELECT c.conname
+          FROM pg_constraint c
+         WHERE c.conrelid='pagos_aplicaciones'::regclass
+           AND c.contype='u'
+           AND (
+               SELECT ARRAY_AGG(a.attname ORDER BY u.ord)
+                 FROM UNNEST(c.conkey) WITH ORDINALITY u(attnum, ord)
+                 JOIN pg_attribute a
+                   ON a.attrelid=c.conrelid AND a.attnum=u.attnum
+           ) = ARRAY['pago_id','ambito']::name[]
+    LOOP
+        EXECUTE FORMAT(
+            'ALTER TABLE pagos_aplicaciones DROP CONSTRAINT %I',
+            restriccion.conname
+        );
+    END LOOP;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pago_aplicacion_factura
+    ON pagos_aplicaciones (pago_id, factura_id)
+    WHERE factura_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pago_aplicacion_envio
+    ON pagos_aplicaciones (pago_id, envio_id)
+    WHERE envio_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_pago_aplicacion_factura_estado
+    ON pagos_aplicaciones (factura_id, estado)
+    WHERE factura_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_pago_aplicacion_envio_estado
+    ON pagos_aplicaciones (envio_id, estado)
+    WHERE envio_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION validar_pago_aplicacion()
+RETURNS TRIGGER AS $$
+DECLARE
+    pago_actual RECORD;
+    factura_actual RECORD;
+    envio_actual RECORD;
+    ambito_documento TEXT;
+    ambito_documento_max TEXT;
+    aplicado_pago NUMERIC(14,2);
+    aplicado_documento NUMERIC(14,2);
+    total_documento NUMERIC(14,2);
+BEGIN
+    IF TG_OP = 'UPDATE' AND (
+        NEW.pago_id IS DISTINCT FROM OLD.pago_id
+        OR NEW.factura_id IS DISTINCT FROM OLD.factura_id
+        OR NEW.envio_id IS DISTINCT FROM OLD.envio_id
+        OR NEW.monto_ars IS DISTINCT FROM OLD.monto_ars
+        OR NEW.ambito IS DISTINCT FROM OLD.ambito
+        OR NOT (
+            NEW.estado = OLD.estado
+            OR (OLD.estado='SOLICITADA' AND NEW.estado='APLICADA')
+        )
+    ) THEN
+        RAISE EXCEPTION 'Una aplicación sólo puede confirmarse; no se reescribe';
+    END IF;
+
+    SELECT id, cliente_id, monto_ars,
+           COALESCE(estado, 'APROBADO') AS estado
+      INTO pago_actual
+      FROM pagos
+     WHERE id=NEW.pago_id
+     FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'El pago % no existe', NEW.pago_id;
+    END IF;
+    IF NEW.estado='APLICADA' AND pago_actual.estado <> 'APROBADO' THEN
+        RAISE EXCEPTION 'El pago % no está aprobado', NEW.pago_id;
+    END IF;
+    IF NEW.estado='SOLICITADA' AND pago_actual.estado <> 'PENDIENTE' THEN
+        RAISE EXCEPTION 'Sólo un pago pendiente admite una imputación solicitada';
+    END IF;
+
+    IF NEW.factura_id IS NOT NULL THEN
+        SELECT id, cliente_id, tipo, estado, total
+          INTO factura_actual
+          FROM facturas_cliente
+         WHERE id=NEW.factura_id
+         FOR UPDATE;
+        IF NOT FOUND OR factura_actual.cliente_id <> pago_actual.cliente_id
+           OR factura_actual.estado <> 'EMITIDA' OR factura_actual.tipo <> 'FC' THEN
+            RAISE EXCEPTION 'La factura no pertenece al cliente o no es imputable';
+        END IF;
+        SELECT MIN(COALESCE(e.ambito, ea.ambito)),
+               MAX(COALESCE(e.ambito, ea.ambito))
+          INTO ambito_documento, ambito_documento_max
+          FROM facturas_cliente_items i
+     LEFT JOIN envios e ON e.id=i.envio_id
+     LEFT JOIN ajustes_cliente a ON a.id=i.ajuste_id
+     LEFT JOIN envios ea ON ea.solicitud_id=a.solicitud_id
+         WHERE i.factura_id=NEW.factura_id;
+        IF ambito_documento IS DISTINCT FROM ambito_documento_max THEN
+            RAISE EXCEPTION 'La factura mezcla ámbitos contables';
+        END IF;
+        total_documento := factura_actual.total;
+        SELECT COALESCE(SUM(pa.monto_ars), 0)
+          INTO aplicado_documento
+          FROM pagos_aplicaciones pa
+         WHERE pa.id <> COALESCE(NEW.id, -1)
+           AND pa.estado IN ('SOLICITADA','APLICADA')
+           AND (
+               pa.factura_id=NEW.factura_id
+               OR pa.envio_id IN (
+                   SELECT i.envio_id FROM facturas_cliente_items i
+                    WHERE i.factura_id=NEW.factura_id
+                      AND i.envio_id IS NOT NULL
+               )
+           );
+    ELSIF NEW.envio_id IS NOT NULL THEN
+        SELECT id, cliente_id, estado, monto_ars, ambito
+          INTO envio_actual
+          FROM envios
+         WHERE id=NEW.envio_id
+         FOR UPDATE;
+        IF NOT FOUND OR envio_actual.cliente_id <> pago_actual.cliente_id
+           OR envio_actual.estado <> 'ACTIVO' THEN
+            RAISE EXCEPTION 'El cargo no pertenece al cliente o no está activo';
+        END IF;
+        IF TG_OP='INSERT' AND EXISTS (
+            SELECT 1 FROM facturas_cliente_items i
+            JOIN facturas_cliente f ON f.id=i.factura_id
+            WHERE i.envio_id=NEW.envio_id AND f.estado='EMITIDA'
+        ) THEN
+            RAISE EXCEPTION 'El cargo ya está facturado; imputá la factura';
+        END IF;
+        ambito_documento := envio_actual.ambito;
+        total_documento := envio_actual.monto_ars;
+        SELECT COALESCE(SUM(pa.monto_ars), 0)
+          INTO aplicado_documento
+          FROM pagos_aplicaciones pa
+         WHERE pa.id <> COALESCE(NEW.id, -1)
+           AND pa.envio_id=NEW.envio_id
+           AND pa.estado IN ('SOLICITADA','APLICADA');
+    ELSE
+        -- Compatibilidad: las aplicaciones anteriores a esta migración no
+        -- tienen documento y conservan el ámbito que ya tenían.
+        ambito_documento := NEW.ambito;
+        aplicado_documento := 0;
+        total_documento := NULL;
+    END IF;
+
+    IF ambito_documento NOT IN ('NACIONAL','INTERNACIONAL') THEN
+        RAISE EXCEPTION 'El documento no tiene ámbito contable válido';
+    END IF;
+    NEW.ambito := ambito_documento;
+    IF total_documento IS NOT NULL
+       AND aplicado_documento + NEW.monto_ars > total_documento THEN
+        RAISE EXCEPTION 'La aplicación supera el saldo del documento';
+    END IF;
+
+    SELECT COALESCE(SUM(monto_ars), 0)
+      INTO aplicado_pago
+      FROM pagos_aplicaciones
+     WHERE pago_id=NEW.pago_id
+       AND id <> COALESCE(NEW.id, -1);
+    IF aplicado_pago + NEW.monto_ars > pago_actual.monto_ars THEN
+        RAISE EXCEPTION 'Las aplicaciones superan el monto del pago';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_pago_aplicacion ON pagos_aplicaciones;
+CREATE TRIGGER trg_validar_pago_aplicacion
+BEFORE INSERT OR UPDATE ON pagos_aplicaciones
+FOR EACH ROW EXECUTE FUNCTION validar_pago_aplicacion();
+
 -- 7) Auditoría permanente del módulo. No comparte la política de retención
 --    corta de security_audit porque forma parte de la evidencia financiera.
 CREATE TABLE IF NOT EXISTS auditoria_facturas_courier (

@@ -49,7 +49,7 @@ from servicios.cotizador_nacional import preparar_cotizacion_nacional
 from servicios.cuenta_corriente import (
     saldo, total_pagado, get_facturado_real, get_facturas_recientes,
     movimientos, resumir_facturacion, resumen_cuenta_por_ambito,
-    movimientos_cuenta_paginados,
+    movimientos_cuenta_paginados, listar_destinos_pago,
 )
 from servicios.facturacion_clientes import (
     get_factura_cliente_pdf,
@@ -1094,6 +1094,12 @@ def cuenta_corriente(
             pendientes_facturar.extend(listar_partidas_facturables(
                 cliente, tipo="FC", ambito=ambito_partida,
             ))
+    try:
+        destinos_pago = listar_destinos_pago(cliente)
+    except RuntimeError:
+        # Mantiene renderizable la página durante readiness/migración; el
+        # saldo principal ya tiene su propio circuito de diagnóstico.
+        destinos_pago = []
 
     return templates.TemplateResponse(
         request=request, name="portal/cuenta.html",
@@ -1107,6 +1113,8 @@ def cuenta_corriente(
             "vista_cuenta": vista,
             "facturas_cliente": facturas_cliente,
             "pendientes_facturar": pendientes_facturar,
+            "destinos_pago": destinos_pago,
+            "today": datetime.now().strftime("%Y-%m-%d"),
             "idempotency_key": _nueva_idempotency_key(),
         },
     )
@@ -1134,30 +1142,40 @@ async def informar_pago(
             form.get("monto"), "Monto", minimo=Decimal("0.01")
         )
 
-        destino = str(form.get("destino_pago") or "SIN_IMPUTAR").strip().upper()
-        if destino not in {"SIN_IMPUTAR", "NACIONAL", "INTERNACIONAL", "DIVIDIR"}:
-            raise ValueError("Elegí un destino válido para el pago.")
-
+        destinos = None
         aplicaciones = {}
-        if destino in {"NACIONAL", "INTERNACIONAL"}:
-            aplicaciones[destino] = monto
-        elif destino == "DIVIDIR":
-            monto_nacional = _importe_cuenta_form(
-                form.get("monto_nacional") or "0",
-                "Monto para Nacional", minimo=Decimal("0"),
-            )
-            monto_internacional = _importe_cuenta_form(
-                form.get("monto_internacional") or "0",
-                "Monto para Internacional", minimo=Decimal("0"),
-            )
-            if monto_nacional + monto_internacional <= 0:
-                raise ValueError("Indicá cuánto querés imputar a Nacional o Internacional.")
-            if monto_nacional + monto_internacional > monto:
-                raise ValueError("La suma a imputar no puede superar el monto total del pago.")
-            if monto_nacional:
-                aplicaciones["NACIONAL"] = monto_nacional
-            if monto_internacional:
-                aplicaciones["INTERNACIONAL"] = monto_internacional
+        if str(form.get("seleccion_documental") or "") == "1":
+            destinos = list(form.getlist("destinos"))
+        else:
+            # Compatibilidad con formularios abiertos antes del cambio.
+            destino = str(
+                form.get("destino_pago") or "SIN_IMPUTAR"
+            ).strip().upper()
+            if destino not in {
+                "SIN_IMPUTAR", "NACIONAL", "INTERNACIONAL", "DIVIDIR"
+            }:
+                raise ValueError("Elegí un destino válido para el pago.")
+            if destino in {"NACIONAL", "INTERNACIONAL"}:
+                aplicaciones[destino] = monto
+            elif destino == "DIVIDIR":
+                monto_nacional = _importe_cuenta_form(
+                    form.get("monto_nacional") or "0", "Monto para Nacional",
+                    minimo=Decimal("0"),
+                )
+                monto_internacional = _importe_cuenta_form(
+                    form.get("monto_internacional") or "0",
+                    "Monto para Internacional", minimo=Decimal("0"),
+                )
+                if monto_nacional + monto_internacional <= 0:
+                    raise ValueError("Indicá cuánto querés imputar.")
+                if monto_nacional + monto_internacional > monto:
+                    raise ValueError(
+                        "La suma a imputar no puede superar el monto total del pago."
+                    )
+                if monto_nacional:
+                    aplicaciones["NACIONAL"] = monto_nacional
+                if monto_internacional:
+                    aplicaciones["INTERNACIONAL"] = monto_internacional
 
         archivo = form.get("comprobante")
         contenido = await leer_comprobante_con_tope(archivo)
@@ -1166,7 +1184,7 @@ async def informar_pago(
 
         registrar_pago(
             cliente_id=cliente,
-            fecha=datetime.now().strftime("%Y-%m-%d"),
+            fecha=str(form.get("fecha") or datetime.now().strftime("%Y-%m-%d")),
             monto_ars=monto,
             metodo=str(form.get("metodo") or "transferencia")[:60],
             referencia=str(form.get("referencia") or "")[:120],
@@ -1175,6 +1193,7 @@ async def informar_pago(
             comprobante=contenido,
             comprobante_nombre=getattr(archivo, "filename", "") or "",
             aplicaciones=aplicaciones,
+            destinos=destinos,
             idempotency_key=idempotency_key,
         )
     except ValueError as e:

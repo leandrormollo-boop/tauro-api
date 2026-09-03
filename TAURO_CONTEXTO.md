@@ -103,7 +103,7 @@ No existe una tabla independiente llamada `cajas`. Las cajas viven en `solicitud
 
 `pagos`: `id`, cliente, fecha, `monto_ars NUMERIC(14,2)`, método, referencia, nota, estado, comprobante BYTEA/tipo/nombre, idempotency key, origen y creación. Un pago informado por cliente nace PENDIENTE; uno cargado por admin nace APROBADO; RECHAZADO no impacta saldo.
 
-`pagos_aplicaciones`: imputación explícita de un pago: `id`, `pago_id`, ámbito NACIONAL/INTERNACIONAL, `monto_ars NUMERIC(14,2)`, estado SOLICITADA/APLICADA y timestamps. La suma no puede superar el pago. Lo no aplicado queda como crédito sin imputar.
+`pagos_aplicaciones`: imputación explícita de un pago: `id`, `pago_id`, `factura_id` opcional, `envio_id` opcional, ámbito NACIONAL/INTERNACIONAL derivado del documento, `monto_ars NUMERIC(14,2)`, estado SOLICITADA/APLICADA y timestamps. Cada aplicación nueva apunta a una factura o a un cargo todavía no facturado. La suma no puede superar ni el pago ni el saldo del documento. Las filas históricas sin objetivo conservan su ámbito; lo no aplicado no genera fila y queda como crédito sin imputar.
 
 `facturas_cliente`: cabecera documental de una factura o nota de crédito TAURO. Guarda `id`, cliente, tipo FC/NC, punto de venta, número, CAE, emisión, vencimiento y período; `subtotal`, `iva` y `total NUMERIC(14,2)`; PDF BYTEA, nombre, estado EMITIDA/ANULADA y autor/fecha de creación. Tipo+punto de venta+número es único. La cabecera es inmutable salvo la transición explícita a ANULADA.
 
@@ -252,11 +252,13 @@ El admin emite desde `/admin/clientes/{cliente_id}/facturas/nueva`. Filtra por p
 
 La factura documenta deuda ya registrada: no crea un segundo debe y no reescribe `envios.nro_fc` ni su PDF legacy. El portal lista los documentos nuevos en la vista Facturas de `/portal/cuenta` y descarga cada PDF con autorización por cliente. Las rutas antiguas de facturación individual redirigen al lote; los documentos históricos siguen disponibles en una ruta legacy separada.
 
+Portal y admin permiten seleccionar facturas con saldo o cargos todavía sin factura al informar/registrar un pago. El servidor distribuye el monto, con Decimal, en el orden elegido: cubre cada documento hasta su saldo, permite que el último quede parcial y deja cualquier excedente como crédito a favor. Una selección del cliente nace SOLICITADA y sólo pasa a APLICADA cuando admin aprueba el comprobante. Si el cargo se factura después, su aplicación no se mueve ni se duplica: la factura calcula `pagado` sumando aplicaciones directas y las heredadas de sus renglones.
+
 ## 7. Cuenta corriente
 
 - Debe: cargos ACTIVO de `envios` más ajustes APLICADO positivos. Un cargo puede estar facturado (`nro_fc`) o pendiente de facturación; ambos integran deuda.
 - Haber: pagos APROBADO efectivamente imputados y ajustes APLICADO negativos.
-- Subledger nacional/internacional: cada cargo tiene `ambito`; cada aplicación de pago también. Se calculan dos libros separados y un consolidado, sin inferir ámbito por courier.
+- Subledger nacional/internacional: cada cargo tiene `ambito`; las aplicaciones documentales derivan el suyo de la factura o el envío. Se calculan dos libros separados y un consolidado, sin inferir ámbito por courier.
 - Crédito sin imputar: parte de pagos aprobados que todavía no tiene filas APLICADA en `pagos_aplicaciones`. Reduce el consolidado económico, pero no se adjudica arbitrariamente a nacional o internacional.
 - Cargos sin clasificar: cargos históricos con `ambito` nulo o inválido. Permanecen visibles aparte y requieren clasificación admin; no se reparten automáticamente.
 - Pagos pendientes: comprobantes informados por cliente. Se muestran, pero no son haber hasta aprobación admin.
@@ -350,7 +352,7 @@ Los prefijos ya están incorporados debajo.
 
 ## 10. Pendientes y deuda técnica
 
-- La facturación agrupada ya tiene cabecera y renglones, pero todavía falta conectar sus saldos con imputaciones documentales de pagos y completar el flujo explícito de anulación/NC en interfaz.
+- La facturación agrupada y los pagos documentales están conectados; queda completar el flujo explícito de anulación/NC en interfaz y decidir una estrategia asistida para reclasificar las 25 aplicaciones históricas que sólo identifican ámbito.
 - Ingreso de facturas courier desde correo: el módulo admin permite carga y conciliación, pero `docs/CONCILIACION_FACTURAS_COURIER.md` marca pendiente el conector que descarga automáticamente adjuntos de Gmail/Excel/Sheets y los ingresa al expediente.
 - `api_key` legado coexiste con hash y el script de Sheets menciona `api_key_hash`, columna que debe verificarse en la base efectiva. Consolidar autenticación API y retirar texto claro.
 - Tracking genérico en `servicios/rastreo.py` conserva un TODO para llamar `courier.track()`; DHL tiene job real aparte, pero FedEx/UPS genéricos no están cerrados.
@@ -397,5 +399,6 @@ Los prefijos ya están incorporados debajo.
 - 2 septiembre, snapshots de reemisión: la recotización DHL captura costo, dólar, precio, margen y pesos en un canal interno antes de emitir, sin ampliar la respuesta cliente. Las reemisiones fallan cerradas si no tienen snapshot propio. En producción se reconstruyó con evidencia la relación WAIMAO #52 → #53, se conservaron cargos separados y se verificó que ambos trackings muestran base interna en conciliación; el acta está en `docs/REEMISION_WAIMAO_52_53_ACTA.md`.
 - 3 septiembre, históricos WAIMAO: se cruzó la hoja madre `TAURO 2026` con producción y se importaron 29 costos iniciales faltantes como snapshots inmutables `IMPORT_SHEET_2026`; 3 existentes coincidieron y 14 casos sin evidencia quedaron pendientes. El proceso tiene dry-run, controles estrictos, auditoría, respaldo restaurable e idempotencia verificada; el acta está en `docs/IMPORTACION_COSTOS_WAIMAO_2026_ACTA.md`.
 - 3 septiembre, facturación agrupada a clientes: se incorporaron cabeceras y renglones inmutables para FC/NC, selección por período y ámbito, PDF único, auditoría, bloqueo de doble facturación y vistas separadas de facturas/pendientes en el portal. La factura pasa a documentar cargos preexistentes sin duplicar deuda; el diseño contable conjunto está en `docs/DISENO_FACTURACION_PAGOS_DIFERENCIAS.md`.
+- 3 septiembre, pagos por documento: portal y admin permiten imputar a facturas o cargos, con pagos parciales, remanente a favor, aprobación de solicitudes y arrastre automático al facturar. Se preservaron las aplicaciones históricas por ámbito y se agregaron controles concurrentes para impedir sobrepago del pago o del documento.
 
 Este historial resume los commits visibles de `origin/main`; no atribuye autoría personal cuando el commit no la documenta. Para una auditoría exacta se debe consultar `git log --date=iso` y el diff de cada hash.

@@ -94,6 +94,26 @@ SELECT
           AND t.tgname = 'trg_validar_pago_con_aplicaciones'
           AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
     ) AS trigger_pago_padre_habilitado,
+    (
+        SELECT COUNT(*) = 2
+        FROM information_schema.columns
+        WHERE table_schema = CURRENT_SCHEMA()
+          AND table_name = 'pagos_aplicaciones'
+          AND column_name IN ('factura_id', 'envio_id')
+    ) AS pagos_objetivos_documentales_existen,
+    TO_REGCLASS('facturas_cliente') IS NOT NULL
+        AS facturas_cliente_existe,
+    TO_REGCLASS('facturas_cliente_items') IS NOT NULL
+        AS facturas_cliente_items_existe,
+    EXISTS (
+        SELECT 1 FROM pg_class c JOIN pg_index i ON i.indexrelid=c.oid
+        WHERE c.oid=TO_REGCLASS('uq_pago_aplicacion_factura')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+    ) AND EXISTS (
+        SELECT 1 FROM pg_class c JOIN pg_index i ON i.indexrelid=c.oid
+        WHERE c.oid=TO_REGCLASS('uq_pago_aplicacion_envio')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+    ) AS pagos_objetivos_indices_listos,
     EXISTS (
         SELECT 1
         FROM pg_class indice
@@ -290,7 +310,7 @@ SELECT
           AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
     ) AS trigger_snapshot_consistente_habilitado,
     (
-        SELECT COUNT(*) = 4
+        SELECT COUNT(*) = 6
         FROM pg_trigger t
         WHERE (t.tgrelid, t.tgname) IN (
             (TO_REGCLASS('facturas_courier'),
@@ -300,12 +320,16 @@ SELECT
             (TO_REGCLASS('conciliaciones_envio'),
                 'trg_proteger_calculo_conciliacion'),
             (TO_REGCLASS('auditoria_facturas_courier'),
-                'trg_auditoria_courier_append_only')
+                'trg_auditoria_courier_append_only'),
+            (TO_REGCLASS('facturas_cliente'),
+                'trg_proteger_factura_cliente'),
+            (TO_REGCLASS('facturas_cliente_items'),
+                'trg_proteger_factura_cliente_item')
         )
           AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
     ) AS mutaciones_financieras_bloqueadas,
     (
-        SELECT COUNT(*) = 6
+        SELECT COUNT(*) = 8
         FROM pg_trigger t
         WHERE t.tgrelid IN (
             TO_REGCLASS('facturas_courier'),
@@ -313,6 +337,8 @@ SELECT
             TO_REGCLASS('factura_courier_item_matches'),
             TO_REGCLASS('conciliaciones_envio'),
             TO_REGCLASS('ajustes_cliente'),
+            TO_REGCLASS('facturas_cliente'),
+            TO_REGCLASS('facturas_cliente_items'),
             TO_REGCLASS('auditoria_facturas_courier')
         )
           AND t.tgname LIKE 'trg_no_delete_%'
@@ -336,6 +362,10 @@ _READINESS_CONTABLE_CAMPOS = (
     "pagos_aplicaciones_existe",
     "trigger_pago_aplicacion_habilitado",
     "trigger_pago_padre_habilitado",
+    "pagos_objetivos_documentales_existen",
+    "facturas_cliente_existe",
+    "facturas_cliente_items_existe",
+    "pagos_objetivos_indices_listos",
     "indice_fc_global_correcto",
     "check_fc_valida",
     "fk_pagos_cliente_restrict",
