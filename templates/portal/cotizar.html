@@ -137,6 +137,10 @@
                                         <input type="text" name="bulto_alto" inputmode="decimal" data-numero="decimal" required value="{{ b.alto_cm or '' }}">
                                     </div>
                                 </div>
+                                <div class="mini-row" data-package-weights aria-live="polite">
+                                    <span>Peso por caja</span>
+                                    <strong>Completá peso y medidas</strong>
+                                </div>
                             </div>
                             {% endfor %}
                         </div>
@@ -160,8 +164,14 @@
                                     <div class="form-group"><label>Ancho (cm)</label><input type="text" name="bulto_ancho" inputmode="decimal" data-numero="decimal" required></div>
                                     <div class="form-group"><label>Alto (cm)</label><input type="text" name="bulto_alto" inputmode="decimal" data-numero="decimal" required></div>
                                 </div>
+                                <div class="mini-row" data-package-weights aria-live="polite"><span>Peso por caja</span><strong>Completá peso y medidas</strong></div>
                             </div>
                         </template>
+                        <div class="card" style="margin-top:14px;padding:12px 16px;" id="quote-weight-summary" aria-live="polite">
+                            <div class="mini-row"><span>Peso real total</span><strong data-weight-real>—</strong></div>
+                            <div class="mini-row"><span>Peso volumétrico total · divisor 5000</span><strong data-weight-volume>—</strong></div>
+                            <div class="mini-row"><span>Peso facturable total</span><strong data-weight-billable>—</strong></div>
+                        </div>
                     </div>
                 </div>
 
@@ -184,6 +194,7 @@
                 <div><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
                 <div><span>Peso facturable · {{ resultado.cantidad_bultos }} caja{% if resultado.cantidad_bultos != 1 %}s{% endif %}</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
                 <div><span>Real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
+                {% if resultado.cobra_por_volumen %}<div><span>Criterio</span><strong class="warn">Se cobra por volumen</strong></div>{% endif %}
                 <div><span>Valor declarado</span><strong>USD {{ '%g'|format(resultado.valor_declarado_usd) }}</strong></div>
             </div>
 
@@ -273,6 +284,8 @@
         var packagesReady = rows.length > 0;
         var physicalBoxes = 0;
         var totalWeight = 0;
+        var totalVolumetric = 0;
+        var totalBillable = 0;
 
         rows.forEach(function (row) {
             var quantity = Math.max(1, Math.round(numberFrom((row.querySelector('[name="bulto_cantidad"]') || {}).value)) || 1);
@@ -282,8 +295,27 @@
             var height = numberFrom((row.querySelector('[name="bulto_alto"]') || {}).value);
             physicalBoxes += quantity;
             totalWeight += quantity * weight;
+            var volumetric = length * width * height / 5000;
+            totalVolumetric += quantity * volumetric;
+            totalBillable += quantity * Math.max(weight, volumetric);
+            var rowSummary = row.querySelector("[data-package-weights]");
+            if (rowSummary) {
+                var rowStrong = rowSummary.querySelector("strong");
+                if (weight > 0 && length > 0 && width > 0 && height > 0) {
+                    rowStrong.textContent = "Real " + formatWeight(weight) + " · Volumétrico " + formatWeight(volumetric) + " · Facturable " + formatWeight(Math.max(weight, volumetric)) + (volumetric > weight ? " · Se cobra por volumen" : "");
+                } else {
+                    rowStrong.textContent = "Completá peso y medidas";
+                }
+            }
             if (!(weight > 0 && length > 0 && width > 0 && height > 0)) packagesReady = false;
         });
+
+        var realOutput = document.querySelector("[data-weight-real]");
+        var volumeOutput = document.querySelector("[data-weight-volume]");
+        var billableOutput = document.querySelector("[data-weight-billable]");
+        if (realOutput) realOutput.textContent = totalWeight > 0 ? formatWeight(totalWeight) : "—";
+        if (volumeOutput) volumeOutput.textContent = totalVolumetric > 0 ? formatWeight(totalVolumetric) : "—";
+        if (billableOutput) billableOutput.textContent = totalBillable > 0 ? formatWeight(totalBillable) + (totalVolumetric > totalWeight ? " · Se cobra por volumen" : "") : "—";
 
         var declaredReady = numberFrom(declared && declared.value) > 0;
         var originName = selectedName(origin) || "Origen";
@@ -306,6 +338,10 @@
             else progressLabel.textContent = "Todo listo para consultar la tarifa.";
         }
         if (submit) submit.classList.toggle("is-ready", routeReady && packagesReady && declaredReady);
+    }
+
+    function formatWeight(value) {
+        return value.toLocaleString("es-AR", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + " kg";
     }
 
     function syncPackages() {

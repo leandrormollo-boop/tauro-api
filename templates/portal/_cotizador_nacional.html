@@ -124,6 +124,11 @@
                             <input type="text" name="valor_declarado_ars" id="nac_valor_declarado_ars" inputmode="decimal" data-numero="importe" required value="{{ form.valor_declarado_ars or '' }}" placeholder="Ej. 100.000">
                         </div>
                     </div>
+                    <div class="card" style="margin-top:14px;padding:12px 16px;" id="national-weight-summary" aria-live="polite">
+                        <div class="mini-row"><span>Peso real total</span><strong data-national-weight-real>—</strong></div>
+                        <div class="mini-row"><span>Peso volumétrico total · divisor 4000</span><strong data-national-weight-volume>—</strong></div>
+                        <div class="mini-row"><span>Peso facturable total</span><strong data-national-weight-billable>—</strong></div>
+                    </div>
                 </div>
 
                 <div class="quote-submit-row national-submit-row">
@@ -153,6 +158,7 @@
                 <div><span>Origen</span><strong>{{ resultado_nacional.origen.provincia_nombre }}</strong><small>{{ resultado_nacional.origen.localidad_input }} · {{ resultado_nacional.origen.cp_input }}</small></div>
                 <div><span>Destino</span><strong>{{ resultado_nacional.destino.provincia_nombre }}</strong><small>{{ resultado_nacional.destino.localidad_input }} · {{ resultado_nacional.destino.cp_input }}</small></div>
                 <div><span>Bultos</span><strong>{{ resultado_nacional.totales.cantidad_bultos }} · {{ resultado_nacional.totales.peso_kg }} kg</strong><small>{{ resultado_nacional.bultos[0].largo_cm }}×{{ resultado_nacional.bultos[0].ancho_cm }}×{{ resultado_nacional.bultos[0].alto_cm }} cm c/u</small></div>
+                <div><span>Pesos real / volumétrico / facturable</span><strong>{{ resultado_nacional.totales.peso_real_kg }} / {{ resultado_nacional.totales.peso_volumetrico_kg }} / {{ resultado_nacional.totales.peso_facturable_kg }} kg</strong><small>{% if resultado_nacional.totales.cobra_por_volumen %}Se cobra por volumen{% else %}Se cobra por peso real{% endif %}</small></div>
                 <div><span>Modalidad</span><strong>{{ 'Domicilio' if resultado_nacional.modalidad.origen == 'domicilio' else 'Sucursal' }} → {{ 'Domicilio' if resultado_nacional.modalidad.destino == 'domicilio' else 'Sucursal' }}</strong><small>Se confirmará según contrato</small></div>
             </div>
 
@@ -181,6 +187,41 @@
     var loader = document.getElementById("national-loading");
     var modify = document.getElementById("national-modify");
     var stage = document.getElementById("national-quote-stage");
+
+    function numberFrom(value) {
+        var normalized = String(value || "").trim();
+        if (normalized.indexOf(",") >= 0) normalized = normalized.replace(/\./g, "").replace(",", ".");
+        var result = Number(normalized);
+        return Number.isFinite(result) ? result : 0;
+    }
+
+    function formatWeight(value) {
+        return value.toLocaleString("es-AR", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + " kg";
+    }
+
+    function syncNationalWeights() {
+        var quantity = Math.max(1, Math.round(numberFrom((document.getElementById("nac_cantidad_bultos") || {}).value)) || 1);
+        var realUnit = numberFrom((document.getElementById("nac_peso_kg") || {}).value);
+        var length = numberFrom((document.getElementById("nac_largo_cm") || {}).value);
+        var width = numberFrom((document.getElementById("nac_ancho_cm") || {}).value);
+        var height = numberFrom((document.getElementById("nac_alto_cm") || {}).value);
+        var volumeUnit = length * width * height / 4000;
+        var real = realUnit * quantity;
+        var volume = volumeUnit * quantity;
+        var billable = Math.max(realUnit, volumeUnit) * quantity;
+        var realOutput = document.querySelector("[data-national-weight-real]");
+        var volumeOutput = document.querySelector("[data-national-weight-volume]");
+        var billableOutput = document.querySelector("[data-national-weight-billable]");
+        if (realOutput) realOutput.textContent = real > 0 ? formatWeight(real) : "—";
+        if (volumeOutput) volumeOutput.textContent = volume > 0 ? formatWeight(volume) : "—";
+        if (billableOutput) billableOutput.textContent = billable > 0 ? formatWeight(billable) + (volume > real ? " · Se cobra por volumen" : "") : "—";
+    }
+
+    if (form) {
+        form.addEventListener("input", syncNationalWeights);
+        form.addEventListener("change", syncNationalWeights);
+        syncNationalWeights();
+    }
 
     if (form) {
         form.addEventListener("submit", function () {

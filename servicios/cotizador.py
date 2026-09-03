@@ -390,6 +390,7 @@ def cotizar_referencia_couriers(
             "peso_usado_kg": peso_usado,
             "peso_real_kg": peso_real,
             "peso_volumetrico_kg": peso_volumetrico,
+            "cobra_por_volumen": peso_usado > peso_real,
             "valor_declarado_usd": valor_declarado,
             "cantidad_bultos": len(piezas),
             "couriers_consultados": len(tarjetas),

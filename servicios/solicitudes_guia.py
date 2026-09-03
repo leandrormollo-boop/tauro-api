@@ -24,6 +24,7 @@ from servicios.estados_envio import (
     presentar_estados_envio,
 )
 from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
+from servicios.pesos_envio import pesos_de_solicitud
 
 
 class IdempotencyConflictError(ValueError):
@@ -1658,6 +1659,7 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
         return None
     resultado = _sin_label(dict(row))
     resultado["diferencia_detalle"] = presentar_diferencia(resultado)
+    resultado["resumen_pesos"] = pesos_de_solicitud(resultado)
     return presentar_estados_envio(resultado)
 
 

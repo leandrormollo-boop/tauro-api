@@ -244,8 +244,16 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         </table>
     </div>
     <div class="mini-row" style="margin-top:10px;">
-        <span>Peso total del envío</span>
-        <strong>{{ s.peso_kg }} kg</strong>
+        <span>Peso real total</span>
+        <strong>{{ s.resumen_pesos.real_total_kg }} kg</strong>
+    </div>
+    <div class="mini-row">
+        <span>Peso volumétrico total · divisor {{ s.resumen_pesos.divisor }}</span>
+        <strong>{{ s.resumen_pesos.volumetrico_total_kg }} kg</strong>
+    </div>
+    <div class="mini-row">
+        <span>Peso facturable total</span>
+        <strong>{{ s.resumen_pesos.facturable_total_kg }} kg{% if s.resumen_pesos.cobra_por_volumen %} · <span class="badge warn">Se cobra por volumen</span>{% endif %}</strong>
     </div>
     <div class="mini-row">
         <span>Valor declarado total</span>

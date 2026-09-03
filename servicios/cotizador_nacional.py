@@ -19,6 +19,7 @@ from servicios.provincias import (
     normalizar_localidad,
     normalizar_provincia,
 )
+from servicios.pesos_envio import calcular_pesos_bultos
 
 
 CARRIERS_NACIONALES = (
@@ -142,6 +143,13 @@ def preparar_cotizacion_nacional(
     volumen_unitario_cm3 = largo * ancho * alto
     volumen_total_cm3 = volumen_unitario_cm3 * cantidad
     peso_total = peso * cantidad
+    pesos = calcular_pesos_bultos([{
+        "cantidad": cantidad,
+        "peso_kg": peso,
+        "largo_cm": largo,
+        "ancho_cm": ancho,
+        "alto_cm": alto,
+    }], "nacional")
     origen_nombre = nombre_provincia(origen_codigo)
     destino_nombre = nombre_provincia(destino_codigo)
 
@@ -186,6 +194,10 @@ def preparar_cotizacion_nacional(
             "volumen_cm3": decimal_a_texto(volumen_total_cm3),
             "volumen_m3": decimal_a_texto(volumen_total_cm3 / Decimal("1000000")),
             "valor_declarado_ars": decimal_a_texto(valor_declarado),
+            "peso_real_kg": decimal_a_texto(pesos["real_total_kg"]),
+            "peso_volumetrico_kg": decimal_a_texto(pesos["volumetrico_total_kg"]),
+            "peso_facturable_kg": decimal_a_texto(pesos["facturable_total_kg"]),
+            "cobra_por_volumen": pesos["cobra_por_volumen"],
         },
         "carriers": [dict(carrier) for carrier in CARRIERS_NACIONALES],
         "mensaje": (

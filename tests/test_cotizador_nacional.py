@@ -181,6 +181,10 @@ def test_resultado_es_preparacion_sin_precio_ni_accion_falsa():
         "volumen_cm3": "12200",
         "volumen_m3": "0.0122",
         "valor_declarado_ars": "100000",
+        "peso_real_kg": "11",
+        "peso_volumetrico_kg": "3.05",
+        "peso_facturable_kg": "11",
+        "cobra_por_volumen": False,
     }
 
 
