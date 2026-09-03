@@ -14,11 +14,11 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Request, Form, Cookie, Depends, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -30,6 +30,13 @@ from servicios.cuenta_corriente import (
     get_envios_cliente, get_pagos,
     get_facturado_real, total_pagado, saldo,
     get_resumen_clientes_bulk,
+)
+from servicios.facturacion_clientes import (
+    FacturacionClienteError,
+    crear_factura_cliente,
+    get_factura_cliente_pdf,
+    listar_facturas_cliente,
+    listar_partidas_facturables,
 )
 from servicios.catalogo import (
     get_productos_pendientes, get_todos_productos,
@@ -1603,10 +1610,26 @@ def admin_cliente_detail(
                        COUNT(*) FILTER (
                            WHERE estado='ACTIVO'
                              AND NULLIF(BTRIM(nro_fc), '') IS NULL
+                             AND NOT EXISTS (
+                                 SELECT 1
+                                 FROM facturas_cliente_items fci
+                                 JOIN facturas_cliente fc ON fc.id=fci.factura_id
+                                 WHERE fci.envio_id=envios.id
+                                   AND fc.estado='EMITIDA'
+                             )
                        ) AS pendientes_fc,
                        COUNT(*) FILTER (
                            WHERE estado='ACTIVO'
-                             AND NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                             AND (
+                                 NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                                 OR EXISTS (
+                                     SELECT 1
+                                     FROM facturas_cliente_items fci
+                                     JOIN facturas_cliente fc ON fc.id=fci.factura_id
+                                     WHERE fci.envio_id=envios.id
+                                       AND fc.estado='EMITIDA'
+                                 )
+                             )
                        ) AS facturados,
                        COALESCE(SUM(monto_ars) FILTER (
                            WHERE estado='ACTIVO'
@@ -1658,11 +1681,23 @@ def admin_cliente_detail(
                        s.estado AS solicitud_estado,
                        (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO')
                            AS oculto_cliente,
-                       (e.factura_pdf IS NOT NULL) AS tiene_factura_pdf
+                       (e.factura_pdf IS NOT NULL) AS tiene_factura_pdf,
+                       fc.id AS factura_cliente_id,
+                       fc.tipo AS factura_cliente_tipo,
+                       fc.punto_venta AS factura_cliente_punto_venta,
+                       fc.numero AS factura_cliente_numero,
+                       (fc.pdf IS NOT NULL) AS tiene_factura_cliente_pdf
                 FROM envios e
                 LEFT JOIN solicitudes_guia s
                   ON s.id = e.solicitud_id
                  AND s.cliente_id = e.cliente_id
+                LEFT JOIN LATERAL (
+                    SELECT f.id, f.tipo, f.punto_venta, f.numero, f.pdf
+                    FROM facturas_cliente_items i
+                    JOIN facturas_cliente f ON f.id=i.factura_id
+                    WHERE i.envio_id=e.id AND f.estado='EMITIDA'
+                    ORDER BY f.id DESC LIMIT 1
+                ) fc ON TRUE
                 WHERE e.cliente_id = %s
                 """ + filtro_fecha_envio_sql + """
                 ORDER BY e.fecha DESC, e.id DESC
@@ -2262,6 +2297,204 @@ def _cargo_para_facturar(cliente_id: str, envio_id: int):
     return dict(fila) if fila else None
 
 
+def _rango_factura_cliente(
+    *,
+    anio: str = "",
+    mes: str = "",
+    semana: str = "",
+    desde: str = "",
+    hasta: str = "",
+) -> tuple[date, date, dict]:
+    """Normaliza mes/semana o rango manual, siempre con extremos inclusivos."""
+    hoy = date.today()
+    if str(desde or "").strip() or str(hasta or "").strip():
+        try:
+            desde_fecha = date.fromisoformat(str(desde or "").strip())
+            hasta_fecha = date.fromisoformat(str(hasta or "").strip())
+        except ValueError as exc:
+            raise ValueError("Completá un rango de fechas válido.") from exc
+        if hasta_fecha < desde_fecha:
+            raise ValueError("La fecha hasta no puede ser anterior a desde.")
+        return desde_fecha, hasta_fecha, {
+            "anio": 0, "mes": 0, "semana": 0,
+            "desde_manual": desde_fecha.isoformat(),
+            "hasta_manual": hasta_fecha.isoformat(),
+            "desde_iso": desde_fecha.isoformat(),
+            "hasta_iso": hasta_fecha.isoformat(),
+            "etiqueta": f"{desde_fecha:%d/%m/%Y}–{hasta_fecha:%d/%m/%Y}",
+        }
+    try:
+        anio_num = int(anio or hoy.year)
+        mes_num = int(mes or hoy.month)
+        semana_num = int(semana or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("El período de facturación no es válido.") from exc
+    from servicios.periodos_envios import rango_periodo
+    desde_fecha, hasta_exclusiva = rango_periodo(anio_num, mes_num, semana_num)
+    hasta_fecha = hasta_exclusiva - timedelta(days=1)
+    return desde_fecha, hasta_fecha, {
+        "anio": anio_num, "mes": mes_num, "semana": semana_num,
+        "desde_manual": "", "hasta_manual": "",
+        "desde_iso": desde_fecha.isoformat(),
+        "hasta_iso": hasta_fecha.isoformat(),
+        "etiqueta": f"{desde_fecha:%d/%m/%Y}–{hasta_fecha:%d/%m/%Y}",
+    }
+
+
+@router.get(
+    "/clientes/{cliente_id}/facturas/nueva",
+    response_class=HTMLResponse,
+)
+def admin_factura_cliente_nueva(
+    request: Request,
+    cliente_id: str,
+    tipo: str = "FC",
+    ambito: str = "INTERNACIONAL",
+    anio: str = "",
+    mes: str = "",
+    semana: str = "",
+    desde: str = "",
+    hasta: str = "",
+    envio: str = "",
+    error: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    cliente = cliente_id.strip().upper()
+    try:
+        desde_fecha, hasta_fecha, periodo = _rango_factura_cliente(
+            anio=anio, mes=mes, semana=semana, desde=desde, hasta=hasta,
+        )
+        tipo = str(tipo or "FC").strip().upper()
+        ambito = _ambito_contable_form(ambito)
+        partidas = listar_partidas_facturables(
+            cliente, tipo=tipo, ambito=ambito,
+            desde=desde_fecha, hasta=hasta_fecha,
+        )
+    except (ValueError, FacturacionClienteError) as exc:
+        return Response(content=str(exc), status_code=400, media_type="text/plain")
+    preseleccion = f"E:{int(envio)}" if str(envio).isdigit() else ""
+    from servicios.periodos_envios import MESES, SEMANAS
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/factura_cliente_nueva.html",
+        context={
+            "seccion": "clientes",
+            "cliente_id": cliente,
+            "tipo": tipo,
+            "ambito": ambito,
+            "periodo": periodo,
+            "meses": MESES,
+            "semanas": SEMANAS,
+            "anios": range(date.today().year, 2024, -1),
+            "partidas": partidas,
+            "preseleccion": preseleccion,
+            "today": date.today().isoformat(),
+            "flash_error": error or None,
+        },
+    )
+
+
+@router.post("/clientes/{cliente_id}/facturas/nueva")
+async def admin_factura_cliente_crear(
+    request: Request,
+    cliente_id: str,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    cliente = cliente_id.strip().upper()
+    form = await request.form()
+    try:
+        from servicios.cuenta_corriente import leer_comprobante_con_tope
+
+        archivo = form.get("pdf")
+        contenido = await leer_comprobante_con_tope(archivo)
+        resultado = crear_factura_cliente(
+            cliente_id=cliente,
+            tipo=form.get("tipo"),
+            punto_venta=form.get("punto_venta"),
+            numero=form.get("numero"),
+            cae=form.get("cae"),
+            fecha_emision=form.get("fecha_emision"),
+            fecha_vencimiento=form.get("fecha_vencimiento"),
+            periodo_desde=form.get("periodo_desde"),
+            periodo_hasta=form.get("periodo_hasta"),
+            subtotal=_importe_contable_form(
+                form.get("subtotal"), "Subtotal", permitir_cero=True
+            ),
+            iva=_importe_contable_form(
+                form.get("iva"), "IVA", permitir_cero=True
+            ),
+            pdf=contenido,
+            pdf_nombre=getattr(archivo, "filename", "") or "",
+            seleccion=form.getlist("items"),
+            created_by="admin",
+        )
+    except (ValueError, FacturacionClienteError) as exc:
+        params = urlencode({
+            "tipo": form.get("tipo") or "FC",
+            "ambito": form.get("ambito") or "INTERNACIONAL",
+            "desde": form.get("periodo_desde") or "",
+            "hasta": form.get("periodo_hasta") or "",
+            "error": str(exc),
+        })
+        return RedirectResponse(
+            url=f"/admin/clientes/{cliente}/facturas/nueva?{params}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        url=f"/admin/clientes/{cliente}/facturas?ok={resultado['id']}",
+        status_code=303,
+    )
+
+
+@router.get(
+    "/clientes/{cliente_id}/facturas",
+    response_class=HTMLResponse,
+)
+def admin_facturas_cliente(
+    request: Request,
+    cliente_id: str,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    cliente = cliente_id.strip().upper()
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/facturas_cliente.html",
+        context={
+            "seccion": "clientes",
+            "cliente_id": cliente,
+            "facturas": listar_facturas_cliente(cliente),
+        },
+    )
+
+
+@router.get("/clientes/{cliente_id}/facturas/{factura_id}/pdf")
+def admin_factura_cliente_pdf(
+    cliente_id: str,
+    factura_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    dato = get_factura_cliente_pdf(factura_id, cliente_id=cliente_id)
+    if not dato:
+        return Response(content="Factura no encontrada.", status_code=404)
+    contenido, nombre = dato
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
 @router.get(
     "/clientes/{cliente_id}/envios/{envio_id}/facturar",
     response_class=HTMLResponse,
@@ -2272,27 +2505,13 @@ def admin_facturar_cargo_form(
     envio_id: int,
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Adjunta la FC al débito existente, sin crear un segundo cargo."""
+    """Compatibilidad de bookmarks: abre el nuevo facturador por lote."""
     if not _is_auth(admin_token):
         return _redirect_login()
-    cliente_normalizado = cliente_id.strip().upper()
-    cargo = _cargo_para_facturar(cliente_normalizado, envio_id)
-    if not cargo:
-        return Response(content="Cargo no encontrado.", status_code=404)
-    if str(cargo.get("estado") or "").upper() != "ACTIVO":
-        return Response(content="El cargo no está activo.", status_code=409)
-    if str(cargo.get("nro_fc") or "").strip():
-        return Response(content="El cargo ya está facturado.", status_code=409)
-    return templates.TemplateResponse(
-        request=request,
-        name="admin/facturar_cargo_form.html",
-        context={
-            "seccion": "clientes",
-            "cargo": cargo,
-            "cliente_id": cliente_normalizado,
-            "nro_fc": "",
-            "flash_error": None,
-        },
+    return RedirectResponse(
+        url=(f"/admin/clientes/{cliente_id.strip().upper()}/facturas/nueva"
+             f"?envio={envio_id}"),
+        status_code=303,
     )
 
 
@@ -2305,46 +2524,13 @@ async def admin_facturar_cargo(
     factura_pdf: UploadFile = File(...),
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Factura atómicamente un cargo ya debitado en la cuenta del cliente."""
+    """El endpoint viejo no escribe los campos legacy de ``envios``."""
     if not _is_auth(admin_token):
         return _redirect_login()
-    cliente_normalizado = cliente_id.strip().upper()
-    cargo = _cargo_para_facturar(cliente_normalizado, envio_id)
-    if not cargo:
-        return Response(content="Cargo no encontrado.", status_code=404)
-    try:
-        from servicios.cuenta_corriente import leer_comprobante_con_tope
-
-        contenido = await leer_comprobante_con_tope(factura_pdf)
-        resultado = facturar_cargo(
-            envio_id=envio_id,
-            cliente_id=cliente_normalizado,
-            nro_fc=nro_fc,
-            factura_pdf=contenido,
-            factura_nombre=(factura_pdf.filename or "") if factura_pdf else "",
-            actor_tipo="admin",
-            actor_ref="admin",
-        )
-        if not resultado:
-            return Response(
-                content="El cargo ya no está disponible para facturar.",
-                status_code=409,
-            )
-    except ValueError as exc:
-        return templates.TemplateResponse(
-            request=request,
-            name="admin/facturar_cargo_form.html",
-            context={
-                "seccion": "clientes",
-                "cargo": cargo,
-                "cliente_id": cliente_normalizado,
-                "nro_fc": nro_fc,
-                "flash_error": str(exc),
-            },
-            status_code=400,
-        )
     return RedirectResponse(
-        url=f"/admin/clientes/{cliente_normalizado}", status_code=303
+        url=(f"/admin/clientes/{cliente_id.strip().upper()}/facturas/nueva"
+             f"?envio={envio_id}"),
+        status_code=303,
     )
 
 

@@ -2559,6 +2559,259 @@ CREATE TRIGGER trg_validar_ajuste_cliente
 BEFORE INSERT OR UPDATE ON ajustes_cliente
 FOR EACH ROW EXECUTE FUNCTION tauro_validar_ajuste_cliente();
 
+-- ── Facturación TAURO a clientes ─────────────────────────
+-- La factura documenta cargos/ajustes que ya existen en la cuenta corriente;
+-- no vuelve a debitarlos. Los campos de factura que todavía viven en envios
+-- quedan como legado de sólo lectura para instalaciones históricas.
+CREATE TABLE IF NOT EXISTS facturas_cliente (
+    id                BIGSERIAL PRIMARY KEY,
+    cliente_id        TEXT NOT NULL REFERENCES clientes(cliente_id)
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
+    tipo              TEXT NOT NULL,
+    punto_venta       INTEGER NOT NULL,
+    numero            BIGINT NOT NULL,
+    cae               TEXT,
+    fecha_emision     DATE NOT NULL,
+    fecha_vencimiento DATE,
+    periodo_desde     DATE,
+    periodo_hasta     DATE,
+    subtotal          NUMERIC(14,2) NOT NULL,
+    iva               NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total             NUMERIC(14,2) NOT NULL,
+    pdf               BYTEA NOT NULL,
+    pdf_nombre        TEXT,
+    estado            TEXT NOT NULL DEFAULT 'EMITIDA',
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by        TEXT NOT NULL,
+    CONSTRAINT uq_factura_cliente_numero
+        UNIQUE (tipo, punto_venta, numero),
+    CONSTRAINT ck_factura_cliente_tipo CHECK (tipo IN ('FC','NC')),
+    CONSTRAINT ck_factura_cliente_estado CHECK (estado IN ('EMITIDA','ANULADA')),
+    CONSTRAINT ck_factura_cliente_numero CHECK (punto_venta > 0 AND numero > 0),
+    CONSTRAINT ck_factura_cliente_importes CHECK (
+        subtotal >= 0 AND iva >= 0 AND total > 0
+        AND ABS(total - subtotal - iva) <= 0.02
+    ),
+    CONSTRAINT ck_factura_cliente_fechas CHECK (
+        (fecha_vencimiento IS NULL OR fecha_vencimiento >= fecha_emision)
+        AND (periodo_desde IS NULL OR periodo_hasta IS NULL
+             OR periodo_hasta >= periodo_desde)
+    )
+);
+CREATE INDEX IF NOT EXISTS ix_facturas_cliente_cliente_fecha
+    ON facturas_cliente (cliente_id, fecha_emision DESC, id DESC);
+CREATE INDEX IF NOT EXISTS ix_facturas_cliente_estado_vencimiento
+    ON facturas_cliente (estado, fecha_vencimiento);
+
+CREATE TABLE IF NOT EXISTS facturas_cliente_items (
+    id          BIGSERIAL PRIMARY KEY,
+    factura_id  BIGINT NOT NULL REFERENCES facturas_cliente(id)
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
+    envio_id    INTEGER REFERENCES envios(id)
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
+    ajuste_id   BIGINT REFERENCES ajustes_cliente(id)
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
+    descripcion TEXT NOT NULL,
+    monto       NUMERIC(14,2) NOT NULL,
+    CONSTRAINT ck_factura_cliente_item_objetivo CHECK (
+        NUM_NONNULLS(envio_id, ajuste_id) = 1
+    ),
+    CONSTRAINT ck_factura_cliente_item_monto CHECK (monto > 0)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_cliente_item_envio
+    ON facturas_cliente_items (factura_id, envio_id)
+    WHERE envio_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_factura_cliente_item_ajuste
+    ON facturas_cliente_items (factura_id, ajuste_id)
+    WHERE ajuste_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_factura_cliente_items_factura
+    ON facturas_cliente_items (factura_id, id);
+
+-- Serializa por el cargo/ajuste de destino. Además de ownership y ámbito,
+-- evita que dos facturas EMITIDAS concurrentes documenten la misma partida.
+CREATE OR REPLACE FUNCTION tauro_validar_factura_cliente_item()
+RETURNS TRIGGER AS $$
+DECLARE
+    factura_actual RECORD;
+    objetivo RECORD;
+    ambito_objetivo TEXT;
+BEGIN
+    SELECT id, cliente_id, tipo, estado
+      INTO factura_actual
+      FROM facturas_cliente
+     WHERE id = NEW.factura_id
+     FOR UPDATE;
+    IF NOT FOUND OR factura_actual.estado <> 'EMITIDA' THEN
+        RAISE EXCEPTION 'La factura cliente no existe o no está emitida';
+    END IF;
+
+    IF NEW.envio_id IS NOT NULL THEN
+        SELECT id, cliente_id, estado, ambito, nro_fc
+          INTO objetivo
+          FROM envios
+         WHERE id = NEW.envio_id
+         FOR UPDATE;
+        IF NOT FOUND OR objetivo.cliente_id <> factura_actual.cliente_id
+           OR objetivo.estado <> 'ACTIVO' THEN
+            RAISE EXCEPTION 'El cargo no pertenece al cliente o no está activo';
+        END IF;
+        IF NULLIF(BTRIM(objetivo.nro_fc), '') IS NOT NULL THEN
+            RAISE EXCEPTION 'El cargo ya tiene una factura legacy';
+        END IF;
+        IF factura_actual.tipo <> 'FC' THEN
+            RAISE EXCEPTION 'Un cargo de envío sólo puede integrar una FC';
+        END IF;
+        ambito_objetivo := objetivo.ambito;
+        IF EXISTS (
+            SELECT 1
+              FROM facturas_cliente_items otro
+              JOIN facturas_cliente f ON f.id = otro.factura_id
+             WHERE otro.envio_id = NEW.envio_id
+               AND otro.id <> COALESCE(NEW.id, -1)
+               AND f.estado = 'EMITIDA'
+        ) THEN
+            RAISE EXCEPTION 'El cargo ya integra otra factura emitida';
+        END IF;
+    ELSE
+        SELECT a.id, a.tipo, a.estado, e.cliente_id, e.ambito
+          INTO objetivo
+          FROM ajustes_cliente a
+          JOIN envios e ON e.solicitud_id = a.solicitud_id
+         WHERE a.id = NEW.ajuste_id
+         FOR UPDATE OF a, e;
+        IF NOT FOUND OR objetivo.cliente_id <> factura_actual.cliente_id
+           OR objetivo.estado <> 'APLICADO' THEN
+            RAISE EXCEPTION 'El ajuste no pertenece al cliente o no está aplicado';
+        END IF;
+        IF (factura_actual.tipo = 'FC' AND objetivo.tipo <> 'DEBITO')
+           OR (factura_actual.tipo = 'NC' AND objetivo.tipo <> 'CREDITO') THEN
+            RAISE EXCEPTION 'El tipo de factura no coincide con el ajuste';
+        END IF;
+        ambito_objetivo := objetivo.ambito;
+        IF EXISTS (
+            SELECT 1
+              FROM facturas_cliente_items otro
+              JOIN facturas_cliente f ON f.id = otro.factura_id
+             WHERE otro.ajuste_id = NEW.ajuste_id
+               AND otro.id <> COALESCE(NEW.id, -1)
+               AND f.estado = 'EMITIDA'
+        ) THEN
+            RAISE EXCEPTION 'El ajuste ya integra otra factura emitida';
+        END IF;
+    END IF;
+
+    IF ambito_objetivo NOT IN ('NACIONAL','INTERNACIONAL') THEN
+        RAISE EXCEPTION 'La partida debe tener ámbito contable antes de facturar';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+          FROM facturas_cliente_items item
+          LEFT JOIN envios e ON e.id = item.envio_id
+          LEFT JOIN ajustes_cliente a ON a.id = item.ajuste_id
+          LEFT JOIN envios ea ON ea.solicitud_id = a.solicitud_id
+         WHERE item.factura_id = NEW.factura_id
+           AND item.id <> COALESCE(NEW.id, -1)
+           AND COALESCE(e.ambito, ea.ambito) <> ambito_objetivo
+    ) THEN
+        RAISE EXCEPTION 'Una factura cliente no puede mezclar ámbitos';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_factura_cliente_item
+    ON facturas_cliente_items;
+CREATE TRIGGER trg_validar_factura_cliente_item
+BEFORE INSERT OR UPDATE ON facturas_cliente_items
+FOR EACH ROW EXECUTE FUNCTION tauro_validar_factura_cliente_item();
+
+CREATE OR REPLACE FUNCTION tauro_validar_total_factura_cliente()
+RETURNS TRIGGER AS $$
+DECLARE
+    factura_objetivo BIGINT;
+    factura_actual RECORD;
+    cantidad INTEGER;
+    suma NUMERIC(14,2);
+BEGIN
+    -- PL/pgSQL valida los campos de NEW/OLD aun dentro de un CASE. Separar
+    -- las ramas evita intentar resolver factura_id en la cabecera (o id en
+    -- el ítem) cuando el mismo trigger se reutiliza en ambas tablas.
+    IF TG_TABLE_NAME = 'facturas_cliente' THEN
+        factura_objetivo := COALESCE(NEW.id, OLD.id);
+    ELSE
+        factura_objetivo := COALESCE(NEW.factura_id, OLD.factura_id);
+    END IF;
+    SELECT id, estado, total INTO factura_actual
+      FROM facturas_cliente WHERE id = factura_objetivo;
+    IF NOT FOUND OR factura_actual.estado = 'ANULADA' THEN
+        RETURN NULL;
+    END IF;
+    SELECT COUNT(*), COALESCE(SUM(monto), 0)
+      INTO cantidad, suma
+      FROM facturas_cliente_items
+     WHERE factura_id = factura_objetivo;
+    IF cantidad = 0 OR ABS(suma - factura_actual.total) > 0.02 THEN
+        RAISE EXCEPTION 'Los ítems no coinciden con el total de la factura cliente';
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_total_factura_cliente_cabecera ON facturas_cliente;
+CREATE CONSTRAINT TRIGGER trg_total_factura_cliente_cabecera
+AFTER INSERT OR UPDATE ON facturas_cliente
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION tauro_validar_total_factura_cliente();
+DROP TRIGGER IF EXISTS trg_total_factura_cliente_item ON facturas_cliente_items;
+CREATE CONSTRAINT TRIGGER trg_total_factura_cliente_item
+AFTER INSERT OR UPDATE OR DELETE ON facturas_cliente_items
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION tauro_validar_total_factura_cliente();
+
+CREATE OR REPLACE FUNCTION tauro_proteger_factura_cliente()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.cliente_id IS DISTINCT FROM NEW.cliente_id
+       OR OLD.tipo IS DISTINCT FROM NEW.tipo
+       OR OLD.punto_venta IS DISTINCT FROM NEW.punto_venta
+       OR OLD.numero IS DISTINCT FROM NEW.numero
+       OR OLD.cae IS DISTINCT FROM NEW.cae
+       OR OLD.fecha_emision IS DISTINCT FROM NEW.fecha_emision
+       OR OLD.fecha_vencimiento IS DISTINCT FROM NEW.fecha_vencimiento
+       OR OLD.periodo_desde IS DISTINCT FROM NEW.periodo_desde
+       OR OLD.periodo_hasta IS DISTINCT FROM NEW.periodo_hasta
+       OR OLD.subtotal IS DISTINCT FROM NEW.subtotal
+       OR OLD.iva IS DISTINCT FROM NEW.iva
+       OR OLD.total IS DISTINCT FROM NEW.total
+       OR OLD.pdf IS DISTINCT FROM NEW.pdf
+       OR OLD.pdf_nombre IS DISTINCT FROM NEW.pdf_nombre
+       OR OLD.created_at IS DISTINCT FROM NEW.created_at
+       OR OLD.created_by IS DISTINCT FROM NEW.created_by
+       OR NOT (OLD.estado = NEW.estado OR (
+           OLD.estado = 'EMITIDA' AND NEW.estado = 'ANULADA'
+       )) THEN
+        RAISE EXCEPTION 'La factura cliente es inmutable; sólo puede anularse';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_proteger_factura_cliente ON facturas_cliente;
+CREATE TRIGGER trg_proteger_factura_cliente
+BEFORE UPDATE ON facturas_cliente
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_factura_cliente();
+
+CREATE OR REPLACE FUNCTION tauro_proteger_factura_cliente_item()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Los ítems de una factura cliente son inmutables';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_proteger_factura_cliente_item
+    ON facturas_cliente_items;
+CREATE TRIGGER trg_proteger_factura_cliente_item
+BEFORE UPDATE ON facturas_cliente_items
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_factura_cliente_item();
+
 -- 7) Auditoría permanente del módulo. No comparte la política de retención
 --    corta de security_audit porque forma parte de la evidencia financiera.
 CREATE TABLE IF NOT EXISTS auditoria_facturas_courier (
@@ -2613,6 +2866,8 @@ BEGIN
         'factura_courier_item_matches',
         'conciliaciones_envio',
         'ajustes_cliente',
+        'facturas_cliente',
+        'facturas_cliente_items',
         'auditoria_facturas_courier'
     ]
     LOOP

@@ -139,13 +139,26 @@ def get_facturas_recientes(
     with get_conn() as conn:
         with conn.cursor() as cur:
             query = """
-                SELECT id, fecha, nro_fc, monto_ars, descripcion,
-                       (factura_pdf IS NOT NULL) AS tiene_pdf
-                FROM envios
-                WHERE cliente_id = %s
-                  AND estado NOT IN ('CANCELADO', 'NC')
-                  AND monto_ars > 0
-                ORDER BY fecha DESC
+                SELECT e.id, e.fecha,
+                       COALESCE(
+                           fc.tipo || ' ' || LPAD(fc.punto_venta::text, 4, '0')
+                           || '-' || LPAD(fc.numero::text, 8, '0'),
+                           NULLIF(BTRIM(e.nro_fc), '')
+                       ) AS nro_fc,
+                       e.monto_ars, e.descripcion,
+                       (fc.pdf IS NOT NULL OR e.factura_pdf IS NOT NULL) AS tiene_pdf
+                FROM envios e
+                LEFT JOIN LATERAL (
+                    SELECT f.tipo, f.punto_venta, f.numero, f.pdf
+                    FROM facturas_cliente_items i
+                    JOIN facturas_cliente f ON f.id=i.factura_id
+                    WHERE i.envio_id=e.id AND f.estado='EMITIDA'
+                    ORDER BY f.id DESC LIMIT 1
+                ) fc ON TRUE
+                WHERE e.cliente_id = %s
+                  AND e.estado NOT IN ('CANCELADO', 'NC')
+                  AND e.monto_ars > 0
+                ORDER BY e.fecha DESC
             """
             params = [cliente]
             if limite is not None:
@@ -338,15 +351,30 @@ def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
     ajuste_debito_nac = _decimal_monto(fila.get("ajuste_debito_nacional"))
     ajuste_debito_int = _decimal_monto(fila.get("ajuste_debito_internacional"))
     ajuste_debito_sc = _decimal_monto(fila.get("ajuste_debito_sin_clasificar"))
+    ajuste_facturado_nac = _decimal_monto(
+        fila.get("ajuste_debito_facturado_nacional")
+    )
+    ajuste_facturado_int = _decimal_monto(
+        fila.get("ajuste_debito_facturado_internacional")
+    )
+    ajuste_facturado_sc = _decimal_monto(
+        fila.get("ajuste_debito_facturado_sin_clasificar")
+    )
     ajuste_credito_nac = _decimal_monto(fila.get("ajuste_credito_nacional"))
     ajuste_credito_int = _decimal_monto(fila.get("ajuste_credito_internacional"))
     ajuste_credito_sc = _decimal_monto(fila.get("ajuste_credito_sin_clasificar"))
     debe_nac = envios_nac + ajuste_debito_nac
     debe_int = envios_int + ajuste_debito_int
     debe_sc = envios_sc + ajuste_debito_sc
-    pendiente_nac = envios_nac - facturado_nac + ajuste_debito_nac
-    pendiente_int = envios_int - facturado_int + ajuste_debito_int
-    pendiente_sc = envios_sc - facturado_sc + ajuste_debito_sc
+    pendiente_nac = (
+        envios_nac - facturado_nac + ajuste_debito_nac - ajuste_facturado_nac
+    )
+    pendiente_int = (
+        envios_int - facturado_int + ajuste_debito_int - ajuste_facturado_int
+    )
+    pendiente_sc = (
+        envios_sc - facturado_sc + ajuste_debito_sc - ajuste_facturado_sc
+    )
     pagos_aplicados_nac = _decimal_monto(fila.get("haber_nacional"))
     pagos_aplicados_int = _decimal_monto(fila.get("haber_internacional"))
     haber_nac = pagos_aplicados_nac + ajuste_credito_nac
@@ -370,7 +398,7 @@ def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
     if saldo_antes_sin_imputar - sin_imputar != saldo_consolidado:
         raise RuntimeError("Invariante contable rota: el saldo consolidado no cierra.")
     nacional = {
-        "facturado_ars": facturado_nac,
+        "facturado_ars": facturado_nac + ajuste_facturado_nac,
         "pendiente_facturacion_ars": pendiente_nac,
         "debe_ars": debe_nac,
         "haber_ars": haber_nac,
@@ -380,7 +408,7 @@ def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
         "diferencias_credito_ars": ajuste_credito_nac,
     }
     internacional = {
-        "facturado_ars": facturado_int,
+        "facturado_ars": facturado_int + ajuste_facturado_int,
         "pendiente_facturacion_ars": pendiente_int,
         "debe_ars": debe_int,
         "haber_ars": haber_int,
@@ -390,7 +418,10 @@ def _armar_resumen_ambitos(fila: Mapping[str, Any]) -> Dict[str, Any]:
         "diferencias_credito_ars": ajuste_credito_int,
     }
     consolidado = {
-        "facturado_ars": facturado_nac + facturado_int + facturado_sc,
+        "facturado_ars": (
+            facturado_nac + facturado_int + facturado_sc
+            + ajuste_facturado_nac + ajuste_facturado_int + ajuste_facturado_sc
+        ),
         "pendiente_facturacion_ars": pendiente_nac + pendiente_int + pendiente_sc,
         "debe_ars": debe_total,
         # Consolidado sí reconoce todo pago aprobado, incluso lo no imputado.
@@ -448,16 +479,40 @@ def resumen_cuenta_por_ambito(cliente: str) -> Dict[str, Any]:
                         ), 0) AS debe_sin_clasificar,
                         COALESCE(SUM(monto_ars) FILTER (
                             WHERE ambito = 'NACIONAL'
-                              AND NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                              AND (
+                                  NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                                  OR EXISTS (
+                                      SELECT 1 FROM facturas_cliente_items i
+                                      JOIN facturas_cliente f ON f.id=i.factura_id
+                                      WHERE i.envio_id=envios.id
+                                        AND f.estado='EMITIDA'
+                                  )
+                              )
                         ), 0) AS facturado_nacional,
                         COALESCE(SUM(monto_ars) FILTER (
                             WHERE ambito = 'INTERNACIONAL'
-                              AND NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                              AND (
+                                  NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                                  OR EXISTS (
+                                      SELECT 1 FROM facturas_cliente_items i
+                                      JOIN facturas_cliente f ON f.id=i.factura_id
+                                      WHERE i.envio_id=envios.id
+                                        AND f.estado='EMITIDA'
+                                  )
+                              )
                         ), 0) AS facturado_internacional,
                         COALESCE(SUM(monto_ars) FILTER (
                             WHERE (ambito IS NULL
                                OR ambito NOT IN ('NACIONAL', 'INTERNACIONAL'))
-                              AND NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                              AND (
+                                  NULLIF(BTRIM(nro_fc), '') IS NOT NULL
+                                  OR EXISTS (
+                                      SELECT 1 FROM facturas_cliente_items i
+                                      JOIN facturas_cliente f ON f.id=i.factura_id
+                                      WHERE i.envio_id=envios.id
+                                        AND f.estado='EMITIDA'
+                                  )
+                              )
                         ), 0) AS facturado_sin_clasificar
                     FROM envios
                     WHERE cliente_id = %s
@@ -490,6 +545,31 @@ def resumen_cuenta_por_ambito(cliente: str) -> Dict[str, Any]:
                             WHERE (e.ambito IS NULL OR e.ambito NOT IN ('NACIONAL','INTERNACIONAL'))
                               AND a.tipo='DEBITO'
                         ), 0) AS ajuste_debito_sin_clasificar,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE e.ambito='NACIONAL' AND a.tipo='DEBITO'
+                              AND EXISTS (
+                                  SELECT 1 FROM facturas_cliente_items i
+                                  JOIN facturas_cliente f ON f.id=i.factura_id
+                                  WHERE i.ajuste_id=a.id AND f.estado='EMITIDA'
+                              )
+                        ), 0) AS ajuste_debito_facturado_nacional,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE e.ambito='INTERNACIONAL' AND a.tipo='DEBITO'
+                              AND EXISTS (
+                                  SELECT 1 FROM facturas_cliente_items i
+                                  JOIN facturas_cliente f ON f.id=i.factura_id
+                                  WHERE i.ajuste_id=a.id AND f.estado='EMITIDA'
+                              )
+                        ), 0) AS ajuste_debito_facturado_internacional,
+                        COALESCE(SUM(ABS(a.monto_ars)) FILTER (
+                            WHERE (e.ambito IS NULL OR e.ambito NOT IN ('NACIONAL','INTERNACIONAL'))
+                              AND a.tipo='DEBITO'
+                              AND EXISTS (
+                                  SELECT 1 FROM facturas_cliente_items i
+                                  JOIN facturas_cliente f ON f.id=i.factura_id
+                                  WHERE i.ajuste_id=a.id AND f.estado='EMITIDA'
+                              )
+                        ), 0) AS ajuste_debito_facturado_sin_clasificar,
                         COALESCE(SUM(ABS(a.monto_ars)) FILTER (
                             WHERE e.ambito='NACIONAL' AND a.tipo='CREDITO'
                         ), 0) AS ajuste_credito_nacional,
@@ -575,7 +655,8 @@ def movimientos_cuenta_paginados(
                 e.created_at,
                 40 AS tipo_orden,
                 e.id AS origen_id,
-                CASE WHEN NULLIF(BTRIM(e.nro_fc), '') IS NOT NULL
+                CASE WHEN fc.id IS NOT NULL
+                          OR NULLIF(BTRIM(e.nro_fc), '') IS NOT NULL
                      THEN 'FC' ELSE 'PENDIENTE_FACTURA' END AS tipo,
                 CASE WHEN e.ambito IN ('NACIONAL', 'INTERNACIONAL')
                      THEN e.ambito ELSE 'SIN_CLASIFICAR' END AS ambito,
@@ -588,12 +669,16 @@ def movimientos_cuenta_paginados(
                 0::numeric AS haber_ars,
                 e.monto_ars AS monto_ars,
                 e.estado,
-                (NULLIF(BTRIM(e.nro_fc), '') IS NOT NULL) AS facturado,
+                (fc.id IS NOT NULL
+                 OR NULLIF(BTRIM(e.nro_fc), '') IS NOT NULL) AS facturado,
                 e.id AS envio_id,
                 NULL::integer AS pago_id,
                 e.solicitud_id,
-                CASE WHEN e.factura_pdf IS NOT NULL
-                     THEN '/portal/facturas/' || e.id::text || '/pdf' END AS archivo_url,
+                CASE WHEN fc.id IS NOT NULL AND fc.pdf IS NOT NULL
+                     THEN '/portal/facturas/' || fc.id::text || '/pdf'
+                     WHEN e.factura_pdf IS NOT NULL
+                     THEN '/portal/facturas-legacy/' || e.id::text || '/pdf'
+                END AS archivo_url,
                 COALESCE(
                     NULLIF(BTRIM(e.tracking), ''),
                     NULLIF(BTRIM(s.tracking), '')
@@ -601,11 +686,22 @@ def movimientos_cuenta_paginados(
                 NULLIF(BTRIM(s.dest_nombre), '') AS destinatario,
                 NULLIF(BTRIM(s.remitente_nombre), '') AS remitente,
                 e.monto_ars AS valor_envio_ars,
-                NULLIF(BTRIM(e.nro_fc), '') AS numero_factura
+                COALESCE(
+                    fc.tipo || ' ' || LPAD(fc.punto_venta::text, 4, '0')
+                      || '-' || LPAD(fc.numero::text, 8, '0'),
+                    NULLIF(BTRIM(e.nro_fc), '')
+                ) AS numero_factura
             FROM envios e
             LEFT JOIN solicitudes_guia s
               ON s.id = e.solicitud_id
              AND s.cliente_id = e.cliente_id
+            LEFT JOIN LATERAL (
+                SELECT f.id, f.tipo, f.punto_venta, f.numero, f.pdf
+                FROM facturas_cliente_items i
+                JOIN facturas_cliente f ON f.id=i.factura_id
+                WHERE i.envio_id=e.id AND f.estado='EMITIDA'
+                ORDER BY f.id DESC LIMIT 1
+            ) fc ON TRUE
             WHERE e.cliente_id = %s
               AND e.estado NOT IN ('CANCELADO', 'NC')
               AND e.monto_ars > 0

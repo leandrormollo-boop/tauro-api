@@ -153,6 +153,34 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     </form>
 </details>
 
+<nav class="account-tabs" aria-label="Secciones de la cuenta">
+    <a href="/portal/cuenta?vista=movimientos&ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}" class="{% if vista_cuenta == 'movimientos' %}is-active{% endif %}">Movimientos</a>
+    <a href="/portal/cuenta?vista=facturas" class="{% if vista_cuenta == 'facturas' %}is-active{% endif %}">Facturas</a>
+    <a href="/portal/cuenta?vista=pendientes" class="{% if vista_cuenta == 'pendientes' %}is-active{% endif %}">Pendientes de facturar</a>
+</nav>
+
+{% if vista_cuenta == 'facturas' %}
+  {% if facturas_cliente %}
+  <div class="card account-history-card"><div class="table-wrap"><table class="account-invoice-table">
+    <thead><tr><th>Factura</th><th>Emisión</th><th>Vencimiento</th><th>Total</th><th>Pagado</th><th>Saldo</th><th></th></tr></thead>
+    <tbody>{% for f in facturas_cliente %}<tr>
+      <td><strong>{{ f.numero_visible }}</strong><br><small>{{ f['items'] }} partidas · {{ f.estado|title }}</small>
+        {% if f.detalle_items %}<details><summary>Ver envíos incluidos</summary><ul>{% for item in f.detalle_items %}<li>{{ item.tracking or '—' }} · {{ item.descripcion }} · {{ dinero(item.monto) }}</li>{% endfor %}</ul></details>{% endif %}
+      </td>
+      <td>{{ f.fecha_emision.strftime('%d/%m/%Y') }}</td><td>{{ f.fecha_vencimiento.strftime('%d/%m/%Y') if f.fecha_vencimiento else '—' }}</td>
+      <td class="mono">{{ dinero(f.total) }}</td><td class="mono">{{ dinero(f.pagado) }}</td><td class="mono">{{ dinero(f.saldo) }}</td>
+      <td>{% if f.tiene_pdf %}<a href="/portal/facturas/{{ f.id }}/pdf" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Descargar PDF</a>{% endif %}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div></div>
+  {% else %}<div class="card account-empty-state"><strong>Todavía no tenés facturas emitidas.</strong></div>{% endif %}
+{% elif vista_cuenta == 'pendientes' %}
+  {% if pendientes_facturar %}
+  <div class="card account-history-card"><div class="table-wrap"><table class="account-invoice-table">
+    <thead><tr><th>Tipo</th><th>Guía</th><th>Detalle</th><th>Fecha</th><th>Ámbito</th><th>Importe</th></tr></thead>
+    <tbody>{% for p in pendientes_facturar %}<tr><td>{{ p.clase|title }}</td><td class="mono">{{ p.tracking or '—' }}</td><td>{{ p.descripcion }}</td><td>{{ p.fecha.strftime('%d/%m/%Y') if p.fecha else '—' }}</td><td>{{ p.ambito|title }}</td><td class="mono">{{ dinero(p.monto) }}</td></tr>{% endfor %}</tbody>
+  </table></div></div>
+  {% else %}<div class="card account-empty-state"><strong>No tenés cargos pendientes de facturar.</strong></div>{% endif %}
+{% else %}
 <nav class="account-tabs" aria-label="Ámbito de la cuenta">
     {% for clave, etiqueta in (("consolidado", "Consolidado"), ("nacional", "Nacional"), ("internacional", "Internacional")) %}
     <a href="/portal/cuenta?ambito={{ clave }}&tipo={{ tipo_filtro }}"
@@ -269,6 +297,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <a href="/portal/envios/nuevo">Crear un envío</a>
     {% endif %}
 </div>
+{% endif %}
 {% endif %}
 </section>
 

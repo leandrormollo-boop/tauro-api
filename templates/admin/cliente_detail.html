@@ -56,6 +56,8 @@
 <!-- Acciones rápidas -->
 <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
   <a href="/admin/envios/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-primary btn-sm">+ Cargar cargo manual</a>
+  <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/nueva" class="btn btn-primary btn-sm">+ Facturar por lote</a>
+  <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas" class="btn btn-ghost btn-sm">Ver facturas</a>
   <a href="/admin/pagos/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">+ Registrar pago</a>
   <button type="button" id="btn-reset-pwd" data-muestra="#reset-pwd-form"
           class="btn btn-ghost btn-sm">🔑 Resetear contraseña del portal</button>
@@ -179,7 +181,8 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
         <tr>
           <td class="admin-shipment-concept">
             <strong>{{ e.concepto or "Envío" }}</strong>
-            {% if e.nro_fc %}<small>FC {{ e.nro_fc }}</small>{% endif %}
+            {% if e.factura_cliente_id %}<small>{{ e.factura_cliente_tipo }} {{ "%04d"|format(e.factura_cliente_punto_venta) }}-{{ "%08d"|format(e.factura_cliente_numero) }}</small>
+            {% elif e.nro_fc %}<small>FC {{ e.nro_fc }}</small>{% endif %}
           </td>
           <td class="mono admin-shipment-guide">{{ e.tracking or "—" }}</td>
           <td class="admin-shipment-person">{{ e.destinatario or "—" }}</td>
@@ -215,21 +218,23 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
               {% if e.solicitud_id %}
               <small style="display:block;color:var(--fg-4);margin-top:4px;">Oculto del portal</small>
               {% endif %}
-            {% elif e.nro_fc %}
+            {% elif e.factura_cliente_id or e.nro_fc %}
               <span class="badge ok">FACTURADO</span>
             {% else %}
               <span class="badge warn">A FACTURAR</span>
             {% endif %}
           </td>
           <td>
-            {% if e.estado == 'ACTIVO' and not e.nro_fc %}
-            <a href="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/facturar"
+            {% if e.estado == 'ACTIVO' and not e.nro_fc and not e.factura_cliente_id %}
+            <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/nueva?envio={{ e.id }}"
                class="btn btn-sm btn-primary">Facturar</a>
             <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/anular"
                   style="display:inline;"
                   data-confirm="¿Anular este envío? Se descontará de la cuenta corriente y dejará de mostrarse en el portal del cliente. El registro seguirá guardado en ADMIN para auditoría.">
               <button type="submit" class="btn btn-sm btn-ghost" style="color:var(--error)">Anular prueba</button>
             </form>
+            {% elif e.factura_cliente_id and e.tiene_factura_cliente_pdf %}
+            <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/{{ e.factura_cliente_id }}/pdf" class="btn btn-sm btn-ghost">Ver PDF</a>
             {% elif e.nro_fc and e.tiene_factura_pdf %}
             <a href="/admin/envios/{{ e.id }}/factura" class="btn btn-sm btn-ghost">Ver PDF</a>
             {% endif %}

@@ -105,7 +105,9 @@ No existe una tabla independiente llamada `cajas`. Las cajas viven en `solicitud
 
 `pagos_aplicaciones`: imputación explícita de un pago: `id`, `pago_id`, ámbito NACIONAL/INTERNACIONAL, `monto_ars NUMERIC(14,2)`, estado SOLICITADA/APLICADA y timestamps. La suma no puede superar el pago. Lo no aplicado queda como crédito sin imputar.
 
-No existe una cabecera separada de “factura TAURO” ni una tabla de renglones de factura cliente. La factura de TAURO se representa hoy en `envios`: el admin asigna `nro_fc` y adjunta `factura_pdf` a un cargo individual. Por lo tanto el sistema actual no implementa una factura única que agrupe automáticamente varios envíos; el agrupamiento mensual es de presentación/selección, no un documento contable normalizado. Ésta es una limitación explícita del modelo actual.
+`facturas_cliente`: cabecera documental de una factura o nota de crédito TAURO. Guarda `id`, cliente, tipo FC/NC, punto de venta, número, CAE, emisión, vencimiento y período; `subtotal`, `iva` y `total NUMERIC(14,2)`; PDF BYTEA, nombre, estado EMITIDA/ANULADA y autor/fecha de creación. Tipo+punto de venta+número es único. La cabecera es inmutable salvo la transición explícita a ANULADA.
+
+`facturas_cliente_items`: renglones de una factura TAURO. Cada fila referencia exactamente un cargo `envios` o un `ajustes_cliente`, conserva descripción y `monto NUMERIC(14,2)`. Triggers validan cliente, tipo FC/NC, ámbito homogéneo, estado, no doble facturación y coincidencia exacta entre suma de renglones y total. Los renglones son inmutables. Los campos `nro_fc`/PDF dentro de `envios` quedan sólo como legado para documentos históricos.
 
 ### Conciliación de facturas courier y diferencias
 
@@ -246,9 +248,9 @@ Para envíos históricos, `scripts/importar_costos_waimao_2026.py` cruza por tra
 
 Al emitir una guía, TAURO registra automáticamente un cargo ACTIVO en `envios`, con `solicitud_id`, ámbito, tracking, descripción y el precio aceptado. Eso genera el “debe” incluso antes de que exista número fiscal.
 
-El admin puede cargar un envío/cargo histórico o facturar un cargo desde `/admin/clientes/{cliente_id}/envios/{envio_id}/facturar`: asigna número de FC y PDF. La FC normalizada es única en toda la base y no se permite usar una NC como FC. Cancelar/anular conserva historia.
+El admin emite desde `/admin/clientes/{cliente_id}/facturas/nueva`. Filtra por período, tipo FC/NC y ámbito; todos los cargos o diferencias elegibles aparecen seleccionados por defecto. El servidor vuelve a cargar y bloquea las partidas, exige que pertenezcan al mismo cliente y ámbito, compara con Decimal la suma de renglones contra subtotal+IVA y guarda cabecera, renglones, PDF y auditoría en una única transacción. Una FC agrupa cargos y débitos; una NC agrupa créditos. Una partida no puede integrar dos documentos emitidos.
 
-El modelo actual vincula una factura a un solo registro `envios`. No hay tablas `facturas_cliente` y `facturas_cliente_items`, por lo que no existe agrupación nativa de varios envíos bajo una cabecera única. Las pantallas pueden filtrar por mes y mostrar cargos pendientes de facturación, pero la emisión fiscal agrupada debe hacerse fuera del modelo o repetirse por cargo. Normalizar esta relación es deuda técnica prioritaria si TAURO necesita una factura mensual con muchos renglones.
+La factura documenta deuda ya registrada: no crea un segundo debe y no reescribe `envios.nro_fc` ni su PDF legacy. El portal lista los documentos nuevos en la vista Facturas de `/portal/cuenta` y descarga cada PDF con autorización por cliente. Las rutas antiguas de facturación individual redirigen al lote; los documentos históricos siguen disponibles en una ruta legacy separada.
 
 ## 7. Cuenta corriente
 
@@ -258,7 +260,7 @@ El modelo actual vincula una factura a un solo registro `envios`. No hay tablas 
 - Crédito sin imputar: parte de pagos aprobados que todavía no tiene filas APLICADA en `pagos_aplicaciones`. Reduce el consolidado económico, pero no se adjudica arbitrariamente a nacional o internacional.
 - Cargos sin clasificar: cargos históricos con `ambito` nulo o inválido. Permanecen visibles aparte y requieren clasificación admin; no se reparten automáticamente.
 - Pagos pendientes: comprobantes informados por cliente. Se muestran, pero no son haber hasta aprobación admin.
-- Pendiente de facturación: cargos con número de FC vacío. No significa saldo cero; significa servicio debitado aún sin documento fiscal asociado.
+- Pendiente de facturación: cargos que no integran una `facturas_cliente` EMITIDA ni tienen número legacy. No significa saldo cero; significa servicio debitado aún sin documento fiscal asociado.
 - Tope de deuda: `clientes.tope_deuda_ars`. Si no es NULL y el saldo pendiente lo supera, el cliente no puede emitir nuevas guías aunque tenga permiso; TAURO/admin debe emitir o el cliente debe regularizarse.
 
 Saldo consolidado = suma de cargos ACTIVO + suma de ajustes APLICADO − suma de pagos APROBADO. Para cada ámbito se resta sólo la porción APLICADA a ese ámbito. Las NC de `envios` y los cargos CANCELADO se excluyen. Los importes se cuantizan a centavos con Decimal.
@@ -310,8 +312,8 @@ Los prefijos ya están incorporados debajo.
 - `/track`: redirección de búsqueda de tracking.
 - `/backup.xlsx`: exportación de cuenta propia.
 - `/recolecciones` GET, `/recolecciones/nueva`, `/recolecciones/{id}/cancelar`: pickups.
-- `/cuenta`, `/pagos/informar`, `/pagos/{id}/comprobante`: cuenta y pagos.
-- `/facturas/{envio_id}/pdf`: factura propia.
+- `/cuenta?vista=movimientos|facturas|pendientes`, `/pagos/informar`, `/pagos/{id}/comprobante`: movimientos, documentos, pendientes y pagos.
+- `/facturas/{factura_id}/pdf`: factura TAURO agrupada; `/facturas-legacy/{envio_id}/pdf`: documento histórico individual.
 - `/cotizar` GET/POST, `/api/precio`, `/api/precio-multi`, `/api/parsear-pedido`: cotizador y helpers del wizard.
 - `/envios`: listado; `/envios/nuevo` GET/POST: crear; `/envios/{id}`: detalle; `/envios/{id}/verificacion`: verificación; `/envios/{id}/emitir`: emitir; `/envios/{id}/cancelar`: cancelar/reemplazar; endpoints PDF: documentos.
 - `/tienda`: integración e-commerce; `/tienda/reclamar`, `/politica`, `/conectar`, `/desconectar`: ownership/configuración; `/tienda/tiendanube/instalar`, `/tienda/tiendanube/pedidos`: Tiendanube; `/tienda/reiniciar-shopify`, `/limpiar-shopify-legado`, `/pedidos/descartar`, `/sincronizar-catalogo`: operación Shopify.
@@ -324,7 +326,8 @@ Los prefijos ya están incorporados debajo.
 - `/login` GET/POST, `/logout`, `/recuperar` GET/POST, `/recuperar/canjear`: autenticación.
 - `/home`, `/seguridad`, `/bandeja`, `/bandeja/{cliente_id}`, `/backup.json`: operación y diagnóstico.
 - `/clientes`, `/clientes/nuevo` GET/POST, `/clientes/{id}`, `/editar` GET/POST, `/password`, `/api-key`, `/acceso-precios` GET/POST: clientes y permisos.
-- `/clientes/{cliente}/envios/{envio}/clasificar`, `/facturar` GET/POST, `/anular`: cuenta por cliente.
+- `/clientes/{cliente}/envios/{envio}/clasificar`, `/anular`: clasificación y anulación de cargos. La antigua `/facturar` redirige al lote.
+- `/clientes/{cliente}/facturas/nueva` GET/POST, `/facturas`, `/facturas/{factura_id}/pdf`: emitir por lote, listar y descargar facturas TAURO.
 - `/envios/nuevo` GET/POST, `/envios/{id}/factura`, `/envios/{id}/cancelar`: cargos históricos/facturas.
 - `/pedidos`, `/pedidos/{id}/estado`, `/resolver-courier`, `/liberar-reserva`, `/etiqueta`, `/editar` GET/POST, `/generar-guia`, `/guia.pdf`: solicitudes y emisión.
 - `/guias-reemplazadas`, `/{id}/consultar`, `/{id}/cerrar`, `/{id}/reabrir`: vigilancia de reemplazos.
@@ -347,7 +350,7 @@ Los prefijos ya están incorporados debajo.
 
 ## 10. Pendientes y deuda técnica
 
-- Facturación cliente sin cabecera/renglones: hoy una FC se adjunta a un cargo, no agrupa envíos.
+- La facturación agrupada ya tiene cabecera y renglones, pero todavía falta conectar sus saldos con imputaciones documentales de pagos y completar el flujo explícito de anulación/NC en interfaz.
 - Ingreso de facturas courier desde correo: el módulo admin permite carga y conciliación, pero `docs/CONCILIACION_FACTURAS_COURIER.md` marca pendiente el conector que descarga automáticamente adjuntos de Gmail/Excel/Sheets y los ingresa al expediente.
 - `api_key` legado coexiste con hash y el script de Sheets menciona `api_key_hash`, columna que debe verificarse en la base efectiva. Consolidar autenticación API y retirar texto claro.
 - Tracking genérico en `servicios/rastreo.py` conserva un TODO para llamar `courier.track()`; DHL tiene job real aparte, pero FedEx/UPS genéricos no están cerrados.
@@ -393,5 +396,6 @@ Los prefijos ya están incorporados debajo.
 - 2 septiembre, limpieza operativa: se conservaron cuatro cuentas como `test`, se cancelaron las solicitudes #2, #3 y las pruebas de WAIMAO, y se reparó con auditoría la guía `9802908161` cuyo cargo ya estaba cancelado. Dashboard, bandejas y selectores pasan a excluir datos de prueba; Tracking FedEx queda oculto y con errores sanitizados.
 - 2 septiembre, snapshots de reemisión: la recotización DHL captura costo, dólar, precio, margen y pesos en un canal interno antes de emitir, sin ampliar la respuesta cliente. Las reemisiones fallan cerradas si no tienen snapshot propio. En producción se reconstruyó con evidencia la relación WAIMAO #52 → #53, se conservaron cargos separados y se verificó que ambos trackings muestran base interna en conciliación; el acta está en `docs/REEMISION_WAIMAO_52_53_ACTA.md`.
 - 3 septiembre, históricos WAIMAO: se cruzó la hoja madre `TAURO 2026` con producción y se importaron 29 costos iniciales faltantes como snapshots inmutables `IMPORT_SHEET_2026`; 3 existentes coincidieron y 14 casos sin evidencia quedaron pendientes. El proceso tiene dry-run, controles estrictos, auditoría, respaldo restaurable e idempotencia verificada; el acta está en `docs/IMPORTACION_COSTOS_WAIMAO_2026_ACTA.md`.
+- 3 septiembre, facturación agrupada a clientes: se incorporaron cabeceras y renglones inmutables para FC/NC, selección por período y ámbito, PDF único, auditoría, bloqueo de doble facturación y vistas separadas de facturas/pendientes en el portal. La factura pasa a documentar cargos preexistentes sin duplicar deuda; el diseño contable conjunto está en `docs/DISENO_FACTURACION_PAGOS_DIFERENCIAS.md`.
 
 Este historial resume los commits visibles de `origin/main`; no atribuye autoría personal cuando el commit no la documenta. Para una auditoría exacta se debe consultar `git log --date=iso` y el diff de cada hash.

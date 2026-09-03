@@ -1,0 +1,110 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Nueva factura por lote{% endblock %}
+
+{% macro dinero(valor) -%}
+$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-title page-title-row">
+  <div><div class="eyebrow">Facturación por lote</div><h1>{{ cliente_id }}</h1>
+    <p>Seleccioná cargos del mismo ámbito. La factura documenta deuda existente y no la duplica.</p></div>
+  <a href="/admin/clientes/{{ cliente_id }}/facturas" class="btn btn-ghost">Ver facturas</a>
+</div>
+
+{% if flash_error %}<div class="flash-msg error">{{ flash_error }}</div>{% endif %}
+
+<div class="card" style="margin-bottom:16px;">
+  <form method="GET" class="form-grid-4">
+    <div class="form-group"><label>Tipo</label><select name="tipo">
+      <option value="FC" {% if tipo == 'FC' %}selected{% endif %}>Factura (FC)</option>
+      <option value="NC" {% if tipo == 'NC' %}selected{% endif %}>Nota de crédito (NC)</option>
+    </select></div>
+    <div class="form-group"><label>Ámbito</label><select name="ambito">
+      <option value="INTERNACIONAL" {% if ambito == 'INTERNACIONAL' %}selected{% endif %}>Internacional</option>
+      <option value="NACIONAL" {% if ambito == 'NACIONAL' %}selected{% endif %}>Nacional</option>
+    </select></div>
+    <div class="form-group"><label>Año</label><select name="anio">
+      {% for valor in anios %}<option value="{{ valor }}" {% if periodo.anio == valor %}selected{% endif %}>{{ valor }}</option>{% endfor %}
+    </select></div>
+    <div class="form-group"><label>Mes</label><select name="mes">
+      {% for valor, etiqueta in meses %}<option value="{{ valor }}" {% if periodo.mes == valor %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}
+    </select></div>
+    <div class="form-group"><label>Semana</label><select name="semana">
+      {% for valor, etiqueta in semanas %}<option value="{{ valor }}" {% if periodo.semana == valor %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}
+    </select></div>
+    <div class="form-group"><label>Desde (rango manual)</label><input type="date" name="desde" value="{{ periodo.desde_manual }}"></div>
+    <div class="form-group"><label>Hasta (rango manual)</label><input type="date" name="hasta" value="{{ periodo.hasta_manual }}"></div>
+    <div class="form-group" style="align-self:end;"><button class="btn btn-ghost">Aplicar filtro</button></div>
+  </form>
+  <small>Mes/semana: {{ periodo.etiqueta }}. Si completás rango manual, reemplaza el período.</small>
+</div>
+
+<form method="POST" enctype="multipart/form-data" id="invoice-batch-form">
+  <input type="hidden" name="tipo" value="{{ tipo }}">
+  <input type="hidden" name="ambito" value="{{ ambito }}">
+  <input type="hidden" name="periodo_desde" value="{{ periodo.desde_iso }}" id="period-from">
+  <input type="hidden" name="periodo_hasta" value="{{ periodo.hasta_iso }}" id="period-to">
+
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-head"><div><h3>Partidas disponibles</h3><p>{{ tipo }} · {{ ambito }} · {{ periodo.etiqueta }}</p></div>
+      <strong id="selected-total">{{ dinero(0) }}</strong></div>
+    {% if partidas %}
+    <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px;"><input type="checkbox" id="toggle-all" checked> Seleccionar todas</label>
+    <div class="table-wrap"><table><thead><tr><th></th><th>Fecha</th><th>Tipo</th><th>Guía</th><th>Detalle</th><th class="num">Monto</th></tr></thead><tbody>
+      {% for p in partidas %}
+      <tr><td><input type="checkbox" name="items" value="{{ p.clave }}" data-amount="{{ p.monto }}" checked></td>
+        <td>{{ p.fecha.strftime('%d/%m/%Y') if p.fecha else '—' }}</td><td>{{ p.clase|title }}</td>
+        <td class="mono">{{ p.tracking or '—' }}</td><td>{{ p.descripcion }}</td><td class="num mono">{{ dinero(p.monto) }}</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+    {% else %}<p>No hay partidas facturables para este período, tipo y ámbito.</p>{% endif %}
+  </div>
+
+  {% if partidas %}
+  <div class="card">
+    <div class="form-grid-3">
+      <div class="form-group"><label>Punto de venta *</label><input type="number" min="1" name="punto_venta" required placeholder="5"></div>
+      <div class="form-group"><label>Número *</label><input type="number" min="1" name="numero" required placeholder="123"></div>
+      <div class="form-group"><label>CAE</label><input type="text" name="cae" inputmode="numeric" maxlength="14" pattern="[0-9]{14}" placeholder="14 dígitos"></div>
+      <div class="form-group"><label>Fecha de emisión *</label><input type="date" name="fecha_emision" required value="{{ today }}"></div>
+      <div class="form-group"><label>Fecha de vencimiento</label><input type="date" name="fecha_vencimiento"></div>
+      <div class="form-group"><label>PDF ARCA *</label><input type="file" name="pdf" required accept=".pdf,application/pdf"></div>
+      <div class="form-group"><label>Subtotal *</label><input type="text" name="subtotal" id="invoice-subtotal" required readonly></div>
+      <div class="form-group"><label>IVA *</label><input type="text" name="iva" id="invoice-iva" value="0" inputmode="decimal" data-numero="monto"></div>
+      <div class="form-group"><label>Total de partidas</label><input type="text" id="invoice-total" readonly></div>
+    </div>
+    <p><small>El subtotal se calcula como total de partidas menos IVA. El PDF debe coincidir con estos importes.</small></p>
+    <button class="btn btn-primary" type="submit">Emitir y vincular {{ tipo }}</button>
+  </div>
+  {% endif %}
+</form>
+
+<script nonce="{{ request.state.csp_nonce }}">
+(function () {
+  var form = document.getElementById('invoice-batch-form');
+  if (!form) return;
+  var boxes = Array.from(form.querySelectorAll('input[name="items"]'));
+  var all = document.getElementById('toggle-all');
+  var subtotal = document.getElementById('invoice-subtotal');
+  var iva = document.getElementById('invoice-iva');
+  var totalInput = document.getElementById('invoice-total');
+  var totalLabel = document.getElementById('selected-total');
+  function number(value) { return Number(String(value || '0').replace(/\./g, '').replace(',', '.')) || 0; }
+  function update() {
+    var total = boxes.filter(function (x) { return x.checked; }).reduce(function (sum, x) { return sum + Number(x.dataset.amount || 0); }, 0);
+    var ivaValue = Math.max(0, number(iva && iva.value));
+    if (ivaValue > total) ivaValue = total;
+    var fmt = function (value) { return value.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); };
+    if (subtotal) subtotal.value = fmt(total - ivaValue);
+    if (totalInput) totalInput.value = fmt(total);
+    if (totalLabel) totalLabel.textContent = '$ ' + fmt(total);
+    if (all) all.checked = boxes.length > 0 && boxes.every(function (x) { return x.checked; });
+  }
+  boxes.forEach(function (box) { box.addEventListener('change', update); });
+  if (iva) iva.addEventListener('input', update);
+  if (all) all.addEventListener('change', function () { boxes.forEach(function (x) { x.checked = all.checked; }); update(); });
+  update();
+})();
+</script>
+{% endblock %}

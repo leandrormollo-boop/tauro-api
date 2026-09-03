@@ -105,7 +105,7 @@ def test_cargo_manual_rechaza_ambito_inventado(monkeypatch, admin_autenticado):
     assert guardado == []
 
 
-def test_admin_factura_cargo_existente_sin_crear_otro_debe(
+def test_admin_factura_cargo_legacy_redirige_al_lote_sin_escribir_envios(
     monkeypatch, admin_autenticado,
 ):
     cargo = {
@@ -140,18 +140,10 @@ def test_admin_factura_cargo_existente_sin_crear_otro_debe(
     ))
 
     assert respuesta.status_code == 303
-    assert respuesta.headers["location"] == "/admin/clientes/MELCIOR"
-    assert llamadas == [{
-        "envio_id": 77,
-        "cliente_id": "MELCIOR",
-        "nro_fc": "FC-100",
-        "factura_pdf": b"%PDF-1.4 factura",
-        "factura_nombre": "fc-100.pdf",
-        "actor_tipo": "admin",
-        "actor_ref": "admin",
-    }]
-    assert "monto_ars" not in llamadas[0]
-    assert "ambito" not in llamadas[0]
+    assert respuesta.headers["location"] == (
+        "/admin/clientes/MELCIOR/facturas/nueva?envio=77"
+    )
+    assert llamadas == []
 
 
 def test_admin_no_permite_cancelar_una_fc_facturada(monkeypatch, admin_autenticado):

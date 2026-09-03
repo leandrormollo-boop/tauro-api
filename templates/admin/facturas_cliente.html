@@ -1,0 +1,12 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Facturas de {{ cliente_id }}{% endblock %}
+{% macro dinero(valor) -%}$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}{%- endmacro %}
+{% block content %}
+<div class="page-title page-title-row"><div><div class="eyebrow">Facturación a clientes</div><h1>{{ cliente_id }}</h1><p>Cabeceras ARCA y cargos incluidos.</p></div>
+  <div><a href="/admin/clientes/{{ cliente_id }}" class="btn btn-ghost">Volver al cliente</a> <a href="/admin/clientes/{{ cliente_id }}/facturas/nueva" class="btn btn-primary">Nueva factura</a></div></div>
+{% if request.query_params.get('ok') %}<div class="flash-msg ok">Factura emitida y vinculada correctamente.</div>{% endif %}
+{% if facturas %}<div class="card"><div class="table-wrap"><table><thead><tr><th>Documento</th><th>Fecha</th><th>Vencimiento</th><th>Ítems</th><th>Total</th><th>Pagado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead><tbody>
+{% for f in facturas %}<tr><td><strong>{{ f.numero_visible }}</strong>{% if f.cae %}<br><small>CAE {{ f.cae }}</small>{% endif %}</td><td>{{ f.fecha_emision.strftime('%d/%m/%Y') }}</td><td>{{ f.fecha_vencimiento.strftime('%d/%m/%Y') if f.fecha_vencimiento else '—' }}</td><td>{{ f['items'] }}</td><td class="mono">{{ dinero(f.total) }}</td><td class="mono">{{ dinero(f.pagado) }}</td><td class="mono">{{ dinero(f.saldo) }}</td><td><span class="badge {% if f.estado == 'EMITIDA' %}ok{% else %}error{% endif %}">{{ f.estado }}</span></td><td>{% if f.tiene_pdf %}<a class="btn btn-ghost btn-sm" target="_blank" href="/admin/clientes/{{ cliente_id }}/facturas/{{ f.id }}/pdf">Ver PDF</a>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></div>{% else %}<div class="card"><p>Todavía no hay facturas nuevas para este cliente.</p></div>{% endif %}
+{% endblock %}
+

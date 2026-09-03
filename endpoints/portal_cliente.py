@@ -51,6 +51,11 @@ from servicios.cuenta_corriente import (
     movimientos, resumir_facturacion, resumen_cuenta_por_ambito,
     movimientos_cuenta_paginados,
 )
+from servicios.facturacion_clientes import (
+    get_factura_cliente_pdf,
+    listar_facturas_cliente,
+    listar_partidas_facturables,
+)
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
 )
@@ -1051,6 +1056,7 @@ def cuenta_corriente(
     ambito: str = "consolidado",
     tipo: str = "todos",
     pagina: str = "1",
+    vista: str = "movimientos",
     cliente: str = Depends(cliente_actual),
 ):
     """
@@ -1061,6 +1067,9 @@ def cuenta_corriente(
     ambito = _ambito_cuenta(ambito)
     tipo = _tipo_movimiento_cuenta(tipo)
     pagina_numero = _pagina_cuenta(pagina)
+    vista = str(vista or "movimientos").strip().lower()
+    if vista not in {"movimientos", "facturas", "pendientes"}:
+        vista = "movimientos"
 
     # Las dos consultas reciben exclusivamente el cliente autenticado. Ningún
     # query param o campo del form puede elegir la cuenta de otra persona.
@@ -1076,6 +1085,15 @@ def cuenta_corriente(
         "pagado_ars": consolidado["haber_ars"],
         "saldo_pendiente_ars": consolidado["saldo_ars"],
     }
+    facturas_cliente = (
+        listar_facturas_cliente(cliente) if vista == "facturas" else []
+    )
+    pendientes_facturar = []
+    if vista == "pendientes":
+        for ambito_partida in ("NACIONAL", "INTERNACIONAL"):
+            pendientes_facturar.extend(listar_partidas_facturables(
+                cliente, tipo="FC", ambito=ambito_partida,
+            ))
 
     return templates.TemplateResponse(
         request=request, name="portal/cuenta.html",
@@ -1086,6 +1104,9 @@ def cuenta_corriente(
             "resumen_cuenta": resumen,
             "ambito_filtro": ambito,
             "tipo_filtro": tipo,
+            "vista_cuenta": vista,
+            "facturas_cliente": facturas_cliente,
+            "pendientes_facturar": pendientes_facturar,
             "idempotency_key": _nueva_idempotency_key(),
         },
     )
@@ -1172,11 +1193,30 @@ async def informar_pago(
     )
 
 
-@router.get("/facturas/{envio_id}/pdf")
-def ver_factura_propia(envio_id: int, cliente: str = Depends(cliente_actual)):
-    """El cliente descarga SUS facturas; las ajenas no existen para él."""
+@router.get("/facturas/{factura_id}/pdf")
+def ver_factura_propia(factura_id: int, cliente: str = Depends(cliente_actual)):
+    """Descarga una cabecera TAURO propia; ownership se valida en SQL."""
     from fastapi.responses import Response
+    dato = get_factura_cliente_pdf(factura_id, cliente_id=cliente)
+    if not dato:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    contenido, nombre = dato
+    return Response(
+        content=contenido,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{nombre}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
+
+@router.get("/facturas-legacy/{envio_id}/pdf")
+def ver_factura_legacy_propia(
+    envio_id: int,
+    cliente: str = Depends(cliente_actual),
+):
+    """Fallback de sólo lectura para instalaciones con factura en ``envios``."""
     from servicios.cuenta_corriente import get_factura_pdf
 
     dato = get_factura_pdf(envio_id, cliente_id=cliente)
