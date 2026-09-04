@@ -3234,6 +3234,66 @@ ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pricing_rangos_nacional JSONB NOT 
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS perfil_comercial TEXT NOT NULL DEFAULT '';
 
 -- Valores default de config
+-- Entrada administrativa de PDFs DHL. Evidencia pendiente, NO cuenta corriente.
+CREATE TABLE IF NOT EXISTS entradas_pdf_dhl (
+    id BIGSERIAL PRIMARY KEY,
+    archivo_nombre TEXT NOT NULL,
+    archivo_pdf BYTEA NOT NULL CHECK (octet_length(archivo_pdf) BETWEEN 4 AND 8388608),
+    archivo_sha256 TEXT NOT NULL UNIQUE CHECK (archivo_sha256 ~ '^[0-9a-f]{64}$'),
+    numero_esperado TEXT NOT NULL CHECK (numero_esperado ~ '^[0-9]{4}A[0-9]{8}$'),
+    cuit_esperado TEXT NOT NULL CHECK (cuit_esperado ~ '^[0-9]{11}$'),
+    canal TEXT NOT NULL DEFAULT 'ADMIN_PDF' CHECK (canal = 'ADMIN_PDF'),
+    estado TEXT NOT NULL DEFAULT 'RECIBIDA'
+        CHECK (estado IN ('RECIBIDA','PARA_REVISION','REVISION_MANUAL','IMPORTADA')),
+    extraccion JSONB,
+    observaciones JSONB NOT NULL DEFAULT '[]',
+    revision_sha256 TEXT,
+    lector_version INTEGER,
+    error_lectura TEXT,
+    intentos INTEGER NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+    factura_id BIGINT REFERENCES facturas_courier(id) ON DELETE RESTRICT,
+    creado_por TEXT NOT NULL,
+    revisado_por TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revisado_at TIMESTAMPTZ,
+    CHECK ((estado = 'IMPORTADA') = (factura_id IS NOT NULL)),
+    CHECK (estado NOT IN ('PARA_REVISION','IMPORTADA') OR
+        (extraccion IS NOT NULL AND revision_sha256 IS NOT NULL AND lector_version IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS ix_entradas_dhl_estado ON entradas_pdf_dhl(estado, id DESC);
+
+CREATE OR REPLACE FUNCTION tauro_proteger_entrada_dhl() RETURNS TRIGGER AS $$
+BEGIN
+    IF ROW(NEW.archivo_pdf, NEW.archivo_sha256, NEW.archivo_nombre, NEW.canal,
+           NEW.creado_por, NEW.created_at)
+       IS DISTINCT FROM ROW(OLD.archivo_pdf, OLD.archivo_sha256, OLD.archivo_nombre,
+           OLD.canal, OLD.creado_por, OLD.created_at) THEN
+        RAISE EXCEPTION 'La evidencia original DHL es inmutable';
+    END IF;
+    IF OLD.estado = 'IMPORTADA' AND NEW IS DISTINCT FROM OLD THEN
+        RAISE EXCEPTION 'La entrada importada DHL es inmutable';
+    END IF;
+    IF OLD.estado = 'PARA_REVISION' AND (
+        NEW.estado NOT IN ('PARA_REVISION','IMPORTADA') OR
+        ROW(NEW.numero_esperado, NEW.cuit_esperado, NEW.extraccion,
+            NEW.observaciones, NEW.revision_sha256, NEW.lector_version)
+        IS DISTINCT FROM ROW(OLD.numero_esperado, OLD.cuit_esperado, OLD.extraccion,
+            OLD.observaciones, OLD.revision_sha256, OLD.lector_version)
+    ) THEN
+        RAISE EXCEPTION 'La extracción presentada para revisión es inmutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_proteger_entrada_dhl ON entradas_pdf_dhl;
+CREATE TRIGGER trg_proteger_entrada_dhl BEFORE UPDATE ON entradas_pdf_dhl
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_entrada_dhl();
+DROP TRIGGER IF EXISTS trg_no_borrar_entrada_dhl ON entradas_pdf_dhl;
+CREATE TRIGGER trg_no_borrar_entrada_dhl BEFORE DELETE ON entradas_pdf_dhl
+FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_borrado_financiero();
+
+-- Valores default de config
 INSERT INTO config (parametro, valor) VALUES
     ('COTIZACION_DOLAR_ARS', '1450'),
     ('WEB_MARKUP_PCT', '20'),

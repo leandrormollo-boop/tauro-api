@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 import secrets
 import subprocess
@@ -3583,6 +3584,116 @@ async def admin_envio_realizado_post(
 
 
 # ── Verificación de pagos informados por clientes ───────────
+
+def _csrf_dhl(alcance: str) -> str:
+    base = f"{int(time.time())}.{secrets.token_urlsafe(16)}"
+    firma = hmac.new(_ADMIN_TOKEN.encode(), f"dhl:{alcance}:{base}".encode(), hashlib.sha256).hexdigest()
+    return f"{base}.{firma}"
+
+
+def _csrf_dhl_valido(token, alcance: str) -> bool:
+    if not isinstance(token, str) or len(token) > 160:
+        return False
+    try:
+        fecha, nonce, firma = token.split('.')
+        if not 0 <= time.time() - int(fecha) <= 3600 or len(nonce) != 22:
+            return False
+        esperada = hmac.new(_ADMIN_TOKEN.encode(), f"dhl:{alcance}:{fecha}.{nonce}".encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(firma, esperada)
+    except (ValueError, TypeError):
+        return False
+
+
+@router.get('/conciliacion-couriers/entrada-dhl', response_class=HTMLResponse)
+def admin_bandeja_dhl(request: Request, pagina: int = 1, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.bandeja_facturas_dhl import listar_entradas_dhl
+    return templates.TemplateResponse(request=request, name='admin/entrada_dhl.html',
+        context={'seccion': 'conciliacion_couriers', 'bandeja': listar_entradas_dhl(pagina=pagina),
+                 'csrf_dhl': _csrf_dhl('nueva')}, headers={'Cache-Control': 'private, no-store'})
+
+
+@router.post('/conciliacion-couriers/entrada-dhl')
+async def admin_recibir_dhl(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from starlette.concurrency import run_in_threadpool
+    from servicios.bandeja_facturas_dhl import recibir_pdf_dhl
+    from servicios.cuenta_corriente import leer_comprobante_con_tope
+    form = await request.form()
+    if not _csrf_dhl_valido(form.get('csrf_dhl'), 'nueva'):
+        return Response('Formulario vencido o inválido. Volvé a abrir la bandeja.', status_code=403)
+    try:
+        archivo = form.get('archivo_pdf')
+        entrada = await run_in_threadpool(recibir_pdf_dhl,
+            pdf=await leer_comprobante_con_tope(archivo), nombre=getattr(archivo, 'filename', ''),
+            numero=form.get('numero'), cuit=form.get('cuit'), actor='admin')
+        return RedirectResponse(f"/admin/conciliacion-couriers/entrada-dhl/{entrada['id']}", status_code=303)
+    except ValueError as exc:
+        return RedirectResponse('/admin/conciliacion-couriers/entrada-dhl?error=' + quote(str(exc)), status_code=303)
+
+
+@router.get('/conciliacion-couriers/entrada-dhl/{entrada_id}', response_class=HTMLResponse)
+def admin_detalle_dhl(request: Request, entrada_id: int, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.bandeja_facturas_dhl import obtener_entrada_dhl
+    entrada = obtener_entrada_dhl(entrada_id)
+    if not entrada:
+        return Response('Entrada no encontrada.', status_code=404)
+    return templates.TemplateResponse(request=request, name='admin/entrada_dhl_detalle.html',
+        context={'seccion': 'conciliacion_couriers', 'entrada': entrada,
+                 'csrf_dhl': _csrf_dhl(str(entrada_id))}, headers={'Cache-Control': 'private, no-store'})
+
+
+@router.get('/conciliacion-couriers/entrada-dhl/{entrada_id}/pdf')
+def admin_pdf_entrada_dhl(entrada_id: int, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.bandeja_facturas_dhl import obtener_entrada_dhl
+    entrada = obtener_entrada_dhl(entrada_id, con_pdf=True)
+    if not entrada:
+        return Response('PDF no encontrado.', status_code=404)
+    return Response(bytes(entrada['archivo_pdf']), media_type='application/pdf', headers={
+        'Content-Disposition': f'attachment; filename="DHL-entrada-{entrada_id}.pdf"',
+        "Cache-Control": "private, no-store", 'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "sandbox; default-src 'none'",
+    })
+
+
+@router.post('/conciliacion-couriers/entrada-dhl/{entrada_id}/leer')
+def admin_leer_dhl(entrada_id: int, csrf_dhl: str = Form(''), numero: str = Form(''),
+                   cuit: str = Form(''), admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf_dhl, str(entrada_id)):
+        return Response('Formulario vencido o inválido.', status_code=403)
+    from servicios.bandeja_facturas_dhl import leer_entrada_dhl
+    destino = f'/admin/conciliacion-couriers/entrada-dhl/{entrada_id}'
+    try:
+        leer_entrada_dhl(entrada_id, numero=numero, cuit=cuit, actor='admin')
+    except ValueError as exc:
+        destino += '?error=' + quote(str(exc))
+    return RedirectResponse(destino, status_code=303)
+
+
+@router.post('/conciliacion-couriers/entrada-dhl/{entrada_id}/importar')
+def admin_importar_dhl(entrada_id: int, csrf_dhl: str = Form(''), revision_sha256: str = Form(''),
+                       revisado: str = Form(''), admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf_dhl, str(entrada_id)):
+        return Response('Formulario vencido o inválido.', status_code=403)
+    from servicios.bandeja_facturas_dhl import importar_entrada_dhl
+    from servicios.conciliacion_couriers import ConciliacionCourierError
+    try:
+        factura = importar_entrada_dhl(entrada_id, revision_sha256=revision_sha256,
+                                     revision_confirmada=(revisado == 'si'), actor='admin')
+        return RedirectResponse(f"/admin/conciliacion-couriers/facturas/{factura['id']}?ok=cargada", status_code=303)
+    except (ValueError, ConciliacionCourierError) as exc:
+        return RedirectResponse(f'/admin/conciliacion-couriers/entrada-dhl/{entrada_id}?error=' + quote(str(exc)), status_code=303)
+
 
 @router.get("/conciliacion-couriers", response_class=HTMLResponse)
 def admin_conciliacion_couriers(

@@ -8,6 +8,7 @@ un PDF nunca decide una suma financiera.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import hashlib
 import json
 import re
@@ -510,8 +511,9 @@ def registrar_factura_courier(
     archivo_sha256: str | None = None,
     archivo_contenido: bytes | None = None,
     metadatos_origen: dict[str, Any] | None = None,
+    _conn=None,
 ) -> dict[str, Any]:
-    """Registra documento e ítems de forma atómica e idempotente."""
+    """Registra atómicamente. Si se aporta _conn, el llamador controla commit."""
     courier = normalizar_courier(courier)
     tipo = normalizar_tipo_documento(tipo_documento)
     numero_normalizado = normalizar_numero_documento(numero)
@@ -575,7 +577,7 @@ def registrar_factura_courier(
     metadata = dict(metadatos_origen or {})
     metadata["payload_sha256"] = payload_hash
 
-    with get_conn() as conn:
+    with (nullcontext(_conn) if _conn is not None else get_conn()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
@@ -736,11 +738,12 @@ def matchear_items_exactos(
     factura_id: int,
     *,
     actor: str = "sistema",
+    _conn=None,
 ) -> dict[str, int]:
     """Propone matches únicamente cuando courier y tracking son exactos."""
     propuestos = 0
     sin_match = 0
-    with get_conn() as conn:
+    with (nullcontext(_conn) if _conn is not None else get_conn()) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """

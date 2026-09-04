@@ -67,6 +67,35 @@ def preparar_factura_dhl(
     del modelo. No se acepta cliente, saldo, margen, precio final ni un ID de
     solicitud: el dueño sólo podrá resolverse contra la base por tracking.
     """
+    for campo, valor in {
+        'cuenta_correo': cuenta_correo, 'mensaje_id': mensaje_id,
+        'adjunto_id': adjunto_id,
+    }.items():
+        if not isinstance(valor, str) or not valor.strip():
+            raise ExtraccionDHLInvalida(f'Falta {campo} de la fuente original.')
+    preparado = preparar_factura_dhl_manual(
+        extraccion, archivo_pdf=archivo_pdf, archivo_nombre=archivo_nombre,
+    )
+    cuenta_hash = hashlib.sha256(cuenta_correo.strip().lower().encode()).hexdigest()
+    origen_hash = hashlib.sha256(
+        (cuenta_hash + '\0' + mensaje_id.strip() + '\0' + adjunto_id.strip()).encode()
+    ).hexdigest()
+    preparado.datos_registro.update({
+        'mensaje_origen_id': origen_hash,
+        'metadatos_origen': {
+            'canal': 'correo_dhl', 'contrato_version': 1,
+            'cuenta_sha256': cuenta_hash,
+            'mensaje_id': mensaje_id.strip(), 'adjunto_id': adjunto_id.strip(),
+            'revision_extraccion_requerida': True,
+        },
+    })
+    return preparado
+
+
+def preparar_factura_dhl_manual(
+    extraccion: Mapping[str, Any], *, archivo_pdf: bytes, archivo_nombre: str,
+) -> PreparacionFacturaDHL:
+    """Mismos controles documentales sin inventar una procedencia Gmail."""
     permitidos = {
         'tipo_documento', 'numero', 'moneda', 'subtotal', 'impuestos',
         'total', 'fecha_emision', 'fecha_vencimiento', 'items',
@@ -78,8 +107,7 @@ def preparar_factura_dhl(
     if len(archivo_pdf) > 8 * 1024 * 1024:
         raise ExtraccionDHLInvalida('El PDF supera el máximo de 8 MB.')
     for campo, valor in {
-        'archivo_nombre': archivo_nombre, 'cuenta_correo': cuenta_correo,
-        'mensaje_id': mensaje_id, 'adjunto_id': adjunto_id,
+        'archivo_nombre': archivo_nombre,
     }.items():
         if not isinstance(valor, str) or not valor.strip():
             raise ExtraccionDHLInvalida(f'Falta {campo} de la fuente original.')
@@ -151,10 +179,6 @@ def preparar_factura_dhl(
         raise ExtraccionDHLInvalida('Los renglones no suman el total; no se completa la diferencia por inferencia.')
     if tipo in ('NC', 'ND'):
         observaciones.append('Vincular y revisar el documento original antes de conciliar esta NC/ND.')
-    cuenta_hash = hashlib.sha256(cuenta_correo.strip().lower().encode()).hexdigest()
-    origen_hash = hashlib.sha256(
-        (cuenta_hash + '\0' + mensaje_id.strip() + '\0' + adjunto_id.strip()).encode()
-    ).hexdigest()
     return PreparacionFacturaDHL(
         datos_registro={
             'courier': 'DHL', 'tipo_documento': tipo, 'numero': numero,
@@ -165,11 +189,8 @@ def preparar_factura_dhl(
             'archivo_nombre': archivo_nombre,
             'archivo_contenido': archivo_pdf,
             'archivo_sha256': hashlib.sha256(archivo_pdf).hexdigest(),
-            'mensaje_origen_id': origen_hash,
             'metadatos_origen': {
-                'canal': 'correo_dhl', 'contrato_version': 1,
-                'cuenta_sha256': cuenta_hash,
-                'mensaje_id': mensaje_id.strip(), 'adjunto_id': adjunto_id.strip(),
+                'canal': 'admin_pdf_dhl', 'contrato_version': 1,
                 'revision_extraccion_requerida': True,
             },
         },

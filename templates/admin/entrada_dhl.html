@@ -1,0 +1,34 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Entrada de facturas DHL{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/entrada-dhl.css?v=1">
+<section class="dhl-intake">
+<div class="page-title page-title-row"><div><div class="eyebrow">Facturas del operador · uso interno</div>
+  <h1>Entrada de facturas DHL</h1><p>Guardá el original, revisá la lectura y registrá la factura. Los saldos no cambian en estos pasos.</p></div>
+  <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver al control</a></div>
+<div class="msg">Gmail todavía no está conectado al servidor. Por ahora, descargá el PDF del correo y cargalo aquí. No se envía a modelos de IA.</div>
+{% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+<div class="card" style="margin-bottom:22px;">
+  <h3>1. Conservar el PDF original</h3>
+  <p>Formato inicial: factura A original de DHL Argentina en USD, con cabecera y una página de detalle. Para NC/ND u otros formatos, usá la <a href="/admin/conciliacion-couriers/nueva">carga manual</a>.</p>
+  <form method="POST" action="/admin/conciliacion-couriers/entrada-dhl" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_dhl" value="{{ csrf_dhl }}">
+    <div class="form-grid-3">
+      <div class="form-group"><label for="dhl-pdf">Factura PDF original (máx. 8 MB)</label><input id="dhl-pdf" type="file" name="archivo_pdf" accept="application/pdf,.pdf" required></div>
+      <div class="form-group"><label for="dhl-numero">Número del documento</label><input type="text" id="dhl-numero" name="numero" pattern="[0-9]{4}A[0-9]{8}" maxlength="13" placeholder="1700A00000001" required><small>Copialo del asunto del correo o del PDF.</small></div>
+      <div class="form-group"><label for="dhl-cuit">CUIT receptor esperado</label><input type="text" id="dhl-cuit" name="cuit" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" placeholder="11 dígitos, sin guiones" required><small>Debe coincidir con el destinatario de la factura.</small></div>
+    </div><button class="btn btn-primary">Guardar PDF y abrir revisión</button>
+  </form>
+</div>
+<div class="card"><h3>Documentos recibidos</h3><p>Los PDFs repetidos se abren en el registro existente. Una factura con contenido diferente se bloquea al intentar importarla.</p>
+  <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Recibido</th><th>Estado</th><th></th></tr></thead><tbody>
+  {% for e in bandeja['items'] %}<tr><td><strong>{{ e.numero_esperado }}</strong><br><small>{{ e.archivo_nombre }}</small></td>
+    <td>{{ e.created_at.strftime('%d/%m/%Y %H:%M') }}</td><td><span class="badge {{ 'ok' if e.estado == 'IMPORTADA' else 'warn' }}">{{ e.estado.replace('_',' ')|title }}</span></td>
+    <td><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/entrada-dhl/{{ e.id }}">Abrir</a></td></tr>
+  {% else %}<tr><td colspan="4" class="empty">Todavía no hay PDFs en esta bandeja.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <div style="margin-top:16px;">{% if bandeja.pagina > 1 %}<a class="btn btn-ghost" href="?pagina={{ bandeja.pagina - 1 }}">Anterior</a>{% endif %}
+    <span>Página {{ bandeja.pagina }}</span> {% if bandeja.hay_mas %}<a class="btn btn-ghost" href="?pagina={{ bandeja.pagina + 1 }}">Siguiente</a>{% endif %}</div>
+</div>
+</section>
+{% endblock %}

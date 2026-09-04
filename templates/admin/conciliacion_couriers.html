@@ -12,7 +12,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <h1>Control de envíos y facturas courier</h1>
     <p>Cada guía se controla contra la factura final de DHL, FedEx, Andreani u OCA antes de actualizar al cliente.</p>
   </div>
-  <a href="/admin/conciliacion-couriers/nueva" class="btn btn-primary">Cargar factura courier</a>
+  <div><a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer factura DHL</a>
+  <a href="/admin/conciliacion-couriers/nueva" class="btn btn-ghost">Carga manual courier</a></div>
 </div>
 
 {% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada correctamente.</div>{% endif %}

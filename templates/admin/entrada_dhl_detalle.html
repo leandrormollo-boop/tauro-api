@@ -1,0 +1,56 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Revisar PDF DHL{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/entrada-dhl.css?v=1">
+<section class="dhl-intake">
+<div class="page-title page-title-row"><div><div class="eyebrow">Evidencia interna · sin cargos al cliente</div>
+  <h1>Revisar {{ entrada.numero_esperado }}</h1><p>Origen: carga PDF por Admin. <span class="badge muted">{{ entrada.estado.replace('_',' ')|title }}</span></p></div>
+  <a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-ghost">Volver a la bandeja</a></div>
+{% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+<div class="card" style="margin-bottom:20px;"><a class="btn btn-ghost" href="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/pdf">Descargar original para comparar</a>
+  <p>{{ entrada.archivo_nombre }} · CUIT receptor {{ entrada.cuit_esperado }}</p>
+  <details><summary>Huella del documento</summary><p class="mono" style="overflow-wrap:anywhere;">{{ entrada.archivo_sha256 }}</p></details></div>
+{% if entrada.estado in ('RECIBIDA','REVISION_MANUAL') %}
+  {% if entrada.error_lectura %}<div class="msg error">{{ entrada.error_lectura }} No se registró la factura ni se modificaron saldos.</div>{% endif %}
+  <div class="card"><h3>2. Leer y validar el PDF</h3><p>Se comprobarán número, CUIT, moneda, totales, renglones y peso facturado. Podés corregir la referencia si la copiaste mal.</p>
+    <form method="POST" action="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/leer">
+      <input type="hidden" name="csrf_dhl" value="{{ csrf_dhl }}">
+      <div class="form-grid-2"><div class="form-group"><label for="numero">Número esperado</label><input type="text" id="numero" name="numero" value="{{ entrada.numero_esperado }}" pattern="[0-9]{4}A[0-9]{8}" maxlength="13" required></div>
+      <div class="form-group"><label for="cuit">CUIT receptor esperado</label><input type="text" id="cuit" name="cuit" value="{{ entrada.cuit_esperado }}" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" required></div></div>
+      <button class="btn btn-primary">{{ 'Reintentar lectura' if entrada.intentos else 'Leer PDF' }}</button>
+      <a class="btn btn-ghost" href="/admin/conciliacion-couriers/nueva">Usar carga manual</a>
+    </form></div>
+{% endif %}
+{% if entrada.extraccion %}
+  {% set f = entrada.extraccion %}
+  <div class="card" style="margin-bottom:20px;"><h3>Datos extraídos · {{ f.tipo_documento }} {{ f.numero }}</h3>
+    <div class="form-grid-3"><p>Emisión<br><strong>{{ f.fecha_emision }}</strong></p><p>Vencimiento<br><strong>{{ f.fecha_vencimiento or '—' }}</strong></p><p>Moneda<br><strong>{{ f.moneda }}</strong></p></div>
+    <div class="form-grid-3"><p>Subtotal<br><strong>{{ f.subtotal }}</strong></p><p>Impuestos<br><strong>{{ f.impuestos }}</strong></p><p>Total documental<br><strong>{{ f.moneda }} {{ f.total }}</strong></p></div>
+    <p>Los importes de esta lectura usan punto decimal, sin separador de miles.</p>
+    <div class="table-wrap"><table><thead><tr><th>Línea / guía</th><th>Concepto</th><th>Peso facturado</th><th>Importe ({{ f.moneda }})</th><th>TC documental ARS</th></tr></thead><tbody>
+    {% for i in f['items'] %}<tr><td>{{ i.linea_numero }} · <span class="mono">{{ i.tracking or 'Sin asignar' }}</span></td>
+      <td>{{ i.concepto_tipo }}<br><small>{{ i.descripcion or i.concepto_codigo or '' }}</small></td>
+      <td>{{ i.peso_facturado_kg or '—' }}{% if i.peso_facturado_kg %} kg{% endif %}<br><small>{{ (i.peso_base or 'NO_INFORMADO').replace('_',' ')|title }}</small></td>
+      <td class="mono">{{ i.importe }}</td><td class="mono">{{ i.tipo_cambio_ars }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  <div class="card" style="margin-bottom:20px;"><h3>Puntos a revisar</h3>
+    <ul>{% for nota in entrada.observaciones %}<li>{{ nota }}</li>{% endfor %}
+      <li>El cambio impositivo del PDF no acredita el tipo de cambio del pago.</li>
+      <li>Los impuestos generales sin guía permanecen sin asignar. No se prorratean automáticamente.</li>
+      <li>Las coincidencias por tracking se proponen después; no se confirman ni aplican diferencias en este paso.</li></ul>
+  </div>
+{% endif %}
+{% if entrada.estado == 'PARA_REVISION' %}
+  <div class="card"><h3>3. Registrar la evidencia revisada</h3><p>Compará el original con la tabla. Si hay un error, no confirmes: usá la carga manual. La propuesta original queda conservada.</p>
+    <form method="POST" action="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/importar" data-confirm="¿Registrar esta extracción revisada? No modificará saldos ni aprobará diferencias.">
+      <input type="hidden" name="csrf_dhl" value="{{ csrf_dhl }}"><input type="hidden" name="revision_sha256" value="{{ entrada.revision_sha256 }}">
+      <label style="display:flex;gap:10px;align-items:start;margin:16px 0;"><input style="width:auto;margin-top:4px;" type="checkbox" name="revisado" value="si" required>Comparé el PDF con el número, moneda, totales, guías, cargos y pesos de esta lectura.</label>
+      <button class="btn btn-primary">Registrar factura, sin aplicar cargos</button><a class="btn btn-ghost" href="/admin/conciliacion-couriers/nueva">Carga manual</a>
+    </form></div>
+{% elif entrada.estado == 'IMPORTADA' %}
+  <div class="msg ok">Factura registrada. La revisión financiera y cualquier diferencia al cliente siguen siendo acciones separadas.</div>
+  <a class="btn btn-primary" href="/admin/conciliacion-couriers/facturas/{{ entrada.factura_id }}">Ver factura y coincidencias</a>
+{% endif %}
+</section>
+{% endblock %}
