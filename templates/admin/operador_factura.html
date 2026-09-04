@@ -2,9 +2,9 @@
 {% import "admin/operador_macros.html" as op %}
 {% block title %}{{ factura.numero }} · {{ courier }}{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/css/operadores.css?v=2">
+<link rel="stylesheet" href="/static/css/operadores.css?v=3">
 <div class="operadores">
-<div class="page-title op-heading">{{ op.logo(courier) }}<div><div class="eyebrow"><a href="/admin/operadores/{{ courier }}">{{ op.nombre(courier) }}</a> · Proveedor · Sólo ADMIN</div><h1>{{ factura.tipo_documento }} {{ factura.numero }}</h1>
+<div class="page-title op-heading"><a class="op-logo-button" href="/admin/operadores/{{ courier }}" aria-label="Volver a {{ op.nombre(courier) }}" title="Volver a {{ op.nombre(courier) }}">{{ op.logo(courier) }}</a><div><div class="eyebrow">Proveedor · Sólo ADMIN</div><h1>{{ factura.tipo_documento }} {{ factura.numero }}</h1>
 <p>{{ factura.moneda }} {{ op.dinero(factura.total) }} · {{ op.estado(factura) }}</p></div></div>
 {% include 'admin/operador_mensajes.html' %}
 <div class="op-actions"><a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}" class="btn btn-primary">PDF, matches y revisión financiera</a></div>

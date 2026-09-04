@@ -94,14 +94,14 @@ def test_logos_locales_en_tarjetas_y_encabezados(monkeypatch,courier,archivo,nom
     monkeypatch.setattr(op,'detalle_documento',lambda *args:f)
     ruta='/static/img/carriers/'+archivo
     assert (Path(__file__).resolve().parents[1]/ruta.lstrip('/')).is_file()
-    for r in [ui.inicio(request(),admin_token='valido'),
-              ui.mundo(request(),courier,admin_token='valido'),
+    inicio=ui.inicio(request(),admin_token='valido')
+    assert f'aria-label="Abrir {nombre}"' in inicio.body.decode()
+    for r in [inicio,ui.mundo(request(),courier,admin_token='valido'),
               ui.factura(request(),courier,1,admin_token='valido')]:
         html=r.body.decode()
         assert html.count('src="'+ruta+'"')==1
-        assert nombre in html
         assert 'alt="" width="120" height="60"' in html
-        assert '/static/css/operadores.css?v=2' in html
+        assert '/static/css/operadores.css?v=3' in html
         assert r.headers['cache-control']=='private, no-store'
 
 

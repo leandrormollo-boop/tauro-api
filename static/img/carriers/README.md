@@ -13,7 +13,8 @@ ni añade marcas a la web pública.
   https://www.oca.com.ar/Content/images/LogoOca.png,
   enlazado por https://www.oca.com.ar/ (consulta: 2026-09-04).
 
-Conservar las proporciones y colores. Los nombres permanecen como texto visible;
-las imágenes adyacentes son decorativas para evitar anuncios duplicados en lectores
-de pantalla. La macro usa una lista cerrada de rutas y omite la imagen si el
-operador no tiene un recurso definido.
+Conservar las proporciones y colores. En las tarjetas, el logo completo funciona
+como enlace y el nombre del operador queda disponible en su etiqueta accesible y
+en el texto de ayuda. La imagen interna es decorativa para evitar anuncios
+duplicados en lectores de pantalla. La macro usa una lista cerrada de rutas y
+omite la imagen si el operador no tiene un recurso definido.
