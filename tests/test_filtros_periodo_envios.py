@@ -187,6 +187,7 @@ def test_buscador_portal_descarta_todos_los_filtros_activos(monkeypatch):
 def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
     portal_html = (RAIZ / "templates/portal/envios.html").read_text()
     admin_html = (RAIZ / "templates/admin/cliente_detail.html").read_text()
+    portal_js = (RAIZ / "static/js/portal-envios.js").read_text()
     admin_py = (RAIZ / "endpoints/admin.py").read_text()
     solicitudes = (RAIZ / "servicios/solicitudes_guia.py").read_text()
     schema = (RAIZ / "sql/schema.sql").read_text()
@@ -194,7 +195,7 @@ def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
     for nombre in ('name="anio"', 'name="mes"', 'name="semana"'):
         assert nombre in portal_html
         assert nombre in admin_html
-    assert "requestSubmit()" in portal_html and "requestSubmit()" in admin_html
+    assert "requestSubmit()" in portal_js and "requestSubmit()" in admin_html
     assert "Todos los años" in portal_html and "Todos los meses" in portal_html
     assert "Guías emitidas" in portal_html
     assert "Envíos vigentes" in admin_html

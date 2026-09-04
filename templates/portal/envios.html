@@ -6,6 +6,12 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 
 {% block content %}
 <section class="envios-page">
+<link rel="stylesheet" href="/static/css/portal-envios.css?v=1">
+<div class="envios-async-region" data-envios-region aria-busy="false">
+<div class="envios-async-status" data-envios-status role="status" aria-live="polite" hidden>
+    <span class="envios-async-spinner" aria-hidden="true"></span>
+    <span data-envios-status-text>Actualizando tus envíos…</span>
+</div>
 <div class="page-title">
     <div class="page-title-row">
         <div>
@@ -56,22 +62,6 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     </label>
     <noscript><button type="submit" class="btn btn-primary btn-sm">Aplicar período</button></noscript>
 </form>
-<script nonce="{{ request.state.csp_nonce }}">
-var formularioPeriodo = document.getElementById("envios-periodo-form");
-var camposPeriodo = formularioPeriodo.querySelectorAll("[data-periodo-envios]");
-camposPeriodo.forEach(function (campo) {
-    campo.addEventListener("change", function () {
-        if (campo.name === "anio" && !campo.value) {
-            formularioPeriodo.elements.mes.disabled = true;
-            formularioPeriodo.elements.semana.disabled = true;
-        }
-        if (campo.name === "mes" && !campo.value) {
-            formularioPeriodo.elements.semana.disabled = true;
-        }
-        formularioPeriodo.requestSubmit();
-    });
-});
-</script>
 
 {# Los dos ámbitos quedan siempre a un click, sin pantalla intermedia. El
    filtro de estado y la búsqueda se conservan al cambiar de pestaña; la
@@ -340,6 +330,9 @@ camposPeriodo.forEach(function (campo) {
 </div>
 {% endif %}
 
+{% endif %}
+</div>
+
 <dialog class="shipment-verification-dialog" id="shipment-verification-dialog"
         aria-labelledby="shipment-verification-title">
     <div class="shipment-verification-panel">
@@ -450,6 +443,6 @@ camposPeriodo.forEach(function (campo) {
     });
 })();
 </script>
-{% endif %}
+<script src="/static/js/portal-envios.js?v=1" defer></script>
 </section>
 {% endblock %}

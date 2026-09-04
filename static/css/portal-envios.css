@@ -1,0 +1,45 @@
+/* Actualización interna de "Mis envíos": el contenido visible permanece en
+   su lugar mientras se consulta el filtro nuevo. */
+.envios-async-region { position: relative; }
+.envios-async-status {
+  position: fixed;
+  z-index: 80;
+  top: 22px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: calc(100vw - 32px);
+  padding: 9px 14px;
+  border: 1px solid rgba(167, 139, 250, .48);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .34);
+  color: var(--fg-1);
+  font-size: 12px;
+  font-weight: 600;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.envios-async-status[hidden] { display: none !important; }
+.envios-async-spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  border: 2px solid rgba(167, 139, 250, .28);
+  border-top-color: var(--accent-soft);
+  border-radius: 50%;
+  animation: envios-async-spin .7s linear infinite;
+}
+.envios-async-status.is-error {
+  border-color: rgba(239, 102, 114, .55);
+  color: #f4a0a8;
+}
+.envios-async-status.is-error .envios-async-spinner { display: none; }
+@keyframes envios-async-spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) {
+  .envios-async-status { top: 68px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .envios-async-spinner { animation-duration: 1.4s; }
+}
