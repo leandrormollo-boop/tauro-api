@@ -95,7 +95,11 @@ camposPeriodo.forEach(function (campo) {
 {% endif %}
 
 {% if tiene_historial %}
-<form method="GET" action="/portal/envios" class="envios-search" role="search">
+<details class="envios-search-disclosure"{% if busqueda_filtro %} open{% endif %}>
+    <summary class="btn btn-ghost btn-sm envios-search-toggle" aria-controls="envios-search-form">
+        Buscar{% if busqueda_filtro %}<span class="envios-search-active">Filtro activo</span>{% endif %}
+    </summary>
+<form method="GET" action="/portal/envios" class="envios-search" role="search" id="envios-search-form">
     <label for="envios-buscar">
         <strong>Buscar envío</strong>
         <span>Por código de tracking</span>
@@ -112,6 +116,7 @@ camposPeriodo.forEach(function (campo) {
         <button type="submit" class="btn btn-primary btn-sm">Buscar</button>
     </div>
 </form>
+</details>
 {% endif %}
 
 {% if not tiene_historial %}
@@ -160,7 +165,7 @@ camposPeriodo.forEach(function (campo) {
     <div><small style="color:var(--fg-4);display:block;">Operaciones vigentes</small><strong>{{ resumen_periodo.operaciones_vigentes }}</strong></div>
     <div>
         <small style="color:var(--fg-4);display:block;">Monto activo del período</small>
-        <strong>$ {{ "{:,.0f}".format(resumen_periodo.total_ars).replace(",", ".") }}</strong>
+        <strong class="portal-money-green">$ {{ "{:,.0f}".format(resumen_periodo.total_ars).replace(",", ".") }}</strong>
         <small style="color:var(--fg-4);display:block;">No suma guías canceladas o reemplazadas</small>
     </div>
     {% if resumen_periodo.canceladas_reemplazadas %}
@@ -178,7 +183,7 @@ camposPeriodo.forEach(function (campo) {
 <p class="envios-resumen">
     Mostrando {{ pagina_desde }}–{{ pagina_hasta }} de {{ total_resultados }}
     envío{{ "s" if total_resultados != 1 }}{% if busqueda_filtro %} para <span class="mono">“{{ busqueda_filtro }}”</span>{% endif %} ·
-    <b>{{ dinero_ars(total_pagina.valor) }}</b> total final en esta página
+    <b class="portal-money-green">{{ dinero_ars(total_pagina.valor) }}</b> total final en esta página
 </p>
 {% endif %}
 
@@ -247,14 +252,14 @@ camposPeriodo.forEach(function (campo) {
                         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                             <span style="color:var(--fg-3);">Sin cargo</span>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
-                            <span class="envio-price-initial"><small>Inicial</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
+                            <span class="envio-price-initial portal-money-green"><small>Inicial</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
                             {% if s.diferencia_flete_ars %}
                                 <span class="envio-price-extra diferencia"><b>Diferencia</b><span>{{ "+" if s.diferencia_flete_ars > 0 else "−" }} {{ dinero_ars(s.diferencia_flete_ars|abs) }}</span></span>
                             {% endif %}
                             {% if s.tax_cliente_ars %}
                                 <span class="envio-price-extra tax"><b>TAX</b><span>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</span></span>
                             {% endif %}
-                            <span class="envio-price-final"><small>Total final</small>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span>
+                            <span class="envio-price-final portal-money-green"><small>Total final</small>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span>
                         {% else %}—{% endif %}
                         {% if s.precio_cliente_final_ars %}
                             <br><small style="color:var(--fg-3)"><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;">a tu cliente</span> $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
