@@ -68,3 +68,6 @@ Los datos productivos no fueron consultados ni modificados para estas pruebas.
 
 Resultado: implementación local probada. Ningún release, pago, NC real ni cargo
 al cliente aplicado. Producción requiere autorización y verificación del release.
+
+Cierre integrado con origin/main (c4a1a4f y 33f8c66): 1.663 pruebas, 30 advertencias
+y 5 subtests aprobados. Rama local sin publicación; mejoras concurrentes preservadas.

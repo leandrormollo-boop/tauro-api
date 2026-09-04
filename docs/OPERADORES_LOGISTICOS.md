@@ -112,10 +112,14 @@ veces, con PDF/total preservados y reversas/pagos corregidos conservados.
 
 ## Validación y pendientes reales
 
-Corrida completa: 1.653 tests, 30 advertencias y 5 subtests aprobados (PostgreSQL
+Corrida completa integrada: 1.663 tests, 30 advertencias y 5 subtests aprobados (PostgreSQL
 local y schemas descartables, DATABASE_URL vacía). QA visual de cinco vistas a
 1440, 840 y 390 px, sin desbordes de página. Revisiones independientes con el
 CLI real de Claude, modelo principal verificado `claude-fable-5-1`.
+
+Antes de cerrar se integró origin/main con las mejoras de colores/saldos y búsqueda
+de envíos (c4a1a4f, 33f8c66), sin conflictos ni cambios descartados. La corrida
+anterior al merge tenía 1.653 pruebas; ambas pasaron. No se hizo push.
 
 El servicio fija aislamiento READ COMMITTED antes de escribir. Los triggers de
 pagos, aplicaciones, reversas y protección del documento rechazan otros niveles
