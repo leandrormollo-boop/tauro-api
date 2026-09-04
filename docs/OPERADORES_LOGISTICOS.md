@@ -1,7 +1,7 @@
-# Operadores logísticos — implementación local, 04/09/2026
+# Operadores logísticos — producción, 04/09/2026
 
-Estado: código implementado y probado localmente, **no publicado**. No se cargaron
-pagos/NC reales, no se transfirió dinero, no se cambió producción ni Gmail.
+Estado: código implementado, probado y publicado en producción en `1c458dc`.
+El despliegue no cargó pagos/NC reales, no transfirió dinero y no modificó Gmail.
 
 ## Qué incluye
 

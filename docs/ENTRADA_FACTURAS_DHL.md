@@ -142,16 +142,17 @@ worker dedicado con aislamiento de filesystem/red y control de origen.
   `4f6efcad2fcd3d8157715a9cc10ed442d41dbcf92fd1fbd728fc459cc30721dc`.
 - Suite completa después del lector/preselector: 1.491 pruebas y 5 subtests
   aprobados, 0 fallas (30 advertencias existentes), 7,96 segundos.
-- Suite completa con bandeja: 1.538 pruebas y 5 subtests aprobados, 0 fallas
+- Suite completa del release: 1.674 pruebas y 5 subtests aprobados, 0 fallas
   (30 advertencias existentes). Incluye PostgreSQL real: idempotencia,
   concurrencia, rollback, evidencia inmutable, migración repetible y ausencia
   de cargos/ajustes. Tests de Admin: auth, CSRF, revisión exacta y escape HTML.
-- UI revisada con datos sintéticos, escritorio y ancho móvil de 390 px,
+- UI revisada con datos sintéticos, escritorio y anchos móviles hasta 320 px,
   sin desborde del formulario ni del cuerpo de la página.
 - Tres originales completos validados con el worker Linux: 10, 4 y 10
   renglones respectivamente, totales idénticos al preparador inicial.
 - PostgreSQL de prueba aislado, `DATABASE_URL` vacía y dotenv desactivado.
-- Base de código: `5f5908e` de `origin/main`; trabajo separado de producción.
+- Release: publicado en producción dentro de `1c458dc` el 04/09/2026; sin
+  importar facturas reales ni conectar Gmail durante el despliegue.
 - Router TAURO: arquitectura con impacto financiero y seguridad, ruta Sol;
   sin delegación, envío de documentos a modelos ni acciones productivas.
 
