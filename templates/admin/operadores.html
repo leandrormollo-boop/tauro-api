@@ -2,12 +2,12 @@
 {% import "admin/operador_macros.html" as op %}
 {% block title %}Operadores logísticos{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/css/operadores.css?v=1">
+<link rel="stylesheet" href="/static/css/operadores.css?v=2">
 <div class="operadores">
 <div class="page-title"><div class="eyebrow">Administración · proveedores</div><h1>Operadores logísticos</h1>
 <p>Un documento, todos sus envíos y clientes. Pagos al operador separados de los cobros al cliente.</p></div>
 <div class="op-grid">
-{% for m in mundos %}<section class="card op-world"><h2><a href="/admin/operadores/{{ m.courier }}">{{ m.courier }} →</a></h2>
+{% for m in mundos %}<section class="card op-world"><h2><a class="op-brand" href="/admin/operadores/{{ m.courier }}">{{ op.logo(m.courier) }}<span>{{ op.nombre(m.courier) }} <span aria-hidden="true">→</span></span></a></h2>
 <p>{{ m.cantidad }} documentos registrados</p>{{ op.resumen(m.resumen) }}
 {% if not m.resumen %}<p class="op-note">Sin documentos cargados todavía.</p>{% endif %}
 </section>{% endfor %}

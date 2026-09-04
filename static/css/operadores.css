@@ -8,6 +8,12 @@
 .operadores .op-grid>.card { margin:0; }
 .operadores>.op-grid { margin-bottom:18px; }
 .op-world .op-grid { grid-template-columns:minmax(0,1fr); }
+.op-brand,.op-heading { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.op-brand>span:last-child,.op-heading>div { min-width:0; }
+.op-logo { display:inline-flex; align-items:center; justify-content:center; width:120px; height:60px; flex-shrink:0; background:#fff; border-radius:8px; }
+.op-logo img { display:block; width:100px; height:44px; object-fit:contain; }
+.op-logo-dhl { background:#ffcc00; }
+.op-logo-dhl img,.op-logo-fedex img { width:120px; height:60px; }
 .op-summary { border:1px solid var(--line); border-radius:12px; padding:16px; }
 .op-note,.operadores small { color:var(--fg-4); font-size:12px; line-height:1.5; }
 .operadores td small { display:block; margin-top:5px; }

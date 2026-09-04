@@ -2,9 +2,9 @@
 {% import "admin/operador_macros.html" as op %}
 {% block title %}{{ courier }} · Operador{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/css/operadores.css?v=1">
+<link rel="stylesheet" href="/static/css/operadores.css?v=2">
 <div class="operadores">
-<div class="page-title"><div class="eyebrow"><a href="/admin/operadores">Operadores</a></div><h1>{{ courier }}</h1><p>Facturas, vencimientos y pagos de TAURO al operador.</p></div>
+<div class="page-title"><div class="eyebrow"><a href="/admin/operadores">Operadores</a></div><h1 class="op-brand">{{ op.logo(courier) }}<span>{{ op.nombre(courier) }}</span></h1><p>Facturas, vencimientos y pagos de TAURO al operador.</p></div>
 {% include 'admin/operador_mensajes.html' %}
 {{ op.resumen(resumen) }}
 <div class="op-actions"><a href="/admin/conciliacion-couriers?courier={{ courier }}" class="btn btn-ghost">Cargar / conciliar documentos</a>{% if courier=='DHL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer PDF DHL</a>{% endif %}</div>

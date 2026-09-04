@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 import pytest
 from endpoints import admin,admin_operadores as ui
@@ -78,3 +79,34 @@ def test_mensaje_error_html_escapado():
     r.scope['query_string']=b'error=%3Cscript%3Ealert%281%29%3C%2Fscript%3E'
     html=admin.templates.get_template('admin/operador_mensajes.html').render(request=r)
     assert '<script>' not in html and '&lt;script&gt;' in html
+
+
+@pytest.mark.parametrize('courier,archivo,nombre', [
+    ('DHL','dhl.svg','DHL'), ('FEDEX','fedex.svg','FedEx'),
+    ('ANDREANI','andreani.svg','Andreani'), ('OCA','oca.png','OCA'),
+])
+def test_logos_locales_en_tarjetas_y_encabezados(monkeypatch,courier,archivo,nombre):
+    f=op.estado_documento(documento(id=1,courier=courier,numero='DEMO',lineas=0,clientes=0))
+    f.update(items=[],aplicaciones=[],por_cliente=[],verificaciones=[])
+    monkeypatch.setattr(op,'listar_documentos',lambda *args:[f])
+    monkeypatch.setattr(op,'listar_pagos',lambda *args:[])
+    monkeypatch.setattr(op,'condicion_actual',lambda *args:None)
+    monkeypatch.setattr(op,'detalle_documento',lambda *args:f)
+    ruta='/static/img/carriers/'+archivo
+    assert (Path(__file__).resolve().parents[1]/ruta.lstrip('/')).is_file()
+    for r in [ui.inicio(request(),admin_token='valido'),
+              ui.mundo(request(),courier,admin_token='valido'),
+              ui.factura(request(),courier,1,admin_token='valido')]:
+        html=r.body.decode()
+        assert html.count('src="'+ruta+'"')==1
+        assert nombre in html
+        assert 'alt="" width="120" height="60"' in html
+        assert '/static/css/operadores.css?v=2' in html
+        assert r.headers['cache-control']=='private, no-store'
+
+
+@pytest.mark.parametrize('courier',['DESCONOCIDO','../otro','https://externo.example/logo','<script>'])
+def test_logo_desconocido_no_construye_rutas_ni_html(courier):
+    macros=admin.templates.get_template('admin/operador_macros.html').module
+    assert str(macros.logo(courier)).strip()==''
+    assert '<script>' not in str(macros.nombre(courier))

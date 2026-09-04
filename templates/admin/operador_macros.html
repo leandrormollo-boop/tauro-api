@@ -1,3 +1,8 @@
+{% macro nombre(courier) -%}{{ {'DHL':'DHL','FEDEX':'FedEx','ANDREANI':'Andreani','OCA':'OCA'}.get(courier,courier) }}{%- endmacro %}
+{% macro logo(courier) -%}
+{% set archivo={'DHL':'dhl.svg','FEDEX':'fedex.svg','ANDREANI':'andreani.svg','OCA':'oca.png'}.get(courier) %}
+{% if archivo %}<span class="op-logo op-logo-{{ courier|lower }}" aria-hidden="true"><img src="/static/img/carriers/{{ archivo }}" alt="" width="120" height="60" decoding="async"></span>{% endif %}
+{%- endmacro %}
 {% macro dinero(v) -%}{% set d=v|default(0,true) %}{{ ('{:,.2f}' if (d*100)%1==0 else '{:,.4f}').format(d).replace(',','_').replace('.',',').replace('_','.') }}{%- endmacro %}
 {% macro fecha(v) -%}{{ v.strftime('%d/%m/%Y') if v else 'Sin informar' }}{%- endmacro %}
 {% macro estado(f) -%}
