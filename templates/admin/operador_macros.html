@@ -1,0 +1,52 @@
+{% macro dinero(v) -%}{% set d=v|default(0,true) %}{{ ('{:,.2f}' if (d*100)%1==0 else '{:,.4f}').format(d).replace(',','_').replace('.',',').replace('_','.') }}{%- endmacro %}
+{% macro fecha(v) -%}{{ v.strftime('%d/%m/%Y') if v else 'Sin informar' }}{%- endmacro %}
+{% macro estado(f) -%}
+<span class="op-badge {{ 'ok' if f.estado_pago in ('CANCELADA','CREDITO_DISPONIBLE') else 'danger' if f.dias_mora and f.saldo>0 else '' }}">{{ {'SIN_VERIFICAR':'Sin verificar','IMPAGA':'Impaga','PARCIAL':'Pago parcial','CANCELADA':'Cancelada','CREDITO_DISPONIBLE':'Crédito disponible','CREDITO_SIN_VERIFICAR':'Crédito sin verificar','CREDITO_AGOTADO':'Crédito aplicado','ANULADA':'Anulada'}[f.estado_pago] }}</span>
+{% if f.estado_pago not in ('SIN_VERIFICAR','ANULADA') and f.tipo_documento!='NC' and f.saldo>0 and f.dias_mora %}<small class="op-danger">{{ f.dias_mora }} días vencida</small>{% endif %}
+{%- endmacro %}
+{% macro resumen(filas) -%}
+<div class="op-grid">
+{% for r in filas %}<div class="card op-summary"><div class="eyebrow">{{ r.moneda }}</div>
+  <h3>{{ dinero(r.pendiente) }} pendiente verificado</h3>
+  <p>Vencido: {{ dinero(r.vencido) }} · Crédito sin aplicar: {{ dinero(r.credito) }}</p>
+  <small>{{ r.sin_verificar }} documentos con historial sin verificar. No incluidos en deuda ni crédito verificados.</small>
+</div>{% endfor %}
+</div>
+{%- endmacro %}
+{% macro tokens(csrf,nuevo_id,accion,courier,fid=0) -%}
+<input type="hidden" name="csrf" value="{{ csrf(accion,courier,fid) }}">
+<input type="hidden" name="factura_id" value="{{ fid }}">
+<input type="hidden" name="clave" value="{{ nuevo_id() }}">
+{%- endmacro %}
+{% macro confirmar(texto) -%}
+<label class="op-check"><input type="checkbox" name="confirmo" value="si" required> {{ texto }}</label>
+{%- endmacro %}
+{% macro reversa(csrf,courier,tipo,id,fid=0) -%}
+<details><summary>Corregir registro: revertir</summary>
+<form method="POST" action="/admin/operadores/{{ courier }}/acciones/revertir-{{ tipo }}">
+<input type="hidden" name="csrf" value="{{ csrf('revertir-'+tipo,courier,fid,id) }}">
+<input type="hidden" name="factura_id" value="{{ fid }}"><input type="hidden" name="registro_id" value="{{ id }}">
+<label>Motivo y respaldo de la corrección<textarea name="motivo" minlength="10" maxlength="1000" required></textarea></label>
+{{ confirmar('Confirmo revertir este registro. Se conserva el original y se recalculan los saldos; no devuelve dinero ni toca cuentas de clientes.') }}
+<button class="btn btn-ghost">Registrar reversión</button></form></details>
+{%- endmacro %}
+{% macro lineas(items) -%}
+<div class="op-table"><table><thead><tr><th>Documento / línea</th><th>Cliente / envío</th><th>Concepto</th><th>Asignado al cliente</th><th>Peso inicial → facturado</th><th>Diferencia del envío</th></tr></thead><tbody>
+{% set ns=namespace(vistos=[]) %}
+{% for i in items %}<tr>
+  <td><a href="/admin/operadores/{{ i.courier }}/facturas/{{ i.factura_id }}">{{ i.tipo_documento }} {{ i.numero }}</a><small>Línea {{ i.linea_numero }} · {{ i.courier }}</small></td>
+  <td>{% if i.cliente_id %}<a href="/admin/clientes/{{ i.cliente_id|urlencode }}/operadores">{{ i.cliente_id }}</a>{% else %}<strong>Sin asignar</strong>{% endif %}<small>{{ i.tracking_raw or 'Sin tracking' }}</small></td>
+  <td>{{ i.concepto_tipo }}</td>
+  <td>{% if i.importe_asignado is not none %}{{ i.moneda }} {{ dinero(i.importe_asignado*i.signo) }}{% else %}Pendiente de match<small>Línea: {{ i.moneda }} {{ dinero(i.importe*i.signo) }}</small>{% endif %}</td>
+  <td>{{ i.peso_kg if i.peso_kg is not none else '—' }} → {{ i.peso_facturado_kg if i.peso_facturado_kg is not none else '—' }} kg</td>
+  <td>{% if i.solicitud_id %}
+    {% if i.solicitud_id not in ns.vistos %}
+      {% set ns.vistos=ns.vistos+[i.solicitud_id] %}
+      {% if i.ajuste_cliente_ars is not none %}ARS {{ dinero(i.ajuste_cliente_ars) }}<small>{{ i.ajuste_estado or i.conciliacion_estado }}</small>{% else %}Pendiente de cálculo{% endif %}
+    {% else %}<small>Mismo envío; no sumar otra vez</small>{% endif %}
+    <a href="/admin/conciliacion-couriers/envios/{{ i.solicitud_id }}">Revisar envío</a>
+  {% else %}Sin cliente confirmado{% endif %}</td>
+</tr>{% else %}<tr><td colspan="6">Todavía no hay líneas vinculadas.</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="op-note">El ajuste mostrado es el último cálculo del envío completo, no un importe adicional por cada línea. Sólo se carga al cliente mediante la aprobación del control de envíos.</p>
+{%- endmacro %}

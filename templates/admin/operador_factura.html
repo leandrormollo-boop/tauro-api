@@ -1,0 +1,62 @@
+{% extends "admin/base_admin.html" %}
+{% import "admin/operador_macros.html" as op %}
+{% block title %}{{ factura.numero }} · {{ courier }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/operadores.css?v=1">
+<div class="operadores">
+<div class="page-title"><div class="eyebrow"><a href="/admin/operadores/{{ courier }}">{{ courier }}</a> · Proveedor · Sólo ADMIN</div><h1>{{ factura.tipo_documento }} {{ factura.numero }}</h1>
+<p>{{ factura.moneda }} {{ op.dinero(factura.total) }} · {{ op.estado(factura) }}</p></div>
+{% include 'admin/operador_mensajes.html' %}
+<div class="op-actions"><a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}" class="btn btn-primary">PDF, matches y revisión financiera</a></div>
+<div class="op-grid"><div class="card"><h3>Fechas</h3><p>Emisión: {{ op.fecha(factura.fecha_emision) }}</p><p>{% if factura.dias_emision is not none %}{{ factura.dias_emision }} días desde emisión{% else %}Antigüedad sin definir{% endif %}</p>
+{% if factura.tipo_documento!='NC' %}<p>Vencimiento: {{ op.fecha(factura.vencimiento) if factura.vencimiento else 'Sin definir' }}</p><small>{{ 'Según documento' if factura.fecha_vencimiento else 'Rectificación manual auditada' if factura.rectificacion_id else 'Plazo acordado, conservado para esta factura' if factura.vencimiento else 'Falta fecha documental o plazo confirmado' }}</small>
+{% if factura.fecha_cancelacion %}<p>Cancelada al {{ op.fecha(factura.fecha_cancelacion) }}{% if factura.dias_mora %} · {{ factura.dias_mora }} días después del vencimiento{% endif %}</p>{% endif %}{% endif %}</div>
+<div class="card"><h3>{{ 'Crédito según registros' if factura.tipo_documento=='NC' else 'Saldo según registros' }}</h3><p class="op-amount">{{ factura.moneda }} {{ op.dinero(factura.saldo) }}</p><p>Aplicado: {{ op.dinero(factura.aplicado) }}</p>{% if factura.estado_pago in ('SIN_VERIFICAR','CREDITO_SIN_VERIFICAR') %}<p class="op-note">No se considera deuda ni crédito confirmado: pueden faltar pagos o aplicaciones históricas.</p>{% endif %}<p>Conciliación: {{ factura.estado }}. Este estado no indica que esté pagada.</p></div></div>
+
+<section class="card"><h2>Clientes de este documento</h2><p>Una sola factura puede incluir varios clientes. Cada uno se vincula por sus líneas confirmadas.</p>
+<div class="op-grid">{% for c in factura.por_cliente %}<div class="op-summary"><a href="/admin/clientes/{{ c.cliente_id|urlencode }}/operadores">{{ c.cliente_id }}</a><p>{{ c.moneda }} {{ op.dinero(c.asignado) }} asignados · {{ c.envios }} envíos</p></div>{% else %}<p>Sin clientes confirmados todavía.</p>{% endfor %}</div>
+{{ op.lineas(factura['items']) }}
+{% if factura.pendientes_asignacion %}<h3>Importes todavía sin asignar</h3><ul>{% for i in factura.pendientes_asignacion %}<li>Línea {{ i.linea_numero }} · {{ i.tracking_raw or 'Sin tracking' }}: {{ i.moneda }} {{ op.dinero(i.pendiente*i.signo) }} pendientes de distribución confirmada.</li>{% endfor %}</ul>{% endif %}
+{% if factura.sin_desglosar|default(0)>0 %}<p>Falta desglosar {{ factura.moneda }} {{ op.dinero(factura.sin_desglosar) }} del total del documento.</p>{% elif factura.sin_desglosar|default(0)<0 %}<p class="op-danger">Revisar: las líneas exceden el total en {{ factura.moneda }} {{ op.dinero(-factura.sin_desglosar) }}.</p>{% endif %}
+<p class="op-note">Costos y PDF consolidados son internos. No se muestran en el portal de ningún cliente.</p></section>
+
+<section class="card"><h2>Aplicaciones documentadas</h2><div class="op-table"><table><thead><tr><th>Origen</th><th>Fecha</th><th>Aplicado a FC/ND</th><th>Consumo del origen / TC</th><th>Registro</th></tr></thead><tbody>
+{% for a in factura.aplicaciones %}<tr><td>{% if a.pago_id %}<a href="/admin/operadores/{{ courier }}/pagos/{{ a.pago_id }}/pdf">Pago #{{ a.pago_id }} · {{ a.referencia }}</a>{% else %}<a href="/admin/operadores/{{ courier }}/facturas/{{ a.nc_id }}">NC {{ a.numero_nc }}</a>{% endif %}</td><td>{{ op.fecha(a.fecha_pago or a.fecha_nc) }}</td><td><a href="/admin/operadores/{{ courier }}/facturas/{{ a.factura_id }}">Documento #{{ a.factura_id }}</a><small>{{ factura.moneda }} {{ op.dinero(a.importe_documento) }}</small></td><td>{{ a.moneda_pago or factura.moneda }} {{ op.dinero(a.importe_origen) }}<small>TC {{ a.tipo_cambio }}</small></td><td>{{ a.actor }}<small>{{ a.motivo }}</small>{% if a.fecha_reversion %}<small>REVERTIDA {{ op.fecha(a.fecha_reversion) }} · {{ a.motivo_reversion }}</small>{% else %}{{ op.reversa(csrf,courier,'aplicacion',a.id,factura.id) }}{% endif %}</td></tr>{% else %}<tr><td colspan="5">Sin pagos o NC aplicados.</td></tr>{% endfor %}
+</tbody></table></div></section>
+
+{% if factura.estado!='ANULADA' %}
+{% if factura.saldo>0 and factura.tipo_documento!='NC' %}<section class="card"><h2>Aplicar pago o nota de crédito</h2><p>No modifica cobros al cliente. Los importes no pueden superar el saldo de esta factura ni el saldo disponible del origen.</p>
+<details><summary>Aplicar un pago ya registrado</summary><form method="POST" action="/admin/operadores/{{ courier }}/acciones/aplicar">
+{{ op.tokens(csrf,nuevo_id,'aplicar',courier,factura.id) }}<div class="op-grid">
+<label>Pago disponible<select name="pago_id" required><option value="">Seleccionar</option>{% for p in pagos if p.disponible>0 %}<option value="{{ p.id }}">#{{ p.id }} · {{ p.referencia }} · {{ p.moneda }} {{ op.dinero(p.disponible) }}</option>{% endfor %}</select></label>
+<label>Importe a cancelar en {{ factura.moneda }}<input type="text" name="importe" inputmode="decimal" required></label>
+<label>TC: moneda del pago por 1 {{ factura.moneda }}<input type="text" name="tipo_cambio" inputmode="decimal" required placeholder="Misma moneda: 1"></label>
+<label>Respaldo de la aplicación y del TC<textarea name="motivo" minlength="5" maxlength="1000" required></textarea></label></div>
+<p class="op-note">Ejemplo: factura USD y pago ARS → indicar cuántos ARS cancelan 1 USD. TC sin separadores de miles, por ejemplo 1450,25. El sistema calcula el consumo del pago. Este TC no reemplaza el TC aprobado para la conciliación del cliente.</p>
+<label class="op-check"><input type="checkbox" name="conversion_confirmada" value="si"> Si las monedas son distintas: verifiqué expresamente la conversión, incluso si el TC es 1.</label>
+{{ op.confirmar('Verifiqué importe, moneda y TC contra el comprobante. Confirmo la aplicación inmutable.') }}<button class="btn btn-primary">Aplicar pago</button></form></details>
+<details><summary>Aplicar crédito de una NC</summary><form method="POST" action="/admin/operadores/{{ courier }}/acciones/aplicar">
+{{ op.tokens(csrf,nuevo_id,'aplicar',courier,factura.id) }}<input type="hidden" name="tipo_cambio" value="1"><div class="op-grid">
+<label>NC del mismo operador y moneda<select name="nc_id" required><option value="">Seleccionar</option>{% for n in creditos %}<option value="{{ n.id }}">{{ n.numero }} · {{ n.moneda }} {{ op.dinero(n.saldo) }}</option>{% endfor %}</select></label>
+<label>Crédito a aplicar en {{ factura.moneda }}<input type="text" name="importe" inputmode="decimal" required></label>
+<label>Respaldo de la imputación<textarea name="motivo" minlength="5" maxlength="1000" required></textarea></label></div>
+<p class="op-note">Se exige PDF original de la NC y se respeta su factura referenciada. Un reclamo pendiente no equivale a una NC.</p>
+{{ op.confirmar('Verifiqué la NC y que corresponde aplicarla a esta factura. No es un pago bancario.') }}<button class="btn btn-primary">Aplicar NC</button></form></details></section>{% endif %}
+
+{% if not factura.verificado and factura.saldo>0 %}<section class="card"><h2>Verificar historial</h2><p>{% if factura.tipo_documento=='NC' %}Confirmá el crédito realmente disponible. Si la NC ya se usó fuera del portal, no la habilites hasta revisar y registrar ese historial de forma controlada.{% else %}Antes de marcar deuda pendiente, registrá todos los pagos y NC ya conocidos. Esta confirmación habilita el saldo como pendiente verificado.{% endif %}</p>
+<form method="POST" action="/admin/operadores/{{ courier }}/acciones/verificar">{{ op.tokens(csrf,nuevo_id,'verificar',courier,factura.id) }}
+<label>Fuente revisada / fecha de corte<textarea name="motivo" minlength="5" maxlength="1000" required></textarea></label>
+{{ op.confirmar('Revisé la documentación y el historial está completo; el saldo mostrado coincide con la evidencia.') }}<button class="btn btn-ghost">Confirmar revisión del historial</button></form></section>{% endif %}
+{% if factura.tipo_documento!='NC' and not factura.vencimiento and not factura.rectificacion_id and factura.fecha_emision and condicion and condicion.plazo_dias is not none %}<section class="card"><h2>Asignar plazo a esta factura histórica</h2><p>Plazo actual: {{ condicion.plazo_dias }} días corridos desde emisión. No se aplica retroactivamente sin esta confirmación.</p><form method="POST" action="/admin/operadores/{{ courier }}/acciones/vencimiento">{{ op.tokens(csrf,nuevo_id,'vencimiento',courier,factura.id) }}<input type="hidden" name="condicion_id" value="{{ condicion.id }}">{{ op.confirmar('Verifiqué que este plazo también corresponde a esta factura histórica.') }}<button class="btn btn-ghost">Fijar vencimiento acordado</button></form></section>{% endif %}
+{% endif %}
+{% if factura.tipo_documento!='NC' and factura.estado!='ANULADA' and not factura.fecha_vencimiento %}
+<section class="card"><h3>Rectificar vencimiento acordado</h3><p class="op-note">Sólo corrige el acuerdo cargado en el portal; no modifica el documento original. Conserva todas las fechas anteriores.</p>
+<details><summary>Corregir fecha o dejar vencimiento sin definir</summary><form method="POST" action="/admin/operadores/{{ courier }}/acciones/rectificar-vencimiento">
+{{ op.tokens(csrf,nuevo_id,'rectificar-vencimiento',courier,factura.id) }}
+<div class="op-grid"><label>Fecha corregida (vacío: sin definir)<input type="date" name="fecha"></label><label>Motivo y respaldo del acuerdo<textarea name="motivo" minlength="10" maxlength="1000" required></textarea></label></div>
+{{ op.confirmar('Verifiqué la fecha con el operador y confirmo esta rectificación auditada.') }}<button class="btn btn-ghost">Registrar rectificación</button></form></details>
+</section>{% endif %}
+{% if factura.rectificaciones %}<section class="card"><h3>Historial de vencimientos rectificados</h3>{% for r in factura.rectificaciones %}<p>{{ op.fecha(r.created_at) }} · {{ op.fecha(r.fecha) if r.fecha else 'Sin definir' }} · {{ r.actor }}: {{ r.motivo }}</p>{% endfor %}</section>{% endif %}
+{% if factura.verificaciones %}<section class="card"><h3>Historial de verificaciones</h3>{% for v in factura.verificaciones %}<p>{{ op.fecha(v.created_at) }} · {{ v.actor }}: {{ v.motivo }}</p>{% endfor %}</section>{% endif %}
+</div>
+{% endblock %}

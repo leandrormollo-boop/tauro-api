@@ -1,0 +1,9 @@
+{% extends "admin/base_admin.html" %}
+{% import "admin/operador_macros.html" as op %}
+{% block title %}{{ cliente.cliente_id }} · Costos de operadores{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/operadores.css?v=1">
+<div class="operadores"><div class="page-title"><div class="eyebrow">Sólo ADMIN · <a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}">{{ cliente.cliente_id }}</a></div><h1>Costos de operadores</h1><p>{{ cliente.nombre or cliente.cliente_id }} · Líneas confirmadas que corresponden a este cliente.</p></div>
+<div class="card">{{ op.lineas(items) }}<div class="op-actions"><span>{{ total }} asignaciones · Página {{ pagina }}</span>{% if pagina>1 %}<a href="?pagina={{ pagina-1 }}">Anterior</a>{% endif %}{% if pagina*100<total %}<a href="?pagina={{ pagina+1 }}">Siguiente</a>{% endif %}</div></div>
+<p class="op-note">Esta vista no crea otra factura ni vuelve a cargar un envío. Los documentos del operador y sus costos permanecen exclusivamente en ADMIN.</p></div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "admin/base_admin.html" %}
+{% import "admin/operador_macros.html" as op %}
+{% block title %}Operadores logísticos{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/operadores.css?v=1">
+<div class="operadores">
+<div class="page-title"><div class="eyebrow">Administración · proveedores</div><h1>Operadores logísticos</h1>
+<p>Un documento, todos sus envíos y clientes. Pagos al operador separados de los cobros al cliente.</p></div>
+<div class="op-grid">
+{% for m in mundos %}<section class="card op-world"><h2><a href="/admin/operadores/{{ m.courier }}">{{ m.courier }} →</a></h2>
+<p>{{ m.cantidad }} documentos registrados</p>{{ op.resumen(m.resumen) }}
+{% if not m.resumen %}<p class="op-note">Sin documentos cargados todavía.</p>{% endif %}
+</section>{% endfor %}
+</div>
+<div class="op-actions"><a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer factura DHL</a><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Carga manual y conciliación</a></div>
+<p class="op-note">El pago no se deduce del estado de conciliación. Los documentos históricos quedan “Sin verificar” hasta revisar sus pagos. Las NC son crédito, no facturas a pagar. No se descuentan reclamos pendientes.</p>
+</div>
+{% endblock %}

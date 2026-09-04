@@ -8,6 +8,11 @@ mocks y verificá producción después de cada push (patrón abajo).
 
 ## Reglas de negocio INVIOLABLES
 
+Actualización local del 04/09/2026 (sin publicar): ver
+[Operadores logísticos](OPERADORES_LOGISTICOS.md). Nueva vista por operador y
+cliente, vencimientos y libro separado de pagos/NC proveedor con reversas
+auditadas. No interpretar estados históricos como pagos/deudas confirmados.
+
 1. **Dos superficies de cotización, nunca mezclarlas.**
    - Cotizador WEB (`/web`, `POST /cotizar-web`): público, sin login. Precio
      de vidriera (descuento web + margen por carrier del admin). JAMÁS expone

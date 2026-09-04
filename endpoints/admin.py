@@ -4672,3 +4672,8 @@ async def admin_importar_melcior_2026(
     return templates.TemplateResponse(
         request=request, name="admin/importaciones_historicas.html", context=contexto,
     )
+
+
+# Comparte la autenticación ADMIN; ningún endpoint de proveedores se monta en portal.
+from endpoints.admin_operadores import router as operadores_router
+router.include_router(operadores_router)

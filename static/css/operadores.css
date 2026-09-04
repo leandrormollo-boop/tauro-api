@@ -1,0 +1,33 @@
+.operadores { min-width:0; overflow-wrap:anywhere; }
+.operadores .card { padding:22px; margin-bottom:18px; min-width:0; }
+.operadores h2,.operadores h3 { margin:0 0 12px; }
+.operadores p { color:var(--fg-3); line-height:1.6; margin:10px 0; }
+.operadores a { color:var(--accent,#d9af56); }
+.operadores .btn-primary { color:#fff; }
+.op-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.operadores .op-grid>.card { margin:0; }
+.operadores>.op-grid { margin-bottom:18px; }
+.op-world .op-grid { grid-template-columns:minmax(0,1fr); }
+.op-summary { border:1px solid var(--line); border-radius:12px; padding:16px; }
+.op-note,.operadores small { color:var(--fg-4); font-size:12px; line-height:1.5; }
+.operadores td small { display:block; margin-top:5px; }
+.op-actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:16px 0; }
+.op-table { overflow-x:auto; max-width:100%; }
+.op-table table { min-width:760px; width:100%; border-collapse:collapse; }
+.op-table th,.op-table td { text-align:left; padding:14px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+.op-table th { font-size:11px; text-transform:uppercase; color:var(--fg-4); letter-spacing:.06em; }
+.op-table td { font-size:13px; max-width:260px; }
+.op-badge { display:inline-block; border-radius:20px; padding:5px 10px; font-size:12px; color:#acbbd1; border:1px solid #53637a; }
+.op-badge.ok { color:#6fe0aa; border-color:#296a4f; }
+.op-badge.danger,.operadores .op-danger { color:#f18f93; border-color:#824347; }
+.operadores label { display:flex; flex-direction:column; gap:8px; min-width:0; color:var(--fg-3); font-size:13px; }
+.operadores input,.operadores select,.operadores textarea { width:100%; min-width:0; max-width:100%; box-sizing:border-box; }
+.operadores input[type=file] { white-space:normal; font-size:12px; }
+.operadores textarea { min-height:82px; }
+.operadores .op-check { flex-direction:row; align-items:flex-start; margin:20px 0; line-height:1.5; }
+.operadores .op-check input { width:auto; flex-shrink:0; margin-top:4px; }
+.operadores details { border-top:1px solid var(--line); padding-top:16px; margin-top:18px; }
+.operadores summary { cursor:pointer; margin-bottom:18px; }
+.operadores .op-amount { font-size:30px; color:var(--fg); }
+@media(max-width:900px) { .op-grid { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:500px) { .operadores .card { padding:15px; } .op-actions .btn { white-space:normal; } }

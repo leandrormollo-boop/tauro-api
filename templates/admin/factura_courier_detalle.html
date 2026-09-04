@@ -23,6 +23,7 @@
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
     <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver</a>
+    <a href="/admin/operadores/{{ factura.courier }}/facturas/{{ factura.id }}" class="btn btn-ghost">Pagos y vencimiento</a>
     {% if factura.tiene_evidencia %}<a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/pdf" target="_blank" class="btn btn-ghost">Ver PDF</a>{% endif %}
     {% if ns.hay_activos and not financiera_pendiente %}
     <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar los matches y calcular los envíos vinculados? Si hay borradores anteriores a la aprobación financiera se anularán conservando su historial. Las nuevas diferencias quedarán pendientes de aprobación.">

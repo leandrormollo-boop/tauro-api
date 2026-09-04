@@ -1,0 +1,2 @@
+{% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada con historial. No se transfirió dinero ni se modificaron cargos de clientes.</div>{% endif %}
+{% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}

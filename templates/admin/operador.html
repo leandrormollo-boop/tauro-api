@@ -1,0 +1,41 @@
+{% extends "admin/base_admin.html" %}
+{% import "admin/operador_macros.html" as op %}
+{% block title %}{{ courier }} · Operador{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/operadores.css?v=1">
+<div class="operadores">
+<div class="page-title"><div class="eyebrow"><a href="/admin/operadores">Operadores</a></div><h1>{{ courier }}</h1><p>Facturas, vencimientos y pagos de TAURO al operador.</p></div>
+{% include 'admin/operador_mensajes.html' %}
+{{ op.resumen(resumen) }}
+<div class="op-actions"><a href="/admin/conciliacion-couriers?courier={{ courier }}" class="btn btn-ghost">Cargar / conciliar documentos</a>{% if courier=='DHL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer PDF DHL</a>{% endif %}</div>
+<section class="card"><h2>Documentos</h2>
+<form method="GET" class="op-actions"><label>Pago<select name="estado"><option value="">Todos</option>{% for e,t in [('SIN_VERIFICAR','Sin verificar'),('IMPAGA','Impagas'),('PARCIAL','Pagos parciales'),('CANCELADA','Canceladas'),('CREDITO_SIN_VERIFICAR','NC sin verificar'),('CREDITO_DISPONIBLE','NC disponibles'),('CREDITO_AGOTADO','NC aplicadas'),('ANULADA','Anuladas')] %}<option value="{{ e }}" {% if estado_filtro==e %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label><button class="btn btn-ghost">Filtrar</button></form>
+<div class="op-table"><table><thead><tr><th>Documento</th><th>Emisión / antigüedad</th><th>Vencimiento</th><th>Total</th><th>Pago</th><th>Saldo registrado</th><th>Clientes</th></tr></thead><tbody>
+{% for f in documentos %}<tr>
+<td><a href="/admin/operadores/{{ courier }}/facturas/{{ f.id }}">{{ f.tipo_documento }} {{ f.numero }}</a><small>Conciliación: {{ f.estado }}</small></td>
+<td>{{ op.fecha(f.fecha_emision) }}<small>{% if f.dias_emision is not none %}{{ f.dias_emision }} días desde emisión{% endif %}</small></td>
+<td>{% if f.tipo_documento=='NC' %}No pagable{% elif f.vencimiento %}{{ op.fecha(f.vencimiento) }}<small>{{ 'Según documento' if f.fecha_vencimiento else 'Rectificación auditada' if f.rectificacion_id else 'Plazo acordado' }}{% if f.saldo>0 and f.dias_vencimiento>=0 %} · {{ f.dias_vencimiento }} días para vencer{% endif %}</small>{% else %}Sin definir{% endif %}</td>
+<td>{{ f.moneda }} {{ op.dinero(f.total) }}</td><td>{{ op.estado(f) }}</td><td>{{ f.moneda }} {{ op.dinero(f.saldo) }}{% if f.estado_pago in ('SIN_VERIFICAR','CREDITO_SIN_VERIFICAR') %}<small>Historial sin confirmar</small>{% endif %}</td><td>{{ f.clientes }}<small>{{ f.lineas }} líneas</small></td>
+</tr>{% else %}<tr><td colspan="7">No hay documentos para este filtro.</td></tr>{% endfor %}
+</tbody></table></div><div class="op-actions"><span>{{ total }} documentos · Página {{ pagina }}</span>{% if pagina>1 %}<a href="?pagina={{ pagina-1 }}&estado={{ estado_filtro|urlencode }}">Anterior</a>{% endif %}{% if pagina*50<total %}<a href="?pagina={{ pagina+1 }}&estado={{ estado_filtro|urlencode }}">Siguiente</a>{% endif %}</div></section>
+
+<section class="card"><h2>Pagos al operador</h2><p>Comprobantes de pagos ya realizados. Registrar aquí no hace una transferencia ni modifica la cuenta del cliente.</p>
+<div class="op-table"><table><thead><tr><th>Pago / fecha</th><th>Referencia</th><th>Importe</th><th>Sin aplicar</th><th>Respaldo</th></tr></thead><tbody>
+{% for p in pagos %}<tr><td>#{{ p.id }} · {{ op.fecha(p.fecha) }}{% if p.revertido %}<small>REVERTIDO · {{ p.motivo_reversion }}</small>{% endif %}</td><td>{{ p.referencia }}</td><td>{{ p.moneda }} {{ op.dinero(p.importe) }}</td><td>{{ p.moneda }} {{ op.dinero(p.disponible) }}</td><td><a href="/admin/operadores/{{ courier }}/pagos/{{ p.id }}/pdf">Comprobante PDF</a>{% for fid in p.facturas or [] %}<small><a href="/admin/operadores/{{ courier }}/facturas/{{ fid }}">Aplicación a documento #{{ fid }}</a></small>{% endfor %}{% if not p.revertido %}{{ op.reversa(csrf,courier,'pago',p.id) }}{% endif %}</td></tr>{% else %}<tr><td colspan="5">Todavía no hay pagos documentados.</td></tr>{% endfor %}
+</tbody></table></div><p class="op-note">Para aplicar un pago, abrí la factura correspondiente. Un mismo pago puede distribuirse entre varias facturas.</p>
+<details><summary>Registrar pago ya realizado</summary>
+<form method="POST" enctype="multipart/form-data" action="/admin/operadores/{{ courier }}/acciones/pago">
+{{ op.tokens(csrf,nuevo_id,'pago',courier) }}<div class="op-grid">
+<label>Fecha del pago<input type="date" name="fecha" required></label><label>Moneda del pago<input type="text" name="moneda" placeholder="ARS, USD…" maxlength="3" required></label>
+<label>Importe transferido<input type="text" name="importe" inputmode="decimal" required placeholder="Ej.: 150.000,00"></label><label>Referencia bancaria única<input type="text" name="referencia" minlength="3" maxlength="200" required></label>
+<label>Comprobante PDF · hasta 8 MB<input type="file" name="comprobante_pdf" accept="application/pdf" required></label></div>
+{{ op.confirmar('Verifiqué el comprobante: este pago ya se realizó y los datos son correctos. El registro queda inmutable.') }}<button class="btn btn-primary">Registrar comprobante</button></form>
+</details></section>
+<section class="card"><h2>Plazo de pago acordado</h2>
+<p>Actual: <strong>{% if condicion and condicion.plazo_dias is not none %}{{ condicion.plazo_dias }} días corridos desde emisión{% else %}Sin definir{% endif %}</strong>.</p>
+<p class="op-note">Se usa sólo si el documento no trae vencimiento. Cambiarlo no modifica facturas anteriores. El plazo de cobro a clientes se configura por separado.</p>
+<details><summary>Configurar plazo</summary><form method="POST" action="/admin/operadores/{{ courier }}/acciones/plazo">
+{{ op.tokens(csrf,nuevo_id,'plazo',courier) }}<div class="op-grid"><label>Días acordados (vacío: sin definir)<input type="number" min="0" max="365" name="plazo_dias" value="{{ condicion.plazo_dias if condicion and condicion.plazo_dias is not none else '' }}"></label><label>Respaldo del acuerdo<textarea name="motivo" minlength="5" maxlength="1000" required placeholder="Dónde se verificó el plazo con el operador"></textarea></label></div>
+{{ op.confirmar('Verifiqué este plazo con el operador. Se aplicará a documentos nuevos sin vencimiento propio.') }}<button class="btn btn-primary">Guardar plazo</button></form></details>
+</section></div>
+{% endblock %}
