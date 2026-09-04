@@ -58,7 +58,7 @@
         {% set balance = saldo.saldo_pendiente_ars %}
         <div class="home-balance">
             <span>{% if balance > 0 %}A pagar{% elif balance < 0 %}Saldo a favor{% else %}Estado{% endif %}</span>
-            <strong class="{% if balance < 0 %}ok{% elif balance > 0 %}warn{% endif %}">
+            <strong class="{% if balance != 0 %}portal-balance-metal{% endif %}">
                 {% if balance == 0 %}
                     Al día
                 {% else %}
@@ -73,7 +73,7 @@
             </div>
             <div>
                 <span>Pagos aplicados</span>
-                <b>$ {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</b>
+                <b class="portal-money-green">$ {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</b>
             </div>
         </div>
         <a href="/portal/cuenta#informar-pago" class="home-text-link">Informar un pago →</a>

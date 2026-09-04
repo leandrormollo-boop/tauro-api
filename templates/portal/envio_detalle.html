@@ -166,7 +166,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             </form>
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
                 Al emitir, el cargo de
-                <strong>{{ dinero_ars(s.precio_tauro_ars) }}</strong>
+                <strong class="portal-money-green">{{ dinero_ars(s.precio_tauro_ars) }}</strong>
                 entra a tu cuenta corriente. Si preferís, Tauro la emite por vos.
             </p>
         {% else %}
@@ -300,7 +300,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         </div>
         <div class="mini-row">
             <span>Precio inicial aceptado</span>
-            <strong>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</strong>
+            <strong class="portal-money-green">{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
         {% if s.diferencia_flete_ars %}
         <div class="mini-row envio-account-extra diferencia">
@@ -316,7 +316,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         {% endif %}
         <div class="mini-row envio-account-total">
             <span>Precio final del envío</span>
-            <strong>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
+            <strong class="portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
         {% set d = s.diferencia_detalle %}
         {% if d and d.es_peso %}

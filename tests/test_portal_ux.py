@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=39" in base
+    assert "tauro.css?v=40" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -253,8 +253,8 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     assert "Todavía no impacta el saldo" in html
     assert "Facturado" in html
     assert "A facturar" in html
-    assert "Debe" in html
-    assert "Haber" in html
+    assert "Envíos" in html
+    assert "Pagos" in html
     assert "A favor" in html
 
 

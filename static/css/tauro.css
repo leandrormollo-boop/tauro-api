@@ -2716,7 +2716,43 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   letter-spacing: -.035em;
   white-space: nowrap;
 }
-.account-total-value.ok { color: var(--ok); }
+/* Importes del cliente: verde para pagos/envíos, plata para saldos.
+   El estado A pagar / A favor sigue siendo texto separado del importe. */
+.shell .portal-money-green { color: var(--ok); }
+.shell .portal-balance-metal {
+  color: #e5ebf2;
+  --balance-metal-gradient: linear-gradient(115deg, #bec8d4 0%, #e5ebf2 30%, #fff 48%, #d7e0eb 64%, #f4f7fa 100%);
+}
+html[data-theme="light"] .shell .portal-balance-metal {
+  /* Plata con contraste suficiente sobre las tarjetas claras. */
+  color: #394653;
+  --balance-metal-gradient: linear-gradient(115deg, #394653 0%, #526171 30%, #263340 48%, #526171 64%, #394653 100%);
+}
+html[data-theme="light"] .account-total-card {
+  background: linear-gradient(135deg, #eeebf4, #ffffff);
+}
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .shell .portal-balance-metal {
+    background-image: var(--balance-metal-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
+@media (forced-colors: active) {
+  .shell .portal-balance-metal {
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+    color: CanvasText;
+  }
+}
+@media print {
+  .shell .portal-balance-metal {
+    background-image: none;
+    -webkit-text-fill-color: #000;
+    color: #000;
+  }
+}
 .account-total-breakdown {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2937,7 +2973,7 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
   .account-ledger-values { grid-template-columns: 1fr; gap: 3px; }
   .account-ledger-values div { display: flex; align-items: baseline; justify-content: space-between; gap: 5px; }
   .account-ledger-values dd { text-align: right; }
-  .account-ledger-values dd small { display: inline; margin-left: 3px; }
+  .account-ledger-values dd small { display: block; margin-left: 0; }
   .account-invoice-breakdown { display: none; }
   .account-reconciliation { grid-template-columns: 1fr; }
   .account-reconciliation div { padding: 6px 9px; }

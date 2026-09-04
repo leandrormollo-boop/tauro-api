@@ -24,7 +24,7 @@
       document.getElementById("portal-theme-color").content = tema === "light" ? "#f5f3f8" : "#0c0a14";
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/tauro.css?v=39">
+    <link rel="stylesheet" href="/static/css/tauro.css?v=40">
     <script src="/static/js/tauro-ui.js?v=8" defer></script>
     <script src="/static/js/portal-cotizador.js?v=1" defer></script>
     <script src="/static/js/portal-theme.js?v=1" defer></script>
@@ -81,7 +81,7 @@
         {% if sal %}
         <a href="/portal/cuenta" class="side-saldo {% if sal.al_dia %}al-dia{% endif %}">
             <span class="side-saldo-lbl">{% if sal.a_favor_ars %}A favor · total{% elif sal.al_dia %}Cuenta total{% else %}Saldo total{% endif %}</span>
-            <span class="side-saldo-n">
+            <span class="side-saldo-n {% if not sal.al_dia %}portal-balance-metal{% endif %}">
                 {% if sal.a_favor_ars %}
                     $ {{ "{:,.0f}".format(sal.a_favor_ars).replace(",", ".") }}
                 {% elif sal.al_dia %}

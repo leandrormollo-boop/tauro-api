@@ -212,7 +212,7 @@ def test_template_muestra_invariantes_tabs_paginacion_y_copy_seguro():
     html = (RAIZ / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
 
     for texto in (
-        "Saldo total consolidado", "Nacional", "Internacional", "Debe", "Haber",
+        "Saldo total consolidado", "Nacional", "Internacional", "Envíos", "Pagos",
         "Saldo", "Crédito sin imputar", "Cargos sin clasificar", "Sin imputar",
         "Dividir", "El pago no modifica tus saldos hasta que Tauro apruebe",
     ):
@@ -223,6 +223,21 @@ def test_template_muestra_invariantes_tabs_paginacion_y_copy_seguro():
     assert "paymentDetails.open = true" in html
     assert "movimientos.paginas_visibles" in html
     assert "&pagina={{ numero }}" in html
+
+
+def test_etiquetas_envios_y_pagos_conservan_los_importes_contables():
+    html = (RAIZ / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
+
+    for origen in ("ledger", "total"):
+        assert f"<dt>Envíos</dt><dd>{{{{ dinero({origen}.debe_ars) }}}}</dd>" in html
+        assert f'<dt>Pagos</dt><dd class="portal-money-green">{{{{ dinero({origen}.haber_ars) }}}}</dd>' in html
+    assert '<th scope="col" class="amount-column">Envíos</th>' in html
+    assert '<th scope="col" class="amount-column">Pagos</th>' in html
+    assert 'data-label="Envíos">{% if m.debe_ars %}{{ dinero(m.debe_ars) }}' in html
+    assert 'data-label="Pagos">{% if m.haber_ars %}{{ dinero(m.haber_ars) }}' in html
+    for etiqueta in ("Debe", "Haber"):
+        assert f">{etiqueta}<" not in html
+        assert f'data-label="{etiqueta}"' not in html
 
 
 def test_movimientos_separan_y_ordenan_los_datos_del_envio():

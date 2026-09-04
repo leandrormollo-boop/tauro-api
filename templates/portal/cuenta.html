@@ -15,12 +15,12 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
    {% if ambito_filtro == clave %}aria-current="page"{% endif %}>
     <span class="account-scope-heading">{{ nombre }}</span>
     <dl class="account-ledger-values">
-        <div><dt>Debe</dt><dd>{{ dinero(ledger.debe_ars) }}</dd></div>
-        <div><dt>Haber</dt><dd>{{ dinero(ledger.haber_ars) }}</dd></div>
+        <div><dt>Envíos</dt><dd>{{ dinero(ledger.debe_ars) }}</dd></div>
+        <div><dt>Pagos</dt><dd class="portal-money-green">{{ dinero(ledger.haber_ars) }}</dd></div>
         <div>
             <dt>Saldo</dt>
-            <dd class="{% if ledger.saldo_ars > 0 %}warn{% elif ledger.saldo_ars < 0 %}ok{% endif %}">
-                {{ dinero(ledger.saldo_ars|abs) }}
+            <dd>
+                <span class="portal-balance-metal">{{ dinero(ledger.saldo_ars|abs) }}</span>
                 <small>{{ estado_saldo(ledger.saldo_ars) }}</small>
             </dd>
         </div>
@@ -59,14 +59,14 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <article class="account-total-card">
         <div>
             <span class="account-total-label">Saldo total consolidado</span>
-            <strong class="account-total-value {% if total.saldo_ars > 0 %}warn{% elif total.saldo_ars < 0 %}ok{% endif %}">
+            <strong class="account-total-value portal-balance-metal">
                 {{ dinero(total.saldo_ars|abs) }}
             </strong>
             <span class="account-total-state">{{ estado_saldo(total.saldo_ars) }}</span>
         </div>
         <dl class="account-total-breakdown">
-            <div><dt>Debe</dt><dd>{{ dinero(total.debe_ars) }}</dd></div>
-            <div><dt>Haber</dt><dd>{{ dinero(total.haber_ars) }}</dd></div>
+            <div><dt>Envíos</dt><dd>{{ dinero(total.debe_ars) }}</dd></div>
+            <div><dt>Pagos</dt><dd class="portal-money-green">{{ dinero(total.haber_ars) }}</dd></div>
         </dl>
     </article>
 
@@ -77,7 +77,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 
     <dl class="account-reconciliation" aria-label="Totales de la cuenta corriente">
         <div><dt>Suma de envíos</dt><dd>{{ dinero(total.envios_ars) }}</dd></div>
-        <div><dt>Pagos aprobados</dt><dd>{{ dinero(total.pagos_ars) }}</dd></div>
+        <div><dt>Pagos aprobados</dt><dd class="portal-money-green">{{ dinero(total.pagos_ars) }}</dd></div>
         <div><dt>Diferencias débito</dt><dd>{{ dinero(total.diferencias_debito_ars) }}</dd></div>
         <div><dt>Diferencias crédito</dt><dd>{{ dinero(total.diferencias_credito_ars) }}</dd></div>
     </dl>
@@ -171,7 +171,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         {% if f.detalle_items %}<details><summary>Ver envíos incluidos</summary><ul>{% for item in f.detalle_items %}<li>{{ item.tracking or '—' }} · {{ item.descripcion }} · {{ dinero(item.monto) }}</li>{% endfor %}</ul></details>{% endif %}
       </td>
       <td>{{ f.fecha_emision.strftime('%d/%m/%Y') }}</td><td>{{ f.fecha_vencimiento.strftime('%d/%m/%Y') if f.fecha_vencimiento else '—' }}</td>
-      <td class="mono">{{ dinero(f.total) }}</td><td class="mono">{{ dinero(f.pagado) }}</td><td class="mono">{{ dinero(f.saldo) }}</td>
+      <td class="mono">{{ dinero(f.total) }}</td><td class="mono portal-money-green">{{ dinero(f.pagado) }}</td><td class="mono"><span class="portal-balance-metal">{{ dinero(f.saldo) }}</span></td>
       <td>{% if f.tiene_pdf %}<a href="/portal/facturas/{{ f.id }}/pdf" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Descargar PDF</a>{% endif %}</td>
     </tr>{% endfor %}</tbody>
   </table></div></div>
@@ -220,8 +220,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                     <th scope="col" class="account-col-person">Remitente</th>
                     <th scope="col" class="amount-column account-col-shipment-value">Valor del envío</th>
                     {% if ambito_filtro == 'consolidado' %}<th scope="col" class="account-col-scope">Ámbito</th>{% endif %}
-                    <th scope="col" class="amount-column">Debe</th>
-                    <th scope="col" class="amount-column">Haber</th>
+                    <th scope="col" class="amount-column">Envíos</th>
+                    <th scope="col" class="amount-column">Pagos</th>
                 </tr>
             </thead>
             <tbody>
@@ -267,8 +267,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                     {% if ambito_filtro == 'consolidado' %}
                     <td data-label="Ámbito"><span class="badge muted">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span></td>
                     {% endif %}
-                    <td class="mono amount-column" data-label="Debe">{% if m.debe_ars %}{{ dinero(m.debe_ars) }}{% else %}—{% endif %}</td>
-                    <td class="mono amount-column account-movement-credit" data-label="Haber">{% if m.haber_ars %}{{ dinero(m.haber_ars) }}{% else %}—{% endif %}</td>
+                    <td class="mono amount-column" data-label="Envíos">{% if m.debe_ars %}{{ dinero(m.debe_ars) }}{% else %}—{% endif %}</td>
+                    <td class="mono amount-column account-movement-credit" data-label="Pagos">{% if m.haber_ars %}{{ dinero(m.haber_ars) }}{% else %}—{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>
