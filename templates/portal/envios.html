@@ -95,7 +95,11 @@ camposPeriodo.forEach(function (campo) {
 {% endif %}
 
 {% if tiene_historial %}
-<form method="GET" action="/portal/envios" class="envios-search" role="search">
+<details class="envios-search-disclosure"{% if busqueda_filtro %} open{% endif %}>
+    <summary class="btn btn-ghost btn-sm envios-search-toggle" aria-controls="envios-search-form">
+        Buscar{% if busqueda_filtro %}<span class="envios-search-active">Filtro activo</span>{% endif %}
+    </summary>
+<form method="GET" action="/portal/envios" class="envios-search" role="search" id="envios-search-form">
     <label for="envios-buscar">
         <strong>Buscar envío</strong>
         <span>Por código de tracking</span>
@@ -112,6 +116,7 @@ camposPeriodo.forEach(function (campo) {
         <button type="submit" class="btn btn-primary btn-sm">Buscar</button>
     </div>
 </form>
+</details>
 {% endif %}
 
 {% if not tiene_historial %}

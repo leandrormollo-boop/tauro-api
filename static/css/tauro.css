@@ -3186,6 +3186,16 @@ html[data-theme="light"] .account-total-card {
 .envios-page .chips-embudo { margin-bottom: 7px; }
 .envios-page .chips-tipo { gap: 6px; margin-bottom: 7px; }
 .envios-page .chips-tipo .btn { min-height: 30px; padding: 5px 12px; font-size: 11.5px; }
+.envios-search-disclosure { margin-bottom: 8px; }
+.envios-search-toggle {
+  width: fit-content;
+  min-height: 36px;
+  list-style: none;
+  cursor: pointer;
+}
+.envios-search-toggle::-webkit-details-marker { display: none; }
+.envios-search-active { color: var(--accent-soft); font-size: 10px; font-weight: 500; }
+.envios-search-disclosure > .envios-search { margin: 8px 0 0; }
 .envios-search {
   display: flex;
   align-items: center;
@@ -3617,6 +3627,7 @@ html[data-theme="light"] .account-total-card {
   .envios-page .chip-e b { font-size: 12px; }
   .envios-page .chips-tipo { flex-wrap: nowrap; }
   .envios-page .chips-tipo .btn { flex: 1; min-height: 44px; padding: 5px 6px; font-size: 10px; }
+  .envios-search-toggle { min-height: 44px; }
   .envios-search { display: block; padding: 8px; }
   .envios-search > label { display: none; }
   .envios-search-control { width: 100%; }

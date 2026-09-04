@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=40" in base
+    assert "tauro.css?v=41" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
