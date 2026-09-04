@@ -5739,3 +5739,67 @@ html[data-theme="light"] .quote-window-scope.on { background: rgba(118,85,215,.1
     padding: 11px 12px 13px;
   }
 }
+
+/* ══════════════════════════════════════════════════════════
+   INICIO DEL CLIENTE — escena logística panorámica
+
+   La foto sale del recuadro y ocupa el fondo de la portada. El resto de la
+   interfaz conserva sus medidas, superficies y jerarquía existentes.
+   ══════════════════════════════════════════════════════════ */
+.main:has(> .main-inner > .home-hero) {
+  --home-panorama-height: clamp(470px, 46vw, 640px);
+  position: relative;
+  isolation: isolate;
+}
+.main:has(> .main-inner > .home-hero)::before {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--home-panorama-height);
+  pointer-events: none;
+  content: "";
+  background-image:
+    linear-gradient(0deg, var(--bg) 0%, transparent 34%),
+    url("/static/img/escenas/avion-hero.jpg");
+  background-position: center bottom, center top;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+.main:has(> .main-inner > .home-hero) > .main-inner {
+  position: relative;
+  z-index: 1;
+}
+.main:has(> .main-inner > .home-hero) .home-hero {
+  min-height: calc(var(--home-panorama-height) - 130px);
+  margin-bottom: 14px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.main:has(> .main-inner > .home-hero) .home-hero::after { display: none; }
+
+@media (max-width: 900px) {
+  .main:has(> .main-inner > .home-hero) {
+    --home-panorama-height: clamp(450px, 62vw, 560px);
+  }
+  .main:has(> .main-inner > .home-hero)::before { top: 54px; }
+}
+
+@media (max-width: 620px) {
+  .main:has(> .main-inner > .home-hero) {
+    --home-panorama-height: 460px;
+  }
+  .main:has(> .main-inner > .home-hero)::before {
+    background-image:
+      linear-gradient(0deg, var(--bg) 0%, transparent 33%),
+      url("/static/img/escenas/avion-hero-mob.jpg");
+    background-position: center bottom, 64% 50px;
+    background-size: 100% 100%, auto 410px;
+  }
+  .main:has(> .main-inner > .home-hero) .home-hero {
+    min-height: calc(var(--home-panorama-height) - 76px);
+  }
+}
