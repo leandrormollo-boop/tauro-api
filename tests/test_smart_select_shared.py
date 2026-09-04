@@ -20,7 +20,7 @@ ADMIN_BASE = (RAIZ / "templates" / "admin" / "base_admin.html").read_text(encodi
 def test_portal_y_admin_cargan_la_ui_compartida_con_cache_independiente():
     assert '/static/js/tauro-ui.js?v=8' in PORTAL_BASE
     assert '/static/js/tauro-ui.js?v=8' in ADMIN_BASE
-    assert '/static/css/tauro.css?v=41' in PORTAL_BASE
+    assert '/static/css/tauro.css?v=42' in PORTAL_BASE
     assert '/static/css/tauro.css?v=30' in ADMIN_BASE
 
 
