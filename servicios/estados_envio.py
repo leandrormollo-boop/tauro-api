@@ -29,7 +29,10 @@ ESTADOS_OPERACION_UI = {
     "EMITIENDO": ("Solicitado", "warn"),
     "VERIFICAR_COURIER": ("Solicitado", "warn"),
     "GUIA_LISTA": ("Guía lista", "accent"),
-    "DESPACHADO": ("Despachado", "ok"),
+    # El código interno permanece estable para no romper integraciones ni
+    # filtros. Para el cliente, el hito correcto es que el courier ya lo
+    # recolectó; se distingue en violeta de la entrega final en verde.
+    "DESPACHADO": ("Recolectado", "accent"),
     "ENTREGADO": ("Entregado", "ok"),
     "CANCELADO": ("Cancelado", "muted"),
     "REEMPLAZADO": ("Reemplazado", "muted"),

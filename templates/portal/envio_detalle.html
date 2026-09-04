@@ -9,7 +9,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 
 {% block content %}
 {% set estados_orden = ["SOLICITADO", "GUIA_LISTA", "DESPACHADO", "ENTREGADO"] %}
-{% set estados_labels = {"SOLICITADO": "Solicitado", "GUIA_LISTA": "Guía lista", "DESPACHADO": "Despachado", "ENTREGADO": "Entregado"} %}
+{% set estados_labels = {"SOLICITADO": "Solicitado", "GUIA_LISTA": "Guía lista", "DESPACHADO": "Recolectado", "ENTREGADO": "Entregado"} %}
 {% set idx_por_estado = {"SOLICITADO": 0, "EN_PROCESO": 0, "EMITIENDO": 0, "VERIFICAR_COURIER": 0, "GUIA_LISTA": 1, "DESPACHADO": 2, "ENTREGADO": 3} %}
 {% set idx_actual = idx_por_estado.get(s.estado, -1) %}
 
@@ -82,7 +82,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         {% elif s.estado == "GUIA_LISTA" %}
             ¡Tu guía está lista! Descargá el PDF, imprimí las etiquetas y prepará las cajas.
         {% elif s.estado == "DESPACHADO" %}
-            Tu envío ya está en la red de {{ courier_nombre }}. Seguilo con el tracking de abajo.
+            {{ courier_nombre }} ya recolectó tu envío. Seguilo con el tracking de abajo.
         {% elif s.estado == "ENTREGADO" %}
             El courier confirmó la entrega del envío.
         {% endif %}

@@ -53,7 +53,7 @@ PASOS_EMBUDO = [
     },
     {
         "clave": "despachados",
-        "titulo": "Enviados",
+        "titulo": "Recolectados",
         "detalle": "Ya viajan a destino",
         "url": "/portal/envios?paso=despachados",
         "accion_de": None,

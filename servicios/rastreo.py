@@ -7,7 +7,7 @@
 # cliente, no del que pega un número.
 #
 # Qué sabe la plataforma vs. qué sabe el courier: nuestra base llega hasta
-# "Despachado". El detalle en tránsito / aduana / entrega lo tiene el courier
+# "Recolectado". El detalle en tránsito / aduana / entrega lo tiene el courier
 # en vivo — por eso siempre se devuelve la URL oficial para el botón "ver
 # detalle". Cuando entren las credenciales de cada courier, acá se puede sumar
 # una llamada a courier.track() para traer los hitos reales (ver TODO abajo).
@@ -29,7 +29,7 @@ _ESTADOS = {
     "EMITIENDO":  ("En preparación", 1),
     "VERIFICAR_COURIER": ("Verificando con el courier", 1),
     "GUIA_LISTA": ("Listo para despacho", 1),
-    "DESPACHADO": ("Despachado — en camino", 2),
+    "DESPACHADO": ("Recolectado — en camino", 2),
 }
 
 

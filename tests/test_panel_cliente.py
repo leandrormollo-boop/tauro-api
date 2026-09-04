@@ -88,6 +88,15 @@ def test_el_estado_en_proceso_espera_a_tauro():
     assert pasos["esperando_guia"]["accion_de"] == "tauro"
 
 
+def test_despachado_se_presenta_como_recolectado():
+    filas = [{"estado": "DESPACHADO", "n": 2}]
+    with mock.patch.object(pc, "get_conn", _conn_falsa(filas, n=0)):
+        pasos = {p["clave"]: p for p in pc.embudo_envios("TEST")}
+
+    assert pasos["despachados"]["titulo"] == "Recolectados"
+    assert pasos["despachados"]["cantidad"] == 2
+
+
 def test_embudo_vacio_si_la_base_falla():
     """Nunca tumbar el escritorio: sin base, el bloque no se dibuja."""
 
