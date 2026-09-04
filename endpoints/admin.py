@@ -3638,12 +3638,13 @@ async def admin_recibir_dhl(request: Request, admin_token: Optional[str] = Cooki
 def admin_detalle_dhl(request: Request, entrada_id: int, admin_token: Optional[str] = Cookie(None)):
     if not _is_auth(admin_token):
         return _redirect_login()
-    from servicios.bandeja_facturas_dhl import obtener_entrada_dhl
+    from servicios.bandeja_facturas_dhl import obtener_entrada_dhl, LECTOR_VERSION
     entrada = obtener_entrada_dhl(entrada_id)
     if not entrada:
         return Response('Entrada no encontrada.', status_code=404)
     return templates.TemplateResponse(request=request, name='admin/entrada_dhl_detalle.html',
         context={'seccion': 'conciliacion_couriers', 'entrada': entrada,
+                 'lectura_vigente': entrada.get('lector_version') == LECTOR_VERSION,
                  'csrf_dhl': _csrf_dhl(str(entrada_id))}, headers={'Cache-Control': 'private, no-store'})
 
 
@@ -3841,8 +3842,50 @@ def admin_factura_courier_detalle(
     return templates.TemplateResponse(
         request=request,
         name="admin/factura_courier_detalle.html",
-        context={"seccion": "conciliacion_couriers", "factura": factura},
+        context={"seccion": "conciliacion_couriers", "factura": factura,
+                 "csrf_financiero": _csrf_dhl(f'financiera:{factura_id}')},
+        headers={'Cache-Control': 'private, no-store'},
     )
+
+
+@router.post('/conciliacion-couriers/facturas/{factura_id}/revision-financiera')
+async def admin_revision_financiera_courier(request: Request, factura_id: int,
+                                          admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from starlette.concurrency import run_in_threadpool
+    from servicios.revision_financiera_courier import aprobar_revision_financiera
+    from servicios.conciliacion_couriers import ConciliacionCourierError
+    from servicios.cuenta_corriente import leer_comprobante_con_tope
+    form = await request.form()
+    if not _csrf_dhl_valido(form.get('csrf_financiero'), f'financiera:{factura_id}'):
+        return Response('Formulario vencido o inválido.', status_code=403)
+    destino = f'/admin/conciliacion-couriers/facturas/{factura_id}'
+    try:
+        archivo = form.get('respaldo_pdf')
+        respaldo = await leer_comprobante_con_tope(archivo) if getattr(archivo, 'filename', '') else None
+        await run_in_threadpool(aprobar_revision_financiera, factura_id,
+            tipo_cambio_ars=form.get('tipo_cambio_ars'), fuente=form.get('fuente'),
+            motivo=form.get('motivo'), archivo_sha256=form.get('archivo_sha256'),
+            confirmada=form.get('confirmada') == 'si', actor='admin', respaldo_pdf=respaldo)
+        return RedirectResponse(destino + '?ok=revision_financiera', status_code=303)
+    except (ValueError, ConciliacionCourierError) as exc:
+        return RedirectResponse(destino + '?error=' + quote(str(exc)), status_code=303)
+
+
+@router.get('/conciliacion-couriers/facturas/{factura_id}/respaldo-financiero')
+def admin_respaldo_financiero_courier(factura_id: int, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.revision_financiera_courier import obtener_respaldo_financiero
+    pdf = obtener_respaldo_financiero(factura_id)
+    if not pdf:
+        return Response('Respaldo no encontrado.', status_code=404)
+    return Response(pdf, media_type='application/pdf', headers={
+        'Content-Disposition': f'attachment; filename="respaldo-financiero-{factura_id}.pdf"',
+        "Cache-Control": "private, no-store", 'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "sandbox; default-src 'none'",
+    })
 
 
 @router.get("/conciliacion-couriers/facturas/{factura_id}/pdf")

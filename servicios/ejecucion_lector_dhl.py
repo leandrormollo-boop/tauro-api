@@ -11,15 +11,19 @@ from servicios.entrada_facturas_dhl import ExtraccionDHLInvalida
 _LECTORES = threading.BoundedSemaphore(2)
 
 
+class LectorDHLNoDisponible(RuntimeError):
+    """Falla operativa transitoria; no es un rechazo del documento."""
+
+
 def ejecutar_lector_dhl(pdf: bytes, *, numero: str, cuit: str) -> dict:
     if not isinstance(pdf, bytes) or not pdf.startswith(b'%PDF') or len(pdf) > 8 * 1024 * 1024:
         raise ExtraccionDHLInvalida('Se requiere un PDF de hasta 8 MB.')
     # No se permite continuar sin el límite de memoria. Las pruebas del
     # worker desde macOS se ejecutan en un contenedor Linux local.
     if sys.platform != 'linux':
-        raise ExtraccionDHLInvalida('La lectura protegida requiere el worker Linux. En este equipo usá la carga manual.')
+        raise LectorDHLNoDisponible('La lectura protegida requiere el worker Linux. Contactá al administrador.')
     if not _LECTORES.acquire(blocking=False):
-        raise ExtraccionDHLInvalida('Hay otras lecturas en curso. Reintentá en unos momentos.')
+        raise LectorDHLNoDisponible('Hay otras lecturas en curso. Reintentá en unos momentos.')
     try:
         entrada = json.dumps({'pdf': base64.b64encode(pdf).decode('ascii'),
                               'numero': numero, 'cuit': cuit}).encode()
@@ -30,10 +34,16 @@ def ejecutar_lector_dhl(pdf: bytes, *, numero: str, cuit: str) -> dict:
                 timeout=20, check=False, cwd=str(Path(__file__).resolve().parent),
                 env={'LANG': 'C.UTF-8', 'PYTHONUTF8': '1'},
             )
-        except (subprocess.TimeoutExpired, OSError) as exc:
+        except OSError as exc:
+            raise LectorDHLNoDisponible('El lector no está disponible. Reintentá; si persiste, contactá al administrador.') from exc
+        except subprocess.TimeoutExpired as exc:
             raise ExtraccionDHLInvalida('No se pudo completar la lectura dentro del límite. Revisión manual requerida.') from exc
-        if proceso.returncode or len(proceso.stdout) > 512 * 1024:
-            raise ExtraccionDHLInvalida('El lector no pudo validar este PDF. Revisión manual requerida.')
+        if proceso.returncode:
+            # Los rechazos documentales normales son JSON {error} con exit 0.
+            # Un crash no prueba un defecto del PDF. No filtramos stderr.
+            raise LectorDHLNoDisponible('El lector se interrumpió. Reintentá; si persiste, contactá al administrador.')
+        if len(proceso.stdout) > 512 * 1024:
+            raise LectorDHLNoDisponible('El lector devolvió una respuesta excesiva. Contactá al administrador.')
         try:
             resultado = json.loads(proceso.stdout)
             if not isinstance(resultado, dict):
@@ -50,6 +60,6 @@ def ejecutar_lector_dhl(pdf: bytes, *, numero: str, cuit: str) -> dict:
         except (ValueError, TypeError) as exc:
             if isinstance(exc, ExtraccionDHLInvalida):
                 raise
-            raise ExtraccionDHLInvalida('Respuesta del lector inválida; no se importó nada.') from exc
+            raise LectorDHLNoDisponible('Respuesta del lector inválida; no se importó nada. Reintentá o contactá al administrador.') from exc
     finally:
         _LECTORES.release()

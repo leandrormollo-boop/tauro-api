@@ -10,14 +10,16 @@
 <div class="card" style="margin-bottom:20px;"><a class="btn btn-ghost" href="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/pdf">Descargar original para comparar</a>
   <p>{{ entrada.archivo_nombre }} · CUIT receptor {{ entrada.cuit_esperado }}</p>
   <details><summary>Huella del documento</summary><p class="mono" style="overflow-wrap:anywhere;">{{ entrada.archivo_sha256 }}</p></details></div>
-{% if entrada.estado in ('RECIBIDA','REVISION_MANUAL') %}
+{% if entrada.estado in ('RECIBIDA','REVISION_MANUAL','REINTENTAR') or (entrada.estado == 'PARA_REVISION' and not lectura_vigente) %}
+  {% if entrada.extraccion and not lectura_vigente %}<div class="msg">Esta extracción ya no está vigente. Volvé a leer el original con el lector actualizado antes de importarla. La versión anterior queda conservada en el historial.</div>{% endif %}
+  {% if entrada.estado == 'REINTENTAR' %}<div class="msg">Lector temporalmente no disponible. No es un rechazo del PDF. Podés reintentar cuando vuelva a estar disponible.</div>{% endif %}
   {% if entrada.error_lectura %}<div class="msg error">{{ entrada.error_lectura }} No se registró la factura ni se modificaron saldos.</div>{% endif %}
   <div class="card"><h3>2. Leer y validar el PDF</h3><p>Se comprobarán número, CUIT, moneda, totales, renglones y peso facturado. Podés corregir la referencia si la copiaste mal.</p>
     <form method="POST" action="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/leer">
       <input type="hidden" name="csrf_dhl" value="{{ csrf_dhl }}">
       <div class="form-grid-2"><div class="form-group"><label for="numero">Número esperado</label><input type="text" id="numero" name="numero" value="{{ entrada.numero_esperado }}" pattern="[0-9]{4}A[0-9]{8}" maxlength="13" required></div>
       <div class="form-group"><label for="cuit">CUIT receptor esperado</label><input type="text" id="cuit" name="cuit" value="{{ entrada.cuit_esperado }}" inputmode="numeric" pattern="[0-9]{11}" maxlength="11" required></div></div>
-      <button class="btn btn-primary">{{ 'Reintentar lectura' if entrada.intentos else 'Leer PDF' }}</button>
+      <button class="btn btn-primary">{{ 'Reintentar lectura' if entrada.intentos or entrada.estado == 'REINTENTAR' else 'Leer PDF' }}</button>
       <a class="btn btn-ghost" href="/admin/conciliacion-couriers/nueva">Usar carga manual</a>
     </form></div>
 {% endif %}
@@ -41,7 +43,7 @@
       <li>Las coincidencias por tracking se proponen después; no se confirman ni aplican diferencias en este paso.</li></ul>
   </div>
 {% endif %}
-{% if entrada.estado == 'PARA_REVISION' %}
+{% if entrada.estado == 'PARA_REVISION' and lectura_vigente %}
   <div class="card"><h3>3. Registrar la evidencia revisada</h3><p>Compará el original con la tabla. Si hay un error, no confirmes: usá la carga manual. La propuesta original queda conservada.</p>
     <form method="POST" action="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/importar" data-confirm="¿Registrar esta extracción revisada? No modificará saldos ni aprobará diferencias.">
       <input type="hidden" name="csrf_dhl" value="{{ csrf_dhl }}"><input type="hidden" name="revision_sha256" value="{{ entrada.revision_sha256 }}">

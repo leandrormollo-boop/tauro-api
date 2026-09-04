@@ -33,10 +33,17 @@ def test_worker_no_hereda_secretos_ni_recibe_rutas_del_usuario(monkeypatch):
 
 @pytest.mark.parametrize('salida,code', [(b'no-json', 0), (b'[]', 0), (b'{}', 0),
     (b'{"extraccion":{},"observaciones":"no lista"}', 0), (b'', -9), (b'x' * (512*1024+1), 0),
-    (b'{"error":"Formato desconocido"}', 0)])
+    ])
 def test_fallos_nunca_se_interpretan_como_extraccion(monkeypatch, salida, code):
     monkeypatch.setattr(worker.subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=code, stdout=salida))
-    with pytest.raises(ExtraccionDHLInvalida):
+    with pytest.raises(worker.LectorDHLNoDisponible):
+        ejecutar()
+
+
+def test_rechazo_documental_normal_no_es_falla_de_infraestructura(monkeypatch):
+    monkeypatch.setattr(worker.subprocess, 'run', lambda *a, **kw: SimpleNamespace(
+        returncode=0, stdout=b'{"error":"Formato desconocido"}'))
+    with pytest.raises(ExtraccionDHLInvalida, match='Formato desconocido'):
         ejecutar()
 
 
@@ -53,7 +60,7 @@ def test_no_mas_de_dos_lecturas_por_proceso():
     worker._LECTORES.acquire()
     worker._LECTORES.acquire()
     try:
-        with pytest.raises(ExtraccionDHLInvalida, match='otras lecturas'):
+        with pytest.raises(worker.LectorDHLNoDisponible, match='otras lecturas'):
             ejecutar()
     finally:
         worker._LECTORES.release()
@@ -62,5 +69,15 @@ def test_no_mas_de_dos_lecturas_por_proceso():
 
 def test_web_falla_cerrada_si_no_hay_limite_memoria(monkeypatch):
     monkeypatch.setattr(worker.sys, 'platform', 'darwin')
-    with pytest.raises(ExtraccionDHLInvalida, match='Linux'):
+    with pytest.raises(worker.LectorDHLNoDisponible, match='Linux'):
         ejecutar()
+
+
+def test_fallo_de_arranque_es_operativo_y_libera_capacidad(monkeypatch):
+    def no_disponible(*a, **kw):
+        raise OSError('detalle interno que no debe mostrarse')
+    monkeypatch.setattr(worker.subprocess, 'run', no_disponible)
+    for _ in range(3):
+        with pytest.raises(worker.LectorDHLNoDisponible, match='no está disponible') as error:
+            ejecutar()
+        assert 'detalle interno' not in str(error.value)

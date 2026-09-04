@@ -6,6 +6,8 @@
 {%- endmacro %}
 
 {% block content %}
+<link rel="stylesheet" href="/static/css/entrada-dhl.css?v=1">
+{% set financiera_pendiente = factura.revision_financiera_requerida and not factura.revision_financiera %}
 {% set ns = namespace(hay_activos=false) %}
 {% for item in factura['items'] %}
   {% for match in item.matches %}
@@ -22,8 +24,8 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
     <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver</a>
     {% if factura.tiene_evidencia %}<a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/pdf" target="_blank" class="btn btn-ghost">Ver PDF</a>{% endif %}
-    {% if ns.hay_activos %}
-    <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar los matches todavía propuestos y calcular los envíos vinculados? Las diferencias quedarán pendientes de aprobación.">
+    {% if ns.hay_activos and not financiera_pendiente %}
+    <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar los matches y calcular los envíos vinculados? Si hay borradores anteriores a la aprobación financiera se anularán conservando su historial. Las nuevas diferencias quedarán pendientes de aprobación.">
       <button class="btn btn-primary">Confirmar y calcular</button>
     </form>
     {% endif %}
@@ -32,6 +34,36 @@
 
 {% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada. El historial quedó auditado.</div>{% endif %}
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+
+{% if financiera_pendiente %}
+<div class="card dhl-intake" style="margin-bottom:20px;">
+  <h3>Revisión financiera pendiente</h3>
+  <p>El cambio impositivo del PDF no acredita el cambio del pago. Hasta aprobar este paso se bloquean la confirmación, el cálculo y la aplicación de diferencias.</p>
+  <p>TC documental leído (solo referencia): <strong>{% for tc in factura.tipos_cambio_documentales %}{{ tc }}{% if not loop.last %} · {% endif %}{% endfor %} ARS por {{ factura.moneda }}</strong>. No se selecciona automáticamente.</p>
+  <form method="POST" enctype="multipart/form-data" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/revision-financiera" data-confirm="¿Aprobar este tipo de cambio y su evidencia? Quedará inmutable. Este paso no aplica cargos al cliente.">
+    <input type="hidden" name="csrf_financiero" value="{{ csrf_financiero }}">
+    <input type="hidden" name="archivo_sha256" value="{{ factura.archivo_sha256 }}">
+    <div class="form-grid-2">
+      <div class="form-group"><label for="fuente-financiera">Respaldo elegido</label><select id="fuente-financiera" name="fuente" required>
+        <option value="">Seleccionar expresamente</option>
+        <option value="DOCUMENTO">Usar el TC del documento, luego de verificar que corresponde</option>
+        <option value="COMPROBANTE">Usar TC respaldado por otro comprobante PDF</option>
+      </select></div>
+      <div class="form-group"><label for="tc-financiero">ARS por 1 {{ factura.moneda }}</label><input type="text" id="tc-financiero" name="tipo_cambio_ars" inputmode="decimal" required placeholder="Ej. 1500.25"><small>Punto decimal, sin separador de miles; hasta 6 decimales.</small></div>
+      <div class="form-group"><label for="respaldo-financiero">Comprobante PDF (obligatorio si elegís otro respaldo)</label><input id="respaldo-financiero" name="respaldo_pdf" type="file" accept="application/pdf,.pdf"><small>Máximo 8 MB. Se conserva privado e inmutable.</small></div>
+      <div class="form-group"><label for="motivo-financiero">Fundamento de la decisión</label><textarea id="motivo-financiero" name="motivo" required minlength="12" maxlength="1000" placeholder="Qué verificaste y por qué corresponde este cambio"></textarea></div>
+    </div>
+    <label style="display:flex;gap:10px;margin:16px 0;"><input type="checkbox" name="confirmada" value="si" required style="width:auto;">Verifiqué el tipo de cambio y su respaldo. Entiendo que esta aprobación no se puede sobrescribir.</label>
+    <button class="btn btn-primary">Aprobar TC, sin aplicar cargos</button>
+  </form>
+</div>
+{% elif factura.revision_financiera %}
+<div class="msg ok">TC aprobado para conciliación: {{ factura.revision_financiera.tipo_cambio_ars }} ARS por {{ factura.moneda }}.
+  El cambio y los importes documentales originales se conservan sin cambios.
+  <a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/respaldo-financiero">Descargar respaldo</a>
+  <p>{{ factura.revision_financiera.motivo }} · {{ factura.revision_financiera.aprobado_por }}</p>
+</div>
+{% endif %}
 
 <div class="card">
   <div class="card-head">
@@ -48,7 +80,9 @@
         <tr>
           <td class="mono">#{{ i.linea_numero }}<br><small>ID {{ i.id }}</small></td>
           <td><span class="mono">{{ i.tracking_raw or 'Sin tracking' }}</span><br><strong>{{ i.concepto_tipo }}</strong><br><small>{{ i.descripcion or '' }}</small></td>
-          <td class="mono">{{ i.moneda }} {{ dinero(i.importe) }}<br><small>ARS {{ dinero(i.importe_ars) }}</small><br>{% if i.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(i.remanente) }}</span>{% else %}<span class="badge ok">Asignada completa</span>{% endif %}</td>
+          <td class="mono">{{ i.moneda }} {{ dinero(i.importe) }}<br><small>ARS {{ dinero(i.importe_ars) }}{% if factura.revision_financiera_requerida %} (documental){% endif %}</small>
+            {% if i.importe_conciliacion_ars is defined %}<br><small>ARS {{ dinero(i.importe_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
+            <br>{% if i.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(i.remanente) }}</span>{% else %}<span class="badge ok">Asignada completa</span>{% endif %}</td>
           <td>{{ i.peso_facturado_kg or '—' }} kg<br><small>{{ (i.peso_base or '').replace('_',' ')|title }}</small></td>
           <td>
             {% for m in i.matches %}
@@ -61,7 +95,7 @@
                 </div>
                 {% if m.match_estado == 'PROPUESTO' %}
                 <div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;margin-top:7px;">
-                  <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/matches/{{ m.id }}/confirmar" data-confirm="¿Confirmar este match? Todavía no se aplicará ninguna diferencia al cliente."><button class="btn btn-primary btn-sm">Confirmar</button></form>
+                  {% if not financiera_pendiente %}<form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/matches/{{ m.id }}/confirmar" data-confirm="¿Confirmar este match? Todavía no se aplicará ninguna diferencia al cliente."><button class="btn btn-primary btn-sm">Confirmar</button></form>{% endif %}
                   <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/matches/{{ m.id }}/rechazar" style="display:flex;gap:6px;align-items:center;">
                     <input name="motivo" required minlength="8" placeholder="Motivo del rechazo" style="width:190px;">
                     <button class="btn btn-ghost btn-sm">Rechazar</button>

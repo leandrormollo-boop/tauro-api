@@ -187,3 +187,85 @@ def test_migracion_idempotente_preserva_entrada(db):
     with db() as conn, conn.cursor() as cur:
         cur.execute((Path(__file__).resolve().parents[1] / 'sql/schema.sql').read_text())
     assert bandeja.obtener_entrada_dhl(entrada_id)['estado'] == 'PARA_REVISION'
+
+
+def test_version_obsoleta_se_bloquea_relee_y_conserva_historial(db, monkeypatch):
+    entrada_id = recibir()['id']
+    leer(entrada_id)
+    original = bandeja.obtener_entrada_dhl(entrada_id)
+    monkeypatch.setattr(bandeja, 'LECTOR_VERSION', bandeja.LECTOR_VERSION + 1)
+    with pytest.raises(ExtraccionDHLInvalida, match='versión anterior'):
+        importar(entrada_id)
+    assert contar(db, 'facturas_courier') == 0
+    leer(entrada_id)
+    vigente = bandeja.obtener_entrada_dhl(entrada_id)
+    assert original['revision_sha256'] != vigente['revision_sha256']
+    assert vigente['lector_version'] == bandeja.LECTOR_VERSION
+    with pytest.raises(ExtraccionDHLInvalida, match='revisión no coincide'):
+        importar(entrada_id, revision_sha256=original['revision_sha256'])
+    with db() as conn, conn.cursor() as cur:
+        cur.execute('SELECT * FROM historial_extracciones_dhl ORDER BY id')
+        historial = cur.fetchall()
+        assert len(historial) == 2
+        assert historial[0]['extraccion'] == original['extraccion']
+        assert historial[0]['revision_sha256'] == original['revision_sha256']
+    assert importar(entrada_id)['id']
+    assert contar(db, 'historial_extracciones_dhl') == 2
+
+
+@pytest.mark.parametrize('previa', [False, True])
+def test_saturacion_transitoria_no_rechaza_documento_ni_incrementa_intentos(db, monkeypatch, previa):
+    entrada_id = recibir()['id']
+    if previa:
+        leer(entrada_id)
+        monkeypatch.setattr(bandeja, 'LECTOR_VERSION', bandeja.LECTOR_VERSION + 1)
+    antes = bandeja.obtener_entrada_dhl(entrada_id)
+    real = bandeja.ejecutar_lector_dhl
+    def ocupado(*a, **kw):
+        raise bandeja.LectorDHLNoDisponible('Hay otras lecturas en curso.')
+    monkeypatch.setattr(bandeja, 'ejecutar_lector_dhl', ocupado)
+    assert leer(entrada_id) == 'REINTENTAR'
+    despues = bandeja.obtener_entrada_dhl(entrada_id)
+    assert despues['intentos'] == antes['intentos']
+    assert despues['extraccion'] == antes['extraccion']
+    assert despues['revision_sha256'] == antes['revision_sha256']
+    with pytest.raises(ExtraccionDHLInvalida):
+        importar(entrada_id)
+    monkeypatch.setattr(bandeja, 'ejecutar_lector_dhl', real)
+    assert leer(entrada_id) == 'PARA_REVISION'
+    assert bandeja.obtener_entrada_dhl(entrada_id)['intentos'] == antes['intentos'] + 1
+
+
+def test_fallo_documental_al_actualizar_conserva_revision_anterior(db, monkeypatch):
+    entrada_id = recibir()['id']
+    leer(entrada_id)
+    original = bandeja.obtener_entrada_dhl(entrada_id)
+    monkeypatch.setattr(bandeja, 'LECTOR_VERSION', bandeja.LECTOR_VERSION + 1)
+    def invalido(*a, **kw):
+        raise ExtraccionDHLInvalida('No validado con la versión nueva')
+    monkeypatch.setattr(bandeja, 'ejecutar_lector_dhl', invalido)
+    assert leer(entrada_id) == 'REVISION_MANUAL'
+    assert bandeja.obtener_entrada_dhl(entrada_id)['extraccion'] == original['extraccion']
+    assert contar(db, 'historial_extracciones_dhl') == 1
+
+
+def test_no_degrada_ni_modifica_entradas_ya_importadas(db, monkeypatch):
+    entrada_id = recibir()['id']
+    leer(entrada_id)
+    version = bandeja.LECTOR_VERSION
+    monkeypatch.setattr(bandeja, 'LECTOR_VERSION', version-1)
+    with pytest.raises(ExtraccionDHLInvalida, match='no se puede degradar'):
+        leer(entrada_id)
+    monkeypatch.setattr(bandeja, 'LECTOR_VERSION', version)
+    factura = importar(entrada_id)
+    monkeypatch.setattr(bandeja, 'LECTOR_VERSION', version+1)
+    assert leer(entrada_id) == 'IMPORTADA'
+    assert importar(entrada_id) == {'id': factura['id'], 'duplicado': True}
+
+
+@pytest.mark.parametrize('sql', ['UPDATE historial_extracciones_dhl SET lector_version=100',
+                               'DELETE FROM historial_extracciones_dhl'])
+def test_historial_no_se_puede_sobrescribir(db, sql):
+    leer(recibir()['id'])
+    with pytest.raises(psycopg2.Error), db() as conn, conn.cursor() as cur:
+        cur.execute(sql)

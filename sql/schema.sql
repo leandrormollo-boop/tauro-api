@@ -3234,6 +3234,81 @@ ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pricing_rangos_nacional JSONB NOT 
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS perfil_comercial TEXT NOT NULL DEFAULT '';
 
 -- Valores default de config
+-- Aprobación del TC de conciliación: nunca reemplaza el TC del PDF.
+CREATE TABLE IF NOT EXISTS revisiones_financieras_courier (
+    id BIGSERIAL PRIMARY KEY,
+    factura_id BIGINT NOT NULL UNIQUE REFERENCES facturas_courier(id) ON DELETE RESTRICT,
+    moneda TEXT NOT NULL CHECK (moneda ~ '^[A-Z]{3}$'),
+    tipo_cambio_ars NUMERIC(18,6) NOT NULL CHECK
+        (tipo_cambio_ars > 0 AND tipo_cambio_ars < 1000000000000 AND tipo_cambio_ars <> 'NaN'::numeric),
+    fuente TEXT NOT NULL CHECK (fuente IN ('DOCUMENTO','COMPROBANTE')),
+    motivo TEXT NOT NULL CHECK (length(btrim(motivo)) BETWEEN 12 AND 1000),
+    archivo_sha256 TEXT NOT NULL CHECK (archivo_sha256 ~ '^[0-9a-f]{64}$'),
+    respaldo_pdf BYTEA,
+    respaldo_sha256 TEXT NOT NULL CHECK (respaldo_sha256 ~ '^[0-9a-f]{64}$'),
+    aprobado_por TEXT NOT NULL CHECK (length(btrim(aprobado_por)) > 0),
+    aprobado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK ((fuente='DOCUMENTO' AND respaldo_pdf IS NULL AND respaldo_sha256=archivo_sha256)
+        OR (fuente='COMPROBANTE' AND respaldo_pdf IS NOT NULL
+            AND octet_length(respaldo_pdf) BETWEEN 4 AND 8388608)),
+    CHECK (moneda <> 'ARS' OR tipo_cambio_ars=1)
+);
+CREATE OR REPLACE FUNCTION tauro_revision_append_only() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'El registro de revisión es inmutable';
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_revision_financiera_inmutable ON revisiones_financieras_courier;
+CREATE TRIGGER trg_revision_financiera_inmutable BEFORE UPDATE OR DELETE ON revisiones_financieras_courier
+FOR EACH ROW EXECUTE FUNCTION tauro_revision_append_only();
+
+-- Defensa adicional: una marca false no permite eludir la revisión durable.
+CREATE OR REPLACE FUNCTION tauro_proteger_origen_financiero() RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.metadatos_origen ? 'revision_financiera_pendiente'
+       OR OLD.metadatos_origen->>'canal' IN ('admin_pdf_dhl','correo_dhl') THEN
+        IF ROW(OLD.archivo_pdf, OLD.archivo_sha256, OLD.metadatos_origen->'canal',
+               OLD.metadatos_origen->'entrada_dhl_id', OLD.metadatos_origen->'revision_sha256')
+           IS DISTINCT FROM ROW(NEW.archivo_pdf, NEW.archivo_sha256, NEW.metadatos_origen->'canal',
+               NEW.metadatos_origen->'entrada_dhl_id', NEW.metadatos_origen->'revision_sha256')
+           OR (OLD.metadatos_origen ? 'revision_financiera_pendiente'
+               AND NOT (NEW.metadatos_origen ? 'revision_financiera_pendiente')) THEN
+            RAISE EXCEPTION 'El origen y evidencia financiera son inmutables';
+        END IF;
+        IF NEW.metadatos_origen->'revision_financiera_pendiente' = 'false'::jsonb
+           AND NOT EXISTS (SELECT 1 FROM revisiones_financieras_courier r
+                           WHERE r.factura_id=NEW.id AND r.archivo_sha256=NEW.archivo_sha256) THEN
+            RAISE EXCEPTION 'Falta la revisión financiera aprobada';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_origen_financiero ON facturas_courier;
+CREATE TRIGGER trg_origen_financiero BEFORE UPDATE ON facturas_courier
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_origen_financiero();
+
+CREATE OR REPLACE FUNCTION tauro_exigir_revision_calculo() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.estado IN ('APROBADA','CERRADA') AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(NEW.evidencias) e
+        JOIN facturas_courier f ON f.id=(e->>'factura_id')::bigint
+        LEFT JOIN revisiones_financieras_courier r ON r.factura_id=f.id
+        WHERE (f.metadatos_origen ? 'revision_financiera_pendiente'
+               OR f.metadatos_origen->>'canal' IN ('admin_pdf_dhl','correo_dhl'))
+          AND (r.id IS NULL OR r.archivo_sha256 IS DISTINCT FROM f.archivo_sha256
+               OR r.moneda IS DISTINCT FROM f.moneda
+               OR e->>'revision_financiera_id' IS DISTINCT FROM r.id::text)
+    ) THEN
+        RAISE EXCEPTION 'La conciliación requiere revisión financiera y un cálculo posterior a su aprobación';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_revision_financiera_calculo ON conciliaciones_envio;
+CREATE TRIGGER trg_revision_financiera_calculo BEFORE INSERT OR UPDATE ON conciliaciones_envio
+FOR EACH ROW EXECUTE FUNCTION tauro_exigir_revision_calculo();
+
 -- Entrada administrativa de PDFs DHL. Evidencia pendiente, NO cuenta corriente.
 CREATE TABLE IF NOT EXISTS entradas_pdf_dhl (
     id BIGSERIAL PRIMARY KEY,
@@ -3244,7 +3319,8 @@ CREATE TABLE IF NOT EXISTS entradas_pdf_dhl (
     cuit_esperado TEXT NOT NULL CHECK (cuit_esperado ~ '^[0-9]{11}$'),
     canal TEXT NOT NULL DEFAULT 'ADMIN_PDF' CHECK (canal = 'ADMIN_PDF'),
     estado TEXT NOT NULL DEFAULT 'RECIBIDA'
-        CHECK (estado IN ('RECIBIDA','PARA_REVISION','REVISION_MANUAL','IMPORTADA')),
+        CONSTRAINT entradas_pdf_dhl_estado_check
+        CHECK (estado IN ('RECIBIDA','PARA_REVISION','REVISION_MANUAL','REINTENTAR','IMPORTADA')),
     extraccion JSONB,
     observaciones JSONB NOT NULL DEFAULT '[]',
     revision_sha256 TEXT,
@@ -3261,7 +3337,48 @@ CREATE TABLE IF NOT EXISTS entradas_pdf_dhl (
     CHECK (estado NOT IN ('PARA_REVISION','IMPORTADA') OR
         (extraccion IS NOT NULL AND revision_sha256 IS NOT NULL AND lector_version IS NOT NULL))
 );
+ALTER TABLE entradas_pdf_dhl DROP CONSTRAINT IF EXISTS entradas_pdf_dhl_estado_check;
+ALTER TABLE entradas_pdf_dhl ADD CONSTRAINT entradas_pdf_dhl_estado_check
+    CHECK (estado IN ('RECIBIDA','PARA_REVISION','REVISION_MANUAL','REINTENTAR','IMPORTADA'));
 CREATE INDEX IF NOT EXISTS ix_entradas_dhl_estado ON entradas_pdf_dhl(estado, id DESC);
+
+CREATE TABLE IF NOT EXISTS historial_extracciones_dhl (
+    id BIGSERIAL PRIMARY KEY,
+    entrada_id BIGINT NOT NULL REFERENCES entradas_pdf_dhl(id) ON DELETE RESTRICT,
+    numero_esperado TEXT NOT NULL,
+    cuit_esperado TEXT NOT NULL,
+    extraccion JSONB NOT NULL,
+    observaciones JSONB NOT NULL,
+    revision_sha256 TEXT NOT NULL,
+    lector_version INTEGER NOT NULL,
+    conservado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (entrada_id, revision_sha256)
+);
+-- También conserva extracciones generadas antes de esta migración.
+INSERT INTO historial_extracciones_dhl
+    (entrada_id, numero_esperado, cuit_esperado, extraccion, observaciones, revision_sha256, lector_version)
+    SELECT id, numero_esperado, cuit_esperado, extraccion, observaciones, revision_sha256, lector_version
+    FROM entradas_pdf_dhl WHERE revision_sha256 IS NOT NULL
+ON CONFLICT (entrada_id, revision_sha256) DO NOTHING;
+DROP TRIGGER IF EXISTS trg_historial_dhl_inmutable ON historial_extracciones_dhl;
+CREATE TRIGGER trg_historial_dhl_inmutable BEFORE UPDATE OR DELETE ON historial_extracciones_dhl
+FOR EACH ROW EXECUTE FUNCTION tauro_revision_append_only();
+
+CREATE OR REPLACE FUNCTION tauro_conservar_extraccion_dhl() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.revision_sha256 IS NOT NULL THEN
+        INSERT INTO historial_extracciones_dhl
+            (entrada_id, numero_esperado, cuit_esperado, extraccion, observaciones, revision_sha256, lector_version)
+        VALUES (NEW.id, NEW.numero_esperado, NEW.cuit_esperado, NEW.extraccion,
+                NEW.observaciones, NEW.revision_sha256, NEW.lector_version)
+        ON CONFLICT (entrada_id, revision_sha256) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_conservar_extraccion_dhl ON entradas_pdf_dhl;
+CREATE TRIGGER trg_conservar_extraccion_dhl AFTER INSERT OR UPDATE ON entradas_pdf_dhl
+FOR EACH ROW EXECUTE FUNCTION tauro_conservar_extraccion_dhl();
 
 CREATE OR REPLACE FUNCTION tauro_proteger_entrada_dhl() RETURNS TRIGGER AS $$
 BEGIN
@@ -3274,14 +3391,14 @@ BEGIN
     IF OLD.estado = 'IMPORTADA' AND NEW IS DISTINCT FROM OLD THEN
         RAISE EXCEPTION 'La entrada importada DHL es inmutable';
     END IF;
-    IF OLD.estado = 'PARA_REVISION' AND (
-        NEW.estado NOT IN ('PARA_REVISION','IMPORTADA') OR
+    IF OLD.extraccion IS NOT NULL AND (
         ROW(NEW.numero_esperado, NEW.cuit_esperado, NEW.extraccion,
             NEW.observaciones, NEW.revision_sha256, NEW.lector_version)
         IS DISTINCT FROM ROW(OLD.numero_esperado, OLD.cuit_esperado, OLD.extraccion,
             OLD.observaciones, OLD.revision_sha256, OLD.lector_version)
-    ) THEN
-        RAISE EXCEPTION 'La extracción presentada para revisión es inmutable';
+    ) AND NOT (NEW.estado='PARA_REVISION' AND NEW.lector_version > OLD.lector_version
+               AND NEW.revision_sha256 IS NOT NULL AND NEW.extraccion IS NOT NULL) THEN
+        RAISE EXCEPTION 'La extracción sólo puede reemplazarse por una versión posterior, conservando su historial';
     END IF;
     RETURN NEW;
 END;

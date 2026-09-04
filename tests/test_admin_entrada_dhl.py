@@ -31,7 +31,8 @@ def entrada(estado='PARA_REVISION'):
         'archivo_nombre': '<script>no-ejecutar</script>.pdf', 'archivo_sha256': 'a'*64,
         'estado': estado, 'extraccion': ejemplo() if estado in ('PARA_REVISION','IMPORTADA') else None,
         'observaciones': ['<script>dato-del-pdf</script>'], 'error_lectura': None, 'intentos': 1,
-        'revision_sha256': 'b'*64, 'factura_id': 2, 'created_at': datetime.now(timezone.utc)}
+        'revision_sha256': 'b'*64, 'lector_version': bandeja.LECTOR_VERSION,
+        'factura_id': 2, 'created_at': datetime.now(timezone.utc)}
 
 
 def test_carga_manual_no_inventa_mail():
@@ -80,7 +81,7 @@ def test_token_csrf_vence_y_no_es_auth_token(monkeypatch):
     assert not admin._csrf_dhl_valido(token, 'nueva')
 
 
-@pytest.mark.parametrize('estado', ['RECIBIDA','REVISION_MANUAL','PARA_REVISION','IMPORTADA'])
+@pytest.mark.parametrize('estado', ['RECIBIDA','REVISION_MANUAL','REINTENTAR','PARA_REVISION','IMPORTADA'])
 def test_detalle_renderiza_estados_escapa_pdf_y_no_cachea(monkeypatch, estado):
     monkeypatch.setattr(bandeja, 'obtener_entrada_dhl', lambda _id: entrada(estado))
     respuesta = admin.admin_detalle_dhl(request(), 1, admin_token='valido')
@@ -124,3 +125,11 @@ def test_no_encontrado_devuelve_404(monkeypatch):
     monkeypatch.setattr(bandeja, 'obtener_entrada_dhl', lambda *a, **kw: None)
     assert admin.admin_pdf_entrada_dhl(1, admin_token='valido').status_code == 404
     assert admin.admin_detalle_dhl(request(), 1, admin_token='valido').status_code == 404
+
+
+def test_lectura_obsoleta_no_ofrece_importar_y_si_releer(monkeypatch):
+    monkeypatch.setattr(bandeja, 'obtener_entrada_dhl', lambda *a: entrada() | {'lector_version': bandeja.LECTOR_VERSION-1})
+    html = admin.admin_detalle_dhl(request(), 1, admin_token='valido').body.decode()
+    assert 'ya no está vigente' in html
+    assert 'Reintentar lectura' in html
+    assert 'Registrar factura, sin aplicar cargos' not in html

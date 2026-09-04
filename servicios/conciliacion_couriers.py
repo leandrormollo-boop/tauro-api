@@ -155,6 +155,43 @@ def _json_seguro(payload: Any) -> Any:
     return json.loads(json.dumps(payload, ensure_ascii=True, default=str))
 
 
+def _requiere_revision_financiera(metadata) -> bool:
+    metadata = metadata or {}
+    # La presencia de la marca obliga a comprobar la aprobación durable:
+    # cambiar el booleano a false no basta para habilitar un cobro.
+    return ('revision_financiera_pendiente' in metadata
+            or metadata.get('canal') in ('admin_pdf_dhl', 'correo_dhl'))
+
+
+def _exigir_revision_financiera(cur, factura_id, metadata):
+    if not _requiere_revision_financiera(metadata):
+        return None
+    cur.execute('''SELECT r.id, r.tipo_cambio_ars FROM revisiones_financieras_courier r
+        JOIN facturas_courier f ON f.id=r.factura_id
+        WHERE r.factura_id=%s AND r.archivo_sha256=f.archivo_sha256 AND r.moneda=f.moneda''',
+        (int(factura_id),))
+    revision = cur.fetchone()
+    if not revision:
+        raise ConciliacionCourierError(
+            f'La factura #{factura_id} tiene pendiente la revisión financiera del tipo de cambio. '
+            'Aprobá su respaldo antes de confirmar, calcular o aplicar diferencias.')
+    return dict(revision)
+
+
+def _exigir_revision_del_calculo(cur, conciliacion_id):
+    cur.execute('SELECT evidencias FROM conciliaciones_envio WHERE id=%s', (int(conciliacion_id),))
+    evidencias = cur.fetchone()['evidencias']
+    for evidencia in evidencias:
+        cur.execute('SELECT metadatos_origen FROM facturas_courier WHERE id=%s FOR SHARE',
+                    (int(evidencia['factura_id']),))
+        factura = cur.fetchone()
+        if not factura:
+            raise ConciliacionCourierError('Falta una factura de respaldo del cálculo.')
+        revision = _exigir_revision_financiera(cur, evidencia['factura_id'], factura['metadatos_origen'])
+        if revision and evidencia.get('revision_financiera_id') != revision['id']:
+            raise ConciliacionCourierError('El cálculo es anterior a la revisión financiera. Requiere una nueva conciliación; no se aplicó ningún cargo.')
+
+
 def _registrar_auditoria(
     cur,
     *,
@@ -1109,7 +1146,7 @@ def confirmar_match(
                 """
                 SELECT m.id, m.estado, m.item_id, m.solicitud_id,
                        i.factura_id, i.estado AS item_estado,
-                       f.estado AS factura_estado
+                       f.estado AS factura_estado, f.metadatos_origen
                   FROM factura_courier_item_matches m
                   JOIN facturas_courier_items i ON i.id = m.item_id
                   JOIN facturas_courier f ON f.id = i.factura_id
@@ -1140,6 +1177,7 @@ def confirmar_match(
                 raise ConciliacionCourierError(
                     "Un match rechazado no puede confirmarse."
                 )
+            _exigir_revision_financiera(cur, match['factura_id'], match.get('metadatos_origen'))
             if match["estado"] == "CONFIRMADO":
                 return {
                     "id": int(match_id),
@@ -1317,7 +1355,7 @@ def calcular_conciliacion_envio(
                 )
             cur.execute(
                 """
-                SELECT m.id AS match_id, m.monto_asignado_ars,
+                SELECT m.id AS match_id, m.monto_asignado_ars, m.monto_asignado,
                        i.id AS item_id, i.concepto_tipo, i.signo,
                        i.importe AS item_importe,
                        i.peso_real_kg, i.peso_volumetrico_kg,
@@ -1329,7 +1367,7 @@ def calcular_conciliacion_envio(
                               AND confirmado.estado = 'CONFIRMADO'
                        ), 0) AS item_asignado_confirmado,
                        f.id AS factura_id, f.tipo_documento, f.estado AS factura_estado,
-                       f.archivo_sha256, f.evidencia_uri
+                       f.archivo_sha256, f.evidencia_uri, f.metadatos_origen
                   FROM factura_courier_item_matches m
                   JOIN facturas_courier_items i ON i.id = m.item_id
                   JOIN facturas_courier f ON f.id = i.factura_id
@@ -1349,6 +1387,19 @@ def calcular_conciliacion_envio(
                 raise ConciliacionCourierError(
                     "Una factura vinculada está anulada."
                 )
+            revisiones = {}
+            for fila in filas:
+                fid = fila['factura_id']
+                if fid not in revisiones:
+                    revisiones[fid] = _exigir_revision_financiera(cur, fid, fila.get('metadatos_origen'))
+                revision = revisiones[fid]
+                if revision:
+                    # Sólo cambia la base de este cálculo; ni el ítem original
+                    # ni el match documental se sobrescriben.
+                    fila['monto_asignado_ars'] = (
+                        _decimal(fila['monto_asignado'], 'Monto nativo') * revision['tipo_cambio_ars']
+                    ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
+                    fila['revision_financiera_id'] = revision['id']
             cur.execute(
                 """
                 SELECT COUNT(*) AS cantidad
@@ -1426,6 +1477,8 @@ def calcular_conciliacion_envio(
                     "factura_id": int(fila["factura_id"]),
                     "item_id": int(fila["item_id"]),
                     "match_id": int(fila["match_id"]),
+                    **({'revision_financiera_id': fila['revision_financiera_id']}
+                       if 'revision_financiera_id' in fila else {}),
                 }
                 for fila in filas
             ]
@@ -1439,6 +1492,8 @@ def calcular_conciliacion_envio(
                         "monto_ars": str(fila["monto_asignado_ars"]),
                         "documento": fila["tipo_documento"],
                         "signo": int(fila["signo"]),
+                        **({'revision_financiera_id': fila['revision_financiera_id']}
+                           if 'revision_financiera_id' in fila else {}),
                     }
                     for fila in filas
                 ],
@@ -1482,7 +1537,7 @@ def calcular_conciliacion_envio(
                 }
             cur.execute(
                 """
-                SELECT id
+                SELECT id, estado, evidencias
                   FROM conciliaciones_envio
                  WHERE solicitud_id = %s
                    AND estado IN (
@@ -1494,9 +1549,28 @@ def calcular_conciliacion_envio(
             )
             activa = cur.fetchone()
             if activa:
-                raise ConciliacionActivaError(
-                    "La guía ya tiene una conciliación activa para revisar."
+                obsoleta = activa['estado'] in ('BORRADOR', 'PARA_REVISION') and any(
+                    evidencia.get('revision_financiera_id') is None
+                    and revisiones.get(evidencia['factura_id'])
+                    for evidencia in activa['evidencias']
                 )
+                cur.execute('SELECT id, estado FROM ajustes_cliente WHERE conciliacion_id=%s FOR UPDATE',
+                            (activa['id'],))
+                ajuste_anterior = cur.fetchone()
+                if not obsoleta or (ajuste_anterior and ajuste_anterior['estado'] != 'PROPUESTO'):
+                    raise ConciliacionActivaError(
+                        'La guía ya tiene una conciliación activa para revisar. No se reemplazan cálculos aprobados, reclamados ni ajustes resueltos.')
+                # Recalcular reemplaza sólo el borrador PREVIO a la aprobación
+                # del TC. Conserva montos, evidencia e historial, sin cargos.
+                # Todo se revierte si falla la generación de la nueva versión.
+                if ajuste_anterior:
+                    cur.execute("UPDATE ajustes_cliente SET estado='ANULADO', updated_at=NOW() WHERE id=%s",
+                                (ajuste_anterior['id'],))
+                cur.execute("UPDATE conciliaciones_envio SET estado='ANULADA', updated_at=NOW() WHERE id=%s", (activa['id'],))
+                _registrar_auditoria(cur, evento='CALCULO_PREVIO_A_REVISION_ANULADO', actor=actor,
+                    solicitud_id=int(solicitud_id), conciliacion_id=activa['id'],
+                    ajuste_id=ajuste_anterior['id'] if ajuste_anterior else None,
+                    metadata={'motivo': 'Recalculado tras aprobación financiera; importes históricos conservados'})
             cur.execute(
                 """
                 SELECT COALESCE(MAX(version), 0) + 1 AS version
@@ -1898,7 +1972,7 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                 SELECT id, courier, tipo_documento, numero, fecha_emision,
                        fecha_vencimiento, periodo_desde, periodo_hasta,
                        moneda, subtotal, impuestos, total, estado,
-                       archivo_nombre, archivo_sha256,
+                       archivo_nombre, archivo_sha256, metadatos_origen,
                        (archivo_pdf IS NOT NULL OR evidencia_uri IS NOT NULL)
                            AS tiene_evidencia, created_at
                 FROM facturas_courier WHERE id = %s
@@ -1911,7 +1985,7 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
             cur.execute(
                 """
                 SELECT i.id, i.linea_numero, i.tracking_raw, i.concepto_tipo,
-                       i.descripcion, i.importe, i.moneda, i.importe_ars,
+                       i.descripcion, i.importe, i.moneda, i.importe_ars, i.tipo_cambio_ars,
                        i.peso_facturado_kg, i.peso_base, i.estado,
                        COALESCE(SUM(m.monto_asignado) FILTER (
                            WHERE m.estado IN ('PROPUESTO','CONFIRMADO')
@@ -1952,6 +2026,17 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                 match = dict(fila)
                 mapa[int(match["item_id"])]["matches"].append(match)
             resultado["items"] = items
+            resultado['revision_financiera_requerida'] = _requiere_revision_financiera(resultado.get('metadatos_origen'))
+            if resultado['revision_financiera_requerida']:
+                resultado['tipos_cambio_documentales'] = sorted({item['tipo_cambio_ars'] for item in items})
+                cur.execute('''SELECT id, tipo_cambio_ars, fuente, motivo, aprobado_por, aprobado_at
+                    FROM revisiones_financieras_courier WHERE factura_id=%s''', (int(factura_id),))
+                resultado['revision_financiera'] = cur.fetchone()
+                if resultado['revision_financiera']:
+                    for item in items:
+                        item['importe_conciliacion_ars'] = (
+                            item['importe'] * resultado['revision_financiera']['tipo_cambio_ars']
+                        ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
             return resultado
 
 
@@ -2050,6 +2135,11 @@ def confirmar_y_calcular_factura(factura_id: int, *, actor: str) -> dict[str, An
     """Confirma propuestas y calcula los envíos ya confirmados del documento."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute('SELECT metadatos_origen FROM facturas_courier WHERE id=%s', (int(factura_id),))
+            factura = cur.fetchone()
+            if not factura:
+                raise ConciliacionCourierError('La factura courier no existe.')
+            _exigir_revision_financiera(cur, factura_id, factura['metadatos_origen'])
             cur.execute(
                 """
                 SELECT m.id, m.solicitud_id
@@ -2153,6 +2243,7 @@ def aprobar_y_aplicar_ajuste_cliente(
                 return {"ok": True, "duplicado": True, "ajuste_id": int(ajuste_id)}
             if ajuste["estado"] != "PROPUESTO":
                 raise ConciliacionCourierError("La diferencia ya fue resuelta.")
+            _exigir_revision_del_calculo(cur, ajuste['conciliacion_id'])
             if ajuste["conciliacion_estado"] != "PARA_REVISION":
                 raise ConciliacionCourierError("La conciliación no está lista para aprobar.")
             if not ajuste["evidencia_completa"]:
@@ -2237,6 +2328,7 @@ def cerrar_conciliacion_sin_diferencia(
                 return {"ok": True, "duplicado": True}
             if conciliacion["estado"] != "PARA_REVISION":
                 raise ConciliacionCourierError("La conciliación no está lista para cerrar.")
+            _exigir_revision_del_calculo(cur, conciliacion_id)
             if not conciliacion["evidencia_completa"]:
                 raise ConciliacionCourierError("Falta evidencia documental.")
             if abs(_decimal(conciliacion["ajuste_cliente_ars"], "Diferencia")) > CENTAVO_CONTROL:

@@ -14,9 +14,9 @@ from servicios.conciliacion_couriers import (
     registrar_factura_courier, matchear_items_exactos,
 )
 from servicios.entrada_facturas_dhl import ExtraccionDHLInvalida, preparar_factura_dhl_manual
-from servicios.ejecucion_lector_dhl import ejecutar_lector_dhl
+from servicios.ejecucion_lector_dhl import ejecutar_lector_dhl, LectorDHLNoDisponible
 
-LECTOR_VERSION = 1
+LECTOR_VERSION = 2
 _CAMPOS = '''id, archivo_nombre, archivo_sha256, numero_esperado, cuit_esperado,
     canal, estado, extraccion, observaciones, revision_sha256, lector_version,
     error_lectura, intentos, factura_id, creado_por, revisado_por,
@@ -103,8 +103,14 @@ def leer_entrada_dhl(entrada_id, *, numero, cuit, actor):
     # rollback y conserva RECIBIDA/REVISION_MANUAL para reintentar, sin lease huérfano.
     with get_conn() as conn, conn.cursor() as cur:
         entrada, pdf = _bloquear(cur, entrada_id)
-        if entrada['estado'] in ('PARA_REVISION', 'IMPORTADA'):
+        if entrada['estado'] == 'IMPORTADA':
             return entrada['estado']
+        if entrada['lector_version'] is not None and entrada['lector_version'] > LECTOR_VERSION:
+            raise ExtraccionDHLInvalida('Esta lectura proviene de una versión más nueva. Actualizá el servidor; no se puede degradar.')
+        if entrada['estado'] == 'PARA_REVISION' and entrada['lector_version'] == LECTOR_VERSION:
+            return entrada['estado']
+        if entrada['extraccion'] is not None and (numero, cuit) != (entrada['numero_esperado'], entrada['cuit_esperado']):
+            raise ExtraccionDHLInvalida('La referencia de una extracción conservada no puede cambiarse.')
         if (numero, cuit) != (entrada['numero_esperado'], entrada['cuit_esperado']):
             _auditar(cur, entrada, 'DHL_REFERENCIA_CORREGIDA', actor)
         entrada.update(numero_esperado=numero, cuit_esperado=cuit)
@@ -122,6 +128,12 @@ def leer_entrada_dhl(entrada_id, *, numero, cuit, actor):
                 (numero, cuit, Json(extraccion), Json(observaciones), huella, LECTOR_VERSION, entrada_id))
             _auditar(cur, entrada, 'DHL_PDF_EXTRAIDO', actor, lector_version=LECTOR_VERSION, revision_sha256=huella)
             return 'PARA_REVISION'
+        except LectorDHLNoDisponible as exc:
+            cur.execute('''UPDATE entradas_pdf_dhl SET numero_esperado=%s, cuit_esperado=%s,
+                estado='REINTENTAR', error_lectura=%s, updated_at=NOW() WHERE id=%s''',
+                (numero, cuit, str(exc)[:500], entrada_id))
+            _auditar(cur, entrada, 'DHL_LECTOR_NO_DISPONIBLE', actor, lector_version=LECTOR_VERSION)
+            return 'REINTENTAR'
         except (ExtraccionDHLInvalida, ConciliacionCourierError) as exc:
             cur.execute('''UPDATE entradas_pdf_dhl SET numero_esperado=%s, cuit_esperado=%s,
                 estado='REVISION_MANUAL', error_lectura=%s, intentos=intentos+1, updated_at=NOW() WHERE id=%s''',
@@ -142,6 +154,8 @@ def importar_entrada_dhl(entrada_id, *, revision_sha256, revision_confirmada, ac
             return {'id': entrada['factura_id'], 'duplicado': True}
         if entrada['estado'] != 'PARA_REVISION':
             raise ExtraccionDHLInvalida('Esta entrada todavía no está lista para importar.')
+        if entrada['lector_version'] != LECTOR_VERSION:
+            raise ExtraccionDHLInvalida('La extracción usa una versión anterior o incompatible del lector. Volvé a leer el PDF antes de importar.')
         preparado = preparar_factura_dhl_manual(entrada['extraccion'], archivo_pdf=pdf, archivo_nombre=entrada['archivo_nombre'])
         datos = preparado.datos_registro
         if datos['numero'] != entrada['numero_esperado'] or datos['tipo_documento'] != 'FC':
