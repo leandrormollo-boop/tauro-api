@@ -111,6 +111,23 @@ def test_query_manipulada_vuelve_a_consolidado_y_pagina_uno(monkeypatch):
     assert recibidos == [("CLIENTE_SESION", "consolidado", "todos", 1, 6)]
 
 
+def test_diferencias_usan_tres_filas_para_conservar_la_vista_compacta(monkeypatch):
+    recibidos = []
+    monkeypatch.setattr(portal, "resumen_cuenta_por_ambito", lambda _cliente: _resumen())
+    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args: (
+        recibidos.append(args) or _movimientos()
+    ))
+    monkeypatch.setattr(portal.templates, "TemplateResponse", lambda **kwargs: kwargs)
+
+    portal.cuenta_corriente(
+        SimpleNamespace(), tipo="diferencias", cliente="CLIENTE_SESION",
+    )
+
+    assert recibidos == [
+        ("CLIENTE_SESION", "consolidado", "diferencias", 1, 3),
+    ]
+
+
 def test_cuenta_genera_clave_opaca_nueva_por_render(monkeypatch):
     monkeypatch.setattr(portal, "resumen_cuenta_por_ambito", lambda _cliente: _resumen())
     monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *_args: _movimientos())

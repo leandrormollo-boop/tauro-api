@@ -205,14 +205,32 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if m.referencia and m.tipo != 'DIFERENCIA' %}<small>Ref. {{ m.referencia }}</small>{% endif %}
                         {% if m.tipo == 'DIFERENCIA' and m.diferencia_detalle %}
                           {% set d = m.diferencia_detalle %}
-                          {% if d.es_peso %}
-                          <small>Peso inicial {{ d.peso_inicial_kg }} kg · Peso facturado por el courier {{ d.peso_facturado_kg }} kg · Diferencia {{ d.diferencia_peso_kg }} kg{% if d.motivo == 'MIXTO' and d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
-                          {% else %}
-                          <small>{{ d.concepto_courier or d.motivo_legible }}</small>
+                          {% if d.montos_completos %}
+                          <div class="account-difference-flow" aria-label="Cálculo del costo final">
+                              <span class="account-difference-value">
+                                  <small>Valor inicial</small>
+                                  <strong>{{ dinero(d.valor_inicial_ars) }}</strong>
+                              </span>
+                              <span class="account-difference-operator">{% if d.es_credito %}−{% else %}+{% endif %}</span>
+                              <span class="account-difference-value is-adjustment {% if d.es_credito %}is-credit{% endif %}">
+                                  <small>Diferencia</small>
+                                  <strong>{{ dinero(d.diferencia_ars|abs) }}</strong>
+                              </span>
+                              <span class="account-difference-operator">=</span>
+                              <span class="account-difference-value is-final">
+                                  <small>Costo final</small>
+                                  <strong>{{ dinero(d.valor_final_ars) }}</strong>
+                              </span>
+                          </div>
                           {% endif %}
-                          <small>{{ d.leyenda }}</small>
+                          {% if d.es_peso %}
+                          <small class="account-difference-reason">Peso inicial {{ d.peso_inicial_kg }} kg → peso facturado {{ d.peso_facturado_kg }} kg · diferencia {{ d.diferencia_peso_kg }} kg{% if d.motivo == 'MIXTO' and d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
+                          {% else %}
+                          <small class="account-difference-reason">Motivo: {{ d.concepto_courier or d.motivo_legible }}</small>
+                          {% endif %}
+                          <small class="account-difference-policy">{{ d.leyenda }}</small>
                         {% endif %}
-                        {% if m.valor_envio_ars is not none and m.tipo == 'DIFERENCIA' %}<small>Valor final del envío {{ dinero(m.valor_envio_ars) }}</small>{% endif %}
+                        {% if m.valor_envio_ars is not none and m.tipo == 'DIFERENCIA' and (not m.diferencia_detalle or not m.diferencia_detalle.montos_completos) %}<small>Valor final del envío {{ dinero(m.valor_envio_ars) }}</small>{% endif %}
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
                     </td>
                     <td class="mono" data-label="Documento">

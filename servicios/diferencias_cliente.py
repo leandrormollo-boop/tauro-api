@@ -30,6 +30,18 @@ def _decimal_opcional(valor: Any) -> Decimal | None:
     return numero.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
 
+def _dinero_opcional(valor: Any) -> Decimal | None:
+    if valor in (None, ""):
+        return None
+    try:
+        numero = Decimal(str(valor))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not numero.is_finite():
+        return None
+    return numero.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def presentar_diferencia(datos: Mapping[str, Any] | None) -> dict[str, Any]:
     """Devuelve sólo campos comerciales permitidos para portal/cliente."""
     fuente = datos or {}
@@ -47,8 +59,19 @@ def presentar_diferencia(datos: Mapping[str, Any] | None) -> dict[str, Any]:
     concepto = str(
         fuente.get("concepto_courier", fuente.get("conceptos_courier")) or ""
     ).strip()[:500]
+    valor_inicial = _dinero_opcional(fuente.get("valor_inicial_ars"))
+    diferencia = _dinero_opcional(fuente.get("diferencia_ars"))
+    valor_final = _dinero_opcional(fuente.get("valor_final_ars"))
+    montos_completos = all(
+        valor is not None for valor in (valor_inicial, diferencia, valor_final)
+    ) and abs(valor_inicial + diferencia - valor_final) <= Decimal("0.02")
     es_peso = motivo in MOTIVOS_PESO and inicial is not None and facturado is not None
     return {
+        "montos_completos": montos_completos,
+        "valor_inicial_ars": valor_inicial,
+        "diferencia_ars": diferencia,
+        "valor_final_ars": valor_final,
+        "es_credito": diferencia is not None and diferencia < 0,
         "es_peso": es_peso,
         "peso_inicial_kg": inicial,
         "peso_facturado_kg": facturado,

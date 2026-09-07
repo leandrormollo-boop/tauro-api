@@ -125,6 +125,7 @@ TIPOS_MOVIMIENTO_CUENTA = {
 # Mantiene resumen, filtros y una página completa dentro del viewport de
 # escritorio; el resto queda accesible con paginación explícita.
 MOVIMIENTOS_CUENTA_POR_PAGINA = 6
+DIFERENCIAS_CUENTA_POR_PAGINA = 3
 _IDEMPOTENCY_KEY_MIN_LEN = 32
 _IDEMPOTENCY_KEY_MAX_LEN = 128
 _IDEMPOTENCY_KEY_CHARS = frozenset(
@@ -1081,8 +1082,13 @@ def cuenta_corriente(
     # Las dos consultas reciben exclusivamente el cliente autenticado. Ningún
     # query param o campo del form puede elegir la cuenta de otra persona.
     resumen = resumen_cuenta_por_ambito(cliente)
+    movimientos_por_pagina = (
+        DIFERENCIAS_CUENTA_POR_PAGINA
+        if tipo == "diferencias"
+        else MOVIMIENTOS_CUENTA_POR_PAGINA
+    )
     movs = movimientos_cuenta_paginados(
-        cliente, ambito, tipo, pagina_numero, MOVIMIENTOS_CUENTA_POR_PAGINA
+        cliente, ambito, tipo, pagina_numero, movimientos_por_pagina
     )
     consolidado = resumen["consolidado"]
     # Compatibilidad con el saldo del menú lateral: reutiliza el total ya

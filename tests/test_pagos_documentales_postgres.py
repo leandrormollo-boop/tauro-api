@@ -274,6 +274,10 @@ def test_diferencia_publica_usa_concepto_courier_sin_costos(cuenta_db):
     diferencia = pagina["items"][0]["diferencia_detalle"]
     assert diferencia["concepto_courier"] == "Cargo por zona extendida"
     assert diferencia["motivo_legible"] == "Recargo del courier"
+    assert diferencia["valor_inicial_ars"] == Decimal("100.00")
+    assert diferencia["diferencia_ars"] == Decimal("50.00")
+    assert diferencia["valor_final_ars"] == Decimal("150.00")
+    assert diferencia["montos_completos"] is True
     assert "costo" not in diferencia and "margen" not in diferencia
 
     envio = solicitudes_guia.obtener_solicitud_de_cliente(

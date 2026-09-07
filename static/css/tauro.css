@@ -2947,6 +2947,40 @@ html[data-theme="light"] .account-total-card {
 .account-table td[data-label="Documento"] { overflow-wrap: anywhere; }
 .account-movement-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--fg-2); line-height: 1.35; }
 .account-table td small { display: block; margin-top: 2px; color: var(--fg-4); font-size: 8.5px; }
+.account-difference-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+}
+.account-difference-value {
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(255,255,255,.018);
+}
+.account-difference-value small { margin: 0; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
+.account-difference-value strong {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-difference-value.is-adjustment { border-color: rgba(245,158,11,.3); background: rgba(245,158,11,.06); }
+.account-difference-value.is-adjustment strong { color: var(--warning, #fbbf24); }
+.account-difference-value.is-adjustment.is-credit { border-color: rgba(52,211,153,.25); background: rgba(52,211,153,.06); }
+.account-difference-value.is-adjustment.is-credit strong { color: var(--ok); }
+.account-difference-value.is-final { border-color: rgba(167,139,250,.34); background: rgba(167,139,250,.07); }
+.account-difference-value.is-final strong { color: var(--fg); }
+.account-difference-operator { color: var(--fg-4); font-family: var(--font-mono); font-size: 10px; }
+.account-table td small.account-difference-reason { margin-top: 5px; color: var(--fg-3); }
+.account-table td small.account-difference-policy { color: var(--fg-4); font-size: 7.5px; }
 .account-document-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 3px; }
 .account-document-actions a { color: var(--accent-soft); font-family: var(--font-body); font-size: 8.5px; text-decoration: none; }
 .account-movement-amount strong { display: block; color: var(--fg-2); font-weight: 650; white-space: nowrap; }
