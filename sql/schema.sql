@@ -1445,6 +1445,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     dest_ciudad              TEXT NOT NULL,
     dest_estado              TEXT,
     dest_zip                 TEXT NOT NULL,
+    etiqueta_cliente         TEXT,
     observaciones            TEXT,
     peso_kg                  REAL,
     largo_cm                 REAL,
@@ -1498,6 +1499,26 @@ ALTER TABLE solicitudes_guia VALIDATE CONSTRAINT ck_solicitudes_guia_estado;
 -- existente, por eso este ALTER idempotente es obligatorio en producción.
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS updated_at
     TIMESTAMPTZ NOT NULL DEFAULT NOW();
+-- Nombre libre y privado con el que el cliente reconoce el envío en su
+-- portal. Es sólo presentación: nunca se envía al courier ni modifica
+-- tracking, documentos o movimientos contables.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS etiqueta_cliente TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'solicitudes_guia'::regclass
+          AND conname = 'ck_solicitudes_guia_etiqueta_cliente'
+    ) THEN
+        ALTER TABLE solicitudes_guia
+            ADD CONSTRAINT ck_solicitudes_guia_etiqueta_cliente
+            CHECK (etiqueta_cliente IS NULL OR CHAR_LENGTH(etiqueta_cliente) <= 80)
+            NOT VALID;
+    END IF;
+END $$;
+ALTER TABLE solicitudes_guia
+    VALIDATE CONSTRAINT ck_solicitudes_guia_etiqueta_cliente;
 -- Linaje durable: una solicitud nacida de una venta conserva su origen en el
 -- INSERT inicial. No depende del vínculo posterior pedidos_tienda.solicitud_id,
 -- que puede fallar o desaparecer durante una solicitud de privacidad.

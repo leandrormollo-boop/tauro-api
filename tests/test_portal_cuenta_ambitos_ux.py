@@ -245,21 +245,22 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
     assert "account-tabs" not in html
 
 
-def test_importe_unificado_conserva_cargos_y_pagos_contables():
+def test_columna_cuenta_conserva_cargos_y_pagos_contables_con_copy_claro():
     html = (RAIZ / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
 
     assert "{{ dinero(total.facturado_ars) }}" in html
     assert '{{ dinero(total.haber_ars) }}' in html
-    assert '<th scope="col" class="amount-column account-col-amount">Importe</th>' in html
-    assert 'data-label="Importe"' in html
+    assert '<th scope="col" class="amount-column account-col-account">Tu cuenta</th>' in html
+    assert 'data-label="Tu cuenta"' in html
     assert "{% if m.haber_ars %}" in html
     assert "{{ dinero(m.haber_ars) }}" in html
     assert "{% elif m.debe_ars %}" in html
     assert "{{ dinero(m.debe_ars) }}" in html
     assert "Valor cotizado" in html
-    assert 'account-movement-amount{% if m.tipo == \'DIFERENCIA\' %} is-summary-only' in html
-    assert "El costo final está detallado en Movimiento." in html
-    for etiqueta in ("Debe", "Haber"):
+    assert "El ajuste ya está incluido en el costo final." in html
+    assert "Se suma al saldo" in html
+    assert "Se descuenta del saldo" in html
+    for etiqueta in ("Debe", "Haber", "Importe", "Documento"):
         assert f">{etiqueta}<" not in html
         assert f'data-label="{etiqueta}"' not in html
 
@@ -274,21 +275,22 @@ def test_movimientos_agrupan_datos_sin_forzar_scroll_horizontal():
     admin_py = (RAIZ / "endpoints" / "admin.py").read_text(encoding="utf-8")
     css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
 
-    columnas_portal = ("Fecha", "Movimiento", "Documento", "Ámbito", "Importe")
+    columnas_portal = ("Fecha", "Detalle", "Guía / tracking", "Tu cuenta")
     tabla_portal = portal_html[portal_html.index('<table class="account-table">'):]
     posiciones = [tabla_portal.index(f">{columna}<") for columna in columnas_portal]
     assert posiciones == sorted(posiciones)
 
     for etiqueta in columnas_portal:
         assert f'data-label="{etiqueta}"' in portal_html
-    assert "{{ m.remitente or 'Origen sin informar' }} → {{ m.destinatario or 'Destino sin informar' }}" in portal_html
+    assert "{{ ubicacion(m.origen_ciudad, m.origen_pais) }} → {{ ubicacion(m.destino_ciudad, m.destino_pais) }}" in portal_html
+    assert "m.etiqueta_envio or m.destinatario" in portal_html
     assert "min-width: 1220px" not in css
     assert ".account-table { width: 100%; min-width: 0; table-layout: fixed; }" in css
     assert "NULLIF(BTRIM(s.dest_nombre), '') AS destinatario" in admin_py
     assert "NULLIF(BTRIM(s.remitente_nombre), '') AS remitente" in admin_py
     assert "WHEN e.solicitud_id IS NOT NULL THEN 'Flete'" in admin_py
     assert ".admin-shipments-table" in css
-    assert '.account-table td[data-label="Movimiento"]' in css
+    assert '.account-table td[data-label="Detalle"]' in css
 
 
 def test_resumen_consolidado_es_compacto_y_no_desborda():

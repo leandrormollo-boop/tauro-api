@@ -153,6 +153,31 @@ def test_buscador_filtra_antes_de_paginar_y_se_combina_con_estado():
     assert segunda["total_paginas"] == 2
 
 
+def test_buscador_encuentra_nombre_destinatario_y_ciudad_del_envio():
+    historial = [
+        {
+            **_envio(1, "DHL", "DESPACHADO"),
+            "etiqueta_cliente": "Pedido urgente Cecilia",
+            "dest_nombre": "Enrique Vila",
+            "dest_ciudad": "Guaynabo",
+        },
+        {
+            **_envio(2, "DHL", "DESPACHADO"),
+            "etiqueta_cliente": "Reposición de stock",
+            "dest_nombre": "Otra persona",
+            "dest_ciudad": "Miami",
+        },
+    ]
+
+    por_nombre = preparar_historial_envios(historial, buscar="pedido URGENTE")
+    por_destinatario = preparar_historial_envios(historial, buscar="enrique vila")
+    por_ciudad = preparar_historial_envios(historial, buscar="guaynabo")
+
+    assert [s["id"] for s in por_nombre["solicitudes"]] == [1]
+    assert [s["id"] for s in por_destinatario["solicitudes"]] == [1]
+    assert [s["id"] for s in por_ciudad["solicitudes"]] == [1]
+
+
 def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     html = (RAIZ / "templates" / "portal" / "envios.html").read_text(encoding="utf-8")
 
@@ -173,7 +198,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "No hay envíos que coincidan con estos filtros" in html
     assert 'role="search"' in html
     assert 'name="buscar"' in html
-    assert 'placeholder="Ej. 888244412640"' in html
+    assert 'placeholder="Ej. Pedido 21036 o 888244412640"' in html
     assert "envios-search-icon" not in html
     assert "{{ con_busqueda }}" in html
     assert 'class="envio-destination-name"' in html

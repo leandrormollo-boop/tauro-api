@@ -250,6 +250,10 @@ def crear_desde_pedido(pedido_id: int) -> dict:
             dest_ciudad=dest.get("ciudad") or "",
             dest_estado=dest.get("estado") or "",
             dest_zip=dest.get("cp") or "",
+            etiqueta_cliente=(
+                f"Pedido {str(ped['numero']).strip()}"
+                if str(ped.get("numero") or "").strip() else ""
+            ),
             observaciones=f"Generado automáticamente desde la venta {ped['numero'] or ''}".strip(),
             peso_kg=precio.get("peso_total_kg") or 0.5,
             largo_cm=primero.get("largo_cm") or 30,

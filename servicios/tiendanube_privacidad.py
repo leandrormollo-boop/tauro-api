@@ -115,6 +115,7 @@ def generar_exportacion(solicitud_id: int) -> dict[str, Any] | None:
                 cur.execute(
                     """
                     SELECT id, estado, producto_alias, cantidad, destino_pais,
+                           etiqueta_cliente,
                            dest_nombre, dest_contacto, dest_documento,
                            dest_email, dest_telefono, dest_direccion,
                            dest_ciudad, dest_estado, dest_zip, observaciones,

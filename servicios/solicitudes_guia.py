@@ -265,6 +265,14 @@ def _clean(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def normalizar_etiqueta_cliente(value) -> str:
+    """Nombre privado del envío, legible y seguro para todas las vistas."""
+    etiqueta = " ".join(str(value or "").split())
+    if len(etiqueta) > 80:
+        raise ValueError("La etiqueta del envío puede tener hasta 80 caracteres.")
+    return etiqueta
+
+
 def reconciliar_solicitudes_con_cargo_cancelado(
     cliente_id: Optional[str] = None,
 ) -> int:
@@ -853,6 +861,7 @@ def crear_solicitud_guia(
     dest_zip: str,
     dest_contacto: str = "",
     observaciones: str = "",
+    etiqueta_cliente: str = "",
     peso_kg: float,
     largo_cm: float,
     ancho_cm: float,
@@ -899,6 +908,7 @@ def crear_solicitud_guia(
     Los campos legacy (producto_alias, cantidad, peso/dims/valor) guardan el
     primer bulto + totales para que listados y admin sigan andando."""
     cliente_id = cliente_id.strip().upper()
+    etiqueta_cliente = normalizar_etiqueta_cliente(etiqueta_cliente)
     cantidad = parse_entero_formulario(
         cantidad, "Cantidad de cajas", minimo=1, maximo=20,
     )
@@ -1022,7 +1032,8 @@ def crear_solicitud_guia(
                     ambito,
                     dest_nombre, dest_documento, dest_email, dest_telefono,
                     dest_direccion, dest_ciudad, dest_estado, dest_zip,
-                    observaciones, peso_kg, largo_cm, ancho_cm, alto_cm,
+                    etiqueta_cliente, observaciones,
+                    peso_kg, largo_cm, ancho_cm, alto_cm,
                     valor_declarado_usd, ruta_id, coti_id, precio_tauro_ars,
                     precio_tauro_usd, precio_cliente_final_ars, bultos,
                     courier, servicio_courier, tax_paga,
@@ -1036,7 +1047,7 @@ def crear_solicitud_guia(
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
                     %s, %s, %s,
                     %s, %s, %s,
@@ -1073,6 +1084,7 @@ def crear_solicitud_guia(
                     dest_ciudad.strip(),
                     _clean(dest_estado),
                     dest_zip.strip(),
+                    etiqueta_cliente or None,
                     _clean(observaciones),
                     peso_kg,
                     largo_cm,
@@ -1197,6 +1209,7 @@ def listar_solicitudes_cliente(
             # para dibujar un tilde en cada fila.
             query = """
                 SELECT s.id, s.cliente_id, s.estado, s.producto_alias, s.cantidad,
+                       s.etiqueta_cliente,
                        s.remitente_pais, s.ambito, s.destino_pais, s.dest_nombre,
                        s.dest_ciudad, s.observaciones, s.peso_kg,
                        s.valor_declarado_usd, s.precio_tauro_ars,
@@ -1362,7 +1375,7 @@ def listar_envios_api(
             total = int(cur.fetchone()["total"])
             cur.execute(
                 f"""
-                SELECT id, api_referencia, estado, ambito, courier,
+                SELECT id, api_referencia, etiqueta_cliente, estado, ambito, courier,
                        servicio_courier, producto_alias, cantidad,
                        destino_pais, dest_nombre, dest_ciudad, dest_estado,
                        peso_kg, valor_declarado_usd, precio_tauro_ars,
@@ -1413,6 +1426,34 @@ def contar_guias_listas(cliente_id: str) -> int:
                 (cliente_id.strip().upper(),),
             )
             return int(cur.fetchone()["n"])
+
+
+def actualizar_etiqueta_cliente(
+    solicitud_id: int,
+    cliente_id: str,
+    etiqueta_cliente: str,
+) -> dict:
+    """Renombra un envío sin tocar guía, tracking, estado ni cuenta corriente."""
+    cliente = (cliente_id or "").strip().upper()
+    if not cliente:
+        raise ValueError("La sesión del cliente no es válida.")
+    etiqueta = normalizar_etiqueta_cliente(etiqueta_cliente)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE solicitudes_guia
+                   SET etiqueta_cliente=%s, updated_at=NOW()
+                 WHERE id=%s AND cliente_id=%s
+                   AND test=FALSE AND visible_cliente=TRUE
+                RETURNING id, cliente_id, etiqueta_cliente, updated_at
+                """,
+                (etiqueta or None, int(solicitud_id), cliente),
+            )
+            fila = cur.fetchone()
+    if not fila:
+        raise ValueError("El envío no existe o no está disponible en tu cuenta.")
+    return dict(fila)
 
 
 def listar_solicitudes_admin(estado: str = "", limite: int = 300) -> list[dict]:

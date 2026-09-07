@@ -92,13 +92,13 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 <form method="GET" action="/portal/envios" class="envios-search" role="search" id="envios-search-form">
     <label for="envios-buscar">
         <strong>Buscar envío</strong>
-        <span>Por código de tracking</span>
+        <span>Por nombre, tracking, destinatario o ciudad</span>
     </label>
     <div class="envios-search-control">
         <input type="search" id="envios-buscar" name="buscar"
                value="{{ busqueda_filtro }}"
-               placeholder="Ej. 888244412640" autocomplete="off"
-               autocapitalize="characters" spellcheck="false">
+               placeholder="Ej. Pedido 21036 o 888244412640" autocomplete="off"
+               spellcheck="false">
         {% if busqueda_filtro %}
         <a href="/portal/envios"
            class="envios-search-clear" aria-label="Limpiar búsqueda">Limpiar</a>
@@ -181,7 +181,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
     <div class="msg envios-empty-filter">
-        {% if busqueda_filtro %}No encontramos el tracking “{{ busqueda_filtro }}” en todo tu historial.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
+        {% if busqueda_filtro %}No encontramos “{{ busqueda_filtro }}” en todo tu historial.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
         <a href="/portal/envios?tipo={{ tipo_filtro }}{{ con_periodo }}">Ver todo el período</a>
     </div>
 {% else %}
@@ -201,7 +201,10 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             {% for s in solicitudes %}
                 <tr>
                     <td data-label="Envío">
-                        {% if s.bultos and s.bultos|length > 1 %}
+                        {% if s.etiqueta_cliente %}
+                            <strong class="shipment-client-label">{{ s.etiqueta_cliente }}</strong>
+                            <br><small style="color:var(--fg-3)">{{ s.producto_alias }} · {{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</small>
+                        {% elif s.bultos and s.bultos|length > 1 %}
                             {% for b in s.bultos %}
                                 <strong>{{ b.producto_alias }}</strong> <small style="color:var(--fg-3)">x{{ b.cantidad }}</small>{% if not loop.last %}<br>{% endif %}
                             {% endfor %}
@@ -213,7 +216,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     </td>
                     <td data-label="Destino">
                         <span class="envio-destination-name">{{ s.dest_nombre }}</span>
-                        <br><small style="color:var(--fg-3)">{{ s.dest_ciudad or "—" }}, {{ s.destino_pais }}</small>
+                        <br><small style="color:var(--fg-3)">{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) }}</small>
                     </td>
                     <td data-label="Servicio y estado" class="envio-service-cell">
                         <span class="service-head">

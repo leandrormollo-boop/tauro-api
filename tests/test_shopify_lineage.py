@@ -245,6 +245,7 @@ def test_automatico_conserva_origen_aunque_falle_marcar_convertido(monkeypatch):
     assert persistido["origen_plataforma"] == "shopify"
     assert persistido["origen_dominio"] == "pesca-jacks.myshopify.com"
     assert persistido["origen_pedido_externo_id"] == "gid://shopify/Order/123"
+    assert persistido["etiqueta_cliente"] == "Pedido #123"
     assert len(persistido["idempotency_key_hash"]) == 64
 
 

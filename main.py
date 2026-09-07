@@ -1405,6 +1405,7 @@ def listar_envios_b2b(
         envios.append({
             "solicitud_id": envio["id"],
             "referencia": envio.get("api_referencia"),
+            "nombre_envio": envio.get("etiqueta_cliente"),
             "estado": envio.get("estado"),
             "ambito": (envio.get("ambito") or "").lower(),
             "courier": courier or None,

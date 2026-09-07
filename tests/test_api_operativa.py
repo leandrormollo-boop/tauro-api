@@ -200,6 +200,7 @@ def test_listado_envios_b2b_pagina_y_separa_ambito(monkeypatch):
         return ([{
             "id": 91,
             "api_referencia": "PESCA-91",
+            "etiqueta_cliente": "Pedido mayorista 91",
             "estado": "GUIA_LISTA",
             "ambito": "INTERNACIONAL",
             "courier": "DHL",
@@ -235,6 +236,7 @@ def test_listado_envios_b2b_pagina_y_separa_ambito(monkeypatch):
     assert respuesta["siguiente_offset"] == 2
     assert respuesta["anterior_offset"] == 0
     assert respuesta["envios"][0]["ambito"] == "internacional"
+    assert respuesta["envios"][0]["nombre_envio"] == "Pedido mayorista 91"
     assert respuesta["envios"][0]["guia_url"] == "/pedidos/91/guia.pdf"
     serializado = str(respuesta).lower()
     assert "margen" not in serializado

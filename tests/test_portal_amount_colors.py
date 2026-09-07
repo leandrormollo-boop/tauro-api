@@ -27,6 +27,7 @@ def render_account(balance, movement=None):
         saldo_menu=lambda *_: dict(al_dia=balance == 0, a_favor_ars=max(-balance, 0), pendiente_ars=max(balance, 0)),
         pendientes_menu=lambda *_: dict(envios=0, tienda=0),
         ayuda=lambda: dict(whatsapp_url=None, mail_url="mailto:demo@example.invalid"),
+        nombre_pais=lambda codigo: {"AR": "Argentina", "US": "Estados Unidos"}.get(codigo, codigo),
     )
     payment = dict(
         tipo="PAGO", estado="APROBADO", concepto="Transferencia de prueba",
@@ -55,7 +56,7 @@ def test_saldo_metalico_conserva_valor_y_estado(balance, state):
     status = re.search(r'<span class="account-total-state">\s*(.*?)\s*</span>', html)
     assert status.group(1) == state
     assert '<dt>Pagos aprobados</dt><dd class="portal-money-green">$ 3.000.000,00</dd>' in html
-    assert 'data-label="Importe">' in html
+    assert 'data-label="Tu cuenta">' in html
     assert '<strong class="account-amount-credit">− $ 3.000.000,00</strong>' in html
     assert 'mono amount-column account-movement-amount' in html
 
@@ -95,7 +96,8 @@ def test_diferencia_muestra_una_sola_ecuacion_y_no_duplica_el_cargo():
     assert "$ 97.700,00" in html
     assert "$ 24.571,34" in html
     assert "$ 122.271,34" in html
-    assert 'account-movement-amount is-summary-only' in html
+    assert "El ajuste ya está incluido en el costo final." in html
+    assert 'data-label="Importe"' not in html
     assert ">Cargo<" not in html
 
 

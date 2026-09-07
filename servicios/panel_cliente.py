@@ -144,9 +144,8 @@ def preparar_historial_envios(
     """Filtra y pagina el historial del cliente con una única regla de UI.
 
     ``solicitudes`` ya debe venir aislado por cliente. El filtro de tipo se
-    aplica antes de contar los pasos; la búsqueda por tracking y el filtro de
-    paso se aplican antes de paginar. Así un código se encuentra aunque el
-    envío esté en una página posterior del historial.
+    aplica antes de contar los pasos; la búsqueda por tracking, etiqueta,
+    destinatario o ruta y el filtro de paso se aplican antes de paginar.
     """
     from servicios.couriers_urls import ambito_envio
 
@@ -194,13 +193,30 @@ def preparar_historial_envios(
     total_sin_filtrar = len(por_tipo)
     busqueda = str(buscar or "").strip()[:80]
     tracking_buscado = _normalizar_busqueda_tracking(busqueda)
+    texto_buscado = " ".join(busqueda.casefold().split())
+    if not re.search(r"\w", texto_buscado):
+        texto_buscado = ""
     filtradas = por_tipo
-    if tracking_buscado:
+    if tracking_buscado or texto_buscado:
+        def coincide(solicitud) -> bool:
+            if tracking_buscado and tracking_buscado in _normalizar_busqueda_tracking(
+                solicitud.get("tracking")
+            ):
+                return True
+            campos = (
+                "etiqueta_cliente", "dest_nombre", "dest_ciudad",
+                "destino_pais", "remitente_ciudad", "remitente_pais",
+                "producto_alias", "api_referencia",
+            )
+            texto = " ".join(
+                str(solicitud.get(campo) or "") for campo in campos
+            ).casefold()
+            return bool(texto_buscado and texto_buscado in texto)
+
         filtradas = [
             solicitud
             for solicitud in filtradas
-            if tracking_buscado
-            in _normalizar_busqueda_tracking(solicitud.get("tracking"))
+            if coincide(solicitud)
         ]
     else:
         # Una cadena compuesta sólo por separadores no debe ocultar envíos ni

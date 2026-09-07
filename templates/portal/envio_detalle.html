@@ -16,8 +16,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 <div class="page-title page-title-row">
     <div>
         <div class="eyebrow">{% if ambito == 'nacional' %}🇦🇷 Nacional{% elif ambito == 'internacional' %}🌐 Internacional{% else %}Ámbito en revisión{% endif %} · Envío #{{ s.id }}</div>
-        <h1>{{ s.dest_nombre }} · {{ s.dest_ciudad or s.destino_pais }}</h1>
-        <p>Creado el {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "—" }}.</p>
+        <h1>{{ s.etiqueta_cliente or s.dest_nombre }}{% if not s.etiqueta_cliente %} · {{ s.dest_ciudad or nombre_pais(s.destino_pais) }}{% endif %}</h1>
+        <p>{% if s.etiqueta_cliente %}Destinatario: {{ s.dest_nombre }} · {% endif %}{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) }} · {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "Fecha sin informar" }}.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
         <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">Operación: {{ s.estado_operacion_ui.label }}</span>
@@ -30,10 +30,24 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% if request.query_params.get('ok') == 'reemision' %}
     <div class="msg ok">Corrección completada. Ésta es la guía final vigente y la única aplicada a tu cuenta corriente.</div>
 {% elif request.query_params.get('ok') == 'cancelado' %}
-    <div class="msg ok">Envío cancelado. La etiqueta quedó descartada, el cargo fue excluido de tu cuenta corriente y conservamos el tracking para control.</div>
+    <div class="msg ok">Envío cancelado. La guía anterior quedó descartada, el cargo fue excluido de tu cuenta corriente y conservamos el tracking para control.</div>
+{% elif request.query_params.get('ok') == 'etiqueta' %}
+    <div class="msg ok">Guardamos el nombre del envío. La guía, el tracking y tu cuenta no cambiaron.</div>
 {% elif request.query_params.get('error') %}
     <div class="msg error">{{ request.query_params.get('error') }}</div>
 {% endif %}
+
+<div class="card shipment-label-card">
+    <form method="POST" action="/portal/envios/{{ s.id }}/etiqueta" class="shipment-label-form">
+        <div>
+            <label for="etiqueta_cliente">Nombre para reconocer este envío</label>
+            <small>Es privado y organizativo. Si lo dejás vacío, mostramos destinatario y ruta.</small>
+        </div>
+        <input type="text" id="etiqueta_cliente" name="etiqueta_cliente" maxlength="80"
+               value="{{ s.etiqueta_cliente or '' }}" placeholder="Ej. Pedido 21036 · Enrique Vila">
+        <button type="submit" class="btn btn-ghost btn-sm">Guardar nombre</button>
+    </form>
+</div>
 
 {% if s.reemplaza_solicitud_id %}
     <div class="msg ok" style="margin-bottom:16px;">

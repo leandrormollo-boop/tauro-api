@@ -2935,18 +2935,26 @@ html[data-theme="light"] .account-total-card {
 .account-history-card { margin: 0; padding: 8px 13px; }
 .account-history-card .table-wrap { width: 100%; overflow: visible; }
 .account-table { width: 100%; min-width: 0; table-layout: fixed; }
-.account-table .account-col-date { width: 10%; }
-.account-table .account-col-concept { width: 39%; }
+.account-table .account-col-date { width: 9%; }
+.account-table .account-col-concept { width: 53%; }
 .account-table .account-col-document { width: 20%; }
-.account-table .account-col-scope { width: 13%; }
-.account-table .account-col-amount { width: 18%; }
+.account-table .account-col-account { width: 18%; }
 .account-table th,
-.account-table td { padding: 8px 7px; vertical-align: middle; }
+.account-table td { padding: 9px 9px; vertical-align: middle; }
 .account-table tbody tr { height: 58px; }
 .account-table .amount-column { text-align: right; }
-.account-table td[data-label="Documento"] { overflow-wrap: anywhere; }
+.account-table td[data-label="Guía / tracking"] { overflow-wrap: anywhere; }
 .account-movement-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: var(--fg-2); line-height: 1.35; }
-.account-table td small { display: block; margin-top: 2px; color: var(--fg-4); font-size: 8.5px; }
+.account-shipment-title { color: var(--fg); font-size: 12.5px; font-weight: 650; }
+.account-table td small { display: block; margin-top: 3px; color: var(--fg-4); font-size: 9.5px; line-height: 1.35; }
+.account-shipment-meta { color: var(--fg-3) !important; }
+.account-tracking-cell > strong { color: var(--fg); font-size: 16px; font-weight: 750; letter-spacing: .015em; }
+.account-tracking-cell .account-document-actions { margin-top: 5px; }
+.account-movement-amount { display: grid; justify-items: end; gap: 5px; }
+.account-movement-amount .account-scope-badge { margin-bottom: 2px; }
+.account-movement-amount strong { font-size: 13px; }
+.account-movement-amount small { margin: 0; text-align: right; }
+.account-impact-explanation { max-width: 150px; color: var(--fg-3) !important; }
 .account-row-difference {
   background: linear-gradient(90deg, rgba(245,158,11,.025), transparent 54%);
 }
@@ -2967,13 +2975,13 @@ html[data-theme="light"] .account-total-card {
   min-width: 0;
   padding: 2px 0;
 }
-.account-difference-value small { margin: 0; font-size: 7px; letter-spacing: .06em; text-transform: uppercase; }
+.account-difference-value small { margin: 0; font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
 .account-difference-value strong {
   display: block;
   margin-top: 3px;
   color: var(--fg-2);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -2993,12 +3001,12 @@ html[data-theme="light"] .account-total-card {
   background: rgba(167,139,250,.075);
 }
 .account-difference-value.is-final small { color: var(--accent-soft); font-weight: 600; }
-.account-difference-value.is-final strong { color: var(--fg); font-size: 11px; }
+.account-difference-value.is-final strong { color: var(--fg); font-size: 17px; font-weight: 780; }
 .account-difference-operator { color: var(--fg-4); font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
 .account-table td small.account-difference-reason { margin-top: 5px; color: var(--fg-3); }
 .account-table td small.account-difference-policy { color: var(--fg-4); font-size: 7.5px; }
 .account-document-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 3px; }
-.account-document-actions a { color: var(--accent-soft); font-family: var(--font-body); font-size: 8.5px; text-decoration: none; }
+.account-document-actions a { color: var(--accent-soft); font-family: var(--font-body); font-size: 9.5px; text-decoration: none; }
 .account-movement-amount strong { display: block; color: var(--fg-2); font-weight: 650; white-space: nowrap; }
 .account-movement-amount .account-amount-credit { color: var(--ok); }
 .account-pagination { display: flex; justify-content: flex-end; gap: 4px; padding-top: 7px; border-top: 1px solid var(--line-soft); }
@@ -3093,20 +3101,18 @@ html[data-theme="light"] .account-total-card {
   }
   .account-table td::before { display: block; margin-bottom: 1px; color: var(--fg-4); content: attr(data-label); font-size: 7.5px; text-transform: uppercase; }
   .account-table td[data-label="Fecha"] { grid-column: 1; grid-row: 1; }
-  .account-table td[data-label="Ámbito"] { grid-column: 2; grid-row: 1; text-align: right; }
-  .account-table td[data-label="Movimiento"] { grid-column: 1 / -1; grid-row: 2; }
-  .account-table td[data-label="Documento"] { grid-column: 1; grid-row: 3; }
-  .account-table td[data-label="Importe"] { grid-column: 2; grid-row: 3; text-align: right; }
-  .account-table td[data-label="Importe"].is-summary-only { display: none; }
-  .account-row-difference td[data-label="Documento"] { grid-column: 1 / -1; }
-  .account-table td[data-label="Ámbito"]::before,
-  .account-table td[data-label="Importe"]::before { text-align: right; }
+  .account-table td[data-label="Tu cuenta"] { grid-column: 2; grid-row: 1; text-align: right; }
+  .account-table td[data-label="Detalle"] { grid-column: 1 / -1; grid-row: 2; }
+  .account-table td[data-label="Guía / tracking"] { grid-column: 1 / -1; grid-row: 3; }
+  .account-table td[data-label="Tu cuenta"]::before { text-align: right; }
+  .account-movement-amount { align-content: start; }
+  .account-impact-explanation { max-width: 180px; }
   .account-movement-heading { flex-wrap: wrap; line-height: 1.35; }
   .account-difference-flow { gap: 5px; padding: 7px; }
-  .account-difference-value strong { font-size: 8.5px; }
+  .account-difference-value strong { font-size: 10px; }
   .account-difference-value.is-adjustment,
   .account-difference-value.is-final { padding: 6px; }
-  .account-difference-value.is-final strong { font-size: 9px; }
+  .account-difference-value.is-final strong { font-size: 12px; }
   .account-pagination { justify-content: center; }
   .account-pagination a,
   .account-pagination span { min-width: 44px; height: 44px; }
@@ -3120,6 +3126,23 @@ html[data-theme="light"] .account-total-card {
   .account-difference-value.is-final { width: 100%; padding: 7px 9px; }
   .account-difference-value strong,
   .account-difference-value.is-final strong { font-size: 10px; }
+}
+
+.shipment-label-card { margin-bottom: 16px; padding: 12px 16px; }
+.shipment-label-form {
+  display: grid;
+  grid-template-columns: minmax(210px, .8fr) minmax(260px, 1.4fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.shipment-label-form label { display: block; color: var(--fg); font-size: 12px; font-weight: 650; }
+.shipment-label-form small,
+.shipment-label-field small { display: block; margin-top: 3px; color: var(--fg-4); font-size: 9.5px; }
+.shipment-label-form input { min-height: 40px; }
+.shipment-client-label { color: var(--fg); font-size: 13px; font-weight: 700; }
+@media (max-width: 720px) {
+  .shipment-label-form { grid-template-columns: 1fr; gap: 8px; }
+  .shipment-label-form .btn { width: 100%; min-height: 42px; }
 }
 
 .admin-shipments-table { min-width: 1360px; table-layout: fixed; }

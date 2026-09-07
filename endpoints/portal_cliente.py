@@ -63,6 +63,7 @@ from servicios.solicitudes_guia import (
     preparar_documentos_envio_portal,
     obtener_factura_comercial_pdf,
     obtener_solicitud_de_cliente, contar_guias_listas,
+    actualizar_etiqueta_cliente,
     idempotency_hash_origen_tienda,
     validar_reemision_cliente, validar_cancelacion_cliente,
     cancelar_solicitud_cliente, periodos_solicitudes_cliente,
@@ -76,7 +77,7 @@ from servicios.numeros_humanos import (
     parse_float_formulario as _numero_form,
     parse_importe_humano,
 )
-from servicios.paises import normalizar as normalizar_pais
+from servicios.paises import normalizar as normalizar_pais, nombre as nombre_pais
 from servicios.provincias import opciones as opciones_provincias
 from servicios.panel_cliente import embudo_envios, preparar_historial_envios
 from servicios.integraciones_tienda import (
@@ -113,6 +114,7 @@ templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
 templates.env.globals["ambito_envio"] = ambito_envio
 templates.env.globals["nombre_courier"] = nombre_courier
+templates.env.globals["nombre_pais"] = nombre_pais
 templates.env.globals["dinero_ars"] = dinero_ars
 templates.env.globals["numero_ars"] = numero_ars
 
@@ -2098,6 +2100,7 @@ def _precargar_envio_existente(origen: dict, *, corregir_id: int | None = None):
         "dest_ciudad": origen.get("dest_ciudad") or "",
         "dest_estado": origen.get("dest_estado") or "",
         "dest_zip": origen.get("dest_zip") or "",
+        "etiqueta_cliente": origen.get("etiqueta_cliente") or "",
         "observaciones": origen.get("observaciones") or "",
         "precio_cliente_final_ars": origen.get("precio_cliente_final_ars") or "",
         "tax_paga": origen.get("tax_paga") or "",
@@ -2410,6 +2413,7 @@ def envio_nuevo_post(
     dest_alias: str = Form(""),
     guardar_destinatario: Optional[str] = Form(None),
     precio_cliente_final_ars: str = Form(""),
+    etiqueta_cliente: str = Form(""),
     observaciones: str = Form(""),
     # Si el envío nació de un pedido de la tienda, al crearse la solicitud
     # el pedido pasa de PENDIENTE a CONVERTIDO.
@@ -2434,6 +2438,8 @@ def envio_nuevo_post(
         bulto_valor_caja_usd = []
     if not isinstance(asegurar_carga, str):
         asegurar_carga = "NO"
+    if not isinstance(etiqueta_cliente, str):
+        etiqueta_cliente = ""
     asegurar_carga = asegurar_carga.strip().upper()
     if asegurar_carga not in {"SI", "NO"}:
         asegurar_carga = "NO"
@@ -2606,6 +2612,7 @@ def envio_nuevo_post(
         "dest_alias": dest_alias,
         "guardar_destinatario": guardar_destinatario,
         "precio_cliente_final_ars": precio_cliente_final_ars,
+        "etiqueta_cliente": etiqueta_cliente,
         "observaciones": observaciones,
         "intl_courier": intl_courier,
         "precio_cotizado_ars": precio_cotizado_ars,
@@ -2954,6 +2961,7 @@ def envio_nuevo_post(
             dest_ciudad=dest_ciudad,
             dest_estado=dest_estado,
             dest_zip=dest_zip,
+            etiqueta_cliente=etiqueta_cliente,
             observaciones=observaciones,
             # Totales del envío completo (lo que se cotizó y se declara).
             peso_kg=precio.get("peso_total_kg") or 0.5,
@@ -3141,6 +3149,41 @@ def envio_detalle(
             "puede_cancelar": bool(cancelacion.get("ok")),
             "cancelar_bloqueo": str(cancelacion.get("error") or ""),
         },
+    )
+
+
+@router.post("/envios/{solicitud_id}/etiqueta")
+def etiquetar_envio_portal(
+    request: Request,
+    solicitud_id: int,
+    etiqueta_cliente: str = Form(""),
+    cliente: str = Depends(cliente_actual),
+):
+    """Guarda un nombre privado sin modificar la operación logística."""
+    try:
+        resultado = actualizar_etiqueta_cliente(
+            solicitud_id, cliente, etiqueta_cliente,
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"/portal/envios/{solicitud_id}?error={quote(str(exc))}",
+            status_code=303,
+        )
+    from servicios.auditoria import registrar_desde_request
+    etiqueta = str(resultado.get("etiqueta_cliente") or "")
+    registrar_desde_request(
+        request,
+        event="portal.etiqueta_envio_actualizada",
+        actor_type="cliente",
+        actor_ref=cliente,
+        metadata={
+            "solicitud_id": solicitud_id,
+            "etiqueta_presente": bool(etiqueta),
+            "longitud": len(etiqueta),
+        },
+    )
+    return RedirectResponse(
+        url=f"/portal/envios/{solicitud_id}?ok=etiqueta", status_code=303,
     )
 
 

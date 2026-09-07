@@ -483,11 +483,17 @@
                 </div>
             </fieldset>
 
-            <details class="shipment-extra-options" {% if form.precio_cliente_final_ars or form.observaciones %}open{% endif %}>
+            <details class="shipment-extra-options" {% if form.etiqueta_cliente or form.precio_cliente_final_ars or form.observaciones %}open{% endif %}>
                 <summary>
-                    <span><strong>Opciones adicionales</strong><small>Courier, impuestos, precio de reventa y notas</small></span>
+                    <span><strong>Opciones adicionales</strong><small>Nombre del envío, courier, impuestos y notas</small></span>
                 </summary>
                 <div class="shipment-extra-body">
+            <div class="form-group shipment-label-field">
+                <label for="etiqueta_cliente">Nombre para reconocer este envío <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label>
+                <input type="text" name="etiqueta_cliente" id="etiqueta_cliente" maxlength="80"
+                       value="{{ form.etiqueta_cliente or '' }}" placeholder="Ej. Pedido 21036 · Enrique Vila">
+                <small>Lo vas a ver en “Mis envíos” y “Mi cuenta”. No modifica la guía ni el tracking.</small>
+            </div>
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="precio_cliente_final_ars">Precio final a tu cliente ARS <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label>

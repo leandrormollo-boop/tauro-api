@@ -737,6 +737,11 @@ def movimientos_cuenta_paginados(
                 ) AS numero_guia,
                 NULLIF(BTRIM(s.dest_nombre), '') AS destinatario,
                 NULLIF(BTRIM(s.remitente_nombre), '') AS remitente,
+                NULLIF(BTRIM(s.etiqueta_cliente), '') AS etiqueta_envio,
+                NULLIF(BTRIM(s.remitente_ciudad), '') AS origen_ciudad,
+                NULLIF(BTRIM(s.remitente_pais), '') AS origen_pais,
+                NULLIF(BTRIM(s.dest_ciudad), '') AS destino_ciudad,
+                NULLIF(BTRIM(s.destino_pais), '') AS destino_pais,
                 e.monto_ars AS valor_envio_ars,
                 COALESCE(
                     fc.tipo || ' ' || LPAD(fc.punto_venta::text, 4, '0')
@@ -769,8 +774,9 @@ def movimientos_cuenta_paginados(
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
-                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text,
-                NULL::jsonb
+                NULL::text, NULL::text, NULL::text,
+                NULL::text, NULL::text, NULL::text, NULL::text, NULL::text,
+                NULL::numeric, NULL::text, NULL::jsonb
             FROM pagos_aplicaciones pa
             JOIN pagos p ON p.id = pa.pago_id
             WHERE p.cliente_id = %s
@@ -788,8 +794,9 @@ def movimientos_cuenta_paginados(
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
-                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text,
-                NULL::jsonb
+                NULL::text, NULL::text, NULL::text,
+                NULL::text, NULL::text, NULL::text, NULL::text, NULL::text,
+                NULL::numeric, NULL::text, NULL::jsonb
             FROM pagos p
             LEFT JOIN aplicaciones_pago ap ON ap.pago_id = p.id
             WHERE p.cliente_id = %s
@@ -806,8 +813,9 @@ def movimientos_cuenta_paginados(
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
                      THEN '/portal/pagos/' || p.id::text || '/comprobante' END,
-                NULL::text, NULL::text, NULL::text, NULL::numeric, NULL::text,
-                NULL::jsonb
+                NULL::text, NULL::text, NULL::text,
+                NULL::text, NULL::text, NULL::text, NULL::text, NULL::text,
+                NULL::numeric, NULL::text, NULL::jsonb
             FROM pagos p
             WHERE p.cliente_id = %s
               AND p.estado = 'PENDIENTE'
@@ -837,6 +845,11 @@ def movimientos_cuenta_paginados(
                 ),
                 NULLIF(BTRIM(s.dest_nombre), ''),
                 NULLIF(BTRIM(s.remitente_nombre), ''),
+                NULLIF(BTRIM(s.etiqueta_cliente), ''),
+                NULLIF(BTRIM(s.remitente_ciudad), ''),
+                NULLIF(BTRIM(s.remitente_pais), ''),
+                NULLIF(BTRIM(s.dest_ciudad), ''),
+                NULLIF(BTRIM(s.destino_pais), ''),
                 a.precio_nuevo_ars,
                 NULLIF(BTRIM(e.nro_fc), ''),
                 JSONB_BUILD_OBJECT(

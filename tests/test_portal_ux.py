@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=45" in base
+    assert "tauro.css?v=46" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -241,7 +241,8 @@ def test_error_aduanero_reabre_la_hoja_de_invoice():
 def test_opciones_secundarias_del_paquete_no_alargan_el_paso_principal():
     html = _template("envio_nuevo.html")
     assert '<details class="shipment-extra-options"' in html
-    assert "Courier, impuestos, precio de reventa y notas" in html
+    assert "Nombre del envío, courier, impuestos y notas" in html
+    assert "Precio final a tu cliente ARS" in html
     assert html.index('<details class="shipment-extra-options"') < html.index('id="courier-btns"')
 
 

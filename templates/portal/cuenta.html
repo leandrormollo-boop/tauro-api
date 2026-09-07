@@ -9,6 +9,10 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     {% if valor > 0 %}A pagar{% elif valor < 0 %}A favor{% else %}Al día{% endif %}
 {%- endmacro %}
 
+{% macro ubicacion(ciudad, pais) -%}
+    {% if ciudad %}{{ ciudad }}{% if pais %}, {% endif %}{% endif %}{% if pais %}{{ nombre_pais(pais) }}{% else %}Sin informar{% endif %}
+{%- endmacro %}
+
 {% macro resumen_ambito(nombre, clave, ledger) -%}
 <a class="account-scope-summary {% if ambito_filtro == clave %}is-active{% endif %}"
    href="/portal/cuenta?ambito={{ clave }}&tipo={{ tipo_filtro }}"
@@ -170,39 +174,44 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 <div class="card account-history-card">
     <div class="table-wrap">
         <table class="account-table">
-            <caption class="sr-only">Todos los movimientos de la cuenta {{ ambito_filtro }}</caption>
+            <caption class="sr-only">Historial de envíos, pagos y ajustes de la cuenta {{ ambito_filtro }}</caption>
             <thead>
                 <tr>
                     <th scope="col" class="account-col-date">Fecha</th>
-                    <th scope="col" class="account-col-concept">Movimiento</th>
-                    <th scope="col" class="account-col-document">Documento</th>
-                    <th scope="col" class="account-col-scope">Ámbito</th>
-                    <th scope="col" class="amount-column account-col-amount">Importe</th>
+                    <th scope="col" class="account-col-concept">Detalle</th>
+                    <th scope="col" class="account-col-document">Guía / tracking</th>
+                    <th scope="col" class="amount-column account-col-account">Tu cuenta</th>
                 </tr>
             </thead>
             <tbody>
                 {% for m in filas %}
                 <tr{% if m.tipo == 'DIFERENCIA' %} class="account-row-difference"{% endif %}>
                     <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
-                    <td data-label="Movimiento">
+                    <td data-label="Detalle">
                         <span class="account-movement-heading">
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}
-                            <span class="badge warn">En revisión</span>
+                            <span class="badge warn">Pago en revisión</span>
                         {% elif m.tipo == 'PAGO' %}
-                            <span class="badge ok">Pago aplicado</span>
+                            <span class="badge ok">Pago confirmado</span>
                         {% elif m.tipo == 'PENDIENTE_FACTURA' %}
-                            <span class="badge warn">A facturar</span>
+                            <span class="badge warn">Pendiente de factura</span>
                         {% elif m.tipo == 'DIFERENCIA' %}
-                            <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">Diferencia aplicada</span>
+                            <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">Ajuste del courier</span>
                         {% else %}
-                            <span class="badge">Factura</span>
+                            <span class="badge">Facturado</span>
                         {% endif %}
-                        {{ m.concepto or '—' }}
+                        {% if m.solicitud_id %}
+                            <strong class="account-shipment-title">{{ m.etiqueta_envio or m.destinatario or ('Envío #' ~ m.solicitud_id) }}</strong>
+                        {% else %}
+                            <strong class="account-shipment-title">{{ m.concepto or '—' }}</strong>
+                        {% endif %}
                         </span>
-                        {% if m.remitente or m.destinatario %}
-                        <small>{{ m.remitente or 'Origen sin informar' }} → {{ m.destinatario or 'Destino sin informar' }}</small>
-                        {% endif %}
-                        {% if m.referencia and m.tipo != 'DIFERENCIA' %}<small>Ref. {{ m.referencia }}</small>{% endif %}
+                        {% if m.solicitud_id %}
+                        <small class="account-shipment-meta">
+                            {% if m.etiqueta_envio %}Destinatario: {{ m.destinatario or 'Sin informar' }} · {% endif %}
+                            {{ ubicacion(m.origen_ciudad, m.origen_pais) }} → {{ ubicacion(m.destino_ciudad, m.destino_pais) }}
+                        </small>
+                        {% elif m.referencia and m.tipo != 'DIFERENCIA' %}<small>Referencia: {{ m.referencia }}</small>{% endif %}
                         {% if m.tipo == 'DIFERENCIA' and m.diferencia_detalle %}
                           {% set d = m.diferencia_detalle %}
                           {% if d.montos_completos %}
@@ -233,7 +242,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if m.valor_envio_ars is not none and m.tipo == 'DIFERENCIA' and (not m.diferencia_detalle or not m.diferencia_detalle.montos_completos) %}<small>Valor final del envío {{ dinero(m.valor_envio_ars) }}</small>{% endif %}
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
                     </td>
-                    <td class="mono" data-label="Documento">
+                    <td class="mono account-tracking-cell" data-label="Guía / tracking">
                         {% if m.numero_guia %}<strong>{{ m.numero_guia }}</strong>{% endif %}
                         {% if m.numero_factura %}<small>FC {{ m.numero_factura }}</small>{% endif %}
                         {% if not m.numero_guia and not m.numero_factura %}<span>—</span>{% endif %}
@@ -242,13 +251,13 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                             {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener">Descargar</a>{% endif %}
                         </span>
                     </td>
-                    <td data-label="Ámbito"><span class="badge muted">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span></td>
-                    <td class="mono amount-column account-movement-amount{% if m.tipo == 'DIFERENCIA' %} is-summary-only{% endif %}" data-label="Importe">
+                    <td class="mono amount-column account-movement-amount" data-label="Tu cuenta">
+                        <span class="badge muted account-scope-badge">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span>
                         {% if m.tipo == 'DIFERENCIA' %}
-                        <span class="sr-only">El costo final está detallado en Movimiento.</span>
-                        {% elif m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong><small>Pago</small>
-                        {% elif m.debe_ars %}<strong>+ {{ dinero(m.debe_ars) }}</strong><small>Cargo</small>
-                        {% elif m.tipo == 'PAGO_PENDIENTE' %}<strong>{{ dinero(m.monto_ars) }}</strong><small>En revisión</small>
+                        <small class="account-impact-explanation">El ajuste ya está incluido en el costo final.</small>
+                        {% elif m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong><small>Se descuenta del saldo</small>
+                        {% elif m.debe_ars %}<strong>+ {{ dinero(m.debe_ars) }}</strong><small>Se suma al saldo</small>
+                        {% elif m.tipo == 'PAGO_PENDIENTE' %}<strong>{{ dinero(m.monto_ars) }}</strong><small>Todavía no modifica el saldo</small>
                         {% else %}<span>—</span>{% endif %}
                     </td>
                 </tr>
