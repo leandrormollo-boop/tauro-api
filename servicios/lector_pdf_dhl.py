@@ -21,6 +21,10 @@ DINERO = r'(?:[0-9]+|[0-9]{1,3}(?:\.[0-9]{3})+),[0-9]{2}'
 CONCEPTOS = {
     'FLETE': 'FLETE', 'FUEL': 'COMBUSTIBLE', 'GOGREEN PLUS': 'OTRO',
     '12:00 PREMIUM': 'OTRO', 'VALUE PROTECTION': 'SEGURO',
+    # Recargo DHL identificado literalmente en el detalle. Se conserva como
+    # OTRO; no se infiere una categoría financiera más específica.
+    'NON-CONVEYABLE SURCHARGE (NCP)- WEIGHT': 'OTRO',
+    'REMOTE AREA SERVICE': 'OTRO',
 }
 BASES_PESO = {'A': 'DECLARADO', 'B': 'REAL', 'V': 'VOLUMETRICO',
               'W': 'VOLUMETRICO', 'M': 'OTRO'}
@@ -47,6 +51,42 @@ def _unico(patron, texto, campo):
 def _dinero(texto):
     _exigir(bool(re.fullmatch(DINERO, texto)), 'Importe documental inválido.')
     return Decimal(texto.replace('.', '').replace(',', '.'))
+
+
+def _total_cabecera(cabecera, pagina):
+    """Lee el total aunque el PDF lo separe visualmente de su etiqueta.
+
+    Algunas FC de abril-junio 2026 conservan la misma grilla DHL, pero el
+    extractor de texto deja el importe en una línea independiente. El
+    fallback exige la etiqueta, geometría y una única celda monetaria; no usa
+    el equivalente en ARS ni completa el dato por cálculo.
+    """
+    patron = r'^TOTAL A PAGA(?:R)?\s*U\$S\s*(' + DINERO + r')$'
+    valores = re.findall(patron, cabecera, flags=re.MULTILINE)
+    _exigir(len(valores) <= 1, 'Total: dato faltante o ambiguo.')
+    if valores:
+        return _dinero(valores[0])
+
+    palabras = pagina.extract_words()
+    anclas = [
+        w for w in palabras
+        if w['text'] == 'TOTAL' and 315 <= w['x0'] < 350 and 430 <= w['top'] < 455
+    ]
+    pagos = [
+        w for w in palabras
+        if re.fullmatch(r'PAGA(?:R)?U\$S', w['text'])
+        and 340 <= w['x0'] < 400 and 430 <= w['top'] < 455
+    ]
+    _exigir(len(anclas) == len(pagos) == 1 and abs(anclas[0]['top'] - pagos[0]['top']) <= 4,
+            'Total: dato faltante o ambiguo.')
+    importes = [
+        w['text'] for w in palabras
+        if 540 <= w['x0'] < 600
+        and anclas[0]['top'] <= w['top'] <= anclas[0]['top'] + 8
+        and re.fullmatch(DINERO, w['text'])
+    ]
+    _exigir(len(importes) == 1, 'Total: dato faltante o ambiguo.')
+    return _dinero(importes[0])
 
 
 def _fecha(texto):
@@ -100,7 +140,7 @@ def _leer_paginas(paginas, *, numero_esperado, cuit_esperado):
     _exigir(detalle.startswith('DETALLE Página 1 de 1\nFactura\n'), 'Detalle parcial o no soportado.')
     vencimiento = _unico(r'^VENCIMIENTO: ([0-9/]+)$', cabecera, 'Vencimiento')
     subtotal = _dinero(_unico(r'SUBTOTAL U\$S (' + DINERO + r')$', cabecera, 'Subtotal'))
-    total = _dinero(_unico(r'^TOTAL A PAGA(?:R)?\s*U\$S (' + DINERO + r')$', cabecera, 'Total'))
+    total = _total_cabecera(cabecera, paginas[0])
     fx = Decimal(_unico(r'Tipo de Cambio Efectos Impositivos: ([0-9]+\.[0-9]{2})', cabecera, 'Cambio impositivo'))
     ars, cambio = _unico(r'^El importe corresponde a \$ ([0-9]+\.[0-9]{2}) a TC: ([0-9]+\.[0-9]{3})$',
                         cabecera, 'Equivalente documental')
@@ -119,15 +159,17 @@ def _leer_paginas(paginas, *, numero_esperado, cuit_esperado):
         valores = _unico(r'^' + re.escape(nombre) + r' (' + DINERO + r') (' + DINERO + r')$', cabecera, nombre)
         resumen[nombre] = tuple(_dinero(v) for v in valores)
     _exigir(resumen['Periodic fee'] == (0, 0), 'Periodic fee requiere revisión específica.')
-    exento, gravado = (_dinero(v) for v in _unico(r'TOTAL CONCEPTO (' + DINERO + r') (' + DINERO + r')$',
+    exento, gravado = (_dinero(v) for v in _unico(r'TOTAL CONCEPTOS? (' + DINERO + r') (' + DINERO + r')$',
                                                 cabecera, 'Resumen de conceptos'))
     _exigir(exento + gravado == subtotal, 'Exento y gravado no cierran con el subtotal.')
     cantidad = int(_unico(r'^CANTIDAD DE GUÍAS: ([0-9]+)$', cabecera, 'Cantidad de guías'))
     palabras = paginas[1].extract_words()
     # El formato tiene columnas fijas. Se comprueban anclas antes de usarlas.
-    for nombre, desde, hasta in [('Guía', 15, 30), ('Peso', 135, 150),
-                                 ('Detalle', 430, 460), ('Importe', 480, 515), ('Grav', 520, 540)]:
-        _exigir(sum(w['text'] == nombre and desde <= w['x0'] < hasta and 80 <= w['top'] < 104
+    for nombre, variantes, desde, hasta in [
+            ('Guía', {'Guía'}, 15, 30), ('Peso', {'Peso'}, 135, 150),
+            ('Detalle', {'Detalle'}, 430, 460), ('Importe', {'Importe'}, 480, 515),
+            ('Grav', {'Grav', 'Grav.'}, 520, 540)]:
+        _exigir(sum(w['text'] in variantes and desde <= w['x0'] < hasta and 80 <= w['top'] < 104
                     for w in palabras) == 1, 'Columnas del detalle DHL no reconocidas.')
     tabla = [w for w in palabras if 105 <= w['top'] < 730]
     guias = _columna(tabla, 8, 58)

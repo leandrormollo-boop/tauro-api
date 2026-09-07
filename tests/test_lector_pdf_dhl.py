@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from servicios.entrada_facturas_dhl import ExtraccionDHLInvalida, preparar_factura_dhl
-from servicios.lector_pdf_dhl import _leer_paginas, extraer_factura_dhl_pdf
+from servicios.lector_pdf_dhl import _conceptos, _leer_paginas, extraer_factura_dhl_pdf
 
 
 CABECERA = '''Factura ORIGINAL
@@ -114,6 +114,36 @@ def test_no_acepta_total_ambiguo():
         leer(p)
 
 
+def test_acepta_total_en_celda_separada_si_geometria_es_univoca():
+    p = paginas()
+    p[0].extract_text = lambda: CABECERA.replace(
+        'TOTAL A PAGAU$S 148,36', 'TOTAL A PAGAU$S',
+    )
+    p[0].extract_words = lambda: [
+        {'text': 'TOTAL', 'x0': 331, 'top': 442},
+        {'text': 'A', 'x0': 354, 'top': 442},
+        {'text': 'PAGAU$S', 'x0': 361, 'top': 441},
+        {'text': '148,36', 'x0': 561, 'top': 445},
+    ]
+    assert leer(p).extraccion['total'] == Decimal('148.36')
+
+
+def test_acepta_plural_documentado_en_total_conceptos():
+    p = paginas()
+    p[0].extract_text = lambda: CABECERA.replace('TOTAL CONCEPTO ', 'TOTAL CONCEPTOS ')
+    assert leer(p).extraccion['subtotal'] == Decimal('142.00')
+
+
+def test_clasifica_recargo_no_transportable_solo_por_nombre_exacto():
+    assert _conceptos('Non-conveyable Surcharge (NCP)- Weight') == [
+        'NON-CONVEYABLE SURCHARGE (NCP)- WEIGHT',
+    ]
+
+
+def test_clasifica_recargo_zona_remota_solo_por_nombre_exacto():
+    assert _conceptos('Remote Area Service') == ['REMOTE AREA SERVICE']
+
+
 @pytest.mark.parametrize('detalle', [DETALLE.replace('00000001', '00000002'),
     DETALLE.replace('31/08/2026', '30/08/2026'), DETALLE.replace('1 de 1', '1 de 2')])
 def test_detalle_de_otro_documento_o_incompleto(detalle):
@@ -160,6 +190,12 @@ def test_columnas_movidas_se_rechazan():
     next(w for w in p[1].extract_words() if w['text'] == 'Importe')['x0'] = 300
     with pytest.raises(ExtraccionDHLInvalida, match='Columnas'):
         leer(p)
+
+
+def test_admite_grav_con_punto_en_la_cabecera_del_detalle():
+    p = paginas()
+    next(w for w in p[1].extract_words() if w['text'] == 'Grav')['text'] = 'Grav.'
+    assert leer(p).extraccion['total'] == Decimal('148.36')
 
 
 def test_no_acepta_geometria_distinta():
