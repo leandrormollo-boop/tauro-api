@@ -109,3 +109,14 @@ def test_saldos_contrastan_en_ambos_temas_sin_cambiar_metalico_de_marca():
     for path in (ROOT / "templates/admin").glob("*.html"):
         assert 'portal-balance-metal' not in path.read_text()
         assert 'portal-money-green' not in path.read_text()
+
+
+def test_formula_de_diferencias_no_trunca_importes_en_mobile():
+    css = (ROOT / "static/css/tauro.css").read_text()
+
+    bloque_valor = css.split(".account-difference-value strong {", 1)[1].split("}", 1)[0]
+    assert "text-overflow: ellipsis" not in bloque_valor
+    assert "white-space: nowrap" not in bloque_valor
+    assert "overflow-wrap: anywhere" in bloque_valor
+    assert "@media (max-width: 390px)" in css
+    assert ".account-difference-flow { grid-template-columns: 1fr;" in css

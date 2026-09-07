@@ -840,12 +840,11 @@ def movimientos_cuenta_paginados(
                 a.precio_nuevo_ars,
                 NULLIF(BTRIM(e.nro_fc), ''),
                 JSONB_BUILD_OBJECT(
-                    'valor_inicial_ars', a.precio_anterior_ars,
-                    'diferencia_ars', CASE
-                        WHEN a.tipo='CREDITO' THEN -ABS(a.monto_ars)
-                        ELSE ABS(a.monto_ars)
-                    END,
-                    'valor_final_ars', a.precio_nuevo_ars,
+                    'valor_inicial_ars', ROUND(c.precio_cliente_inicial_ars, 2),
+                    'diferencia_ars',
+                        ROUND(a.precio_nuevo_ars, 2)
+                        - ROUND(c.precio_cliente_inicial_ars, 2),
+                    'valor_final_ars', ROUND(a.precio_nuevo_ars, 2),
                     'tipo_ajuste', a.tipo,
                     'peso_inicial_kg', c.peso_cotizado_kg,
                     'peso_facturado_kg', c.peso_final_facturado_kg,

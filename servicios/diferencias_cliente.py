@@ -64,7 +64,7 @@ def presentar_diferencia(datos: Mapping[str, Any] | None) -> dict[str, Any]:
     valor_final = _dinero_opcional(fuente.get("valor_final_ars"))
     montos_completos = all(
         valor is not None for valor in (valor_inicial, diferencia, valor_final)
-    ) and abs(valor_inicial + diferencia - valor_final) <= Decimal("0.02")
+    ) and valor_inicial + diferencia == valor_final
     es_peso = motivo in MOTIVOS_PESO and inicial is not None and facturado is not None
     return {
         "montos_completos": montos_completos,

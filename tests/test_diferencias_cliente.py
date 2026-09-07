@@ -67,6 +67,16 @@ def test_presentacion_distingue_credito_y_oculta_flujo_inconsistente():
     assert inconsistente["montos_completos"] is False
 
 
+def test_presentacion_exige_igualdad_exacta_a_centavos():
+    detalle = presentar_diferencia({
+        "valor_inicial_ars": "100",
+        "diferencia_ars": "10",
+        "valor_final_ars": "110.02",
+    })
+
+    assert detalle["montos_completos"] is False
+
+
 def test_portal_muestra_explicacion_en_cuenta_y_detalle():
     cuenta = (ROOT / "templates" / "portal" / "cuenta.html").read_text()
     envio = (ROOT / "templates" / "portal" / "envio_detalle.html").read_text()
@@ -80,7 +90,8 @@ def test_portal_muestra_explicacion_en_cuenta_y_detalle():
     for texto in ("Valor cotizado", "Diferencia", "Costo final"):
         assert texto in cuenta
     assert "Peso facturado por el courier" in envio
-    assert "'valor_inicial_ars', a.precio_anterior_ars" in servicio
-    assert "'valor_final_ars', a.precio_nuevo_ars" in servicio
+    assert "'valor_inicial_ars', ROUND(c.precio_cliente_inicial_ars, 2)" in servicio
+    assert "- ROUND(c.precio_cliente_inicial_ars, 2)" in servicio
+    assert "'valor_final_ars', ROUND(a.precio_nuevo_ars, 2)" in servicio
     assert "concepto_courier" in servicio
     assert "i.concepto_tipo <> 'FLETE'" in servicio

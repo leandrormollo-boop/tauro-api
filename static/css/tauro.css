@@ -2971,12 +2971,11 @@ html[data-theme="light"] .account-total-card {
 .account-difference-value strong {
   display: block;
   margin-top: 3px;
-  overflow: hidden;
   color: var(--fg-2);
   font-family: var(--font-mono);
   font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 .account-difference-value.is-adjustment {
   padding: 7px 9px;
@@ -3112,6 +3111,15 @@ html[data-theme="light"] .account-total-card {
   .account-pagination a,
   .account-pagination span { min-width: 44px; height: 44px; }
   .account-empty-state { flex-direction: column; text-align: center; }
+}
+@media (max-width: 390px) {
+  .account-difference-flow { grid-template-columns: 1fr; gap: 5px; }
+  .account-difference-operator { justify-self: center; line-height: 1; }
+  .account-difference-value,
+  .account-difference-value.is-adjustment,
+  .account-difference-value.is-final { width: 100%; padding: 7px 9px; }
+  .account-difference-value strong,
+  .account-difference-value.is-final strong { font-size: 10px; }
 }
 
 .admin-shipments-table { min-width: 1360px; table-layout: fixed; }
