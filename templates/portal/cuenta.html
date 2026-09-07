@@ -182,7 +182,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             </thead>
             <tbody>
                 {% for m in filas %}
-                <tr>
+                <tr{% if m.tipo == 'DIFERENCIA' %} class="account-row-difference"{% endif %}>
                     <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
                     <td data-label="Movimiento">
                         <span class="account-movement-heading">
@@ -208,7 +208,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                           {% if d.montos_completos %}
                           <div class="account-difference-flow" aria-label="Cálculo del costo final">
                               <span class="account-difference-value">
-                                  <small>Valor inicial</small>
+                                  <small>Valor cotizado</small>
                                   <strong>{{ dinero(d.valor_inicial_ars) }}</strong>
                               </span>
                               <span class="account-difference-operator">{% if d.es_credito %}−{% else %}+{% endif %}</span>
@@ -243,8 +243,10 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         </span>
                     </td>
                     <td data-label="Ámbito"><span class="badge muted">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span></td>
-                    <td class="mono amount-column account-movement-amount" data-label="Importe">
-                        {% if m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong><small>Pago</small>
+                    <td class="mono amount-column account-movement-amount{% if m.tipo == 'DIFERENCIA' %} is-summary-only{% endif %}" data-label="Importe">
+                        {% if m.tipo == 'DIFERENCIA' %}
+                        <span class="sr-only">El costo final está detallado en Movimiento.</span>
+                        {% elif m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong><small>Pago</small>
                         {% elif m.debe_ars %}<strong>+ {{ dinero(m.debe_ars) }}</strong><small>Cargo</small>
                         {% elif m.tipo == 'PAGO_PENDIENTE' %}<strong>{{ dinero(m.monto_ars) }}</strong><small>En revisión</small>
                         {% else %}<span>—</span>{% endif %}

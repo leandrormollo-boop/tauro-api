@@ -11,7 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def render_account(balance):
+def render_account(balance, movement=None):
     """Página real con datos ficticios, sin acceder a cuentas ni bases reales."""
     balance = Decimal(balance)
     ledger = dict(
@@ -41,7 +41,7 @@ def render_account(balance):
             credito_sin_imputar_ars=0, cargos_sin_clasificar_ars=0,
         ),
         ambito_filtro="consolidado", tipo_filtro="todos", vista_cuenta="movimientos",
-        movimientos=dict(items=[payment], total_resultados=1, pagina_desde=1, pagina_hasta=1, total_paginas=1),
+        movimientos=dict(items=[movement or payment], total_resultados=1, pagina_desde=1, pagina_hasta=1, total_paginas=1),
         destinos_pago=[], today="2026-09-04", idempotency_key="test",
     )
 
@@ -70,6 +70,33 @@ def test_costos_verdes_conservan_adicionales_separados():
     detail = (ROOT / "templates/portal/envio_detalle.html").read_text()
     assert 'class="portal-money-green">{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}' in detail
     assert 'class="portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}' in detail
+
+
+def test_diferencia_muestra_una_sola_ecuacion_y_no_duplica_el_cargo():
+    difference = dict(
+        tipo="DIFERENCIA", estado="APLICADA", concepto="Diferencia de envío",
+        referencia="", numero_guia="873258645592", numero_factura=None,
+        solicitud_id=12, destinatario="DESTINO", remitente="ORIGEN",
+        fecha="01/09/2026", valor_envio_ars=Decimal("122271.34"),
+        ambito="internacional", debe_ars=Decimal("24571.34"), haber_ars=0,
+        diferencia_detalle=dict(
+            montos_completos=True, valor_inicial_ars=Decimal("97700"),
+            diferencia_ars=Decimal("24571.34"), valor_final_ars=Decimal("122271.34"),
+            es_credito=False, es_peso=False, concepto_courier="Diferencia del courier",
+            motivo_legible="Diferencia del courier", leyenda="Sin margen adicional.",
+        ),
+    )
+
+    html = render_account("24571.34", movement=difference)
+
+    assert "Valor cotizado" in html
+    assert "Diferencia" in html
+    assert "Costo final" in html
+    assert "$ 97.700,00" in html
+    assert "$ 24.571,34" in html
+    assert "$ 122.271,34" in html
+    assert 'account-movement-amount is-summary-only' in html
+    assert ">Cargo<" not in html
 
 
 def test_saldos_contrastan_en_ambos_temas_sin_cambiar_metalico_de_marca():

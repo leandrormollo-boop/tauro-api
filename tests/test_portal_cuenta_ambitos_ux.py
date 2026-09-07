@@ -256,6 +256,9 @@ def test_importe_unificado_conserva_cargos_y_pagos_contables():
     assert "{{ dinero(m.haber_ars) }}" in html
     assert "{% elif m.debe_ars %}" in html
     assert "{{ dinero(m.debe_ars) }}" in html
+    assert "Valor cotizado" in html
+    assert 'account-movement-amount{% if m.tipo == \'DIFERENCIA\' %} is-summary-only' in html
+    assert "El costo final está detallado en Movimiento." in html
     for etiqueta in ("Debe", "Haber"):
         assert f">{etiqueta}<" not in html
         assert f'data-label="{etiqueta}"' not in html

@@ -77,7 +77,7 @@ def test_portal_muestra_explicacion_en_cuenta_y_detalle():
         assert "leyenda" in html
         assert "costo_courier" not in html
         assert "margen_tauro" not in html
-    for texto in ("Valor inicial", "Diferencia", "Costo final"):
+    for texto in ("Valor cotizado", "Diferencia", "Costo final"):
         assert texto in cuenta
     assert "Peso facturado por el courier" in envio
     assert "'valor_inicial_ars', a.precio_anterior_ars" in servicio
