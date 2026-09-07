@@ -111,6 +111,7 @@
                   {% for referencia in guia.referencias_tauro_2026 %}
                     <strong>{{ referencia.cliente }}</strong>
                     <small>{{ referencia.concepto|title }}{% if referencia.fuente_fila %} · fila {{ referencia.fuente_fila }}{% endif %}</small>
+                    {% if referencia.estado_financiero == 'CONCILIADO_PREVIAMENTE' %}<span class="badge ok">Ya conciliado</span>{% endif %}
                     {% if not loop.last %}<span>·</span>{% endif %}
                   {% endfor %}
                 </div>
@@ -137,7 +138,10 @@
                 {% elif m.match_estado == 'RECHAZADO' %}<small>Motivo: {{ m.motivo_rechazo }}</small>{% endif %}
               </div>
             {% else %}
-              {% if guia.referencias_tauro_2026 %}
+              {% if guia.referencias_tauro_2026 and guia.referencias_tauro_2026[0].estado_financiero == 'CONCILIADO_PREVIAMENTE' %}
+                <span class="badge ok">Aplicado anteriormente</span>
+                <small>Esta guía ya tenía su diferencia conciliada y aplicada. El PDF actual quedó vinculado como evidencia, sin duplicar el débito.</small>
+              {% elif guia.referencias_tauro_2026 %}
                 <span class="badge warn">Envío no importado al portal</span>
                 <small>La FC y la guía coinciden en TAURO 2026, pero todavía no existe una solicitud del cliente a la cual aplicar la conciliación.</small>
               {% else %}

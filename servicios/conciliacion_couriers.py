@@ -905,6 +905,182 @@ def registrar_referencias_tauro_2026(
                     "TAURO 2026 trae guías que no aparecen en el PDF: "
                     + ", ".join(ajenos)
                 )
+            conciliadas_previamente = 0
+            for referencia in normalizadas:
+                saldo_fuente = referencia.get("saldo_ars")
+                if saldo_fuente in (None, ""):
+                    continue
+                saldo_fuente = _dinero(
+                    saldo_fuente, "SALDO ARS de TAURO 2026"
+                )
+                cur.execute(
+                    """
+                    SELECT id, cliente_id
+                      FROM solicitudes_guia
+                     WHERE UPPER(BTRIM(courier)) = UPPER(BTRIM(%s))
+                       AND NULLIF(REGEXP_REPLACE(
+                           UPPER(BTRIM(tracking)), '[^A-Z0-9]', '', 'g'
+                       ), '') = %s
+                    """,
+                    (factura["courier"], referencia["tracking"]),
+                )
+                solicitudes = [
+                    fila for fila in cur.fetchall()
+                    if _cliente_referencia_coincide(
+                        fila.get("cliente_id"), referencia.get("cliente")
+                    )
+                ]
+                if len(solicitudes) != 1:
+                    continue
+                solicitud_id = int(solicitudes[0]["id"])
+                patron_factura = f"%{factura['numero_normalizado']}%"
+                cur.execute(
+                    """
+                    SELECT f.id AS factura_id, f.numero,
+                           SUM(
+                               m.monto_asignado_ars * i.signo
+                               * CASE WHEN f.tipo_documento='NC' THEN -1 ELSE 1 END
+                           ) AS costo_confirmado_ars
+                      FROM factura_courier_item_matches m
+                      JOIN facturas_courier_items i ON i.id=m.item_id
+                      JOIN facturas_courier f ON f.id=i.factura_id
+                     WHERE m.solicitud_id=%s
+                       AND m.estado='CONFIRMADO'
+                       AND f.id<>%s
+                       AND (
+                           f.numero_normalizado LIKE %s
+                           OR UPPER(COALESCE(f.evidencia_uri, '')) LIKE %s
+                           OR UPPER(COALESCE(f.archivo_nombre, '')) LIKE %s
+                       )
+                     GROUP BY f.id, f.numero
+                    HAVING ABS(SUM(
+                               m.monto_asignado_ars * i.signo
+                               * CASE WHEN f.tipo_documento='NC' THEN -1 ELSE 1 END
+                           ) - %s) <= %s
+                     ORDER BY f.id
+                     LIMIT 1
+                    """,
+                    (
+                        solicitud_id, int(factura_id), patron_factura,
+                        patron_factura, patron_factura,
+                        saldo_fuente, CENTAVO_CONTROL,
+                    ),
+                )
+                factura_previa = cur.fetchone()
+                if not factura_previa:
+                    continue
+                diferencia_fuente = referencia.get("diferencia_ars")
+                diferencia_fuente = (
+                    _dinero(diferencia_fuente, "Diferencia de TAURO 2026")
+                    if diferencia_fuente not in (None, "") else None
+                )
+                cur.execute(
+                    """
+                    SELECT c.id AS conciliacion_id, c.version,
+                           c.costo_courier_real_ars,
+                           a.id AS ajuste_id, a.estado AS ajuste_estado,
+                           a.monto_ars AS ajuste_monto_ars
+                      FROM conciliaciones_envio c
+                      LEFT JOIN ajustes_cliente a
+                        ON a.conciliacion_id=c.id AND a.estado='APLICADO'
+                     WHERE c.solicitud_id=%s
+                       AND c.estado='CERRADA'
+                       AND ABS(c.costo_courier_real_ars - %s) <= %s
+                       AND (
+                           %s::numeric IS NULL
+                           OR (
+                               a.id IS NOT NULL
+                               AND ABS(ABS(a.monto_ars) - ABS(%s::numeric)) <= %s
+                           )
+                       )
+                     ORDER BY c.version DESC
+                     LIMIT 1
+                    """,
+                    (
+                        solicitud_id, saldo_fuente, CENTAVO_CONTROL,
+                        diferencia_fuente, diferencia_fuente,
+                        CENTAVO_CONTROL,
+                    ),
+                )
+                conciliacion_previa = cur.fetchone()
+                if not conciliacion_previa:
+                    continue
+                cur.execute(
+                    """
+                    SELECT m.id, m.estado
+                      FROM factura_courier_item_matches m
+                      JOIN facturas_courier_items i ON i.id=m.item_id
+                     WHERE i.factura_id=%s
+                       AND i.tracking_normalizado=%s
+                       AND m.solicitud_id=%s
+                     ORDER BY m.id
+                     FOR UPDATE OF m
+                    """,
+                    (
+                        int(factura_id), referencia["tracking"],
+                        solicitud_id,
+                    ),
+                )
+                matches_actuales = list(cur.fetchall())
+                if any(
+                    fila["estado"] == "CONFIRMADO"
+                    for fila in matches_actuales
+                ):
+                    continue
+                propuestas = [
+                    int(fila["id"]) for fila in matches_actuales
+                    if fila["estado"] == "PROPUESTO"
+                ]
+                if propuestas:
+                    cur.execute(
+                        """
+                        UPDATE factura_courier_item_matches
+                           SET estado='RECHAZADO',
+                               motivo_rechazo=%s, updated_at=NOW()
+                         WHERE id=ANY(%s) AND estado='PROPUESTO'
+                        """,
+                        (
+                            "Ya conciliado con el control histórico de esta FC",
+                            propuestas,
+                        ),
+                    )
+                referencia.update({
+                    "estado_financiero": "CONCILIADO_PREVIAMENTE",
+                    "solicitud_id": solicitud_id,
+                    "factura_control_previa_id": int(
+                        factura_previa["factura_id"]
+                    ),
+                    "conciliacion_previa_id": int(
+                        conciliacion_previa["conciliacion_id"]
+                    ),
+                    "ajuste_previo_id": (
+                        int(conciliacion_previa["ajuste_id"])
+                        if conciliacion_previa.get("ajuste_id") else None
+                    ),
+                })
+                conciliadas_previamente += 1
+                _registrar_auditoria(
+                    cur,
+                    evento="MATCH_DUPLICADO_HISTORICO_RECHAZADO",
+                    actor=actor,
+                    factura_id=int(factura_id),
+                    solicitud_id=solicitud_id,
+                    conciliacion_id=int(
+                        conciliacion_previa["conciliacion_id"]
+                    ),
+                    ajuste_id=(
+                        int(conciliacion_previa["ajuste_id"])
+                        if conciliacion_previa.get("ajuste_id") else None
+                    ),
+                    metadata={
+                        "tracking": referencia["tracking"],
+                        "factura_control_previa_id": int(
+                            factura_previa["factura_id"]
+                        ),
+                        "matches_rechazados": propuestas,
+                        "saldo_ars": str(saldo_fuente),
+                    },
+                )
             metadata = dict(factura.get("metadatos_origen") or {})
             metadata["referencias_tauro_2026"] = _json_seguro(normalizadas)
             metadata["referencias_tauro_2026_sha256"] = hash_fuente
@@ -940,6 +1116,7 @@ def registrar_referencias_tauro_2026(
         "factura_id": int(factura_id),
         "filas": len(normalizadas),
         "guias": len(trackings_fuente),
+        "conciliadas_previamente": conciliadas_previamente,
         **propuesta,
     }
 
@@ -1021,6 +1198,12 @@ def matchear_items_exactos(
                 )
                 solicitudes = list(cur.fetchall())
                 referencias = referencias_por_tracking.get(tracking, [])
+                if any(
+                    fila.get("estado_financiero")
+                    == "CONCILIADO_PREVIAMENTE"
+                    for fila in referencias
+                ):
+                    continue
                 clientes_referencia = {
                     fila["cliente"] for fila in referencias
                     if _texto(fila.get("cliente"))
