@@ -86,7 +86,7 @@ def test_cuenta_usa_solo_cliente_de_sesion_y_normaliza_filtros(monkeypatch):
 
     assert llamadas == [
         ("resumen", "CLIENTE_SESION"),
-        ("movimientos", "CLIENTE_SESION", "nacional", "pagos", 3, 10),
+        ("movimientos", "CLIENTE_SESION", "nacional", "pagos", 3, 6),
     ]
     assert respuesta["context"]["ambito_filtro"] == "nacional"
     assert respuesta["context"]["saldo"]["saldo_pendiente_ars"] == Decimal("500")
@@ -108,7 +108,7 @@ def test_query_manipulada_vuelve_a_consolidado_y_pagina_uno(monkeypatch):
         cliente="CLIENTE_SESION",
     )
 
-    assert recibidos == [("CLIENTE_SESION", "consolidado", "todos", 1, 10)]
+    assert recibidos == [("CLIENTE_SESION", "consolidado", "todos", 1, 6)]
 
 
 def test_cuenta_genera_clave_opaca_nueva_por_render(monkeypatch):
@@ -208,12 +208,12 @@ def test_pago_exige_idempotencia_valida_y_rechaza_mas_de_dos_decimales(monkeypat
     assert "m%C3%A1ximo%20dos%20decimales" in demasiados_decimales.headers["location"]
 
 
-def test_template_muestra_invariantes_tabs_paginacion_y_copy_seguro():
+def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
     html = (RAIZ / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
 
     for texto in (
-        "Saldo total consolidado", "Nacional", "Internacional", "Envíos", "Pagos",
-        "Saldo", "Crédito sin imputar", "Cargos sin clasificar", "Sin imputar",
+        "Saldo de tu cuenta", "Nacional", "Internacional", "Todos tus movimientos",
+        "Facturado", "Pagos aprobados", "A facturar", "Crédito disponible", "Sin imputar",
         "Dividir", "El pago no modifica tus saldos hasta que Tauro apruebe",
     ):
         assert texto in html
@@ -223,24 +223,28 @@ def test_template_muestra_invariantes_tabs_paginacion_y_copy_seguro():
     assert "paymentDetails.open = true" in html
     assert "movimientos.paginas_visibles" in html
     assert "&pagina={{ numero }}" in html
+    assert "account-unified-filters" in html
+    assert "vista=facturas" not in html
+    assert "account-tabs" not in html
 
 
-def test_etiquetas_envios_y_pagos_conservan_los_importes_contables():
+def test_importe_unificado_conserva_cargos_y_pagos_contables():
     html = (RAIZ / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
 
-    for origen in ("ledger", "total"):
-        assert f"<dt>Envíos</dt><dd>{{{{ dinero({origen}.debe_ars) }}}}</dd>" in html
-        assert f'<dt>Pagos</dt><dd class="portal-money-green">{{{{ dinero({origen}.haber_ars) }}}}</dd>' in html
-    assert '<th scope="col" class="amount-column">Envíos</th>' in html
-    assert '<th scope="col" class="amount-column">Pagos</th>' in html
-    assert 'data-label="Envíos">{% if m.debe_ars %}{{ dinero(m.debe_ars) }}' in html
-    assert 'data-label="Pagos">{% if m.haber_ars %}{{ dinero(m.haber_ars) }}' in html
+    assert "{{ dinero(total.facturado_ars) }}" in html
+    assert '{{ dinero(total.haber_ars) }}' in html
+    assert '<th scope="col" class="amount-column account-col-amount">Importe</th>' in html
+    assert 'data-label="Importe"' in html
+    assert "{% if m.haber_ars %}" in html
+    assert "{{ dinero(m.haber_ars) }}" in html
+    assert "{% elif m.debe_ars %}" in html
+    assert "{{ dinero(m.debe_ars) }}" in html
     for etiqueta in ("Debe", "Haber"):
         assert f">{etiqueta}<" not in html
         assert f'data-label="{etiqueta}"' not in html
 
 
-def test_movimientos_separan_y_ordenan_los_datos_del_envio():
+def test_movimientos_agrupan_datos_sin_forzar_scroll_horizontal():
     portal_html = (
         RAIZ / "templates" / "portal" / "cuenta.html"
     ).read_text(encoding="utf-8")
@@ -250,34 +254,28 @@ def test_movimientos_separan_y_ordenan_los_datos_del_envio():
     admin_py = (RAIZ / "endpoints" / "admin.py").read_text(encoding="utf-8")
     css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
 
-    columnas = (
-        "Concepto", "N.º de guía", "Destinatario", "Fecha", "Remitente",
-        "Valor del envío",
-    )
-    tablas = (
-        portal_html[portal_html.index('<table class="account-table">'):],
-        admin_html[admin_html.index('<table class="admin-shipments-table">'):],
-    )
-    for html in tablas:
-        posiciones = [html.index(f">{columna}<") for columna in columnas]
-        assert posiciones == sorted(posiciones)
+    columnas_portal = ("Fecha", "Movimiento", "Documento", "Ámbito", "Importe")
+    tabla_portal = portal_html[portal_html.index('<table class="account-table">'):]
+    posiciones = [tabla_portal.index(f">{columna}<") for columna in columnas_portal]
+    assert posiciones == sorted(posiciones)
 
-    assert 'data-label="Concepto"' in portal_html
-    assert 'data-label="N.º de guía"' in portal_html
-    assert 'data-label="Destinatario"' in portal_html
-    assert 'data-label="Remitente"' in portal_html
-    assert 'data-label="Valor del envío"' in portal_html
+    for etiqueta in columnas_portal:
+        assert f'data-label="{etiqueta}"' in portal_html
+    assert "{{ m.remitente or 'Origen sin informar' }} → {{ m.destinatario or 'Destino sin informar' }}" in portal_html
+    assert "min-width: 1220px" not in css
+    assert ".account-table { width: 100%; min-width: 0; table-layout: fixed; }" in css
     assert "NULLIF(BTRIM(s.dest_nombre), '') AS destinatario" in admin_py
     assert "NULLIF(BTRIM(s.remitente_nombre), '') AS remitente" in admin_py
     assert "WHEN e.solicitud_id IS NOT NULL THEN 'Flete'" in admin_py
     assert ".admin-shipments-table" in css
-    assert '.account-table td[data-label="Concepto"]' in css
+    assert '.account-table td[data-label="Movimiento"]' in css
 
 
-def test_resumen_consolidado_no_desborda_sobre_los_ambitos():
+def test_resumen_consolidado_es_compacto_y_no_desborda():
     css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
 
-    assert "grid-template-columns: minmax(300px, 1fr) minmax(0, 2fr);" in css
+    assert "grid-template-columns: minmax(240px, .8fr) minmax(460px, 1.7fr) minmax(270px, 1fr);" in css
     assert ".account-total-card > div { min-width: 0; }" in css
-    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
+    assert ".account-kpis" in css
+    assert ".account-scope-list" in css
     assert "text-overflow: ellipsis;" in css

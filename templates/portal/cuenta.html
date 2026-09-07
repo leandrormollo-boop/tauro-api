@@ -9,25 +9,13 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     {% if valor > 0 %}A pagar{% elif valor < 0 %}A favor{% else %}Al día{% endif %}
 {%- endmacro %}
 
-{% macro tarjeta_ambito(nombre, clave, ledger) -%}
-<a class="account-scope-card {% if ambito_filtro == clave %}is-active{% endif %}"
+{% macro resumen_ambito(nombre, clave, ledger) -%}
+<a class="account-scope-summary {% if ambito_filtro == clave %}is-active{% endif %}"
    href="/portal/cuenta?ambito={{ clave }}&tipo={{ tipo_filtro }}"
    {% if ambito_filtro == clave %}aria-current="page"{% endif %}>
-    <span class="account-scope-heading">{{ nombre }}</span>
-    <dl class="account-ledger-values">
-        <div><dt>Envíos</dt><dd>{{ dinero(ledger.debe_ars) }}</dd></div>
-        <div><dt>Pagos</dt><dd class="portal-money-green">{{ dinero(ledger.haber_ars) }}</dd></div>
-        <div>
-            <dt>Saldo</dt>
-            <dd>
-                <span class="portal-balance-metal">{{ dinero(ledger.saldo_ars|abs) }}</span>
-                <small>{{ estado_saldo(ledger.saldo_ars) }}</small>
-            </dd>
-        </div>
-    </dl>
-    <span class="account-invoice-breakdown">
-        Facturado {{ dinero(ledger.facturado_ars) }} · A facturar {{ dinero(ledger.pendiente_facturacion_ars) }}
-    </span>
+    <span>{{ nombre }}</span>
+    <strong class="portal-balance-metal">{{ dinero(ledger.saldo_ars|abs) }}</strong>
+    <small>{{ estado_saldo(ledger.saldo_ars) }} · Facturado {{ dinero(ledger.facturado_ars) }} · A facturar {{ dinero(ledger.pendiente_facturacion_ars) }}</small>
 </a>
 {%- endmacro %}
 
@@ -38,8 +26,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Administración</div>
-            <h1>Mi cuenta corriente</h1>
-            <p>Cargos y pagos separados por ámbito, con el total siempre consolidado.</p>
+            <h1>Mi cuenta</h1>
+            <p>Tu saldo, tus pagos y cada movimiento en un solo lugar.</p>
         </div>
         <div class="account-title-actions">
             <a href="#informar-pago" class="btn btn-primary" data-open-payment>Informar un pago</a>
@@ -58,40 +46,29 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 <div class="account-overview" aria-label="Resumen de cuenta">
     <article class="account-total-card">
         <div>
-            <span class="account-total-label">Saldo total consolidado</span>
+            <span class="account-total-label">Saldo de tu cuenta · total consolidado</span>
             <strong class="account-total-value portal-balance-metal">
                 {{ dinero(total.saldo_ars|abs) }}
             </strong>
             <span class="account-total-state">{{ estado_saldo(total.saldo_ars) }}</span>
         </div>
-        <dl class="account-total-breakdown">
-            <div><dt>Envíos</dt><dd>{{ dinero(total.debe_ars) }}</dd></div>
-            <div><dt>Pagos</dt><dd class="portal-money-green">{{ dinero(total.haber_ars) }}</dd></div>
-        </dl>
     </article>
 
-    <div class="account-scope-grid">
-        {{ tarjeta_ambito("Nacional", "nacional", resumen_cuenta.nacional) }}
-        {{ tarjeta_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}
+    <dl class="account-kpis" aria-label="Totales de la cuenta corriente">
+        <div><dt>Facturado</dt><dd>{{ dinero(total.facturado_ars) }}</dd></div>
+        <div><dt>Pagos aprobados</dt><dd class="portal-money-green">{{ dinero(total.haber_ars) }}</dd></div>
+        <div><dt>A facturar</dt><dd>{{ dinero(total.pendiente_facturacion_ars) }}</dd></div>
+        <div><dt>Crédito disponible</dt><dd class="portal-money-green">{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd></div>
+    </dl>
+
+    <div class="account-scope-list" aria-label="Saldo por ámbito">
+        {{ resumen_ambito("Nacional", "nacional", resumen_cuenta.nacional) }}
+        {{ resumen_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}
     </div>
 
-    <dl class="account-reconciliation" aria-label="Totales de la cuenta corriente">
-        <div><dt>Suma de envíos</dt><dd>{{ dinero(total.envios_ars) }}</dd></div>
-        <div><dt>Pagos aprobados</dt><dd class="portal-money-green">{{ dinero(total.pagos_ars) }}</dd></div>
-        <div><dt>Diferencias débito</dt><dd>{{ dinero(total.diferencias_debito_ars) }}</dd></div>
-        <div><dt>Diferencias crédito</dt><dd>{{ dinero(total.diferencias_credito_ars) }}</dd></div>
-    </dl>
-
-    <dl class="account-reconciliation" aria-label="Partidas pendientes de imputación o clasificación">
-        <div>
-            <dt>Crédito sin imputar</dt>
-            <dd>{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd>
-        </div>
-        <div>
-            <dt>Cargos sin clasificar</dt>
-            <dd>{{ dinero(resumen_cuenta.cargos_sin_clasificar_ars) }}</dd>
-        </div>
-    </dl>
+    {% if resumen_cuenta.cargos_sin_clasificar_ars %}
+    <p class="account-classification-note">Pendiente de clasificar: {{ dinero(resumen_cuenta.cargos_sin_clasificar_ars) }}</p>
+    {% endif %}
 </div>
 
 <details class="card account-payment-card" id="informar-pago">
@@ -156,52 +133,35 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     </form>
 </details>
 
-<nav class="account-tabs" aria-label="Secciones de la cuenta">
-    <a href="/portal/cuenta?vista=movimientos&ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}" class="{% if vista_cuenta == 'movimientos' %}is-active{% endif %}">Movimientos</a>
-    <a href="/portal/cuenta?vista=facturas" class="{% if vista_cuenta == 'facturas' %}is-active{% endif %}">Facturas</a>
-    <a href="/portal/cuenta?vista=pendientes" class="{% if vista_cuenta == 'pendientes' %}is-active{% endif %}">Pendientes de facturar</a>
-</nav>
-
-{% if vista_cuenta == 'facturas' %}
-  {% if facturas_cliente %}
-  <div class="card account-history-card"><div class="table-wrap"><table class="account-invoice-table">
-    <thead><tr><th>Factura</th><th>Emisión</th><th>Vencimiento</th><th>Total</th><th>Pagado</th><th>Saldo</th><th></th></tr></thead>
-    <tbody>{% for f in facturas_cliente %}<tr>
-      <td><strong>{{ f.numero_visible }}</strong><br><small>{{ f['items'] }} partidas · {{ f.estado|title }}</small>
-        {% if f.detalle_items %}<details><summary>Ver envíos incluidos</summary><ul>{% for item in f.detalle_items %}<li>{{ item.tracking or '—' }} · {{ item.descripcion }} · {{ dinero(item.monto) }}</li>{% endfor %}</ul></details>{% endif %}
-      </td>
-      <td>{{ f.fecha_emision.strftime('%d/%m/%Y') }}</td><td>{{ f.fecha_vencimiento.strftime('%d/%m/%Y') if f.fecha_vencimiento else '—' }}</td>
-      <td class="mono">{{ dinero(f.total) }}</td><td class="mono portal-money-green">{{ dinero(f.pagado) }}</td><td class="mono"><span class="portal-balance-metal">{{ dinero(f.saldo) }}</span></td>
-      <td>{% if f.tiene_pdf %}<a href="/portal/facturas/{{ f.id }}/pdf" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Descargar PDF</a>{% endif %}</td>
-    </tr>{% endfor %}</tbody>
-  </table></div></div>
-  {% else %}<div class="card account-empty-state"><strong>Todavía no tenés facturas emitidas.</strong></div>{% endif %}
-{% elif vista_cuenta == 'pendientes' %}
-  {% if pendientes_facturar %}
-  <div class="card account-history-card"><div class="table-wrap"><table class="account-invoice-table">
-    <thead><tr><th>Tipo</th><th>Guía</th><th>Detalle</th><th>Fecha</th><th>Ámbito</th><th>Importe</th></tr></thead>
-    <tbody>{% for p in pendientes_facturar %}<tr><td>{{ p.clase|title }}</td><td class="mono">{{ p.tracking or '—' }}</td><td>{{ p.descripcion }}</td><td>{{ p.fecha.strftime('%d/%m/%Y') if p.fecha else '—' }}</td><td>{{ p.ambito|title }}</td><td class="mono">{{ dinero(p.monto) }}</td></tr>{% endfor %}</tbody>
-  </table></div></div>
-  {% else %}<div class="card account-empty-state"><strong>No tenés cargos pendientes de facturar.</strong></div>{% endif %}
-{% else %}
-<nav class="account-tabs" aria-label="Ámbito de la cuenta">
-    {% for clave, etiqueta in (("consolidado", "Consolidado"), ("nacional", "Nacional"), ("internacional", "Internacional")) %}
-    <a href="/portal/cuenta?ambito={{ clave }}&tipo={{ tipo_filtro }}"
-       class="{% if ambito_filtro == clave %}is-active{% endif %}"
-       {% if ambito_filtro == clave %}aria-current="page"{% endif %}>{{ etiqueta }}</a>
-    {% endfor %}
-</nav>
-
+<section class="account-ledger" aria-labelledby="account-ledger-title">
 <div class="account-history-head">
-    <nav class="account-movement-filters" aria-label="Filtrar movimientos">
-        {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos / FC"), ("pagos", "Pagos"), ("diferencias", "Diferencias"), ("revision", "En revisión")) %}
-        <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ clave }}"
-           class="{% if tipo_filtro == clave %}is-active{% endif %}"
-           {% if tipo_filtro == clave %}aria-current="page"{% endif %}>{{ etiqueta }}</a>
-        {% endfor %}
-    </nav>
+    <div>
+        <h2 id="account-ledger-title">Todos tus movimientos</h2>
+        <p>Envíos, facturas, pagos y ajustes en orden de fecha.</p>
+    </div>
+    <form class="account-unified-filters" method="get" action="/portal/cuenta">
+        <label>
+            <span>Ámbito</span>
+            <select name="ambito" data-account-filter>
+                {% for clave, etiqueta in (("consolidado", "Todos"), ("nacional", "Nacional"), ("internacional", "Internacional")) %}
+                <option value="{{ clave }}" {% if ambito_filtro == clave %}selected{% endif %}>{{ etiqueta }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            <span>Tipo</span>
+            <select name="tipo" data-account-filter>
+                {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos y facturas"), ("pagos", "Pagos"), ("diferencias", "Ajustes"), ("revision", "En revisión")) %}
+                <option value="{{ clave }}" {% if tipo_filtro == clave %}selected{% endif %}>{{ etiqueta }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        {% if ambito_filtro != 'consolidado' or tipo_filtro != 'todos' %}
+        <a href="/portal/cuenta" class="account-clear-filters">Ver todo</a>
+        {% endif %}
+    </form>
     {% if movimientos.total_resultados %}
-    <p>Mostrando {{ movimientos.pagina_desde }}–{{ movimientos.pagina_hasta }} de {{ movimientos.total_resultados }}</p>
+    <p class="account-results-count">{{ movimientos.pagina_desde }}–{{ movimientos.pagina_hasta }} de {{ movimientos.total_resultados }}</p>
     {% endif %}
 </div>
 
@@ -210,24 +170,21 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 <div class="card account-history-card">
     <div class="table-wrap">
         <table class="account-table">
-            <caption class="sr-only">Movimientos de la cuenta {{ ambito_filtro }}</caption>
+            <caption class="sr-only">Todos los movimientos de la cuenta {{ ambito_filtro }}</caption>
             <thead>
                 <tr>
-                    <th scope="col" class="account-col-concept">Concepto</th>
-                    <th scope="col" class="account-col-guide">N.º de guía</th>
-                    <th scope="col" class="account-col-person">Destinatario</th>
                     <th scope="col" class="account-col-date">Fecha</th>
-                    <th scope="col" class="account-col-person">Remitente</th>
-                    <th scope="col" class="amount-column account-col-shipment-value">Valor del envío</th>
-                    {% if ambito_filtro == 'consolidado' %}<th scope="col" class="account-col-scope">Ámbito</th>{% endif %}
-                    <th scope="col" class="amount-column">Envíos</th>
-                    <th scope="col" class="amount-column">Pagos</th>
+                    <th scope="col" class="account-col-concept">Movimiento</th>
+                    <th scope="col" class="account-col-document">Documento</th>
+                    <th scope="col" class="account-col-scope">Ámbito</th>
+                    <th scope="col" class="amount-column account-col-amount">Importe</th>
                 </tr>
             </thead>
             <tbody>
                 {% for m in filas %}
                 <tr>
-                    <td data-label="Concepto">
+                    <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
+                    <td data-label="Movimiento">
                         <span class="account-movement-heading">
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}
                             <span class="badge warn">En revisión</span>
@@ -242,6 +199,9 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% endif %}
                         {{ m.concepto or '—' }}
                         </span>
+                        {% if m.remitente or m.destinatario %}
+                        <small>{{ m.remitente or 'Origen sin informar' }} → {{ m.destinatario or 'Destino sin informar' }}</small>
+                        {% endif %}
                         {% if m.referencia and m.tipo != 'DIFERENCIA' %}<small>Ref. {{ m.referencia }}</small>{% endif %}
                         {% if m.tipo == 'DIFERENCIA' and m.diferencia_detalle %}
                           {% set d = m.diferencia_detalle %}
@@ -252,23 +212,25 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                           {% endif %}
                           <small>{{ d.leyenda }}</small>
                         {% endif %}
-                        {% if m.numero_factura %}<small>FC {{ m.numero_factura }}</small>{% endif %}
+                        {% if m.valor_envio_ars is not none and m.tipo == 'DIFERENCIA' %}<small>Valor final del envío {{ dinero(m.valor_envio_ars) }}</small>{% endif %}
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
-                        {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener" class="account-document-link">Ver comprobante o factura ↗</a>{% endif %}
                     </td>
-                    <td class="mono" data-label="N.º de guía">
-                        {{ m.numero_guia or '—' }}
-                        {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}" class="account-document-link">Ver envío →</a>{% endif %}
+                    <td class="mono" data-label="Documento">
+                        {% if m.numero_guia %}<strong>{{ m.numero_guia }}</strong>{% endif %}
+                        {% if m.numero_factura %}<small>FC {{ m.numero_factura }}</small>{% endif %}
+                        {% if not m.numero_guia and not m.numero_factura %}<span>—</span>{% endif %}
+                        <span class="account-document-actions">
+                            {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}">Ver envío</a>{% endif %}
+                            {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener">Descargar</a>{% endif %}
+                        </span>
                     </td>
-                    <td data-label="Destinatario">{{ m.destinatario or '—' }}</td>
-                    <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
-                    <td data-label="Remitente">{{ m.remitente or '—' }}</td>
-                    <td class="mono amount-column account-shipment-value" data-label="Valor del envío">{% if m.valor_envio_ars is not none %}{{ dinero(m.valor_envio_ars) }}{% else %}—{% endif %}</td>
-                    {% if ambito_filtro == 'consolidado' %}
                     <td data-label="Ámbito"><span class="badge muted">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span></td>
-                    {% endif %}
-                    <td class="mono amount-column" data-label="Envíos">{% if m.debe_ars %}{{ dinero(m.debe_ars) }}{% else %}—{% endif %}</td>
-                    <td class="mono amount-column account-movement-credit" data-label="Pagos">{% if m.haber_ars %}{{ dinero(m.haber_ars) }}{% else %}—{% endif %}</td>
+                    <td class="mono amount-column account-movement-amount" data-label="Importe">
+                        {% if m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong><small>Pago</small>
+                        {% elif m.debe_ars %}<strong>+ {{ dinero(m.debe_ars) }}</strong><small>Cargo</small>
+                        {% elif m.tipo == 'PAGO_PENDIENTE' %}<strong>{{ dinero(m.monto_ars) }}</strong><small>En revisión</small>
+                        {% else %}<span>—</span>{% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -310,7 +272,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     {% endif %}
 </div>
 {% endif %}
-{% endif %}
+</section>
 </section>
 
 <script nonce="{{ request.state.csp_nonce }}">
@@ -322,6 +284,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
   var total = document.getElementById("pago-monto");
   var destinations = Array.from(form.querySelectorAll('[name="destinos"]'));
   var summary = document.getElementById("payment-allocation-summary");
+  var accountFilters = Array.from(document.querySelectorAll("[data-account-filter]"));
 
   function numberFromInput(value) {
     value = String(value || "").trim().replace(/\s/g, "");
@@ -366,6 +329,9 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
   if (paymentOpener) paymentOpener.addEventListener("click", openPayment);
   if (window.location.hash === "#informar-pago") openPayment();
   total.addEventListener("input", updateAllocation);
+  accountFilters.forEach(function (filter) {
+    filter.addEventListener("change", function () { filter.form.submit(); });
+  });
   updateAllocation();
 })();
 </script>

@@ -53,8 +53,6 @@ from servicios.cuenta_corriente import (
 )
 from servicios.facturacion_clientes import (
     get_factura_cliente_pdf,
-    listar_facturas_cliente,
-    listar_partidas_facturables,
 )
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
@@ -124,9 +122,9 @@ AMBITOS_CUENTA = {"consolidado", "nacional", "internacional"}
 TIPOS_MOVIMIENTO_CUENTA = {
     "todos", "cargos", "pagos", "diferencias", "revision",
 }
-# Mantiene el resumen y una página completa de movimientos dentro del viewport
-# de escritorio; el resto queda accesible con paginación explícita.
-MOVIMIENTOS_CUENTA_POR_PAGINA = 10
+# Mantiene resumen, filtros y una página completa dentro del viewport de
+# escritorio; el resto queda accesible con paginación explícita.
+MOVIMIENTOS_CUENTA_POR_PAGINA = 6
 _IDEMPOTENCY_KEY_MIN_LEN = 32
 _IDEMPOTENCY_KEY_MAX_LEN = 128
 _IDEMPOTENCY_KEY_CHARS = frozenset(
@@ -1076,9 +1074,9 @@ def cuenta_corriente(
     ambito = _ambito_cuenta(ambito)
     tipo = _tipo_movimiento_cuenta(tipo)
     pagina_numero = _pagina_cuenta(pagina)
-    vista = str(vista or "movimientos").strip().lower()
-    if vista not in {"movimientos", "facturas", "pendientes"}:
-        vista = "movimientos"
+    # `vista` queda en la firma por compatibilidad con enlaces anteriores.
+    # La cuenta nueva unifica facturas, pendientes y pagos en el mismo historial.
+    vista = "movimientos"
 
     # Las dos consultas reciben exclusivamente el cliente autenticado. Ningún
     # query param o campo del form puede elegir la cuenta de otra persona.
@@ -1094,15 +1092,6 @@ def cuenta_corriente(
         "pagado_ars": consolidado["haber_ars"],
         "saldo_pendiente_ars": consolidado["saldo_ars"],
     }
-    facturas_cliente = (
-        listar_facturas_cliente(cliente) if vista == "facturas" else []
-    )
-    pendientes_facturar = []
-    if vista == "pendientes":
-        for ambito_partida in ("NACIONAL", "INTERNACIONAL"):
-            pendientes_facturar.extend(listar_partidas_facturables(
-                cliente, tipo="FC", ambito=ambito_partida,
-            ))
     try:
         destinos_pago = listar_destinos_pago(cliente)
     except RuntimeError:
@@ -1120,8 +1109,6 @@ def cuenta_corriente(
             "ambito_filtro": ambito,
             "tipo_filtro": tipo,
             "vista_cuenta": vista,
-            "facturas_cliente": facturas_cliente,
-            "pendientes_facturar": pendientes_facturar,
             "destinos_pago": destinos_pago,
             "today": datetime.now().strftime("%Y-%m-%d"),
             "idempotency_key": _nueva_idempotency_key(),

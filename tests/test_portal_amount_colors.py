@@ -54,9 +54,10 @@ def test_saldo_metalico_conserva_valor_y_estado(balance, state):
     assert amount.group(1) == expected
     status = re.search(r'<span class="account-total-state">\s*(.*?)\s*</span>', html)
     assert status.group(1) == state
-    assert '<dt>Pagos</dt><dd class="portal-money-green">$ 3.000.000,00</dd>' in html
-    assert 'data-label="Pagos">$ 3.000.000,00</td>' in html
-    assert 'mono amount-column account-movement-credit' in html
+    assert '<dt>Pagos aprobados</dt><dd class="portal-money-green">$ 3.000.000,00</dd>' in html
+    assert 'data-label="Importe">' in html
+    assert '<strong class="account-amount-credit">− $ 3.000.000,00</strong>' in html
+    assert 'mono amount-column account-movement-amount' in html
 
 
 def test_costos_verdes_conservan_adicionales_separados():
