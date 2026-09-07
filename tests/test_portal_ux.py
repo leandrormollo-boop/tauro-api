@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=43" in base
+    assert "tauro.css?v=44" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -91,8 +91,11 @@ def test_cotizador_destaca_dhl_y_da_profundidad_al_formulario():
     assert 'data-carrier="{{ op.carrier_id }}"' in html
     assert 'class="quote-form-overview"' in html
     assert 'id="quote-route-summary"' in html
-    assert 'id="quote-package-summary"' in html
-    assert 'id="quote-progress-bar"' in html
+    assert 'id="quote-step-title"' in html
+    assert 'data-quote-step="route"' in html
+    assert 'data-quote-step="packages"' in html
+    assert 'id="quote-route-confirmation"' in html
+    assert 'id="quote-submit-row"' in html
     assert 'data-quote-section="route"' in html
     assert 'data-quote-section="packages"' in html
     assert '.quote-operator-chip.ready .quote-operator-logo-shell' in css
@@ -130,9 +133,11 @@ def test_cotizador_actualiza_resumen_progreso_y_cajas_en_vivo():
 
     assert "function syncQuotePreview()" in html
     assert 'form.addEventListener("input", syncQuotePreview)' in html
-    assert 'form.addEventListener("change", syncQuotePreview)' in html
-    assert 'totalWeight.toLocaleString("es-AR"' in html
-    assert 'progressBar.style.width' in html
+    assert 'form.addEventListener("change", function (event)' in html
+    assert 'value.toLocaleString("es-AR"' in html
+    assert "function showQuoteStep(routeReady, quoteReady)" in html
+    assert 'submit.disabled = !quoteReady' in html
+    assert 'destination.value = ""' in html
     assert 'last.classList.add("is-entering")' in html
     assert 'row.classList.add("is-removing")' in html
 

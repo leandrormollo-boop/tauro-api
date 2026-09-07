@@ -176,10 +176,41 @@
     var packageTemplate = root.querySelector("#quote-package-template");
     var addPackage = root.querySelector("#quote-add-package");
     var routeSummary = root.querySelector("#quote-route-summary");
-    var packageSummary = root.querySelector("#quote-package-summary");
     var progressLabel = root.querySelector("#quote-progress-label");
-    var progressBar = root.querySelector("#quote-progress-bar");
     var submit = root.querySelector("#quote-submit");
+    var submitRow = root.querySelector("#quote-submit-row");
+    var routeBlock = root.querySelector('[data-quote-section="route"]');
+    var packagesBlock = root.querySelector('[data-quote-section="packages"]');
+    var routeConfirmation = root.querySelector("#quote-route-confirmation");
+    var editRoute = root.querySelector("#quote-edit-route");
+    var stepTitle = root.querySelector("#quote-step-title");
+    var stepDescription = root.querySelector("#quote-step-description");
+    var routeStep = root.querySelector('[data-quote-step="route"]');
+    var packagesStep = root.querySelector('[data-quote-step="packages"]');
+    var editingRoute = false;
+
+    function showStep(routeReady, quoteReady) {
+      var showPackages = routeReady && !editingRoute;
+      if (form) form.classList.add("quote-flow-enabled");
+      if (routeBlock) routeBlock.classList.toggle("is-step-hidden", showPackages);
+      if (packagesBlock) packagesBlock.classList.toggle("is-step-hidden", !showPackages);
+      if (routeConfirmation) routeConfirmation.hidden = !showPackages;
+      if (submitRow) submitRow.hidden = !showPackages;
+      if (routeStep) {
+        routeStep.classList.toggle("is-active", !showPackages);
+        routeStep.classList.toggle("is-complete", showPackages);
+      }
+      if (packagesStep) {
+        packagesStep.classList.toggle("is-active", showPackages);
+        packagesStep.classList.toggle("is-complete", showPackages && quoteReady);
+      }
+      if (stepTitle) stepTitle.textContent = showPackages
+        ? "Paso 2 de 2 · Completá la caja"
+        : "Paso 1 de 2 · Elegí la ruta";
+      if (stepDescription) stepDescription.textContent = showPackages
+        ? "Ingresá peso, medidas y valor declarado para obtener la tarifa."
+        : "Indicá desde dónde sale el envío y a qué país llega.";
+    }
 
     function syncPreview() {
       if (!form || !packageList) return;
@@ -214,25 +245,21 @@
       if (routeSummary) {
         routeSummary.textContent = originName + " → " + (destinationName || "Elegí destino");
       }
-      if (packageSummary) {
-        var boxesText = physicalBoxes + " caja" + (physicalBoxes === 1 ? "" : "s");
-        packageSummary.textContent = boxesText + (totalWeight > 0
-          ? " · " + totalWeight.toLocaleString("es-AR", { maximumFractionDigits: 2 }) + " kg"
-          : "");
-      }
-
       setSectionState(root, "route", routeReady);
       setSectionState(root, "packages", packagesReady && declaredReady);
 
-      var progress = 10 + (routeReady ? 30 : 0) + (packagesReady ? 40 : 0) + (declaredReady ? 20 : 0);
-      if (progressBar) progressBar.style.width = Math.min(progress, 100) + "%";
       if (progressLabel) {
-        if (!routeReady) progressLabel.textContent = "Elegí el destino para comenzar.";
+        if (!routeReady || editingRoute) progressLabel.textContent = "Elegí origen y destino para continuar.";
         else if (!packagesReady) progressLabel.textContent = "Completá el peso y las medidas de cada caja.";
         else if (!declaredReady) progressLabel.textContent = "Indicá el valor declarado total.";
         else progressLabel.textContent = "Todo listo para consultar la tarifa.";
       }
-      if (submit) submit.classList.toggle("is-ready", routeReady && packagesReady && declaredReady);
+      var quoteReady = routeReady && packagesReady && declaredReady;
+      showStep(routeReady, quoteReady);
+      if (submit) {
+        submit.disabled = !quoteReady;
+        submit.classList.toggle("is-ready", quoteReady);
+      }
     }
 
     function syncPackages() {
@@ -280,7 +307,12 @@
 
     if (form) {
       form.addEventListener("input", syncPreview);
-      form.addEventListener("change", syncPreview);
+      form.addEventListener("change", function (event) {
+        if (event.target && (event.target.id === "origen_pais" || event.target.id === "destino_pais")) {
+          editingRoute = false;
+        }
+        syncPreview();
+      });
       syncPreview();
 
       form.addEventListener("submit", function (event) {
@@ -317,6 +349,20 @@
             if (submit) submit.disabled = false;
             showInlineError(root, stage, error.message);
           });
+      });
+    }
+
+    if (editRoute) {
+      editRoute.addEventListener("click", function () {
+        editingRoute = true;
+        var destination = root.querySelector("#destino_pais");
+        if (destination) {
+          destination.value = "";
+          destination.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        syncPreview();
+        var origin = root.querySelector("#origen_pais");
+        if (origin) origin.focus({ preventScroll: true });
       });
     }
 

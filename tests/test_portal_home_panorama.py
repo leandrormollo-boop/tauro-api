@@ -36,7 +36,7 @@ def test_hero_conserva_el_contenido_y_deja_de_encerrar_la_foto():
     assert "border: 0;" in panorama
     assert "background: none;" in panorama
     assert "box-shadow: none;" in panorama
-    assert "tauro.css?v=43" in BASE
+    assert "tauro.css?v=44" in BASE
 
 
 def test_cuadrantes_del_home_dejan_ver_la_escena_sin_afectar_otras_paginas():
