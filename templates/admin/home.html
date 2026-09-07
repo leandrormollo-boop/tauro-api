@@ -1,30 +1,37 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}Panel de control{% endblock %}
 
 {% block content %}
 <div class="page-title">
   <div class="eyebrow">Tauro Admin</div>
-  <h1>Dashboard</h1>
+  <h1>Panel de control</h1>
+  <p>Accedé directamente al área que necesitás administrar.</p>
 </div>
 
-{# Las tarjetas son LINKS, no carteles (Leandro, 06/08): "deberían ser botones
-   para que la experiencia sea fluida y rápida". Un número que te dice que hay 4
-   guías esperando y no te lleva a ellas te obliga a buscarlas en el menú. #}
 <div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 28px;">
+  <a href="/admin/facturas-internacionales" class="stat-card stat-link">
+    <div class="label">Control de operadores</div>
+    <div class="value" style="font-size:22px;">Facturas internacionales</div>
+    <div class="ir">DHL y FedEx →</div>
+  </a>
+  <a href="/admin/facturas-nacionales" class="stat-card stat-link">
+    <div class="label">Control de operadores</div>
+    <div class="value" style="font-size:22px;">Facturas nacionales</div>
+    <div class="ir">Andreani y OCA →</div>
+  </a>
   <a href="/admin/clientes" class="stat-card stat-link">
-    <div class="label">Clientes activos</div>
-    <div class="value">{{ stats.clientes_activos }}</div>
-    <div class="ir">Ver clientes →</div>
+    <div class="label">Administración</div>
+    <div class="value" style="font-size:22px;">Lista de clientes</div>
+    <div class="ir">{{ stats.clientes_activos }} activos · abrir →</div>
   </a>
-  <a href="/admin/envios/nuevo" class="stat-card stat-link">
-    <div class="label">Facturas cargadas</div>
-    <div class="value">{{ stats.total_envios }}</div>
-    <div class="ir">Cargar factura →</div>
-  </a>
+</div>
+
+<div class="eyebrow" style="margin-bottom:12px;">Pendientes operativos</div>
+<div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 28px;">
   <a href="/admin/pagos/pendientes" class="stat-card stat-link">
-    <div class="label">Pagos registrados</div>
+    <div class="label">Pagos por revisar</div>
     <div class="value">{{ stats.total_pagos }}</div>
-    <div class="ir">Ver pagos →</div>
+    <div class="ir">Abrir pagos →</div>
   </a>
   <a href="/admin/productos" class="stat-card stat-link {% if stats.productos_pendientes > 0 %}urge{% endif %}">
     <div class="label">Productos pendientes</div>

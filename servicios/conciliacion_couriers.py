@@ -2407,6 +2407,7 @@ def listar_control_envios(
     *,
     cliente: str = "",
     courier: str = "",
+    ambito: str = "",
     estado: str = "",
     buscar: str = "",
     limite: int = 1000,
@@ -2420,6 +2421,17 @@ def listar_control_envios(
     if courier.strip():
         condiciones.append("UPPER(BTRIM(s.courier)) = %s")
         parametros.append(normalizar_courier(courier))
+    ambito_normalizado = _texto(ambito).upper()
+    if ambito_normalizado == "INTERNACIONAL":
+        condiciones.append(
+            "(e.ambito = 'INTERNACIONAL' OR "
+            "UPPER(BTRIM(s.courier)) IN ('DHL','FEDEX'))"
+        )
+    elif ambito_normalizado == "NACIONAL":
+        condiciones.append(
+            "(e.ambito = 'NACIONAL' OR "
+            "UPPER(BTRIM(s.courier)) IN ('ANDREANI','OCA'))"
+        )
     if buscar.strip():
         condiciones.append(
             "(s.tracking ILIKE %s OR s.cliente_id ILIKE %s "
@@ -2513,11 +2525,23 @@ def listar_control_envios(
     return {"items": filas, "totales": estados, "total": len(filas)}
 
 
-def listar_facturas_courier_control(limite: int = 100) -> list[dict[str, Any]]:
+def listar_facturas_courier_control(
+    limite: int = 100,
+    *,
+    couriers: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    couriers_normalizados = sorted({
+        normalizar_courier(courier) for courier in (couriers or [])
+    })
+    where = ""
+    parametros: list[Any] = []
+    if couriers_normalizados:
+        where = "WHERE UPPER(BTRIM(f.courier)) = ANY(%s)"
+        parametros.append(couriers_normalizados)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT f.id, f.courier, f.tipo_documento, f.numero,
                        f.fecha_emision, f.moneda, f.total, f.estado,
                        f.archivo_nombre, f.created_at,
@@ -2538,11 +2562,12 @@ def listar_facturas_courier_control(limite: int = 100) -> list[dict[str, Any]]:
                 FROM facturas_courier f
                 LEFT JOIN facturas_courier_items i ON i.factura_id = f.id
                 LEFT JOIN factura_courier_item_matches m ON m.item_id = i.id
+                {where}
                 GROUP BY f.id
                 ORDER BY f.created_at DESC, f.id DESC
                 LIMIT %s
                 """,
-                (max(1, min(int(limite), 500)),),
+                (*parametros, max(1, min(int(limite), 500))),
             )
             return [dict(fila) for fila in cur.fetchall()]
 

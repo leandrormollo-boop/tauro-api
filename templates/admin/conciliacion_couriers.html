@@ -1,5 +1,5 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Control de envíos y facturas{% endblock %}
+{% block title %}{{ titulo|default('Control de envíos y facturas') }}{% endblock %}
 
 {% macro dinero(valor) -%}
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
@@ -9,11 +9,11 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 <div class="page-title page-title-row">
   <div>
     <div class="eyebrow">Administración financiera</div>
-    <h1>Control de envíos y facturas courier</h1>
-    <p>Cada guía se controla contra la factura final de DHL, FedEx, Andreani u OCA antes de actualizar al cliente.</p>
+    <h1>{{ titulo|default('Control de envíos y facturas') }}</h1>
+    <p>{{ descripcion|default('Cada guía se controla contra la factura final del operador antes de actualizar al cliente.') }}</p>
   </div>
-  <div><a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer factura DHL</a>
-  <a href="/admin/conciliacion-couriers/nueva" class="btn btn-ghost">Carga manual courier</a></div>
+  <div>{% if ambito == 'INTERNACIONAL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Importar facturas DHL</a>{% endif %}
+  <a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito|default('INTERNACIONAL') }}" class="btn {% if ambito == 'INTERNACIONAL' %}btn-ghost{% else %}btn-primary{% endif %}">Cargar factura</a></div>
 </div>
 
 {% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada correctamente.</div>{% endif %}
@@ -27,9 +27,9 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 </div>
 
 <div class="card" style="margin-bottom:18px;">
-  <form method="GET" action="/admin/conciliacion-couriers" class="form-grid-4">
+  <form method="GET" action="{{ ruta_facturas|default('/admin/conciliacion-couriers') }}" class="form-grid-4">
     <div class="form-group"><label>Cliente</label><select name="cliente"><option value="">Todos</option>{% for c in clientes %}<option value="{{ c.cliente_id }}" {% if filtros.cliente == c.cliente_id %}selected{% endif %}>{{ c.cliente_id }}</option>{% endfor %}</select></div>
-    <div class="form-group"><label>Courier</label><select name="courier"><option value="">Todos</option>{% for nombre in ('DHL','FEDEX','ANDREANI','OCA') %}<option value="{{ nombre }}" {% if filtros.courier|upper == nombre %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label>Operador</label><select name="courier"><option value="">Todos</option>{% for nombre in couriers_disponibles|default(('DHL','FEDEX','ANDREANI','OCA')) %}<option value="{{ nombre }}" {% if filtros.courier|upper == nombre %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
     <div class="form-group"><label>Estado de control</label><select name="estado"><option value="">Todos</option>{% for valor, etiqueta in (('ESPERANDO_FACTURA','Esperando factura'),('BASE_PENDIENTE','Base pendiente'),('MATCH_PENDIENTE','Match pendiente'),('DIFERENCIA_PENDIENTE','Diferencia pendiente'),('CONCILIADO','Conciliado')) %}<option value="{{ valor }}" {% if filtros.estado|upper == valor %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}</select></div>
     <div class="form-group"><label>Tracking / destinatario</label><input name="buscar" value="{{ filtros.buscar }}" placeholder="Buscar"><button class="btn btn-ghost btn-sm" style="margin-top:8px;">Filtrar</button></div>
   </form>
@@ -73,7 +73,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 </div>
 
 <div class="card" style="margin-bottom:22px;">
-  <div class="card-head"><div><h3>Facturas de operadores</h3><p>Documentos internos; el cliente nunca ve estos costos.</p></div><a href="/admin/conciliacion-couriers/nueva" class="btn btn-ghost btn-sm">+ Nueva factura</a></div>
+  <div class="card-head"><div><h3>{{ titulo|default('Facturas de operadores') }}</h3><p>Documentos internos; el cliente nunca ve estos costos.</p></div><a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito|default('INTERNACIONAL') }}" class="btn btn-ghost btn-sm">+ Nueva factura</a></div>
   <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Courier</th><th>Total</th><th>Guías / matches</th><th>Estado</th><th></th></tr></thead><tbody>
   {% for f in facturas %}<tr><td><strong>{{ f.tipo_documento }} {{ f.numero }}</strong><br><small>{{ f.fecha_emision or f.created_at.strftime('%d/%m/%Y') }}</small></td><td>{{ f.courier }}</td><td class="mono">{{ f.moneda }} {{ f.total }}</td><td>{{ f.guias }} guías · {{ f.lineas }} cargos<br><small>{{ f.confirmados }} matches confirmados · {{ f.propuestos }} propuestos</small></td><td><span class="badge muted">{{ f.estado|title }}</span></td><td><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/facturas/{{ f.id }}">Controlar</a></td></tr>
   {% else %}<tr><td colspan="6" class="empty">Todavía no se cargaron facturas courier.</td></tr>{% endfor %}

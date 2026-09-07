@@ -1,12 +1,13 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Cargar factura courier{% endblock %}
+{% block title %}{{ titulo|default('Cargar factura') }}{% endblock %}
 {% block content %}
-<div class="page-title page-title-row"><div><div class="eyebrow">Control courier</div><h1>Cargar factura del operador</h1><p>Puede ser una factura individual o una factura mensual con muchas guías.</p></div><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver</a></div>
+<div class="page-title page-title-row"><div><div class="eyebrow">Control courier</div><h1>{{ titulo|default('Cargar factura del operador') }}</h1><p>Puede ser una factura individual o una factura mensual con muchas guías.</p></div><a href="{{ ruta_retorno|default('/admin/facturas-internacionales') }}" class="btn btn-ghost">Volver</a></div>
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
 <div class="card" style="max-width:980px;">
 <form method="POST" action="/admin/conciliacion-couriers/nueva" enctype="multipart/form-data">
+  <input type="hidden" name="ambito" value="{{ ambito|default('INTERNACIONAL') }}">
   <div class="form-grid-4">
-    <div class="form-group"><label>Courier *</label><select name="courier" required>{% for c in ('DHL','FEDEX','ANDREANI','OCA') %}<option>{{ c }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label>Operador *</label><select name="courier" required>{% for c in couriers_disponibles %}<option>{{ c }}</option>{% endfor %}</select></div>
     <div class="form-group"><label>Tipo *</label><select name="tipo_documento"><option>FC</option><option>NC</option><option>ND</option></select></div>
     <div class="form-group"><label>Número *</label><input name="numero" required placeholder="FC 0001-1234"></div>
     <div class="form-group"><label>Fecha emisión</label><input type="date" name="fecha_emision"></div>
@@ -32,7 +33,7 @@
     <small>El total del documento debe incluir este importe. Si ya pegaste el TAX como una línea IMPUESTO o ADUANA, dejá estos casilleros vacíos.</small>
   </div>
   <div class="form-group"><label>Líneas de la factura *</label><textarea name="lineas" rows="12" required placeholder="tracking;importe;concepto;peso_facturado;peso_base;descripcion&#10;1234567890;15000;FLETE;3,2;VOLUMETRICO;Flete internacional"></textarea><small>Pegá desde Excel usando tabulaciones o punto y coma. Conceptos: FLETE, COMBUSTIBLE, IMPUESTO, ADUANA, MANEJO, SEGURO, DESCUENTO u OTRO. Un tracking puede repetirse en varias líneas.</small></div>
-  <div style="display:flex;gap:10px;"><button class="btn btn-primary">Cargar y proponer matches</button><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Cancelar</a></div>
+  <div style="display:flex;gap:10px;"><button class="btn btn-primary">Cargar y proponer matches</button><a href="{{ ruta_retorno|default('/admin/facturas-internacionales') }}" class="btn btn-ghost">Cancelar</a></div>
 </form>
 </div>
 {% endblock %}

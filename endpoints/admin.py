@@ -3830,42 +3830,155 @@ def admin_conciliacion_couriers(
     """Control financiero por envío; costos reales nunca salen al portal."""
     if not _is_auth(admin_token):
         return _redirect_login()
+    return _render_facturas_admin(
+        request=request, cliente=cliente, courier=courier,
+        estado=estado, buscar=buscar,
+    )
+
+
+def _render_facturas_admin(
+    *,
+    request: Request,
+    cliente: str = "",
+    courier: str = "",
+    estado: str = "",
+    buscar: str = "",
+    ambito: str = "",
+):
     from servicios.conciliacion_couriers import (
         listar_ajustes_para_revision,
         listar_control_envios,
         listar_facturas_courier_control,
     )
+    ambito_normalizado = str(ambito or "").strip().upper()
+    if ambito_normalizado == "INTERNACIONAL":
+        couriers_disponibles = ("DHL", "FEDEX")
+        titulo = "Facturas internacionales"
+        descripcion = (
+            "DHL y FedEx: factura, guías, costos finales y diferencias "
+            "de cada cliente."
+        )
+        seccion = "facturas_internacionales"
+        ruta_facturas = "/admin/facturas-internacionales"
+    elif ambito_normalizado == "NACIONAL":
+        couriers_disponibles = ("ANDREANI", "OCA")
+        titulo = "Facturas nacionales"
+        descripcion = (
+            "Andreani y OCA: facturas y control de los envíos dentro "
+            "de Argentina."
+        )
+        seccion = "facturas_nacionales"
+        ruta_facturas = "/admin/facturas-nacionales"
+    else:
+        couriers_disponibles = ("DHL", "FEDEX", "ANDREANI", "OCA")
+        titulo = "Control de envíos y facturas"
+        descripcion = (
+            "Control interno de facturas y envíos de todos los operadores."
+        )
+        seccion = "conciliacion_couriers"
+        ruta_facturas = "/admin/conciliacion-couriers"
+    courier_normalizado = str(courier or "").strip().upper()
+    if courier_normalizado not in couriers_disponibles:
+        courier_normalizado = ""
     control = listar_control_envios(
-        cliente=cliente, courier=courier, estado=estado, buscar=buscar,
+        cliente=cliente, courier=courier_normalizado, ambito=ambito_normalizado,
+        estado=estado, buscar=buscar,
     )
+    ajustes = [
+        ajuste for ajuste in listar_ajustes_para_revision()
+        if str(ajuste.get("courier") or "").strip().upper()
+        in couriers_disponibles
+    ]
     return templates.TemplateResponse(
         request=request,
         name="admin/conciliacion_couriers.html",
         context={
-            "seccion": "conciliacion_couriers",
+            "seccion": seccion,
+            "titulo": titulo,
+            "descripcion": descripcion,
+            "ambito": ambito_normalizado,
+            "ruta_facturas": ruta_facturas,
+            "couriers_disponibles": couriers_disponibles,
             "control": control,
-            "facturas": listar_facturas_courier_control(),
-            "ajustes": listar_ajustes_para_revision(),
+            "facturas": listar_facturas_courier_control(
+                couriers=couriers_disponibles
+            ),
+            "ajustes": ajustes,
             "clientes": _get_clientes_lista(),
             "filtros": {
-                "cliente": cliente, "courier": courier,
+                "cliente": cliente, "courier": courier_normalizado,
                 "estado": estado, "buscar": buscar,
             },
         },
     )
 
 
-@router.get("/conciliacion-couriers/nueva", response_class=HTMLResponse)
-def admin_factura_courier_form(
+@router.get("/facturas-internacionales", response_class=HTMLResponse)
+def admin_facturas_internacionales(
     request: Request,
+    cliente: str = "",
+    courier: str = "",
+    estado: str = "",
+    buscar: str = "",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
+    return _render_facturas_admin(
+        request=request, cliente=cliente, courier=courier,
+        estado=estado, buscar=buscar, ambito="INTERNACIONAL",
+    )
+
+
+@router.get("/facturas-nacionales", response_class=HTMLResponse)
+def admin_facturas_nacionales(
+    request: Request,
+    cliente: str = "",
+    courier: str = "",
+    estado: str = "",
+    buscar: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    return _render_facturas_admin(
+        request=request, cliente=cliente, courier=courier,
+        estado=estado, buscar=buscar, ambito="NACIONAL",
+    )
+
+
+@router.get("/conciliacion-couriers/nueva", response_class=HTMLResponse)
+def admin_factura_courier_form(
+    request: Request,
+    ambito: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    ambito_normalizado = str(ambito or "").strip().upper()
+    if ambito_normalizado == "NACIONAL":
+        couriers_disponibles = ("ANDREANI", "OCA")
+        titulo = "Cargar factura nacional"
+        ruta_retorno = "/admin/facturas-nacionales"
+    else:
+        ambito_normalizado = "INTERNACIONAL"
+        couriers_disponibles = ("DHL", "FEDEX")
+        titulo = "Cargar factura internacional"
+        ruta_retorno = "/admin/facturas-internacionales"
     return templates.TemplateResponse(
         request=request,
         name="admin/factura_courier_form.html",
-        context={"seccion": "conciliacion_couriers"},
+        context={
+            "seccion": (
+                "facturas_nacionales"
+                if ambito_normalizado == "NACIONAL"
+                else "facturas_internacionales"
+            ),
+            "ambito": ambito_normalizado,
+            "couriers_disponibles": couriers_disponibles,
+            "titulo": titulo,
+            "ruta_retorno": ruta_retorno,
+        },
     )
 
 
@@ -3886,6 +3999,9 @@ async def admin_factura_courier_post(
     from servicios.numeros_humanos import parse_importe_humano
     try:
         form = await request.form()
+        ambito = str(form.get("ambito") or "INTERNACIONAL").strip().upper()
+        if ambito not in {"INTERNACIONAL", "NACIONAL"}:
+            ambito = "INTERNACIONAL"
         moneda = str(form.get("moneda") or "ARS").strip().upper()
         tipo_cambio = parse_importe_humano(form.get("tipo_cambio_ars") or "1")
         items = parsear_lineas_factura_texto(
@@ -3944,8 +4060,12 @@ async def admin_factura_courier_post(
             status_code=303,
         )
     except Exception as exc:
+        ambito = locals().get("ambito", "INTERNACIONAL")
         return RedirectResponse(
-            url=f"/admin/conciliacion-couriers/nueva?error={quote(str(exc))}",
+            url=(
+                "/admin/conciliacion-couriers/nueva"
+                f"?ambito={ambito}&error={quote(str(exc))}"
+            ),
             status_code=303,
         )
 
@@ -3965,10 +4085,18 @@ def admin_factura_courier_detalle(
     factura = obtener_factura_courier_control(factura_id)
     if not factura:
         return Response(content="Factura courier no encontrada.", status_code=404)
+    courier = str(factura.get("courier") or "").strip().upper()
+    if courier in {"ANDREANI", "OCA"}:
+        seccion = "facturas_nacionales"
+        ruta_retorno = "/admin/facturas-nacionales"
+    else:
+        seccion = "facturas_internacionales"
+        ruta_retorno = "/admin/facturas-internacionales"
     return templates.TemplateResponse(
         request=request,
         name="admin/factura_courier_detalle.html",
-        context={"seccion": "conciliacion_couriers", "factura": factura,
+        context={"seccion": seccion, "factura": factura,
+                 "ruta_retorno": ruta_retorno,
                  "csrf_financiero": _csrf_dhl(f'financiera:{factura_id}'),
                  "csrf_tauro_2026": _csrf_dhl(f'tauro-2026:{factura_id}')},
         headers={'Cache-Control': 'private, no-store'},

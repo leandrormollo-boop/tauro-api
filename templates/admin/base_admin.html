@@ -54,6 +54,27 @@
     .sidebar a.active {
       color: var(--accent);
     }
+    .sidebar-more {
+      margin: 10px 8px 0;
+      border-top: 1px solid var(--line-soft);
+      padding-top: 10px;
+    }
+    .sidebar-more summary {
+      cursor: pointer;
+      list-style: none;
+      color: var(--fg-4);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 9px 16px;
+      border-radius: var(--radius-sm);
+    }
+    .sidebar-more summary::-webkit-details-marker { display: none; }
+    .sidebar-more summary::after { content: " +"; color: var(--accent); }
+    .sidebar-more[open] summary::after { content: " −"; }
+    .sidebar-more summary:hover { background: var(--bg-elev-2); color: var(--fg); }
+    .sidebar-more a { margin-left: 0; margin-right: 0; }
     .admin-main {
       flex: 1;
       padding: 32px 36px 80px;
@@ -117,6 +138,11 @@
         flex: 0 0 auto; margin: 0; padding: 8px 12px;
         white-space: nowrap;
       }
+      .sidebar-more { flex: 0 0 auto; margin: 0; padding: 0; border: 0; }
+      .sidebar-more summary { padding: 8px 12px; white-space: nowrap; }
+      .sidebar-more[open] { display: flex; align-items: center; gap: 4px; }
+      .sidebar-more[open] summary { flex: 0 0 auto; }
+      .sidebar-more[open] .sidebar-more-links { display: flex; gap: 4px; }
       .admin-main { width: 100%; padding: 18px 14px 80px; overflow: hidden; }
       .admin-main input,
       .admin-main select,
@@ -135,45 +161,35 @@
 
   <div class="admin-layout">
     <nav class="sidebar">
-      <div class="sidebar-label">General</div>
-      <a href="/admin/home" {% if seccion == 'home' %}class="active"{% endif %}>Dashboard</a>
-
-      <div class="sidebar-label">Comercial</div>
-      <a href="/admin/comercial" {% if seccion == 'comercial' %}class="active"{% endif %}>Prospectos y agentes</a>
-
-      <div class="sidebar-label">Clientes</div>
+      <div class="sidebar-label">Principal</div>
+      <a href="/admin/home" {% if seccion == 'home' %}class="active"{% endif %}>Panel de control</a>
+      <a href="/admin/facturas-internacionales" {% if seccion in ('facturas_internacionales','conciliacion_couriers') %}class="active"{% endif %}>Facturas internacionales</a>
+      <a href="/admin/facturas-nacionales" {% if seccion == 'facturas_nacionales' %}class="active"{% endif %}>Facturas nacionales</a>
       <a href="/admin/clientes" {% if seccion == 'clientes' %}class="active"{% endif %}>Lista de clientes</a>
-      <a href="/admin/clientes/nuevo" {% if seccion == 'cliente_nuevo' %}class="active"{% endif %}>+ Nuevo cliente</a>
 
-      <div class="sidebar-label">Cuenta corriente</div>
-      <a href="/admin/envios/nuevo" {% if seccion == 'envio_nuevo' %}class="active"{% endif %}>+ Cargar factura</a>
-      <a href="/admin/pagos/nuevo" {% if seccion == 'pago_nuevo' %}class="active"{% endif %}>+ Registrar pago</a>
-      <a href="/admin/pagos/pendientes" {% if seccion == 'pagos_pendientes' %}class="active"{% endif %}>Pagos por verificar</a>
-      <a href="/admin/conciliacion-couriers" {% if seccion == 'conciliacion_couriers' %}class="active"{% endif %}>Control de envíos y FC</a>
-      <a href="/admin/importaciones-historicas" {% if seccion == 'importaciones_historicas' %}class="active"{% endif %}>Importaciones históricas</a>
-
-      <div class="sidebar-label">Operaciones</div>
-      <a href="/admin/operadores" {% if seccion == 'operadores' %}class="active"{% endif %}>Operadores logísticos</a>
-      <a href="/admin/envios-realizados/nuevo" {% if seccion == 'envio_realizado' %}class="active"{% endif %}>+ Cargar envío realizado</a>
-      <a href="/admin/recolecciones" {% if seccion == 'recolecciones' %}class="active"{% endif %}>Recolecciones</a>
-      <a href="/admin/bandeja" {% if seccion == 'bandeja' %}class="active"{% endif %}
-         style="display:flex;align-items:center;gap:8px;">
-        Bandeja por cliente
-        {% if pendientes_admin() %}<span class="side-badge">{{ pendientes_admin() }}</span>{% endif %}
-      </a>
-      <a href="/admin/pedidos" {% if seccion == 'pedidos' %}class="active"{% endif %}>Solicitudes de guía</a>
-      <a href="/admin/guias-reemplazadas" {% if seccion == 'guias_reemplazadas' %}class="active"{% endif %}
-         style="display:flex;align-items:center;gap:8px;">
-        Guías descartadas
-        {% if alertas_guias_reemplazadas() %}<span class="side-badge">{{ alertas_guias_reemplazadas() }}</span>{% endif %}
-      </a>
-      <a href="/admin/productos" {% if seccion == 'productos' %}class="active"{% endif %}>Catálogo / Validar</a>
-      <a href="/admin/rutas" {% if seccion == 'rutas' %}class="active"{% endif %}>Rutas</a>
-      <a href="/admin/referencia" {% if seccion == 'referencia' %}class="active"{% endif %}>Referencia mercado</a>
-      <a href="/admin/config" {% if seccion == 'config' %}class="active"{% endif %}>Configuración</a>
-      <a href="/admin/seguridad" {% if seccion == 'seguridad' %}class="active"{% endif %}>Seguridad</a>
-      <a href="/admin/shopify/privacidad" {% if seccion == 'shopify_privacidad' %}class="active"{% endif %}>Privacidad Shopify</a>
-      <a href="/admin/tiendanube/privacidad" {% if seccion == 'tiendanube_privacidad' %}class="active"{% endif %}>Privacidad Tiendanube</a>
+      <details class="sidebar-more" {% if seccion in ('comercial','envio_nuevo','pago_nuevo','pagos_pendientes','importaciones_historicas','operadores','envio_realizado','recolecciones','bandeja','pedidos','guias_reemplazadas','productos','rutas','referencia','config','seguridad','shopify_privacidad','tiendanube_privacidad') %}open{% endif %}>
+        <summary>Más herramientas</summary>
+        <div class="sidebar-more-links">
+          <a href="/admin/pedidos" {% if seccion == 'pedidos' %}class="active"{% endif %}>Envíos y guías</a>
+          <a href="/admin/pagos/pendientes" {% if seccion == 'pagos_pendientes' %}class="active"{% endif %}>Pagos</a>
+          <a href="/admin/operadores" {% if seccion == 'operadores' %}class="active"{% endif %}>Operadores</a>
+          <a href="/admin/bandeja" {% if seccion == 'bandeja' %}class="active"{% endif %} style="display:flex;align-items:center;gap:8px;">Bandeja{% if pendientes_admin() %}<span class="side-badge">{{ pendientes_admin() }}</span>{% endif %}</a>
+          <a href="/admin/recolecciones" {% if seccion == 'recolecciones' %}class="active"{% endif %}>Recolecciones</a>
+          <a href="/admin/guias-reemplazadas" {% if seccion == 'guias_reemplazadas' %}class="active"{% endif %} style="display:flex;align-items:center;gap:8px;">Guías descartadas{% if alertas_guias_reemplazadas() %}<span class="side-badge">{{ alertas_guias_reemplazadas() }}</span>{% endif %}</a>
+          <a href="/admin/envios-realizados/nuevo" {% if seccion == 'envio_realizado' %}class="active"{% endif %}>Cargar envío</a>
+          <a href="/admin/envios/nuevo" {% if seccion == 'envio_nuevo' %}class="active"{% endif %}>Cargar cargo</a>
+          <a href="/admin/pagos/nuevo" {% if seccion == 'pago_nuevo' %}class="active"{% endif %}>Registrar pago</a>
+          <a href="/admin/importaciones-historicas" {% if seccion == 'importaciones_historicas' %}class="active"{% endif %}>Importaciones históricas</a>
+          <a href="/admin/productos" {% if seccion == 'productos' %}class="active"{% endif %}>Catálogo</a>
+          <a href="/admin/rutas" {% if seccion == 'rutas' %}class="active"{% endif %}>Rutas</a>
+          <a href="/admin/comercial" {% if seccion == 'comercial' %}class="active"{% endif %}>Prospectos</a>
+          <a href="/admin/referencia" {% if seccion == 'referencia' %}class="active"{% endif %}>Referencia de mercado</a>
+          <a href="/admin/config" {% if seccion == 'config' %}class="active"{% endif %}>Configuración</a>
+          <a href="/admin/seguridad" {% if seccion == 'seguridad' %}class="active"{% endif %}>Seguridad</a>
+          <a href="/admin/shopify/privacidad" {% if seccion == 'shopify_privacidad' %}class="active"{% endif %}>Privacidad Shopify</a>
+          <a href="/admin/tiendanube/privacidad" {% if seccion == 'tiendanube_privacidad' %}class="active"{% endif %}>Privacidad Tiendanube</a>
+        </div>
+      </details>
     </nav>
 
     <main class="admin-main">

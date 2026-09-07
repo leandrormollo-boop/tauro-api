@@ -23,7 +23,7 @@
     <p>{{ factura.moneda }} {{ dinero(factura.total) }} · {{ factura.estado|title }} · {{ factura.cantidad_guias|default(factura.envios_facturados|length) }} guías · {{ factura['items']|length }} cargos{% if factura.cantidad_guias_referenciadas_tauro_2026|default(0) %} · {{ factura.cantidad_guias_referenciadas_tauro_2026 }} identificadas en TAURO 2026{% endif %}{% if factura.cantidad_cargos_generales|default(0) %} · {{ factura.cantidad_cargos_generales }} generales sin tracking{% endif %}</p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-    <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver</a>
+    <a href="{{ ruta_retorno|default('/admin/facturas-internacionales') }}" class="btn btn-ghost">Volver</a>
     <a href="/admin/operadores/{{ factura.courier }}/facturas/{{ factura.id }}" class="btn btn-ghost">Pagos y vencimiento</a>
     <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/sincronizar-tauro-2026">
       <input type="hidden" name="csrf_tauro_2026" value="{{ csrf_tauro_2026 }}">
