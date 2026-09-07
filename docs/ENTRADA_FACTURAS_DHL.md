@@ -4,8 +4,8 @@ Estado al 06/09/2026: contrato, preselector Gmail, lector PDF, **bandeja de
 revisión administrativa** y conector OAuth de sólo lectura implementados.
 El job periódico autentica origen, descarga, deduplica, lee, registra evidencia
 y propone matches para el formato exacto admitido. Nunca confirma matches,
-decide el tipo de cambio ni aplica diferencias. El nuevo conector todavía no
-está publicado ni autorizado contra la casilla real.
+decide el tipo de cambio ni aplica diferencias. El conector fue publicado en
+producción; todavía no está autorizado contra la casilla real.
 
 ## Cuentas y alcance
 
@@ -195,13 +195,14 @@ worker dedicado con aislamiento de filesystem/red y control de origen.
 - Tres originales completos validados con el worker Linux: 10, 4 y 10
   renglones respectivamente, totales idénticos al preparador inicial.
 - PostgreSQL de prueba aislado, `DATABASE_URL` vacía y dotenv desactivado.
-- Release: publicado en producción dentro de `1c458dc` el 04/09/2026; sin
-  importar facturas reales ni conectar Gmail durante el despliegue.
+- Release del conector Gmail: `0f8890e`, publicado y verificado en producción
+  el 06/09/2026. Salud, base y camino crítico aprobados; sin importar facturas
+  reales ni conectar Gmail durante el despliegue.
 - Router TAURO: arquitectura con impacto financiero y seguridad, ruta Sol.
   Claude Fable 5.1 auditó únicamente el código en modo de sólo lectura; sus dos
   hallazgos prioritarios originaron las pruebas de reintento y cuota. No recibió
-  documentos, correos, credenciales ni datos de clientes. Sin acciones
-  productivas.
+  documentos, correos, credenciales ni datos de clientes. La auditoría no
+  ejecutó acciones productivas.
 
 ## Pendiente para activar
 
@@ -216,8 +217,7 @@ worker dedicado con aislamiento de filesystem/red y control de origen.
    días. Si la casilla no pertenece a una organización Google Workspace que
    pueda declarar la app interna, revisar el circuito de publicación/
    verificación aplicable al scope restringido antes de operar en producción.
-2. Publicar el código con aprobación explícita y autorizar una sola vez la
-   casilla receptora desde el Admin.
+2. Autorizar una sola vez la casilla receptora desde el Admin.
 3. Ejecutar el primer lote con `DHL_GMAIL_AUTO_IMPORT` apagado, comparar sus
    resultados contra PDFs reales y recién entonces habilitarlo. No ampliar
    formatos ni retroceder más de la ventana inicial de siete días sin una nueva
