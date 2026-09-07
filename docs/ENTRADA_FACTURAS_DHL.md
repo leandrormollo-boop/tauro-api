@@ -68,9 +68,11 @@ DHL** en Control de envíos y FC.
    PKCE; el servidor
    verifica que el perfil sea exactamente `DHL_GMAIL_ACCOUNT` y cifra ambos
    tokens con una clave exclusiva.
-3. Cada `DHL_GMAIL_SYNC_MINUTES` (30 por defecto) el job busca únicamente el
-   patrón de factura DHL desde una ventana solapada. Un advisory lock de
-   PostgreSQL evita duplicar el lote entre procesos.
+3. Los lunes y viernes a las 06:00 de Argentina el job busca únicamente el
+   patrón de factura DHL desde una ventana solapada. La hora puede ajustarse con
+   `DHL_GMAIL_CRON_HOUR` y `DHL_GMAIL_CRON_MINUTE`. Un advisory lock de
+   PostgreSQL evita duplicar el lote entre procesos. El Admin conserva además
+   el botón para ejecutar una búsqueda manual cuando haga falta.
 4. Cada mensaje pasa autenticación de origen, selección conservadora del PDF,
    tamaño/hash e identidad documental. Mensaje, adjunto, PDF y número quedan
    deduplicados en distintas capas.

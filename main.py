@@ -1579,18 +1579,22 @@ scheduler.add_job(
     replace_existing=True,
 )
 
-# Facturas DHL por Gmail: el job queda inerte mientras falten credenciales o
-# autorización OAuth. Sólo descarga y prepara evidencia para revisión; nunca
-# confirma diferencias ni modifica la cuenta corriente.
+# Facturas DHL por Gmail: lunes y viernes. El job queda inerte mientras falten
+# credenciales o autorización OAuth. Sólo descarga y prepara evidencia para
+# revisión; nunca confirma diferencias ni modifica la cuenta corriente.
 from servicios.correo_facturas_dhl import sincronizar_facturas_dhl_seguro
 
-_DHL_GMAIL_MINUTOS = _entero_cron("DHL_GMAIL_SYNC_MINUTES", 30, 5, 1440)
+_DHL_GMAIL_HORA = _entero_cron("DHL_GMAIL_CRON_HOUR", 6, 0, 23)
+_DHL_GMAIL_MINUTO = _entero_cron("DHL_GMAIL_CRON_MINUTE", 0, 0, 59)
 scheduler.add_job(
     sincronizar_facturas_dhl_seguro,
-    trigger="interval",
-    minutes=_DHL_GMAIL_MINUTOS,
+    trigger="cron",
+    day_of_week="mon,fri",
+    hour=_DHL_GMAIL_HORA,
+    minute=_DHL_GMAIL_MINUTO,
     max_instances=1,
     coalesce=True,
+    misfire_grace_time=12 * 60 * 60,
     id="facturas_dhl_gmail",
     replace_existing=True,
 )
@@ -1893,6 +1897,9 @@ print(
     "[scheduler] Rastreo DHL diario: "
     f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
 )
-print(f"[scheduler] Facturas DHL por Gmail: cada {_DHL_GMAIL_MINUTOS} min (si está conectado)")
+print(
+    "[scheduler] Facturas DHL por Gmail: lunes y viernes "
+    f"{_DHL_GMAIL_HORA:02d}:{_DHL_GMAIL_MINUTO:02d} (Argentina; si está conectado)"
+)
 print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
 print(f"[scheduler] Centinela del checkout: cada 15 min")

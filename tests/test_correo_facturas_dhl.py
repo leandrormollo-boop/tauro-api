@@ -214,6 +214,14 @@ def test_schema_conserva_oauth_dedupe_y_canal_sin_aprobar_cargos():
 def test_scheduler_es_idempotente_y_no_promete_aplicar_diferencias():
     main = (ROOT / 'main.py').read_text()
     assert 'id="facturas_dhl_gmail"' in main
+    bloque = main[main.index('# Facturas DHL por Gmail:'):main.index(
+        '# Job diario: podar el registro de auditoría'
+    )]
+    assert 'trigger="cron"' in bloque
+    assert 'day_of_week="mon,fri"' in bloque
+    assert 'DHL_GMAIL_SYNC_MINUTES' not in bloque
+    assert 'DHL_GMAIL_CRON_HOUR' in bloque
+    assert 'DHL_GMAIL_CRON_MINUTE' in bloque
     assert 'max_instances=1' in main
     assert 'sincronizar_facturas_dhl_seguro' in main
     assert 'nunca' in main[main.index('Facturas DHL por Gmail'):main.index('Facturas DHL por Gmail') + 500]
