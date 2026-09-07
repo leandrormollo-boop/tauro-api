@@ -14,5 +14,5 @@ pydantic[email]
 bcrypt
 cryptography
 pypdf
-pdfplumber==0.11.9
+pdfplumber==0.11.10
 openpyxl
