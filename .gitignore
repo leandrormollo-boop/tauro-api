@@ -35,3 +35,7 @@ dotenv.py
 
 # toolchain de build de la web (Railway no lo usa; el bundle se commitea)
 node_modules/
+*.keystore
+*.jks
+*.aab
+signing-key-info.txt

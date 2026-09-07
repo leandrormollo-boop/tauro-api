@@ -8,6 +8,26 @@ son el paso siguiente: envolver esa misma PWA en una cáscara nativa.
 Pendiente aparte, no bloquea la app: integraciones Andreani / OCA / FedEx.
 La app abre la web; lo que se sume a la web aparece en la app solo.
 
+## Estado 07/09/2026 — paquete Android GENERADO
+
+- Generado con PWABuilder (job `taurosolutions.ar:316926`), 52 s de build.
+- Guardado FUERA del repo: `~/Desktop/TAURO 2026/PLAY STORE/paquete-android-v1/`
+  - `Tauro Solutions.aab` → es lo que se sube a Play Console
+  - `Tauro Solutions.apk` → para instalar de prueba en un Android
+  - `signing.keystore` + `signing-key-info.txt` → **RESPALDAR** (la
+    contraseña está en el .txt). Sin esto no hay actualizaciones nunca más.
+  - `assetlinks.json` → la huella ya está copiada abajo
+- Package: `ar.taurosolutions.portal` · versión 1.0.0.0 (code 1)
+- Nombre "Tauro Solutions" / corto "TAURO AR" (elegidos por Leandro)
+- Colores de marca: tema/nav `#7C5CF6`, divisores `#A78BFA`, fondo `#0C0A14`.
+  El manifest de la PWA también pasó a `theme_color #7c5cf6` (commit 5eac437).
+- Huella SHA-256 de firma (va en Railway → `ANDROID_ASSETLINKS_SHA256`):
+  `C4:D4:ED:77:5E:C6:6E:16:B3:45:45:4F:4C:34:4C:90:F1:D2:98:73:E8:56:7C:3B:AF:B7:14:5C:94:9E:D1:22`
+
+**Faltan (Leandro):** cuenta Play Console (USD 25) · cargar la huella en
+Railway · subir el .aab · ficha (`docs/PLAY_STORE_FICHA.md`) · publicar
+`/privacidad` (borrador en `docs/PRIVACIDAD_BORRADOR.md`).
+
 ## Fases
 
 | Fase | Qué | Costo | Riesgo de rechazo |
