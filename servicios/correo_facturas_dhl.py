@@ -766,8 +766,14 @@ def _procesar_mensaje(
             mensaje, candidato, entrada["id"], autenticidad.__dict__,
         )
         if estado == "PARA_REVISION" and _auto_import_habilitado():
-            importar_entrada_dhl_correo(
+            factura = importar_entrada_dhl_correo(
                 entrada["id"], cuenta_correo=cliente.cuenta, actor=_ACTOR,
+            )
+            from servicios.referencias_tauro_2026 import (
+                sincronizar_referencias_factura_seguro,
+            )
+            sincronizar_referencias_factura_seguro(
+                factura["id"], actor=_ACTOR,
             )
             _guardar_correo(
                 mensaje, estado="IMPORTADO", entrada_id=entrada["id"],

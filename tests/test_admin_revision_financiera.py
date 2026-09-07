@@ -11,6 +11,7 @@ from test_admin_entrada_dhl import auth, request
 from endpoints import admin
 from servicios import conciliacion_couriers as conciliacion
 from servicios import revision_financiera_courier as financiera
+from servicios import referencias_tauro_2026 as referencias_tauro
 
 
 def formulario(datos):
@@ -110,3 +111,51 @@ def test_pantalla_bloquea_acciones_y_separa_importes(monkeypatch, requerida, apr
     assert ('(TC aprobado)' in html) == aprobada
     assert '<script>no-ejecutar' not in html
     assert r.headers['cache-control'] == 'private, no-store'
+
+
+def test_pantalla_distingue_match_tauro_de_envio_importado(monkeypatch):
+    datos = factura(requerida=False, aprobada=False)
+    datos['cantidad_guias_referenciadas_tauro_2026'] = 1
+    guia = datos['envios_facturados'][0]
+    guia['matches'] = []
+    guia['referencias_tauro_2026'] = [{
+        'nro_fc': '0700A00918787', 'tracking': '0123456789',
+        'empresa': 'DHL', 'cliente': 'JONA', 'concepto': 'FLETE',
+        'remitente': 'JONA', 'destinatario': 'JONATHAN LORENZO',
+        'pais': 'ARG - CR', 'fecha_envio': '2026-04-27',
+        'fuente_fila': 1615,
+    }]
+    monkeypatch.setattr(
+        conciliacion, 'obtener_factura_courier_control', lambda _id: datos
+    )
+    r = admin.admin_factura_courier_detalle(
+        request(), 7, admin_token='valido'
+    )
+    html = r.body.decode()
+    assert '1 identificadas en TAURO 2026' in html
+    assert 'Match TAURO 2026' in html
+    assert 'JONA' in html
+    assert 'Envío no importado al portal' in html
+    assert 'No coincide con el portal ni con TAURO 2026' not in html
+
+
+def test_cruce_tauro_2026_exige_admin_y_csrf_especifico(monkeypatch):
+    assert admin.admin_sincronizar_factura_tauro_2026(
+        7, admin_token='invalido'
+    ).status_code == 303
+    assert admin.admin_sincronizar_factura_tauro_2026(
+        7, csrf_tauro_2026='invalido', admin_token='valido'
+    ).status_code == 403
+    llamadas = []
+    monkeypatch.setattr(
+        referencias_tauro, 'sincronizar_referencias_factura',
+        lambda factura_id, actor: llamadas.append((factura_id, actor))
+            or {'estado': 'OK'},
+    )
+    respuesta = admin.admin_sincronizar_factura_tauro_2026(
+        7, csrf_tauro_2026=admin._csrf_dhl('tauro-2026:7'),
+        admin_token='valido',
+    )
+    assert llamadas == [(7, 'admin')]
+    assert respuesta.status_code == 303
+    assert 'ok=tauro_2026_ok' in respuesta.headers['location']

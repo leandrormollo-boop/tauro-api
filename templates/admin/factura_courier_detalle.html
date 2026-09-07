@@ -20,11 +20,15 @@
   <div>
     <div class="eyebrow">{{ factura.courier }} · {{ factura.tipo_documento }}</div>
     <h1>{{ factura.numero }}</h1>
-    <p>{{ factura.moneda }} {{ dinero(factura.total) }} · {{ factura.estado|title }} · {{ factura.cantidad_guias|default(factura.envios_facturados|length) }} guías · {{ factura['items']|length }} cargos{% if factura.cantidad_cargos_generales|default(0) %} · {{ factura.cantidad_cargos_generales }} generales sin tracking{% endif %}</p>
+    <p>{{ factura.moneda }} {{ dinero(factura.total) }} · {{ factura.estado|title }} · {{ factura.cantidad_guias|default(factura.envios_facturados|length) }} guías · {{ factura['items']|length }} cargos{% if factura.cantidad_guias_referenciadas_tauro_2026|default(0) %} · {{ factura.cantidad_guias_referenciadas_tauro_2026 }} identificadas en TAURO 2026{% endif %}{% if factura.cantidad_cargos_generales|default(0) %} · {{ factura.cantidad_cargos_generales }} generales sin tracking{% endif %}</p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
     <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver</a>
     <a href="/admin/operadores/{{ factura.courier }}/facturas/{{ factura.id }}" class="btn btn-ghost">Pagos y vencimiento</a>
+    <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/sincronizar-tauro-2026">
+      <input type="hidden" name="csrf_tauro_2026" value="{{ csrf_tauro_2026 }}">
+      <button class="btn btn-ghost">Cruzar con TAURO 2026</button>
+    </form>
     {% if factura.tiene_evidencia %}<a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/pdf" target="_blank" class="btn btn-ghost">Ver PDF</a>{% endif %}
     {% if ns.hay_activos and not financiera_pendiente %}
     <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar los matches y calcular los envíos vinculados? Si hay borradores anteriores a la aprobación financiera se anularán conservando su historial. Las nuevas diferencias quedarán pendientes de aprobación.">
@@ -100,6 +104,20 @@
             <br>{% if guia.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(guia.remanente) }}</span>{% else %}<span class="badge ok">Guía asignada completa</span>{% endif %}</td>
           <td>{{ guia.peso_facturado_kg or '—' }} kg<br><small>{{ (guia.peso_base or '').replace('_',' ')|title }}</small></td>
           <td>
+            {% if guia.referencias_tauro_2026 %}
+              <div style="padding:9px 10px;margin-bottom:9px;border:1px solid rgba(65,210,150,.28);border-radius:10px;background:rgba(65,210,150,.07);">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                  <span class="badge ok">Match TAURO 2026</span>
+                  {% for referencia in guia.referencias_tauro_2026 %}
+                    <strong>{{ referencia.cliente }}</strong>
+                    <small>{{ referencia.concepto|title }}{% if referencia.fuente_fila %} · fila {{ referencia.fuente_fila }}{% endif %}</small>
+                    {% if not loop.last %}<span>·</span>{% endif %}
+                  {% endfor %}
+                </div>
+                {% set referencia = guia.referencias_tauro_2026[0] %}
+                <small>{{ referencia.remitente or referencia.cliente }} → {{ referencia.destinatario or 'Destinatario no informado' }}{% if referencia.pais %} · {{ referencia.pais }}{% endif %}{% if referencia.fecha_envio %} · {{ referencia.fecha_envio }}{% endif %}</small>
+              </div>
+            {% endif %}
             {% for m in guia.matches %}
               <div style="padding:9px 0;{% if not loop.last %}border-bottom:1px solid var(--border);{% endif %}">
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -119,8 +137,13 @@
                 {% elif m.match_estado == 'RECHAZADO' %}<small>Motivo: {{ m.motivo_rechazo }}</small>{% endif %}
               </div>
             {% else %}
-              <span class="badge error">Sin coincidencia</span>
-              <small>Requiere asignación manual.</small>
+              {% if guia.referencias_tauro_2026 %}
+                <span class="badge warn">Envío no importado al portal</span>
+                <small>La FC y la guía coinciden en TAURO 2026, pero todavía no existe una solicitud del cliente a la cual aplicar la conciliación.</small>
+              {% else %}
+                <span class="badge error">Sin coincidencia</span>
+                <small>No coincide con el portal ni con TAURO 2026.</small>
+              {% endif %}
             {% endfor %}
 
             {% if guia.remanente > 0.02 %}

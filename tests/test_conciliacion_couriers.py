@@ -116,3 +116,34 @@ def test_parseo_de_factura_rechaza_linea_sin_tracking():
         conciliacion.parsear_lineas_factura_texto(
             ";15000;FLETE", moneda="ARS", tipo_cambio_ars="1"
         )
+
+
+def test_referencias_tauro_exigen_factura_tracking_cliente_y_courier():
+    referencias = conciliacion._referencias_tauro_2026(
+        {"referencias_tauro_2026": [
+            {"empresa": "DHL", "nro_fc": "0700-A00918787",
+             "tracking": "3290 421 481", "cliente": "JONA",
+             "concepto": "FLETE", "fuente_fila": 1615},
+            {"empresa": "DHL", "nro_fc": "OTRA",
+             "tracking": "2807257515", "cliente": "WAIMAO"},
+            {"empresa": "FEDEX", "nro_fc": "0700A00918787",
+             "tracking": "2807257515", "cliente": "WAIMAO"},
+            {"empresa": "DHL", "nro_fc": "0700A00918787",
+             "tracking": "", "cliente": "WAIMAO"},
+        ]},
+        numero_factura="0700A00918787",
+        courier="DHL",
+    )
+
+    assert referencias == [{
+        "empresa": "DHL", "nro_fc": "0700A00918787",
+        "tracking": "3290421481", "cliente": "JONA",
+        "concepto": "FLETE", "fuente_fila": 1615,
+    }]
+
+
+def test_cliente_referencia_compara_ids_sin_separadores():
+    assert conciliacion._cliente_referencia_coincide(
+        "PRETE_ROSSO", "Prete Rosso"
+    )
+    assert not conciliacion._cliente_referencia_coincide("WAIMAO", "JONA")

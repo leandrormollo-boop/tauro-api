@@ -3809,6 +3809,10 @@ def admin_importar_dhl(entrada_id: int, csrf_dhl: str = Form(''), revision_sha25
     try:
         factura = importar_entrada_dhl(entrada_id, revision_sha256=revision_sha256,
                                      revision_confirmada=(revisado == 'si'), actor='admin')
+        from servicios.referencias_tauro_2026 import (
+            sincronizar_referencias_factura_seguro,
+        )
+        sincronizar_referencias_factura_seguro(factura['id'], actor='admin')
         return RedirectResponse(f"/admin/conciliacion-couriers/facturas/{factura['id']}?ok=cargada", status_code=303)
     except (ValueError, ConciliacionCourierError) as exc:
         return RedirectResponse(f'/admin/conciliacion-couriers/entrada-dhl/{entrada_id}?error=' + quote(str(exc)), status_code=303)
@@ -3931,6 +3935,10 @@ async def admin_factura_courier_post(
             actor="admin",
         )
         matchear_items_exactos(factura["id"], actor="admin")
+        from servicios.referencias_tauro_2026 import (
+            sincronizar_referencias_factura_seguro,
+        )
+        sincronizar_referencias_factura_seguro(factura["id"], actor="admin")
         return RedirectResponse(
             url=f"/admin/conciliacion-couriers/facturas/{factura['id']}?ok=cargada",
             status_code=303,
@@ -3961,9 +3969,40 @@ def admin_factura_courier_detalle(
         request=request,
         name="admin/factura_courier_detalle.html",
         context={"seccion": "conciliacion_couriers", "factura": factura,
-                 "csrf_financiero": _csrf_dhl(f'financiera:{factura_id}')},
+                 "csrf_financiero": _csrf_dhl(f'financiera:{factura_id}'),
+                 "csrf_tauro_2026": _csrf_dhl(f'tauro-2026:{factura_id}')},
         headers={'Cache-Control': 'private, no-store'},
     )
+
+
+@router.post(
+    "/conciliacion-couriers/facturas/{factura_id}/sincronizar-tauro-2026"
+)
+def admin_sincronizar_factura_tauro_2026(
+    factura_id: int,
+    csrf_tauro_2026: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf_tauro_2026, f"tauro-2026:{factura_id}"):
+        return Response("Formulario vencido o inválido.", status_code=403)
+    from servicios.referencias_tauro_2026 import (
+        sincronizar_referencias_factura,
+    )
+    destino = f"/admin/conciliacion-couriers/facturas/{factura_id}"
+    try:
+        resultado = sincronizar_referencias_factura(
+            factura_id, actor="admin"
+        )
+        estado = str(resultado.get("estado") or "OK").lower()
+        return RedirectResponse(
+            f"{destino}?ok=tauro_2026_{estado}", status_code=303
+        )
+    except Exception as exc:
+        return RedirectResponse(
+            f"{destino}?error={quote(str(exc))}", status_code=303
+        )
 
 
 @router.post('/conciliacion-couriers/facturas/{factura_id}/revision-financiera')

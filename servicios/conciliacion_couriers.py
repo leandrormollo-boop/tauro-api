@@ -155,6 +155,76 @@ def _json_seguro(payload: Any) -> Any:
     return json.loads(json.dumps(payload, ensure_ascii=True, default=str))
 
 
+def _referencias_tauro_2026(
+    metadata: Any,
+    *,
+    numero_factura: Any = "",
+    courier: Any = "",
+) -> list[dict[str, Any]]:
+    """Devuelve referencias verificables de la hoja madre, nunca decisiones.
+
+    La referencia une número de FC + tracking + cliente. No crea deuda ni
+    reemplaza el match contra una solicitud existente en el portal.
+    """
+    if not isinstance(metadata, dict):
+        return []
+    filas = metadata.get("referencias_tauro_2026")
+    if not isinstance(filas, list):
+        return []
+    factura_esperada = normalizar_identificador(numero_factura)
+    courier_esperado = _texto(courier).upper()
+    resultado: list[dict[str, Any]] = []
+    vistos: set[tuple[str, str, str]] = set()
+    for fila in filas:
+        if not isinstance(fila, dict):
+            continue
+        tracking = normalizar_tracking(fila.get("tracking"))
+        nro_fc = normalizar_identificador(fila.get("nro_fc"))
+        empresa = _texto(fila.get("empresa")).upper()
+        cliente = _texto(fila.get("cliente")).upper()
+        concepto = _texto(fila.get("concepto")).upper() or "FLETE"
+        if not tracking or not nro_fc or not cliente:
+            continue
+        if factura_esperada and nro_fc != factura_esperada:
+            continue
+        if courier_esperado and empresa and empresa != courier_esperado:
+            continue
+        clave = (tracking, cliente, concepto)
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        limpia = dict(fila)
+        limpia.update({
+            "tracking": tracking,
+            "nro_fc": nro_fc,
+            "empresa": empresa or courier_esperado,
+            "cliente": cliente,
+            "concepto": concepto,
+        })
+        resultado.append(limpia)
+    return resultado
+
+
+def _referencias_tauro_por_tracking(
+    metadata: Any,
+    *,
+    numero_factura: Any = "",
+    courier: Any = "",
+) -> dict[str, list[dict[str, Any]]]:
+    agrupadas: dict[str, list[dict[str, Any]]] = {}
+    for fila in _referencias_tauro_2026(
+        metadata, numero_factura=numero_factura, courier=courier
+    ):
+        agrupadas.setdefault(fila["tracking"], []).append(fila)
+    return agrupadas
+
+
+def _cliente_referencia_coincide(cliente_id: Any, referencia: Any) -> bool:
+    return normalizar_identificador(cliente_id) == normalizar_identificador(
+        referencia
+    )
+
+
 def _requiere_revision_financiera(metadata) -> bool:
     metadata = metadata or {}
     # La presencia de la marca obliga a comprobar la aprobación durable:
@@ -771,6 +841,109 @@ def registrar_factura_courier(
             return {"id": factura_id, "duplicado": False}
 
 
+def registrar_referencias_tauro_2026(
+    factura_id: int,
+    *,
+    referencias: Iterable[dict[str, Any]],
+    fuente_sha256: str,
+    actor: str,
+    _conn=None,
+) -> dict[str, Any]:
+    """Adjunta el cruce ya existente en TAURO 2026 a una FC importada.
+
+    La hoja madre aporta evidencia de identidad. El PDF conserva los costos
+    reales y la solicitud del portal sigue siendo obligatoria para calcular o
+    aplicar una diferencia al cliente.
+    """
+    hash_fuente = _texto(fuente_sha256).lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", hash_fuente):
+        raise ConciliacionCourierError(
+            "La copia de TAURO 2026 requiere una huella SHA-256 válida."
+        )
+    with (nullcontext(_conn) if _conn is not None else get_conn()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, courier, numero, numero_normalizado,
+                       metadatos_origen
+                  FROM facturas_courier
+                 WHERE id = %s
+                 FOR UPDATE
+                """,
+                (int(factura_id),),
+            )
+            factura = cur.fetchone()
+            if not factura:
+                raise ConciliacionCourierError("La factura courier no existe.")
+            normalizadas = _referencias_tauro_2026(
+                {"referencias_tauro_2026": list(referencias)},
+                numero_factura=factura["numero_normalizado"],
+                courier=factura["courier"],
+            )
+            if not normalizadas:
+                raise ConciliacionCourierError(
+                    "TAURO 2026 no contiene filas válidas para esta factura."
+                )
+            trackings_pdf = set()
+            cur.execute(
+                """
+                SELECT DISTINCT tracking_normalizado
+                  FROM facturas_courier_items
+                 WHERE factura_id = %s
+                   AND tracking_normalizado IS NOT NULL
+                   AND estado <> 'IGNORADO'
+                """,
+                (int(factura_id),),
+            )
+            trackings_pdf.update(
+                fila["tracking_normalizado"] for fila in cur.fetchall()
+            )
+            trackings_fuente = {fila["tracking"] for fila in normalizadas}
+            ajenos = sorted(trackings_fuente - trackings_pdf)
+            if ajenos:
+                raise ConciliacionCourierError(
+                    "TAURO 2026 trae guías que no aparecen en el PDF: "
+                    + ", ".join(ajenos)
+                )
+            metadata = dict(factura.get("metadatos_origen") or {})
+            metadata["referencias_tauro_2026"] = _json_seguro(normalizadas)
+            metadata["referencias_tauro_2026_sha256"] = hash_fuente
+            metadata["referencias_tauro_2026_registradas_por"] = (
+                _texto(actor) or "sistema"
+            )
+            metadata["referencias_tauro_2026_registradas_at"] = (
+                datetime.now(timezone.utc).isoformat()
+            )
+            cur.execute(
+                """
+                UPDATE facturas_courier
+                   SET metadatos_origen = %s, updated_at = NOW()
+                 WHERE id = %s
+                """,
+                (Json(metadata), int(factura_id)),
+            )
+            _registrar_auditoria(
+                cur,
+                evento="REFERENCIAS_TAURO_2026_REGISTRADAS",
+                actor=actor,
+                factura_id=int(factura_id),
+                metadata={
+                    "fuente_sha256": hash_fuente,
+                    "filas": len(normalizadas),
+                    "guias": len(trackings_fuente),
+                },
+            )
+        propuesta = matchear_items_exactos(
+            int(factura_id), actor=actor, _conn=conn
+        )
+    return {
+        "factura_id": int(factura_id),
+        "filas": len(normalizadas),
+        "guias": len(trackings_fuente),
+        **propuesta,
+    }
+
+
 def matchear_items_exactos(
     factura_id: int,
     *,
@@ -790,7 +963,9 @@ def matchear_items_exactos(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT estado FROM facturas_courier
+                SELECT estado, courier, numero_normalizado,
+                       metadatos_origen
+                  FROM facturas_courier
                  WHERE id = %s
                  FOR UPDATE
                 """,
@@ -803,6 +978,11 @@ def matchear_items_exactos(
                 raise ConciliacionCourierError(
                     "Una factura anulada no puede matchearse."
                 )
+            referencias_por_tracking = _referencias_tauro_por_tracking(
+                factura.get("metadatos_origen"),
+                numero_factura=factura.get("numero_normalizado"),
+                courier=factura.get("courier"),
+            )
             cur.execute(
                 """
                 SELECT i.id, i.importe, i.importe_ars,
@@ -830,7 +1010,7 @@ def matchear_items_exactos(
             for tracking, lineas_grupo in grupos.items():
                 cur.execute(
                     """
-                    SELECT id
+                    SELECT id, cliente_id
                       FROM solicitudes_guia
                      WHERE UPPER(BTRIM(courier)) = UPPER(BTRIM(%s))
                        AND NULLIF(REGEXP_REPLACE(
@@ -840,10 +1020,33 @@ def matchear_items_exactos(
                     (lineas_grupo[0]["courier"], tracking),
                 )
                 solicitudes = list(cur.fetchall())
+                referencias = referencias_por_tracking.get(tracking, [])
+                clientes_referencia = {
+                    fila["cliente"] for fila in referencias
+                    if _texto(fila.get("cliente"))
+                }
+                if len(clientes_referencia) == 1:
+                    cliente_referencia = next(iter(clientes_referencia))
+                    solicitudes = [
+                        solicitud for solicitud in solicitudes
+                        if _cliente_referencia_coincide(
+                            solicitud.get("cliente_id"), cliente_referencia
+                        )
+                    ]
                 if len(solicitudes) != 1:
                     sin_match += 1
                     continue
                 solicitud_id = int(solicitudes[0]["id"])
+                metodo = "REFERENCIA" if referencias else "EXACTO_TRACKING"
+                evidencia = None
+                if referencias:
+                    filas_fuente = sorted({
+                        str(fila.get("fuente_fila"))
+                        for fila in referencias if fila.get("fuente_fila")
+                    })
+                    evidencia = "TAURO 2026/ENVIOS 2026"
+                    if filas_fuente:
+                        evidencia += "/filas " + ",".join(filas_fuente)
                 match_ids: list[int] = []
                 for item in lineas_grupo:
                     cur.execute(
@@ -851,15 +1054,16 @@ def matchear_items_exactos(
                         INSERT INTO factura_courier_item_matches (
                             item_id, solicitud_id, monto_asignado,
                             monto_asignado_ars, metodo, confianza,
-                            estado, creado_por
-                        ) VALUES (%s, %s, %s, %s, 'EXACTO_TRACKING', 1,
-                                  'PROPUESTO', %s)
+                            estado, creado_por, evidencia_uri
+                        ) VALUES (%s, %s, %s, %s, %s, 1,
+                                  'PROPUESTO', %s, %s)
                         ON CONFLICT (item_id, solicitud_id) DO NOTHING
                         RETURNING id
                         """,
                         (
                             int(item["id"]), solicitud_id, item["importe"],
-                            item["importe_ars"], _texto(actor) or "sistema",
+                            item["importe_ars"], metodo,
+                            _texto(actor) or "sistema", evidencia,
                         ),
                     )
                     insertado = cur.fetchone()
@@ -880,6 +1084,8 @@ def matchear_items_exactos(
                         "match_ids_lineas": match_ids,
                         "tracking": tracking,
                         "cantidad_lineas": len(match_ids),
+                        "metodo": metodo,
+                        "referencias_tauro_2026": len(referencias),
                     },
                 )
             if propuestos or sin_match:
@@ -2378,9 +2584,22 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                         ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
             resultado["items"] = items
             resultado["envios_facturados"] = _agrupar_items_por_envio_facturado(items)
+            referencias_por_tracking = _referencias_tauro_por_tracking(
+                resultado.get("metadatos_origen"),
+                numero_factura=resultado.get("numero"),
+                courier=resultado.get("courier"),
+            )
+            for grupo in resultado["envios_facturados"]:
+                grupo["referencias_tauro_2026"] = referencias_por_tracking.get(
+                    grupo.get("tracking_normalizado") or "", []
+                )
             resultado["cantidad_guias"] = sum(
                 1 for grupo in resultado["envios_facturados"]
                 if grupo["tracking_normalizado"]
+            )
+            resultado["cantidad_guias_referenciadas_tauro_2026"] = sum(
+                1 for grupo in resultado["envios_facturados"]
+                if grupo.get("referencias_tauro_2026")
             )
             resultado["cantidad_cargos_generales"] = sum(
                 1 for item in items if not item.get("tracking_normalizado")
