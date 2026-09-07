@@ -775,7 +775,10 @@ MANIFEST_PORTAL = {
     "scope": "/portal/",
     "display": "standalone",
     "background_color": "#0c0a14",
-    "theme_color": "#0c0a14",
+    # Violeta de marca (--accent-deep) para la barra de la app instalada y
+    # la de Play Store; el fondo del splash sigue oscuro porque el ícono es
+    # negro. Pedido de Leandro 26/08: "los colores deben ser los de TAURO".
+    "theme_color": "#7c5cf6",
     "icons": [
         {
             "src": f"/static/img/pwa/icon-192.png?v={_PWA_ICONOS_V}",
