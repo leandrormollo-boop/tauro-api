@@ -1579,6 +1579,22 @@ scheduler.add_job(
     replace_existing=True,
 )
 
+# Facturas DHL por Gmail: el job queda inerte mientras falten credenciales o
+# autorización OAuth. Sólo descarga y prepara evidencia para revisión; nunca
+# confirma diferencias ni modifica la cuenta corriente.
+from servicios.correo_facturas_dhl import sincronizar_facturas_dhl_seguro
+
+_DHL_GMAIL_MINUTOS = _entero_cron("DHL_GMAIL_SYNC_MINUTES", 30, 5, 1440)
+scheduler.add_job(
+    sincronizar_facturas_dhl_seguro,
+    trigger="interval",
+    minutes=_DHL_GMAIL_MINUTOS,
+    max_instances=1,
+    coalesce=True,
+    id="facturas_dhl_gmail",
+    replace_existing=True,
+)
+
 
 # Job diario: podar el registro de auditoría (retención configurable, 1 año
 # por default) para que la tabla no crezca sin fin.
@@ -1877,5 +1893,6 @@ print(
     "[scheduler] Rastreo DHL diario: "
     f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
 )
+print(f"[scheduler] Facturas DHL por Gmail: cada {_DHL_GMAIL_MINUTOS} min (si está conectado)")
 print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
 print(f"[scheduler] Centinela del checkout: cada 15 min")

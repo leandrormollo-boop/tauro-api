@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="/static/css/entrada-dhl.css?v=1">
 <section class="dhl-intake">
 <div class="page-title page-title-row"><div><div class="eyebrow">Evidencia interna · sin cargos al cliente</div>
-  <h1>Revisar {{ entrada.numero_esperado }}</h1><p>Origen: carga PDF por Admin. <span class="badge muted">{{ entrada.estado.replace('_',' ')|title }}</span></p></div>
+  <h1>Revisar {{ entrada.numero_esperado }}</h1><p>Origen: {{ 'correo DHL autenticado' if entrada.canal == 'CORREO_DHL' else 'carga PDF por Admin' }}. <span class="badge muted">{{ entrada.estado.replace('_',' ')|title }}</span></p></div>
   <a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-ghost">Volver a la bandeja</a></div>
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
 <div class="card" style="margin-bottom:20px;"><a class="btn btn-ghost" href="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/pdf">Descargar original para comparar</a>

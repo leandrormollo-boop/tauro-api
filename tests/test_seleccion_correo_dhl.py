@@ -2,7 +2,11 @@ from copy import deepcopy
 
 import pytest
 
-from servicios.seleccion_correo_dhl import CorreoDHLInvalido, seleccionar_adjunto_dhl
+from servicios.seleccion_correo_dhl import (
+    CorreoDHLInvalido,
+    seleccionar_adjunto_dhl,
+    validar_autenticidad_dhl,
+)
 
 
 def ejemplo():
@@ -131,3 +135,43 @@ def test_limita_recursion_mime():
         datos['payload']['parts'] = [{'mimeType': 'multipart/mixed', 'parts': datos['payload']['parts']}]
     with pytest.raises(CorreoDHLInvalido, match='compleja'):
         seleccionar(datos)
+
+
+def test_autenticidad_exige_dkim_y_dmarc_alineados_con_dhl():
+    datos = ejemplo()
+    datos['payload']['headers'].append({'name': 'Authentication-Results', 'value':
+        'mx.google.com; dkim=pass header.i=@dhl.com; spf=pass smtp.mailfrom=dhl.com; '
+        'dmarc=pass header.from=dhl.com'})
+    autenticidad = validar_autenticidad_dhl(datos)
+    assert autenticidad.dkim and autenticidad.dmarc and autenticidad.spf
+
+
+def test_dkim_de_otro_dominio_no_autentica_aunque_from_diga_dhl():
+    datos = ejemplo()
+    datos['payload']['headers'].append({'name': 'Authentication-Results', 'value':
+        'mx.google.com; dkim=pass header.i=@evil.invalid; spf=pass smtp.mailfrom=evil.invalid; '
+        'dmarc=pass header.from=dhl.com'})
+    with pytest.raises(CorreoDHLInvalido, match='firma DHL'):
+        validar_autenticidad_dhl(datos)
+
+
+def test_ignora_authentication_results_no_emitido_por_gmail():
+    datos = ejemplo()
+    datos['payload']['headers'].append({'name': 'Authentication-Results', 'value':
+        'atacante.invalid; dkim=pass header.i=@dhl.com; dmarc=pass header.from=dhl.com'})
+    with pytest.raises(CorreoDHLInvalido, match='Gmail no informó'):
+        validar_autenticidad_dhl(datos)
+
+
+@pytest.mark.parametrize('valor', [
+    'mx.google.com; dkim=pass header.i=@dhl.com; dmarc=fail header.from=dhl.com',
+    'mx.google.com; dkim=fail header.i=@dhl.com; dmarc=pass header.from=dhl.com',
+    '',
+])
+def test_no_confunde_cabecera_de_firma_con_resultado_validado(valor):
+    datos = ejemplo()
+    datos['payload']['headers'].append({'name': 'DKIM-Signature', 'value': 'd=dhl.com; b=falsa'})
+    if valor:
+        datos['payload']['headers'].append({'name': 'Authentication-Results', 'value': valor})
+    with pytest.raises(CorreoDHLInvalido):
+        validar_autenticidad_dhl(datos)

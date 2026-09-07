@@ -3582,13 +3582,24 @@ BEGIN
            IS DISTINCT FROM ROW(NEW.archivo_pdf, NEW.archivo_sha256, NEW.metadatos_origen->'canal',
                NEW.metadatos_origen->'entrada_dhl_id', NEW.metadatos_origen->'revision_sha256')
            OR (OLD.metadatos_origen ? 'revision_financiera_pendiente'
-               AND NOT (NEW.metadatos_origen ? 'revision_financiera_pendiente')) THEN
+               AND NOT (NEW.metadatos_origen ? 'revision_financiera_pendiente'))
+           OR (OLD.metadatos_origen->'revision_extraccion_requerida' = 'true'::jsonb
+               AND NEW.metadatos_origen->'revision_extraccion_requerida'
+                   IS DISTINCT FROM 'true'::jsonb
+               AND NEW.metadatos_origen->'revision_extraccion_requerida'
+                   IS DISTINCT FROM 'false'::jsonb) THEN
             RAISE EXCEPTION 'El origen y evidencia financiera son inmutables';
         END IF;
         IF NEW.metadatos_origen->'revision_financiera_pendiente' = 'false'::jsonb
            AND NOT EXISTS (SELECT 1 FROM revisiones_financieras_courier r
                            WHERE r.factura_id=NEW.id AND r.archivo_sha256=NEW.archivo_sha256) THEN
             RAISE EXCEPTION 'Falta la revisión financiera aprobada';
+        END IF;
+        IF OLD.metadatos_origen->'revision_extraccion_requerida' = 'true'::jsonb
+           AND NEW.metadatos_origen->'revision_extraccion_requerida' = 'false'::jsonb
+           AND NOT EXISTS (SELECT 1 FROM revisiones_financieras_courier r
+                           WHERE r.factura_id=NEW.id AND r.archivo_sha256=NEW.archivo_sha256) THEN
+            RAISE EXCEPTION 'Falta la revisión humana de la extracción DHL';
         END IF;
     END IF;
     RETURN NEW;
@@ -3619,7 +3630,37 @@ DROP TRIGGER IF EXISTS trg_revision_financiera_calculo ON conciliaciones_envio;
 CREATE TRIGGER trg_revision_financiera_calculo BEFORE INSERT OR UPDATE ON conciliaciones_envio
 FOR EACH ROW EXECUTE FUNCTION tauro_exigir_revision_calculo();
 
--- Entrada administrativa de PDFs DHL. Evidencia pendiente, NO cuenta corriente.
+-- OAuth de sólo lectura para el buzón que recibe facturas DHL. Los tokens se
+-- cifran en la aplicación con una clave exclusiva; nunca se guardan en claro.
+CREATE TABLE IF NOT EXISTS integracion_correo_dhl (
+    id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    cuenta_email TEXT NOT NULL CHECK (btrim(cuenta_email) <> ''),
+    access_token_cifrado TEXT NOT NULL CHECK (access_token_cifrado LIKE 'enc:v1:%'),
+    refresh_token_cifrado TEXT NOT NULL CHECK (refresh_token_cifrado LIKE 'enc:v1:%'),
+    token_expira_at TIMESTAMPTZ NOT NULL,
+    scopes TEXT NOT NULL CHECK
+        (scopes = 'https://www.googleapis.com/auth/gmail.readonly'),
+    estado TEXT NOT NULL DEFAULT 'CONECTADA'
+        CHECK (estado IN ('CONECTADA','REAUTORIZAR','ERROR')),
+    conectado_por TEXT NOT NULL CHECK (btrim(conectado_por) <> ''),
+    conectado_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_sync_at TIMESTAMPTZ,
+    sync_page_token TEXT,
+    sync_query_after DATE,
+    ultimo_error_codigo TEXT,
+    ultimo_resultado JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ALTER TABLE integracion_correo_dhl ADD COLUMN IF NOT EXISTS sync_page_token TEXT;
+ALTER TABLE integracion_correo_dhl ADD COLUMN IF NOT EXISTS sync_query_after DATE;
+ALTER TABLE integracion_correo_dhl
+    DROP CONSTRAINT IF EXISTS integracion_correo_dhl_scopes_check;
+ALTER TABLE integracion_correo_dhl
+    ADD CONSTRAINT integracion_correo_dhl_scopes_check CHECK
+        (scopes = 'https://www.googleapis.com/auth/gmail.readonly');
+
+-- Entrada administrativa o automática de PDFs DHL. Es evidencia pendiente y
+-- nunca representa por sí sola una deuda ni modifica la cuenta corriente.
 CREATE TABLE IF NOT EXISTS entradas_pdf_dhl (
     id BIGSERIAL PRIMARY KEY,
     archivo_nombre TEXT NOT NULL,
@@ -3627,7 +3668,10 @@ CREATE TABLE IF NOT EXISTS entradas_pdf_dhl (
     archivo_sha256 TEXT NOT NULL UNIQUE CHECK (archivo_sha256 ~ '^[0-9a-f]{64}$'),
     numero_esperado TEXT NOT NULL CHECK (numero_esperado ~ '^[0-9]{4}A[0-9]{8}$'),
     cuit_esperado TEXT NOT NULL CHECK (cuit_esperado ~ '^[0-9]{11}$'),
-    canal TEXT NOT NULL DEFAULT 'ADMIN_PDF' CHECK (canal = 'ADMIN_PDF'),
+    canal TEXT NOT NULL DEFAULT 'ADMIN_PDF'
+        CHECK (canal IN ('ADMIN_PDF','CORREO_DHL')),
+    correo_mensaje_id TEXT,
+    correo_adjunto_id TEXT,
     estado TEXT NOT NULL DEFAULT 'RECIBIDA'
         CONSTRAINT entradas_pdf_dhl_estado_check
         CHECK (estado IN ('RECIBIDA','PARA_REVISION','REVISION_MANUAL','REINTENTAR','IMPORTADA')),
@@ -3650,7 +3694,87 @@ CREATE TABLE IF NOT EXISTS entradas_pdf_dhl (
 ALTER TABLE entradas_pdf_dhl DROP CONSTRAINT IF EXISTS entradas_pdf_dhl_estado_check;
 ALTER TABLE entradas_pdf_dhl ADD CONSTRAINT entradas_pdf_dhl_estado_check
     CHECK (estado IN ('RECIBIDA','PARA_REVISION','REVISION_MANUAL','REINTENTAR','IMPORTADA'));
+ALTER TABLE entradas_pdf_dhl ADD COLUMN IF NOT EXISTS correo_mensaje_id TEXT;
+ALTER TABLE entradas_pdf_dhl ADD COLUMN IF NOT EXISTS correo_adjunto_id TEXT;
+ALTER TABLE entradas_pdf_dhl DROP CONSTRAINT IF EXISTS entradas_pdf_dhl_canal_check;
+ALTER TABLE entradas_pdf_dhl ADD CONSTRAINT entradas_pdf_dhl_canal_check
+    CHECK (canal IN ('ADMIN_PDF','CORREO_DHL'));
+ALTER TABLE entradas_pdf_dhl DROP CONSTRAINT IF EXISTS entradas_pdf_dhl_origen_check;
+ALTER TABLE entradas_pdf_dhl ADD CONSTRAINT entradas_pdf_dhl_origen_check CHECK (
+    (canal='ADMIN_PDF' AND correo_mensaje_id IS NULL AND correo_adjunto_id IS NULL)
+    OR (canal='CORREO_DHL' AND length(correo_mensaje_id) BETWEEN 1 AND 255
+        AND length(correo_adjunto_id) BETWEEN 1 AND 500)
+);
 CREATE INDEX IF NOT EXISTS ix_entradas_dhl_estado ON entradas_pdf_dhl(estado, id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entrada_dhl_correo_mensaje
+    ON entradas_pdf_dhl(correo_mensaje_id)
+    WHERE canal='CORREO_DHL' AND correo_mensaje_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_entrada_dhl_correo_adjunto
+    ON entradas_pdf_dhl(correo_mensaje_id, correo_adjunto_id)
+    WHERE canal='CORREO_DHL' AND correo_mensaje_id IS NOT NULL
+      AND correo_adjunto_id IS NOT NULL;
+
+-- Checkpoint durable por mensaje. No guarda el cuerpo del correo: sólo IDs
+-- opacos, resultado de autenticación, vínculo con el PDF y estado operativo.
+CREATE TABLE IF NOT EXISTS correos_dhl_procesados (
+    gmail_mensaje_id TEXT PRIMARY KEY CHECK (length(gmail_mensaje_id) BETWEEN 1 AND 255),
+    gmail_thread_id TEXT CHECK (gmail_thread_id IS NULL OR length(gmail_thread_id) BETWEEN 1 AND 255),
+    gmail_history_id TEXT CHECK (gmail_history_id IS NULL OR length(gmail_history_id) BETWEEN 1 AND 255),
+    gmail_adjunto_id TEXT CHECK (gmail_adjunto_id IS NULL OR length(gmail_adjunto_id) BETWEEN 1 AND 500),
+    archivo_nombre TEXT,
+    numero_documento TEXT,
+    estado TEXT NOT NULL CHECK (estado IN (
+        'DETECTADO','ORIGEN_RECHAZADO','REVISION_MANUAL','RECIBIDO',
+        'PARA_REVISION','REINTENTAR','IMPORTADO'
+    )),
+    autenticacion JSONB NOT NULL DEFAULT '{}'::jsonb,
+    entrada_id BIGINT REFERENCES entradas_pdf_dhl(id) ON DELETE RESTRICT,
+    error_codigo TEXT,
+    intentos INTEGER NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (entrada_id IS NULL OR estado IN ('RECIBIDO','PARA_REVISION','REINTENTAR','REVISION_MANUAL','IMPORTADO')),
+    CHECK (estado NOT IN ('RECIBIDO','PARA_REVISION','REINTENTAR','IMPORTADO') OR entrada_id IS NOT NULL)
+);
+ALTER TABLE correos_dhl_procesados
+    DROP CONSTRAINT IF EXISTS correos_dhl_procesados_gmail_thread_id_check;
+ALTER TABLE correos_dhl_procesados
+    ADD CONSTRAINT correos_dhl_procesados_gmail_thread_id_check CHECK
+        (gmail_thread_id IS NULL OR length(gmail_thread_id) BETWEEN 1 AND 255);
+ALTER TABLE correos_dhl_procesados
+    DROP CONSTRAINT IF EXISTS correos_dhl_procesados_gmail_history_id_check;
+ALTER TABLE correos_dhl_procesados
+    ADD CONSTRAINT correos_dhl_procesados_gmail_history_id_check CHECK
+        (gmail_history_id IS NULL OR length(gmail_history_id) BETWEEN 1 AND 255);
+ALTER TABLE correos_dhl_procesados
+    DROP CONSTRAINT IF EXISTS correos_dhl_procesados_gmail_adjunto_id_check;
+ALTER TABLE correos_dhl_procesados
+    ADD CONSTRAINT correos_dhl_procesados_gmail_adjunto_id_check CHECK
+        (gmail_adjunto_id IS NULL OR length(gmail_adjunto_id) BETWEEN 1 AND 500);
+CREATE INDEX IF NOT EXISTS ix_correos_dhl_estado
+    ON correos_dhl_procesados(estado, updated_at DESC);
+CREATE OR REPLACE FUNCTION tauro_proteger_origen_correo_dhl() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.gmail_mensaje_id IS DISTINCT FROM OLD.gmail_mensaje_id
+       OR NEW.created_at IS DISTINCT FROM OLD.created_at
+       OR (OLD.gmail_thread_id IS NOT NULL AND NEW.gmail_thread_id IS DISTINCT FROM OLD.gmail_thread_id)
+       OR (OLD.gmail_history_id IS NOT NULL AND NEW.gmail_history_id IS DISTINCT FROM OLD.gmail_history_id)
+       OR (OLD.gmail_adjunto_id IS NOT NULL AND NEW.gmail_adjunto_id IS DISTINCT FROM OLD.gmail_adjunto_id)
+       OR (OLD.archivo_nombre IS NOT NULL AND NEW.archivo_nombre IS DISTINCT FROM OLD.archivo_nombre)
+       OR (OLD.numero_documento IS NOT NULL AND NEW.numero_documento IS DISTINCT FROM OLD.numero_documento)
+       OR (OLD.autenticacion <> '{}'::jsonb AND NEW.autenticacion IS DISTINCT FROM OLD.autenticacion)
+       OR (OLD.entrada_id IS NOT NULL AND NEW.entrada_id IS DISTINCT FROM OLD.entrada_id) THEN
+        RAISE EXCEPTION 'El origen autenticado del correo DHL es inmutable';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_proteger_origen_correo_dhl ON correos_dhl_procesados;
+CREATE TRIGGER trg_proteger_origen_correo_dhl BEFORE UPDATE ON correos_dhl_procesados
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_origen_correo_dhl();
+DROP TRIGGER IF EXISTS trg_no_borrar_correo_dhl ON correos_dhl_procesados;
+CREATE TRIGGER trg_no_borrar_correo_dhl BEFORE DELETE ON correos_dhl_procesados
+FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_borrado_financiero();
 
 CREATE TABLE IF NOT EXISTS historial_extracciones_dhl (
     id BIGSERIAL PRIMARY KEY,
@@ -3693,9 +3817,11 @@ FOR EACH ROW EXECUTE FUNCTION tauro_conservar_extraccion_dhl();
 CREATE OR REPLACE FUNCTION tauro_proteger_entrada_dhl() RETURNS TRIGGER AS $$
 BEGIN
     IF ROW(NEW.archivo_pdf, NEW.archivo_sha256, NEW.archivo_nombre, NEW.canal,
+           NEW.correo_mensaje_id, NEW.correo_adjunto_id,
            NEW.creado_por, NEW.created_at)
        IS DISTINCT FROM ROW(OLD.archivo_pdf, OLD.archivo_sha256, OLD.archivo_nombre,
-           OLD.canal, OLD.creado_por, OLD.created_at) THEN
+           OLD.canal, OLD.correo_mensaje_id, OLD.correo_adjunto_id,
+           OLD.creado_por, OLD.created_at) THEN
         RAISE EXCEPTION 'La evidencia original DHL es inmutable';
     END IF;
     IF OLD.estado = 'IMPORTADA' AND NEW IS DISTINCT FROM OLD THEN

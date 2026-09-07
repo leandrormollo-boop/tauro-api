@@ -24,6 +24,65 @@ class AdjuntoCandidatoDHL:
     requiere_revision: bool = True
 
 
+@dataclass(frozen=True)
+class AutenticidadCorreoDHL:
+    dkim: bool
+    dmarc: bool
+    spf: bool
+
+
+def validar_autenticidad_dhl(mensaje: Mapping[str, Any]) -> AutenticidadCorreoDHL:
+    """Exige una firma DHL validada por Gmail y alineación DMARC.
+
+    ``From`` por sí solo se puede falsificar. Esta validación consume los
+    resultados que Gmail agregó después de verificar criptográficamente el
+    mensaje; una mera cabecera ``DKIM-Signature`` no alcanza porque no prueba
+    que la firma sea válida. SPF se conserva como señal adicional, pero DMARC
+    puede aprobar legítimamente por DKIM aunque el reenvío rompa SPF.
+    """
+    if not isinstance(mensaje, Mapping):
+        raise CorreoDHLInvalido('Mensaje inválido para autenticar el origen.')
+    payload = mensaje.get('payload')
+    headers = payload.get('headers') if isinstance(payload, Mapping) else None
+    if not isinstance(headers, list):
+        raise CorreoDHLInvalido('Faltan cabeceras autenticadas del mensaje.')
+    resultados = []
+    for header in headers:
+        if not isinstance(header, Mapping):
+            raise CorreoDHLInvalido('Cabecera de autenticación inválida.')
+        nombre = header.get('name')
+        valor = header.get('value')
+        if not isinstance(nombre, str):
+            raise CorreoDHLInvalido('Cabecera de autenticación inválida.')
+        if nombre.casefold() != 'authentication-results':
+            continue
+        if not isinstance(valor, str) or '\r' in valor or '\n' in valor:
+            raise CorreoDHLInvalido('Resultado de autenticación ambiguo.')
+        normalizado = valor.casefold().strip()
+        # Sólo son autoridad los resultados agregados por la infraestructura
+        # receptora de Gmail; una cabecera incluida por el emisor no alcanza.
+        if re.match(r'^mx\.google\.com\s*;', normalizado):
+            resultados.append(normalizado)
+    if not resultados:
+        raise CorreoDHLInvalido('Gmail no informó autenticación del remitente.')
+    # Gmail agrega su resultado más reciente primero. No se combinan señales
+    # entre cabeceras que podrían corresponder a evaluaciones diferentes.
+    texto = resultados[0]
+    dominio = r'(?:[a-z0-9-]+\.)*dhl\.com'
+    dkim = bool(re.search(
+        rf'\bdkim=pass\b[^;]*(?:header\.(?:i|d)=@?{dominio})', texto,
+    ))
+    dmarc = bool(re.search(
+        rf'\bdmarc=pass\b[^;]*header\.from={dominio}', texto,
+    ))
+    spf = bool(re.search(
+        rf'\bspf=pass\b[^;]*(?:smtp\.mailfrom|header\.from)=@?{dominio}', texto,
+    ))
+    if not dkim or not dmarc:
+        raise CorreoDHLInvalido('El correo no acredita firma DHL y alineación DMARC válidas.')
+    return AutenticidadCorreoDHL(dkim=True, dmarc=True, spf=spf)
+
+
 def seleccionar_adjunto_dhl(
     mensaje: Mapping[str, Any], *, cuenta_autenticada: str,
     cuenta_esperada: str, cuit_esperado: str,
@@ -44,7 +103,7 @@ def seleccionar_adjunto_dhl(
     if not isinstance(mensaje, Mapping):
         raise CorreoDHLInvalido('Mensaje inválido.')
     mensaje_id = mensaje.get('id')
-    if not isinstance(mensaje_id, str) or not mensaje_id.strip():
+    if not isinstance(mensaje_id, str) or not mensaje_id.strip() or len(mensaje_id) > 255:
         raise CorreoDHLInvalido('Falta el identificador inmutable de Gmail.')
     etiquetas = mensaje.get('labelIds', [])
     if not isinstance(etiquetas, list) or not all(isinstance(v, str) for v in etiquetas):
@@ -114,9 +173,11 @@ def seleccionar_adjunto_dhl(
         parte_id = parte.get('partId')
         adjunto_id = cuerpo.get('attachmentId')
         datos_inline = cuerpo.get('data')
-        if not isinstance(parte_id, str):
+        if not isinstance(parte_id, str) or len(parte_id) > 200:
             raise CorreoDHLInvalido('Falta el identificador de parte MIME.')
-        if adjunto_id is not None and (not isinstance(adjunto_id, str) or not adjunto_id.strip()):
+        if adjunto_id is not None and (
+            not isinstance(adjunto_id, str) or not adjunto_id.strip() or len(adjunto_id) > 500
+        ):
             raise CorreoDHLInvalido('Identificador de adjunto inválido.')
         if adjunto_id is None and (not isinstance(datos_inline, str) or not datos_inline):
             raise CorreoDHLInvalido('El adjunto no tiene contenido ni referencia.')

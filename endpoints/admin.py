@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import os
@@ -21,7 +22,9 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter, Request, Form, Cookie, Depends, File, UploadFile
+from fastapi import (
+    APIRouter, BackgroundTasks, Request, Form, Cookie, Depends, File, UploadFile,
+)
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -3609,9 +3612,12 @@ def admin_bandeja_dhl(request: Request, pagina: int = 1, admin_token: Optional[s
     if not _is_auth(admin_token):
         return _redirect_login()
     from servicios.bandeja_facturas_dhl import listar_entradas_dhl
+    from servicios.correo_facturas_dhl import estado_integracion
     return templates.TemplateResponse(request=request, name='admin/entrada_dhl.html',
         context={'seccion': 'conciliacion_couriers', 'bandeja': listar_entradas_dhl(pagina=pagina),
-                 'csrf_dhl': _csrf_dhl('nueva')}, headers={'Cache-Control': 'private, no-store'})
+                 'gmail': estado_integracion(), 'csrf_dhl': _csrf_dhl('nueva'),
+                 'csrf_gmail': _csrf_dhl('gmail:sync')},
+        headers={'Cache-Control': 'private, no-store'})
 
 
 @router.post('/conciliacion-couriers/entrada-dhl')
@@ -3632,6 +3638,96 @@ async def admin_recibir_dhl(request: Request, admin_token: Optional[str] = Cooki
         return RedirectResponse(f"/admin/conciliacion-couriers/entrada-dhl/{entrada['id']}", status_code=303)
     except ValueError as exc:
         return RedirectResponse('/admin/conciliacion-couriers/entrada-dhl?error=' + quote(str(exc)), status_code=303)
+
+
+@router.get('/conciliacion-couriers/entrada-dhl/gmail/conectar')
+def admin_conectar_gmail_dhl(admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.correo_facturas_dhl import url_autorizacion
+    try:
+        state = secrets.token_urlsafe(40)
+        code_verifier = secrets.token_urlsafe(64)
+        code_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode("ascii")).digest()
+        ).rstrip(b"=").decode("ascii")
+        respuesta = RedirectResponse(
+            url_autorizacion(state, code_challenge=code_challenge), status_code=303,
+        )
+        respuesta.set_cookie(
+            key='dhl_gmail_oauth', value=state, max_age=600,
+            httponly=True, secure=COOKIE_SECURE, samesite='lax',
+            path='/admin/conciliacion-couriers/entrada-dhl/gmail/callback',
+        )
+        respuesta.set_cookie(
+            key='dhl_gmail_pkce', value=code_verifier, max_age=600,
+            httponly=True, secure=COOKIE_SECURE, samesite='lax',
+            path='/admin/conciliacion-couriers/entrada-dhl/gmail/callback',
+        )
+        return respuesta
+    except ValueError as exc:
+        return RedirectResponse(
+            '/admin/conciliacion-couriers/entrada-dhl?error=' + quote(str(exc)),
+            status_code=303,
+        )
+
+
+@router.get('/conciliacion-couriers/entrada-dhl/gmail/callback')
+def admin_callback_gmail_dhl(
+    state: str = '', code: str = '', error: str = '',
+    dhl_gmail_oauth: Optional[str] = Cookie(None),
+    dhl_gmail_pkce: Optional[str] = Cookie(None),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    destino = '/admin/conciliacion-couriers/entrada-dhl'
+    if (not state or len(state) > 160 or not dhl_gmail_oauth or not dhl_gmail_pkce
+            or not hmac.compare_digest(state, dhl_gmail_oauth)):
+        respuesta = Response('Autorización Gmail vencida o inválida.', status_code=403)
+        respuesta.delete_cookie(
+            'dhl_gmail_oauth',
+            path='/admin/conciliacion-couriers/entrada-dhl/gmail/callback',
+        )
+        respuesta.delete_cookie(
+            'dhl_gmail_pkce',
+            path='/admin/conciliacion-couriers/entrada-dhl/gmail/callback',
+        )
+        return respuesta
+    try:
+        if error:
+            raise ValueError('Google no autorizó la conexión de Gmail DHL.')
+        from servicios.correo_facturas_dhl import conectar_desde_codigo
+        conectar_desde_codigo(code, code_verifier=dhl_gmail_pkce, actor='admin')
+        respuesta = RedirectResponse(destino + '?ok=gmail_conectado', status_code=303)
+    except (ValueError, RuntimeError) as exc:
+        respuesta = RedirectResponse(destino + '?error=' + quote(str(exc)), status_code=303)
+    respuesta.delete_cookie(
+        'dhl_gmail_oauth',
+        path='/admin/conciliacion-couriers/entrada-dhl/gmail/callback',
+    )
+    respuesta.delete_cookie(
+        'dhl_gmail_pkce',
+        path='/admin/conciliacion-couriers/entrada-dhl/gmail/callback',
+    )
+    return respuesta
+
+
+@router.post('/conciliacion-couriers/entrada-dhl/gmail/sincronizar')
+def admin_sincronizar_gmail_dhl(
+    background_tasks: BackgroundTasks,
+    csrf_gmail: str = Form(''), admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf_gmail, 'gmail:sync'):
+        return Response('Formulario vencido o inválido.', status_code=403)
+    from servicios.correo_facturas_dhl import sincronizar_facturas_dhl_seguro
+    background_tasks.add_task(sincronizar_facturas_dhl_seguro)
+    return RedirectResponse(
+        '/admin/conciliacion-couriers/entrada-dhl?ok=sincronizacion_iniciada',
+        status_code=303,
+    )
 
 
 @router.get('/conciliacion-couriers/entrada-dhl/{entrada_id}', response_class=HTMLResponse)

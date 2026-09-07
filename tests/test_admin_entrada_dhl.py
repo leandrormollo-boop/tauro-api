@@ -3,10 +3,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from endpoints import admin
 from servicios import bandeja_facturas_dhl as bandeja
+from servicios import correo_facturas_dhl as correo
 from servicios.entrada_facturas_dhl import preparar_factura_dhl_manual
 from test_entrada_facturas_dhl import ejemplo
 
@@ -29,6 +31,7 @@ def request():
 def entrada(estado='PARA_REVISION'):
     return {'id': 1, 'numero_esperado': '1700A00000001', 'cuit_esperado': '20123456786',
         'archivo_nombre': '<script>no-ejecutar</script>.pdf', 'archivo_sha256': 'a'*64,
+        'canal': 'ADMIN_PDF', 'correo_mensaje_id': None, 'correo_adjunto_id': None,
         'estado': estado, 'extraccion': ejemplo() if estado in ('PARA_REVISION','IMPORTADA') else None,
         'observaciones': ['<script>dato-del-pdf</script>'], 'error_lectura': None, 'intentos': 1,
         'revision_sha256': 'b'*64, 'lector_version': bandeja.LECTOR_VERSION,
@@ -48,6 +51,9 @@ def test_carga_manual_no_inventa_mail():
     (admin.admin_pdf_entrada_dhl, {'entrada_id': 1}),
     (admin.admin_leer_dhl, {'entrada_id': 1}),
     (admin.admin_importar_dhl, {'entrada_id': 1}),
+    (admin.admin_conectar_gmail_dhl, {}),
+    (admin.admin_callback_gmail_dhl, {}),
+    (admin.admin_sincronizar_gmail_dhl, {'background_tasks': BackgroundTasks()}),
 ])
 def test_todas_las_rutas_exigen_admin_antes_de_leer_o_escribir(fn, args):
     respuesta = fn(**args, admin_token='invalido')
@@ -95,9 +101,76 @@ def test_detalle_renderiza_estados_escapa_pdf_y_no_cachea(monkeypatch, estado):
 
 def test_bandeja_renderiza_sin_promesa_de_gmail_activo(monkeypatch):
     monkeypatch.setattr(bandeja, 'listar_entradas_dhl', lambda **kw: {'items': [entrada()], 'pagina': 1, 'hay_mas': False})
+    monkeypatch.setattr(correo, 'estado_integracion', lambda: {
+        'configurada': False, 'conectada': False, 'estado': 'SIN_CONFIGURAR',
+        'bloqueos': ['oauth_google'], 'conteos': {},
+    })
     respuesta = admin.admin_bandeja_dhl(request(), admin_token='valido')
-    assert 'Gmail todavía no está conectado' in respuesta.body.decode()
+    assert 'faltan credenciales seguras' in respuesta.body.decode()
     assert respuesta.headers['cache-control'] == 'private, no-store'
+
+
+def test_conectar_gmail_usa_state_http_only_y_scope_del_servicio(monkeypatch):
+    visto = {}
+    monkeypatch.setattr(
+        correo, 'url_autorizacion',
+        lambda state, **kw: (visto.update(state=state, **kw)
+                             or 'https://accounts.google.test/auth'),
+    )
+    respuesta = admin.admin_conectar_gmail_dhl(admin_token='valido')
+    assert respuesta.status_code == 303
+    assert respuesta.headers['location'] == 'https://accounts.google.test/auth'
+    cookies = respuesta.headers.getlist('set-cookie')
+    assert len(cookies) == 2
+    assert all('HttpOnly' in cookie and 'Secure' in cookie and 'SameSite=lax' in cookie
+               for cookie in cookies)
+    assert any('dhl_gmail_oauth=' in cookie for cookie in cookies)
+    assert any('dhl_gmail_pkce=' in cookie for cookie in cookies)
+    assert len(visto['state']) >= 32 and len(visto['code_challenge']) == 43
+
+
+def test_callback_exige_state_y_nunca_acepta_error_como_codigo(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(
+        correo, 'conectar_desde_codigo',
+        lambda codigo, **kw: llamadas.append((codigo, kw)),
+    )
+    invalida = admin.admin_callback_gmail_dhl(
+        state='uno', code='codigo-valido-largo', dhl_gmail_oauth='otro',
+        dhl_gmail_pkce='v' * 64, admin_token='valido')
+    assert invalida.status_code == 403 and llamadas == []
+    rechazada = admin.admin_callback_gmail_dhl(
+        state='mismo', code='codigo-valido-largo', error='access_denied',
+        dhl_gmail_oauth='mismo', dhl_gmail_pkce='v' * 64, admin_token='valido')
+    assert rechazada.status_code == 303 and llamadas == []
+
+    aceptada = admin.admin_callback_gmail_dhl(
+        state='mismo', code='codigo-valido-largo', dhl_gmail_oauth='mismo',
+        dhl_gmail_pkce='v' * 64, admin_token='valido')
+    assert aceptada.status_code == 303
+    assert llamadas == [('codigo-valido-largo', {
+        'code_verifier': 'v' * 64, 'actor': 'admin',
+    })]
+    assert all('dhl_gmail_' in cookie and 'Max-Age=0' in cookie
+               for cookie in aceptada.headers.getlist('set-cookie'))
+
+
+def test_sincronizacion_manual_exige_csrf_antes_de_tocar_gmail(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(
+        correo, 'sincronizar_facturas_dhl_seguro', lambda: llamadas.append(True),
+    )
+    tareas = BackgroundTasks()
+    assert admin.admin_sincronizar_gmail_dhl(
+        tareas, csrf_gmail='', admin_token='valido',
+    ).status_code == 403
+    assert llamadas == [] and tareas.tasks == []
+    tareas = BackgroundTasks()
+    respuesta = admin.admin_sincronizar_gmail_dhl(
+        tareas, csrf_gmail=admin._csrf_dhl('gmail:sync'), admin_token='valido')
+    assert respuesta.status_code == 303 and llamadas == [] and len(tareas.tasks) == 1
+    asyncio.run(tareas())
+    assert llamadas == [True]
 
 
 def test_pdf_se_descarga_privado_con_nombre_controlado(monkeypatch):

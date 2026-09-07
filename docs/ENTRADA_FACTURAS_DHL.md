@@ -1,9 +1,11 @@
-# Facturas DHL por correo — primera etapa
+# Facturas DHL por correo
 
-Estado al 04/09/2026: contrato, preselector Gmail, lector PDF y **bandeja de
-revisión administrativa** implementados y probados localmente. Tres originales
-reales leídos sin registrarlos. Sin conexión automática al correo, sin
-despliegue y sin cambios en saldos ni registros de facturas reales.
+Estado al 06/09/2026: contrato, preselector Gmail, lector PDF, **bandeja de
+revisión administrativa** y conector OAuth de sólo lectura implementados.
+El job periódico autentica origen, descarga, deduplica, lee, registra evidencia
+y propone matches para el formato exacto admitido. Nunca confirma matches,
+decide el tipo de cambio ni aplica diferencias. El nuevo conector todavía no
+está publicado ni autorizado contra la casilla real.
 
 ## Cuentas y alcance
 
@@ -37,7 +39,12 @@ y firmado por `dhl.com`. El nombre visible por sí solo no autentica un mail.
   configurados. Rechaza cuenta incorrecta, cabeceras ambiguas y adjuntos
   múltiples; excluye legajos, recibos, respuestas, mensajes enviados,
   borradores, spam, papelera y correos anidados. El filtro `From` NO valida
-  DKIM ni habilita una importación; falta implementar el control de origen.
+  DKIM por sí solo. `validar_autenticidad_dhl` exige que Gmail reporte DKIM
+  aprobado y DMARC alineado con `dhl.com`; SPF se conserva como señal adicional.
+- `servicios/correo_facturas_dhl.py`: OAuth Gmail read-only, tokens cifrados,
+  perfil de cuenta, búsqueda acotada con solapamiento, descarga base64url,
+  checkpoint durable, reintentos y lock global del job. No guarda cuerpos de
+  correo ni expone respuestas de Google en logs.
 - `servicios/lector_pdf_dhl.py`: extraer campos desde el documento real;
   los adjuntos y correos son datos no confiables, no instrucciones.
 - `servicios/entrada_facturas_dhl.py`: validar una extracción normalizada sin
@@ -52,7 +59,41 @@ y firmado por `dhl.com`. El nombre visible por sí solo no autentica un mail.
 ## Bandeja administrativa implementada
 
 Ruta: `/admin/conciliacion-couriers/entrada-dhl`, accesible desde **Leer factura
-DHL** en Control de envíos y FC. No está publicada todavía.
+DHL** en Control de envíos y FC.
+
+## Flujo automático preparado
+
+1. El Admin abre la bandeja y pulsa **Conectar Gmail DHL**.
+2. Google devuelve acceso offline limitado a `gmail.readonly`, protegido con
+   PKCE; el servidor
+   verifica que el perfil sea exactamente `DHL_GMAIL_ACCOUNT` y cifra ambos
+   tokens con una clave exclusiva.
+3. Cada `DHL_GMAIL_SYNC_MINUTES` (30 por defecto) el job busca únicamente el
+   patrón de factura DHL desde una ventana solapada. Un advisory lock de
+   PostgreSQL evita duplicar el lote entre procesos.
+4. Cada mensaje pasa autenticación de origen, selección conservadora del PDF,
+   tamaño/hash e identidad documental. Mensaje, adjunto, PDF y número quedan
+   deduplicados en distintas capas.
+5. Si el formato conocido cierra exactamente, se registra la evidencia y se
+   proponen matches por courier + tracking. El Admin todavía debe revisar el
+   original y aprobar el tipo de cambio antes de confirmar o calcular.
+6. Origen dudoso, formato nuevo, NC/ND, error documental o falta de match quedan
+   visibles para revisión manual. Un fallo transitorio conserva el PDF y se
+   reintenta; no se interpreta como documento inválido.
+
+Cada pedido a Gmail trae como máximo 500 mensajes (límite por página de la API).
+Si la corrida alcanza `DHL_GMAIL_SYNC_LIMIT` (500 por defecto), guarda el cursor
+y continúa desde la página siguiente en la próxima ejecución, sin adelantar la
+fecha del último ciclo completo. El límite por corrida puede ampliarse hasta
+5.000 sin perder la continuidad de paginación. Los mensajes en reintento se
+leen además desde el checkpoint durable, por lo que no quedan varados aunque
+el cursor o la ventana de Gmail avancen.
+
+La importación automática de evidencia nace **apagada**. Después de revisar el
+primer lote supervisado se habilita explícitamente con
+`DHL_GMAIL_AUTO_IMPORT=true`; aun encendida no crea ajustes ni saldos. Un error
+transitorio reintenta con espera exponencial y, al quinto intento por defecto,
+pasa a revisión manual (`DHL_GMAIL_MAX_ATTEMPTS` permite ajustar el tope).
 
 1. Admin carga el PDF original, el número y el CUIT receptor esperado.
 2. Se conserva el PDF en `entradas_pdf_dhl`, estado `RECIBIDA`, antes de leer.
@@ -142,10 +183,13 @@ worker dedicado con aislamiento de filesystem/red y control de origen.
   `4f6efcad2fcd3d8157715a9cc10ed442d41dbcf92fd1fbd728fc459cc30721dc`.
 - Suite completa después del lector/preselector: 1.491 pruebas y 5 subtests
   aprobados, 0 fallas (30 advertencias existentes), 7,96 segundos.
-- Suite completa del release: 1.674 pruebas y 5 subtests aprobados, 0 fallas
+- Suite completa final: 1.725 pruebas y 5 subtests aprobados, 0 fallas
   (30 advertencias existentes). Incluye PostgreSQL real: idempotencia,
   concurrencia, rollback, evidencia inmutable, migración repetible y ausencia
   de cargos/ajustes. Tests de Admin: auth, CSRF, revisión exacta y escape HTML.
+- 79 pruebas focalizadas del conector aprobadas: OAuth PKCE, 403 de cuota,
+  rotación de claves, tarea en segundo plano, reintento/backoff, tope manual y
+  paginación durable. Build web aprobado.
 - UI revisada con datos sintéticos, escritorio y anchos móviles hasta 320 px,
   sin desborde del formulario ni del cuerpo de la página.
 - Tres originales completos validados con el worker Linux: 10, 4 y 10
@@ -153,21 +197,38 @@ worker dedicado con aislamiento de filesystem/red y control de origen.
 - PostgreSQL de prueba aislado, `DATABASE_URL` vacía y dotenv desactivado.
 - Release: publicado en producción dentro de `1c458dc` el 04/09/2026; sin
   importar facturas reales ni conectar Gmail durante el despliegue.
-- Router TAURO: arquitectura con impacto financiero y seguridad, ruta Sol;
-  sin delegación, envío de documentos a modelos ni acciones productivas.
+- Router TAURO: arquitectura con impacto financiero y seguridad, ruta Sol.
+  Claude Fable 5.1 auditó únicamente el código en modo de sólo lectura; sus dos
+  hallazgos prioritarios originaron las pruebas de reintento y cuota. No recibió
+  documentos, correos, credenciales ni datos de clientes. Sin acciones
+  productivas.
 
 ## Pendiente para activar
 
-Revisar variantes, recargos adicionales y NC/ND; completar controles de origen
-y cuenta contractual DHL; fijar conceptos trasladables y política cambiaria.
-La bandeja durable y sus reintentos manuales están listos; falta la cola de
-correo y su procesamiento programado, autenticación/verificación del emisor,
-conexión OAuth de sólo lectura del servidor, almacenamiento seguro de tokens,
-aislamiento del worker para correo y prueba end-to-end. Publicar la etapa de
-carga administrativa requiere aprobación explícita del responsable.
+1. Crear/configurar el cliente OAuth de Google con el callback que muestra el
+   Admin y cargar en el servidor:
+   `DHL_GMAIL_CLIENT_ID`, `DHL_GMAIL_CLIENT_SECRET`, `DHL_GMAIL_ACCOUNT`,
+   `DHL_GMAIL_CUIT` y `DHL_GMAIL_TOKEN_ENCRYPTION_KEY` (secreto exclusivo de
+   32 caracteres como mínimo).
+   El consentimiento OAuth debe usar únicamente `gmail.readonly`. Para una
+   conexión estable, el proyecto de Google no puede quedar en estado
+   **Testing**: en ese modo Google vence también el refresh token a los siete
+   días. Si la casilla no pertenece a una organización Google Workspace que
+   pueda declarar la app interna, revisar el circuito de publicación/
+   verificación aplicable al scope restringido antes de operar en producción.
+2. Publicar el código con aprobación explícita y autorizar una sola vez la
+   casilla receptora desde el Admin.
+3. Ejecutar el primer lote con `DHL_GMAIL_AUTO_IMPORT` apagado, comparar sus
+   resultados contra PDFs reales y recién entonces habilitarlo. No ampliar
+   formatos ni retroceder más de la ventana inicial de siete días sin una nueva
+   validación.
+4. Para una etapa posterior: separar el lector en un servicio/contenedor todavía
+   más aislado. El subprocess actual limita recursos y secretos, pero no es un
+   sandbox completo contra PDFs arbitrarios.
 
-La sesión Chrome y el acceso del asistente no son credenciales del servidor.
-No activar cargas automáticas antes de esas pruebas y autorizaciones.
+Siguen requiriendo evidencia adicional los recargos nuevos, NC/ND, escaneos,
+reimpresiones y formatos de más páginas. La sesión Chrome del operador nunca se
+reutiliza como credencial del servidor.
 
 ## Referencias técnicas
 

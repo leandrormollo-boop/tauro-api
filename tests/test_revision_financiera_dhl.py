@@ -95,6 +95,30 @@ def test_doble_aprobacion_concurrente_idempotente_y_no_sobrescribe(db, caso):
         aprobar(caso, motivo='Una decisión diferente no puede pisar el historial')
 
 
+def test_aprobacion_humana_cierra_revision_de_extraccion_automatica(db, caso):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("""UPDATE facturas_courier SET metadatos_origen=
+            jsonb_set(metadatos_origen, '{revision_extraccion_requerida}', 'true')
+            WHERE id=%s""", (caso['fid'],))
+    aprobar(caso)
+    with db() as conn, conn.cursor() as cur:
+        cur.execute('SELECT metadatos_origen FROM facturas_courier WHERE id=%s', (caso['fid'],))
+        metadata = cur.fetchone()['metadatos_origen']
+        assert metadata['revision_extraccion_requerida'] is False
+        assert metadata['revision_financiera_pendiente'] is False
+
+
+def test_no_se_puede_cerrar_revision_automatica_sin_registro_humano(db, caso):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("""UPDATE facturas_courier SET metadatos_origen=
+            jsonb_set(metadatos_origen, '{revision_extraccion_requerida}', 'true')
+            WHERE id=%s""", (caso['fid'],))
+    with pytest.raises(psycopg2.Error, match='revisión humana'), db() as conn, conn.cursor() as cur:
+        cur.execute("""UPDATE facturas_courier SET metadatos_origen=
+            jsonb_set(metadatos_origen, '{revision_extraccion_requerida}', 'false')
+            WHERE id=%s""", (caso['fid'],))
+
+
 def test_tc_respaldado_sin_diferencia_cierra_sin_crear_cargos(db, caso):
     aprobar(caso, tipo_cambio_ars='1000', fuente='COMPROBANTE', respaldo_pdf=b'%PDF-evidencia-sintetica')
     calculo = conciliacion.confirmar_y_calcular_factura(caso['fid'], actor='test')['conciliaciones'][0]

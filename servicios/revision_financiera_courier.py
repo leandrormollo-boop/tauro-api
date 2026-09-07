@@ -65,7 +65,10 @@ def aprobar_revision_financiera(factura_id, *, tipo_cambio_ars, fuente, motivo,
              respaldo_pdf, respaldo_sha, actor))
         revision_id = cur.fetchone()['id']
         cur.execute('''UPDATE facturas_courier SET metadatos_origen=
-            jsonb_set(metadatos_origen, '{revision_financiera_pendiente}', 'false'), updated_at=NOW()
+            jsonb_set(
+                jsonb_set(metadatos_origen, '{revision_financiera_pendiente}', 'false'),
+                '{revision_extraccion_requerida}', 'false'
+            ), updated_at=NOW()
             WHERE id=%s''', (int(factura_id),))
         _registrar_auditoria(cur, evento='REVISION_FINANCIERA_APROBADA', actor=actor,
             factura_id=int(factura_id), metadata={'revision_financiera_id': revision_id,

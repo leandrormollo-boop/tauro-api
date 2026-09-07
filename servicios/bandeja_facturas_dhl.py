@@ -1,7 +1,7 @@
-"""Intake administrativo durable. Revisar extracción != aprobar cargo al cliente.
+"""Intake durable, manual o desde Gmail. Leer evidencia != aprobar un cargo.
 
-No conexión a Gmail, no envío a modelos, no cambio de precios/saldos. El PDF
-original se conserva; las coincidencias posteriores son sólo PROPUESTAS.
+No envía documentos a modelos ni cambia precios/saldos. El PDF original se
+conserva y las coincidencias posteriores son siempre sólo PROPUESTAS.
 """
 import hashlib
 import re
@@ -13,12 +13,17 @@ from servicios.conciliacion_couriers import (
     ConciliacionCourierError, _hash_json, _json_seguro, _registrar_auditoria,
     registrar_factura_courier, matchear_items_exactos,
 )
-from servicios.entrada_facturas_dhl import ExtraccionDHLInvalida, preparar_factura_dhl_manual
+from servicios.entrada_facturas_dhl import (
+    ExtraccionDHLInvalida,
+    preparar_factura_dhl,
+    preparar_factura_dhl_manual,
+)
 from servicios.ejecucion_lector_dhl import ejecutar_lector_dhl, LectorDHLNoDisponible
 
 LECTOR_VERSION = 2
 _CAMPOS = '''id, archivo_nombre, archivo_sha256, numero_esperado, cuit_esperado,
-    canal, estado, extraccion, observaciones, revision_sha256, lector_version,
+    canal, correo_mensaje_id, correo_adjunto_id, estado, extraccion,
+    observaciones, revision_sha256, lector_version,
     error_lectura, intentos, factura_id, creado_por, revisado_por,
     created_at, updated_at, revisado_at'''
 
@@ -40,11 +45,21 @@ def _auditar(cur, entrada, evento, actor, **extra):
     })
 
 
-def recibir_pdf_dhl(*, pdf, nombre, numero, cuit, actor):
+def _recibir_pdf_dhl(*, pdf, nombre, numero, cuit, actor, canal,
+                     correo_mensaje_id=None, correo_adjunto_id=None):
     numero, cuit = _referencia(numero, cuit)
     if not isinstance(pdf, bytes) or not pdf.startswith(b'%PDF') or len(pdf) > 8 * 1024 * 1024:
         raise ExtraccionDHLInvalida('Adjuntá el PDF original, de hasta 8 MB.')
     nombre = ''.join(c for c in str(nombre or '') if c.isalnum() or c in '._- ')[:180] or 'factura.pdf'
+    if canal not in {'ADMIN_PDF', 'CORREO_DHL'}:
+        raise ExtraccionDHLInvalida('Canal de entrada DHL inválido.')
+    if canal == 'CORREO_DHL':
+        correo_mensaje_id = str(correo_mensaje_id or '').strip()
+        correo_adjunto_id = str(correo_adjunto_id or '').strip()
+        if not (1 <= len(correo_mensaje_id) <= 255 and 1 <= len(correo_adjunto_id) <= 500):
+            raise ExtraccionDHLInvalida('Falta la identidad inmutable del correo DHL.')
+    else:
+        correo_mensaje_id = correo_adjunto_id = None
     sha = hashlib.sha256(pdf).hexdigest()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))', ('tauro:entrada-dhl:' + sha,))
@@ -55,18 +70,38 @@ def recibir_pdf_dhl(*, pdf, nombre, numero, cuit, actor):
                 raise ExtraccionDHLInvalida('Este PDF ya está en la bandeja con otra referencia. Abrí su detalle para corregirla antes de leer.')
             return {'id': existente['id'], 'duplicado': True}
         cur.execute('''INSERT INTO entradas_pdf_dhl
-            (archivo_nombre, archivo_pdf, archivo_sha256, numero_esperado, cuit_esperado, creado_por)
-            VALUES (%s,%s,%s,%s,%s,%s) RETURNING id, archivo_sha256''',
-            (nombre, pdf, sha, numero, cuit, actor))
+            (archivo_nombre, archivo_pdf, archivo_sha256, numero_esperado,
+             cuit_esperado, canal, correo_mensaje_id, correo_adjunto_id, creado_por)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id, archivo_sha256''',
+            (nombre, pdf, sha, numero, cuit, canal, correo_mensaje_id,
+             correo_adjunto_id, actor))
         entrada = cur.fetchone()
-        _auditar(cur, entrada, 'DHL_PDF_RECIBIDO', actor)
+        _auditar(cur, entrada, 'DHL_PDF_RECIBIDO', actor, canal=canal)
         return {'id': entrada['id'], 'duplicado': False}
+
+
+def recibir_pdf_dhl(*, pdf, nombre, numero, cuit, actor):
+    """Carga manual del Admin; nunca fabrica una procedencia de correo."""
+    return _recibir_pdf_dhl(
+        pdf=pdf, nombre=nombre, numero=numero, cuit=cuit, actor=actor,
+        canal='ADMIN_PDF',
+    )
+
+
+def recibir_pdf_dhl_correo(*, pdf, nombre, numero, cuit, actor,
+                           correo_mensaje_id, correo_adjunto_id):
+    """Conserva un adjunto que ya pasó el control de origen Gmail."""
+    return _recibir_pdf_dhl(
+        pdf=pdf, nombre=nombre, numero=numero, cuit=cuit, actor=actor,
+        canal='CORREO_DHL', correo_mensaje_id=correo_mensaje_id,
+        correo_adjunto_id=correo_adjunto_id,
+    )
 
 
 def listar_entradas_dhl(*, pagina=1):
     pagina = max(1, min(int(pagina), 10000))
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('''SELECT id, numero_esperado, archivo_nombre, estado, created_at,
+        cur.execute('''SELECT id, numero_esperado, archivo_nombre, canal, estado, created_at,
             factura_id, error_lectura FROM entradas_pdf_dhl ORDER BY id DESC LIMIT 51 OFFSET %s''',
             ((pagina - 1) * 50,))
         filas = [dict(f) for f in cur.fetchall()]
@@ -104,6 +139,8 @@ def leer_entrada_dhl(entrada_id, *, numero, cuit, actor):
     with get_conn() as conn, conn.cursor() as cur:
         entrada, pdf = _bloquear(cur, entrada_id)
         if entrada['estado'] == 'IMPORTADA':
+            cur.execute("UPDATE correos_dhl_procesados SET estado='IMPORTADO', updated_at=NOW() WHERE entrada_id=%s",
+                        (entrada_id,))
             return entrada['estado']
         if entrada['lector_version'] is not None and entrada['lector_version'] > LECTOR_VERSION:
             raise ExtraccionDHLInvalida('Esta lectura proviene de una versión más nueva. Actualizá el servidor; no se puede degradar.')
@@ -126,18 +163,24 @@ def leer_entrada_dhl(entrada_id, *, numero, cuit, actor):
                 estado='PARA_REVISION', extraccion=%s, observaciones=%s, revision_sha256=%s,
                 lector_version=%s, error_lectura=NULL, intentos=intentos+1, updated_at=NOW() WHERE id=%s''',
                 (numero, cuit, Json(extraccion), Json(observaciones), huella, LECTOR_VERSION, entrada_id))
+            cur.execute("UPDATE correos_dhl_procesados SET estado='PARA_REVISION', error_codigo=NULL, updated_at=NOW() WHERE entrada_id=%s",
+                        (entrada_id,))
             _auditar(cur, entrada, 'DHL_PDF_EXTRAIDO', actor, lector_version=LECTOR_VERSION, revision_sha256=huella)
             return 'PARA_REVISION'
         except LectorDHLNoDisponible as exc:
             cur.execute('''UPDATE entradas_pdf_dhl SET numero_esperado=%s, cuit_esperado=%s,
                 estado='REINTENTAR', error_lectura=%s, updated_at=NOW() WHERE id=%s''',
                 (numero, cuit, str(exc)[:500], entrada_id))
+            cur.execute("UPDATE correos_dhl_procesados SET estado='REINTENTAR', error_codigo='LECTOR_NO_DISPONIBLE', updated_at=NOW() WHERE entrada_id=%s",
+                        (entrada_id,))
             _auditar(cur, entrada, 'DHL_LECTOR_NO_DISPONIBLE', actor, lector_version=LECTOR_VERSION)
             return 'REINTENTAR'
         except (ExtraccionDHLInvalida, ConciliacionCourierError) as exc:
             cur.execute('''UPDATE entradas_pdf_dhl SET numero_esperado=%s, cuit_esperado=%s,
                 estado='REVISION_MANUAL', error_lectura=%s, intentos=intentos+1, updated_at=NOW() WHERE id=%s''',
                 (numero, cuit, str(exc)[:500], entrada_id))
+            cur.execute("UPDATE correos_dhl_procesados SET estado='REVISION_MANUAL', error_codigo='DOCUMENTO_REQUIERE_REVISION', updated_at=NOW() WHERE entrada_id=%s",
+                        (entrada_id,))
             _auditar(cur, entrada, 'DHL_PDF_REVISION_MANUAL', actor, lector_version=LECTOR_VERSION)
             return 'REVISION_MANUAL'
 
@@ -170,5 +213,55 @@ def importar_entrada_dhl(entrada_id, *, revision_sha256, revision_confirmada, ac
         cur.execute('''UPDATE entradas_pdf_dhl SET estado='IMPORTADA', factura_id=%s,
             revisado_por=%s, revisado_at=NOW(), updated_at=NOW() WHERE id=%s''',
             (factura['id'], actor, entrada_id))
+        cur.execute("UPDATE correos_dhl_procesados SET estado='IMPORTADO', error_codigo=NULL, updated_at=NOW() WHERE entrada_id=%s",
+                    (entrada_id,))
         _auditar(cur, entrada, 'DHL_PDF_IMPORTADO_REVISADO', actor, factura_id=factura['id'], revision_sha256=huella)
+        return factura
+
+
+def importar_entrada_dhl_correo(entrada_id, *, cuenta_correo, actor):
+    """Registra una extracción exacta de correo, sin aprobarla financieramente.
+
+    Sólo acepta el canal autenticado y la versión vigente del lector. Los
+    matches quedan PROPUESTOS y la revisión humana del PDF/TC continúa siendo
+    obligatoria antes de confirmar, calcular o aplicar una diferencia.
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        entrada, pdf = _bloquear(cur, entrada_id)
+        if entrada['estado'] == 'IMPORTADA':
+            return {'id': entrada['factura_id'], 'duplicado': True}
+        if entrada['canal'] != 'CORREO_DHL' or not entrada['correo_mensaje_id'] or not entrada['correo_adjunto_id']:
+            raise ExtraccionDHLInvalida('La importación automática exige un correo DHL autenticado.')
+        if entrada['estado'] != 'PARA_REVISION' or entrada['lector_version'] != LECTOR_VERSION:
+            raise ExtraccionDHLInvalida('La lectura automática todavía no está validada con la versión vigente.')
+        huella = _huella_revision(
+            entrada, entrada['extraccion'], entrada['observaciones'], entrada['lector_version'],
+        )
+        if huella != entrada['revision_sha256']:
+            raise ExtraccionDHLInvalida('La extracción automática no coincide con su huella.')
+        preparado = preparar_factura_dhl(
+            entrada['extraccion'], archivo_pdf=pdf,
+            archivo_nombre=entrada['archivo_nombre'], cuenta_correo=cuenta_correo,
+            mensaje_id=entrada['correo_mensaje_id'], adjunto_id=entrada['correo_adjunto_id'],
+        )
+        datos = preparado.datos_registro
+        if datos['numero'] != entrada['numero_esperado'] or datos['tipo_documento'] != 'FC':
+            raise ExtraccionDHLInvalida('Identidad documental automática no admitida.')
+        datos['metadatos_origen'].update({
+            'entrada_dhl_id': entrada_id,
+            'revision_sha256': huella,
+            'lector_version': entrada['lector_version'],
+            'revision_extraccion_requerida': True,
+            'revision_financiera_pendiente': True,
+        })
+        factura = registrar_factura_courier(**datos, actor=actor, _conn=conn)
+        matchear_items_exactos(factura['id'], actor=actor, _conn=conn)
+        cur.execute('''UPDATE entradas_pdf_dhl SET estado='IMPORTADA', factura_id=%s,
+            updated_at=NOW() WHERE id=%s''', (factura['id'], entrada_id))
+        cur.execute("""UPDATE correos_dhl_procesados SET estado='IMPORTADO',
+            error_codigo=NULL, updated_at=NOW() WHERE entrada_id=%s""", (entrada_id,))
+        _auditar(
+            cur, entrada, 'DHL_PDF_IMPORTADO_AUTOMATICO', actor,
+            factura_id=factura['id'], revision_sha256=huella,
+        )
         return factura

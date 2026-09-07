@@ -6,8 +6,33 @@
 <div class="page-title page-title-row"><div><div class="eyebrow">Facturas del operador · uso interno</div>
   <h1>Entrada de facturas DHL</h1><p>Guardá el original, revisá la lectura y registrá la factura. Los saldos no cambian en estos pasos.</p></div>
   <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver al control</a></div>
-<div class="msg">Gmail todavía no está conectado al servidor. Por ahora, descargá el PDF del correo y cargalo aquí. No se envía a modelos de IA.</div>
+{% if request.query_params.get('ok') %}<div class="msg ok">La búsqueda de Gmail quedó iniciada en segundo plano. La bandeja conservará cualquier documento nuevo para revisión.</div>{% endif %}
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+<div class="card" style="margin-bottom:22px;">
+  <div class="page-title-row"><div><div class="eyebrow">Automatización segura</div><h3>Correo de facturación DHL</h3></div>
+  {% if gmail.configurada and not gmail.conectada %}<a class="btn btn-primary" href="/admin/conciliacion-couriers/entrada-dhl/gmail/conectar">{{ 'Reconectar Gmail' if gmail.estado == 'REAUTORIZAR' else 'Conectar Gmail DHL' }}</a>{% endif %}</div>
+  {% if not gmail.configurada %}
+    <div class="msg">La automatización está preparada, pero faltan credenciales seguras del servidor. Hasta completarlas, descargá el PDF del correo y cargalo abajo.</div>
+    <p><strong>Configuración pendiente:</strong> {{ gmail.bloqueos|join(', ') }}.</p>
+    <p><small>Callback para Google Cloud: <code>{{ gmail.callback_url }}</code></small></p>
+  {% elif gmail.conectada %}
+    <div class="msg ok">Conectado en modo de sólo lectura a <strong>{{ gmail.cuenta }}</strong>. Los PDF se descargan y se leen automáticamente. El registro y la propuesta de matches se habilitan sólo después del primer lote supervisado; ninguna diferencia se aplica sin aprobación.</div>
+    <div class="form-grid-3">
+      <p>Última revisión<br><strong>{{ gmail.ultimo_sync_at.strftime('%d/%m/%Y %H:%M') if gmail.ultimo_sync_at else 'Pendiente' }}</strong></p>
+      <p>Para revisar<br><strong>{{ gmail.conteos.get('PARA_REVISION', 0) }}</strong></p>
+      <p>Revisión manual<br><strong>{{ gmail.conteos.get('REVISION_MANUAL', 0) + gmail.conteos.get('ORIGEN_RECHAZADO', 0) }}</strong></p>
+    </div>
+    <form method="POST" action="/admin/conciliacion-couriers/entrada-dhl/gmail/sincronizar">
+      <input type="hidden" name="csrf_gmail" value="{{ csrf_gmail }}">
+      <button class="btn btn-primary">Buscar facturas ahora</button>
+    </form>
+  {% else %}
+    <div class="msg {{ 'error' if gmail.estado in ('REAUTORIZAR','ERROR','ERROR_BASE') else '' }}">{{ 'Google solicita volver a autorizar la casilla.' if gmail.estado == 'REAUTORIZAR' else 'Gmail todavía no está conectado al servidor.' }}</div>
+    <p>La autorización no permite enviar, borrar, archivar ni marcar correos como leídos.</p>
+  {% endif %}
+  {% if gmail.configurada %}<p><small>Callback OAuth: <code>{{ gmail.callback_url }}</code></small></p>{% endif %}
+  <p><small>El lector es determinístico y no envía facturas ni correos a modelos de IA.</small></p>
+</div>
 <div class="card" style="margin-bottom:22px;">
   <h3>1. Conservar el PDF original</h3>
   <p>Formato inicial: factura A original de DHL Argentina en USD, con cabecera y una página de detalle. Para NC/ND u otros formatos, usá la <a href="/admin/conciliacion-couriers/nueva">carga manual</a>.</p>
@@ -21,11 +46,11 @@
   </form>
 </div>
 <div class="card"><h3>Documentos recibidos</h3><p>Los PDFs repetidos se abren en el registro existente. Una factura con contenido diferente se bloquea al intentar importarla.</p>
-  <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Recibido</th><th>Estado</th><th></th></tr></thead><tbody>
+  <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Origen</th><th>Recibido</th><th>Estado</th><th></th></tr></thead><tbody>
   {% for e in bandeja['items'] %}<tr><td><strong>{{ e.numero_esperado }}</strong><br><small>{{ e.archivo_nombre }}</small></td>
-    <td>{{ e.created_at.strftime('%d/%m/%Y %H:%M') }}</td><td><span class="badge {{ 'ok' if e.estado == 'IMPORTADA' else 'warn' }}">{{ e.estado.replace('_',' ')|title }}</span></td>
+    <td>{{ 'Correo DHL' if e.canal == 'CORREO_DHL' else 'Carga manual' }}</td><td>{{ e.created_at.strftime('%d/%m/%Y %H:%M') }}</td><td><span class="badge {{ 'ok' if e.estado == 'IMPORTADA' else 'warn' }}">{{ e.estado.replace('_',' ')|title }}</span></td>
     <td><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/entrada-dhl/{{ e.id }}">Abrir</a></td></tr>
-  {% else %}<tr><td colspan="4" class="empty">Todavía no hay PDFs en esta bandeja.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="5" class="empty">Todavía no hay PDFs en esta bandeja.</td></tr>{% endfor %}
   </tbody></table></div>
   <div style="margin-top:16px;">{% if bandeja.pagina > 1 %}<a class="btn btn-ghost" href="?pagina={{ bandeja.pagina - 1 }}">Anterior</a>{% endif %}
     <span>Página {{ bandeja.pagina }}</span> {% if bandeja.hay_mas %}<a class="btn btn-ghost" href="?pagina={{ bandeja.pagina + 1 }}">Siguiente</a>{% endif %}</div>
