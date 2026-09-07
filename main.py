@@ -762,6 +762,56 @@ def robots_txt():
     )
 
 
+# ── Apps de tienda (Play Store / App Store) ─────────────────
+# El portal ya es PWA; para publicarlo en las tiendas se envuelve en una
+# cáscara nativa que abre taurosolutions.ar. Las tiendas exigen que el
+# dominio DECLARE que esa app es suya, con estos dos archivos. Se llenan
+# desde variables de entorno en Railway, así no hay que redeployar para
+# cambiar una firma; mientras estén vacías responden vacío y no rompen nada.
+#
+#   ANDROID_PACKAGE_NAME       ej: ar.taurosolutions.portal
+#   ANDROID_ASSETLINKS_SHA256  huellas SHA-256 del certificado de firma,
+#                              separadas por coma (PWABuilder / Play Console)
+#   APPLE_TEAM_ID + IOS_BUNDLE_ID  para la fase App Store (universal links)
+
+def _lista_env(nombre: str) -> list[str]:
+    return [v.strip() for v in os.getenv(nombre, "").split(",") if v.strip()]
+
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+def android_assetlinks():
+    paquete = os.getenv("ANDROID_PACKAGE_NAME", "ar.taurosolutions.portal").strip()
+    huellas = _lista_env("ANDROID_ASSETLINKS_SHA256")
+    if not huellas:
+        return JSONResponse([], headers={"Cache-Control": "public, max-age=3600"})
+    return JSONResponse(
+        [{
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": paquete,
+                "sha256_cert_fingerprints": huellas,
+            },
+        }],
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+def apple_app_site_association():
+    team = os.getenv("APPLE_TEAM_ID", "").strip()
+    bundle = os.getenv("IOS_BUNDLE_ID", "ar.taurosolutions.portal").strip()
+    if not team:
+        return JSONResponse({"applinks": {"apps": [], "details": []}},
+                            headers={"Cache-Control": "public, max-age=3600"})
+    return JSONResponse(
+        {"applinks": {"apps": [], "details": [
+            {"appID": f"{team}.{bundle}", "paths": ["/portal/*"]},
+        ]}},
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 @app.get("/partners", tags=["public"])
 def partners_activos():
     """
