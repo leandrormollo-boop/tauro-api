@@ -99,3 +99,100 @@ def test_facturas_nacionales_filtra_andreani_y_oca(monkeypatch):
     assert llamadas["control"]["kwargs"]["ambito"] == "NACIONAL"
     assert llamadas["control"]["kwargs"]["courier"] == "OCA"
     assert llamadas["couriers"] == ("ANDREANI", "OCA")
+
+
+def test_resumen_facturas_calcula_metricas_por_guia_y_normaliza_vista(monkeypatch):
+    from endpoints import admin
+    from servicios import conciliacion_couriers as conciliacion
+
+    facturas = [
+        {
+            "estado": "ABIERTA",
+            "guias": 3,
+            "con_match": 2,
+        },
+        {
+            "estado": "CONCILIADA",
+            "guias": 2,
+            "con_match": 2,
+        },
+    ]
+    monkeypatch.setattr(
+        conciliacion,
+        "listar_control_envios",
+        lambda **kwargs: {"items": [], "totales": {}, "total": 0},
+    )
+    monkeypatch.setattr(
+        conciliacion,
+        "listar_facturas_courier_control",
+        lambda *, couriers: facturas,
+    )
+    monkeypatch.setattr(
+        conciliacion,
+        "listar_ajustes_para_revision",
+        lambda: [{"courier": "DHL", "id": 7}],
+    )
+    monkeypatch.setattr(admin, "_get_clientes_lista", lambda: [])
+    monkeypatch.setattr(admin.templates, "TemplateResponse", lambda **kw: kw)
+
+    respuesta = admin._render_facturas_admin(
+        request=SimpleNamespace(), ambito="INTERNACIONAL", vista="desconocida"
+    )
+
+    contexto = respuesta["context"]
+    assert contexto["vista"] == "resumen"
+    assert contexto["metricas"] == {
+        "facturas": 2,
+        "facturas_pendientes": 1,
+        "guias": 5,
+        "guias_con_match": 4,
+        "guias_sin_match": 1,
+        "diferencias": 1,
+    }
+
+
+def test_lista_clientes_muestra_control_financiero_consolidado(monkeypatch):
+    from endpoints import admin
+
+    clientes = [
+        {
+            "cliente_id": "WAIMAO",
+            "nombre": "WAIMAO",
+            "email": "cliente@example.com",
+            "activo": True,
+        }
+    ]
+    monkeypatch.setattr(admin, "_is_auth", lambda token: True)
+    monkeypatch.setattr(admin, "_get_clientes_lista", lambda: clientes)
+    monkeypatch.setattr(
+        admin,
+        "get_resumen_clientes_bulk",
+        lambda solo_activos: [
+            {
+                "cliente_id": "WAIMAO",
+                "facturado": 125000,
+                "pagado": 100000,
+                "saldo": 25000,
+            }
+        ],
+    )
+    monkeypatch.setattr(admin.templates, "TemplateResponse", lambda **kw: kw)
+
+    respuesta = admin.admin_clientes(
+        request=SimpleNamespace(), admin_token="sesion"
+    )
+
+    cliente = respuesta["context"]["clientes"][0]
+    assert cliente["total_cargos_ars"] == 125000
+    assert cliente["total_pagos_ars"] == 100000
+    assert cliente["saldo_ars"] == 25000
+
+
+def test_panel_explica_match_unico_y_aprobacion_manual():
+    html = (ROOT / "templates/admin/conciliacion_couriers.html").read_text()
+
+    assert "Una fila representa una guía completa" in html
+    assert "Ninguna se aplica automáticamente" in html
+    assert "Factura recibida" in html
+    assert "Match con envío" in html
+    assert "Diferencias por aprobar" in html

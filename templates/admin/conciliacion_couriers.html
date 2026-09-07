@@ -5,65 +5,129 @@
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
 {%- endmacro %}
 
+{% macro etiqueta_control(estado) -%}
+  {% if estado == 'ESPERANDO_FACTURA' %}Esperando factura
+  {% elif estado == 'BASE_PENDIENTE' %}Falta costo estimado
+  {% elif estado == 'MATCH_PENDIENTE' %}Match para revisar
+  {% elif estado == 'LISTO_PARA_CALCULAR' %}Listo para comparar
+  {% elif estado == 'EVIDENCIA_PENDIENTE' %}Falta evidencia
+  {% elif estado == 'DIFERENCIA_PENDIENTE' %}Diferencia para aprobar
+  {% elif estado == 'CONCILIADO' %}Conciliado
+  {% elif estado == 'SIN_CARGO' %}Sin cargo activo
+  {% else %}{{ estado.replace('_', ' ')|title }}{% endif %}
+{%- endmacro %}
+
 {% block content %}
+<style>
+  .control-tabs { display:flex; gap:6px; margin:0 0 18px; padding:5px; width:max-content; max-width:100%; border:1px solid var(--line); border-radius:12px; background:var(--bg-elev); overflow-x:auto; }
+  .control-tabs a { padding:9px 14px; border-radius:8px; color:var(--fg-3); font-size:12px; font-weight:700; white-space:nowrap; }
+  .control-tabs a:hover { color:var(--fg); background:var(--bg-elev-2); }
+  .control-tabs a.active { color:#fff; background:linear-gradient(135deg,var(--accent),#6040a8); box-shadow:0 7px 18px rgba(111,72,194,.22); }
+  .control-tabs .count { margin-left:5px; opacity:.75; font-family:var(--font-mono); }
+  .control-flow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; margin-bottom:18px; }
+  .control-step { position:relative; min-height:112px; padding:16px; border:1px solid var(--line); border-radius:13px; background:linear-gradient(145deg,rgba(255,255,255,.035),rgba(111,72,194,.035)); }
+  .control-step:not(:last-child)::after { content:"→"; position:absolute; right:-10px; top:42px; z-index:2; color:var(--accent-soft); font-weight:800; }
+  .control-step b { display:block; margin-bottom:6px; color:var(--fg); }
+  .control-step small { color:var(--fg-4); line-height:1.45; }
+  .control-step-number { display:grid; place-items:center; width:24px; height:24px; margin-bottom:10px; border:1px solid rgba(167,129,255,.45); border-radius:50%; color:var(--accent-soft); font:700 10px var(--font-mono); }
+  .control-summary-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+  .control-summary-card { display:block; min-height:128px; padding:18px; border:1px solid var(--line); border-radius:14px; background:var(--bg-elev); }
+  .control-summary-card:hover { border-color:rgba(167,129,255,.55); transform:translateY(-1px); }
+  .control-summary-card strong { display:block; margin:6px 0; color:var(--fg); font-size:17px; }
+  .control-summary-card p { margin:0; color:var(--fg-4); font-size:12px; line-height:1.5; }
+  .match-progress { min-width:170px; }
+  .match-progress-track { width:100%; height:5px; margin:7px 0 5px; overflow:hidden; border-radius:999px; background:var(--bg-elev-2); }
+  .match-progress-fill { height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--accent),var(--ok)); }
+  @media (max-width:900px) {
+    .control-flow { grid-template-columns:1fr; }
+    .control-step:not(:last-child)::after { content:"↓"; right:18px; top:auto; bottom:-13px; }
+    .control-summary-grid { grid-template-columns:1fr; }
+  }
+</style>
+
 <div class="page-title page-title-row">
   <div>
-    <div class="eyebrow">Administración financiera</div>
+    <div class="eyebrow">Control financiero de operadores</div>
     <h1>{{ titulo|default('Control de envíos y facturas') }}</h1>
     <p>{{ descripcion|default('Cada guía se controla contra la factura final del operador antes de actualizar al cliente.') }}</p>
   </div>
-  <div>{% if ambito == 'INTERNACIONAL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Importar facturas DHL</a>{% endif %}
-  <a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito|default('INTERNACIONAL') }}" class="btn {% if ambito == 'INTERNACIONAL' %}btn-ghost{% else %}btn-primary{% endif %}">Cargar factura</a></div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+    {% if ambito == 'INTERNACIONAL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Importar facturas DHL</a>{% endif %}
+    <a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito|default('INTERNACIONAL') }}" class="btn {% if ambito == 'INTERNACIONAL' %}btn-ghost{% else %}btn-primary{% endif %}">Cargar factura</a>
+  </div>
 </div>
 
 {% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada correctamente.</div>{% endif %}
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
 
+{% set cliente_query = '&cliente=' ~ (filtros.cliente|urlencode) if filtros.cliente else '' %}
+<nav class="control-tabs" aria-label="Secciones del control de facturas">
+  <a href="{{ ruta_facturas }}?vista=resumen{{ cliente_query }}" class="{% if vista == 'resumen' %}active{% endif %}">Resumen</a>
+  <a href="{{ ruta_facturas }}?vista=facturas{{ cliente_query }}" class="{% if vista == 'facturas' %}active{% endif %}">Facturas <span class="count">{{ metricas.facturas }}</span></a>
+  <a href="{{ ruta_facturas }}?vista=conciliacion{{ cliente_query }}" class="{% if vista == 'conciliacion' %}active{% endif %}">Conciliación <span class="count">{{ metricas.guias_sin_match }}</span></a>
+  <a href="{{ ruta_facturas }}?vista=diferencias{{ cliente_query }}" class="{% if vista == 'diferencias' %}active{% endif %}">Diferencias <span class="count">{{ metricas.diferencias }}</span></a>
+</nav>
+
 <div class="dashboard-stats" style="margin-bottom:18px;">
-  <div class="card"><small>Esperando factura</small><h2>{{ control.totales.get('ESPERANDO_FACTURA', 0) }}</h2></div>
-  <div class="card"><small>Base pendiente</small><h2>{{ control.totales.get('BASE_PENDIENTE', 0) }}</h2></div>
-  <div class="card"><small>Diferencias a aprobar</small><h2>{{ ajustes|length }}</h2></div>
-  <div class="card"><small>Conciliados</small><h2>{{ control.totales.get('CONCILIADO', 0) }}</h2></div>
+  <div class="card"><small>Facturas recibidas</small><h2>{{ metricas.facturas }}</h2><span class="badge {% if metricas.facturas_pendientes %}warn{% else %}ok{% endif %}">{{ metricas.facturas_pendientes }} abiertas</span></div>
+  <div class="card"><small>Guías dentro de facturas</small><h2>{{ metricas.guias }}</h2><span class="badge muted">{{ metricas.guias_con_match }} vinculadas</span></div>
+  <div class="card"><small>Sin match</small><h2>{{ metricas.guias_sin_match }}</h2><span class="badge {% if metricas.guias_sin_match %}error{% else %}ok{% endif %}">{{ 'Requieren control' if metricas.guias_sin_match else 'Todo vinculado' }}</span></div>
+  <div class="card"><small>Diferencias por aprobar</small><h2>{{ metricas.diferencias }}</h2><span class="badge {% if metricas.diferencias %}warn{% else %}ok{% endif %}">{{ 'No impactaron saldos' if metricas.diferencias else 'Sin pendientes' }}</span></div>
 </div>
 
+{% if vista == 'resumen' %}
 <div class="card" style="margin-bottom:18px;">
+  <div class="card-head"><div><h3>Recorrido de una factura</h3><p>El saldo del cliente sólo cambia en el último paso y con aprobación del ADMIN.</p></div></div>
+  <div class="control-flow">
+    <div class="control-step"><span class="control-step-number">1</span><b>Factura recibida</b><small>Se guarda el PDF del operador sin duplicar el documento.</small></div>
+    <div class="control-step"><span class="control-step-number">2</span><b>Guías separadas</b><small>Flete, combustible, recargos y TAX quedan agrupados por tracking.</small></div>
+    <div class="control-step"><span class="control-step-number">3</span><b>Match con envío</b><small>Se vincula cada tracking con un único envío y cliente.</small></div>
+    <div class="control-step"><span class="control-step-number">4</span><b>Comparación</b><small>Precio aceptado, costo final y peso facturado quedan enfrentados.</small></div>
+    <div class="control-step"><span class="control-step-number">5</span><b>Aprobación</b><small>TAURO aprueba la diferencia antes de llevarla a la cuenta corriente.</small></div>
+  </div>
+</div>
+
+<div class="control-summary-grid">
+  <a class="control-summary-card" href="{{ ruta_facturas }}?vista=facturas{{ cliente_query }}"><small>Documentos del operador</small><strong>Revisar facturas</strong><p>{{ metricas.facturas_pendientes }} documentos permanecen abiertos. Acá se controla el PDF y el detalle de guías.</p></a>
+  <a class="control-summary-card" href="{{ ruta_facturas }}?vista=conciliacion{{ cliente_query }}"><small>Factura contra envío</small><strong>Resolver conciliación</strong><p>{{ metricas.guias_sin_match }} guías no tienen un match activo. Los cargos se revisan juntos por tracking.</p></a>
+  <a class="control-summary-card" href="{{ ruta_facturas }}?vista=diferencias{{ cliente_query }}"><small>Impacto al cliente</small><strong>Aprobar diferencias</strong><p>{{ metricas.diferencias }} diferencias están esperando decisión. Ninguna se aplica automáticamente.</p></a>
+</div>
+{% endif %}
+
+{% if vista == 'conciliacion' %}
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-head"><div><h3>Buscar un envío</h3><p>Filtrá el universo por cliente, operador, tracking o estado de control.</p></div></div>
   <form method="GET" action="{{ ruta_facturas|default('/admin/conciliacion-couriers') }}" class="form-grid-4">
+    <input type="hidden" name="vista" value="conciliacion">
     <div class="form-group"><label>Cliente</label><select name="cliente"><option value="">Todos</option>{% for c in clientes %}<option value="{{ c.cliente_id }}" {% if filtros.cliente == c.cliente_id %}selected{% endif %}>{{ c.cliente_id }}</option>{% endfor %}</select></div>
     <div class="form-group"><label>Operador</label><select name="courier"><option value="">Todos</option>{% for nombre in couriers_disponibles|default(('DHL','FEDEX','ANDREANI','OCA')) %}<option value="{{ nombre }}" {% if filtros.courier|upper == nombre %}selected{% endif %}>{{ nombre }}</option>{% endfor %}</select></div>
-    <div class="form-group"><label>Estado de control</label><select name="estado"><option value="">Todos</option>{% for valor, etiqueta in (('ESPERANDO_FACTURA','Esperando factura'),('BASE_PENDIENTE','Base pendiente'),('MATCH_PENDIENTE','Match pendiente'),('DIFERENCIA_PENDIENTE','Diferencia pendiente'),('CONCILIADO','Conciliado')) %}<option value="{{ valor }}" {% if filtros.estado|upper == valor %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label>Estado</label><select name="estado"><option value="">Todos</option>{% for valor, etiqueta in (('ESPERANDO_FACTURA','Esperando factura'),('BASE_PENDIENTE','Falta costo estimado'),('MATCH_PENDIENTE','Match para revisar'),('LISTO_PARA_CALCULAR','Listo para comparar'),('DIFERENCIA_PENDIENTE','Diferencia pendiente'),('CONCILIADO','Conciliado')) %}<option value="{{ valor }}" {% if filtros.estado|upper == valor %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}</select></div>
     <div class="form-group"><label>Tracking / destinatario</label><input name="buscar" value="{{ filtros.buscar }}" placeholder="Buscar"><button class="btn btn-ghost btn-sm" style="margin-top:8px;">Filtrar</button></div>
   </form>
 </div>
 
-<div class="card" style="margin-bottom:22px;">
-  <div class="card-head"><div><h3>Control por envío</h3><p>{{ control.total }} registros en la vista actual.</p></div></div>
+<div class="card">
+  <div class="card-head"><div><h3>Conciliación por envío</h3><p>Una fila representa una guía completa, aunque la factura contenga varios recargos.</p></div><small>{{ control.total }} registros</small></div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Cliente / tracking</th><th>Precio aceptado</th><th>Base interna</th><th>Factura final</th><th>Estado</th><th>Acción</th></tr></thead>
+    <thead><tr><th>Cliente y guía</th><th>Envío aceptado</th><th>Costo estimado</th><th>Resultado final</th><th>Estado</th><th>Acción</th></tr></thead>
     <tbody>
     {% for e in control['items'] %}
       <tr>
-        <td><strong>{{ e.cliente_id }}</strong><br><span class="mono">{{ e.tracking or ('#' ~ e.solicitud_id) }}</span><br><small>{{ e.courier|upper }} · {{ e.dest_nombre or e.destino_pais }}</small></td>
-        <td class="mono">{{ dinero(e.precio_tauro_ars) }}<br><small>{{ e.peso_kg or '—' }} kg emitido</small></td>
-        <td class="mono">{% if e.snapshot_id %}Costo est. {{ dinero(e.costo_courier_estimado_ars) }}<br><small>Margen protegido {{ dinero(e.margen_tauro_protegido_ars) }}</small>{% else %}<span class="badge warn">Sin base</span>{% endif %}</td>
-        <td class="mono">{% if e.conciliacion_id %}Final cliente {{ dinero(e.precio_cliente_final_ars) }}<br><small>Diferencia {{ dinero(e.ajuste_cliente_ars) }} · {{ e.peso_final_facturado_kg or '—' }} kg</small>{% else %}—{% endif %}</td>
-        <td><span class="badge {% if e.control_estado == 'CONCILIADO' %}ok{% elif e.control_estado in ('BASE_PENDIENTE','DIFERENCIA_PENDIENTE') %}warn{% else %}muted{% endif %}">{{ e.control_estado.replace('_',' ')|title }}</span></td>
+        <td><strong>{{ e.cliente_id }}</strong><br><span class="mono">{{ e.tracking or ('#' ~ e.solicitud_id) }}</span><br><small>{{ e.courier|upper }} · {{ e.dest_nombre or e.destino_pais }} · {{ e.created_at.strftime('%d/%m/%Y') if e.created_at else '—' }}</small></td>
+        <td class="mono"><strong>{{ dinero(e.precio_tauro_ars) }}</strong><br><small>{{ e.peso_kg or '—' }} kg emitido</small></td>
+        <td class="mono">{% if e.snapshot_id %}{{ dinero(e.costo_courier_estimado_ars) }}<br><small>Margen protegido {{ dinero(e.margen_tauro_protegido_ars) }}</small>{% else %}<span class="badge warn">Falta base</span>{% endif %}</td>
+        <td class="mono">{% if e.conciliacion_id %}<strong>{{ dinero(e.precio_cliente_final_ars) }}</strong><br><small>Diferencia {{ dinero(e.ajuste_cliente_ars) }} · {{ e.peso_final_facturado_kg or '—' }} kg final</small>{% else %}<span style="color:var(--fg-4);">Todavía no calculado</span>{% endif %}</td>
+        <td><span class="badge {% if e.control_estado == 'CONCILIADO' %}ok{% elif e.control_estado in ('BASE_PENDIENTE','MATCH_PENDIENTE','DIFERENCIA_PENDIENTE','LISTO_PARA_CALCULAR') %}warn{% elif e.control_estado == 'SIN_CARGO' %}error{% else %}muted{% endif %}">{{ etiqueta_control(e.control_estado) }}</span></td>
         <td>
-          <a href="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}" class="btn btn-ghost btn-sm" style="margin-bottom:5px;">Abrir control</a>
+          <a href="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}" class="btn btn-ghost btn-sm" style="margin-bottom:5px;">Abrir expediente</a>
           {% if e.control_estado == 'BASE_PENDIENTE' %}
-          <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/snapshot" data-confirm="¿Congelar este costo estimado como base histórica? Después no podrá modificarse.">
-            <input name="costo_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Costo estimado ARS" style="width:155px;margin-bottom:5px;">
-            <button class="btn btn-ghost btn-sm">Guardar base</button>
-          </form>
+          <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/snapshot" data-confirm="¿Congelar este costo estimado como base histórica? Después no podrá modificarse."><input name="costo_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Costo estimado ARS" style="width:155px;margin-bottom:5px;"><button class="btn btn-ghost btn-sm">Guardar base</button></form>
           {% elif e.ajuste_id and e.ajuste_estado == 'PROPUESTO' %}
-          <a href="#ajuste-{{ e.ajuste_id }}" class="btn btn-primary btn-sm">Revisar diferencia</a>
+          <a href="{{ ruta_facturas }}?vista=diferencias{{ cliente_query }}#ajuste-{{ e.ajuste_id }}" class="btn btn-primary btn-sm">Revisar diferencia</a>
           {% elif e.conciliacion_estado == 'PARA_REVISION' and not e.ajuste_id %}
-          <form method="POST" action="/admin/conciliacion-couriers/conciliaciones/{{ e.conciliacion_id }}/cerrar" data-confirm="¿Confirmar que la factura no generó diferencia para este envío?">
-            <button class="btn btn-primary btn-sm">Cerrar sin diferencia</button>
-          </form>
+          <form method="POST" action="/admin/conciliacion-couriers/conciliaciones/{{ e.conciliacion_id }}/cerrar" data-confirm="¿Confirmar que la factura no generó diferencia para este envío?"><input type="hidden" name="solicitud_id" value="{{ e.solicitud_id }}"><input type="hidden" name="ambito" value="{{ ambito }}"><button class="btn btn-primary btn-sm">Cerrar sin diferencia</button></form>
           {% elif e.control_estado == 'LISTO_PARA_CALCULAR' %}
-          <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/calcular">
-            <button class="btn btn-primary btn-sm">Calcular diferencia</button>
-          </form>
+          <form method="POST" action="/admin/conciliacion-couriers/envios/{{ e.solicitud_id }}/calcular"><button class="btn btn-primary btn-sm">Comparar importes</button></form>
           {% endif %}
         </td>
       </tr>
@@ -71,20 +135,28 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     </tbody>
   </table></div>
 </div>
+{% endif %}
 
-<div class="card" style="margin-bottom:22px;">
-  <div class="card-head"><div><h3>{{ titulo|default('Facturas de operadores') }}</h3><p>Documentos internos; el cliente nunca ve estos costos.</p></div><a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito|default('INTERNACIONAL') }}" class="btn btn-ghost btn-sm">+ Nueva factura</a></div>
-  <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Courier</th><th>Total</th><th>Guías / matches</th><th>Estado</th><th></th></tr></thead><tbody>
-  {% for f in facturas %}<tr><td><strong>{{ f.tipo_documento }} {{ f.numero }}</strong><br><small>{{ f.fecha_emision or f.created_at.strftime('%d/%m/%Y') }}</small></td><td>{{ f.courier }}</td><td class="mono">{{ f.moneda }} {{ f.total }}</td><td>{{ f.guias }} guías · {{ f.lineas }} cargos<br><small>{{ f.confirmados }} matches confirmados · {{ f.propuestos }} propuestos</small></td><td><span class="badge muted">{{ f.estado|title }}</span></td><td><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/facturas/{{ f.id }}">Controlar</a></td></tr>
-  {% else %}<tr><td colspan="6" class="empty">Todavía no se cargaron facturas courier.</td></tr>{% endfor %}
-  </tbody></table></div>
-</div>
-
+{% if vista == 'facturas' %}
 <div class="card">
-  <div class="card-head"><div><h3>Diferencias por aprobar</h3><p>Sólo la aprobación humana modifica el saldo del cliente.</p></div></div>
-  <div class="table-wrap"><table><thead><tr><th>Cliente / envío</th><th>Inicial → final</th><th>Peso</th><th>Motivo</th><th>Decisión</th></tr></thead><tbody>
-  {% for a in ajustes %}<tr id="ajuste-{{ a.id }}"><td><strong>{{ a.cliente_id }}</strong><br><span class="mono">{{ a.tracking or a.solicitud_id }}</span> · {{ a.courier }}</td><td class="mono">{{ dinero(a.precio_anterior_ars) }} → <strong>{{ dinero(a.precio_nuevo_ars) }}</strong><br><span class="badge {% if a.tipo == 'CREDITO' %}ok{% else %}warn{% endif %}">{{ a.tipo|title }} {{ dinero(a.monto_ars|abs) }}</span><br><small>Diferencia {{ dinero(a.diferencia_flete_ars) }} · TAX {{ dinero(a.tax_cliente_ars) }}</small></td><td>{{ a.peso_cotizado_kg or '—' }} kg → <strong>{{ a.peso_final_facturado_kg or '—' }} kg</strong><br><small>{{ (a.peso_base_facturado or 'NO_INFORMADO').replace('_',' ')|title }}</small></td><td>{{ (a.motivo_diferencia or a.motivo or 'OTRO').replace('_',' ')|title }}<br><span class="badge {% if a.evidencia_completa %}ok{% else %}warn{% endif %}">{{ 'Evidencia completa' if a.evidencia_completa else 'Evidencia incompleta' }}</span></td><td><form method="POST" action="/admin/conciliacion-couriers/diferencias/{{ a.id }}/aplicar" data-confirm="¿Aprobar y aplicar esta diferencia a la cuenta corriente? El precio original no se reemplazará."><input name="referencia" placeholder="Referencia de control" style="width:170px;margin-bottom:5px;"><button class="btn btn-primary btn-sm" {% if not a.evidencia_completa %}disabled{% endif %}>Aprobar y aplicar</button></form></td></tr>
-  {% else %}<tr><td colspan="5" class="empty">No hay diferencias pendientes.</td></tr>{% endfor %}
+  <div class="card-head"><div><h3>Facturas recibidas de los operadores</h3><p>Son costos internos de TAURO. El cliente nunca ve estos importes ni el PDF del courier.</p></div><a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito|default('INTERNACIONAL') }}" class="btn btn-ghost btn-sm">+ Nueva factura</a></div>
+  <div class="table-wrap"><table><thead><tr><th>Factura</th><th>Operador</th><th>Total interno</th><th>Avance del match</th><th>Estado</th><th></th></tr></thead><tbody>
+  {% for f in facturas %}
+    {% set sin_match = [f.guias - f.con_match, 0]|max %}
+    {% set avance = ((f.con_match * 100 / f.guias)|round(0, 'floor')) if f.guias else 0 %}
+    <tr><td><strong>{{ f.tipo_documento }} {{ f.numero }}</strong><br><small>{{ f.fecha_emision or f.created_at.strftime('%d/%m/%Y') }} · {{ f.lineas }} cargos internos</small></td><td><span class="badge muted">{{ f.courier }}</span></td><td class="mono"><strong>{{ f.moneda }} {{ f.total }}</strong></td><td class="match-progress"><strong>{{ f.con_match }} de {{ f.guias }} guías vinculadas</strong><div class="match-progress-track"><div class="match-progress-fill" style="width:{{ avance }}%;"></div></div><small>{{ f.confirmados }} confirmadas · {{ f.propuestos }} para revisar{% if sin_match %} · <span style="color:var(--error);">{{ sin_match }} sin match</span>{% endif %}</small></td><td><span class="badge {% if f.estado in ('CONCILIADA','CERRADA') %}ok{% elif f.estado == 'OBSERVADA' %}error{% else %}warn{% endif %}">{{ f.estado|title }}</span></td><td><a class="btn {% if f.propuestos or sin_match %}btn-primary{% else %}btn-ghost{% endif %} btn-sm" href="/admin/conciliacion-couriers/facturas/{{ f.id }}">{{ 'Resolver' if f.propuestos or sin_match else 'Ver control' }}</a></td></tr>
+  {% else %}<tr><td colspan="6" class="empty">Todavía no se cargaron facturas del operador.</td></tr>{% endfor %}
   </tbody></table></div>
 </div>
+{% endif %}
+
+{% if vista == 'diferencias' %}
+<div class="card">
+  <div class="card-head"><div><h3>Diferencias por aprobar</h3><p>El precio aceptado nunca se reemplaza. La diferencia se registra como un movimiento separado.</p></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Cliente y guía</th><th>Precio aceptado → final</th><th>Peso emitido → final</th><th>Explicación</th><th>Decisión</th></tr></thead><tbody>
+  {% for a in ajustes %}<tr id="ajuste-{{ a.id }}"><td><strong>{{ a.cliente_id }}</strong><br><span class="mono">{{ a.tracking or a.solicitud_id }}</span><br><small>{{ a.courier }}</small></td><td class="mono">{{ dinero(a.precio_anterior_ars) }} → <strong>{{ dinero(a.precio_nuevo_ars) }}</strong><br><span class="badge {% if a.tipo == 'CREDITO' %}ok{% else %}warn{% endif %}">{{ a.tipo|title }} {{ dinero(a.monto_ars|abs) }}</span><br><small>Flete {{ dinero(a.diferencia_flete_ars) }} · TAX {{ dinero(a.tax_cliente_ars) }}</small></td><td>{{ a.peso_cotizado_kg or '—' }} kg → <strong>{{ a.peso_final_facturado_kg or '—' }} kg</strong><br><small>{{ (a.peso_base_facturado or 'NO_INFORMADO').replace('_',' ')|title }}</small></td><td>{{ (a.motivo_diferencia or a.motivo or 'OTRO').replace('_',' ')|title }}<br><span class="badge {% if a.evidencia_completa %}ok{% else %}warn{% endif %}">{{ 'Factura comprobada' if a.evidencia_completa else 'Falta evidencia' }}</span></td><td><form method="POST" action="/admin/conciliacion-couriers/diferencias/{{ a.id }}/aplicar" data-confirm="¿Aprobar y aplicar esta diferencia a la cuenta corriente? El precio original no se reemplazará."><input type="hidden" name="solicitud_id" value="{{ a.solicitud_id }}"><input type="hidden" name="ambito" value="{{ ambito }}"><input name="referencia" placeholder="Referencia de control" style="width:170px;margin-bottom:5px;"><button class="btn btn-primary btn-sm" {% if not a.evidencia_completa %}disabled{% endif %}>Aprobar y aplicar</button></form></td></tr>
+  {% else %}<tr><td colspan="5" class="empty">No hay diferencias pendientes de aprobación.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endif %}
 {% endblock %}

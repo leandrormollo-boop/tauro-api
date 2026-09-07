@@ -2558,7 +2558,11 @@ def listar_facturas_courier_control(
                        COUNT(DISTINCT (i.tracking_normalizado, m.solicitud_id)) FILTER (
                            WHERE m.estado='CONFIRMADO'
                              AND i.tracking_normalizado IS NOT NULL
-                       ) AS confirmados
+                       ) AS confirmados,
+                       COUNT(DISTINCT i.tracking_normalizado) FILTER (
+                           WHERE m.estado IN ('PROPUESTO','CONFIRMADO')
+                             AND i.tracking_normalizado IS NOT NULL
+                       ) AS con_match
                 FROM facturas_courier f
                 LEFT JOIN facturas_courier_items i ON i.factura_id = f.id
                 LEFT JOIN factura_courier_item_matches m ON m.item_id = i.id

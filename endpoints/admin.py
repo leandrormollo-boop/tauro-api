@@ -1331,6 +1331,15 @@ def admin_clientes(request: Request, admin_token: Optional[str] = Cookie(None)):
     if not _is_auth(admin_token):
         return _redirect_login()
     clientes = _get_clientes_lista()
+    resumen_financiero = {
+        fila["cliente_id"]: fila
+        for fila in get_resumen_clientes_bulk(solo_activos=False)
+    }
+    for cliente in clientes:
+        financiero = resumen_financiero.get(cliente["cliente_id"], {})
+        cliente["total_cargos_ars"] = financiero.get("facturado", 0)
+        cliente["total_pagos_ars"] = financiero.get("pagado", 0)
+        cliente["saldo_ars"] = financiero.get("saldo", 0)
     return templates.TemplateResponse(
         request=request, name="admin/clientes.html",
         context={"seccion": "clientes", "clientes": clientes},
@@ -3825,6 +3834,7 @@ def admin_conciliacion_couriers(
     courier: str = "",
     estado: str = "",
     buscar: str = "",
+    vista: str = "resumen",
     admin_token: Optional[str] = Cookie(None),
 ):
     """Control financiero por envío; costos reales nunca salen al portal."""
@@ -3832,7 +3842,7 @@ def admin_conciliacion_couriers(
         return _redirect_login()
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
-        estado=estado, buscar=buscar,
+        estado=estado, buscar=buscar, vista=vista,
     )
 
 
@@ -3844,6 +3854,7 @@ def _render_facturas_admin(
     estado: str = "",
     buscar: str = "",
     ambito: str = "",
+    vista: str = "resumen",
 ):
     from servicios.conciliacion_couriers import (
         listar_ajustes_para_revision,
@@ -3880,6 +3891,11 @@ def _render_facturas_admin(
     courier_normalizado = str(courier or "").strip().upper()
     if courier_normalizado not in couriers_disponibles:
         courier_normalizado = ""
+    vista_normalizada = str(vista or "resumen").strip().lower()
+    if vista_normalizada not in {
+        "resumen", "facturas", "conciliacion", "diferencias",
+    }:
+        vista_normalizada = "resumen"
     control = listar_control_envios(
         cliente=cliente, courier=courier_normalizado, ambito=ambito_normalizado,
         estado=estado, buscar=buscar,
@@ -3889,6 +3905,30 @@ def _render_facturas_admin(
         if str(ajuste.get("courier") or "").strip().upper()
         in couriers_disponibles
     ]
+    facturas = listar_facturas_courier_control(
+        couriers=couriers_disponibles
+    )
+    metricas = {
+        "facturas": len(facturas),
+        "facturas_pendientes": sum(
+            1 for factura in facturas
+            if str(factura.get("estado") or "").upper()
+            not in {"CONCILIADA", "CERRADA", "ANULADA"}
+        ),
+        "guias": sum(int(factura.get("guias") or 0) for factura in facturas),
+        "guias_con_match": sum(
+            int(factura.get("con_match") or 0) for factura in facturas
+        ),
+        "guias_sin_match": sum(
+            max(
+                0,
+                int(factura.get("guias") or 0)
+                - int(factura.get("con_match") or 0),
+            )
+            for factura in facturas
+        ),
+        "diferencias": len(ajustes),
+    }
     return templates.TemplateResponse(
         request=request,
         name="admin/conciliacion_couriers.html",
@@ -3899,10 +3939,10 @@ def _render_facturas_admin(
             "ambito": ambito_normalizado,
             "ruta_facturas": ruta_facturas,
             "couriers_disponibles": couriers_disponibles,
+            "vista": vista_normalizada,
+            "metricas": metricas,
             "control": control,
-            "facturas": listar_facturas_courier_control(
-                couriers=couriers_disponibles
-            ),
+            "facturas": facturas,
             "ajustes": ajustes,
             "clientes": _get_clientes_lista(),
             "filtros": {
@@ -3920,13 +3960,14 @@ def admin_facturas_internacionales(
     courier: str = "",
     estado: str = "",
     buscar: str = "",
+    vista: str = "resumen",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
-        estado=estado, buscar=buscar, ambito="INTERNACIONAL",
+        estado=estado, buscar=buscar, ambito="INTERNACIONAL", vista=vista,
     )
 
 
@@ -3937,13 +3978,14 @@ def admin_facturas_nacionales(
     courier: str = "",
     estado: str = "",
     buscar: str = "",
+    vista: str = "resumen",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
-        estado=estado, buscar=buscar, ambito="NACIONAL",
+        estado=estado, buscar=buscar, ambito="NACIONAL", vista=vista,
     )
 
 
@@ -4323,7 +4365,9 @@ def admin_factura_courier_confirmar(
             status_code=303,
         )
     return RedirectResponse(
-        url="/admin/conciliacion-couriers?ok=calculada", status_code=303,
+        url=(f"/admin/conciliacion-couriers/facturas/{factura_id}"
+             "?ok=calculada"),
+        status_code=303,
     )
 
 
@@ -4342,10 +4386,20 @@ def admin_conciliacion_envio_detalle(
     envio = obtener_control_envio(solicitud_id)
     if not envio:
         return Response(content="Envío no encontrado.", status_code=404)
+    if str(envio.get("ambito") or "").upper() == "NACIONAL":
+        seccion = "facturas_nacionales"
+        ruta_facturas = "/admin/facturas-nacionales"
+    else:
+        seccion = "facturas_internacionales"
+        ruta_facturas = "/admin/facturas-internacionales"
     return templates.TemplateResponse(
         request=request,
         name="admin/conciliacion_envio_detalle.html",
-        context={"seccion": "conciliacion_couriers", "envio": envio},
+        context={
+            "seccion": seccion,
+            "envio": envio,
+            "ruta_facturas": ruta_facturas,
+        },
     )
 
 
@@ -4368,11 +4422,13 @@ def admin_conciliacion_snapshot_manual(
         )
     except Exception as exc:
         return RedirectResponse(
-            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            url=(f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+                 f"?error={quote(str(exc))}"),
             status_code=303,
         )
     return RedirectResponse(
-        url="/admin/conciliacion-couriers?ok=base", status_code=303,
+        url=f"/admin/conciliacion-couriers/envios/{solicitud_id}?ok=base",
+        status_code=303,
     )
 
 
@@ -4389,11 +4445,14 @@ def admin_conciliacion_calcular_envio(
         calcular_conciliacion_envio(solicitud_id, actor="admin")
     except Exception as exc:
         return RedirectResponse(
-            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            url=(f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+                 f"?error={quote(str(exc))}"),
             status_code=303,
         )
     return RedirectResponse(
-        url="/admin/conciliacion-couriers?ok=calculada", status_code=303,
+        url=(f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+             "?ok=calculada"),
+        status_code=303,
     )
 
 
@@ -4401,6 +4460,8 @@ def admin_conciliacion_calcular_envio(
 def admin_conciliacion_aplicar_diferencia(
     ajuste_id: int,
     referencia: str = Form(""),
+    solicitud_id: int = Form(0),
+    ambito: str = Form("INTERNACIONAL"),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -4412,18 +4473,35 @@ def admin_conciliacion_aplicar_diferencia(
             ajuste_id, actor="admin", referencia=referencia,
         )
     except Exception as exc:
+        destino = (
+            f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+            if solicitud_id > 0 else (
+                "/admin/facturas-nacionales?vista=diferencias"
+                if str(ambito).upper() == "NACIONAL"
+                else "/admin/facturas-internacionales?vista=diferencias"
+            )
+        )
         return RedirectResponse(
-            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            url=f"{destino}{'&' if '?' in destino else '?'}error={quote(str(exc))}",
             status_code=303,
         )
+    if solicitud_id > 0:
+        destino = f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+    elif str(ambito).upper() == "NACIONAL":
+        destino = "/admin/facturas-nacionales?vista=diferencias"
+    else:
+        destino = "/admin/facturas-internacionales?vista=diferencias"
     return RedirectResponse(
-        url="/admin/conciliacion-couriers?ok=aplicada", status_code=303,
+        url=f"{destino}{'&' if '?' in destino else '?'}ok=aplicada",
+        status_code=303,
     )
 
 
 @router.post("/conciliacion-couriers/conciliaciones/{conciliacion_id}/cerrar")
 def admin_conciliacion_cerrar_sin_diferencia(
     conciliacion_id: int,
+    solicitud_id: int = Form(0),
+    ambito: str = Form("INTERNACIONAL"),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -4433,12 +4511,27 @@ def admin_conciliacion_cerrar_sin_diferencia(
     try:
         cerrar_conciliacion_sin_diferencia(conciliacion_id, actor="admin")
     except Exception as exc:
+        destino = (
+            f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+            if solicitud_id > 0 else (
+                "/admin/facturas-nacionales?vista=conciliacion"
+                if str(ambito).upper() == "NACIONAL"
+                else "/admin/facturas-internacionales?vista=conciliacion"
+            )
+        )
         return RedirectResponse(
-            url=f"/admin/conciliacion-couriers?error={quote(str(exc))}",
+            url=f"{destino}{'&' if '?' in destino else '?'}error={quote(str(exc))}",
             status_code=303,
         )
+    if solicitud_id > 0:
+        destino = f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+    elif str(ambito).upper() == "NACIONAL":
+        destino = "/admin/facturas-nacionales?vista=conciliacion"
+    else:
+        destino = "/admin/facturas-internacionales?vista=conciliacion"
     return RedirectResponse(
-        url="/admin/conciliacion-couriers?ok=sin_diferencia", status_code=303,
+        url=f"{destino}{'&' if '?' in destino else '?'}ok=sin_diferencia",
+        status_code=303,
     )
 
 

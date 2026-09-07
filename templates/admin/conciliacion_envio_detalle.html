@@ -13,7 +13,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <p>{{ envio.courier|upper }} · {{ envio.dest_nombre or envio.destino_pais }} · guía interna #{{ envio.solicitud_id }}</p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    <a href="/admin/conciliacion-couriers?cliente={{ envio.cliente_id }}" class="btn btn-ghost">Volver al control</a>
+    <a href="{{ ruta_facturas }}?vista=conciliacion&cliente={{ envio.cliente_id }}" class="btn btn-ghost">Volver a conciliación</a>
     <a href="/admin/pedidos?buscar={{ envio.tracking or envio.solicitud_id }}" class="btn btn-ghost">Ver operación</a>
   </div>
 </div>
@@ -42,11 +42,13 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
   <form method="POST" action="/admin/conciliacion-couriers/envios/{{ envio.solicitud_id }}/calcular"><button class="btn btn-primary">Calcular diferencia</button></form>
   {% elif envio.ajuste_id and envio.ajuste_estado == 'PROPUESTO' %}
   <form method="POST" action="/admin/conciliacion-couriers/diferencias/{{ envio.ajuste_id }}/aplicar" class="form-grid-3" data-confirm="¿Aprobar y aplicar esta diferencia a la cuenta corriente?">
+    <input type="hidden" name="solicitud_id" value="{{ envio.solicitud_id }}">
+    <input type="hidden" name="ambito" value="{{ envio.ambito or 'INTERNACIONAL' }}">
     <div class="form-group"><label>Referencia del control</label><input name="referencia" placeholder="Factura / revisión interna"></div>
     <div class="form-group" style="align-self:end;"><button class="btn btn-primary" {% if not envio.evidencia_completa %}disabled{% endif %}>Aprobar y aplicar diferencia</button></div>
   </form>
   {% elif envio.conciliacion_estado == 'PARA_REVISION' and not envio.ajuste_id %}
-  <form method="POST" action="/admin/conciliacion-couriers/conciliaciones/{{ envio.conciliacion_id }}/cerrar" data-confirm="¿Cerrar esta conciliación sin diferencia?"><button class="btn btn-primary">Cerrar sin diferencia</button></form>
+  <form method="POST" action="/admin/conciliacion-couriers/conciliaciones/{{ envio.conciliacion_id }}/cerrar" data-confirm="¿Cerrar esta conciliación sin diferencia?"><input type="hidden" name="solicitud_id" value="{{ envio.solicitud_id }}"><input type="hidden" name="ambito" value="{{ envio.ambito or 'INTERNACIONAL' }}"><button class="btn btn-primary">Cerrar sin diferencia</button></form>
   {% else %}<p>No hay una decisión financiera pendiente para este envío.</p>{% endif %}
 </div>
 
@@ -59,7 +61,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
       <tr>
         <td><a href="/admin/conciliacion-couriers/facturas/{{ d.factura_id }}"><strong>{{ d.tipo_documento }} {{ d.numero }}</strong></a><br><small>{{ d.fecha_emision or 'Sin fecha' }} · {{ d.factura_estado|title }}</small></td>
         <td class="mono"><strong>{{ d.tracking_raw or 'Sin tracking' }}</strong><br><small>{{ d.cantidad_lineas }} {% if d.cantidad_lineas == 1 %}cargo{% else %}cargos{% endif %}</small></td>
-        <td><details><summary style="cursor:pointer;color:var(--accent-light);">Ver cargos</summary><div style="margin-top:7px;display:grid;gap:5px;min-width:260px;">{% for item in d['items'] %}<div style="display:flex;justify-content:space-between;gap:12px;"><span>{{ item.concepto_tipo|title }} <small>#{{ item.linea_numero }}</small></span><span class="mono">{% if item.signo < 0 %}−{% endif %}{{ d.moneda }} {{ item.monto_asignado }}</span></div>{% endfor %}</div></details></td>
+        <td><details><summary style="cursor:pointer;color:var(--accent-soft);">Ver cargos</summary><div style="margin-top:7px;display:grid;gap:5px;min-width:260px;">{% for item in d['items'] %}<div style="display:flex;justify-content:space-between;gap:12px;"><span>{{ item.concepto_tipo|title }} <small>#{{ item.linea_numero }}</small></span><span class="mono">{% if item.signo < 0 %}−{% endif %}{{ d.moneda }} {{ item.monto_asignado }}</span></div>{% endfor %}</div></details></td>
         <td class="mono">{{ d.moneda }} {{ d.monto_asignado }}<br><small>{{ dinero_ars(d.monto_asignado_ars) }} ARS</small></td>
         <td>{{ d.peso_facturado_kg or '—' }} kg<br><small>{{ d.peso_base.replace('_',' ')|title }}</small></td>
         <td><span class="badge {% if d.match_estado == 'CONFIRMADO' %}ok{% elif d.match_estado == 'RECHAZADO' %}error{% else %}warn{% endif %}">{{ d.match_estado|title }}</span><br><small>{{ d.metodo.replace('_',' ')|title }}</small></td>

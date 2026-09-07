@@ -6,8 +6,9 @@
   <div>
     <div class="eyebrow">Clientes</div>
     <h1>Lista de clientes</h1>
+    <p>Desde cada cliente accedés a sus envíos, cuenta corriente, facturas y configuración.</p>
   </div>
-  <a href="/admin/clientes/nuevo" class="btn btn-primary btn-sm" style="margin-top:8px;">+ Nuevo</a>
+  <a href="/admin/clientes/nuevo" class="btn btn-primary btn-sm" style="margin-top:8px;">+ Nuevo cliente</a>
 </div>
 
 <div class="card">
@@ -15,36 +16,32 @@
     <table>
       <thead>
         <tr>
-          <th>ID</th>
-          <th>Nombre</th>
-          <th>Email</th>
-          <th>Pricing</th>
+          <th>Cliente</th>
+          <th>Contacto</th>
+          <th>Cargos</th>
+          <th>Pagos</th>
+          <th>Saldo</th>
           <th>Estado</th>
-          <th></th>
+          <th>Acciones</th>
         </tr>
       </thead>
       <tbody>
         {% for c in clientes %}
         <tr>
-          <td class="mono">{{ c.cliente_id }}</td>
-          <td>{{ c.nombre or "—" }}</td>
+          <td><strong>{{ c.nombre or c.cliente_id }}</strong><br><small class="mono">{{ c.cliente_id }}</small></td>
           <td style="color:var(--fg-3)">{{ c.email }}</td>
-          <td class="mono">
-            {% for pricing in c.pricing_por_courier %}
-              <small style="display:block;"><strong>{{ pricing.nombre }}</strong>: {{ pricing.descripcion }}</small>
-            {% else %}
-              {{ c.pricing_desc }}
-            {% endfor %}
-          </td>
+          <td class="mono">$ {{ "{:,.2f}".format(c.total_cargos_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br><small>Envíos + diferencias</small></td>
+          <td class="mono" style="color:var(--ok);">$ {{ "{:,.2f}".format(c.total_pagos_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
+          <td class="mono"><strong style="color:{% if c.saldo_ars > 0 %}var(--warn){% elif c.saldo_ars < 0 %}var(--ok){% else %}var(--fg){% endif %};">$ {{ "{:,.2f}".format(c.saldo_ars|abs).replace(",", "X").replace(".", ",").replace("X", ".") }}</strong><br><small>{{ 'A cobrar' if c.saldo_ars > 0 else ('A favor' if c.saldo_ars < 0 else 'Al día') }}</small></td>
           <td>
             <span class="badge {% if c.activo %}ok{% else %}muted{% endif %}">
               {{ "Activo" if c.activo else "Inactivo" }}
             </span>
           </td>
-          <td><a href="/admin/clientes/{{ c.cliente_id }}" class="btn btn-sm btn-ghost">Ver →</a></td>
+          <td><div style="display:flex;gap:6px;flex-wrap:wrap;"><a href="/admin/clientes/{{ c.cliente_id }}#cuenta-corriente" class="btn btn-sm btn-primary">Cuenta</a><a href="/admin/clientes/{{ c.cliente_id }}#envios-cliente" class="btn btn-sm btn-ghost">Envíos</a></div></td>
         </tr>
         {% else %}
-        <tr><td colspan="6" style="color:var(--fg-4);text-align:center;padding:24px;">Sin clientes.</td></tr>
+        <tr><td colspan="7" style="color:var(--fg-4);text-align:center;padding:24px;">Sin clientes.</td></tr>
         {% endfor %}
       </tbody>
     </table>

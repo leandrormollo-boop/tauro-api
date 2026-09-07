@@ -17,8 +17,15 @@
   </div>
 </div>
 
+<nav class="tabs" style="margin-bottom:18px;overflow-x:auto;white-space:nowrap;">
+  <a class="tab active" href="#cuenta-corriente">Cuenta corriente</a>
+  <a class="tab" href="#envios-cliente">Envíos y cargos</a>
+  <a class="tab" href="/admin/clientes/{{ cliente.cliente_id }}/facturas">Facturas emitidas</a>
+  <a class="tab" href="/admin/clientes/{{ cliente.cliente_id }}/acceso-precios">Acceso y precios</a>
+</nav>
+
 <!-- Cuenta corriente por ámbito -->
-<div class="card-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom:16px;">
+<div id="cuenta-corriente" class="card-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom:16px;scroll-margin-top:20px;">
   <div class="stat-card">
     <div class="label">Pricing</div>
     <div class="value" style="font-size:22px;">{{ cliente.pricing_desc }}</div>
@@ -154,7 +161,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
 </div>
 
 <!-- Facturas y cargos -->
-<div class="card" style="margin-bottom:16px;">
+<div id="envios-cliente" class="card" style="margin-bottom:16px;scroll-margin-top:20px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
     <h3 style="margin:0;">Envíos y cargos · {{ periodo.etiqueta }}</h3>
     {% if pagination %}
