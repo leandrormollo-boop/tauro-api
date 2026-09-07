@@ -154,7 +154,11 @@ def seleccionar_adjunto_dhl(
                 raise CorreoDHLInvalido('Partes MIME inválidas.')
             pendientes.extend((hijo, profundidad + 1) for hijo in hijos)
             continue
-        if mime.lower() != 'application/pdf':
+        # Gmail conserva algunas facturas reales de DHL como
+        # ``application/octet-stream`` aunque el adjunto sea un PDF. Se admite
+        # ese MIME genérico sólo dentro del patrón documental exacto que sigue;
+        # la descarga además exige que el contenido comience con ``%PDF``.
+        if mime.lower() not in {'application/pdf', 'application/octet-stream'}:
             continue
         archivo = parte.get('filename', '')
         patron = re.fullmatch(r'DHL-([0-9]{4}A[0-9]{8})_([0-9]{8})\.pdf', archivo) if isinstance(archivo, str) else None

@@ -38,6 +38,15 @@ def test_separa_factura_y_legajo_sin_mutaciones():
     assert resultado.requiere_revision is True
 
 
+def test_admite_mime_generico_real_de_gmail_solo_para_factura_con_nombre_exacto():
+    datos = ejemplo()
+    for parte in datos['payload']['parts']:
+        parte['mimeType'] = 'application/octet-stream'
+    resultado = seleccionar(datos)
+    assert resultado.archivo_nombre == 'DHL-1700A00000001_02092026.pdf'
+    assert resultado.adjunto_id == 'att-1'
+
+
 def test_bloquea_cuenta_incorrecta():
     with pytest.raises(CorreoDHLInvalido, match='buzón autorizado'):
         seleccionar(cuenta_autenticada='otra@example.invalid')

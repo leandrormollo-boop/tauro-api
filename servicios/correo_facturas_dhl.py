@@ -693,10 +693,19 @@ def _reintentos_pendientes() -> list[dict[str, str]]:
         ]
 
 
-def _procesar_mensaje(cliente: _ClienteGmail, resumen: Mapping[str, str]) -> str:
+def _procesar_mensaje(
+    cliente: _ClienteGmail, resumen: Mapping[str, str], *,
+    reintentar_patron_no_admitido: bool = False,
+) -> str:
     mensaje_id = str(resumen.get("id") or "")
     existente = _correo_guardado(mensaje_id)
-    if existente and existente["estado"] in _ESTADOS_TERMINALES:
+    reintento_patron = bool(
+        reintentar_patron_no_admitido
+        and existente
+        and existente["estado"] == "REVISION_MANUAL"
+        and existente.get("error_codigo") == "PATRON_NO_ADMITIDO"
+    )
+    if existente and existente["estado"] in _ESTADOS_TERMINALES and not reintento_patron:
         return "YA_PROCESADO"
     if existente and int(existente.get("intentos") or 0) >= _max_intentos():
         _marcar_reintentos_agotados(existente.get("entrada_id"))
@@ -863,7 +872,9 @@ def sincronizar_facturas_dhl_historicas(anio: int) -> dict[str, Any]:
                 mensajes_unicos.append(resumen)
             conteos: dict[str, int] = {}
             for resumen in mensajes_unicos:
-                resultado = _procesar_mensaje(cliente, resumen)
+                resultado = _procesar_mensaje(
+                    cliente, resumen, reintentar_patron_no_admitido=True,
+                )
                 conteos[resultado] = conteos.get(resultado, 0) + 1
             estado_salida = "LIMITE_ALCANZADO" if limite_alcanzado else "OK"
             salida = {
