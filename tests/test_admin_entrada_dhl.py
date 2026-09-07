@@ -54,6 +54,8 @@ def test_carga_manual_no_inventa_mail():
     (admin.admin_conectar_gmail_dhl, {}),
     (admin.admin_callback_gmail_dhl, {}),
     (admin.admin_sincronizar_gmail_dhl, {'background_tasks': BackgroundTasks()}),
+    (admin.admin_sincronizar_gmail_dhl_historico,
+     {'background_tasks': BackgroundTasks(), 'anio': 2026}),
 ])
 def test_todas_las_rutas_exigen_admin_antes_de_leer_o_escribir(fn, args):
     respuesta = fn(**args, admin_token='invalido')
@@ -171,6 +173,28 @@ def test_sincronizacion_manual_exige_csrf_antes_de_tocar_gmail(monkeypatch):
     assert respuesta.status_code == 303 and llamadas == [] and len(tareas.tasks) == 1
     asyncio.run(tareas())
     assert llamadas == [True]
+
+
+def test_sincronizacion_historica_exige_csrf_y_encola_anio(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(
+        correo, 'sincronizar_facturas_dhl_historicas_seguro',
+        lambda anio: llamadas.append(anio),
+    )
+    tareas = BackgroundTasks()
+    assert admin.admin_sincronizar_gmail_dhl_historico(
+        tareas, anio=2026, csrf_gmail_historico='', admin_token='valido',
+    ).status_code == 403
+    assert tareas.tasks == []
+    tareas = BackgroundTasks()
+    respuesta = admin.admin_sincronizar_gmail_dhl_historico(
+        tareas, anio=2026,
+        csrf_gmail_historico=admin._csrf_dhl('gmail:sync:historico'),
+        admin_token='valido',
+    )
+    assert respuesta.status_code == 303 and len(tareas.tasks) == 1
+    asyncio.run(tareas())
+    assert llamadas == [2026]
 
 
 def test_pdf_se_descarga_privado_con_nombre_controlado(monkeypatch):

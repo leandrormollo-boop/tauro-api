@@ -148,6 +148,31 @@ def test_importacion_automatica_es_opt_in(monkeypatch):
     assert correo._auto_import_habilitado() is True
 
 
+def test_busqueda_historica_acota_el_anio_y_no_mueve_checkpoint():
+    consultas = []
+
+    class GmailHistorico:
+        def get(self, ruta, *, params=None):
+            assert ruta == '/users/me/messages'
+            consultas.append(dict(params or {}))
+            return {'messages': []}
+
+    mensajes, limite = correo._listar_mensajes_historicos(GmailHistorico(), 2026)
+    assert mensajes == [] and limite is False
+    assert consultas == [{
+        'q': ('from:AR.E-Billing@dhl.com subject:"DHL Invoice services" '
+              'has:attachment filename:pdf after:1767225599 before:1798761600'),
+        'maxResults': 500,
+        'includeSpamTrash': 'false',
+    }]
+
+
+@pytest.mark.parametrize('anio', [2019, 9999, '2026', None])
+def test_busqueda_historica_rechaza_anio_fuera_de_contrato(anio):
+    with pytest.raises(correo.ConfiguracionCorreoDHL, match='Año histórico'):
+        correo._listar_mensajes_historicos(None, anio)
+
+
 def test_backoff_y_tope_de_reintentos_son_acotados(monkeypatch):
     assert correo._espera_reintento(1).total_seconds() == 30 * 60
     assert correo._espera_reintento(2).total_seconds() == 60 * 60

@@ -331,6 +331,18 @@ def _marcar_integracion(*, estado=None, error=None, resultado=None) -> None:
         cur.execute(f"UPDATE integracion_correo_dhl SET {', '.join(campos)} WHERE id=%s", valores)
 
 
+def _marcar_resultado_historico(resultado: Mapping[str, Any]) -> None:
+    """Registra el backfill sin alterar la ventana incremental periódica."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """UPDATE integracion_correo_dhl
+               SET estado='CONECTADA', ultimo_resultado=%s,
+                   ultimo_error_codigo=NULL, updated_at=NOW()
+               WHERE id=1""",
+            (Json(dict(resultado)),),
+        )
+
+
 def _token_acceso(*, forzar_refresh=False) -> str:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (_LOCK_NAME + ":token",))
@@ -603,6 +615,51 @@ def _listar_mensajes(cliente: _ClienteGmail) -> tuple[list[dict[str, str]], str 
     return encontrados[:limite], pagina if isinstance(pagina, str) and pagina else None, fecha_inicio
 
 
+def _listar_mensajes_historicos(
+    cliente: _ClienteGmail, anio: int,
+) -> tuple[list[dict[str, str]], bool]:
+    """Lista un año calendario sin mover el checkpoint del job periódico.
+
+    El tope evita una descarga accidentalmente ilimitada. La identidad y la
+    autenticidad de cada mensaje siguen validándose en ``_procesar_mensaje``.
+    """
+    actual = datetime.now(timezone.utc).year
+    if type(anio) is not int or not 2020 <= anio <= actual:
+        raise ConfiguracionCorreoDHL("Año histórico DHL inválido.")
+    limite = 5000
+    inicio = int(datetime(anio, 1, 1, tzinfo=timezone.utc).timestamp()) - 1
+    fin = int(datetime(anio + 1, 1, 1, tzinfo=timezone.utc).timestamp())
+    consulta = (
+        'from:AR.E-Billing@dhl.com subject:"DHL Invoice services" '
+        f'has:attachment filename:pdf after:{inicio} before:{fin}'
+    )
+    encontrados = []
+    pagina = None
+    while len(encontrados) < limite:
+        params = {
+            "q": consulta,
+            "maxResults": min(500, limite - len(encontrados)),
+            "includeSpamTrash": "false",
+        }
+        if pagina:
+            params["pageToken"] = pagina
+        datos = cliente.get("/users/me/messages", params=params)
+        mensajes = datos.get("messages", [])
+        if not isinstance(mensajes, list):
+            raise CorreoDHLTemporal("Gmail devolvió un listado histórico inválido.")
+        for mensaje in mensajes:
+            mensaje_id = mensaje.get("id") if isinstance(mensaje, Mapping) else None
+            if isinstance(mensaje_id, str) and 0 < len(mensaje_id) <= 255:
+                encontrados.append({
+                    "id": mensaje_id,
+                    "threadId": str(mensaje.get("threadId") or "")[:255],
+                })
+        pagina = datos.get("nextPageToken")
+        if not isinstance(pagina, str) or not pagina:
+            break
+    return encontrados[:limite], bool(pagina)
+
+
 def _guardar_cursor_sync(page_token: str | None, fecha_inicio: str | None) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -776,3 +833,74 @@ def sincronizar_facturas_dhl_seguro() -> dict[str, Any]:
     except Exception as exc:
         print(f"[correo-dhl] sincronización falló: {type(exc).__name__}")
         return {"estado": "ERROR", "procesados": 0}
+
+
+def sincronizar_facturas_dhl_historicas(anio: int) -> dict[str, Any]:
+    """Prepara un año completo para revisión sin aplicar saldos ni diferencias."""
+    control = preflight_correo_dhl()
+    if not control["configurada"]:
+        return {"estado": "DESHABILITADA", "procesados": 0,
+                "bloqueos": control["bloqueos"]}
+    actual = datetime.now(timezone.utc).year
+    if type(anio) is not int or not 2020 <= anio <= actual:
+        return {"estado": "ANIO_INVALIDO", "procesados": 0}
+    with get_conn() as lock_conn, lock_conn.cursor() as lock_cur:
+        lock_cur.execute("SELECT pg_try_advisory_lock(hashtext(%s)) AS adquirido", (_LOCK_NAME,))
+        if not lock_cur.fetchone()["adquirido"]:
+            return {"estado": "EN_CURSO", "procesados": 0}
+        try:
+            estado = estado_integracion()
+            if not estado.get("conectada"):
+                return {"estado": "SIN_CONECTAR", "procesados": 0}
+            cliente = _ClienteGmail()
+            mensajes, limite_alcanzado = _listar_mensajes_historicos(cliente, anio)
+            vistos = set()
+            mensajes_unicos = []
+            for resumen in mensajes:
+                if resumen["id"] in vistos:
+                    continue
+                vistos.add(resumen["id"])
+                mensajes_unicos.append(resumen)
+            conteos: dict[str, int] = {}
+            for resumen in mensajes_unicos:
+                resultado = _procesar_mensaje(cliente, resumen)
+                conteos[resultado] = conteos.get(resultado, 0) + 1
+            estado_salida = "LIMITE_ALCANZADO" if limite_alcanzado else "OK"
+            salida = {
+                "estado": estado_salida,
+                "anio": anio,
+                "procesados": len(mensajes_unicos),
+                "resultados": conteos,
+                "historico": True,
+            }
+            _marcar_resultado_historico(salida)
+            with get_conn() as conn, conn.cursor() as cur:
+                _registrar_auditoria(
+                    cur, evento="DHL_GMAIL_HISTORICO_PROCESADO", actor=_ACTOR,
+                    metadata={"anio": anio, "procesados": len(mensajes_unicos),
+                              "resultados": conteos, "limite_alcanzado": limite_alcanzado},
+                )
+            return salida
+        except CorreoDHLReautorizar:
+            _marcar_integracion(estado="REAUTORIZAR", error="REAUTORIZAR")
+            return {"estado": "REAUTORIZAR", "procesados": 0, "anio": anio}
+        except CorreoDHLTemporal:
+            _marcar_integracion(error="ERROR_TEMPORAL")
+            return {"estado": "ERROR_TEMPORAL", "procesados": 0, "anio": anio}
+        except ConfiguracionCorreoDHL:
+            _marcar_integracion(estado="ERROR", error="CONFIGURACION")
+            return {"estado": "ERROR_CONFIGURACION", "procesados": 0, "anio": anio}
+        finally:
+            lock_cur.execute("SELECT pg_advisory_unlock(hashtext(%s))", (_LOCK_NAME,))
+
+
+def sincronizar_facturas_dhl_historicas_seguro(anio: int) -> dict[str, Any]:
+    """Wrapper del backfill: no expone mensajes, tokens ni respuestas de Gmail."""
+    try:
+        resultado = sincronizar_facturas_dhl_historicas(anio)
+        if resultado.get("estado") not in {"DESHABILITADA", "SIN_CONECTAR", "EN_CURSO"}:
+            print("[correo-dhl] histórico: " + str(resultado.get("estado")))
+        return resultado
+    except Exception as exc:
+        print(f"[correo-dhl] histórico falló: {type(exc).__name__}")
+        return {"estado": "ERROR", "procesados": 0, "anio": anio}

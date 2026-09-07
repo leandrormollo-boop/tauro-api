@@ -3616,7 +3616,8 @@ def admin_bandeja_dhl(request: Request, pagina: int = 1, admin_token: Optional[s
     return templates.TemplateResponse(request=request, name='admin/entrada_dhl.html',
         context={'seccion': 'conciliacion_couriers', 'bandeja': listar_entradas_dhl(pagina=pagina),
                  'gmail': estado_integracion(), 'csrf_dhl': _csrf_dhl('nueva'),
-                 'csrf_gmail': _csrf_dhl('gmail:sync')},
+                 'csrf_gmail': _csrf_dhl('gmail:sync'),
+                 'csrf_gmail_historico': _csrf_dhl('gmail:sync:historico')},
         headers={'Cache-Control': 'private, no-store'})
 
 
@@ -3726,6 +3727,27 @@ def admin_sincronizar_gmail_dhl(
     background_tasks.add_task(sincronizar_facturas_dhl_seguro)
     return RedirectResponse(
         '/admin/conciliacion-couriers/entrada-dhl?ok=sincronizacion_iniciada',
+        status_code=303,
+    )
+
+
+@router.post('/conciliacion-couriers/entrada-dhl/gmail/sincronizar-historico')
+def admin_sincronizar_gmail_dhl_historico(
+    background_tasks: BackgroundTasks,
+    anio: int = Form(0), csrf_gmail_historico: str = Form(''),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf_gmail_historico, 'gmail:sync:historico'):
+        return Response('Formulario vencido o inválido.', status_code=403)
+    actual = datetime.now(timezone.utc).year
+    if not 2020 <= int(anio) <= actual:
+        return Response('Año histórico DHL inválido.', status_code=400)
+    from servicios.correo_facturas_dhl import sincronizar_facturas_dhl_historicas_seguro
+    background_tasks.add_task(sincronizar_facturas_dhl_historicas_seguro, int(anio))
+    return RedirectResponse(
+        f'/admin/conciliacion-couriers/entrada-dhl?ok=historico_{int(anio)}_iniciado',
         status_code=303,
     )
 

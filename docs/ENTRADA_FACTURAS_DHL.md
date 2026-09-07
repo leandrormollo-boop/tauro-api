@@ -224,6 +224,9 @@ worker dedicado con aislamiento de filesystem/red y control de origen.
    resultados contra PDFs reales y recién entonces habilitarlo. No ampliar
    formatos ni retroceder más de la ventana inicial de siete días sin una nueva
    validación.
+   El Admin dispone además de **Buscar todo 2026**, un backfill calendarizado
+   separado que no mueve el cursor periódico, conserva la deduplicación y deja
+   todo documento en revisión mientras la importación automática esté apagada.
 4. Para una etapa posterior: separar el lector en un servicio/contenedor todavía
    más aislado. El subprocess actual limita recursos y secretos, pero no es un
    sandbox completo contra PDFs arbitrarios.
