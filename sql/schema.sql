@@ -2188,9 +2188,30 @@ CREATE INDEX IF NOT EXISTS ix_factura_item_tracking
 CREATE INDEX IF NOT EXISTS ix_factura_item_factura_estado
     ON facturas_courier_items (factura_id, estado, linea_numero);
 
--- 4) El match puede ser propuesto automáticamente, pero confirmar una línea
---    o repartirla entre varios envíos es una decisión auditada. Los montos
---    asignados permiten prorratear líneas agrupadas sin perder el original.
+-- Unidad canónica de conciliación: una fila por tracking dentro del
+-- documento. Los cargos originales continúan en facturas_courier_items y
+-- este total siempre se deriva de ellos; no se guarda una segunda copia.
+CREATE OR REPLACE VIEW factura_courier_guias AS
+SELECT i.factura_id,
+       i.tracking_normalizado,
+       MIN(i.tracking_raw) AS tracking_raw,
+       MIN(i.linea_numero) AS linea_inicial,
+       COUNT(*) AS cantidad_cargos,
+       SUM(i.importe * i.signo) AS importe_total,
+       SUM(i.importe_ars * i.signo) AS importe_total_ars,
+       MAX(i.peso_real_kg) AS peso_real_kg,
+       MAX(i.peso_volumetrico_kg) AS peso_volumetrico_kg,
+       MAX(i.peso_facturado_kg) AS peso_facturado_kg,
+       ARRAY_AGG(i.id ORDER BY i.linea_numero) AS item_ids
+  FROM facturas_courier_items i
+ WHERE i.tracking_normalizado IS NOT NULL
+   AND i.estado <> 'IGNORADO'
+ GROUP BY i.factura_id, i.tracking_normalizado;
+
+-- 4) La decisión de match es una por factura + tracking. Esta tabla conserva
+--    las asignaciones internas de cada cargo (FLETE, FUEL, recargos, etc.)
+--    para que el total de la guía sea reproducible sin perder el PDF original.
+--    La aplicación agrupa y confirma esas asignaciones de forma atómica.
 CREATE TABLE IF NOT EXISTS factura_courier_item_matches (
     id                    BIGSERIAL PRIMARY KEY,
     item_id               BIGINT NOT NULL REFERENCES facturas_courier_items(id)
@@ -2259,7 +2280,7 @@ BEGIN
     END IF;
 
     SELECT i.importe, i.importe_ars, i.tipo_cambio_ars,
-           i.tracking_normalizado, f.courier
+           i.factura_id, i.tracking_normalizado, f.courier
       INTO item_actual
       FROM facturas_courier_items i
       JOIN facturas_courier f ON f.id = i.factura_id
@@ -2293,6 +2314,24 @@ BEGIN
             <> solicitud_actual.tracking_normalizado
     ) THEN
         RAISE EXCEPTION 'El tracking exacto no coincide';
+    END IF;
+
+    IF NEW.metodo = 'EXACTO_TRACKING'
+       AND NEW.estado IN ('PROPUESTO','CONFIRMADO')
+       AND item_actual.tracking_normalizado IS NOT NULL
+       AND EXISTS (
+           SELECT 1
+             FROM factura_courier_item_matches otro
+             JOIN facturas_courier_items otro_item
+               ON otro_item.id = otro.item_id
+            WHERE otro_item.factura_id = item_actual.factura_id
+              AND otro_item.tracking_normalizado
+                  = item_actual.tracking_normalizado
+              AND otro.solicitud_id <> NEW.solicitud_id
+              AND otro.estado IN ('PROPUESTO','CONFIRMADO')
+              AND otro.id <> COALESCE(NEW.id, 0)
+       ) THEN
+        RAISE EXCEPTION 'Una guía de la factura no puede matchearse con dos envíos';
     END IF;
 
     IF ABS(

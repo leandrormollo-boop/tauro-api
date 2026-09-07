@@ -777,7 +777,13 @@ def matchear_items_exactos(
     actor: str = "sistema",
     _conn=None,
 ) -> dict[str, int]:
-    """Propone matches únicamente cuando courier y tracking son exactos."""
+    """Propone un match lógico por guía y asigna todas sus líneas internas.
+
+    ``factura_courier_item_matches`` conserva la asignación contable de cada
+    renglón para poder auditar la suma. La unidad que decide el operador, sin
+    embargo, es ``factura + tracking``: FLETE, FUEL y recargos de una misma
+    guía nunca se proponen como matches independientes.
+    """
     propuestos = 0
     sin_match = 0
     with (nullcontext(_conn) if _conn is not None else get_conn()) as conn:
@@ -805,22 +811,23 @@ def matchear_items_exactos(
                   JOIN facturas_courier f ON f.id = i.factura_id
                  WHERE i.factura_id = %s
                    AND i.estado <> 'IGNORADO'
-                   AND NOT EXISTS (
-                       SELECT 1 FROM factura_courier_item_matches existente
-                        WHERE existente.item_id = i.id
-                          AND existente.estado IN ('PROPUESTO','CONFIRMADO')
-                   )
                  ORDER BY i.linea_numero
                  FOR UPDATE OF i
                 """,
                 (int(factura_id),),
             )
             items = list(cur.fetchall())
+            grupos: dict[str, list[dict[str, Any]]] = {}
+            sin_tracking: list[dict[str, Any]] = []
             for item in items:
-                tracking = item.get("tracking_normalizado")
+                tracking = _texto(item.get("tracking_normalizado"))
                 if not tracking:
-                    sin_match += 1
+                    sin_tracking.append(item)
                     continue
+                grupos.setdefault(tracking, []).append(item)
+            sin_match += len(sin_tracking)
+
+            for tracking, lineas_grupo in grupos.items():
                 cur.execute(
                     """
                     SELECT id
@@ -830,31 +837,35 @@ def matchear_items_exactos(
                            UPPER(BTRIM(tracking)), '[^A-Z0-9]', '', 'g'
                        ), '') = %s
                     """,
-                    (item["courier"], tracking),
+                    (lineas_grupo[0]["courier"], tracking),
                 )
                 solicitudes = list(cur.fetchall())
                 if len(solicitudes) != 1:
                     sin_match += 1
                     continue
                 solicitud_id = int(solicitudes[0]["id"])
-                cur.execute(
-                    """
-                    INSERT INTO factura_courier_item_matches (
-                        item_id, solicitud_id, monto_asignado,
-                        monto_asignado_ars, metodo, confianza,
-                        estado, creado_por
-                    ) VALUES (%s, %s, %s, %s, 'EXACTO_TRACKING', 1,
-                              'PROPUESTO', %s)
-                    ON CONFLICT (item_id, solicitud_id) DO NOTHING
-                    RETURNING id
-                    """,
-                    (
-                        int(item["id"]), solicitud_id, item["importe"],
-                        item["importe_ars"], _texto(actor) or "sistema",
-                    ),
-                )
-                insertado = cur.fetchone()
-                if not insertado:
+                match_ids: list[int] = []
+                for item in lineas_grupo:
+                    cur.execute(
+                        """
+                        INSERT INTO factura_courier_item_matches (
+                            item_id, solicitud_id, monto_asignado,
+                            monto_asignado_ars, metodo, confianza,
+                            estado, creado_por
+                        ) VALUES (%s, %s, %s, %s, 'EXACTO_TRACKING', 1,
+                                  'PROPUESTO', %s)
+                        ON CONFLICT (item_id, solicitud_id) DO NOTHING
+                        RETURNING id
+                        """,
+                        (
+                            int(item["id"]), solicitud_id, item["importe"],
+                            item["importe_ars"], _texto(actor) or "sistema",
+                        ),
+                    )
+                    insertado = cur.fetchone()
+                    if insertado:
+                        match_ids.append(int(insertado["id"]))
+                if not match_ids:
                     continue
                 propuestos += 1
                 _registrar_auditoria(
@@ -862,9 +873,14 @@ def matchear_items_exactos(
                     evento="MATCH_EXACTO_PROPUESTO",
                     actor=actor,
                     factura_id=int(factura_id),
-                    item_id=int(item["id"]),
+                    item_id=int(lineas_grupo[0]["id"]),
                     solicitud_id=solicitud_id,
-                    metadata={"match_id": int(insertado["id"])},
+                    metadata={
+                        "match_id": match_ids[0],
+                        "match_ids_lineas": match_ids,
+                        "tracking": tracking,
+                        "cantidad_lineas": len(match_ids),
+                    },
                 )
             if propuestos or sin_match:
                 cur.execute(
@@ -956,6 +972,7 @@ def proponer_match_manual(
                 """
                 SELECT i.id, i.factura_id, i.importe, i.importe_ars,
                        i.tipo_cambio_ars, i.estado AS item_estado,
+                       i.tracking_normalizado,
                        f.courier, f.estado AS factura_estado
                   FROM facturas_courier_items i
                   JOIN facturas_courier f ON f.id = i.factura_id
@@ -1054,57 +1071,115 @@ def proponer_match_manual(
                 raise ConciliacionCourierError(
                     "El envío tiene una conciliación abierta; resolvela antes de sumar otra línea."
                 )
-            cur.execute(
-                """
-                SELECT COALESCE(SUM(monto_asignado), 0) AS asignado
-                  FROM factura_courier_item_matches
-                 WHERE item_id = %s AND estado IN ('PROPUESTO','CONFIRMADO')
-                """,
-                (int(item_id),),
-            )
-            asignado = _decimal(cur.fetchone()["asignado"], "Monto asignado")
-            remanente = (
-                _decimal(item["importe"], "Importe de línea") - asignado
-            ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
-            if remanente <= CENTAVO_CONTROL:
-                raise ConciliacionCourierError(
-                    "La línea ya está totalmente asignada."
-                )
-            monto = (
-                _dinero(monto_asignado, "Monto a asignar", permite_cero=False)
-                if monto_asignado is not None and _texto(monto_asignado)
-                else remanente
-            )
-            if monto > remanente + CENTAVO_CONTROL:
-                raise ConciliacionCourierError(
-                    "El monto manual supera el saldo disponible de la línea."
-                )
-            monto_ars = (monto * _decimal(
-                item["tipo_cambio_ars"], "Tipo de cambio"
-            )).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
-            evidencia = f"admin://match-manual/{hashlib.sha256(motivo.encode('utf-8')).hexdigest()}"
-            try:
+            # Sin un prorrateo explícito, el match manual toma la guía
+            # completa: todos los renglones de esta factura que comparten
+            # tracking. El detalle sigue separado para auditoría.
+            if item.get("tracking_normalizado") and not _texto(monto_asignado):
                 cur.execute(
                     """
-                    INSERT INTO factura_courier_item_matches (
-                        item_id, solicitud_id, monto_asignado,
-                        monto_asignado_ars, metodo, confianza, estado,
-                        evidencia_uri, creado_por
-                    ) VALUES (%s, %s, %s, %s, 'MANUAL', NULL, 'PROPUESTO', %s, %s)
-                    RETURNING id
+                    SELECT i.id, i.importe, i.tipo_cambio_ars,
+                           COALESCE((
+                               SELECT SUM(m.monto_asignado)
+                                 FROM factura_courier_item_matches m
+                                WHERE m.item_id = i.id
+                                  AND m.estado IN ('PROPUESTO','CONFIRMADO')
+                           ), 0) AS asignado
+                      FROM facturas_courier_items i
+                     WHERE i.factura_id = %s
+                       AND i.tracking_normalizado = %s
+                       AND i.estado <> 'IGNORADO'
+                     ORDER BY i.linea_numero
+                     FOR UPDATE OF i
                     """,
-                    (
-                        int(item_id), int(solicitud["id"]), monto,
-                        monto_ars, evidencia, actor,
-                    ),
+                    (int(item["factura_id"]), item["tracking_normalizado"]),
                 )
+                lineas_grupo = list(cur.fetchall())
+            else:
+                cur.execute(
+                    """
+                    SELECT i.id, i.importe, i.tipo_cambio_ars,
+                           COALESCE((
+                               SELECT SUM(m.monto_asignado)
+                                 FROM factura_courier_item_matches m
+                                WHERE m.item_id = i.id
+                                  AND m.estado IN ('PROPUESTO','CONFIRMADO')
+                           ), 0) AS asignado
+                      FROM facturas_courier_items i
+                     WHERE i.id = %s
+                     FOR UPDATE OF i
+                    """,
+                    (int(item_id),),
+                )
+                lineas_grupo = list(cur.fetchall())
+            pendientes_grupo = []
+            for linea in lineas_grupo:
+                remanente_linea = (
+                    _decimal(linea["importe"], "Importe de línea")
+                    - _decimal(linea["asignado"], "Monto asignado")
+                ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
+                if remanente_linea > CENTAVO_CONTROL:
+                    pendientes_grupo.append((linea, remanente_linea))
+            if not pendientes_grupo:
+                raise ConciliacionCourierError(
+                    "La guía ya está totalmente asignada."
+                )
+            if _texto(monto_asignado):
+                monto_manual = _dinero(
+                    monto_asignado, "Monto a asignar", permite_cero=False
+                )
+                if len(pendientes_grupo) != 1:
+                    raise ConciliacionCourierError(
+                        "El prorrateo manual sólo se admite sobre una línea individual."
+                    )
+                if monto_manual > pendientes_grupo[0][1] + CENTAVO_CONTROL:
+                    raise ConciliacionCourierError(
+                        "El monto manual supera el saldo disponible de la línea."
+                    )
+                pendientes_grupo = [(pendientes_grupo[0][0], monto_manual)]
+            identidad_match = ":".join((
+                str(item["factura_id"]),
+                _texto(item.get("tracking_normalizado")) or str(item_id),
+                str(solicitud["id"]), actor, motivo,
+                datetime.now(timezone.utc).isoformat(),
+            ))
+            evidencia = (
+                "admin://match-manual/"
+                + hashlib.sha256(identidad_match.encode("utf-8")).hexdigest()
+            )
+            match_ids = []
+            monto = Decimal("0")
+            monto_ars = Decimal("0")
+            try:
+                for linea, monto_linea in pendientes_grupo:
+                    monto_linea_ars = (
+                        monto_linea
+                        * _decimal(linea["tipo_cambio_ars"], "Tipo de cambio")
+                    ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
+                    cur.execute(
+                        """
+                        INSERT INTO factura_courier_item_matches (
+                            item_id, solicitud_id, monto_asignado,
+                            monto_asignado_ars, metodo, confianza, estado,
+                            evidencia_uri, creado_por
+                        ) VALUES (%s, %s, %s, %s, 'MANUAL', NULL,
+                                  'PROPUESTO', %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            int(linea["id"]), int(solicitud["id"]),
+                            monto_linea, monto_linea_ars, evidencia, actor,
+                        ),
+                    )
+                    match_ids.append(int(cur.fetchone()["id"]))
+                    monto += monto_linea
+                    monto_ars += monto_linea_ars
             except Exception as exc:
                 if getattr(exc, "pgcode", None) == "23505":
                     raise ConciliacionCourierError(
-                        "Esa línea ya tiene un match histórico con el envío elegido."
+                        "La guía ya tiene un match histórico con el envío elegido."
                     ) from exc
                 raise
-            match_id = int(cur.fetchone()["id"])
+            match_id = match_ids[0]
             _registrar_auditoria(
                 cur,
                 evento="MATCH_MANUAL_PROPUESTO",
@@ -1114,6 +1189,9 @@ def proponer_match_manual(
                 solicitud_id=int(solicitud["id"]),
                 metadata={
                     "match_id": match_id,
+                    "match_ids_lineas": match_ids,
+                    "tracking": item.get("tracking_normalizado"),
+                    "cantidad_lineas": len(match_ids),
                     "monto_asignado": str(monto),
                     "monto_asignado_ars": str(monto_ars),
                     "motivo": motivo,
@@ -1136,7 +1214,12 @@ def confirmar_match(
     actor: str,
     factura_id_esperada: int | None = None,
 ) -> dict[str, Any]:
-    """Confirma una propuesta; no aprueba todavía ningún ajuste al cliente."""
+    """Confirma una guía completa; no aprueba ningún ajuste al cliente.
+
+    Para coincidencias exactas la confirmación es atómica sobre todas las
+    líneas de la misma ``factura + tracking + envío``. El ``match_id`` es sólo
+    el identificador representativo que llega desde la pantalla.
+    """
     actor = _texto(actor)
     if not actor:
         raise ConciliacionCourierError("Falta identificar al operador.")
@@ -1144,8 +1227,10 @@ def confirmar_match(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT m.id, m.estado, m.item_id, m.solicitud_id,
+                SELECT m.id, m.estado, m.item_id, m.solicitud_id, m.metodo,
+                       m.evidencia_uri,
                        i.factura_id, i.estado AS item_estado,
+                       i.tracking_normalizado,
                        f.estado AS factura_estado, f.metadatos_origen
                   FROM factura_courier_item_matches m
                   JOIN facturas_courier_items i ON i.id = m.item_id
@@ -1178,7 +1263,42 @@ def confirmar_match(
                     "Un match rechazado no puede confirmarse."
                 )
             _exigir_revision_financiera(cur, match['factura_id'], match.get('metadatos_origen'))
-            if match["estado"] == "CONFIRMADO":
+            if match.get("tracking_normalizado") and match["metodo"] in {
+                "EXACTO_TRACKING", "MANUAL",
+            }:
+                cur.execute(
+                    """
+                    SELECT m.id, m.estado
+                      FROM factura_courier_item_matches m
+                      JOIN facturas_courier_items i ON i.id = m.item_id
+                     WHERE i.factura_id = %s
+                       AND i.tracking_normalizado = %s
+                       AND m.solicitud_id = %s
+                       AND m.metodo = %s
+                       AND (%s <> 'MANUAL' OR m.evidencia_uri = %s)
+                     ORDER BY m.id
+                     FOR UPDATE OF m
+                    """,
+                    (
+                        int(match["factura_id"]),
+                        match["tracking_normalizado"],
+                        int(match["solicitud_id"]),
+                        match["metodo"], match["metodo"],
+                        match.get("evidencia_uri"),
+                    ),
+                )
+                grupo = list(cur.fetchall())
+            else:
+                grupo = [{"id": int(match_id), "estado": match["estado"]}]
+            if any(fila["estado"] == "RECHAZADO" for fila in grupo):
+                raise ConciliacionCourierError(
+                    "La guía contiene una asignación rechazada y debe revisarse."
+                )
+            pendientes = [
+                int(fila["id"]) for fila in grupo
+                if fila["estado"] == "PROPUESTO"
+            ]
+            if not pendientes:
                 return {
                     "id": int(match_id),
                     "factura_id": int(match["factura_id"]),
@@ -1190,9 +1310,9 @@ def confirmar_match(
                 UPDATE factura_courier_item_matches
                    SET estado = 'CONFIRMADO', confirmado_por = %s,
                        confirmado_at = NOW(), updated_at = NOW()
-                 WHERE id = %s
+                 WHERE id = ANY(%s) AND estado = 'PROPUESTO'
                 """,
-                (actor, int(match_id)),
+                (actor, pendientes),
             )
             _registrar_auditoria(
                 cur,
@@ -1201,7 +1321,12 @@ def confirmar_match(
                 factura_id=int(match["factura_id"]),
                 item_id=int(match["item_id"]),
                 solicitud_id=int(match["solicitud_id"]),
-                metadata={"match_id": int(match_id)},
+                metadata={
+                    "match_id": int(match_id),
+                    "match_ids_lineas": pendientes,
+                    "tracking": match.get("tracking_normalizado"),
+                    "cantidad_lineas": len(pendientes),
+                },
             )
             _actualizar_estado_factura(cur, int(match["factura_id"]))
             return {
@@ -1219,7 +1344,7 @@ def rechazar_match(
     motivo: str,
     factura_id_esperada: int | None = None,
 ) -> dict[str, Any]:
-    """Rechaza una propuesta conservando el registro y su motivo."""
+    """Rechaza atómicamente la propuesta de una guía y conserva el motivo."""
     actor = _texto(actor)
     motivo = _texto(motivo)
     if not actor:
@@ -1232,8 +1357,9 @@ def rechazar_match(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT m.id, m.estado, m.item_id, m.solicitud_id,
-                       i.factura_id
+                SELECT m.id, m.estado, m.item_id, m.solicitud_id, m.metodo,
+                       m.evidencia_uri,
+                       i.factura_id, i.tracking_normalizado
                   FROM factura_courier_item_matches m
                   JOIN facturas_courier_items i ON i.id = m.item_id
                  WHERE m.id = %s
@@ -1255,14 +1381,46 @@ def rechazar_match(
                 raise ConciliacionCourierError(
                     "Sólo se puede rechazar un match todavía propuesto."
                 )
+            if match.get("tracking_normalizado") and match["metodo"] in {
+                "EXACTO_TRACKING", "MANUAL",
+            }:
+                cur.execute(
+                    """
+                    SELECT m.id, m.estado
+                      FROM factura_courier_item_matches m
+                      JOIN facturas_courier_items i ON i.id = m.item_id
+                     WHERE i.factura_id = %s
+                       AND i.tracking_normalizado = %s
+                       AND m.solicitud_id = %s
+                       AND m.metodo = %s
+                       AND (%s <> 'MANUAL' OR m.evidencia_uri = %s)
+                     ORDER BY m.id
+                     FOR UPDATE OF m
+                    """,
+                    (
+                        int(match["factura_id"]),
+                        match["tracking_normalizado"],
+                        int(match["solicitud_id"]),
+                        match["metodo"], match["metodo"],
+                        match.get("evidencia_uri"),
+                    ),
+                )
+                grupo = list(cur.fetchall())
+            else:
+                grupo = [{"id": int(match_id), "estado": match["estado"]}]
+            if any(fila["estado"] != "PROPUESTO" for fila in grupo):
+                raise ConciliacionCourierError(
+                    "La guía ya tiene líneas resueltas y no puede rechazarse parcialmente."
+                )
+            match_ids = [int(fila["id"]) for fila in grupo]
             cur.execute(
                 """
                 UPDATE factura_courier_item_matches
                    SET estado = 'RECHAZADO', motivo_rechazo = %s,
                        updated_at = NOW()
-                 WHERE id = %s AND estado = 'PROPUESTO'
+                 WHERE id = ANY(%s) AND estado = 'PROPUESTO'
                 """,
-                (motivo, int(match_id)),
+                (motivo, match_ids),
             )
             _registrar_auditoria(
                 cur,
@@ -1271,7 +1429,13 @@ def rechazar_match(
                 factura_id=int(match["factura_id"]),
                 item_id=int(match["item_id"]),
                 solicitud_id=int(match["solicitud_id"]),
-                metadata={"match_id": int(match_id), "motivo": motivo},
+                metadata={
+                    "match_id": int(match_id),
+                    "match_ids_lineas": match_ids,
+                    "tracking": match.get("tracking_normalizado"),
+                    "cantidad_lineas": len(match_ids),
+                    "motivo": motivo,
+                },
             )
             _actualizar_estado_factura(cur, int(match["factura_id"]))
             return {
@@ -1949,9 +2113,18 @@ def listar_facturas_courier_control(limite: int = 100) -> list[dict[str, Any]]:
                        f.archivo_nombre, f.created_at,
                        (f.archivo_pdf IS NOT NULL OR f.evidencia_uri IS NOT NULL)
                            AS tiene_evidencia,
-                       COUNT(i.id) AS lineas,
-                       COUNT(m.id) FILTER (WHERE m.estado='PROPUESTO') AS propuestos,
-                       COUNT(m.id) FILTER (WHERE m.estado='CONFIRMADO') AS confirmados
+                       COUNT(DISTINCT i.id) AS lineas,
+                       COUNT(DISTINCT i.tracking_normalizado) FILTER (
+                           WHERE i.tracking_normalizado IS NOT NULL
+                       ) AS guias,
+                       COUNT(DISTINCT (i.tracking_normalizado, m.solicitud_id)) FILTER (
+                           WHERE m.estado='PROPUESTO'
+                             AND i.tracking_normalizado IS NOT NULL
+                       ) AS propuestos,
+                       COUNT(DISTINCT (i.tracking_normalizado, m.solicitud_id)) FILTER (
+                           WHERE m.estado='CONFIRMADO'
+                             AND i.tracking_normalizado IS NOT NULL
+                       ) AS confirmados
                 FROM facturas_courier f
                 LEFT JOIN facturas_courier_items i ON i.factura_id = f.id
                 LEFT JOIN factura_courier_item_matches m ON m.item_id = i.id
@@ -1962,6 +2135,169 @@ def listar_facturas_courier_control(limite: int = 100) -> list[dict[str, Any]]:
                 (max(1, min(int(limite), 500)),),
             )
             return [dict(fila) for fila in cur.fetchall()]
+
+
+def _agrupar_items_por_envio_facturado(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Arma la vista guía -> cargos sin alterar las líneas documentales.
+
+    La clave real es el tracking normalizado dentro de una factura. Las líneas
+    sin tracking permanecen como partidas independientes para impedir que un
+    impuesto general sea prorrateado silenciosamente.
+    """
+    grupos: dict[str, dict[str, Any]] = {}
+    for item in items:
+        tracking = _texto(item.get("tracking_normalizado"))
+        clave = tracking or f"LINEA:{int(item['id'])}"
+        grupo = grupos.setdefault(clave, {
+            "clave": clave,
+            "tracking_normalizado": tracking or None,
+            "tracking_raw": item.get("tracking_raw") or None,
+            "item_referencia_id": int(item["id"]),
+            "linea_inicial": int(item["linea_numero"]),
+            "items": [],
+            "matches": [],
+            "total_importe": Decimal("0"),
+            "total_importe_ars": Decimal("0"),
+            "total_conciliacion_ars": Decimal("0"),
+            "remanente": Decimal("0"),
+            "peso_facturado_kg": None,
+            "peso_base": "NO_INFORMADO",
+            "fecha_envio": item.get("fecha_envio"),
+        })
+        grupo["items"].append(item)
+        signo = Decimal(int(item.get("signo") or 1))
+        grupo["total_importe"] += _decimal(item["importe"], "Importe") * signo
+        grupo["total_importe_ars"] += (
+            _decimal(item["importe_ars"], "Importe ARS") * signo
+        )
+        grupo["total_conciliacion_ars"] += (
+            _decimal(
+                item.get("importe_conciliacion_ars", item["importe_ars"]),
+                "Importe conciliación ARS",
+            ) * signo
+        )
+        grupo["remanente"] += _decimal(item["remanente"], "Remanente")
+        peso = item.get("peso_facturado_kg")
+        if peso is not None and (
+            grupo["peso_facturado_kg"] is None
+            or _decimal(peso, "Peso facturado")
+                > _decimal(grupo["peso_facturado_kg"], "Peso facturado")
+        ):
+            grupo["peso_facturado_kg"] = peso
+            grupo["peso_base"] = item.get("peso_base") or "NO_INFORMADO"
+        if not grupo.get("fecha_envio") and item.get("fecha_envio"):
+            grupo["fecha_envio"] = item["fecha_envio"]
+
+    for grupo in grupos.values():
+        matches: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for item in grupo["items"]:
+            for match in item["matches"]:
+                clave_match = (
+                    int(match["solicitud_id"]), match["metodo"],
+                    match.get("evidencia_uri") if match["metodo"] == "MANUAL" else None,
+                )
+                agregado = matches.setdefault(clave_match, {
+                    **match,
+                    "id": int(match["id"]),
+                    "match_ids_lineas": [],
+                    "estados_lineas": [],
+                    "monto_asignado": Decimal("0"),
+                    "monto_asignado_ars": Decimal("0"),
+                    "cantidad_lineas": 0,
+                })
+                agregado["match_ids_lineas"].append(int(match["id"]))
+                agregado["estados_lineas"].append(match["match_estado"])
+                signo = Decimal(int(match.get("item_signo") or 1))
+                agregado["monto_asignado"] += (
+                    _decimal(match["monto_asignado"], "Monto asignado") * signo
+                )
+                agregado["monto_asignado_ars"] += (
+                    _decimal(match["monto_asignado_ars"], "Monto asignado ARS")
+                    * signo
+                )
+                agregado["cantidad_lineas"] += 1
+                if match["match_estado"] == "PROPUESTO":
+                    agregado["id"] = int(match["id"])
+        for agregado in matches.values():
+            estados = set(agregado.pop("estados_lineas"))
+            if len(estados) == 1:
+                agregado["match_estado"] = next(iter(estados))
+            elif estados <= {"PROPUESTO", "CONFIRMADO"}:
+                # Compatibilidad con una confirmación parcial histórica: la
+                # acción visible completa lo pendiente de forma atómica.
+                agregado["match_estado"] = "PROPUESTO"
+            else:
+                agregado["match_estado"] = "MIXTO"
+        grupo["matches"] = sorted(matches.values(), key=lambda m: int(m["id"]))
+        for campo in (
+            "total_importe", "total_importe_ars",
+            "total_conciliacion_ars", "remanente",
+        ):
+            grupo[campo] = grupo[campo].quantize(
+                CUATRO_DECIMALES, rounding=ROUND_HALF_UP
+            )
+    return sorted(grupos.values(), key=lambda grupo: grupo["linea_inicial"])
+
+
+def _agrupar_documentos_del_envio(
+    filas: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Compacta el expediente a una fila por documento y tracking."""
+    grupos: dict[tuple[int, str], dict[str, Any]] = {}
+    for fila in filas:
+        clave_tracking = normalizar_tracking(fila.get("tracking_raw")) or (
+            f"LINEA:{int(fila['item_id'])}"
+        )
+        clave = (int(fila["factura_id"]), clave_tracking)
+        grupo = grupos.setdefault(clave, {
+            **fila,
+            "items": [],
+            "monto_asignado": Decimal("0"),
+            "monto_asignado_ars": Decimal("0"),
+            "cantidad_lineas": 0,
+            "estados_match": set(),
+            "metodos_match": set(),
+        })
+        grupo["items"].append(fila)
+        signo = Decimal(int(fila.get("signo") or 1))
+        grupo["monto_asignado"] += (
+            _decimal(fila["monto_asignado"], "Monto asignado") * signo
+        )
+        grupo["monto_asignado_ars"] += (
+            _decimal(fila["monto_asignado_ars"], "Monto asignado ARS") * signo
+        )
+        grupo["cantidad_lineas"] += 1
+        grupo["estados_match"].add(fila["match_estado"])
+        grupo["metodos_match"].add(fila["metodo"])
+        peso = fila.get("peso_facturado_kg")
+        if peso is not None and (
+            grupo.get("peso_facturado_kg") is None
+            or _decimal(peso, "Peso facturado")
+                > _decimal(grupo["peso_facturado_kg"], "Peso facturado")
+        ):
+            grupo["peso_facturado_kg"] = peso
+            grupo["peso_base"] = fila.get("peso_base") or "NO_INFORMADO"
+    resultado = []
+    for grupo in grupos.values():
+        estados = grupo.pop("estados_match")
+        metodos = grupo.pop("metodos_match")
+        if len(estados) == 1:
+            grupo["match_estado"] = next(iter(estados))
+        elif estados <= {"PROPUESTO", "CONFIRMADO"}:
+            grupo["match_estado"] = "PROPUESTO"
+        else:
+            grupo["match_estado"] = "MIXTO"
+        grupo["metodo"] = next(iter(metodos)) if len(metodos) == 1 else "MIXTO"
+        grupo["monto_asignado"] = grupo["monto_asignado"].quantize(
+            CUATRO_DECIMALES, rounding=ROUND_HALF_UP
+        )
+        grupo["monto_asignado_ars"] = grupo["monto_asignado_ars"].quantize(
+            CUATRO_DECIMALES, rounding=ROUND_HALF_UP
+        )
+        resultado.append(grupo)
+    return resultado
 
 
 def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
@@ -1984,9 +2320,12 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                 return None
             cur.execute(
                 """
-                SELECT i.id, i.linea_numero, i.tracking_raw, i.concepto_tipo,
+                SELECT i.id, i.linea_numero, i.tracking_raw,
+                       i.tracking_normalizado, i.concepto_tipo,
                        i.descripcion, i.importe, i.moneda, i.importe_ars, i.tipo_cambio_ars,
-                       i.peso_facturado_kg, i.peso_base, i.estado,
+                       i.signo, i.fecha_envio, i.peso_real_kg,
+                       i.peso_volumetrico_kg, i.peso_facturado_kg,
+                       i.peso_base, i.estado,
                        COALESCE(SUM(m.monto_asignado) FILTER (
                            WHERE m.estado IN ('PROPUESTO','CONFIRMADO')
                        ), 0) AS monto_asignado
@@ -2011,6 +2350,7 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                 """
                 SELECT m.id, m.item_id, m.estado AS match_estado, m.metodo,
                        m.monto_asignado, m.monto_asignado_ars,
+                       m.evidencia_uri, i.signo AS item_signo,
                        m.solicitud_id, m.motivo_rechazo,
                        m.creado_por, m.confirmado_por, m.confirmado_at,
                        s.cliente_id, s.tracking
@@ -2025,7 +2365,6 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
             for fila in cur.fetchall():
                 match = dict(fila)
                 mapa[int(match["item_id"])]["matches"].append(match)
-            resultado["items"] = items
             resultado['revision_financiera_requerida'] = _requiere_revision_financiera(resultado.get('metadatos_origen'))
             if resultado['revision_financiera_requerida']:
                 resultado['tipos_cambio_documentales'] = sorted({item['tipo_cambio_ars'] for item in items})
@@ -2037,6 +2376,15 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                         item['importe_conciliacion_ars'] = (
                             item['importe'] * resultado['revision_financiera']['tipo_cambio_ars']
                         ).quantize(CUATRO_DECIMALES, rounding=ROUND_HALF_UP)
+            resultado["items"] = items
+            resultado["envios_facturados"] = _agrupar_items_por_envio_facturado(items)
+            resultado["cantidad_guias"] = sum(
+                1 for grupo in resultado["envios_facturados"]
+                if grupo["tracking_normalizado"]
+            )
+            resultado["cantidad_cargos_generales"] = sum(
+                1 for item in items if not item.get("tracking_normalizado")
+            )
             return resultado
 
 
@@ -2060,7 +2408,8 @@ def obtener_control_envio(solicitud_id: int) -> dict[str, Any] | None:
                        m.metodo, m.monto_asignado, m.monto_asignado_ars,
                        m.created_at AS match_created_at,
                        i.id AS item_id, i.linea_numero, i.tracking_raw,
-                       i.concepto_tipo, i.descripcion, i.peso_facturado_kg,
+                       i.concepto_tipo, i.descripcion, i.signo,
+                       i.peso_facturado_kg,
                        i.peso_base, f.id AS factura_id, f.courier,
                        f.tipo_documento, f.numero, f.fecha_emision,
                        f.moneda, f.estado AS factura_estado
@@ -2072,7 +2421,9 @@ def obtener_control_envio(solicitud_id: int) -> dict[str, Any] | None:
                 """,
                 (int(solicitud_id),),
             )
-            envio["documentos"] = [dict(fila) for fila in cur.fetchall()]
+            envio["documentos"] = _agrupar_documentos_del_envio(
+                [dict(fila) for fila in cur.fetchall()]
+            )
             cur.execute(
                 """
                 SELECT c.id, c.version, c.estado,
@@ -2142,11 +2493,19 @@ def confirmar_y_calcular_factura(factura_id: int, *, actor: str) -> dict[str, An
             _exigir_revision_financiera(cur, factura_id, factura['metadatos_origen'])
             cur.execute(
                 """
-                SELECT m.id, m.solicitud_id
+                SELECT DISTINCT ON (
+                           COALESCE(i.tracking_normalizado, 'ITEM:' || i.id::text),
+                           m.solicitud_id, m.metodo,
+                           CASE WHEN m.metodo='MANUAL' THEN m.evidencia_uri END
+                       )
+                       m.id, m.solicitud_id
                 FROM factura_courier_item_matches m
                 JOIN facturas_courier_items i ON i.id = m.item_id
                 WHERE i.factura_id = %s AND m.estado = 'PROPUESTO'
-                ORDER BY m.id
+                ORDER BY COALESCE(i.tracking_normalizado, 'ITEM:' || i.id::text),
+                         m.solicitud_id, m.metodo,
+                         CASE WHEN m.metodo='MANUAL' THEN m.evidencia_uri END,
+                         m.id
                 """,
                 (int(factura_id),),
             )

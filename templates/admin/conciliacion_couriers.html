@@ -74,8 +74,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 
 <div class="card" style="margin-bottom:22px;">
   <div class="card-head"><div><h3>Facturas de operadores</h3><p>Documentos internos; el cliente nunca ve estos costos.</p></div><a href="/admin/conciliacion-couriers/nueva" class="btn btn-ghost btn-sm">+ Nueva factura</a></div>
-  <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Courier</th><th>Total</th><th>Líneas / matches</th><th>Estado</th><th></th></tr></thead><tbody>
-  {% for f in facturas %}<tr><td><strong>{{ f.tipo_documento }} {{ f.numero }}</strong><br><small>{{ f.fecha_emision or f.created_at.strftime('%d/%m/%Y') }}</small></td><td>{{ f.courier }}</td><td class="mono">{{ f.moneda }} {{ f.total }}</td><td>{{ f.lineas }} líneas · {{ f.confirmados }} confirmadas · {{ f.propuestos }} propuestas</td><td><span class="badge muted">{{ f.estado|title }}</span></td><td><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/facturas/{{ f.id }}">Controlar</a></td></tr>
+  <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Courier</th><th>Total</th><th>Guías / matches</th><th>Estado</th><th></th></tr></thead><tbody>
+  {% for f in facturas %}<tr><td><strong>{{ f.tipo_documento }} {{ f.numero }}</strong><br><small>{{ f.fecha_emision or f.created_at.strftime('%d/%m/%Y') }}</small></td><td>{{ f.courier }}</td><td class="mono">{{ f.moneda }} {{ f.total }}</td><td>{{ f.guias }} guías · {{ f.lineas }} cargos<br><small>{{ f.confirmados }} matches confirmados · {{ f.propuestos }} propuestos</small></td><td><span class="badge muted">{{ f.estado|title }}</span></td><td><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/facturas/{{ f.id }}">Controlar</a></td></tr>
   {% else %}<tr><td colspan="6" class="empty">Todavía no se cargaron facturas courier.</td></tr>{% endfor %}
   </tbody></table></div>
 </div>

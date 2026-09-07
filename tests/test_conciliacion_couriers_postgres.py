@@ -313,7 +313,8 @@ def test_fc_nc_y_lineas_repetidas_por_tracking_se_suman_con_signo(
             "importe": "1000",
         }],
     )
-    assert conciliacion.matchear_items_exactos(factura["id"])["propuestos"] == 2
+    # Dos cargos del mismo tracking constituyen un único match de guía.
+    assert conciliacion.matchear_items_exactos(factura["id"])["propuestos"] == 1
     assert conciliacion.matchear_items_exactos(nota["id"])["propuestos"] == 1
     assert len(_confirmar_todos(conciliacion_db, solicitud_id)) == 3
 
@@ -366,7 +367,7 @@ def test_conciliacion_separa_diferencia_de_flete_y_tax(
             },
         ],
     )
-    assert conciliacion.matchear_items_exactos(factura["id"])["propuestos"] == 2
+    assert conciliacion.matchear_items_exactos(factura["id"])["propuestos"] == 1
     assert len(_confirmar_todos(conciliacion_db, solicitud_id)) == 2
 
     resultado = conciliacion.calcular_conciliacion_envio(
@@ -382,7 +383,6 @@ def test_conciliacion_separa_diferencia_de_flete_y_tax(
         resultado["diferencia_flete_ars"] + resultado["tax_cliente_ars"]
         == resultado["ajuste_cliente_ars"]
     )
-
     with conciliacion_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -398,6 +398,77 @@ def test_conciliacion_separa_diferencia_de_flete_y_tax(
                 "tax_cliente_ars": Decimal("2000.0000"),
             }
 
+
+def test_una_guia_con_varios_recargos_genera_un_solo_match_atomico(
+    conciliacion_db,
+):
+    solicitud_id = _crear_solicitud(
+        conciliacion_db,
+        sufijo="DHL_GUIA_AGRUPADA",
+        tracking="3290421481",
+        precio=Decimal("900000"),
+    )
+    conceptos = [
+        ("FLETE", "318.00"),
+        ("COMBUSTIBLE", "139.94"),
+        ("OTRO", "10.60"),
+        ("MANEJO", "23.00"),
+        ("MANEJO", "42.40"),
+        ("SEGURO", "17.50"),
+    ]
+    factura = conciliacion.registrar_factura_courier(
+        courier="DHL",
+        tipo_documento="FC",
+        numero="0700A00918787-TEST",
+        moneda="USD",
+        total="551.44",
+        actor="parser@test",
+        archivo_sha256="7" * 64,
+        items=[{
+            "linea_numero": indice,
+            "tracking": "3290421481",
+            "concepto_tipo": concepto,
+            "descripcion": f"Cargo {concepto}",
+            "importe": importe,
+            "tipo_cambio_ars": "1500",
+            "peso_facturado_kg": "50.5",
+            "peso_base": "REAL",
+        } for indice, (concepto, importe) in enumerate(conceptos, start=1)],
+    )
+
+    assert conciliacion.matchear_items_exactos(factura["id"]) == {
+        "propuestos": 1,
+        "sin_match": 0,
+    }
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id FROM factura_courier_item_matches
+                     WHERE solicitud_id=%s ORDER BY id""",
+                (solicitud_id,),
+            )
+            asignaciones = [int(fila["id"]) for fila in cur.fetchall()]
+    assert len(asignaciones) == len(conceptos)
+
+    conciliacion.confirmar_match(asignaciones[0], actor="auditor@test")
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT COUNT(*) AS cantidad
+                     FROM factura_courier_item_matches
+                     WHERE solicitud_id=%s AND estado='CONFIRMADO'""",
+                (solicitud_id,),
+            )
+            assert cur.fetchone()["cantidad"] == len(conceptos)
+
+    detalle = conciliacion.obtener_factura_courier_control(factura["id"])
+    assert len(detalle["envios_facturados"]) == 1
+    guia = detalle["envios_facturados"][0]
+    assert guia["tracking_normalizado"] == "3290421481"
+    assert guia["total_importe"] == Decimal("551.4400")
+    assert len(guia["items"]) == len(conceptos)
+    assert len(guia["matches"]) == 1
+    assert guia["matches"][0]["match_estado"] == "CONFIRMADO"
 
 def test_db_bloquea_mutar_snapshot_borrar_factura_y_sobreasignar_item(
     conciliacion_db,

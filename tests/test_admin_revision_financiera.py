@@ -69,7 +69,7 @@ def test_pdf_respaldo_es_privado_y_no_encontrado(monkeypatch):
 
 
 def factura(requerida=True, aprobada=False):
-    return {'id': 7, 'numero': 'SINTETICA', 'courier': 'DHL', 'tipo_documento': 'FC',
+    resultado = {'id': 7, 'numero': 'SINTETICA', 'courier': 'DHL', 'tipo_documento': 'FC',
         'moneda': 'USD', 'total': Decimal('10'), 'estado': 'PARCIAL', 'tiene_evidencia': True,
         'archivo_sha256': 'a'*64, 'revision_financiera_requerida': requerida,
         'tipos_cambio_documentales': [Decimal('1500.000000')],
@@ -82,7 +82,19 @@ def factura(requerida=True, aprobada=False):
             **({'importe_conciliacion_ars': Decimal('16000')} if aprobada else {}),
             'remanente': Decimal('0'), 'peso_facturado_kg': 2, 'peso_base': 'REAL',
             'matches': [{'id': 3, 'match_estado': 'PROPUESTO', 'cliente_id': 'TEST',
-                'solicitud_id': 1, 'metodo': 'EXACTO_TRACKING', 'monto_asignado': Decimal('10')}]}]}
+                'solicitud_id': 1, 'metodo': 'EXACTO_TRACKING',
+                'monto_asignado': Decimal('10'), 'monto_asignado_ars': Decimal('15000'),
+                'cantidad_lineas': 1}]}]}
+    resultado['envios_facturados'] = [{
+        'tracking_raw': '0123456789', 'fecha_envio': None,
+        'items': resultado['items'], 'total_importe': Decimal('10'),
+        'total_importe_ars': Decimal('15000'),
+        'total_conciliacion_ars': Decimal('16000'),
+        'remanente': Decimal('0'), 'peso_facturado_kg': 2,
+        'peso_base': 'REAL', 'matches': resultado['items'][0]['matches'],
+        'item_referencia_id': 1,
+    }]
+    return resultado
 
 
 @pytest.mark.parametrize('requerida,aprobada', [(True, False), (True, True), (False, False)])

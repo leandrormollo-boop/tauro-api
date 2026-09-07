@@ -8,9 +8,10 @@
 {% block content %}
 <link rel="stylesheet" href="/static/css/entrada-dhl.css?v=1">
 {% set financiera_pendiente = factura.revision_financiera_requerida and not factura.revision_financiera %}
+{% set unidades_match = factura.envios_facturados|default(factura['items'], true) %}
 {% set ns = namespace(hay_activos=false) %}
-{% for item in factura['items'] %}
-  {% for match in item.matches %}
+{% for envio_facturado in unidades_match %}
+  {% for match in envio_facturado.matches %}
     {% if match.match_estado in ('PROPUESTO', 'CONFIRMADO') %}{% set ns.hay_activos = true %}{% endif %}
   {% endfor %}
 {% endfor %}
@@ -19,7 +20,7 @@
   <div>
     <div class="eyebrow">{{ factura.courier }} · {{ factura.tipo_documento }}</div>
     <h1>{{ factura.numero }}</h1>
-    <p>{{ factura.moneda }} {{ dinero(factura.total) }} · {{ factura.estado|title }} · {{ factura['items']|length }} líneas</p>
+    <p>{{ factura.moneda }} {{ dinero(factura.total) }} · {{ factura.estado|title }} · {{ factura.cantidad_guias|default(factura.envios_facturados|length) }} guías · {{ factura['items']|length }} cargos{% if factura.cantidad_cargos_generales|default(0) %} · {{ factura.cantidad_cargos_generales }} generales sin tracking{% endif %}</p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
     <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver</a>
@@ -69,30 +70,43 @@
 <div class="card">
   <div class="card-head">
     <div>
-      <h3>Líneas y asignación a envíos</h3>
-      <p>Los matches automáticos se proponen por courier + tracking. Las excepciones manuales exigen un motivo y una segunda confirmación.</p>
+      <h3>Guías facturadas y detalle de cargos</h3>
+      <p>Cada tracking se matchea una sola vez. Flete, combustible, zona remota, seguro y demás conceptos permanecen dentro de la guía para auditar su total.</p>
     </div>
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Línea</th><th>Detalle courier</th><th>Importe</th><th>Peso facturado</th><th style="min-width:410px;">Control del match</th></tr></thead>
+      <thead><tr><th>Guía</th><th>Costo facturado</th><th>Peso facturado</th><th style="min-width:410px;">Único match del envío</th></tr></thead>
       <tbody>
-      {% for i in factura['items'] %}
+      {% for guia in factura.envios_facturados %}
         <tr>
-          <td class="mono">#{{ i.linea_numero }}<br><small>ID {{ i.id }}</small></td>
-          <td><span class="mono">{{ i.tracking_raw or 'Sin tracking' }}</span><br><strong>{{ i.concepto_tipo }}</strong><br><small>{{ i.descripcion or '' }}</small></td>
-          <td class="mono">{{ i.moneda }} {{ dinero(i.importe) }}<br><small>ARS {{ dinero(i.importe_ars) }}{% if factura.revision_financiera_requerida %} (documental){% endif %}</small>
-            {% if i.importe_conciliacion_ars is defined %}<br><small>ARS {{ dinero(i.importe_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
-            <br>{% if i.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(i.remanente) }}</span>{% else %}<span class="badge ok">Asignada completa</span>{% endif %}</td>
-          <td>{{ i.peso_facturado_kg or '—' }} kg<br><small>{{ (i.peso_base or '').replace('_',' ')|title }}</small></td>
           <td>
-            {% for m in i.matches %}
+            <strong class="mono" style="font-size:1.06rem;">{{ guia.tracking_raw or 'Cargo general sin guía' }}</strong>
+            <br><small>{{ guia.fecha_envio or 'Fecha no informada' }} · {{ guia['items']|length }} {% if guia['items']|length == 1 %}cargo{% else %}cargos{% endif %}</small>
+            <details style="margin-top:10px;">
+              <summary style="cursor:pointer;color:var(--accent-light);">Ver desglose de cargos</summary>
+              <div style="margin-top:8px;display:grid;gap:6px;min-width:330px;">
+                {% for i in guia['items'] %}
+                <div style="display:grid;grid-template-columns:minmax(130px,1fr) auto;gap:12px;padding:7px 9px;border:1px solid var(--border);border-radius:9px;background:rgba(255,255,255,.025);">
+                  <span><strong>{{ i.concepto_tipo|title }}</strong><br><small>#{{ i.linea_numero }} · {{ i.descripcion or 'Sin descripción' }}</small></span>
+                  <span class="mono">{% if i.signo|default(1) < 0 %}−{% endif %}{{ i.moneda }} {{ dinero(i.importe) }}</span>
+                </div>
+                {% endfor %}
+              </div>
+            </details>
+          </td>
+          <td class="mono"><strong>{{ factura.moneda }} {{ dinero(guia.total_importe) }}</strong><br><small>ARS {{ dinero(guia.total_importe_ars) }}{% if factura.revision_financiera_requerida %} documental{% endif %}</small>
+            {% if factura.revision_financiera %}<br><small>ARS {{ dinero(guia.total_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
+            <br>{% if guia.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(guia.remanente) }}</span>{% else %}<span class="badge ok">Guía asignada completa</span>{% endif %}</td>
+          <td>{{ guia.peso_facturado_kg or '—' }} kg<br><small>{{ (guia.peso_base or '').replace('_',' ')|title }}</small></td>
+          <td>
+            {% for m in guia.matches %}
               <div style="padding:9px 0;{% if not loop.last %}border-bottom:1px solid var(--border);{% endif %}">
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                   <span class="badge {% if m.match_estado == 'CONFIRMADO' %}ok{% elif m.match_estado == 'RECHAZADO' %}error{% else %}warn{% endif %}">{{ m.match_estado|title }}</span>
                   <strong>{{ m.cliente_id }}</strong>
                   <a href="/admin/conciliacion-couriers/envios/{{ m.solicitud_id }}" class="mono">envío #{{ m.solicitud_id }}</a>
-                  <small>{{ m.metodo.replace('_',' ')|title }} · {{ factura.moneda }} {{ dinero(m.monto_asignado) }}</small>
+                  <small>{{ m.metodo.replace('_',' ')|title }} · {{ m.cantidad_lineas }} cargos · {{ factura.moneda }} {{ dinero(m.monto_asignado) }}</small>
                 </div>
                 {% if m.match_estado == 'PROPUESTO' %}
                 <div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;margin-top:7px;">
@@ -109,12 +123,11 @@
               <small>Requiere asignación manual.</small>
             {% endfor %}
 
-            {% if i.remanente > 0.02 %}
-            <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/items/{{ i.id }}/match-manual" style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px;">
-              <strong>Asignar manualmente</strong>
-              <div class="form-grid-3" style="margin-top:8px;">
+            {% if guia.remanente > 0.02 %}
+            <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/items/{{ guia.item_referencia_id }}/match-manual" style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px;">
+              <strong>{% if guia.tracking_normalizado %}Asignar la guía completa manualmente{% else %}Asignar este cargo general manualmente{% endif %}</strong>
+              <div class="form-grid-2" style="margin-top:8px;">
                 <div class="form-group"><label>Tracking o #ID interno</label><input name="identificador_envio" required placeholder="Ej. 1234567890 o #482"></div>
-                <div class="form-group"><label>Monto {{ i.moneda }} (opcional)</label><input name="monto_asignado" inputmode="decimal" data-numero="monto" placeholder="Todo: {{ dinero(i.remanente) }}"></div>
                 <div class="form-group"><label>Motivo / evidencia</label><input name="motivo" required minlength="8" placeholder="Ej. tracking mal informado"></div>
               </div>
               <button class="btn btn-ghost btn-sm">Proponer match manual</button>
@@ -122,7 +135,7 @@
             {% endif %}
           </td>
         </tr>
-      {% else %}<tr><td colspan="5" class="empty">La factura no tiene líneas.</td></tr>{% endfor %}
+      {% else %}<tr><td colspan="4" class="empty">La factura no tiene guías ni cargos.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
