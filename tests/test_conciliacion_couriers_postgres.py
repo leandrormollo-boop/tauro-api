@@ -334,6 +334,60 @@ def test_tauro_2026_no_adjudica_tracking_al_cliente_incorrecto(
             assert cur.fetchone()["cantidad"] == 0
 
 
+def test_tauro_2026_agrega_evidencia_sin_duplicar_match_preexistente(
+    conciliacion_db,
+):
+    solicitud_id = _crear_solicitud(
+        conciliacion_db, sufijo="WAIMAO", tracking="2807257515"
+    )
+    factura = conciliacion.registrar_factura_courier(
+        courier="DHL", tipo_documento="FC", numero="0700A00918787",
+        moneda="USD", total="48.94",
+        actor="parser@test", archivo_sha256="7" * 64,
+        items=[
+            {"linea_numero": 1, "tracking": "2807257515",
+             "importe": "35.57", "concepto_tipo": "FLETE",
+             "tipo_cambio_ars": "1420"},
+            {"linea_numero": 2, "tracking": "2807257515",
+             "importe": "13.07", "concepto_tipo": "COMBUSTIBLE",
+             "tipo_cambio_ars": "1420"},
+            {"linea_numero": 3, "tracking": "2807257515",
+             "importe": "0.30", "concepto_tipo": "OTRO",
+             "tipo_cambio_ars": "1420"},
+        ],
+    )
+    assert conciliacion.matchear_items_exactos(factura["id"])["propuestos"] == 1
+
+    resultado = conciliacion.registrar_referencias_tauro_2026(
+        factura["id"], actor="auditor@test", fuente_sha256="c" * 64,
+        referencias=[{
+            "empresa": "DHL", "nro_fc": "0700A00918787",
+            "tracking": "2807257515", "cliente": "CLIENTE WAIMAO",
+            "concepto": "FLETE", "fuente_fila": 1615,
+        }],
+    )
+    assert resultado["propuestos"] == 0
+    assert resultado["sin_match"] == 0
+    with conciliacion_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS cantidad,
+                       COUNT(DISTINCT solicitud_id) AS solicitudes
+                  FROM factura_courier_item_matches
+                 WHERE estado = 'PROPUESTO'
+                """
+            )
+            assert cur.fetchone() == {
+                "cantidad": 3, "solicitudes": 1,
+            }
+    detalle = conciliacion.obtener_factura_courier_control(factura["id"])
+    assert detalle["cantidad_guias_referenciadas_tauro_2026"] == 1
+    assert detalle["envios_facturados"][0]["matches"][0][
+        "solicitud_id"
+    ] == solicitud_id
+
+
 def test_fc_nc_y_lineas_repetidas_por_tracking_se_suman_con_signo(
     conciliacion_db,
 ):

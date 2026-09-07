@@ -1048,7 +1048,26 @@ def matchear_items_exactos(
                     if filas_fuente:
                         evidencia += "/filas " + ",".join(filas_fuente)
                 match_ids: list[int] = []
+                match_ids_activos: list[int] = []
                 for item in lineas_grupo:
+                    # El trigger financiero valida los topes antes de que
+                    # PostgreSQL resuelva ON CONFLICT. Evitamos reinsertar un
+                    # match ya propuesto/confirmado cuando luego aparece la
+                    # evidencia adicional de TAURO 2026.
+                    cur.execute(
+                        """
+                        SELECT id, estado
+                          FROM factura_courier_item_matches
+                         WHERE item_id = %s AND solicitud_id = %s
+                         LIMIT 1
+                        """,
+                        (int(item["id"]), solicitud_id),
+                    )
+                    existente = cur.fetchone()
+                    if existente:
+                        if existente["estado"] in ("PROPUESTO", "CONFIRMADO"):
+                            match_ids_activos.append(int(existente["id"]))
+                        continue
                     cur.execute(
                         """
                         INSERT INTO factura_courier_item_matches (
@@ -1070,6 +1089,8 @@ def matchear_items_exactos(
                     if insertado:
                         match_ids.append(int(insertado["id"]))
                 if not match_ids:
+                    if not match_ids_activos:
+                        sin_match += 1
                     continue
                 propuestos += 1
                 _registrar_auditoria(
