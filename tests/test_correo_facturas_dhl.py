@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -35,6 +36,54 @@ def test_preflight_falla_cerrado_sin_credenciales(monkeypatch):
         'oauth_google', 'cuenta_gmail', 'cuit_receptor', 'cifrado_tokens',
     }
     assert correo.sincronizar_facturas_dhl()['estado'] == 'DESHABILITADA'
+
+
+def test_backfill_puede_reintentar_lector_sin_esperar_el_backoff(monkeypatch):
+    configurar(monkeypatch)
+    existente = {
+        'estado': 'REINTENTAR', 'error_codigo': 'LECTOR_NO_DISPONIBLE',
+        'intentos': 1, 'updated_at': datetime.now(timezone.utc),
+        'entrada_id': 7,
+    }
+    monkeypatch.setattr(correo, '_correo_guardado', lambda _id: existente)
+    monkeypatch.setattr(correo, '_guardar_correo', lambda *a, **kw: None)
+    monkeypatch.setattr(
+        correo, 'validar_autenticidad_dhl',
+        lambda _mensaje: SimpleNamespace(dkim=True, dmarc=True, spf=True),
+    )
+    candidato = AdjuntoCandidatoDHL(
+        'gmail-retry', '1', 'adjunto-1',
+        'DHL-1700A00000001_02092026.pdf', '1700A00000001',
+    )
+    monkeypatch.setattr(correo, 'seleccionar_adjunto_dhl', lambda *a, **kw: candidato)
+    monkeypatch.setattr(correo, 'descargar_adjunto', lambda *a, **kw: b'%PDF-test')
+    monkeypatch.setattr(
+        correo, 'recibir_pdf_dhl_correo', lambda **kw: {'id': 7, 'duplicado': True},
+    )
+    monkeypatch.setattr(
+        correo, '_actualizar_estado_por_entrada',
+        lambda *a, **kw: 'PARA_REVISION',
+    )
+    monkeypatch.setattr(correo, '_auto_import_habilitado', lambda: False)
+
+    class Gmail:
+        cuenta = 'taurosolutionsar@gmail.com'
+
+        def __init__(self):
+            self.consultas = 0
+
+        def get(self, *_a, **_kw):
+            self.consultas += 1
+            return {'id': 'gmail-retry', 'threadId': 'thread-retry'}
+
+    cliente = Gmail()
+    resumen = {'id': 'gmail-retry', 'threadId': 'thread-retry'}
+    assert correo._procesar_mensaje(cliente, resumen) == 'REINTENTO_DIFERIDO'
+    assert cliente.consultas == 0
+    assert correo._procesar_mensaje(
+        cliente, resumen, forzar_reintento_operativo=True,
+    ) == 'PARA_REVISION'
+    assert cliente.consultas == 1
 
 
 def test_preflight_rechaza_clave_de_cifrado_debil(monkeypatch):
