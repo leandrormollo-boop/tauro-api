@@ -3291,8 +3291,11 @@ html[data-theme="light"] .account-total-card {
 .envios-search-disclosure { margin-bottom: 8px; }
 .envios-search-toggle {
   width: fit-content;
+  min-width: 132px;
   min-height: 36px;
   list-style: none;
+  color: var(--fg-1);
+  font-weight: 600;
   cursor: pointer;
 }
 .envios-search-toggle::-webkit-details-marker { display: none; }

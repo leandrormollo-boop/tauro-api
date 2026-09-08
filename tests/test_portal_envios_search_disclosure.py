@@ -29,11 +29,19 @@ class Elements(HTMLParser):
 
 
 def test_busqueda_cerrada_por_defecto_y_control_nativo_accesible():
-    parsed = Elements(render_search())
+    html = render_search()
+    parsed = Elements(html)
     assert "open" not in parsed.first("details")
+    assert "Buscar tracking" in html
     assert parsed.first("summary")["aria-controls"] == parsed.first("form")["id"]
     assert parsed.first("input")["value"] == ""
     assert not any(tag in ("script", "svg") for tag, _ in parsed.tags)
+
+
+def test_el_boton_no_depende_de_la_bandera_auxiliar_de_historial():
+    source = (ROOT / "templates/portal/envios.html").read_text(encoding="utf-8")
+    before = source[:source.index('<details class="envios-search-disclosure"')]
+    assert before.rfind("{% if tiene_historial %}") < before.rfind("{% endif %}")
 
 
 def test_filtro_activo_abre_el_buscador_y_permite_limpiar():
