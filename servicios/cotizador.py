@@ -246,13 +246,16 @@ def cotizar_referencia_couriers(
     alto_cm: float,
     valor_declarado_usd: float,
     paquetes: list[dict] | None = None,
+    origen_ubicacion: dict | None = None,
+    destino_ubicacion: dict | None = None,
 ) -> dict:
     """Compara una opción principal por courier para el cotizador rápido.
 
-    Esta pantalla ya exige peso, medidas y valor declarado, pero todavía no
-    tiene la dirección completa ni la descripción aduanera. Por eso usa la
-    ciudad/CP de referencia de cada país y devuelve una *estimación*; el wizard
-    vuelve a cotizar con todos los datos reales antes de crear la solicitud.
+    Esta pantalla ya exige ciudad, CP, peso, medidas y valor declarado, pero
+    todavía no tiene la dirección completa ni la descripción aduanera. Para
+    los destinos frecuentes precarga una referencia editable; para cualquier
+    otro país usa la ciudad y el CP que escribió el cliente. El wizard vuelve
+    a cotizar con la dirección completa antes de crear la solicitud.
 
     Se apoya en la misma capa multi-courier que usa Nuevo envío, pero adapta
     su respuesta al contrato pequeño de la pantalla. No persiste en
@@ -350,10 +353,31 @@ def cotizar_referencia_couriers(
         for p, peso_vol in zip(piezas, pesos_volumetricos)
     ), 3)
 
-    origen = referencia(origen_iso)
-    destino = referencia(destino_iso)
-    origen["state"] = ciudad_a_state(origen.get("city", ""))
-    destino["state"] = ciudad_a_state(destino.get("city", ""))
+    def ubicacion_cotizacion(
+        iso: str, datos: dict | None, etiqueta: str,
+    ) -> dict:
+        base = referencia(iso)
+        datos = datos if isinstance(datos, dict) else {}
+        ciudad = str(
+            datos.get("city") or datos.get("ciudad") or base.get("city") or ""
+        ).strip()
+        codigo_postal = str(
+            datos.get("postal_code") or datos.get("cp")
+            or base.get("postal_code") or ""
+        ).strip()
+        if not ciudad:
+            raise ValueError(f"Indicá la ciudad de {etiqueta}.")
+        if not codigo_postal:
+            raise ValueError(f"Indicá el código postal de {etiqueta}.")
+        return {
+            "country": iso,
+            "city": ciudad,
+            "postal_code": codigo_postal,
+            "state": ciudad_a_state(ciudad),
+        }
+
+    origen = ubicacion_cotizacion(origen_iso, origen_ubicacion, "origen")
+    destino = ubicacion_cotizacion(destino_iso, destino_ubicacion, "destino")
 
     acceso_couriers = configuracion_cotizacion(cliente)
     tarjetas = cotizar_carriers_cliente(

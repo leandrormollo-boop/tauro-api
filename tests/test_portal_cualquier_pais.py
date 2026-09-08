@@ -17,7 +17,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import endpoints.portal_cliente as pc  # noqa: E402
 import servicios.api_b2b as b2b  # noqa: E402
-from servicios.paises import PAISES  # noqa: E402
+from core.dhl_client import TZ_POR_PAIS  # noqa: E402
+from servicios.paises import PAISES, normalizar, referencia  # noqa: E402
 
 
 def test_el_desplegable_ofrece_todos_los_paises():
@@ -26,13 +27,25 @@ def test_el_desplegable_ofrece_todos_los_paises():
     Ahora: el catálogo completo.
     """
     paises = pc._paises_con_nacional()
+    assert len(PAISES) == 249
     assert len(paises) == len(PAISES), (
         f"el portal ofrece {len(paises)} países de {len(PAISES)} — "
         "sigue atado a las rutas cargadas"
     )
     isos = {iso for iso, _ in paises}
-    for esperado in ("CN", "IN", "BD", "US", "AR"):
+    for esperado in ("CN", "IN", "BD", "US", "AR", "NZ", "CR", "CH", "EG", "NG", "SG"):
         assert esperado in isos, f"falta {esperado} en el desplegable del portal"
+
+
+def test_un_pais_antes_ausente_se_normaliza_y_pide_ubicacion_real():
+    assert normalizar("Nueva Zelanda") == "NZ"
+    assert referencia("NZ") == {
+        "country": "NZ", "city": "", "postal_code": "",
+    }
+
+
+def test_dhl_conoce_el_huso_de_todos_los_origenes_del_catalogo():
+    assert set(PAISES) <= set(TZ_POR_PAIS)
 
 
 def test_cotizar_no_exige_una_ruta_cargada():

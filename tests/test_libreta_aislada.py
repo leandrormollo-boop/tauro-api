@@ -58,12 +58,13 @@ def test_la_libreta_acepta_remitentes_del_exterior():
     WAIMAO importa: su remitente es el proveedor de China, India o
     Bangladesh. Si la lista de países no los tiene, no puede cargarlo.
     """
-    ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "templates", "portal", "direcciones.html")
-    html = open(ruta, encoding="utf-8").read()
-    lista = re.search(r"paises_nombres = \{(.*?)\} %\}", html, re.S).group(1)
-    for iso in ("CN", "IN", "BD", "US"):
-        assert f"'{iso}'" in lista, f"falta {iso} en la libreta: WAIMAO no puede cargar ese origen"
+    paises = dict(pc._paises_con_nacional())
+    assert len(paises) == 249
+    for iso in ("CN", "IN", "BD", "US", "NZ", "CR", "CH"):
+        assert iso in paises, f"falta {iso} en la libreta"
+
+    fuente = inspect.getsource(pc.direcciones_view)
+    assert '"paises": paises' in fuente
 
 
 def test_el_pais_no_esta_forzado_a_argentina():

@@ -187,7 +187,22 @@
     var stepDescription = root.querySelector("#quote-step-description");
     var routeStep = root.querySelector('[data-quote-step="route"]');
     var packagesStep = root.querySelector('[data-quote-step="packages"]');
+    var origin = root.querySelector("#origen_pais");
+    var destination = root.querySelector("#destino_pais");
+    var originCity = root.querySelector("#origen_ciudad");
+    var originPostal = root.querySelector("#origen_cp_internacional");
+    var destinationCity = root.querySelector("#destino_ciudad_internacional");
+    var destinationPostal = root.querySelector("#destino_cp_internacional");
     var editingRoute = false;
+
+    function applyLocationReference(select, cityInput, postalInput, force) {
+      if (!select || !cityInput || !postalInput) return;
+      var option = select.options[select.selectedIndex];
+      var city = option ? option.dataset.refCity || "" : "";
+      var postal = option ? option.dataset.refPostal || "" : "";
+      if (force || !cityInput.value.trim()) cityInput.value = city;
+      if (force || !postalInput.value.trim()) postalInput.value = postal;
+    }
 
     function showStep(routeReady, quoteReady) {
       var showPackages = routeReady && !editingRoute;
@@ -214,11 +229,18 @@
 
     function syncPreview() {
       if (!form || !packageList) return;
-      var origin = root.querySelector("#origen_pais");
-      var destination = root.querySelector("#destino_pais");
       var declared = root.querySelector("#valor_declarado_usd");
       var rows = Array.from(packageList.querySelectorAll("[data-package-row]"));
-      var routeReady = Boolean(origin && origin.value && destination && destination.value);
+      var countriesReady = Boolean(
+        origin && origin.value && destination && destination.value
+      );
+      var locationReady = Boolean(
+        originCity && originCity.value.trim()
+        && originPostal && originPostal.value.trim()
+        && destinationCity && destinationCity.value.trim()
+        && destinationPostal && destinationPostal.value.trim()
+      );
+      var routeReady = countriesReady && locationReady;
       var packagesReady = rows.length > 0;
       var physicalBoxes = 0;
       var totalWeight = 0;
@@ -249,7 +271,8 @@
       setSectionState(root, "packages", packagesReady && declaredReady);
 
       if (progressLabel) {
-        if (!routeReady || editingRoute) progressLabel.textContent = "Elegí origen y destino para continuar.";
+        if (!countriesReady) progressLabel.textContent = "Elegí origen y destino para continuar.";
+        else if (!locationReady || editingRoute) progressLabel.textContent = "Completá ciudad y código postal de la ruta.";
         else if (!packagesReady) progressLabel.textContent = "Completá el peso y las medidas de cada caja.";
         else if (!declaredReady) progressLabel.textContent = "Indicá el valor declarado total.";
         else progressLabel.textContent = "Todo listo para consultar la tarifa.";
@@ -308,11 +331,31 @@
     if (form) {
       form.addEventListener("input", syncPreview);
       form.addEventListener("change", function (event) {
-        if (event.target && (event.target.id === "origen_pais" || event.target.id === "destino_pais")) {
+        if (event.target && event.target.id === "origen_pais") {
+          applyLocationReference(origin, originCity, originPostal, true);
+          editingRoute = false;
+        }
+        if (event.target && event.target.id === "destino_pais") {
+          applyLocationReference(destination, destinationCity, destinationPostal, true);
           editingRoute = false;
         }
         syncPreview();
       });
+      if (routeBlock) {
+        routeBlock.addEventListener("focusin", function (event) {
+          if (event.target && event.target.matches("input")) editingRoute = true;
+        });
+        routeBlock.addEventListener("focusout", function () {
+          window.setTimeout(function () {
+            if (!routeBlock.contains(document.activeElement)) {
+              editingRoute = false;
+              syncPreview();
+            }
+          }, 0);
+        });
+      }
+      applyLocationReference(origin, originCity, originPostal, false);
+      applyLocationReference(destination, destinationCity, destinationPostal, false);
       syncPreview();
 
       form.addEventListener("submit", function (event) {

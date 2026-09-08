@@ -88,6 +88,48 @@ def test_envia_al_courier_las_medidas_reales_con_claves_canonicas():
     assert resultado["resumen"]["peso_usado_kg"] == 4.8
 
 
+def test_pais_nuevo_usa_ciudad_y_cp_escritos_por_el_cliente():
+    capturado = {}
+    with mock.patch(
+        "servicios.carriers.cotizar_carriers_cliente",
+        side_effect=lambda **kwargs: capturado.update(kwargs) or _tarjetas_dos_couriers(),
+    ), mock.patch.object(cotizador, "_get_dolar_ars", return_value=1500), \
+         mock.patch(
+             "servicios.configuracion_couriers_cliente.configuracion_cotizacion",
+             return_value={
+                 "pricing_general": {"tipo": "FIJO_ARS", "valor": 14000},
+                 "pricing_por_courier": {},
+                 "couriers_habilitados": {"dhl"},
+             },
+         ):
+        cotizador.cotizar_referencia_couriers(
+            cliente="WAIMAO", origen_pais="AR", destino_pais="NZ",
+            origen_ubicacion={"city": "CORDOBA", "postal_code": "5000"},
+            destino_ubicacion={"city": "AUCKLAND", "postal_code": "1010"},
+            peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+            valor_declarado_usd=250,
+        )
+
+    assert capturado["origen"] == {
+        "country": "AR", "city": "CORDOBA", "postal_code": "5000",
+        "state": "X",
+    }
+    assert capturado["destino"]["country"] == "NZ"
+    assert capturado["destino"]["city"] == "AUCKLAND"
+    assert capturado["destino"]["postal_code"] == "1010"
+
+
+def test_pais_sin_referencia_no_inventa_ciudad_ni_cp():
+    with mock.patch("servicios.carriers.cotizar_carriers_cliente") as consultar:
+        with pytest.raises(ValueError, match="ciudad de destino"):
+            cotizador.cotizar_referencia_couriers(
+                cliente="WAIMAO", origen_pais="AR", destino_pais="NZ",
+                peso_kg=1.2, largo_cm=40, ancho_cm=30, alto_cm=20,
+                valor_declarado_usd=250,
+            )
+    consultar.assert_not_called()
+
+
 def test_multibulto_expande_cajas_y_suma_peso_facturable():
     capturado = {}
     with mock.patch(

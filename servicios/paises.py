@@ -11,8 +11,9 @@ cotizar. Acá el catálogo es una constante y **la cobertura la decide el
 courier**: si DHL cotiza Bangladesh → India, se vende; si no, el cliente ve
 que ese courier no llega, que es la verdad y sale de ellos.
 
-Cada país trae una ciudad y un CP de REFERENCIA. Sirven SOLO para una
-estimación sin dirección cargada: en un envío real va la dirección del
+Los destinos frecuentes traen una ciudad y un CP de REFERENCIA. Sirven SOLO
+para precargar una estimación: el cliente puede corregirlos y, para el resto
+de los países, debe escribirlos. En un envío real siempre va la dirección del
 remitente y del destinatario, porque los recargos por zona remota dependen
 del CP exacto (ver `_destino_para_cotizar` en cotizador.py).
 """
@@ -21,43 +22,54 @@ from __future__ import annotations
 import re
 import unicodedata
 
-# ISO-2 → (nombre, ciudad de referencia, CP de referencia)
+from servicios.paises_iso import NOMBRES_ISO
+
+# Referencias únicamente para precargar el cotizador. No definen cobertura.
+# Si un país no está acá, el formulario pide ciudad y código postal reales.
+_REFERENCIAS_PAISES = {
+    "AR": ("BUENOS AIRES", "1043"),
+    "US": ("MIAMI", "33101"),
+    "CN": ("SHANGHAI", "200000"),
+    "IN": ("MUMBAI", "400001"),
+    "BD": ("DHAKA", "1000"),
+    "VN": ("HO CHI MINH", "700000"),
+    "PK": ("KARACHI", "74000"),
+    "TH": ("BANGKOK", "10100"),
+    "ID": ("JAKARTA", "10110"),
+    "TR": ("ISTANBUL", "34000"),
+    "KR": ("SEOUL", "04524"),
+    "JP": ("TOKYO", "100-0001"),
+    "HK": ("HONG KONG", ""),
+    "TW": ("TAIPEI", "100"),
+    "AE": ("DUBAI", ""),
+    "ES": ("MADRID", "28001"),
+    "IT": ("MILANO", "20121"),
+    "DE": ("BERLIN", "10115"),
+    "FR": ("PARIS", "75001"),
+    "PT": ("LISBOA", "1000-001"),
+    "NL": ("AMSTERDAM", "1011"),
+    "GB": ("LONDON", "EC1A 1BB"),
+    "BR": ("SAO PAULO", "01310100"),
+    "CL": ("SANTIAGO", "8320000"),
+    "UY": ("MONTEVIDEO", "11000"),
+    "PY": ("ASUNCION", "1209"),
+    "BO": ("LA PAZ", ""),
+    "PE": ("LIMA", "15001"),
+    "EC": ("QUITO", "170101"),
+    "CO": ("BOGOTA", "110111"),
+    "MX": ("CIUDAD DE MEXICO", "06600"),
+    "CA": ("TORONTO", "M5H 2N2"),
+    "AU": ("SYDNEY", "2000"),
+    "IL": ("TEL AVIV", "6100000"),
+    "ZA": ("JOHANNESBURG", "2000"),
+}
+
+# Contrato histórico: ISO-2 → (nombre, ciudad de referencia, CP de referencia).
+# Ahora contiene los 249 códigos ISO vigentes; ciudad/CP quedan vacíos cuando
+# no existe una referencia operativa validada por TAURO.
 PAISES = {
-    "AR": ("Argentina",        "BUENOS AIRES", "1043"),
-    "US": ("Estados Unidos",   "MIAMI",        "33101"),
-    "CN": ("China",            "SHANGHAI",     "200000"),
-    "IN": ("India",            "MUMBAI",       "400001"),
-    "BD": ("Bangladesh",       "DHAKA",        "1000"),
-    "VN": ("Vietnam",          "HO CHI MINH",  "700000"),
-    "PK": ("Pakistán",         "KARACHI",      "74000"),
-    "TH": ("Tailandia",        "BANGKOK",      "10100"),
-    "ID": ("Indonesia",        "JAKARTA",      "10110"),
-    "TR": ("Turquía",          "ISTANBUL",     "34000"),
-    "KR": ("Corea del Sur",    "SEOUL",        "04524"),
-    "JP": ("Japón",            "TOKYO",        "100-0001"),
-    "HK": ("Hong Kong",        "HONG KONG",    ""),
-    "TW": ("Taiwán",           "TAIPEI",       "100"),
-    "AE": ("Emiratos Árabes",  "DUBAI",        ""),
-    "ES": ("España",           "MADRID",       "28001"),
-    "IT": ("Italia",           "MILANO",       "20121"),
-    "DE": ("Alemania",         "BERLIN",       "10115"),
-    "FR": ("Francia",          "PARIS",        "75001"),
-    "PT": ("Portugal",         "LISBOA",       "1000-001"),
-    "NL": ("Países Bajos",     "AMSTERDAM",    "1011"),
-    "GB": ("Reino Unido",      "LONDON",       "EC1A 1BB"),
-    "BR": ("Brasil",           "SAO PAULO",    "01310100"),
-    "CL": ("Chile",            "SANTIAGO",     "8320000"),
-    "UY": ("Uruguay",          "MONTEVIDEO",   "11000"),
-    "PY": ("Paraguay",         "ASUNCION",     "1209"),
-    "BO": ("Bolivia",          "LA PAZ",       ""),
-    "PE": ("Perú",             "LIMA",         "15001"),
-    "EC": ("Ecuador",          "QUITO",        "170101"),
-    "CO": ("Colombia",         "BOGOTA",       "110111"),
-    "MX": ("México",           "CIUDAD DE MEXICO", "06600"),
-    "CA": ("Canadá",           "TORONTO",      "M5H 2N2"),
-    "AU": ("Australia",        "SYDNEY",       "2000"),
-    "IL": ("Israel",           "TEL AVIV",     "6100000"),
-    "ZA": ("Sudáfrica",        "JOHANNESBURG", "2000"),
+    iso: (nombre, *_REFERENCIAS_PAISES.get(iso, ("", "")))
+    for iso, nombre in NOMBRES_ISO.items()
 }
 
 
@@ -109,6 +121,8 @@ _ISO_POR_ALIAS = {
     "netherlands": "NL",
     "holanda": "NL",
     "south korea": "KR",
+    "bangladesh": "BD",
+    "emiratos arabes": "AE",
     "united arab emirates": "AE",
 }
 
@@ -162,3 +176,11 @@ def opciones() -> list:
     """Para los desplegables: [(iso2, nombre), ...] ordenado por nombre."""
     return sorted(((iso, datos[0]) for iso, datos in PAISES.items()),
                   key=lambda x: x[1])
+
+
+def referencias_formulario() -> dict[str, dict[str, str]]:
+    """Datos seguros para precargar ciudad/CP, sin implicar cobertura DHL."""
+    return {
+        iso: {"city": ciudad, "postal_code": cp}
+        for iso, (_nombre, ciudad, cp) in PAISES.items()
+    }

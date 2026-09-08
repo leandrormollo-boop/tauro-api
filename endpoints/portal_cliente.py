@@ -77,7 +77,11 @@ from servicios.numeros_humanos import (
     parse_float_formulario as _numero_form,
     parse_importe_humano,
 )
-from servicios.paises import normalizar as normalizar_pais, nombre as nombre_pais
+from servicios.paises import (
+    nombre as nombre_pais,
+    normalizar as normalizar_pais,
+    referencias_formulario as referencias_paises_formulario,
+)
 from servicios.provincias import opciones as opciones_provincias
 from servicios.panel_cliente import embudo_envios, preparar_historial_envios
 from servicios.integraciones_tienda import (
@@ -1354,6 +1358,7 @@ def cotizar_form(
             "provincias": opciones_provincias(),
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
+            "referencias_paises": referencias_paises_formulario(),
             "resultado": None,
             "opciones": None,
             "no_disponibles": [],
@@ -1377,6 +1382,10 @@ def cotizar_post(
     # default evita que FastAPI responda 422 antes de poder validar el ámbito.
     origen_pais: str = Form(""),
     destino_pais: str = Form(""),
+    origen_ciudad: str = Form(""),
+    origen_cp_internacional: str = Form(""),
+    destino_ciudad_internacional: str = Form(""),
+    destino_cp_internacional: str = Form(""),
     peso_kg: str = Form(""),
     largo_cm: str = Form(""),
     ancho_cm: str = Form(""),
@@ -1483,6 +1492,21 @@ def cotizar_post(
         "cantidad": "1", "peso_kg": peso_kg, "largo_cm": largo_cm,
         "ancho_cm": ancho_cm, "alto_cm": alto_cm,
     }]
+    # Las llamadas directas de algunos tests conservan el objeto Form como
+    # default. Sólo los strings enviados por el navegador son datos de usuario.
+    origen_ciudad = origen_ciudad.strip() if isinstance(origen_ciudad, str) else ""
+    origen_cp_internacional = (
+        origen_cp_internacional.strip()
+        if isinstance(origen_cp_internacional, str) else ""
+    )
+    destino_ciudad_internacional = (
+        destino_ciudad_internacional.strip()
+        if isinstance(destino_ciudad_internacional, str) else ""
+    )
+    destino_cp_internacional = (
+        destino_cp_internacional.strip()
+        if isinstance(destino_cp_internacional, str) else ""
+    )
 
     try:
         paquetes, filas_bultos_form = _bultos_cotizador_internacional(
@@ -1510,6 +1534,14 @@ def cotizar_post(
             alto_cm=primero["alto_cm"],
             valor_declarado_usd=valor_usd_num,
             paquetes=paquetes,
+            origen_ubicacion={
+                "city": origen_ciudad,
+                "postal_code": origen_cp_internacional,
+            },
+            destino_ubicacion={
+                "city": destino_ciudad_internacional,
+                "postal_code": destino_cp_internacional,
+            },
         )
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
@@ -1543,6 +1575,7 @@ def cotizar_post(
             "ambito": "internacional",
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
+            "referencias_paises": referencias_paises_formulario(),
             "opciones": opciones,
             "resultado": resumen,
             "no_disponibles": no_disponibles,
@@ -1553,6 +1586,10 @@ def cotizar_post(
             "form": {
                 "origen_pais": origen_pais,
                 "destino_pais": destino_pais,
+                "origen_ciudad": origen_ciudad,
+                "origen_cp_internacional": origen_cp_internacional,
+                "destino_ciudad_internacional": destino_ciudad_internacional,
+                "destino_cp_internacional": destino_cp_internacional,
                 "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
                 "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
                 "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),
@@ -3775,6 +3812,7 @@ def direcciones_view(
     error: Optional[str] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    paises = _paises_con_nacional()
     flash_ok = None
     if ok == "1":
         flash_ok = "Dirección guardada."
@@ -3787,6 +3825,8 @@ def direcciones_view(
             "remitente": obtener_remitente_para_envio(cliente),
             "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
             "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+            "paises": paises,
+            "paises_nombres": dict(paises),
             "flash_ok": flash_ok,
             "error": error,
         },

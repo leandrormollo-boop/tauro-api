@@ -4,7 +4,8 @@ import math
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from pathlib import Path
+from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from dotenv import load_dotenv
@@ -29,10 +30,43 @@ MAX_DHL_CUSTOMS_UNITS = 9999
 
 # MyDHL exige que la hora de retiro/emisión lleve el huso DEL ORIGEN. El
 # contenedor de producción instala tzdata (Dockerfile), por eso usamos zonas
-# IANA y no offsets fijos: Londres/Madrid cambian por horario de verano. Para
-# países con más de un huso, la zona es la de la ciudad de referencia del
-# catálogo; los remitentes de WAIMAO (CN/AR/IN) no tienen esa ambigüedad.
-TZ_POR_PAIS = {
+# IANA y no offsets fijos: Londres/Madrid cambian por horario de verano.
+def _zonas_iana_por_pais() -> dict[str, str]:
+    """Primera zona IANA oficial de cada ISO presente en tzdata.
+
+    ``zone.tab`` cubre 247 de los 249 territorios ISO. Las referencias
+    frecuentes se pisan luego con la ciudad concreta usada por TAURO.
+    """
+    rutas = [
+        Path(raiz) / archivo
+        for raiz in TZPATH
+        for archivo in ("zone.tab", "zone1970.tab")
+    ]
+    # macOS conserva además una copia completa bajo ``zoneinfo.default``.
+    rutas.extend((
+        Path("/usr/share/zoneinfo.default/zone.tab"),
+        Path("/usr/share/zoneinfo.default/zone1970.tab"),
+    ))
+    zonas: dict[str, str] = {}
+    for ruta in rutas:
+        try:
+            lineas = ruta.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for linea in lineas:
+            if not linea or linea.startswith("#"):
+                continue
+            columnas = linea.split("\t")
+            if len(columnas) < 3:
+                continue
+            for iso in columnas[0].split(","):
+                zonas.setdefault(iso, columnas[2])
+        if zonas:
+            break
+    return zonas
+
+
+_TZ_REFERENCIAS_TAURO = {
     "AR": "America/Argentina/Buenos_Aires", "US": "America/New_York",
     "CN": "Asia/Shanghai", "IN": "Asia/Kolkata", "BD": "Asia/Dhaka",
     "VN": "Asia/Ho_Chi_Minh", "PK": "Asia/Karachi", "TH": "Asia/Bangkok",
@@ -45,6 +79,14 @@ TZ_POR_PAIS = {
     "BO": "America/La_Paz", "PE": "America/Lima", "EC": "America/Guayaquil",
     "CO": "America/Bogota", "MX": "America/Mexico_City", "CA": "America/Toronto",
     "AU": "Australia/Sydney", "IL": "Asia/Jerusalem", "ZA": "Africa/Johannesburg",
+}
+TZ_POR_PAIS = {
+    **_zonas_iana_por_pais(),
+    # Territorios deshabitados sin entrada propia en tzdata. La API decidirá
+    # después si existe cobertura; acá sólo evitamos inventar un offset fijo.
+    "BV": "Europe/Oslo",
+    "HM": "Indian/Kerguelen",
+    **_TZ_REFERENCIAS_TAURO,
 }
 
 # ─────────────────────────────────────────────

@@ -49,6 +49,26 @@ def test_cotizador_internacional_se_resuelve_en_dos_pasos_compactos():
     assert ".quote-screen-window .quote-operator-strip { display: none; }" in css
 
 
+def test_ruta_internacional_pide_ubicacion_real_y_precarga_referencias():
+    template = (ROOT / "templates" / "portal" / "cotizar.html").read_text(
+        encoding="utf-8"
+    )
+    javascript = (ROOT / "static" / "js" / "portal-cotizador.js").read_text(
+        encoding="utf-8"
+    )
+
+    for campo in (
+        "origen_ciudad", "origen_cp_internacional",
+        "destino_ciudad_internacional", "destino_cp_internacional",
+    ):
+        assert f'name="{campo}"' in template
+        assert f'id="{campo}"' in template
+    assert 'data-ref-city=' in template
+    assert 'data-ref-postal=' in template
+    assert "applyLocationReference" in javascript
+    assert "Completá ciudad y código postal de la ruta." in javascript
+
+
 def test_recoleccion_se_presenta_como_accion_explicita_del_envio():
     envios = (ROOT / "templates" / "portal" / "envios.html").read_text(
         encoding="utf-8"
