@@ -4,6 +4,7 @@ credenciales.json
 
 # Python
 venv/
+.venv/
 .venv-codex/
 __pycache__/
 *.pyc

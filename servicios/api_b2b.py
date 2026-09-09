@@ -5,6 +5,11 @@
 import hashlib
 import math
 import secrets
+from decimal import Decimal
+
+from servicios.invoice_comercial import (
+    MAX_ITEMS_INVOICE, normalizar_items_invoice, total_items_invoice,
+)
 
 from core.database import get_conn
 from modelos.cotizacion import CotizacionInput
@@ -464,6 +469,11 @@ def cotizar_couriers_cliente(
         }
 
     acceso_couriers = configuracion_cotizacion(cliente_id)
+    habilitados = acceso_couriers["couriers_habilitados"]
+    if any("items_invoice" in b for b in detalle):
+        # Sólo DHL implementa esta declaración. Otro adaptador no puede
+        # cotizar y luego emitir omitiendo artículos silenciosamente.
+        habilitados = [c for c in habilitados if c.lower() == "dhl"]
     tarjetas = cotizar_carriers_cliente(
         origen=_direccion(origen_real, origen_iso),
         destino=_direccion(destino_real, destino_iso),
@@ -472,7 +482,7 @@ def cotizar_couriers_cliente(
         pricing_cliente=acceso_couriers["pricing_general"],
         paquetes=piezas,
         pricing_por_courier=acceso_couriers["pricing_por_courier"],
-        couriers_habilitados=acceso_couriers["couriers_habilitados"],
+        couriers_habilitados=habilitados,
         incluir_base_interna=incluir_base_interna,
     )
 
@@ -525,6 +535,7 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
             return numero_invalido
 
     piezas, detalle, total_cajas = [], [], 0
+    total_items = 0
     for b in bultos:
         if not isinstance(b, dict):
             return [], [], "caja_incompleta: cada caja debe tener datos válidos"
@@ -611,13 +622,33 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
             return [], [], ("caja_incompleta: el valor declarado por caja debe "
                             "ser un monto válido mayor a cero")
         total_invoice = round(float(valor_unitario) * unidades_aduana, 2)
+        if "items_invoice" in b:
+            try:
+                items = normalizar_items_invoice(
+                    b["items_invoice"],
+                    peso_total_kg=Decimal(str(fila["peso_kg"])) * cantidad,
+                )
+            except (TypeError, ValueError) as exc:
+                return [], [], f"invoice_invalida: {exc}"
+            fila["items_invoice"] = items
+            # Mantener la primera línea para lectores históricos; la lista
+            # completa es la fuente de verdad para los importes y para DHL.
+            fila.update({k: items[0][k] for k in (
+                "descripcion_en", "unidades_aduana", "valor_unitario_usd",
+                "hs_code", "pais_origen",
+            )})
+            total_invoice = float(total_items_invoice(items))
+        total_items += len(fila.get("items_invoice") or [fila])
+        if total_items > MAX_ITEMS_INVOICE:
+            return [], [], f"invoice_invalida: máximo {MAX_ITEMS_INVOICE} ítems por envío."
         if valor_caja is None:
             # Compatibilidad con solicitudes/API anteriores: antes sólo se
             # guardaba el total comercial. Se reparte entre las cajas sin
             # alterar el valor declarado total de la invoice.
             valor_caja = round(total_invoice / cantidad, 2)
         total_cajas_declarado = round(float(valor_caja) * cantidad, 2)
-        if valor_caja_explicito and abs(total_cajas_declarado - total_invoice) > 0.02:
+        diferencia = abs(Decimal(str(total_cajas_declarado)) - Decimal(str(total_invoice)))
+        if valor_caja_explicito and diferencia > Decimal("0.02"):
             return [], [], (
                 "valor_declarado_no_coincide: el total declarado de las cajas "
                 f"(USD {total_cajas_declarado:.2f}) debe coincidir con el subtotal "

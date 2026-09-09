@@ -1736,7 +1736,7 @@ async def api_precio_envio_multi(
                     "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
                     "valor_declarado_caja_usd", "valor_unitario_usd",
                     "descripcion_en", "hs_code",
-                    "pais_origen",
+                    "pais_origen", "items_invoice",
                 ) if b.get(k) not in (None, "")},
             })
     except Exception:
@@ -2411,6 +2411,8 @@ def envio_nuevo_post(
     bulto_valor_usd: list[str] = Form([]),
     bulto_hs: list[str] = Form([]),
     bulto_pais_fab: list[str] = Form([]),
+    bulto_items_extra: list[str] = Form([]),
+    bulto_peso_neto: list[str] = Form([]),
     # Legacy (por si queda un form viejo cacheado): un solo producto.
     producto_alias: str = Form(""),
     cantidad: str = Form("1"),
@@ -2473,6 +2475,10 @@ def envio_nuevo_post(
         bulto_unidades_aduana = []
     if not isinstance(bulto_valor_caja_usd, (list, tuple)):
         bulto_valor_caja_usd = []
+    if not isinstance(bulto_items_extra, (list, tuple)):
+        bulto_items_extra = []
+    if not isinstance(bulto_peso_neto, (list, tuple)):
+        bulto_peso_neto = []
     if not isinstance(asegurar_carga, str):
         asegurar_carga = "NO"
     if not isinstance(etiqueta_cliente, str):
@@ -2499,6 +2505,8 @@ def envio_nuevo_post(
                   len(bulto_peso or []), len(bulto_desc_en or []),
                   len(bulto_unidades_aduana or []),
                   len(bulto_valor_caja_usd or []))
+    if len(bulto_items_extra) > n_filas or len(bulto_peso_neto) > n_filas:
+        errores_invoice.append("Los artículos deben corresponder a una caja del envío.")
     for i in range(n_filas):
         def _campo(lista, idx=i):
             v = lista[idx] if idx < len(lista or []) else ""
@@ -2608,6 +2616,34 @@ def envio_nuevo_post(
                     fila_form["valor_unitario_usd"] = fila["valor_unitario_usd"]
             except ValueError as exc:
                 errores_invoice.append(str(exc))
+        # Los ítems adicionales pertenecen a estas cajas, no crean piezas.
+        # Se conserva la entrada para que un error no borre el trabajo del cliente.
+        raw_extra = _campo(bulto_items_extra)
+        peso_neto = _campo(bulto_peso_neto)
+        if raw_extra or peso_neto:
+            import json
+            from servicios.invoice_comercial import normalizar_items_invoice, MAX_ITEMS_INVOICE
+            try:
+                if len(raw_extra) > 100_000:
+                    raise ValueError("La declaración de artículos es demasiado extensa.")
+                extras = json.loads(raw_extra) if raw_extra else []
+                if not isinstance(extras, list) or len(extras) >= MAX_ITEMS_INVOICE:
+                    raise ValueError(f"Máximo {MAX_ITEMS_INVOICE} ítems por envío.")
+                if not all(isinstance(item, dict) for item in extras):
+                    raise ValueError("Revisá los artículos adicionales de la invoice.")
+                if extras or peso_neto:
+                    primero = {k: fila_form.get(k, "") for k in (
+                        "descripcion_en", "unidades_aduana", "valor_unitario_usd",
+                        "hs_code", "pais_origen",
+                    )}
+                    primero["peso_neto_kg"] = peso_neto
+                    fila_form["items_invoice"] = [primero, *extras]
+                    fila["items_invoice"] = normalizar_items_invoice(
+                        fila_form["items_invoice"],
+                        peso_total_kg=Decimal(str(fila.get("peso_kg") or 0)) * cant,
+                    )
+            except (TypeError, ValueError) as exc:
+                errores_invoice.append(f"Caja {i + 1}: {exc}")
         filas.append(fila)
     # Form viejo cacheado (pre multi-bulto): ahí "cantidad" significaba
     # unidades dentro de UNA caja — se respeta esa semántica para que el

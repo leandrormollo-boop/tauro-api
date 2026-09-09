@@ -6,6 +6,48 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 09/09/2026 — Invoice DHL con varios artículos por caja (lista para publicar)
+
+Rama local `codex/dhl-invoice-items`, basada en `origin/main` `f60b8a2`.
+**Todavía no publicada.** El login real de WAIMAO quedó abierto, pendiente
+del ingreso del usuario. No se emitieron guías ni se generaron cargos reales.
+
+- El paso 4 permite agregar y quitar artículos dentro de cada tipo de caja:
+  descripción, unidades, precio USD, HS, país de fabricación y peso neto
+  total del artículo. Para varias cajas iguales, las unidades comerciales
+  representan el contenido de todas esas cajas, igual que en el contrato previo.
+- `bultos[].items_invoice` conserva la lista completa en el JSONB existente;
+  no requiere migración. Los campos escalares conservan el primer artículo
+  para compatibilidad. Cotización, alta, repetición, reemisión, verificación
+  y detalle preservan todos los artículos. Los adaptadores sin soporte no
+  pueden emitir una declaración truncada: esta modalidad requiere DHL.
+- DHL recibe una `content.packages` por caja física y una
+  `exportDeclaration.lineItems` por artículo. Se validan cantidades, valores,
+  país, HS, peso neto y límite de 100 artículos por envío. Los importes se
+  validan con Decimal contra el valor total declarado; el seguro conserva
+  ese total. No se modificaron reservas, referencias, reintentos ni cargos.
+- Cada artículo nuevo informa su propio peso neto, sin repetir el peso
+  de la caja. [MyDHL API](https://developer.dhl.com/api-reference/dhl-express-mydhl-api)
+  permite enviar sólo netValue por línea (contrato desde 3.0.0;
+  adaptador actual 3.3.1).
+
+Validación local, Python 3.12 / Windows, sin DB ni APIs reales:
+
+- 136 pruebas de invoice, DHL, seguridad financiera, piloto WAIMAO y
+  reemisión aprobadas, incluidas 30 nuevas pruebas de varios artículos.
+- Suite completa: 1881 aprobadas, 133 omitidas, 3 fallos y 4 errores
+  (antes de agregar las dos pruebas finales de rechazo de otros couriers).
+  Comparación contra `f60b8a2` sin cambios: 1853 aprobadas y exactamente
+  los mismos fallos/errores, por rutas Windows, zonas horarias, CRLF y
+  parámetros de pytest que exceden el tamaño de una variable de entorno.
+- Navegador con datos sintéticos WAIMAO: una caja de 4 kg, 4 camisas ×
+  USD 25 y 2 pantalones × USD 50 = USD 200. Verificados agregar/quitar
+  artículos, agregar/quitar otra caja sin perder el contenido y POST con
+  ambos artículos. Las tarifas del preview son simuladas.
+
+Pendiente: autorización de publicación y verificación del formulario real
+con sesión de WAIMAO tras el deploy. Un push a `main` dispara producción.
+
 ## Reglas de negocio INVIOLABLES
 
 Actualización publicada en producción el 04/09/2026 (`1c458dc`): ver

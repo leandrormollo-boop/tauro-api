@@ -2485,6 +2485,8 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
                 "pais_origen": (
                     bulto.get("pais_origen") or sol.get("remitente_pais") or "AR"
                 ),
+                **({"items_invoice": bulto["items_invoice"]}
+                   if "items_invoice" in bulto else {}),
             })
     else:
         cantidad = parse_entero_formulario(
@@ -3182,6 +3184,8 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
                     "descripcion_en": b.get("descripcion_en") or "Merchandise",
                     "pais_origen": (b.get("pais_origen")
                                     or sol.get("remitente_pais") or "AR"),
+                    **({"items_invoice": b["items_invoice"]}
+                       if "items_invoice" in b else {}),
                 }
                 for i, b in enumerate(bultos, start=1)
             ]
@@ -3223,6 +3227,9 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     # bultos) es el MISMO contrato para los dos, por eso todo el armado de
     # arriba se comparte y sumar un courier no duplica esta función.
     courier = (courier or "FEDEX").upper()
+    if courier != "DHL" and any("items_invoice" in b for b in bultos):
+        _liberar_reserva(solicitud_id)
+        return {"ok": False, "error": "La invoice con varios artículos por caja requiere DHL."}
     if courier == "DHL":
         from core.dhl_client import DHLClient
         cliente_courier = DHLClient()

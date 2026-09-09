@@ -421,7 +421,7 @@
             <div class="shipment-step-heading">
                 <div>
                     <h4><span class="n">4</span> Contenido para la invoice comercial <span class="badge warn">Aduana</span></h4>
-                    <p>Declaración por ítem: producto, cantidad y valor unitario. DHL calcula cantidad × valor unitario.</p>
+                    <p>Podés declarar varios productos distintos dentro de una misma caja. DHL calcula cantidad × valor unitario por artículo.</p>
                 </div>
                 <span class="shipment-step-counter">Valores en USD</span>
             </div>
@@ -430,10 +430,16 @@
                 {% for f in filas %}
                 <article class="bulto-row shipment-invoice-card" data-invoice-bulto data-bulto-index="{{ loop.index0 }}">
                     <div class="shipment-box-head">
-                        <div><span>Invoice comercial</span><strong>Ítem <b data-box-number>{{ loop.index }}</b></strong></div>
+                        <div><span>Invoice comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
                         <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
                     </div>
-                    <div class="bulto-invoice">
+                    <input type="hidden" name="bulto_items_extra" class="invoice-extras" value="{{ (f.items_invoice[1:] if f.items_invoice else [])|tojson|forceescape }}">
+                    <div class="invoice-items">
+                    <div class="bulto-invoice" data-invoice-item>
+                        <div class="invoice-item-heading" style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                            <strong data-item-number>Artículo 1</strong>
+                            <button type="button" class="btn btn-ghost btn-sm invoice-item-remove" hidden style="display:none">Quitar artículo</button>
+                        </div>
                         <div class="form-group shipment-content-field">
                             <label>Nombre del producto (en inglés)</label>
                             <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
@@ -460,11 +466,19 @@
                                 {% endfor %}
                             </select>
                         </div>
+                        <div class="form-group invoice-net-weight" {% if not f.items_invoice %}hidden{% endif %}>
+                            <label>Peso neto total de este artículo</label>
+                            <div class="input-unit"><input type="text" name="bulto_peso_neto" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
+                            <small>Peso de todas las unidades de este artículo, sin embalaje.</small>
+                        </div>
                     </div>
+                    </div>
+                    <button type="button" class="btn-add-bulto invoice-item-add">+ Agregar otro artículo a esta caja</button>
+                    <p data-invoice-box-total class="invoice-note" aria-live="polite"></p>
                 </article>
                 {% endfor %}
             </div>
-            <div class="invoice-note"><strong>Importante:</strong> el valor unitario es el precio de una unidad del producto, no el valor total de la caja. El subtotal se calcula automáticamente.</div>
+            <div class="invoice-note"><strong>Importante:</strong> el valor unitario es el precio de una unidad del producto, no el valor total de la caja. El subtotal se calcula automáticamente. Si cargás varias cajas iguales en una fila, declarás aquí los artículos de todas esas cajas. La suma debe coincidir con el total declarado del paso 3. Los envíos con varios artículos por caja se emiten con DHL.</div>
 
             {% set seguro_sel = (form.asegurar_carga or 'NO')|upper %}
             <fieldset class="shipment-insurance-choice">
@@ -792,15 +806,79 @@
     return Number(limpio);
   }
 
+  function articulosDe(invoice) {
+    return Array.prototype.slice.call(invoice.querySelectorAll("[data-invoice-item]"));
+  }
+
+  function leerArticulos(invoice) {
+    return articulosDe(invoice).map(function (item) {
+      var v = function (sel) { return ((item.querySelector(sel) || {}).value || "").trim(); };
+      return {
+        descripcion_en: v(".bulto-desc"), unidades_aduana: v(".bulto-unidades-aduana"),
+        valor_unitario_usd: v(".bulto-valor"), hs_code: v(".bulto-hs"),
+        pais_origen: v(".bulto-pais-fab"), peso_neto_kg: v(".invoice-peso-neto"),
+      };
+    });
+  }
+
+  function subtotalArticulos(invoice) {
+    return leerArticulos(invoice).reduce(function (total, item) {
+      var unidades = numeroInvoice(item.unidades_aduana);
+      var valor = numeroInvoice(item.valor_unitario_usd);
+      return total + (unidades > 0 && valor > 0 ? unidades * Math.round(valor * 100) : NaN);
+    }, 0) / 100;
+  }
+
+  function sincronizarArticulos(invoice) {
+    var items = leerArticulos(invoice);
+    invoice.querySelector(".invoice-extras").value = JSON.stringify(items.slice(1));
+    articulosDe(invoice).forEach(function (item, i) {
+      item.querySelector("[data-item-number]").textContent = "Artículo " + (i + 1);
+      item.querySelector(".invoice-item-remove").hidden = i === 0;
+      item.querySelector(".invoice-item-remove").style.display = i === 0 ? "none" : "";
+      var peso = item.querySelector(".invoice-peso-neto");
+      var mostrarPeso = items.length > 1 || Boolean(peso.value);
+      item.querySelector(".invoice-net-weight").hidden = !mostrarPeso;
+      peso.required = items.length > 1;
+      var unidades = numeroInvoice(items[i].unidades_aduana);
+      var valor = numeroInvoice(items[i].valor_unitario_usd);
+      item.querySelector("[data-invoice-line-total]").textContent = unidades > 0 && valor > 0
+        ? "Subtotal: USD " + (unidades * Math.round(valor * 100) / 100).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
+        : "Subtotal: USD —";
+    });
+    var total = subtotalArticulos(invoice);
+    invoice.querySelector("[data-invoice-box-total]").textContent = Number.isFinite(total)
+      ? "Total de artículos: USD " + total.toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
+      : "Completá cantidad y valor de cada artículo para calcular el total.";
+  }
+
+  function agregarArticulo(invoice, datos) {
+    var total = invoiceRows().reduce(function (n, grupo) { return n + articulosDe(grupo).length; }, 0);
+    if (total >= 100) return;
+    var nuevo = articulosDe(invoice)[0].cloneNode(true);
+    // Los nombres legacy pertenecen únicamente al primer artículo. Los
+    // adicionales viajan juntos en JSON y no desalinean las filas de cajas.
+    nuevo.querySelectorAll("input, select").forEach(function (el) {
+      el.removeAttribute("name");
+      el.value = "";
+      el.setCustomValidity("");
+    });
+    var mapa = {
+      descripcion_en: ".bulto-desc", unidades_aduana: ".bulto-unidades-aduana",
+      valor_unitario_usd: ".bulto-valor", hs_code: ".bulto-hs",
+      pais_origen: ".bulto-pais-fab", peso_neto_kg: ".invoice-peso-neto",
+    };
+    Object.keys(mapa).forEach(function (k) {
+      nuevo.querySelector(mapa[k]).value = datos && datos[k] != null ? datos[k] : (k === "unidades_aduana" ? "1" : "");
+    });
+    invoice.querySelector(".invoice-items").appendChild(nuevo);
+    sincronizarArticulos(invoice);
+    return nuevo;
+  }
+
   function actualizarSubtotalInvoice(invoice) {
     if (!invoice) return;
-    var cantidad = numeroInvoice(((invoice.querySelector(".bulto-unidades-aduana") || {}).value || ""));
-    var unitario = numeroInvoice(((invoice.querySelector(".bulto-valor") || {}).value || ""));
-    var total = invoice.querySelector("[data-invoice-line-total]");
-    if (!total) return;
-    total.textContent = Number.isFinite(cantidad) && cantidad > 0 && Number.isFinite(unitario) && unitario > 0
-      ? "Subtotal: USD " + (cantidad * unitario).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
-      : "Subtotal: USD —";
+    sincronizarArticulos(invoice);
     var indice = invoiceRows().indexOf(invoice);
     if (indice >= 0) actualizarDeclaracion(bultoRows()[indice]);
   }
@@ -826,10 +904,8 @@
     if (!invoice) return;
     var cajas = numeroInvoice(((row.querySelector(".bulto-cantidad") || {}).value || ""));
     var porCaja = numeroInvoice(((row.querySelector(".bulto-valor-caja") || {}).value || ""));
-    var unidades = numeroInvoice(((invoice.querySelector(".bulto-unidades-aduana") || {}).value || ""));
-    var unitario = numeroInvoice(((invoice.querySelector(".bulto-valor") || {}).value || ""));
     var totalCajas = cajas * porCaja;
-    var totalInvoice = unidades * unitario;
+    var totalInvoice = subtotalArticulos(invoice);
     var nota = row.querySelector("[data-box-declared-total]");
     var valorInvoice = invoice.querySelector(".bulto-valor");
     if (nota) {
@@ -849,16 +925,27 @@
 
   function wireInvoiceRow(invoice) {
     if (!invoice) return;
-    [".bulto-unidades-aduana", ".bulto-valor"].forEach(function (sel) {
-      var el = invoice.querySelector(sel);
-      if (el) el.addEventListener("input", function () {
+    var extras = JSON.parse(invoice.querySelector(".invoice-extras").value || "[]");
+    extras.forEach(function (item) { agregarArticulo(invoice, item); });
+    ["input", "change"].forEach(function (evento) {
+      invoice.addEventListener(evento, function () {
         actualizarSubtotalInvoice(invoice);
         refreshLivePrice();
       });
     });
-    [".bulto-desc", ".bulto-hs", ".bulto-pais-fab"].forEach(function (sel) {
-      var el = invoice.querySelector(sel);
-      if (el) el.addEventListener(el.tagName === "SELECT" ? "change" : "input", refreshLivePrice);
+    invoice.addEventListener("click", function (e) {
+      if (e.target.closest(".invoice-item-add")) {
+        var item = agregarArticulo(invoice);
+        actualizarSubtotalInvoice(invoice);
+        if (item) item.querySelector(".bulto-desc").focus();
+        refreshLivePrice();
+      } else if (e.target.closest(".invoice-item-remove")) {
+        var item = e.target.closest("[data-invoice-item]");
+        if (item === articulosDe(invoice)[0]) return;
+        item.remove();
+        actualizarSubtotalInvoice(invoice);
+        refreshLivePrice();
+      }
     });
     actualizarSubtotalInvoice(invoice);
   }
@@ -908,6 +995,8 @@
         descripcion_en: v(invoice, ".bulto-desc"),
         hs_code: v(invoice, ".bulto-hs"),
         pais_origen: v(invoice, ".bulto-pais-fab"),
+        ...(articulosDe(invoice).length > 1 || v(invoice, ".invoice-peso-neto")
+          ? {items_invoice: leerArticulos(invoice)} : {}),
       };
     }).filter(function (b) { return b.producto || b.peso_kg || b.descripcion_en; });
   }
@@ -942,11 +1031,13 @@
     var baseInvoice = invoiceRows()[0];
     var nueva = base.cloneNode(true);
     var nuevaInvoice = baseInvoice.cloneNode(true);
+    articulosDe(nuevaInvoice).slice(1).forEach(function (item) { item.remove(); });
     var sel = nueva.querySelector(".bulto-producto");
     var cant = nueva.querySelector(".bulto-cantidad");
     var unidadesAduana = nuevaInvoice.querySelector(".bulto-unidades-aduana");
     nueva.querySelectorAll("input").forEach(function (el) { el.value = ""; });
     nuevaInvoice.querySelectorAll("input").forEach(function (el) { el.value = ""; });
+    nuevaInvoice.querySelector(".invoice-extras").value = "[]";
     if (sel) sel.value = producto || "";
     if (cant) cant.value = cantidad || 1;
     if (unidadesAduana) unidadesAduana.value = cantidad || 1;
@@ -1002,6 +1093,8 @@
         ? motivo.replace("peso_excedido: ", "")
         : motivo.indexOf("valor_declarado_no_coincide") === 0
           ? motivo.replace("valor_declarado_no_coincide: ", "")
+        : motivo.indexOf("invoice_invalida:") === 0
+          ? motivo.replace("invoice_invalida: ", "")
         : motivo === "seguro_no_disponible"
           ? "DHL no pudo cotizar este envío con protección de carga. Revisá los datos o probá sin seguro."
         : "No pudimos cotizar esa combinación todavía.";

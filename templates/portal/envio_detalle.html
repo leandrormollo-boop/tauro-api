@@ -237,7 +237,11 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             {% if s.bultos and s.bultos|length %}
                 {% for b in s.bultos %}
                 <tr>
-                    <td><strong>{{ b.producto_alias }}</strong>{% if b.hs_code %}<br><small class="mono" style="color:var(--fg-3)">HS {{ b.hs_code }}</small>{% endif %}</td>
+                    <td>{% for item in (b.items_invoice or [b]) %}
+                        <div><strong>{{ item.descripcion_en or b.producto_alias }}</strong>
+                        {% if item.hs_code %}<br><small class="mono" style="color:var(--fg-3)">HS {{ item.hs_code }}</small>{% endif %}
+                        {% if b.items_invoice %}<br><small>{{ item.unidades_aduana }} unidades × USD {{ item.valor_unitario_usd }} · {{ item.peso_neto_kg }} kg netos</small>{% endif %}</div>
+                    {% endfor %}</td>
                     <td class="mono">x{{ b.cantidad }}</td>
                     <td class="mono">{{ b.largo_cm }}×{{ b.ancho_cm }}×{{ b.alto_cm }} cm</td>
                     <td class="mono">{{ b.peso_kg }} kg</td>

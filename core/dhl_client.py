@@ -4,6 +4,7 @@ import math
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 
@@ -11,6 +12,9 @@ import requests
 from dotenv import load_dotenv
 from core.fedex_client import CarrierBase
 from servicios.impuestos import incoterm as incoterm_de
+from servicios.invoice_comercial import (
+    MAX_ITEMS_INVOICE, normalizar_items_invoice, total_items_invoice,
+)
 
 load_dotenv()
 
@@ -796,6 +800,19 @@ class DHLClient(CarrierBase):
                 return {"encontrado": False,
                         "error": "El valor unitario de cada ítem debe ser mayor a cero."}
             total_invoice_linea = round(valor_u * unidades_aduana, 2)
+            items_invoice = None
+            if "items_invoice" in b:
+                try:
+                    items_invoice = normalizar_items_invoice(
+                        b["items_invoice"],
+                        peso_total_kg=Decimal(str(peso_caja)) * cajas,
+                    )
+                except (TypeError, ValueError) as exc:
+                    return {"encontrado": False, "error": f"Caja {i}: {exc}"}
+                total_invoice_linea = float(total_items_invoice(items_invoice))
+            if len(line_items) + len(items_invoice or [b]) > MAX_ITEMS_INVOICE:
+                return {"encontrado": False,
+                        "error": f"Máximo {MAX_ITEMS_INVOICE} ítems por envío."}
             valor_caja_crudo = b.get("valor_declarado_caja_usd")
             try:
                 valor_caja = (
@@ -811,7 +828,8 @@ class DHLClient(CarrierBase):
                         "error": "El valor declarado por caja debe ser mayor a cero."}
             total_cajas_linea = round(valor_caja * cajas, 2)
             if (valor_caja_crudo not in (None, "")
-                    and abs(total_cajas_linea - total_invoice_linea) > 0.02):
+                    and abs(Decimal(str(total_cajas_linea))
+                            - Decimal(str(total_invoice_linea))) > Decimal("0.02")):
                 return {"encontrado": False, "error": (
                     f"Caja {i}: el valor declarado de las cajas (USD "
                     f"{total_cajas_linea:.2f}) no coincide con la invoice "
@@ -830,32 +848,33 @@ class DHLClient(CarrierBase):
                 })
             valor_total += total_invoice_linea
             valor_total_cajas += total_cajas_linea
-            line_items.append({
-                "number": i,
-                "description": (b.get("descripcion_en") or b.get("producto_alias")
-                                or "Merchandise")[:75],
-                "price": round(valor_u, 2),
-                "quantity": {
-                    "value": unidades_aduana,
-                    "unitOfMeasurement": "PCS",
-                },
-                "commodityCodes": ([{"typeCode": "outbound",
-                                     "value": str(b["hs_code"]).replace(".", "")[:18]}]
-                                   if b.get("hs_code") else []),
-                "exportReasonType": "permanent",
-                # Regla de Leandro (01/08): el país de fabricación es el del
-                # ORIGEN DEL ENVÍO. Sale de China → CN. El "AR" fijo era falso
-                # para cualquier importación y es una declaración ante aduana.
-                "manufacturerCountry": (
-                    b.get("pais_origen") or pais_origen_envio
-                ).upper()[:2],
-                "weight": {
-                    # Peso de todo el renglon comercial. Las dimensiones y el
-                    # peso POR CAJA ya viven, por separado, en `packages`.
-                    "netValue": peso_linea,
-                    "grossValue": peso_linea,
-                },
-            })
+            for item in items_invoice or [{
+                **b, "unidades_aduana": unidades_aduana,
+                "valor_unitario_usd": valor_u, "peso_neto_kg": peso_linea,
+            }]:
+                peso_item = float(item["peso_neto_kg"])
+                line_items.append({
+                    "number": len(line_items) + 1,
+                    "description": (item.get("descripcion_en") or b.get("producto_alias")
+                                    or "Merchandise")[:75],
+                    "price": round(float(item["valor_unitario_usd"]), 2),
+                    "quantity": {
+                        "value": item["unidades_aduana"], "unitOfMeasurement": "PCS",
+                    },
+                    "commodityCodes": ([{"typeCode": "outbound",
+                                         "value": str(item["hs_code"]).replace(".", "")[:18]}]
+                                       if item.get("hs_code") else []),
+                    "exportReasonType": "permanent",
+                    "manufacturerCountry": (
+                        item.get("pais_origen") or pais_origen_envio
+                    ).upper()[:2],
+                    # Peso TOTAL del artículo, nunca el peso de la caja
+                    # repetido para cada producto. MyDHL permite enviar netValue
+                    # sin grossValue en cada línea comercial.
+                    "weight": ({"netValue": peso_item} if items_invoice else {
+                        "netValue": peso_item, "grossValue": peso_item,
+                    }),
+                })
 
         # El caller productivo persiste esta referencia ANTES del POST. Si el
         # proceso muere sin leer la respuesta, TAURO puede buscar exactamente

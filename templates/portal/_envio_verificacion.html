@@ -67,11 +67,14 @@
             <div class="shipment-check-list">
                 {% if s.bultos and s.bultos|length %}
                     {% for b in s.bultos %}
+                    {% set caja_numero = loop.index %}
+                    {% for item in (b.items_invoice or [b]) %}
                     <article>
-                        <span>Ítem {{ loop.index }}{% if b.hs_code %} · HS {{ b.hs_code }}{% else %} · Sin HS code{% endif %}</span>
-                        <strong>{{ b.descripcion_en or b.producto_alias or s.producto_alias or "Mercadería" }}</strong>
-                        <small>{{ b.unidades_aduana or b.cantidad or 1 }} unidad{{ "es" if (b.unidades_aduana or b.cantidad or 1)|int != 1 else "" }} × USD {{ b.valor_unitario_usd or "—" }}</small>
+                        <span>Caja {{ caja_numero }} · Ítem {{ loop.index }}{% if item.hs_code %} · HS {{ item.hs_code }}{% else %} · Sin HS code{% endif %}</span>
+                        <strong>{{ item.descripcion_en or b.producto_alias or s.producto_alias or "Mercadería" }}</strong>
+                        <small>{{ item.unidades_aduana or b.cantidad or 1 }} unidad{{ "es" if (item.unidades_aduana or b.cantidad or 1)|int != 1 else "" }} × USD {{ item.valor_unitario_usd or "—" }}{% if item.peso_neto_kg %} · {{ item.peso_neto_kg }} kg netos{% endif %}</small>
                     </article>
+                    {% endfor %}
                     {% endfor %}
                 {% else %}
                     <article><span>Contenido</span><strong>{{ s.producto_alias or "Mercadería" }}</strong><small>Valor declarado total: USD {{ s.valor_declarado_usd or "—" }}</small></article>
