@@ -9,8 +9,10 @@ mocks y verificá producción después de cada push (patrón abajo).
 ## 09/09/2026 — Invoice DHL con varios artículos por caja (lista para publicar)
 
 Rama local `codex/dhl-invoice-items`, basada en `origin/main` `f60b8a2`.
-**Todavía no publicada.** El login real de WAIMAO quedó abierto, pendiente
-del ingreso del usuario. No se emitieron guías ni se generaron cargos reales.
+**Todavía no publicada.** El usuario ingresó en la cuenta real de WAIMAO.
+Se verificó el formulario internacional en la sesión autenticada: la versión
+publicada conserva un único artículo por caja y no tiene el botón de agregar
+artículos. No se guardaron solicitudes ni se emitieron guías reales.
 
 - El paso 4 permite agregar y quitar artículos dentro de cada tipo de caja:
   descripción, unidades, precio USD, HS, país de fabricación y peso neto
