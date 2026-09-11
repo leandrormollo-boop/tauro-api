@@ -238,6 +238,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 {% for b in s.bultos %}
                 <tr>
                     <td>{% for item in (b.items_invoice or [b]) %}
+                        {% if loop.first and b.embalaje %}<div class="badge">{{ b.embalaje.nombre }}</div>{% endif %}
                         <div><strong>{{ item.descripcion_en or b.producto_alias }}</strong>
                         {% if item.hs_code %}<br><small class="mono" style="color:var(--fg-3)">HS {{ item.hs_code }}</small>{% endif %}
                         {% if b.items_invoice %}<br><small>{{ item.unidades_aduana }} unidades × USD {{ item.valor_unitario_usd }} · {{ item.peso_neto_kg }} kg netos</small>{% endif %}</div>

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Embalajes y tarifas{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/portal-paquetes.css?v=1">
+<div class="pkg-page">
+  <div class="page-title"><div><span class="pkg-eyebrow">PREPARÁ UNA VEZ · COTIZÁ CADA VENTA</span><h1>Embalajes y tarifas</h1><p>Tus cajas, tus productos y el envío que verá el comprador.</p></div><a class="btn btn-ghost" href="/portal/tienda">Ir a mis ventas →</a></div>
+  <div class="pkg-stats" id="pkg-stats"></div>
+  <div id="pkg-notice" class="msg" role="status" hidden></div>
+  <nav class="pkg-tabs" aria-label="Configuración de embalajes">
+    <button type="button" data-tab="embalajes" aria-current="page">1. Embalajes</button>
+    <button type="button" data-tab="productos">2. Productos y combinaciones</button>
+    <button type="button" data-tab="tiendas">3. Tarifas en mi tienda</button>
+    <button type="button" data-tab="prueba">4. Probar cotización</button>
+  </nav>
+
+  <section data-panel="embalajes" aria-label="Mis embalajes">
+    <div class="pkg-section-head"><div><h2>Cajas listas para vender</h2><p>Guardá las medidas externas reales y el peso del embalaje vacío.</p></div><button class="btn btn-primary" id="pkg-new">+ Nuevo embalaje</button></div>
+    <div id="pkg-boxes" class="pkg-boxes"></div>
+    <p class="pkg-note">El peso del envío suma productos + caja + protección. El transportista también considera el volumen y el destino.</p>
+  </section>
+
+  <section data-panel="productos" aria-label="Productos y combinaciones" hidden>
+    <div class="pkg-section-head"><div><h2>Qué va dentro de cada caja</h2><p>Primero asociá cada variante. Después guardá las combinaciones que despachás seguido.</p></div><a class="btn btn-ghost" href="/portal/catalogo">Ver catálogo</a></div>
+    <div class="pkg-columns">
+      <article class="card"><h3>Producto individual</h3><p class="pkg-muted">También sirve para varias unidades del mismo producto.</p>
+        <form id="pkg-associate">
+          <label>Producto / variante<select name="producto_id" class="pkg-product-select" aria-label="Producto o variante" required></select></label>
+          <label>Embalaje<select name="paquete_id" class="pkg-box-select" aria-label="Embalaje" required></select></label>
+          <div class="pkg-fields"><label>Peso de una unidad (kg)<input name="peso_neto_kg" inputmode="decimal" required placeholder="0,350"></label><label>Unidades que caben por caja<input name="unidades_por_caja" type="number" min="1" max="100" value="1" required></label></div>
+          <p class="pkg-muted">Pesá el producto como se vende, con su envase individual. La caja de envío y su protección se suman aparte.</p>
+          <label class="pkg-check"><input name="confirmado" type="checkbox" required> Probé que estas unidades caben y quedan protegidas en esa caja.</label>
+          <button class="btn btn-primary" type="submit">Guardar asociación</button>
+        </form>
+      </article>
+      <article class="card"><h3>Combinación de productos</h3><p class="pkg-muted">Un contenido exacto en una sola caja. Ejemplo: 1 reel + 2 señuelos.</p>
+        <form id="pkg-combine">
+          <label>Nombre<input name="nombre" maxlength="80" placeholder="Reel + señuelos" required></label>
+          <label>Embalaje<select name="paquete_id" class="pkg-box-select" aria-label="Embalaje" required></select></label>
+          <div id="pkg-recipe-items" class="pkg-lines"></div>
+          <button class="btn btn-ghost" type="button" id="pkg-add-recipe">+ Agregar producto</button>
+          <label>Prioridad de uso<input name="prioridad" type="number" min="0" max="100" value="0"><small>Si varias combinaciones sirven, se prueba primero la de mayor prioridad.</small></label>
+          <label class="pkg-check"><input name="confirmado" type="checkbox" required> Probé este contenido completo dentro de la caja.</label>
+          <button class="btn btn-primary" type="submit">Guardar combinación</button>
+        </form>
+      </article>
+    </div>
+    <div class="card"><h3>Asociaciones guardadas</h3><div id="pkg-associations"></div></div>
+    <div class="card"><h3>Combinaciones guardadas</h3><div id="pkg-recipes"></div></div>
+    <p class="pkg-note">Sin una combinación guardada, cada producto usa su embalaje asociado. El portal puede armar varias cajas; no supone que todo entra en una.</p>
+  </section>
+
+  <section data-panel="tiendas" aria-label="Tarifas en mi tienda" hidden>
+    <div class="pkg-section-head"><div><h2>Elegí cuánto paga tu comprador</h2><p>Configurá nacional e internacional por separado. TAURO conserva el costo de envío de tu cuenta.</p></div></div>
+    <div id="pkg-stores"></div>
+    <div class="card pkg-help"><h3>Cómo llega el precio al comprador</h3><p>Tu tienda envía el carrito y destino a TAURO. Calculamos las cajas, consultamos las tarifas disponibles y devolvemos el precio para el pago de la compra.</p><p>En Shopify, autorizá el permiso de tarifas, conectá el servicio y agregá TAURO en las zonas de envío correspondientes. Se necesita envío calculado por terceros: Advanced, Plus o Grow con esa función habilitada. Configurá una tarifa de respaldo en Shopify para cuando el transportista no responda.</p><p>Esta primera configuración devuelve precios en pesos argentinos (ARS), también para destinos internacionales. El envío gratis lo absorbés vos; no elimina el importe que TAURO te cobra. Impuestos de importación no incluidos.</p></div>
+  </section>
+
+  <section data-panel="prueba" aria-label="Probar cotización" hidden>
+    <div class="pkg-section-head"><div><h2>Probá una venta antes de activarla</h2><p>Vas a ver las cajas propuestas, tu tarifa y el precio para el comprador.</p></div></div>
+    <div class="pkg-columns pkg-simulator">
+      <form id="pkg-quote" class="card">
+        <h3>Armá un carrito</h3><div id="pkg-cart-items" class="pkg-lines"></div><button class="btn btn-ghost" id="pkg-add-cart" type="button">+ Agregar producto</button>
+        <label>Valor total de los productos (ARS)<input name="valor_ars" inputmode="decimal" required placeholder="150000"></label>
+        <label>Usar política de<select name="tienda_id" id="pkg-quote-store"><option value="">Tarifa de mi cuenta TAURO</option></select></label>
+        <fieldset><legend>Desde dónde enviás</legend><div class="pkg-fields"><label>País (2 letras)<input name="origen_pais" minlength="2" maxlength="2" required placeholder="AR"></label><label>Código postal<input name="origen_cp" maxlength="16" required></label><label>Ciudad<input name="origen_ciudad" maxlength="100" required></label><label>Provincia / estado<input name="origen_estado" maxlength="100"></label></div></fieldset>
+        <fieldset><legend>A dónde enviás</legend><div class="pkg-fields"><label>País (2 letras)<input name="destino_pais" minlength="2" maxlength="2" required placeholder="AR"></label><label>Código postal<input name="destino_cp" maxlength="16" required></label><label>Ciudad<input name="destino_ciudad" maxlength="100" required></label><label>Provincia / estado<input name="destino_estado" maxlength="100"></label></div></fieldset>
+        <button class="btn btn-primary" type="submit">Calcular cajas y cotizar</button>
+      </form>
+      <div id="pkg-quote-result" class="card pkg-result" aria-live="polite"><div class="pkg-empty"><span class="pkg-box-icon" aria-hidden="true">◇</span><h3>Una prueba sin generar envíos</h3><p>Agregá productos y un destino para ver el embalaje y las tarifas disponibles.</p></div></div>
+    </div>
+  </section>
+</div>
+<dialog id="pkg-dialog" class="pkg-dialog"><form id="pkg-box-form">
+  <div class="pkg-section-head"><h2 id="pkg-dialog-title">Nuevo embalaje</h2><button class="btn btn-ghost" type="button" id="pkg-close" aria-label="Cerrar">✕</button></div>
+  <input type="hidden" name="id"><label>Nombre<input name="nombre" maxlength="80" placeholder="Caja reel individual" required></label>
+  <fieldset><legend>Medidas externas de la caja cerrada (cm)</legend><div class="pkg-fields pkg-three"><label>Largo<input name="largo_cm" inputmode="decimal" placeholder="15" required></label><label>Ancho<input name="ancho_cm" inputmode="decimal" placeholder="15" required></label><label>Alto<input name="alto_cm" inputmode="decimal" placeholder="10" required></label></div></fieldset>
+  <div class="pkg-fields"><label>Peso de caja vacía (kg)<input name="tara_kg" inputmode="decimal" placeholder="0,080" required></label><label>Peso de protección (kg)<input name="proteccion_kg" inputmode="decimal" placeholder="0,020" required></label></div>
+  <label>Peso máximo de caja llena (kg)<input name="max_kg" inputmode="decimal" placeholder="5" required></label>
+  <p class="pkg-muted">Incluí cinta y relleno en protección. El peso máximo es el que soporta el embalaje, sujeto a los límites del transportista.</p>
+  <div id="pkg-dialog-error" class="msg error" role="alert" hidden></div><button class="btn btn-primary" type="submit">Guardar embalaje</button>
+</form></dialog>
+<script id="pkg-data" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ paquetes_data | tojson }}</script>
+<script src="/static/js/portal-paquetes.js?v=1" defer></script>
+{% endblock %}

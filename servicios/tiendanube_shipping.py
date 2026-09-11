@@ -112,7 +112,17 @@ def configuracion(store_id: str) -> dict | None:
                 (str(store_id),),
             )
             row = cur.fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            result = dict(row)
+            cur.execute("""SELECT to_jsonb(c) AS paquetes FROM paquetes_tiendas c
+                JOIN tiendas_conectadas t ON t.cliente_id=c.cliente_id
+                    AND t.dominio=c.dominio AND t.plataforma=c.plataforma
+                WHERE c.plataforma='tiendanube' AND c.dominio=%s AND t.activa""",
+                (f"{store_id}.tiendanube",))
+            config = cur.fetchone()
+            result["paquetes"] = config["paquetes"] if config else None
+            return result
 
 
 def configuracion_por_label_token(token: str) -> dict | None:
@@ -835,20 +845,35 @@ def _request_id(payload: Mapping, suffix: str = "full") -> str:
     return f"tn-{suffix}-{digest}"
 
 
-def _quote_request(payload: Mapping, customer_id: str, *, paid_only=False) -> QuoteRequest:
+def _quote_request(payload: Mapping, customer_id: str, *, paid_only=False, packaging=None) -> QuoteRequest:
     items = payload.get("items") or []
     if not isinstance(items, list) or not items:
         raise ShippingContractError("El carrito no contiene productos.")
     currency = str(payload.get("currency") or "").strip().upper()
     if currency != "ARS":
         raise ShippingContractError("TAURO Solutions Ar cotiza únicamente en ARS.")
+    paquetes = None
+    if packaging and packaging.get("usar_paquetes"):
+        from servicios.paquetes_cotizacion import plan_tienda
+        from servicios.paquetes import PaqueteError
+        if packaging.get("cliente_id") != customer_id or not packaging.get("nacional", {}).get("habilitado"):
+            raise ShippingContractError("Los envíos nacionales de esta tienda no están habilitados.")
+        try:
+            plan, _ = plan_tienda(customer_id,"tiendanube",f"{payload['store_id']}.tiendanube",
+                [i for i in items if not paid_only or not i.get("free_shipping")])
+        except PaqueteError as exc:
+            raise ShippingContractError(str(exc)) from None
+        # Conserva los límites contractuales nacionales sobre las cajas finales.
+        paquetes = _packages([{"quantity":1,"grams":str(Decimal(str(b["peso_kg"]))*1000),
+            "dimensions":{"depth":b["largo_cm"],"width":b["ancho_cm"],"height":b["alto_cm"]}}
+            for b in plan["bultos"]])
     return QuoteRequest(
         request_id=_request_id(payload, "paid" if paid_only else "full"),
         customer_id=str(customer_id),
         scope=Ambito.NACIONAL,
         origin=_address(payload.get("origin") or {}, "El origen"),
         destination=_address(payload.get("destination") or {}, "El destino"),
-        packages=_packages(items, paid_only=paid_only),
+        packages=paquetes if paquetes is not None else _packages(items, paid_only=paid_only),
         declared_value=_declared_value(payload, items, paid_only=paid_only),
         declared_currency="ARS",
         origin_mode="domicilio",
@@ -927,7 +952,8 @@ def cotizar_callback(
         raise ShippingUnavailableError("La integración está suspendida.")
 
     deadline = time.monotonic() + _CALLBACK_DEADLINE_SECONDS
-    request = _quote_request(payload, str(installation["cliente_id"]))
+    packaging = cfg.get("paquetes")
+    request = _quote_request(payload, str(installation["cliente_id"]), packaging=packaging)
     candidates: list[tuple[object, QuoteResult]] = []
     carrier_responded = False
     production_adapters = adapters is None
@@ -977,7 +1003,7 @@ def cotizar_callback(
     buyer_price = selected.customer_price
     if has_free and has_paid:
         partial_request = _quote_request(
-            payload, str(installation["cliente_id"]), paid_only=True
+            payload, str(installation["cliente_id"]), paid_only=True, packaging=packaging
         )
         partial_quotes = _valid_quotes(
             adapter, partial_request, deadline=deadline
@@ -990,6 +1016,12 @@ def cotizar_callback(
                 "No se pudo calcular el descuento de envío gratis del carrito mixto."
             )
         buyer_price = same_service.customer_price
+
+    if packaging and packaging.get("usar_paquetes"):
+        from servicios.paquetes import precio_comprador
+        buyer_price = precio_comprador(buyer_price,packaging["nacional"],request.declared_value)
+    if has_free and not has_paid:
+        buyer_price = Decimal("0")
 
     now = datetime.now(_ARGENTINA_TZ)
     days = max(int(selected.estimated_days or 1), 1)

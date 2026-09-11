@@ -67,12 +67,15 @@ def crear_desde_pedido(pedido_id: int) -> dict:
             cur.execute("""
                 SELECT p.id, p.cliente_id, p.estado, p.numero,
                        p.destinatario, p.items, p.valor_total, p.moneda,
-                       p.solicitud_id,
+                       p.solicitud_id, p.flete_cobrado, p.flete_detalle,
+                       pc.usar_paquetes AS paquetes_configurados,
                        LOWER(p.plataforma) AS origen_plataforma,
                        LOWER(t.dominio) AS origen_dominio,
                        p.pedido_externo_id AS origen_pedido_externo_id
                 FROM pedidos_tienda p
                 JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                LEFT JOIN paquetes_tiendas pc ON pc.cliente_id=p.cliente_id
+                    AND pc.plataforma=LOWER(p.plataforma) AND pc.dominio=LOWER(t.dominio)
                 LEFT JOIN shopify_instalaciones i
                   ON i.dominio = t.dominio
                  AND LOWER(t.plataforma) = 'shopify'
@@ -130,6 +133,10 @@ def crear_desde_pedido(pedido_id: int) -> dict:
     pais = (dest.get("pais") or "").upper()
     if not pais:
         return _motivo(pedido_id, "El pedido no trae país de destino.")
+
+    if ped.get("paquetes_configurados"):
+        from servicios.paquetes_pedidos import crear_desde_pedido as crear_con_paquetes
+        return crear_con_paquetes(ped)
 
     # ── Productos: cada SKU del carrito tiene que existir en el catálogo ──
     # El catálogo es lo único que tiene medidas y HS code; sin eso no se

@@ -141,7 +141,7 @@ def install(request: Request, shop: str = ""):
     return _redirect_oauth(shop)
 
 
-def _redirect_oauth(shop: str) -> RedirectResponse:
+def _redirect_oauth(shop: str, *, cotizar_checkout: bool = False) -> RedirectResponse:
     """
     Manda al consentimiento de Shopify guardando el `state` en una cookie
     corta. Hasta ahora el state se generaba, viajaba... y nadie lo comparaba
@@ -149,7 +149,9 @@ def _redirect_oauth(shop: str) -> RedirectResponse:
     (anti-CSRF del flujo OAuth, y Shopify lo revisa para el App Store).
     """
     state = nuevo_state()
-    resp = RedirectResponse(url=url_instalacion(shop, state), status_code=303)
+    url = (url_instalacion(shop, state, cotizar_checkout=True)
+           if cotizar_checkout else url_instalacion(shop, state))
+    resp = RedirectResponse(url=url, status_code=303)
     resp.headers["Cache-Control"] = "private, no-store"
     resp.headers["Pragma"] = "no-cache"
     resp.set_cookie(

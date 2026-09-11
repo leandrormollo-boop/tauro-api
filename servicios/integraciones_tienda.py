@@ -774,6 +774,7 @@ def parsear_pedido_shopify(order: dict) -> Optional[dict]:
             "precio": it.get("price"),
             "sku": (it.get("sku") or "")[:160],
             "peso_gr": it.get("grams"),
+            "requires_shipping": it.get("requires_shipping", True),
             # IDs estables: el SKU puede cambiar y no es obligatorio. Son la
             # llave correcta para encontrar imagen, stock y datos aduaneros.
             "external_product_id": (

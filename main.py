@@ -315,6 +315,11 @@ app.include_router(admin_router)
 app.include_router(integraciones_router)
 app.include_router(tiendanube_shipping_router)
 app.include_router(shopify_router)
+try:
+    from endpoints.paquetes import router as paquetes_router
+    app.include_router(paquetes_router)
+except ImportError as exc:
+    print(f"[startup] configuración de paquetes no disponible: {type(exc).__name__}")
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "web"))
 _WEB_HTML_PATH = os.path.join(WEB_DIR, "Tauro Solutions.html")

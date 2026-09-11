@@ -1,4 +1,4 @@
-# RELEVO — estado y reglas del proyecto (act. 27/08/2026)
+# RELEVO — estado y reglas del proyecto (act. 11/09/2026)
 
 Este documento existe para que CUALQUIER agente (Codex, Claude, humano) pueda
 retomar el trabajo sin contexto previo. Leelo entero antes de tocar código.
@@ -6,7 +6,48 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
-## 09/09/2026 — Invoice DHL con varios artículos por caja (lista para publicar)
+## 11/09/2026 — Embalajes guardados y tarifas de tienda (desarrollo terminado)
+
+Rama `codex/paquetes-preguardados`, basada en `origin/main` `da36e53`.
+**Pendiente de autorización de publicación y piloto real.** No se cambiaron
+cuentas, productos, permisos ni ventas reales de Pesca Jacks.
+Detalle y procedimiento: [Paquetes y tarifas](PAQUETES_Y_TARIFAS.md).
+
+- Nueva sección `/portal/paquetes`: embalajes, asociaciones por variante,
+  combinaciones físicas confirmadas, políticas por tienda y simulador.
+- Un mismo motor determina cajas, contenido, peso bruto y volumen para
+  portal, API, Shopify, Tiendanube nacional y solicitudes de ventas.
+  Sin combinación confirmada se usan las cajas individuales; no se infieren
+  dimensiones a partir de la suma de volúmenes. No emite guías automáticamente.
+- El usuario solicitó ofrecer tarifas en checkout el 11/09. Esto actualiza
+  la decisión histórica de retirar CarrierService de la regla 6: el endpoint
+  anterior sigue retirado y la nueva integración es opcional por tienda,
+  con permiso `write_shipping`, secreto ligado a instalación y generación,
+  CCS habilitado y activación explícita. No se activa una tienda existente.
+- Precios de checkout en ARS y centavos Shopify, también internacional;
+  políticas tarifa real, porcentaje, fijo o gratis. Se mantienen separados
+  el precio de la cuenta TAURO y el cobrado al comprador.
+- Nacional depende de operadores habilitados, cobertura y credenciales.
+  OCA sólo cotiza cuando pasa su configuración/homologación; su emisión
+  sigue pendiente. Tiendanube mantiene el alcance nacional existente.
+- Migración idempotente `sql/paquetes.sql` incluida también en `schema.sql`.
+  Sin dependencias Python nuevas. Tablas y consultas separadas por cliente.
+- Validación aislada: 392 pruebas aprobadas de paquetes, Shopify, Tiendanube,
+  invoices, ámbitos y no fuga de precios. Incluye PostgreSQL 17 local real
+  para persistencia, migración repetida, claves de cliente y reintentos de
+  CarrierService simulados. Tras los últimos ajustes, 18 pruebas enfocadas
+  de callback y PostgreSQL volvieron a pasar.
+- Navegador con datos ficticios: asociación/combinación persistida,
+  1 reel en 15×15×10 cm y 1 reel + 2 señuelos en una caja mediana;
+  política gratis nacional y tarifa internacional con importes simulados.
+  No se usaron credenciales ni transportistas reales en la validación.
+
+Antes de activar Pesca Jacks: confirmar sus embalajes, pesos y capacidades
+físicas; autorizar tarifas y agregar TAURO a las zonas de Shopify; revisar
+operadores; probar checkout, pedido recibido y correspondencia con cajas.
+Guardar una política en el portal no reemplaza esos pasos de la tienda.
+
+## 09/09/2026 — Invoice DHL con varios artículos por caja (historial anterior)
 
 Rama local `codex/dhl-invoice-items`, basada en `origin/main` `f60b8a2`.
 **Todavía no publicada.** El usuario ingresó en la cuenta real de WAIMAO.

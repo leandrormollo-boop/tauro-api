@@ -25,11 +25,11 @@ def test_portal_no_pide_dominio_para_instalar_shopify():
     assert "https://admin.shopify.com/" in plantilla
 
 
-def test_portal_no_promete_modificar_el_checkout_retirado():
+def test_portal_explica_activacion_opcional_del_checkout():
     plantilla = (ROOT / "templates" / "portal" / "tienda.html").read_text(
         encoding="utf-8"
     )
 
     assert 'action="/portal/tienda/politica"' not in plantilla
-    assert "TAURO no agrega cargos ni" in plantilla
-    assert "modifica el checkout" in plantilla
+    assert "La función se activa por tienda" in plantilla
+    assert "autorización y zonas de envío configuradas" in plantilla

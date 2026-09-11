@@ -2354,6 +2354,17 @@ def envio_nuevo_form(
                 "pedido_tienda_id": p["id"],
             }
             pedido_info = p
+            # Las cajas calculadas al recibir la venta también precargan el
+            # flujo manual si el alta automática esperaba datos aduaneros.
+            from servicios.paquetes_cotizacion import plan_pedido
+            from servicios.paquetes_pedidos import bultos_invoice
+            from servicios.paquetes import cargar_catalogo, PaqueteError
+            plan_guardado = plan_pedido(cliente,p["id"])
+            if plan_guardado:
+                try:
+                    form["bultos"] = bultos_invoice(plan_guardado,cargar_catalogo(cliente),para_revision=True)
+                except PaqueteError:
+                    error = "El catálogo cambió desde esta venta. Revisá sus productos y embalajes antes de preparar el envío."
     if courier in {"dhl", "fedex", "ups"}:
         form["intl_courier"] = courier
     return templates.TemplateResponse(
