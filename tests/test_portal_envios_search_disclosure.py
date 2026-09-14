@@ -1,4 +1,4 @@
-"""El buscador se despliega sin JS y no oculta un filtro activo al cargar."""
+"""La búsqueda está siempre visible, es global y funciona sin JavaScript."""
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def render_search(query=""):
     source = (ROOT / "templates/portal/envios.html").read_text(encoding="utf-8")
-    start = source.index('<details class="envios-search-disclosure"')
-    end = source.index("</details>", start) + len("</details>")
+    start = source.index('<form method="GET" action="/portal/envios" class="envios-search"')
+    end = source.index("</form>", start) + len("</form>")
     return Environment(autoescape=True).from_string(source[start:end]).render(busqueda_filtro=query)
 
 
@@ -28,28 +28,27 @@ class Elements(HTMLParser):
         return next(attrs for name, attrs in self.tags if name == tag)
 
 
-def test_busqueda_cerrada_por_defecto_y_control_nativo_accesible():
+def test_busqueda_visible_por_defecto_y_control_nativo_accesible():
     html = render_search()
     parsed = Elements(html)
-    assert "open" not in parsed.first("details")
-    assert "Buscar tracking" in html
-    assert parsed.first("summary")["aria-controls"] == parsed.first("form")["id"]
+    assert not any(tag == "details" for tag, _ in parsed.tags)
+    assert "Encontrá tu envío" in html
+    assert parsed.first("label")["for"] == parsed.first("input")["id"]
     assert parsed.first("input")["value"] == ""
     assert not any(tag in ("script", "svg") for tag, _ in parsed.tags)
 
 
 def test_el_boton_no_depende_de_la_bandera_auxiliar_de_historial():
     source = (ROOT / "templates/portal/envios.html").read_text(encoding="utf-8")
-    before = source[:source.index('<details class="envios-search-disclosure"')]
+    before = source[:source.index('<form method="GET" action="/portal/envios" class="envios-search"')]
     assert before.rfind("{% if tiene_historial %}") < before.rfind("{% endif %}")
 
 
-def test_filtro_activo_abre_el_buscador_y_permite_limpiar():
+def test_filtro_activo_conserva_busqueda_y_permite_limpiar():
     html = render_search("888244412640")
     parsed = Elements(html)
-    assert "open" in parsed.first("details")
+    assert not any(tag == "details" for tag, _ in parsed.tags)
     assert parsed.first("input")["value"] == "888244412640"
-    assert "Filtro activo" in html
     assert parsed.first("a")["href"] == "/portal/envios"
     assert parsed.first("a")["aria-label"] == "Limpiar búsqueda"
 

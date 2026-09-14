@@ -120,7 +120,8 @@ def normalizar_periodo(
         etiqueta = f"{_NOMBRE_MES[mes_valor]} {anio_valor}"
 
     anios = sorted(
-        {a for a, _ in disponibles} | {hoy.year, anio_valor}, reverse=True
+        {a for a, _ in disponibles} | {hoy.year} | ({anio_valor} if anio_valor else set()),
+        reverse=True,
     )
     return {
         "anio": anio_valor,

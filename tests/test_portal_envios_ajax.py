@@ -21,7 +21,7 @@ def test_region_actualizable_contiene_filtros_resumen_y_tabla():
     assert 'class="chips-embudo"' in region
     assert 'class="card envios-card"' in region
     assert 'class="envios-pagination"' in region
-    assert '/static/js/portal-envios.js?v=1' in TEMPLATE[fin:]
+    assert '/static/js/portal-envios.js?v=2' in TEMPLATE[fin:]
 
 
 def test_filtros_conservan_fallback_sin_javascript():
@@ -52,8 +52,8 @@ def test_actualizacion_falla_cerrada_y_no_inyecta_html_sin_parsearlo():
     assert 'parsed.querySelector("[data-envios-region]")' in JAVASCRIPT
     assert 'document.importNode(next, true)' in JAVASCRIPT
     assert 'new AbortController()' in JAVASCRIPT
-    assert 'if (error.name !== "AbortError")' in JAVASCRIPT
-    assert 'showError(loadingRoot)' in JAVASCRIPT
+    assert 'error.name !== "AbortError" || timedOut' in JAVASCRIPT
+    assert 'showError(loadingRoot, timedOut)' in JAVASCRIPT
     assert 'if (!keepErrorVisible) stopLoading(loadingRoot)' in JAVASCRIPT
     assert 'window.location.assign(finalUrl.href)' in JAVASCRIPT
     assert '.innerHTML = html' not in JAVASCRIPT

@@ -6,6 +6,56 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 14/09/2026 — Experiencia del cliente: revisión WAIMAO y mejoras locales
+
+Rama `codex/portal-experiencia-cliente`, base `origin/main` `5f91386`.
+**Preparada para revisión, sin publicar.** El usuario pidió analizar WAIMAO
+y avanzar con las mejoras de operación y diseño. El checkout previo
+`dhl-invoice-items` (tracking-claridad-cliente) y `portal-paquetes` se conservan.
+Informe: [Experiencia del portal](EXPERIENCIA_PORTAL_CLIENTE.md).
+
+- Estado principal coherente en inicio/lista/detalle. Cancelado, reemplazado
+  y entrega operativa confirmada prevalecen; en los demás casos se presenta
+  el seguimiento reconocido. No se reescriben estados históricos.
+- Separación de retenidos y entregados en filtros y contadores. En tránsito
+  reemplaza el texto ambiguo Proceso de entrega; mensaje del courier y hora
+  de sincronización visibles. Se mantiene la consulta DHL diaria.
+- Inicio más compacto con la pieza original del avión, búsqueda visible,
+  contadores y actividad antes de cuenta. Fechas y resumen desplegables,
+  año 0 eliminado, importes no repetidos, anulaciones fuera del total visible.
+- Ver envío y PDF prioritarios; Verificar/Repetir en Más opciones. Retiro
+  accesible desde todas las guías internacionales elegibles, sin ofrecerlo
+  cuando el seguimiento ya informa movimientos. Enlace de recolecciones
+  corregido al filtro `tipo=internacional&paso=guia_lista`.
+- Campos legibles y etiquetas completas en móvil. Contraste del cotizador
+  claro corregido. CSS adicional limitado al cuerpo del portal autenticado.
+- Filtros devuelven fragmento con `X-Tauro-Partial: envios`; navegación GET
+  normal sigue disponible sin JS. Timeout de 15 s y errores conservan la lista.
+  Historial, desplazamiento y foco se recuperan al filtrar.
+- Validación final: 240 passed, 1 skipped (PostgreSQL aislado no configurado),
+  1 deselected (husos horarios Windows; misma falla probada en `5f91386`).
+  Pruebas de invoice, cotización, cuenta, paquetes, retiros, repetición,
+  cancelación, presentación y filtrado. JS y diff check correctos.
+- Navegador con datos ficticios: escritorio/móvil, oscuro/claro, filtros,
+  búsqueda global, volver atrás, acciones y formulario hasta invoice con
+  artículo adicional. No se emitieron guías ni se consultaron tarifas reales.
+- Respuestas locales HTML: reducción 35,6% con diez filas y 68,7% con una.
+  No se midió todavía latencia de producción ni de DHL. Se observaron dos
+  avisos de Chrome por transición omitida; sin bloqueo de navegación.
+- Ejecución por el agente principal, sin delegación. Controles: trabajo
+  aislado, registros de prueba, sin secretos, sin cambios en facturación,
+  reservas de emisión, credenciales, migraciones o dependencias.
+
+Prioridad operativa pendiente: contrastar el aviso de retención del último
+envío WAIMAO con los eventos DHL. Esta mejora no confirma esa retención ni
+cambia el clasificador del carrier; no inferir ubicación física por un
+evento de despacho aduanero. Confirmar autorización antes de publicar y
+seguir la verificación de `/salud` y recorridos autenticados en producción.
+
+Nota de continuidad: la invoice de varios artículos ya está incluida en
+`origin/main` (`da36e53`) y visible en el portal revisado el 14/09. La entrada
+del 09/09 más abajo conserva la foto anterior a su publicación.
+
 ## 14/09/2026 — Publicación de embalajes guardados y tarifas de tienda
 
 Rama `codex/paquetes-preguardados`, basada en `origin/main` `da36e53`.

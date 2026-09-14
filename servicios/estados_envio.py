@@ -1,8 +1,8 @@
 """Vocabulario único de estados operativos y físicos de un envío.
 
 El estado operativo pertenece a TAURO (pedido, guía y despacho). El estado de
-tracking describe lo que informa el courier. Se presentan siempre por separado
-para no convertir, por ejemplo, una guía lista en un envío ya despachado.
+tracking describe lo que informa el courier. Conservamos ambos datos y derivamos
+un estado principal para el cliente sin modificar el historial operativo.
 """
 
 from __future__ import annotations
@@ -39,10 +39,21 @@ ESTADOS_OPERACION_UI = {
 }
 
 ESTADOS_TRACKING_UI = {
-    "PROCESO_ENTREGA": ("Proceso de entrega", "warn"),
+    "PROCESO_ENTREGA": ("En tránsito", "warn"),
     "RETENIDO": ("Retenido", "error"),
     "ENTREGADO": ("Entregado", "ok"),
 }
+
+
+def estado_principal_envio(estado: Any, tracking_estado: Any = None) -> str:
+    """La anulación prevalece; el tracking confirmado supera hitos anteriores."""
+    operacion = str(estado or "").strip().upper()
+    tracking = str(tracking_estado or "").strip().upper()
+    if operacion in {"CANCELADO", "REEMPLAZADO", "ENTREGADO"}:
+        return operacion
+    if tracking in ESTADOS_TRACKING_UI:
+        return tracking
+    return operacion
 
 
 def _presentacion(codigo: Any, mapa: dict, *, vacio: tuple[str, str]) -> dict:
@@ -56,7 +67,7 @@ def _presentacion(codigo: Any, mapa: dict, *, vacio: tuple[str, str]) -> dict:
 
 
 def presentar_estados_envio(envio: dict) -> dict:
-    """Agrega las dos presentaciones canónicas sin borrar el dato original."""
+    """Agrega las presentaciones canónicas sin borrar el dato original."""
     envio["estado_operacion_ui"] = _presentacion(
         envio.get("estado"),
         ESTADOS_OPERACION_UI,
@@ -66,5 +77,12 @@ def presentar_estados_envio(envio: dict) -> dict:
         envio.get("tracking_estado"),
         ESTADOS_TRACKING_UI,
         vacio=("Sin movimientos", "muted"),
+    )
+    envio["estado_cliente_ui"] = _presentacion(
+        estado_principal_envio(envio.get("estado"), envio.get("tracking_estado")),
+        {**ESTADOS_OPERACION_UI, **ESTADOS_TRACKING_UI,
+         "EMITIENDO": ("Generando guía", "warn"),
+         "VERIFICAR_COURIER": ("Confirmando emisión", "warn")},
+        vacio=("Por confirmar", "muted"),
     )
     return envio

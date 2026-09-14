@@ -10,8 +10,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% block content %}
 {% set estados_orden = ["SOLICITADO", "GUIA_LISTA", "DESPACHADO", "ENTREGADO"] %}
 {% set estados_labels = {"SOLICITADO": "Solicitado", "GUIA_LISTA": "Guía lista", "DESPACHADO": "Recolectado", "ENTREGADO": "Entregado"} %}
-{% set idx_por_estado = {"SOLICITADO": 0, "EN_PROCESO": 0, "EMITIENDO": 0, "VERIFICAR_COURIER": 0, "GUIA_LISTA": 1, "DESPACHADO": 2, "ENTREGADO": 3} %}
-{% set idx_actual = idx_por_estado.get(s.estado, -1) %}
+{% set idx_por_estado = {"SOLICITADO": 0, "EN_PROCESO": 0, "EMITIENDO": 0, "VERIFICAR_COURIER": 0, "GUIA_LISTA": 1, "DESPACHADO": 2, "PROCESO_ENTREGA": 2, "RETENIDO": 2, "ENTREGADO": 3} %}
+{% set idx_actual = idx_por_estado.get(s.estado_cliente_ui.codigo, -1) %}
 
 <div class="page-title page-title-row">
     <div>
@@ -20,8 +20,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <p>{% if s.etiqueta_cliente %}Destinatario: {{ s.dest_nombre }} · {% endif %}{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) }} · {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "Fecha sin informar" }}.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-        <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">Operación: {{ s.estado_operacion_ui.label }}</span>
-        <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">Tracking: {{ s.estado_tracking_ui.label }}</span>
+        <span class="badge {{ s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
         {% if ambito == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-primary btn-sm">Repetir envío</a>{% endif %}
         <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos {{ ambito if ambito != 'sin_clasificar' else '' }}</a>
     </div>
@@ -87,7 +86,13 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         {% endfor %}
     </div>
     <p style="text-align:center;color:var(--fg-3);font-size:13px;margin-top:4px;">
-        {% if s.estado == "SOLICITADO" %}
+        {% if s.estado_cliente_ui.codigo == "ENTREGADO" %}
+            El courier confirmó la entrega del envío.
+        {% elif s.estado_cliente_ui.codigo == "RETENIDO" %}
+            El courier informa una retención. Revisá su último mensaje en el seguimiento de abajo.
+        {% elif s.estado_cliente_ui.codigo == "PROCESO_ENTREGA" %}
+            Tu envío está en tránsito. La entrega todavía no fue confirmada por el courier.
+        {% elif s.estado == "SOLICITADO" %}
             {% if ambito == 'nacional' %}La emisión nacional se habilitará cuando conectemos OCA y Andreani. No se emitió ni se generó ningún cargo.
             {% elif ambito == 'sin_clasificar' %}El origen y el destino necesitan revisión antes de emitir. No se generó ningún cargo.
             {% elif puede_emitir %}Tu solicitud está lista: emití la guía con el botón de abajo, o no hagas nada y la emite Tauro.{% else %}Recibimos tu solicitud. Tauro está generando la guía — te avisamos apenas esté lista.{% endif %}
@@ -97,8 +102,6 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             ¡Tu guía está lista! Descargá el PDF, imprimí las etiquetas y prepará las cajas.
         {% elif s.estado == "DESPACHADO" %}
             {{ courier_nombre }} ya recolectó tu envío. Seguilo con el tracking de abajo.
-        {% elif s.estado == "ENTREGADO" %}
-            El courier confirmó la entrega del envío.
         {% endif %}
     </p>
 </div>
@@ -157,7 +160,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 {% if s.bultos and s.bultos|length %}El PDF comienza con una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}El PDF comienza con la etiqueta para imprimir y pegar en la caja.{% endif %}
                 {% if s.tiene_factura_comercial %} La invoice comercial está incluida al final del mismo archivo.{% endif %}
             </p>
-            {% if ambito == 'internacional' and s.estado == 'GUIA_LISTA' and courier_codigo != 'ENVIA' %}
+            {% if ambito == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and courier_codigo != 'ENVIA' %}
             {# El paso que sigue a tener la etiqueta: que pasen a buscarla.
                Llega al form con courier/bultos/peso de este envío puestos. #}
             <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-full" style="margin-top:8px;">
@@ -206,6 +209,15 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <div class="mono" style="font-size:17px;margin-bottom:12px;">
                 <a href="{{ track_url }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
             </div>
+            {% if s.tracking_descripcion %}
+            <div class="msg{% if s.estado_cliente_ui.codigo == 'RETENIDO' %} error{% endif %}">
+                <strong>Último mensaje de {{ courier_nombre }}</strong><br>{{ s.tracking_descripcion }}
+            </div>
+            {% endif %}
+            <p class="tracking-sync-note">
+                {% if s.tracking_actualizado_at %}Última sincronización: {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M %Z") }}.{% else %}Todavía no recibimos una actualización del courier.{% endif %}
+                {% if courier_codigo == 'DHL' %}El portal consulta DHL una vez al día. El seguimiento oficial puede tener movimientos posteriores.{% endif %}
+            </p>
             <a href="{{ track_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Seguir envío →</a>
         {% else %}
             <div class="empty" style="padding:14px;">El tracking aparece acá cuando se emite la guía.</div>

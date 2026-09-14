@@ -25,6 +25,7 @@
     })();
     </script>
     <link rel="stylesheet" href="/static/css/tauro.css?v=48">
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=1">{% endif %}
     <script src="/static/js/tauro-ui.js?v=8" defer></script>
     <script src="/static/js/portal-cotizador.js?v=3" defer></script>
     <script src="/static/js/portal-theme.js?v=1" defer></script>
@@ -40,7 +41,7 @@
     <meta name="apple-mobile-web-app-title" content="TAURO">
     <script src="/static/js/portal-pwa.js?v=1" defer></script>
 </head>
-<body>
+<body{% if cliente %} class="portal-operacion"{% endif %}>
 {% if not cliente %}
 <button type="button" class="theme-toggle theme-toggle-floating" data-theme-toggle aria-label="Cambiar apariencia" title="Cambiar apariencia">
     <span class="theme-toggle-track" aria-hidden="true">

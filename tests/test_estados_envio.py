@@ -16,14 +16,14 @@ def test_presenta_dos_estados_con_vocabulario_canonico():
     assert envio["estado_operacion_ui"]["label"] == "Guía lista"
     assert envio["estado_tracking_ui"] == {
         "codigo": "PROCESO_ENTREGA",
-        "label": "Proceso de entrega",
+        "label": "En tránsito",
         "clase": "warn",
     }
 
 
 def test_colores_de_tracking_siguen_la_regla_operativa():
     casos = {
-        "PROCESO_ENTREGA": ("Proceso de entrega", "warn"),
+        "PROCESO_ENTREGA": ("En tránsito", "warn"),
         "ENTREGADO": ("Entregado", "ok"),
         "RETENIDO": ("Retenido", "error"),
     }
@@ -78,8 +78,7 @@ def test_plantillas_no_duplican_mapas_de_estados():
     ):
         contenido = (ROOT / relativo).read_text()
         assert "set estados =" not in contenido
-        assert "estado_operacion_ui" in contenido
-        assert "estado_tracking_ui" in contenido
+        assert "estado_cliente_ui" in contenido
 
 
 def test_detalle_nombra_recolectado_sin_exponer_despachado():

@@ -93,7 +93,7 @@ def test_despachado_se_presenta_como_recolectado():
     with mock.patch.object(pc, "get_conn", _conn_falsa(filas, n=0)):
         pasos = {p["clave"]: p for p in pc.embudo_envios("TEST")}
 
-    assert pasos["despachados"]["titulo"] == "Recolectados"
+    assert pasos["despachados"]["titulo"] == "En seguimiento"
     assert pasos["despachados"]["cantidad"] == 2
 
 

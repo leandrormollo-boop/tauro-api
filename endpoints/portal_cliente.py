@@ -1916,6 +1916,7 @@ def envios_view(
         context={
             "cliente": cliente,
             **vista,
+            "parcial": request.headers.get("X-Tauro-Partial") == "envios",
             "periodo": periodo,
             "periodo_query": urlencode(periodo_parametros),
             "puede_emitir": puede_emitir,
@@ -1923,7 +1924,7 @@ def envios_view(
                 ("Solicitud creada. Podés emitir la guía vos mismo desde el botón "
                  "de la fila, o dejarla y la emitimos nosotros.")
                 if (ok == "solicitado" and puede_emitir)
-                else ("Solicitud creada. Tauro ya la ve en el admin." if ok == "solicitado" else None)
+                else ("Solicitud creada. El equipo de TAURO ya la recibió." if ok == "solicitado" else None)
             ),
         },
     )

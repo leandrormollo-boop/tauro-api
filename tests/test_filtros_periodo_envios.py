@@ -122,7 +122,7 @@ def test_endpoint_portal_aplica_el_rango_al_cliente_autenticado(monkeypatch):
     )
 
     respuesta = portal.envios_view(
-        SimpleNamespace(), tipo="internacional", anio="2026", mes="8",
+        SimpleNamespace(headers={}), tipo="internacional", anio="2026", mes="8",
         semana="2", cliente="WAIMAO",
     )
 
@@ -169,7 +169,7 @@ def test_buscador_portal_descarta_todos_los_filtros_activos(monkeypatch):
     )
 
     respuesta = portal.envios_view(
-        SimpleNamespace(), tipo="nacional", paso="despachados",
+        SimpleNamespace(headers={}), tipo="nacional", paso="despachados",
         buscar=" TRACK-123 ", anio="2026", mes="8", semana="2",
         cliente="WAIMAO",
     )
@@ -209,3 +209,9 @@ def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
     # no borra el mes en el que el cliente realizó la operación.
     assert "s.estado <> 'CANCELADO'" not in solicitudes[inicio:fin]
     assert "cargo_cancelado.estado='CANCELADO'" not in solicitudes[inicio:fin]
+
+def test_filtro_vacio_no_agrega_anio_cero_al_desplegable():
+    for anio in ("", "0", "SQL", "-1"):
+        periodo = normalizar_periodo(anio, "", "", [(2025, 8)], hoy=date(2026, 9, 14))
+        assert periodo["anios"] == [2026, 2025]
+        assert periodo["activo"] is False

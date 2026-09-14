@@ -87,7 +87,7 @@
     {% elif not puede_recolectar and dhl_requiere_envio %}
         <div class="msg warn">
             Para coordinar un retiro DHL, primero emití la guía. Después entrá en
-            <a href="/portal/envios?ambito=internacional"><b>Mis envíos internacionales</b></a>
+            <a href="/portal/envios?tipo=internacional&amp;paso=guia_lista"><b>Mis envíos internacionales</b></a>
             y elegí <b>Programar retiro</b> en esa guía. Así usamos automáticamente el origen,
             las cajas, las medidas y el valor declarado correctos.
         </div>
@@ -102,7 +102,7 @@
     {% else %}
     {% if dhl_requiere_envio %}
     <div class="msg" style="margin-bottom:14px;">
-        ¿La guía es DHL? Programá el retiro desde <a href="/portal/envios?ambito=internacional">Mis envíos</a>
+        ¿La guía es DHL? Programá el retiro desde <a href="/portal/envios?tipo=internacional&amp;paso=guia_lista">Mis envíos</a>
         para conservar sus cajas y su dirección exacta.
     </div>
     {% endif %}

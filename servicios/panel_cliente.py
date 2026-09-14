@@ -23,7 +23,7 @@ from decimal import Decimal, InvalidOperation
 import re
 
 from core.database import get_conn
-from servicios.estados_envio import presentar_estados_envio
+from servicios.estados_envio import estado_principal_envio, presentar_estados_envio
 
 
 # ── Embudo de envíos ─────────────────────────────────────────
@@ -53,9 +53,23 @@ PASOS_EMBUDO = [
     },
     {
         "clave": "despachados",
-        "titulo": "Recolectados",
-        "detalle": "Ya viajan a destino",
+        "titulo": "En seguimiento",
+        "detalle": "Recolectados o en tránsito; entrega aún no confirmada",
         "url": "/portal/envios?paso=despachados",
+        "accion_de": None,
+    },
+    {
+        "clave": "retenidos",
+        "titulo": "Retenidos",
+        "detalle": "Revisá el último aviso del courier",
+        "url": "/portal/envios?paso=retenidos",
+        "accion_de": "cliente",
+    },
+    {
+        "clave": "entregados",
+        "titulo": "Entregados",
+        "detalle": "Entrega confirmada",
+        "url": "/portal/envios?paso=entregados",
         "accion_de": None,
     },
     {
@@ -74,7 +88,7 @@ PASOS_EMBUDO = [
 ENVIOS_POR_PAGINA = 10
 
 
-def paso_de_estado(estado: str) -> str | None:
+def paso_de_estado(estado: str, tracking_estado: str | None = None) -> str | None:
     """
     Traduce un estado de solicitudes_guia al paso del embudo que le toca.
 
@@ -86,17 +100,19 @@ def paso_de_estado(estado: str) -> str | None:
     Los estados cancelado y reemplazado conservan su propia pestaña para que
     los contadores siempre sumen el total visible.
     """
-    estado = (estado or "").upper()
+    estado = estado_principal_envio(estado, tracking_estado)
     if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO", "VERIFICAR_COURIER"):
         # Los tres significan lo mismo para el cliente: la pelota la tiene
         # Tauro. Mismo criterio que usa la bandeja del admin.
         return "esperando_guia"
     if estado == "GUIA_LISTA":
         return "guia_lista"
-    if estado in ("DESPACHADO", "ENTREGADO"):
-        # DESPACHADO es el estado terminal que la tabla tiene hoy; ENTREGADO
-        # queda contemplado para cuando el tracking escriba la entrega.
+    if estado in ("DESPACHADO", "PROCESO_ENTREGA"):
         return "despachados"
+    if estado == "RETENIDO":
+        return "retenidos"
+    if estado == "ENTREGADO":
+        return "entregados"
     if estado in ("CANCELADO", "REEMPLAZADO"):
         return "canceladas"
     print(f"[panel] estado sin mapear en el embudo: {estado!r}")
@@ -228,7 +244,7 @@ def preparar_historial_envios(
     total_busqueda = len(filtradas)
     conteos: dict[str, int] = {}
     for solicitud in filtradas:
-        clave = paso_de_estado(solicitud.get("estado"))
+        clave = paso_de_estado(solicitud.get("estado"), solicitud.get("tracking_estado"))
         if clave:
             conteos[clave] = conteos.get(clave, 0) + 1
     chips = [
@@ -240,7 +256,8 @@ def preparar_historial_envios(
     paso = (paso or "").strip().lower()
     if paso in {chip["clave"] for chip in chips}:
         filtradas = [
-            s for s in filtradas if paso_de_estado(s.get("estado")) == paso
+            s for s in filtradas
+            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) == paso
         ]
     else:
         paso = ""
@@ -293,24 +310,17 @@ def embudo_envios(cliente_id: str) -> list[dict]:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT estado, COUNT(*) AS n
+                    SELECT estado, tracking_estado, COUNT(*) AS n
                     FROM solicitudes_guia s
                     WHERE s.cliente_id = %s
                       AND s.test=FALSE
                       AND s.visible_cliente=TRUE
-                      AND NOT (
-                          s.estado='GUIA_LISTA'
-                          AND (
-                              s.guia_descargada_at IS NOT NULL
-                              OR s.tracking_estado IS NOT NULL
-                          )
-                      )
-                    GROUP BY s.estado
+                    GROUP BY s.estado, s.tracking_estado
                     """,
                     (cliente_id,),
                 )
                 for fila in cur.fetchall():
-                    paso = paso_de_estado(fila["estado"])
+                    paso = paso_de_estado(fila["estado"], fila.get("tracking_estado"))
                     if paso:
                         conteos[paso] += int(fila["n"] or 0)
 

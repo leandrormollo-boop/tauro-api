@@ -1,0 +1,197 @@
+/* Lectura y operación cotidiana. Sólo el portal autenticado; sin dependencias. */
+.portal-operacion { --fg-3: #ada8ba; --fg-4: #9691a4; }
+html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
+.portal-operacion .main-inner { max-width: 1440px; padding: 30px 36px 44px; }
+.portal-operacion .sidebar .side-item { min-height: 44px; font-size: 14px; }
+.portal-operacion .btn { min-height: 42px; font-size: 14px; }
+.portal-operacion .btn-sm { min-height: 36px; font-size: 12px; }
+.portal-operacion .btn:not(.is-loading) { animation: none; }
+.portal-operacion .btn:focus-visible,
+.portal-operacion summary:focus-visible,
+.portal-operacion a:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 4px; }
+.portal-operacion .eyebrow { font-size: 11px; letter-spacing: .09em; }
+.portal-operacion .badge { font-size: 11px; line-height: 1.4; white-space: normal; }
+.portal-operacion .card { border-radius: 16px; }
+.portal-operacion .page-title p { font-size: 14px; line-height: 1.55; }
+
+/* La pieza de marca acompaña el trabajo y conserva el avión original. */
+.portal-operacion .main:has(> .main-inner > .home-hero) { --home-panorama-height: 340px; }
+.portal-operacion .main:has(> .main-inner > .home-hero) .home-hero {
+  min-height: 220px; padding: 22px 10px; margin-bottom: 20px;
+}
+.portal-operacion .home-hero h1 { font-size: clamp(28px, 3vw, 42px); line-height: 1.15; }
+.portal-operacion .home-hero p { max-width: 470px; font-size: 15px; line-height: 1.5; }
+.portal-operacion .home-primary-actions { margin-top: 20px; }
+.portal-operacion .home-flow {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px;
+}
+.portal-operacion .home-flow-item {
+  position: relative; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px;
+  padding: 19px 20px; min-width: 0; border: 1px solid var(--line); border-radius: 14px;
+  color: var(--fg-1); background: var(--bg-elev); text-decoration: none;
+  transition: border-color .16s, transform .16s;
+}
+.portal-operacion .home-flow-item:hover { border-color: var(--accent-soft); transform: translateY(-2px); }
+.portal-operacion .home-flow-item > span:first-child { font-size: 13px; align-self: center; }
+.portal-operacion .home-flow-item strong { font-family: var(--font-display); font-size: 27px; line-height: 1.1; }
+.portal-operacion .home-flow-item small { grid-column: 1/-1; font-size: 12px; color: var(--fg-3); line-height: 1.45; padding-right: 10px; }
+.portal-operacion .home-flow-arrow { position: absolute; right: 12px; bottom: 12px; color: var(--accent-soft); font-size: 14px; }
+.portal-operacion .home-flow-item.has-alert { border-color: var(--error); }
+.portal-operacion .home-flow-item.has-alert strong { color: var(--error); }
+.portal-operacion .home-shipment-search { margin-bottom: 24px; }
+.portal-operacion .home-shipment-search label { display: block; font-size: 14px; margin-bottom: 9px; color: var(--fg-1); }
+.portal-operacion .home-shipment-search > div { display: flex; align-items: center; gap: 14px; padding: 8px 10px 8px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg-elev); }
+.portal-operacion .home-shipment-search svg { flex: 0 0 20px; color: var(--fg-3); }
+.portal-operacion .home-shipment-search input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 16px; box-shadow: none; padding: 10px 0; }
+.portal-operacion .home-shipment-search:focus-within > div { border-color: var(--accent-soft); }
+.portal-operacion .home-scope-activity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; }
+.portal-operacion .home-section-title { grid-column: 1/-1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.portal-operacion .home-section-title h2 { font-size: 18px; margin: 0; }
+.portal-operacion .home-section-title a, .portal-operacion .home-scope-head a { font-size: 13px; }
+.portal-operacion .home-scope-card { padding: 20px; margin: 0; }
+.portal-operacion .home-scope-activity:has(.is-empty) { grid-template-columns: 1fr; }
+.portal-operacion .home-scope-card.is-empty { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px; }
+.portal-operacion .home-scope-card.is-empty .home-scope-head { padding: 0; margin: 0; border: 0; }
+.portal-operacion .home-scope-card.is-empty .home-scope-head a { display: none; }
+.portal-operacion .home-scope-empty { padding: 0; display: flex; align-items: center; gap: 14px; font-size: 13px; }
+.portal-operacion .home-scope-row { padding: 16px 0; align-items: center; gap: 16px; }
+.portal-operacion .home-scope-row strong { font-size: 15px; }
+.portal-operacion .home-scope-row small { display: block; font-size: 12px; line-height: 1.5; margin-top: 4px; }
+.portal-operacion .home-shipment-copy { min-width: 0; overflow-wrap: anywhere; }
+.portal-operacion .home-overview-grid { gap: 16px; margin: 0 0 24px; }
+.portal-operacion .home-account-totals { margin-top: 14px; }
+.portal-operacion .home-account-totals summary { font-size: 13px; cursor: pointer; color: var(--fg-3); padding: 8px 0; }
+.portal-operacion .home-currency { color: var(--fg-3); font-size: 12px; }
+.portal-operacion .main:has(> .main-inner > .home-hero) .home-overview-grid > .card,
+.portal-operacion .main:has(> .main-inner > .home-hero) .home-scope-activity > .card { backdrop-filter: none; -webkit-backdrop-filter: none; }
+
+/* Buscar primero; fechas y cifras de conjunto se abren a pedido. */
+.portal-operacion .envios-search { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(280px, 1.6fr); gap: 20px; align-items: center; margin: 0 0 12px; padding: 18px 20px; }
+.portal-operacion .envios-search label strong { font-size: 16px; }
+.portal-operacion .envios-search label span { font-size: 12px; line-height: 1.5; }
+.portal-operacion .envios-search input { font-size: 16px; min-height: 44px; }
+.portal-operacion .envios-search-control { min-width: 0; }
+.portal-operacion .envios-date-filters,
+.portal-operacion .envios-period-summary { margin: 0 0 12px; }
+.portal-operacion .envios-date-filters > summary,
+.portal-operacion .envios-period-summary > summary { cursor: pointer; padding: 10px 2px; font-size: 13px; color: var(--fg-2); }
+.portal-operacion .envios-date-filters > summary span,
+.portal-operacion .envios-period-summary > summary span { color: var(--fg-3); margin-left: 10px; font-size: 12px; }
+.portal-operacion .envios-scope-tabs { margin-bottom: 12px; }
+.portal-operacion .chips-embudo { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.portal-operacion .chips-embudo .chip-e { min-height: 38px; font-size: 12px; padding: 8px 12px; }
+.portal-operacion .envios-resumen { font-size: 13px; line-height: 1.5; }
+.portal-operacion .envios-table { table-layout: auto; }
+.portal-operacion .envios-table th { font-size: 11px; padding: 14px 12px; }
+.portal-operacion .envios-table td { padding: 18px 12px; font-size: 13px; vertical-align: top; }
+.portal-operacion .envios-table td small { font-size: 11px; line-height: 1.5; }
+.portal-operacion .envio-service-cell .service-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+.portal-operacion .envio-service-cell .tracking-updated,
+.portal-operacion .envio-service-cell .tracking-alert { max-width: 270px; white-space: normal; overflow-wrap: anywhere; font-size: 11px; line-height: 1.45; }
+.portal-operacion .envio-service-cell .track-link { font-size: 13px; margin-top: 9px; }
+.portal-operacion .envio-price-cell > .envio-price-final { display: block; border: 0; padding-top: 0; font-size: 15px; white-space: nowrap; overflow-wrap: normal; }
+.portal-operacion .envio-price-cell > .envio-price-final small { display: block; margin-bottom: 5px; white-space: normal; }
+.portal-operacion .envio-price-breakdown { margin-bottom: 8px; }
+.portal-operacion .envio-price-breakdown summary,
+.portal-operacion .envio-more-actions summary { cursor: pointer; color: var(--fg-3); font-size: 12px; padding: 8px 0; }
+.portal-operacion .envio-more-actions { order: 3; }
+.portal-operacion .envios-table .row-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.portal-operacion .envios-table .row-actions .btn-sm { font-size: 12px; min-height: 36px; }
+.portal-operacion .envios-table .row-actions > a { white-space: normal; text-align: center; }
+.portal-operacion .tracking-sync-note { color: var(--fg-3); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+
+/* Formularios cómodos: crecer verticalmente antes que comprimir el texto. */
+.portal-operacion .wizard-compacto .step label { font-size: 12px; color: var(--fg-3); }
+.portal-operacion .wizard-compacto .step.active label,
+.portal-operacion .wizard-compacto .step.done label { color: var(--fg-1); }
+.portal-operacion .wizard-compacto .form-group label,
+.portal-operacion .wizard-compacto .shipment-package-card label,
+.portal-operacion .wizard-compacto .shipment-invoice-card label { font-family: var(--font-sans); font-size: 13px; line-height: 1.5; color: var(--fg-2); letter-spacing: 0; text-transform: none; white-space: normal; overflow: visible; text-overflow: clip; }
+.portal-operacion .wizard-compacto input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]),
+.portal-operacion .wizard-compacto select,
+.portal-operacion .wizard-compacto textarea,
+.portal-operacion .wizard-compacto .tselect-btn { min-height: 44px; padding: 10px 12px; font-size: 16px; line-height: 1.4; }
+.portal-operacion .wizard-compacto .form-grid-2 { gap: 16px; }
+.portal-operacion .wizard-compacto .shipment-step-help,
+.portal-operacion .wizard-compacto .form-help { font-size: 12px; line-height: 1.55; }
+.portal-operacion .wizard-compacto .input-unit span,
+.portal-operacion .wizard-compacto .invoice-line-total,
+.portal-operacion .wizard-compacto .shipment-box-value small { font-size: 11px; }
+.portal-operacion .wizard-compacto .bulto-fisico,
+.portal-operacion .wizard-compacto .bulto-invoice { gap: 12px; }
+.portal-operacion .wizard-compacto .shipment-package-card,
+.portal-operacion .wizard-compacto .shipment-invoice-card { padding: 18px; }
+.portal-operacion .wizard-compacto .paso-nav .btn { min-height: 44px; font-size: 14px; }
+.portal-operacion .quote-form-overview-copy > span,
+.portal-operacion .quote-block-head small { display: none; }
+.portal-operacion .quote-form-overview-copy > strong { color: var(--fg-1); font-size: 16px; }
+.portal-operacion .quote-form-overview-copy > small,
+.portal-operacion .quote-completion { font-size: 12px; line-height: 1.5; }
+.portal-operacion .quote-form-card .form-group label { font-family: var(--font-sans); font-size: 13px; text-transform: none; letter-spacing: 0; }
+.portal-operacion .quote-stepper small { font-size: 12px; }
+html[data-theme="light"] .portal-operacion .quote-form-card { background: var(--bg-elev); box-shadow: 0 10px 28px rgba(44,31,67,.055); }
+.portal-operacion #quote-window-dialog input,
+.portal-operacion #quote-window-dialog select,
+.portal-operacion #quote-window-dialog .tselect-btn { font-size: 16px; min-height: 44px; }
+
+@media (max-width: 1100px) {
+  .portal-operacion .main-inner { padding: 24px; }
+  .portal-operacion .home-flow-item { padding: 15px; }
+  .portal-operacion .envios-table th,
+  .portal-operacion .envios-table td { padding: 14px 9px; }
+}
+@media (max-width: 900px) {
+  .portal-operacion .main-inner { padding: 20px 18px 96px; }
+  .portal-operacion .main:has(> .main-inner > .home-hero) { --home-panorama-height: 340px; }
+  .portal-operacion .envios-search { grid-template-columns: 1fr; gap: 10px; }
+}
+@media (max-width: 620px) {
+  .portal-operacion .main-inner { padding: 16px 14px 96px; }
+  .portal-operacion .main:has(> .main-inner > .home-hero) { --home-panorama-height: 300px; }
+  .portal-operacion .main:has(> .main-inner > .home-hero)::before { background-position: center bottom, 75% 0; background-size: 100% 100%, auto 300px; }
+  .portal-operacion .main:has(> .main-inner > .home-hero) .home-hero { min-height: 205px; padding: 16px 4px; margin-bottom: 14px; }
+  .portal-operacion .home-hero p { font-size: 14px; max-width: 255px; }
+  .portal-operacion .home-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+  .portal-operacion .home-flow-item { padding: 14px; }
+  .portal-operacion .home-flow-item > span:first-child { font-size: 12px; }
+  .portal-operacion .home-flow-item strong { font-size: 24px; }
+  .portal-operacion .home-flow-item small { display: none; }
+  .portal-operacion .home-flow-arrow { display: none; }
+  .portal-operacion .home-shipment-search > div { gap: 8px; padding: 6px 8px; }
+  .portal-operacion .home-shipment-search svg { display: none; }
+  .portal-operacion .home-shipment-search input { padding-left: 4px; font-size: 16px; }
+  .portal-operacion .home-scope-activity { grid-template-columns: 1fr; }
+  .portal-operacion .home-scope-card { padding: 16px; }
+  .portal-operacion .home-scope-row { flex-wrap: wrap; gap: 10px; padding: 16px 0; }
+  .portal-operacion .home-scope-row > span:last-child { justify-content: flex-start !important; }
+  .portal-operacion .home-scope-card.is-empty { display: block; padding: 14px 16px; }
+  .portal-operacion .home-scope-empty { justify-content: space-between; margin-top: 10px; flex-wrap: wrap; }
+  .portal-operacion .home-section-title h2 { font-size: 17px; }
+  .portal-operacion .home-section-title a { font-size: 12px; }
+  .portal-operacion .envios-search { padding: 14px; }
+  .portal-operacion .envios-search > label { display: block; }
+  .portal-operacion .envios-search input[type="search"] { font-size: 16px; }
+  .portal-operacion .envios-search-control { flex-wrap: wrap; }
+  .portal-operacion .envios-search-control input { min-width: 0; flex: 1 1 160px; }
+  .portal-operacion .envios-date-filters > summary span,
+  .portal-operacion .envios-period-summary > summary span { font-size: 11px; }
+  .portal-operacion .chips-embudo { gap: 6px; }
+  .portal-operacion .chips-embudo .chip-e { flex: 0 1 auto; width: auto; min-height: 36px; padding: 7px 10px; font-size: 11px; }
+  .portal-operacion .envios-table td { font-size: 14px; padding: 10px 14px; }
+  .portal-operacion .envios-table td small { font-size: 12px; }
+  .portal-operacion .envios-table .row-actions { display: flex; flex-direction: row; flex-wrap: wrap; }
+  .portal-operacion .envios-table .row-actions > a { flex: 1 1 auto; }
+  .portal-operacion .envios-table .row-actions .btn-sm { font-size: 12px; padding: 10px; }
+  .portal-operacion .envios-table td[data-label]::before { font-size: 11px; }
+  .portal-operacion .envio-more-actions { flex-basis: 100%; }
+  .portal-operacion .wizard-compacto .form-grid-2 { grid-template-columns: 1fr; }
+  .portal-operacion .wizard-compacto .bulto-fisico,
+  .portal-operacion .wizard-compacto .bulto-invoice { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .portal-operacion .wizard-compacto .shipment-content-field { grid-column: 1/-1; }
+  .portal-operacion .wizard-compacto .step label { font-size: 11px; }
+  .portal-operacion .wizard-compacto .shipment-package-card,
+  .portal-operacion .wizard-compacto .shipment-invoice-card { padding: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .portal-operacion *, .portal-operacion *::before, .portal-operacion *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

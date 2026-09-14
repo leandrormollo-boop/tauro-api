@@ -176,10 +176,10 @@ def test_schema_scheduler_y_portal_reflejan_el_tracking_diario():
     assert 'trigger="cron"' in main
     assert 'DHL_TRACKING_CRON_HOUR' in main
     assert 'target=actualizar_trackings_diarios_seguro' in main
-    assert '"PROCESO_ENTREGA": ("Proceso de entrega", "warn")' in estados
+    assert '"PROCESO_ENTREGA": ("En tránsito", "warn")' in estados
     assert '"ENTREGADO": ("Entregado", "ok")' in estados
     assert '"RETENIDO": ("Retenido", "error")' in estados
-    assert "estado_tracking_ui" in html
+    assert "estado_cliente_ui" in html
     assert '"Sin movimientos", "muted"' in estados
 
 

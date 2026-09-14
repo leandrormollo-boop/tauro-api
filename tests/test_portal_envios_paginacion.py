@@ -189,7 +189,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "periodo_query" in html
     assert "data-periodo-envios" in html
     assert "Todo el mes" not in html  # las opciones vienen del servicio común
-    assert "total final en esta página" in html
+    assert "registrado en esta página" in html
     assert "{% if not tipo_filtro %}" not in html
     assert "envios-scope-tabs" in html
     assert "Nacionales <b>{{ total_nacionales }}</b>" in html
@@ -198,7 +198,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "No hay envíos que coincidan con estos filtros" in html
     assert 'role="search"' in html
     assert 'name="buscar"' in html
-    assert 'placeholder="Ej. Pedido 21036 o 888244412640"' in html
+    assert 'placeholder="Tracking, destinatario o ciudad"' in html
     assert "envios-search-icon" not in html
     assert "{{ con_busqueda }}" in html
     assert 'class="envio-destination-name"' in html

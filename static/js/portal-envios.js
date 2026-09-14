@@ -1,5 +1,5 @@
 /* Filtros progresivos de "Mis envíos". Todos los href y formularios siguen
-   siendo el fallback canónico cuando JavaScript o la red interna fallan. */
+   funcionando como navegación normal cuando JavaScript no está disponible. */
 (function () {
   "use strict";
 
@@ -30,18 +30,16 @@
     if (status) status.hidden = true;
   }
 
-  function showError(container) {
+  function showError(container, timedOut) {
     var status = statusFor(container);
     if (!container || !container.isConnected || !status) return;
     container.setAttribute("aria-busy", "false");
     container.classList.remove("is-loading");
     status.classList.add("is-error");
     status.querySelector("[data-envios-status-text]").textContent =
-      "No pudimos actualizar. Intentá nuevamente.";
+      timedOut ? "La consulta está demorando. Conservamos la lista anterior; volvé a intentar." :
+        "No pudimos actualizar. Conservamos la lista anterior; intentá nuevamente.";
     status.hidden = false;
-    window.setTimeout(function () {
-      if (status.isConnected && status.classList.contains("is-error")) status.hidden = true;
-    }, 5000);
   }
 
   function internalUrl(value) {
@@ -50,7 +48,7 @@
     return url;
   }
 
-  function replaceRegion(html, responseUrl, historyMode, previousScroll) {
+  function replaceRegion(html, responseUrl, historyMode, previousScroll, focusId) {
     var parsed = new DOMParser().parseFromString(html, "text/html");
     var next = parsed.querySelector("[data-envios-region]");
     if (!next) throw new Error("Respuesta de envíos incompleta");
@@ -66,6 +64,9 @@
     window.scrollTo({left: previousScroll.x, top: previousScroll.y, behavior: "auto"});
     window.requestAnimationFrame(function () {
       window.scrollTo({left: previousScroll.x, top: previousScroll.y, behavior: "auto"});
+      var focusTarget = focusId && document.getElementById(focusId);
+      if (!focusTarget || !root.contains(focusTarget)) focusTarget = root.querySelector("#envios-resultados");
+      if (focusTarget) focusTarget.focus({preventScroll: true});
     });
   }
 
@@ -78,6 +79,12 @@
     var loadingRoot = root;
     var previousScroll = {x: window.scrollX, y: window.scrollY};
     var keepErrorVisible = false;
+    var timedOut = false;
+    var focusId = document.activeElement && document.activeElement.id;
+    var timeout = window.setTimeout(function () {
+      timedOut = true;
+      controller.abort();
+    }, 15000);
     currentRequest = controller;
     startLoading(loadingRoot);
 
@@ -98,13 +105,14 @@
       });
     }).then(function (result) {
       if (!result || currentRequest !== controller) return;
-      replaceRegion(result.html, result.url, historyMode, previousScroll);
+      replaceRegion(result.html, result.url, historyMode, previousScroll, focusId);
     }).catch(function (error) {
-      if (error.name !== "AbortError") {
+      if (currentRequest === controller && (error.name !== "AbortError" || timedOut)) {
         keepErrorVisible = true;
-        showError(loadingRoot);
+        showError(loadingRoot, timedOut);
       }
     }).finally(function () {
+      window.clearTimeout(timeout);
       if (currentRequest === controller) {
         currentRequest = null;
         if (!keepErrorVisible) stopLoading(loadingRoot);

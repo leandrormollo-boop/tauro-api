@@ -4,9 +4,9 @@
 {% block content %}
 <section class="home-hero">
     <div class="home-hero-content">
-        <div class="eyebrow">Portal de clientes</div>
+        <div class="eyebrow">Tu operación, conectada</div>
         <h1>Hola, <span class="t-metal">{{ cliente }}</span></h1>
-        <p>Creá un envío o consultá una tarifa. Si algo necesita tu atención, lo vas a ver acá.</p>
+        <p>Tus envíos, su seguimiento y tu cuenta. Todo a mano.</p>
         <div class="home-primary-actions" aria-label="Acciones principales">
             <a href="/portal/envios/nuevo" class="btn btn-primary">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
@@ -19,6 +19,28 @@
         </div>
     </div>
 </section>
+
+{% if embudo %}
+<nav class="home-flow" aria-label="Resumen de tus envíos">
+    {% for paso in embudo %}
+    {% if paso.clave in ('guia_lista', 'despachados', 'retenidos', 'entregados') %}
+    <a href="{{ paso.url }}" class="home-flow-item{% if paso.clave == 'retenidos' and paso.cantidad %} has-alert{% endif %}">
+        <span>{{ paso.titulo }}</span><strong>{{ paso.cantidad }}</strong>
+        <small>{{ paso.detalle }}</small><span class="home-flow-arrow" aria-hidden="true">↗</span>
+    </a>
+    {% endif %}
+    {% endfor %}
+</nav>
+{% endif %}
+
+<form method="GET" action="/portal/envios" class="home-shipment-search" role="search">
+    <label for="home-buscar">Encontrá tu envío</label>
+    <div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+        <input id="home-buscar" name="buscar" type="search" maxlength="80" placeholder="Tracking, destinatario o ciudad" autocomplete="off">
+        <button class="btn btn-primary" type="submit">Buscar</button>
+    </div>
+</form>
 
 {# Sólo mostramos tareas reales del cliente. Los pasos de Tauro y los ceros
    no ocupan lugar: este bloque es un recordatorio, no otro tablero. #}
@@ -35,8 +57,8 @@
         {% for paso in embudo %}
             {% if paso.cantidad and paso.accion_de == 'cliente' %}
             <a href="{{ paso.url }}">
-                <strong>{{ paso.cantidad }} pendiente{{ 's' if paso.cantidad != 1 else '' }}</strong>
-                <span>{{ paso.titulo }} · {{ paso.detalle }}</span>
+                <strong>{{ paso.cantidad }} · {{ paso.titulo }}</strong>
+                <span>{{ paso.detalle }}</span>
                 <span aria-hidden="true">→</span>
             </a>
             {% endif %}
@@ -45,6 +67,42 @@
 </aside>
 {% endif %}
 
+{% macro actividad_ambito(icono, titulo, ambito, solicitudes) %}
+<section class="card home-scope-card{% if not solicitudes %} is-empty{% endif %}">
+    <div class="home-scope-head">
+        <div><span aria-hidden="true">{{ icono }}</span><strong>{{ titulo }}</strong></div>
+        <a href="/portal/envios?tipo={{ ambito }}">Ver historial →</a>
+    </div>
+    {% if solicitudes %}
+    <div class="home-scope-list">
+        {% for s in solicitudes %}
+        <a href="/portal/envios/{{ s.id }}" class="home-scope-row">
+            <span class="home-shipment-copy"><strong>{{ s.etiqueta_cliente or s.dest_nombre or s.dest_ciudad or "—" }}</strong><small>{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) or 'Origen' }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) or 'Destino' }}</small><small class="mono">{{ s.tracking or 'Guía pendiente' }} · {{ (s.courier or '—')|upper }}</small></span>
+            <span style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
+                <span class="badge {{ s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
+            </span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="home-scope-empty">
+        <span>Sin envíos {{ titulo|lower }} todavía.</span>
+        <a href="/portal/cotizar?ambito={{ ambito }}" data-cotizar-ventana class="btn btn-ghost btn-sm">Cotizar</a>
+    </div>
+    {% endif %}
+</section>
+{% endmacro %}
+
+<div class="home-scope-activity" aria-label="Actividad reciente separada por ámbito">
+    <div class="home-section-title"><h2>Actividad reciente</h2><a href="/portal/envios">Todos los envíos →</a></div>
+    {% if solicitudes_internacionales %}
+        {{ actividad_ambito('🌐', 'Internacionales', 'internacional', solicitudes_internacionales) }}
+        {{ actividad_ambito('🇦🇷', 'Nacionales', 'nacional', solicitudes_nacionales) }}
+    {% else %}
+        {{ actividad_ambito('🇦🇷', 'Nacionales', 'nacional', solicitudes_nacionales) }}
+        {{ actividad_ambito('🌐', 'Internacionales', 'internacional', solicitudes_internacionales) }}
+    {% endif %}
+</div>
 <div class="home-overview-grid">
     <section class="card home-account-card">
         <div class="card-head">
@@ -66,6 +124,8 @@
                 {% endif %}
             </strong>
         </div>
+        <small class="home-currency">Importes en pesos argentinos · ARS</small>
+        <details class="home-account-totals"><summary>Cargos y pagos aplicados</summary>
         <div class="home-account-breakdown">
             <div>
                 <span>Cargos aplicados</span>
@@ -76,6 +136,7 @@
                 <b class="portal-money-green">$ {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</b>
             </div>
         </div>
+        </details>
         <a href="/portal/cuenta#informar-pago" class="home-text-link">Informar un pago →</a>
     </section>
 
@@ -96,35 +157,4 @@
     </section>
 </div>
 
-{% macro actividad_ambito(icono, titulo, ambito, solicitudes) %}
-<section class="card home-scope-card">
-    <div class="home-scope-head">
-        <div><span aria-hidden="true">{{ icono }}</span><strong>{{ titulo }}</strong></div>
-        <a href="/portal/envios?tipo={{ ambito }}">Ver historial →</a>
-    </div>
-    {% if solicitudes %}
-    <div class="home-scope-list">
-        {% for s in solicitudes %}
-        <a href="/portal/envios/{{ s.id }}" class="home-scope-row">
-            <span><strong>{{ s.dest_ciudad or s.dest_nombre or "—" }}</strong><small>{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }} · {{ (s.courier or '—')|upper }}</small></span>
-            <span style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
-                <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">{{ s.estado_operacion_ui.label }}</span>
-                <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">{{ s.estado_tracking_ui.label }}</span>
-            </span>
-        </a>
-        {% endfor %}
-    </div>
-    {% else %}
-    <div class="home-scope-empty">
-        <span>Sin envíos {{ titulo|lower }} todavía.</span>
-        <a href="/portal/cotizar?ambito={{ ambito }}" data-cotizar-ventana class="btn btn-ghost btn-sm">Cotizar</a>
-    </div>
-    {% endif %}
-</section>
-{% endmacro %}
-
-<div class="home-scope-activity" aria-label="Actividad reciente separada por ámbito">
-    {{ actividad_ambito('🇦🇷', 'Nacionales', 'nacional', solicitudes_nacionales) }}
-    {{ actividad_ambito('🌐', 'Internacionales', 'internacional', solicitudes_internacionales) }}
-</div>
 {% endblock %}

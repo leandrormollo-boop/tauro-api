@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "portal/_partial.html" if parcial else "base.html" %}
 {% block title %}Mis envíos{% endblock %}
 {% macro dinero_ars(valor) -%}
 $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}
@@ -22,7 +22,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <div class="envios-page-actions">
             {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para
                controlarlo en su propia planilla. #}
-            <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Respaldo Excel</a>
+            <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Exportar Excel</a>
             <a href="/portal/envios/nuevo{% if tipo_filtro %}?ambito={{ tipo_filtro }}{% endif %}" class="btn btn-primary">Nuevo envío</a>
         </div>
     </div>
@@ -32,7 +32,25 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="msg ok">{{ flash_ok }}</div>
 {% endif %}
 
-{# Período contable: un cambio se aplica solo, sin botón obligatorio. #}
+<form method="GET" action="/portal/envios" class="envios-search" role="search" id="envios-search-form">
+    <label for="envios-buscar">
+        <strong>Encontrá tu envío</strong>
+        <span>Buscá en todo tu historial por tracking, nombre o destino</span>
+    </label>
+    <div class="envios-search-control">
+        <input type="search" id="envios-buscar" name="buscar" maxlength="80"
+               value="{{ busqueda_filtro }}" placeholder="Tracking, destinatario o ciudad"
+               autocomplete="off" spellcheck="false">
+        {% if busqueda_filtro %}
+        <a href="/portal/envios" class="envios-search-clear" aria-label="Limpiar búsqueda">Limpiar</a>
+        {% endif %}
+        <button type="submit" class="btn btn-primary btn-sm">Buscar</button>
+    </div>
+</form>
+
+{# El período sigue siendo opcional; no desplaza la búsqueda ni la lista. #}
+<details class="envios-date-filters"{% if periodo.activo %} open{% endif %}>
+<summary>Filtrar por fecha <span>{{ periodo.etiqueta }}</span></summary>
 <form id="envios-periodo-form" method="GET" action="/portal/envios" class="card"
       style="display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:12px;padding:14px;margin-bottom:14px;align-items:end;">
     <input type="hidden" name="tipo" value="{{ tipo_filtro }}">
@@ -62,6 +80,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     </label>
     <noscript><button type="submit" class="btn btn-primary btn-sm">Aplicar período</button></noscript>
 </form>
+</details>
 
 {# Los dos ámbitos quedan siempre a un click, sin pantalla intermedia. El
    filtro de estado y la búsqueda se conservan al cambiar de pestaña; la
@@ -83,29 +102,6 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     {{ total_sin_clasificar }} envío{{ 's' if total_sin_clasificar != 1 else '' }} histórico{{ 's' if total_sin_clasificar != 1 else '' }} necesita{{ 'n' if total_sin_clasificar != 1 else '' }} revisión de ámbito.{% if tipo_filtro %} No lo{{ 's' if total_sin_clasificar != 1 else '' }} mezclamos hasta clasificarlo{{ 's' if total_sin_clasificar != 1 else '' }}.{% else %} Figura{{ 'n' if total_sin_clasificar != 1 else '' }} igualmente en el historial completo.{% endif %}
 </div>
 {% endif %}
-
-<details class="envios-search-disclosure"{% if busqueda_filtro %} open{% endif %}>
-    <summary class="btn btn-ghost btn-sm envios-search-toggle" aria-controls="envios-search-form">
-        Buscar tracking{% if busqueda_filtro %}<span class="envios-search-active">Filtro activo</span>{% endif %}
-    </summary>
-<form method="GET" action="/portal/envios" class="envios-search" role="search" id="envios-search-form">
-    <label for="envios-buscar">
-        <strong>Buscar envío</strong>
-        <span>Por nombre, tracking, destinatario o ciudad</span>
-    </label>
-    <div class="envios-search-control">
-        <input type="search" id="envios-buscar" name="buscar"
-               value="{{ busqueda_filtro }}"
-               placeholder="Ej. Pedido 21036 o 888244412640" autocomplete="off"
-               spellcheck="false">
-        {% if busqueda_filtro %}
-        <a href="/portal/envios"
-           class="envios-search-clear" aria-label="Limpiar búsqueda">Limpiar</a>
-        {% endif %}
-        <button type="submit" class="btn btn-primary btn-sm">Buscar</button>
-    </div>
-</form>
-</details>
 
 {% if not tiene_historial %}
 <div class="card">
@@ -130,7 +126,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 {% if not busqueda_filtro %}
 <nav class="chips-embudo" aria-label="Filtrar por estado">
-    <a href="/portal/envios{{ solo_tipo }}{{ con_busqueda }}{{ con_periodo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
+    <a href="/portal/envios?{{ ('tipo=' ~ tipo_filtro) if tipo_filtro else '' }}{{ con_periodo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
         <b>{{ total_busqueda }}</b> Todos
     </a>
     {% for c in chips %}
@@ -144,6 +140,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 </nav>
 {% endif %}
 
+<details class="envios-period-summary">
+<summary>Resumen del período <span>{{ periodo.etiqueta }} · {{ resumen_periodo.guias_emitidas }} guías</span></summary>
 <div class="card" style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:14px 18px;margin-bottom:14px;">
     <div style="min-width:180px;">
         <div class="eyebrow">Período seleccionado</div>
@@ -160,25 +158,26 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div><small style="color:var(--fg-4);display:block;">Canceladas / reemplazadas</small><strong>{{ resumen_periodo.canceladas_reemplazadas }}</strong></div>
     {% endif %}
 </div>
+</details>
 
 {% if solicitudes %}
 {% set total_pagina = namespace(valor=0) %}
 {% for envio in solicitudes %}
-    {% if envio.estado != 'REEMPLAZADO' %}
+    {% if envio.estado not in ('CANCELADO', 'REEMPLAZADO') %}
         {% set total_pagina.valor = total_pagina.valor + (envio.precio_final_cliente_ars or envio.precio_tauro_ars or 0) %}
     {% endif %}
 {% endfor %}
-<p class="envios-resumen">
+<p class="envios-resumen" id="envios-resultados" tabindex="-1">
     Mostrando {{ pagina_desde }}–{{ pagina_hasta }} de {{ total_resultados }}
     envío{{ "s" if total_resultados != 1 }}{% if busqueda_filtro %} para <span class="mono">“{{ busqueda_filtro }}”</span>{% endif %} ·
-    <b class="portal-money-green">{{ dinero_ars(total_pagina.valor) }}</b> total final en esta página
+    <b class="portal-money-green">{{ dinero_ars(total_pagina.valor) }} ARS</b> registrado en esta página
 </p>
 {% endif %}
 
 {% if not solicitudes %}
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
-    <div class="msg envios-empty-filter">
+    <div class="msg envios-empty-filter" id="envios-resultados" tabindex="-1">
         {% if busqueda_filtro %}No encontramos “{{ busqueda_filtro }}” en todo tu historial.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
         <a href="/portal/envios?tipo={{ tipo_filtro }}{{ con_periodo }}">Ver todo el período</a>
     </div>
@@ -220,14 +219,14 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         <span class="service-head">
                             <span><strong>{{ (s.courier or '—')|upper }}</strong> · {% if s._ambito_portal == 'nacional' %}Nacional{% elif s._ambito_portal == 'internacional' %}Internacional{% else %}Sin clasificar{% endif %}</span>
                             <span style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
-                                <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">{{ s.estado_operacion_ui.label }}</span>
-                                <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">{{ s.estado_tracking_ui.label }}</span>
+                                <span class="badge {{ s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
                             </span>
                         </span>
-                        {% if s.tracking_estado == 'RETENIDO' and s.tracking_descripcion %}
-                            <small class="tracking-alert">{{ s.tracking_descripcion }}</small>
-                        {% elif s.tracking_estado and s.tracking_actualizado_at %}
-                            <small class="tracking-updated">Actualizado {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M") }}</small>
+                        {% if s.tracking_descripcion %}
+                            <small class="{{ 'tracking-alert' if s.estado_cliente_ui.codigo == 'RETENIDO' else 'tracking-updated' }}">{{ s.tracking_descripcion }}</small>
+                        {% endif %}
+                        {% if s.tracking_estado and s.tracking_actualizado_at %}
+                            <small class="tracking-updated">Sincronizado {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M %Z") }}</small>
                         {% endif %}
                         {% if s.tracking %}
                             {% set turl = url_tracking(s.courier, s.tracking) %}
@@ -243,6 +242,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                             <span style="color:var(--fg-3);">Sin cargo</span>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
+                            {% if s.diferencia_flete_ars or s.tax_cliente_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}
+                            <details class="envio-price-breakdown">
+                            <summary>Ver desglose</summary>
                             <span class="envio-price-initial portal-money-green"><small>Inicial</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
                             {% if s.diferencia_flete_ars %}
                                 <span class="envio-price-extra diferencia"><b>Diferencia</b><span>{{ "+" if s.diferencia_flete_ars > 0 else "−" }} {{ dinero_ars(s.diferencia_flete_ars|abs) }}</span></span>
@@ -250,7 +252,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                             {% if s.tax_cliente_ars %}
                                 <span class="envio-price-extra tax"><b>TAX</b><span>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</span></span>
                             {% endif %}
-                            <span class="envio-price-final portal-money-green"><small>Total final</small>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span>
+                            </details>
+                            {% endif %}
+                            <span class="envio-price-final portal-money-green"><small>Total registrado · ARS</small>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span>
                         {% else %}—{% endif %}
                         {% if s.precio_cliente_final_ars %}
                             <br><small style="color:var(--fg-3)"><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;">a tu cliente</span> $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
@@ -258,6 +262,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     </td>
                     <td>
                         <div class="row-actions">
+                            <a href="/portal/envios/{{ s.id }}" class="btn btn-ghost btn-sm">Ver envío →</a>
+                            {% if s.tracking or s.tiene_label or s.guia_url or s._ambito_portal == 'internacional' %}
+                            <details class="envio-more-actions"><summary>Más opciones</summary>
                             {% if s.tracking or s.tiene_label or s.guia_url %}
                                 <button type="button" class="btn btn-ghost btn-sm"
                                         data-verificar-envio
@@ -267,13 +274,16 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                     Verificar
                                 </button>
                             {% endif %}
-                            {% if s.tiene_label and s.estado != 'REEMPLAZADO' %}
+                            {% if s._ambito_portal == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-ghost btn-sm">Repetir</a>{% endif %}
+                            </details>
+                            {% endif %}
+                            {% if s.tiene_label and s.estado not in ('CANCELADO', 'REEMPLAZADO') %}
                                 <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-primary btn-sm">
                                     {% if s.guia_descargada_at %}Volver a descargar{% elif s.tiene_factura_comercial %}Guía + invoice{% else %}Guía PDF{% endif %}
                                 </a>
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}
-                                {% if tipo_filtro == 'internacional' and s.estado == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
+                                {% if s._ambito_portal == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-sm"
                                    title="Programar la recolección con {{ (s.courier or 'el courier')|upper }}">Programar retiro</a>
                                 {% endif %}
@@ -289,8 +299,6 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                     <button type="submit" class="btn btn-primary btn-sm">Emitir guía</button>
                                 </form>
                             {% endif %}
-                            {% if s._ambito_portal == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-ghost btn-sm">Repetir</a>{% endif %}
-                            <a href="/portal/envios/{{ s.id }}" class="btn btn-ghost btn-sm">Detalle</a>
                         </div>
                     </td>
                 </tr>
@@ -334,6 +342,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% endif %}
 </div>
 
+{% if not parcial %}
 <dialog class="shipment-verification-dialog" id="shipment-verification-dialog"
         aria-labelledby="shipment-verification-title">
     <div class="shipment-verification-panel">
@@ -444,6 +453,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     });
 })();
 </script>
-<script src="/static/js/portal-envios.js?v=1" defer></script>
+<script src="/static/js/portal-envios.js?v=2" defer></script>
+{% endif %}
 </section>
 {% endblock %}
