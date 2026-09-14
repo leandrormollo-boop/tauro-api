@@ -1,7 +1,8 @@
 # Embalajes guardados y tarifas de tienda
 
 Implementación del pedido del 11/09/2026. Rama `codex/paquetes-preguardados`,
-basada en `da36e53`. Pendiente de publicación y prueba de checkout real.
+basada en `da36e53`, desarrollo `b7929e3`. Publicación autorizada por el usuario
+el 14/09/2026. La prueba de checkout real queda para el piloto posterior.
 No se modificaron cuentas ni ventas reales de Pesca Jacks.
 
 ## Qué puede hacer el cliente

@@ -1,4 +1,4 @@
-# RELEVO — estado y reglas del proyecto (act. 11/09/2026)
+# RELEVO — estado y reglas del proyecto (act. 14/09/2026)
 
 Este documento existe para que CUALQUIER agente (Codex, Claude, humano) pueda
 retomar el trabajo sin contexto previo. Leelo entero antes de tocar código.
@@ -6,11 +6,14 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
-## 11/09/2026 — Embalajes guardados y tarifas de tienda (desarrollo terminado)
+## 14/09/2026 — Publicación de embalajes guardados y tarifas de tienda
 
 Rama `codex/paquetes-preguardados`, basada en `origin/main` `da36e53`.
-**Pendiente de autorización de publicación y piloto real.** No se cambiaron
-cuentas, productos, permisos ni ventas reales de Pesca Jacks.
+Desarrollo `b7929e3`. **Publicación autorizada por el usuario el 14/09/2026**:
+«ok, publicalo. Luego lo probamos si está ok». El piloto real queda pendiente;
+esta publicación no activa CarrierService ni modifica cuentas, productos,
+permisos o ventas reales de Pesca Jacks. Comprobar salud, archivos estáticos,
+acceso autenticado a la sección y camino crítico después del despliegue.
 Detalle y procedimiento: [Paquetes y tarifas](PAQUETES_Y_TARIFAS.md).
 
 - Nueva sección `/portal/paquetes`: embalajes, asociaciones por variante,
