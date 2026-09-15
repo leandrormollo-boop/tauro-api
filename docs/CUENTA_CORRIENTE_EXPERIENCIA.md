@@ -1,7 +1,10 @@
 # Cuenta corriente del cliente — experiencia y controles
 
 15 de septiembre de 2026 · Rama `codex/portal-experiencia-cliente`.
-**Preparada para revisión local; pendiente de publicar.**
+**Publicación autorizada el 15/09/2026:** el usuario indicó «publicalo hermano».
+La salida incluye la experiencia del portal y esta cuenta corriente. Los
+apartados de pruebas locales describen la preparación previa; verificar salud,
+recursos y recorridos autenticados en el dominio real después del despliegue.
 
 El objetivo es que el cliente pueda entender cuánto debe, qué factura requiere
 atención y qué ocurrió con un pago informado. Esta entrega reorganiza
@@ -205,6 +208,6 @@ Archivos centrales: `servicios/experiencia_cuenta.py`, `filtros_cuenta.py`,
 `endpoints/portal_cliente.py`, las dos plantillas de cuenta y los recursos
 `static/css/portal-cuenta.css` / `static/js/portal-cuenta.js`.
 
-**Publicación pendiente.** Un push a `main` despliega a producción; esta entrega
-no lo realiza. Antes de darla por publicada se debe verificar `/salud` y los
+**Salida a producción autorizada.** Un push a `main` despliega a producción.
+Antes de darla por publicada se debe verificar `/salud` y los
 recorridos autenticados de saldo, filtros, pagos y descarga en el dominio real.

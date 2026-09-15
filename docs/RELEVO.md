@@ -6,6 +6,22 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 15/09/2026 — Publicación autorizada del portal y cuenta corriente
+
+El usuario autorizó expresamente la salida a producción: «publicalo hermano».
+Se publican los cambios revisados `42e1be4`, `9186952` y `ad9bbd3`, sobre
+`origin/main` `5f91386`, sin divergencia ni migraciones. Incluye experiencia
+del portal, cuenta corriente y control visible de WAIMAO desde septiembre.
+Esta autorización reemplaza las solicitudes de aprobación de las notas previas.
+
+Validación previa: 124 pruebas de cuenta aprobadas (PostgreSQL aislado incluido),
+240 pruebas previas de experiencia del portal, sintaxis compatible con Python
+3.11, nueve plantillas Jinja y ambos recursos JS válidos. La comprobación del
+despliegue debe contrastar los recursos publicados con Git y verificar salud,
+sesión real de WAIMAO, saldo sin cambios, corte, filtros y exportación propia.
+El chequeo se realiza sin emitir guías ni informar pagos. Las notas siguientes
+conservan el estado de preparación anterior a esta autorización.
+
 ## 15/09/2026 — WAIMAO comienza el control visible desde septiembre
 
 El usuario pidió quitar los envíos anteriores a septiembre de la cuenta del
