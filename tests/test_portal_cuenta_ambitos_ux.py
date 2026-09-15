@@ -5,12 +5,27 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import endpoints.portal_cliente as portal
 import servicios.cuenta_corriente as cuenta
 
 
 RAIZ = Path(__file__).resolve().parent.parent
 IDEMPOTENCY_KEY = "a" * 43
+
+
+def _template_cuenta_completo():
+    return "\n".join(
+        (RAIZ / "templates" / "portal" / nombre).read_text(encoding="utf-8")
+        for nombre in ("cuenta.html", "cuenta_movimientos.html")
+    )
+
+
+@pytest.fixture(autouse=True)
+def _detalles_cuenta_aislados(monkeypatch):
+    monkeypatch.setattr(portal, "listar_destinos_pago", lambda _cliente: [])
+    monkeypatch.setattr(portal, "obtener_experiencia_cuenta", lambda _cliente, _resumen: None)
 
 
 def _resumen():
@@ -226,30 +241,32 @@ def test_pago_exige_idempotencia_valida_y_rechaza_mas_de_dos_decimales(monkeypat
 
 
 def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
-    html = (RAIZ / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
+    html = _template_cuenta_completo()
+    script = (RAIZ / "static" / "js" / "portal-cuenta.js").read_text(encoding="utf-8")
 
     for texto in (
-        "Saldo de tu cuenta", "Nacional", "Internacional", "Todos tus movimientos",
-        "Facturado", "Pagos aprobados", "A facturar", "Crédito disponible", "Sin imputar",
-        "Dividir", "El pago no modifica tus saldos hasta que Tauro apruebe",
+        "Saldo consolidado", "Nacional", "Internacional", "Todos tus movimientos",
+        "Facturado", "Pagos aprobados", "A facturar", "Pagos disponibles para aplicar",
+        "¿Qué querés pagar?", "El pago no modifica tus saldos hasta que Tauro apruebe",
     ):
         assert texto in html
     assert 'name="destino_pago" value="SIN_IMPUTAR" checked' in html
     assert 'name="idempotency_key" value="{{ idempotency_key }}"' in html
+    assert 'name="seleccion_documental" value="1"' in html
     assert "data-open-payment" in html
-    assert "paymentDetails.open = true" in html
+    assert "paymentDetails.open = true" in script
     assert "movimientos.paginas_visibles" in html
-    assert "&pagina={{ numero }}" in html
+    assert "cuenta_url(pagina=numero)" in html
     assert "account-unified-filters" in html
     assert "vista=facturas" not in html
     assert "account-tabs" not in html
 
 
 def test_columna_cuenta_conserva_cargos_y_pagos_contables_con_copy_claro():
-    html = (RAIZ / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
+    html = _template_cuenta_completo()
 
     assert "{{ dinero(total.facturado_ars) }}" in html
-    assert '{{ dinero(total.haber_ars) }}' in html
+    assert '{{ dinero(total.pagos_aprobados_ars) }}' in html
     assert '<th scope="col" class="amount-column account-col-account">Tu cuenta</th>' in html
     assert 'data-label="Tu cuenta"' in html
     assert "{% if m.haber_ars %}" in html
@@ -266,9 +283,7 @@ def test_columna_cuenta_conserva_cargos_y_pagos_contables_con_copy_claro():
 
 
 def test_movimientos_agrupan_datos_sin_forzar_scroll_horizontal():
-    portal_html = (
-        RAIZ / "templates" / "portal" / "cuenta.html"
-    ).read_text(encoding="utf-8")
+    portal_html = _template_cuenta_completo()
     admin_html = (
         RAIZ / "templates" / "admin" / "cliente_detail.html"
     ).read_text(encoding="utf-8")

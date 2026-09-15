@@ -1,10 +1,35 @@
-# RELEVO — estado y reglas del proyecto (act. 14/09/2026)
+# RELEVO — estado y reglas del proyecto (act. 15/09/2026)
 
 Este documento existe para que CUALQUIER agente (Codex, Claude, humano) pueda
 retomar el trabajo sin contexto previo. Leelo entero antes de tocar código.
 Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
+
+## 15/09/2026 — Cuenta corriente: operación y diseño del cliente
+
+Rama `codex/portal-experiencia-cliente`. **Preparada localmente, pendiente de
+publicar; sin migraciones ni dependencias nuevas.** Alcance y limitaciones:
+[Experiencia de cuenta corriente](CUENTA_CORRIENTE_EXPERIENCIA.md).
+
+- Saldo consolidado, vencimientos con pago parcial y acceso a informar el
+  documento propio, seguimiento de pagos y cupo monetario cuando está configurado.
+- Pendientes y rechazados visibles sin acreditar dinero. El crédito sin imputar
+  ya está descontado del consolidado. No se inventan fechas de aprobación ni se
+  publican notas internas como motivos de rechazo.
+- Gráfico de seis meses por fecha contable: cargo en su fecha, ajuste aplicado
+  en su fecha de Argentina, créditos negativos; sin duplicar el costo final.
+- Filtros por guía/factura/referencia, ámbito y fecha. Respuesta parcial sin
+  recalcular paneles, historial conservado ante fallos y Excel de la consulta
+  propia hasta 10.000 filas, sin truncamiento ni fórmulas en textos del usuario.
+- Diseño con las variables y tipografías TAURO, temas claro/oscuro y controles
+  adaptados a móvil. Lecturas autenticadas; no cambia emisión ni aprobación.
+- Validación enfocada: 26 pruebas de portal y 50 de servicios/cuenta aprobadas,
+  con PostgreSQL sintético real en la segunda ronda. Los conjuntos se superponen.
+  Cierre ampliado: 99 aprobadas y 4 omitidas (ya cubiertas con PostgreSQL).
+  Revisión visual y funcional local en escritorio y celular, temas claro/oscuro.
+  Preview ficticio `/portal/cuenta` en puerto 8772; PostgreSQL de pruebas apagado.
+  Pendiente verificación autenticada de esta versión tras su publicación.
 
 ## 14/09/2026 — Experiencia del cliente: revisión WAIMAO y mejoras locales
 

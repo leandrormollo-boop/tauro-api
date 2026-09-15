@@ -17,6 +17,7 @@ from core.database import get_conn
 from servicios.auditoria import registrar_evento_con_cursor
 from servicios.conflictos_db import mensaje_conflicto_db
 from servicios.diferencias_cliente import presentar_diferencia
+from servicios.filtros_cuenta import normalizar_filtros_cuenta, patron_busqueda_cuenta
 
 
 _CENTAVO = Decimal("0.01")
@@ -677,6 +678,11 @@ def movimientos_cuenta_paginados(
     tipo: str = "todos",
     pagina: int = 1,
     page_size: int = 25,
+    *,
+    q: str = "",
+    desde: str = "",
+    hasta: str = "",
+    exportar: bool = False,
 ) -> Dict[str, Any]:
     """Contrato del portal: página numerada, con filtros SQL por ámbito/tipo."""
     cliente = cliente.strip().upper()
@@ -684,10 +690,15 @@ def movimientos_cuenta_paginados(
     tipo_filtro = str(tipo or "todos").strip().lower()
     if ambito_filtro not in {"consolidado", "nacional", "internacional"}:
         raise ValueError("El filtro de ámbito no es válido.")
-    if tipo_filtro not in {"todos", "cargos", "pagos", "diferencias", "revision"}:
+    if tipo_filtro not in {"todos", "cargos", "costos", "pagos", "diferencias", "revision"}:
         raise ValueError("El filtro de tipo de movimiento no es válido.")
     pagina = max(1, int(pagina))
     page_size = max(1, min(int(page_size), 100))
+    filtros_busqueda = normalizar_filtros_cuenta(q, desde, hasta)
+    if exportar:
+        # Una descarga completa o un error explícito; nunca un Excel truncado.
+        page_size = 10000
+        pagina = 1
     ambito_sql = (
         None if ambito_filtro == "consolidado" else ambito_filtro.upper()
     )
@@ -758,6 +769,7 @@ def movimientos_cuenta_paginados(
                 FROM facturas_cliente_items i
                 JOIN facturas_cliente f ON f.id=i.factura_id
                 WHERE i.envio_id=e.id AND f.estado='EMITIDA'
+                  AND f.cliente_id=e.cliente_id
                 ORDER BY f.id DESC LIMIT 1
             ) fc ON TRUE
             WHERE e.cliente_id = %s
@@ -806,9 +818,11 @@ def movimientos_cuenta_paginados(
             UNION ALL
 
             SELECT
-                p.fecha, p.created_at, 10, p.id, 'PAGO_PENDIENTE', 'SIN_IMPUTAR',
+                p.fecha, p.created_at, 10, p.id,
+                CASE WHEN p.estado='RECHAZADO' THEN 'PAGO_RECHAZADO'
+                     ELSE 'PAGO_PENDIENTE' END, 'SIN_IMPUTAR',
                 COALESCE(NULLIF(BTRIM(p.metodo), ''), 'Pago informado'), p.referencia,
-                0::numeric, 0::numeric, p.monto_ars, 'PENDIENTE',
+                0::numeric, 0::numeric, p.monto_ars, p.estado,
                 FALSE, NULL::integer, p.id,
                 NULL::integer,
                 CASE WHEN p.comprobante IS NOT NULL
@@ -818,12 +832,13 @@ def movimientos_cuenta_paginados(
                 NULL::numeric, NULL::text, NULL::jsonb
             FROM pagos p
             WHERE p.cliente_id = %s
-              AND p.estado = 'PENDIENTE'
+              AND p.estado IN ('PENDIENTE', 'RECHAZADO')
 
             UNION ALL
 
             SELECT
-                a.aplicado_at::date, a.aplicado_at, 35, a.id,
+                (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+                a.aplicado_at, 35, a.id,
                 'DIFERENCIA',
                 CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                      THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
@@ -893,22 +908,79 @@ def movimientos_cuenta_paginados(
               AND (
                   %s = 'todos'
                   OR (%s = 'cargos' AND tipo IN ('FC', 'PENDIENTE_FACTURA'))
-                  OR (%s = 'pagos' AND tipo = 'PAGO')
+                  OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'DIFERENCIA'))
+                  OR (%s = 'pagos' AND tipo IN ('PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO'))
                   OR (%s = 'diferencias' AND tipo = 'DIFERENCIA')
                   OR (%s = 'revision' AND tipo = 'PAGO_PENDIENTE')
               )
+              __FILTROS_BUSQUEDA__
         )
     """
     filtros = (
         cliente, cliente, cliente, cliente, cliente,
         ambito_sql, ambito_sql,
-        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
+        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
     )
+    condiciones = []
+    parametros_busqueda = []
+    if filtros_busqueda["q"]:
+        # EXISTS conserva cada aplicación como un único movimiento, aunque
+        # su factura contenga varios envíos. Una búsqueda documental encuentra
+        # sólo la aplicación correspondiente, no otras aplicaciones del pago.
+        condiciones.append("""AND (
+            CONCAT_WS(' ', concepto, referencia, numero_guia, numero_factura,
+                etiqueta_envio, destinatario, origen_ciudad, destino_ciudad) ILIKE %s
+            OR EXISTS (
+                SELECT 1
+                FROM pagos_aplicaciones bus_pa
+                JOIN pagos bus_p ON bus_p.id=bus_pa.pago_id
+                                AND bus_p.cliente_id=%s
+                LEFT JOIN facturas_cliente bus_f
+                    ON bus_f.id=bus_pa.factura_id AND bus_f.cliente_id=bus_p.cliente_id
+                LEFT JOIN facturas_cliente_items bus_i ON bus_i.factura_id=bus_f.id
+                LEFT JOIN ajustes_cliente bus_a ON bus_a.id=bus_i.ajuste_id
+                LEFT JOIN envios bus_e ON bus_e.cliente_id=bus_p.cliente_id AND (
+                    bus_e.id=bus_pa.envio_id OR bus_e.id=bus_i.envio_id
+                    OR bus_e.solicitud_id=bus_a.solicitud_id
+                )
+                LEFT JOIN solicitudes_guia bus_s
+                    ON bus_s.id=bus_e.solicitud_id AND bus_s.cliente_id=bus_p.cliente_id
+                WHERE bus_pa.pago_id=movimientos.pago_id
+                  AND (bus_pa.factura_id IS NULL OR bus_f.id IS NOT NULL)
+                  AND (bus_pa.envio_id IS NULL OR bus_e.id IS NOT NULL)
+                  AND (
+                      (movimientos.tipo_orden=30 AND bus_pa.id=movimientos.origen_id
+                       AND bus_pa.estado='APLICADA'
+                       AND COALESCE(bus_p.estado,'APROBADO')='APROBADO')
+                      OR (movimientos.tipo='PAGO_PENDIENTE'
+                          AND bus_pa.estado='SOLICITADA' AND bus_p.estado='PENDIENTE')
+                  )
+                  AND CONCAT_WS(' ',
+                      CASE WHEN bus_f.id IS NOT NULL THEN
+                          bus_f.tipo || ' ' || LPAD(bus_f.punto_venta::text,4,'0')
+                              || '-' || LPAD(bus_f.numero::text,8,'0') END,
+                      bus_e.nro_fc, bus_e.tracking, bus_s.tracking,
+                      bus_s.dest_nombre, bus_s.etiqueta_cliente
+                  ) ILIKE %s
+            )
+        )""")
+        patron = patron_busqueda_cuenta(filtros_busqueda["q"])
+        parametros_busqueda.extend((patron, cliente, patron))
+    if filtros_busqueda["desde"]:
+        condiciones.append("AND fecha >= %s::date")
+        parametros_busqueda.append(filtros_busqueda["desde"])
+    if filtros_busqueda["hasta"]:
+        condiciones.append("AND fecha <= %s::date")
+        parametros_busqueda.append(filtros_busqueda["hasta"])
+    cte = cte.replace("__FILTROS_BUSQUEDA__", "\n".join(condiciones))
+    filtros += tuple(parametros_busqueda)
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(cte + "SELECT COUNT(*) AS total FROM filtrados", filtros)
             fila_total = cur.fetchone()
             total = int(fila_total["total"] if fila_total else 0)
+            if exportar and total > page_size:
+                raise ValueError("La descarga supera 10.000 movimientos. Elegí un período más corto.")
             total_paginas = max(1, (total + page_size - 1) // page_size)
             pagina = min(pagina, total_paginas)
             offset = (pagina - 1) * page_size
@@ -918,19 +990,27 @@ def movimientos_cuenta_paginados(
                 ORDER BY fecha DESC, created_at DESC, tipo_orden DESC, origen_id DESC
                 LIMIT %s OFFSET %s
                 """,
-                filtros + (page_size, offset),
+                filtros + (page_size + 1 if exportar else page_size, offset),
             )
             items = [dict(fila) for fila in cur.fetchall()]
+
+    if exportar and len(items) > page_size:
+        raise ValueError("La descarga supera 10.000 movimientos. Elegí un período más corto.")
+    if exportar:
+        total = len(items)
 
     for item in items:
         item.pop("tipo_orden", None)
         item.pop("origen_id", None)
         if item.get("fecha"):
+            item["fecha_iso"] = item["fecha"].isoformat()
             item["fecha"] = item["fecha"].strftime("%d/%m/%Y")
         for campo in ("debe_ars", "haber_ars", "monto_ars", "valor_envio_ars"):
             if item.get(campo) is None and campo == "valor_envio_ars":
                 continue
-            item[campo] = Decimal(str(item.get(campo) or 0)).quantize(_CENTAVO)
+            item[campo] = Decimal(str(item.get(campo) or 0)).quantize(
+                _CENTAVO, rounding=ROUND_HALF_UP
+            )
         if item.get("tipo") == "DIFERENCIA":
             item["diferencia_detalle"] = presentar_diferencia(
                 item.get("diferencia_detalle")

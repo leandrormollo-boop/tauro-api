@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Mi cuenta corriente{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=1">{% endblock %}
 
 {% macro dinero(valor) -%}
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
@@ -15,27 +16,35 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 
 {% macro resumen_ambito(nombre, clave, ledger) -%}
 <a class="account-scope-summary {% if ambito_filtro == clave %}is-active{% endif %}"
-   href="/portal/cuenta?ambito={{ clave }}&tipo={{ tipo_filtro }}"
+   href="{{ cuenta_url(ambito=clave, pagina=None) }}#movimientos"
    {% if ambito_filtro == clave %}aria-current="page"{% endif %}>
     <span>{{ nombre }}</span>
-    <strong class="portal-balance-metal">{{ dinero(ledger.saldo_ars|abs) }}</strong>
+    <strong>{{ dinero(ledger.saldo_ars|abs) }}</strong>
     <small>{{ estado_saldo(ledger.saldo_ars) }} · Facturado {{ dinero(ledger.facturado_ars) }} · A facturar {{ dinero(ledger.pendiente_facturacion_ars) }}</small>
 </a>
 {%- endmacro %}
 
 {% block content %}
 {% set total = resumen_cuenta.consolidado %}
-<section class="account-page">
+{% set exp = experiencia|default(none) %}
+{% set seleccion = namespace(clave='', monto='') %}
+{% for destino in destinos_pago %}
+    {% if destino.clave == request.query_params.get('pagar') and destino.disponible > 0 %}
+        {% set seleccion.clave = destino.clave %}
+        {% set seleccion.monto = '{:.2f}'.format(destino.disponible).replace('.', ',') %}
+    {% endif %}
+{% endfor %}
+<section class="account-page account-client" aria-label="Cuenta corriente">
 <div class="page-title account-page-title">
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Administración</div>
-            <h1>Mi cuenta</h1>
-            <p>Tu saldo, tus pagos y cada movimiento en un solo lugar.</p>
+            <h1>Tu cuenta, <em>en orden.</em></h1>
+            <p>Saldo, vencimientos y el detalle de tu operación.</p>
         </div>
         <div class="account-title-actions">
             <a href="#informar-pago" class="btn btn-primary" data-open-payment>Informar un pago</a>
-            <a href="/portal/backup.xlsx" class="btn btn-ghost" download>Descargar Excel</a>
+            <a href="{{ cuenta_url(exportar=true, pagina=None) }}" class="btn btn-ghost" download data-account-export aria-label="Descargar movimientos filtrados en Excel"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg> Descargar Excel</a>
         </div>
     </div>
 </div>
@@ -47,35 +56,90 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>
 {% endif %}
 
-<div class="account-overview" aria-label="Resumen de cuenta">
-    <article class="account-total-card">
-        <div>
-            <span class="account-total-label">Saldo de tu cuenta · total consolidado</span>
-            <strong class="account-total-value portal-balance-metal">
-                {{ dinero(total.saldo_ars|abs) }}
-            </strong>
-            <span class="account-total-state">{{ estado_saldo(total.saldo_ars) }}</span>
-        </div>
+{% if experiencia_error|default('') %}<div class="msg warn" role="status">{{ experiencia_error }}</div>{% endif %}
+<div class="account-position" aria-label="Saldo y próximos vencimientos">
+    <article class="account-balance">
+        <span class="account-kicker">Saldo consolidado · ARS</span>
+        <strong class="account-balance-value">{{ dinero(total.saldo_ars|abs) }}</strong>
+        <span class="account-balance-state">{{ estado_saldo(total.saldo_ars) }}</span>
+        <p>Incluye cargos, ajustes y pagos aprobados.</p>
+        <details class="account-balance-breakdown">
+            <summary>Cómo se compone tu saldo</summary>
+            <dl><div><dt>Cargos y ajustes</dt><dd>{{ dinero(total.debe_ars) }}</dd></div><div><dt>Pagos aprobados</dt><dd>− {{ dinero(total.pagos_aprobados_ars) }}</dd></div>{% if total.haber_ars > total.pagos_aprobados_ars %}<div><dt>Ajustes a favor</dt><dd>− {{ dinero(total.haber_ars - total.pagos_aprobados_ars) }}</dd></div>{% endif %}</dl><p class="account-balance-documents">Facturado {{ dinero(total.facturado_ars) }} · A facturar {{ dinero(total.pendiente_facturacion_ars) }}</p>
+        </details>
     </article>
-
-    <dl class="account-kpis" aria-label="Totales de la cuenta corriente">
-        <div><dt>Facturado</dt><dd>{{ dinero(total.facturado_ars) }}</dd></div>
-        <div><dt>Pagos aprobados</dt><dd class="portal-money-green">{{ dinero(total.haber_ars) }}</dd></div>
-        <div><dt>A facturar</dt><dd>{{ dinero(total.pendiente_facturacion_ars) }}</dd></div>
-        <div><dt>Crédito disponible</dt><dd class="portal-money-green">{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd></div>
+    <section class="account-due" aria-labelledby="account-due-title">
+        <div class="account-section-heading">
+            <div><span class="account-kicker">Próxima acción</span><h2 id="account-due-title">Tus vencimientos</h2></div>
+            {% if exp and exp.vencimientos.cantidad_vencida %}<span class="account-status is-attention">{{ exp.vencimientos.cantidad_vencida }} vencida{% if exp.vencimientos.cantidad_vencida != 1 %}s{% endif %}</span>{% endif %}
+        </div>
+        {% if exp and exp.vencimientos['items'] %}
+        <div class="account-due-list">
+            {% for v in exp.vencimientos['items'] %}
+            <div class="account-due-row">
+                <div class="account-due-document"><strong>{{ v.numero_visible }}</strong><span class="{% if v.estado == 'VENCIDA' %}account-attention{% endif %}">{{ v.estado_label }}{% if v.fecha_vencimiento %} · <time datetime="{{ v.fecha_vencimiento_iso }}">{{ v.fecha_vencimiento }}</time>{% endif %}{% if v.parcial %} · Pago parcial{% endif %}</span></div>
+                <div class="account-due-amount"><strong>{{ dinero(v.saldo_ars) }}</strong><span>Pendiente{% if v.en_revision_ars %} · {{ dinero(v.en_revision_ars) }} en revisión{% endif %}</span></div>
+                {% if v.disponible_pago_ars > 0 %}<a href="{{ cuenta_url(pagar=v.destino_pago, pagina=None) }}#informar-pago" class="account-text-action" data-open-payment data-payment-destination="{{ v.destino_pago }}">Informar pago <span aria-hidden="true">↗</span></a>{% else %}<span class="account-status is-attention">En revisión</span>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <p class="account-due-note">{% if exp.vencimientos.cantidad > exp.vencimientos["items"]|length %}Mostrando {{ exp.vencimientos["items"]|length }} de {{ exp.vencimientos.cantidad }} facturas pendientes · {% endif %}Pendiente de facturas: <strong>{{ dinero(exp.vencimientos.total_pendiente_ars) }}</strong>{% if exp.vencimientos.total_vencido_ars %} · Vencido: <strong class="account-attention">{{ dinero(exp.vencimientos.total_vencido_ars) }}</strong>{% endif %}</p>
+        {% elif exp %}<div class="account-quiet-state"><span class="account-quiet-symbol" aria-hidden="true">✓</span><div><strong>No tenés facturas pendientes.</strong><p>Acá vas a ver los próximos vencimientos y sus pagos.</p></div></div>
+        {% else %}<p class="account-inline-empty">Los vencimientos no están disponibles en este momento.</p>{% endif %}
+    </section>
+    <dl class="account-payment-totals">
+        <div><dt>Pagos en revisión</dt><dd>{{ dinero(resumen_cuenta.pagos_pendientes_ars|default(0)) }}</dd><small>Todavía no se descuentan del saldo.</small></div>
+        <div><dt>Pagos disponibles para aplicar</dt><dd>{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd><small>Aprobados, ya descontados del saldo consolidado.</small></div>
+        {% if exp and exp.cupo.configurado %}<div class="account-capacity"><dt>Disponible para nuevos envíos</dt><dd>{{ dinero(exp.cupo.disponible_ars) }}</dd><small>De un límite de {{ dinero(exp.cupo.tope_ars) }}{% if exp.cupo.reservado_ars %} · {{ dinero(exp.cupo.reservado_ars) }} reservado{% endif %} · Se vuelve a verificar al emitir</small></div>{% endif %}
     </dl>
-
-    <div class="account-scope-list" aria-label="Saldo por ámbito">
-        {{ resumen_ambito("Nacional", "nacional", resumen_cuenta.nacional) }}
-        {{ resumen_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}
-    </div>
-
-    {% if resumen_cuenta.cargos_sin_clasificar_ars %}
-    <p class="account-classification-note">Pendiente de clasificar: {{ dinero(resumen_cuenta.cargos_sin_clasificar_ars) }}</p>
-    {% endif %}
 </div>
+<details class="account-scopes"><summary>Ver saldos por ámbito <span>Nacional / Internacional</span></summary><div class="account-scope-list">{{ resumen_ambito("Nacional", "nacional", resumen_cuenta.nacional) }}{{ resumen_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}</div>{% if resumen_cuenta.cargos_sin_clasificar_ars %}<p class="account-classification-note">Pendiente de clasificar: {{ dinero(resumen_cuenta.cargos_sin_clasificar_ars) }}</p>{% endif %}</details>
 
-<details class="card account-payment-card" id="informar-pago">
+{% if exp %}
+<div class="account-activity">
+    <section class="account-costs" aria-labelledby="account-costs-title">
+        <div class="account-section-heading"><div><span class="account-kicker">Tu operación</span><h2 id="account-costs-title">Costos logísticos</h2></div><span class="account-currency">ARS</span></div>
+        <div class="account-cost-total"><strong>{{ dinero(exp.costos.total_ars) }}</strong><span>Consolidado · últimos seis meses</span></div>
+        {% set maxpositivo = exp.costos.maximo_positivo_ars %}
+        {% set maxnegativo = exp.costos.maximo_negativo_ars %}
+        {% set escala = maxpositivo + maxnegativo if maxpositivo + maxnegativo > 0 else 1 %}
+        <div class="account-chart{% if maxnegativo %} is-diverging{% endif %}" role="group" aria-label="Cargos y ajustes por mes. Seleccioná un mes para ver sus movimientos.">
+            {% if maxnegativo %}<span class="account-chart-zero" style="top:{{ (maxpositivo / escala * 120)|float }}px" aria-hidden="true">0</span>{% endif %}
+            {% for mes in exp.costos.meses %}
+            <a href="{{ cuenta_url(ambito='consolidado', desde=mes.desde, hasta=mes.hasta, tipo='costos', q='', pagina=None) }}#movimientos" class="account-chart-month{% if ambito_filtro == 'consolidado' and tipo_filtro == 'costos' and not q_filtro and desde_filtro == mes.desde and hasta_filtro == mes.hasta %} is-selected{% endif %}" aria-label="{{ mes.label_completo }}: {{ dinero(mes.total_ars) }}. Ver cargos y ajustes del mes" title="{{ mes.label_completo }} · Nacional {{ dinero(mes.nacional_ars) }} · Internacional {{ dinero(mes.internacional_ars) }}{% if mes.sin_clasificar_ars %} · Sin clasificar {{ dinero(mes.sin_clasificar_ars) }}{% endif %}">
+                <span class="account-chart-bars" aria-hidden="true">
+                    <span class="account-chart-positive" style="height:{{ (maxpositivo / escala * 100)|float if maxpositivo else 0 }}%">
+                        {% for clase, valor in (('is-international', mes.internacional_ars), ('is-national', mes.nacional_ars), ('is-unclassified', mes.sin_clasificar_ars)) %}{% if valor > 0 %}<span class="account-chart-bar {{ clase }}" style="height:{{ (valor / maxpositivo * 100)|float }}%"></span>{% endif %}{% endfor %}
+                    </span>
+                    {% if maxnegativo %}<span class="account-chart-negative" style="height:{{ (maxnegativo / escala * 100)|float }}%">
+                        {% for clase, valor in (('is-national', mes.nacional_ars), ('is-international', mes.internacional_ars), ('is-unclassified', mes.sin_clasificar_ars)) %}{% if valor < 0 %}<span class="account-chart-bar {{ clase }}" style="height:{{ (valor|abs / maxnegativo * 100)|float }}%"></span>{% endif %}{% endfor %}
+                    </span>{% endif %}
+                </span><span class="account-chart-month-label">{{ mes.label }}</span>
+            </a>
+            {% endfor %}
+        </div>
+        <div class="account-chart-legend"><span><i class="is-national"></i>Nacional</span><span><i class="is-international"></i>Internacional</span>{% if exp.costos.hay_sin_clasificar %}<span><i class="is-unclassified"></i>Sin clasificar</span>{% endif %}</div>
+        <p class="account-chart-note">{{ exp.costos.criterio_fecha }} · Seleccioná un mes para ver sus cargos y ajustes.{% if maxnegativo %} Las barras bajo cero representan créditos.{% endif %}</p>
+        <details class="account-chart-values"><summary>Ver importes por mes</summary><div class="account-chart-values-scroll"><table><caption class="sr-only">Costos logísticos mensuales en pesos argentinos</caption><thead><tr><th>Mes</th><th>Nacional</th><th>Internacional</th>{% if exp.costos.hay_sin_clasificar %}<th>Sin clasificar</th>{% endif %}<th>Total</th></tr></thead><tbody>{% for mes in exp.costos.meses %}<tr><th scope="row">{{ mes.label_completo }}</th><td>{{ dinero(mes.nacional_ars) }}</td><td>{{ dinero(mes.internacional_ars) }}</td>{% if exp.costos.hay_sin_clasificar %}<td>{{ dinero(mes.sin_clasificar_ars) }}</td>{% endif %}<td>{{ dinero(mes.total_ars) }}</td></tr>{% endfor %}</tbody></table></div></details>
+    </section>
+    <section class="account-payment-tracking" aria-labelledby="account-payments-title">
+        <div class="account-section-heading"><div><span class="account-kicker">Comprobantes</span><h2 id="account-payments-title">Seguimiento de pagos</h2></div><a class="account-text-action" href="{{ cuenta_url(tipo='pagos', pagina=None) }}#movimientos" data-account-link="pagos">Ver movimientos <span aria-hidden="true">↗</span></a></div>
+        {% for pago in exp.pagos %}
+        <details class="account-payment-record"{% if loop.first and pago.estado == 'PENDIENTE' %} open{% endif %}>
+            <summary><span class="account-payment-record-title"><strong>{{ dinero(pago.monto_ars) }}</strong><span>{{ pago.fecha or 'Fecha sin informar' }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</span></span><span class="account-status {% if pago.estado == 'PENDIENTE' %}is-attention{% elif pago.estado == 'RECHAZADO' %}is-rejected{% else %}is-confirmed{% endif %}">{{ pago.estado_label }}</span><span class="account-detail-chevron" aria-hidden="true"></span></summary>
+            <div class="account-payment-record-body">
+                <ol class="account-payment-steps" aria-label="Progreso del comprobante">{% for paso in pago.pasos %}<li{% if paso.completo %} class="is-complete"{% endif %}><span>{{ paso.label }}</span>{% if paso.fecha %}<time>{{ paso.fecha }}</time>{% endif %}</li>{% endfor %}</ol>
+                {% if pago.estado == 'RECHAZADO' %}<p class="account-payment-explanation">Este comprobante fue rechazado y no modifica tu saldo. Revisá los datos y consultá a TAURO antes de volver a informarlo.</p>{% elif pago.estado == 'PENDIENTE' %}<p class="account-payment-explanation">Recibimos el comprobante. Se descuenta del saldo cuando TAURO lo aprueba.</p>{% else %}<p class="account-payment-explanation">Pago acreditado en tu cuenta.</p>{% endif %}
+                {% if pago.aplicaciones %}<ul class="account-payment-documents" aria-label="Documentos del pago">{% for aplicacion in pago.aplicaciones %}<li><span>{{ aplicacion.documento }}{% if aplicacion.tracking %}<small class="mono">{{ aplicacion.tracking }}</small>{% endif %}</span><strong>{{ dinero(aplicacion.monto_ars) }}</strong></li>{% endfor %}</ul>{% endif %}
+                <div class="account-record-footer"><span>{{ pago.metodo or 'Método sin informar' }}</span>{% if pago.tiene_comprobante %}<a href="/portal/pagos/{{ pago.id }}/comprobante" target="_blank" rel="noopener">Ver comprobante <span class="sr-only">(abre otra pestaña)</span></a>{% endif %}</div>
+            </div>
+        </details>
+        {% else %}<p class="account-inline-empty">Cuando informes un pago, vas a poder seguir su revisión desde acá.</p>{% endfor %}
+    </section>
+</div>
+{% endif %}
+
+<details class="card account-payment-card" id="informar-pago"{% if seleccion.clave %} open{% endif %}>
     <summary>
         <span>
             <strong>Informar un pago</strong>
@@ -92,7 +156,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         <div class="form-grid-3 account-payment-basics">
             <div class="form-group">
                 <label for="pago-monto">Monto (ARS) *</label>
-                <input type="text" name="monto" id="pago-monto" required inputmode="decimal" data-numero="monto" placeholder="Ej. 100.000 o 100,000">
+                <input type="text" name="monto" id="pago-monto" required inputmode="decimal" data-numero="monto" placeholder="Ej. 100.000,00" value="{{ seleccion.monto }}">
             </div>
             <div class="form-group">
                 <label for="pago-metodo">Método</label>
@@ -110,12 +174,12 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 
         <fieldset class="account-allocation-options">
             <legend>¿Qué querés pagar?</legend>
-            <p><small>Podés elegir documentos de ambos ámbitos: no hace falta Dividir el pago manualmente. Lo Sin imputar queda como saldo a favor.</small></p>
+            <p><small>Podés elegir documentos de ambos ámbitos. El importe sin imputar queda como saldo a favor una vez aprobado el pago.</small></p>
             {% for d in destinos_pago %}
             <label>
-              <input type="checkbox" name="destinos" value="{{ d.clave }}" data-saldo="{{ d.disponible }}">
+              <input type="checkbox" name="destinos" value="{{ d.clave }}" data-saldo="{{ d.disponible }}"{% if d.clave == seleccion.clave %} checked{% endif %}{% if d.disponible <= 0 %} disabled{% endif %}>
               <span><strong>{{ d.descripcion }}</strong>{% if d.tracking %} · {{ d.tracking }}{% endif %}
-                <small>{{ d.ambito|title }} · saldo {{ dinero(d.saldo) }}{% if d.solicitado %} · en revisión {{ dinero(d.solicitado) }}{% endif %}</small>
+                <small>{{ d.ambito|title }} · saldo {{ dinero(d.saldo) }}{% if d.solicitado %} · en revisión {{ dinero(d.solicitado) }}{% endif %} · Disponible para informar {{ dinero(d.disponible) }}</small>
               </span>
             </label>
             {% else %}
@@ -123,7 +187,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             {% endfor %}
         </fieldset>
         <div class="account-split-allocation">
-          <p id="payment-allocation-summary" aria-live="polite">Imputado: $ 0,00 · Te quedan $ 0,00 a favor</p>
+          <p id="payment-allocation-summary" aria-live="polite">La aplicación a los documentos seleccionados se confirma al verificar el comprobante.</p>
         </div>
 
         <div class="account-payment-file-row">
@@ -137,231 +201,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     </form>
 </details>
 
-<section class="account-ledger" aria-labelledby="account-ledger-title">
-<div class="account-history-head">
-    <div>
-        <h2 id="account-ledger-title">Todos tus movimientos</h2>
-        <p>Envíos, facturas, pagos y ajustes en orden de fecha.</p>
-    </div>
-    <form class="account-unified-filters" method="get" action="/portal/cuenta">
-        <label>
-            <span>Ámbito</span>
-            <select name="ambito" data-account-filter>
-                {% for clave, etiqueta in (("consolidado", "Todos"), ("nacional", "Nacional"), ("internacional", "Internacional")) %}
-                <option value="{{ clave }}" {% if ambito_filtro == clave %}selected{% endif %}>{{ etiqueta }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>
-            <span>Tipo</span>
-            <select name="tipo" data-account-filter>
-                {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos y facturas"), ("pagos", "Pagos"), ("diferencias", "Ajustes"), ("revision", "En revisión")) %}
-                <option value="{{ clave }}" {% if tipo_filtro == clave %}selected{% endif %}>{{ etiqueta }}</option>
-                {% endfor %}
-            </select>
-        </label>
-        {% if ambito_filtro != 'consolidado' or tipo_filtro != 'todos' %}
-        <a href="/portal/cuenta" class="account-clear-filters">Ver todo</a>
-        {% endif %}
-    </form>
-    {% if movimientos.total_resultados %}
-    <p class="account-results-count">{{ movimientos.pagina_desde }}–{{ movimientos.pagina_hasta }} de {{ movimientos.total_resultados }}</p>
-    {% endif %}
-</div>
-
-{% set filas = movimientos["items"] %}
-{% if filas %}
-<div class="card account-history-card">
-    <div class="table-wrap">
-        <table class="account-table">
-            <caption class="sr-only">Historial de envíos, pagos y ajustes de la cuenta {{ ambito_filtro }}</caption>
-            <thead>
-                <tr>
-                    <th scope="col" class="account-col-date">Fecha</th>
-                    <th scope="col" class="account-col-concept">Detalle</th>
-                    <th scope="col" class="account-col-document">Guía / tracking</th>
-                    <th scope="col" class="amount-column account-col-account">Tu cuenta</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for m in filas %}
-                <tr{% if m.tipo == 'DIFERENCIA' %} class="account-row-difference"{% endif %}>
-                    <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
-                    <td data-label="Detalle">
-                        <span class="account-movement-heading">
-                        {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}
-                            <span class="badge warn">Pago en revisión</span>
-                        {% elif m.tipo == 'PAGO' %}
-                            <span class="badge ok">Pago confirmado</span>
-                        {% elif m.tipo == 'PENDIENTE_FACTURA' %}
-                            <span class="badge warn">Pendiente de factura</span>
-                        {% elif m.tipo == 'DIFERENCIA' %}
-                            <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">Ajuste del courier</span>
-                        {% else %}
-                            <span class="badge">Facturado</span>
-                        {% endif %}
-                        {% if m.solicitud_id %}
-                            <strong class="account-shipment-title">{{ m.etiqueta_envio or m.destinatario or ('Envío #' ~ m.solicitud_id) }}</strong>
-                        {% else %}
-                            <strong class="account-shipment-title">{{ m.concepto or '—' }}</strong>
-                        {% endif %}
-                        </span>
-                        {% if m.solicitud_id %}
-                        <small class="account-shipment-meta">
-                            {% if m.etiqueta_envio %}Destinatario: {{ m.destinatario or 'Sin informar' }} · {% endif %}
-                            {{ ubicacion(m.origen_ciudad, m.origen_pais) }} → {{ ubicacion(m.destino_ciudad, m.destino_pais) }}
-                        </small>
-                        {% elif m.referencia and m.tipo != 'DIFERENCIA' %}<small>Referencia: {{ m.referencia }}</small>{% endif %}
-                        {% if m.tipo == 'DIFERENCIA' and m.diferencia_detalle %}
-                          {% set d = m.diferencia_detalle %}
-                          {% if d.montos_completos %}
-                          <div class="account-difference-flow" aria-label="Cálculo del costo final">
-                              <span class="account-difference-value">
-                                  <small>Valor cotizado</small>
-                                  <strong>{{ dinero(d.valor_inicial_ars) }}</strong>
-                              </span>
-                              <span class="account-difference-operator">{% if d.es_credito %}−{% else %}+{% endif %}</span>
-                              <span class="account-difference-value is-adjustment {% if d.es_credito %}is-credit{% endif %}">
-                                  <small>Diferencia</small>
-                                  <strong>{{ dinero(d.diferencia_ars|abs) }}</strong>
-                              </span>
-                              <span class="account-difference-operator">=</span>
-                              <span class="account-difference-value is-final">
-                                  <small>Costo final</small>
-                                  <strong>{{ dinero(d.valor_final_ars) }}</strong>
-                              </span>
-                          </div>
-                          {% endif %}
-                          {% if d.es_peso %}
-                          <small class="account-difference-reason">Peso inicial {{ d.peso_inicial_kg }} kg → peso facturado {{ d.peso_facturado_kg }} kg · diferencia {{ d.diferencia_peso_kg }} kg{% if d.motivo == 'MIXTO' and d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
-                          {% else %}
-                          <small class="account-difference-reason">Motivo: {{ d.concepto_courier or d.motivo_legible }}</small>
-                          {% endif %}
-                          <small class="account-difference-policy">{{ d.leyenda }}</small>
-                        {% endif %}
-                        {% if m.valor_envio_ars is not none and m.tipo == 'DIFERENCIA' and (not m.diferencia_detalle or not m.diferencia_detalle.montos_completos) %}<small>Valor final del envío {{ dinero(m.valor_envio_ars) }}</small>{% endif %}
-                        {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
-                    </td>
-                    <td class="mono account-tracking-cell" data-label="Guía / tracking">
-                        {% if m.numero_guia %}<strong>{{ m.numero_guia }}</strong>{% endif %}
-                        {% if m.numero_factura %}<small>FC {{ m.numero_factura }}</small>{% endif %}
-                        {% if not m.numero_guia and not m.numero_factura %}<span>—</span>{% endif %}
-                        <span class="account-document-actions">
-                            {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}">Ver envío</a>{% endif %}
-                            {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener">Descargar</a>{% endif %}
-                        </span>
-                    </td>
-                    <td class="mono amount-column account-movement-amount" data-label="Tu cuenta">
-                        <span class="badge muted account-scope-badge">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span>
-                        {% if m.tipo == 'DIFERENCIA' %}
-                        <small class="account-impact-explanation">El ajuste ya está incluido en el costo final.</small>
-                        {% elif m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong><small>Se descuenta del saldo</small>
-                        {% elif m.debe_ars %}<strong>+ {{ dinero(m.debe_ars) }}</strong><small>Se suma al saldo</small>
-                        {% elif m.tipo == 'PAGO_PENDIENTE' %}<strong>{{ dinero(m.monto_ars) }}</strong><small>Todavía no modifica el saldo</small>
-                        {% else %}<span>—</span>{% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    {% if movimientos.total_paginas > 1 %}
-    <nav class="account-pagination" aria-label="Páginas de movimientos">
-        {% if movimientos.pagina_actual > 1 %}
-        <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}&pagina={{ movimientos.pagina_actual - 1 }}" aria-label="Página anterior">‹</a>
-        {% else %}<span aria-disabled="true">‹</span>{% endif %}
-        {% for numero in movimientos.paginas_visibles %}
-            {% if numero %}
-            <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}&pagina={{ numero }}"
-               class="{% if numero == movimientos.pagina_actual %}is-active{% endif %}"
-               {% if numero == movimientos.pagina_actual %}aria-current="page"{% endif %}>{{ numero }}</a>
-            {% else %}<span aria-hidden="true">…</span>{% endif %}
-        {% endfor %}
-        {% if movimientos.pagina_actual < movimientos.total_paginas %}
-        <a href="/portal/cuenta?ambito={{ ambito_filtro }}&tipo={{ tipo_filtro }}&pagina={{ movimientos.pagina_actual + 1 }}" aria-label="Página siguiente">›</a>
-        {% else %}<span aria-disabled="true">›</span>{% endif %}
-    </nav>
-    {% endif %}
-</div>
-{% else %}
-<div class="card account-empty-state">
-    {% if tipo_filtro != 'todos' %}
-    <strong>No encontramos movimientos con estos filtros.</strong>
-    <a href="/portal/cuenta?ambito={{ ambito_filtro }}">Limpiar filtros</a>
-    {% elif ambito_filtro == 'nacional' %}
-    <strong>Todavía no tenés movimientos nacionales.</strong>
-    <a href="/portal/envios?tipo=nacional">Ver envíos nacionales</a>
-    {% elif ambito_filtro == 'internacional' %}
-    <strong>Todavía no tenés movimientos internacionales.</strong>
-    <a href="/portal/envios?tipo=internacional">Ver envíos internacionales</a>
-    {% else %}
-    <strong>Todavía no hay movimientos en tu cuenta.</strong>
-    <a href="/portal/envios/nuevo">Crear un envío</a>
-    {% endif %}
-</div>
-{% endif %}
-</section>
+{% include "portal/cuenta_movimientos.html" %}
 </section>
 
-<script nonce="{{ request.state.csp_nonce }}">
-(function () {
-  var form = document.getElementById("payment-report-form");
-  if (!form) return;
-  var paymentDetails = document.getElementById("informar-pago");
-  var paymentOpener = document.querySelector("[data-open-payment]");
-  var total = document.getElementById("pago-monto");
-  var destinations = Array.from(form.querySelectorAll('[name="destinos"]'));
-  var summary = document.getElementById("payment-allocation-summary");
-  var accountFilters = Array.from(document.querySelectorAll("[data-account-filter]"));
-
-  function numberFromInput(value) {
-    value = String(value || "").trim().replace(/\s/g, "");
-    if (!value) return 0;
-    if (value.includes(".") && value.includes(",")) {
-      if (value.lastIndexOf(",") > value.lastIndexOf(".")) value = value.replace(/\./g, "").replace(",", ".");
-      else value = value.replace(/,/g, "");
-    } else if (/^\d{1,3}([.,]\d{3})+$/.test(value)) {
-      value = value.replace(/[.,]/g, "");
-    } else {
-      value = value.replace(",", ".");
-    }
-    var parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  }
-
-  function openPayment(event) {
-    if (event) event.preventDefault();
-    paymentDetails.open = true;
-    total.focus();
-  }
-
-  function updateAllocation() {
-    var totalValue = numberFromInput(total.value);
-    var selected = destinations.filter(function (item) { return item.checked; })
-      .reduce(function (sum, item) { return sum + numberFromInput(item.dataset.saldo); }, 0);
-    var allocated = Math.min(totalValue, selected);
-    var credit = Math.max(0, totalValue - selected);
-    var pending = Math.max(0, selected - totalValue);
-    function money(value) { return value.toLocaleString("es-AR", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }); }
-    summary.textContent = "Imputado: $ " + money(allocated)
-      + " · Te quedan $ " + money(credit) + " a favor"
-      + (pending ? " · Queda pendiente: $ " + money(pending) : "");
-  }
-
-  destinations.forEach(function (checkbox) {
-    checkbox.addEventListener("change", updateAllocation);
-  });
-  if (paymentOpener) paymentOpener.addEventListener("click", openPayment);
-  if (window.location.hash === "#informar-pago") openPayment();
-  total.addEventListener("input", updateAllocation);
-  accountFilters.forEach(function (filter) {
-    filter.addEventListener("change", function () { filter.form.submit(); });
-  });
-  updateAllocation();
-})();
-</script>
+<script src="/static/js/portal-cuenta.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
 {% endblock %}

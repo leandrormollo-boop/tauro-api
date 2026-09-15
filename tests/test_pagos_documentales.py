@@ -34,14 +34,17 @@ def test_schema_agrega_objetivos_deriva_ambito_y_preserva_legado():
 
 
 def test_formularios_ofrecen_facturas_envios_parcial_y_saldo_a_favor():
-    portal = (ROOT / "templates" / "portal" / "cuenta.html").read_text()
+    portal = (ROOT / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
+    portal_js = (ROOT / "static" / "js" / "portal-cuenta.js").read_text(encoding="utf-8")
     admin = (ROOT / "templates" / "admin" / "pago_form.html").read_text()
     pendientes = (ROOT / "templates" / "admin" / "pagos_pendientes.html").read_text()
     for html in (portal, admin):
         assert 'name="destinos"' in html
         assert 'data-saldo="{{ d.disponible }}"' in html
         assert "a favor" in html
-        assert "Queda pendiente" in html or "queda pendiente" in html
+    assert "/static/js/portal-cuenta.js" in portal
+    assert "Pendiente en los documentos" in portal_js
+    assert "Queda pendiente" in admin or "queda pendiente" in admin
     assert 'name="fecha"' in portal
     assert 'name="preservar_solicitud" value="1"' in pendientes
 

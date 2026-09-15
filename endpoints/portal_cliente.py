@@ -16,7 +16,7 @@ import hashlib
 import os
 import re
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import quote, urlencode, urlparse
 
@@ -54,6 +54,9 @@ from servicios.cuenta_corriente import (
 from servicios.facturacion_clientes import (
     get_factura_cliente_pdf,
 )
+from servicios.experiencia_cuenta import obtener_experiencia_cuenta
+from servicios.filtros_cuenta import normalizar_filtros_cuenta
+from servicios.export_cuenta import generar_excel_cuenta
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
 )
@@ -126,7 +129,7 @@ templates.env.globals["numero_ars"] = numero_ars
 AMBITOS_PORTAL = {"nacional", "internacional"}
 AMBITOS_CUENTA = {"consolidado", "nacional", "internacional"}
 TIPOS_MOVIMIENTO_CUENTA = {
-    "todos", "cargos", "pagos", "diferencias", "revision",
+    "todos", "cargos", "pagos", "diferencias", "revision", "costos",
 }
 # Mantiene resumen, filtros y una página completa dentro del viewport de
 # escritorio; el resto queda accesible con paginación explícita.
@@ -1072,6 +1075,10 @@ def cuenta_corriente(
     pagina: str = "1",
     vista: str = "movimientos",
     cliente: str = Depends(cliente_actual),
+    q: str = "",
+    desde: str = "",
+    hasta: str = "",
+    pagar: str = "",
 ):
     """
     Timeline completo de facturas y pagos. La spec lo pide explícito: el
@@ -1081,21 +1088,57 @@ def cuenta_corriente(
     ambito = _ambito_cuenta(ambito)
     tipo = _tipo_movimiento_cuenta(tipo)
     pagina_numero = _pagina_cuenta(pagina)
+    filtros_error = ""
+    try:
+        filtros = normalizar_filtros_cuenta(q, desde, hasta)
+    except ValueError as exc:
+        filtros = normalizar_filtros_cuenta()
+        filtros_error = f"{exc} Se muestran los movimientos sin búsqueda ni filtro de fechas."
+        pagina_numero = 1
+
+    def cuenta_url(**cambios):
+        exportar = cambios.pop("exportar", False)
+        parametros = {"ambito": ambito, "tipo": tipo, **filtros}
+        parametros.update({k: v for k, v in cambios.items() if k in {
+            "ambito", "tipo", "q", "desde", "hasta", "pagina", "pagar",
+        }})
+        parametros = {k: v for k, v in parametros.items() if v is not None and v != ""}
+        if exportar:
+            parametros.pop("pagina", None)
+            parametros.pop("pagar", None)
+        path = "/portal/cuenta/exportar.xlsx" if exportar else "/portal/cuenta"
+        return path + ("?" + urlencode(parametros) if parametros else "")
     # `vista` queda en la firma por compatibilidad con enlaces anteriores.
     # La cuenta nueva unifica facturas, pendientes y pagos en el mismo historial.
     vista = "movimientos"
 
     # Las dos consultas reciben exclusivamente el cliente autenticado. Ningún
     # query param o campo del form puede elegir la cuenta de otra persona.
-    resumen = resumen_cuenta_por_ambito(cliente)
+    parcial_cuenta = getattr(request, "headers", {}).get("X-Tauro-Partial") == "cuenta"
+    resumen = None if parcial_cuenta else resumen_cuenta_por_ambito(cliente)
     movimientos_por_pagina = (
         DIFERENCIAS_CUENTA_POR_PAGINA
         if tipo == "diferencias"
         else MOVIMIENTOS_CUENTA_POR_PAGINA
     )
+    argumentos_busqueda = filtros if any(filtros.values()) else {}
     movs = movimientos_cuenta_paginados(
-        cliente, ambito, tipo, pagina_numero, movimientos_por_pagina
+        cliente, ambito, tipo, pagina_numero, movimientos_por_pagina,
+        **argumentos_busqueda,
     )
+    contexto_historial = {
+        "cliente": cliente, "movimientos": movs,
+        "ambito_filtro": ambito, "tipo_filtro": tipo,
+        "q_filtro": filtros["q"], "desde_filtro": filtros["desde"],
+        "hasta_filtro": filtros["hasta"], "filtros_error": filtros_error,
+        "cuenta_url": cuenta_url,
+    }
+    if parcial_cuenta:
+        return templates.TemplateResponse(
+            request=request, name="portal/cuenta_movimientos.html",
+            context=contexto_historial,
+            headers={"X-Tauro-Partial": "cuenta", "Cache-Control": "private, no-store"},
+        )
     consolidado = resumen["consolidado"]
     # Compatibilidad con el saldo del menú lateral: reutiliza el total ya
     # calculado y evita otra consulta a la base.
@@ -1111,6 +1154,20 @@ def cuenta_corriente(
         # saldo principal ya tiene su propio circuito de diagnóstico.
         destinos_pago = []
 
+    experiencia = None
+    experiencia_error = ""
+    try:
+        experiencia = obtener_experiencia_cuenta(cliente, resumen)
+    except Exception as exc:
+        # La cuenta ya calculada sigue visible. Un fallo no representa cero
+        # deuda/vencimientos ni capacidad ilimitada para operar.
+        print(f"[portal-cuenta] detalle no disponible: {type(exc).__name__}")
+        experiencia_error = "No pudimos actualizar vencimientos, pagos y costos. Recargá la página para volver a intentarlo."
+    destino_preseleccionado = next((
+        d for d in destinos_pago
+        if d.get("clave") == pagar and Decimal(str(d.get("disponible") or 0)) > 0
+    ), None)
+
     return templates.TemplateResponse(
         request=request, name="portal/cuenta.html",
         context={
@@ -1122,8 +1179,44 @@ def cuenta_corriente(
             "tipo_filtro": tipo,
             "vista_cuenta": vista,
             "destinos_pago": destinos_pago,
-            "today": datetime.now().strftime("%Y-%m-%d"),
+            "q_filtro": filtros["q"],
+            "desde_filtro": filtros["desde"],
+            "hasta_filtro": filtros["hasta"],
+            "filtros_error": filtros_error,
+            "cuenta_url": cuenta_url,
+            "experiencia": experiencia,
+            "experiencia_error": experiencia_error,
+            "pago_preseleccionado": destino_preseleccionado["clave"] if destino_preseleccionado else "",
+            "pago_monto_preseleccionado": str(destino_preseleccionado["disponible"]) if destino_preseleccionado else "",
+            "today": datetime.now(timezone(timedelta(hours=-3))).date().isoformat(),
             "idempotency_key": _nueva_idempotency_key(),
+        },
+    )
+
+
+@router.get("/cuenta/exportar.xlsx")
+def exportar_cuenta(
+    ambito: str = "consolidado",
+    tipo: str = "todos",
+    q: str = "",
+    desde: str = "",
+    hasta: str = "",
+    cliente: str = Depends(cliente_actual),
+):
+    try:
+        filtros = normalizar_filtros_cuenta(q, desde, hasta)
+        contenido = generar_excel_cuenta(
+            cliente, _ambito_cuenta(ambito), _tipo_movimiento_cuenta(tipo), **filtros
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    fecha = datetime.now(timezone(timedelta(hours=-3))).date().isoformat()
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="TAURO_cuenta_{fecha}.xlsx"',
+            "Cache-Control": "private, no-store",
         },
     )
 

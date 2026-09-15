@@ -648,8 +648,8 @@ def test_movimientos_paginados_filtra_en_sql_y_conserva_factura(monkeypatch):
     assert pagina["items"][0]["archivo_url"] == "/portal/facturas/9/pdf"
     sql = cursor.ejecutadas[0][0]
     assert "WHERE estado = 'APLICADA'" in sql
-    assert "p.estado = 'PENDIENTE'" in sql
-    assert "0::numeric, 0::numeric, p.monto_ars, 'PENDIENTE'" in sql
+    assert "p.estado IN ('PENDIENTE', 'RECHAZADO')" in sql
+    assert "0::numeric, 0::numeric, p.monto_ars, p.estado" in sql
     assert "LEFT JOIN solicitudes_guia s" in sql
     assert "AS numero_guia" in sql
     assert "AS destinatario" in sql
