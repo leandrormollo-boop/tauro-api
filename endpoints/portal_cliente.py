@@ -55,6 +55,7 @@ from servicios.facturacion_clientes import (
     get_factura_cliente_pdf,
 )
 from servicios.experiencia_cuenta import obtener_experiencia_cuenta
+from servicios.periodo_cuenta import inicio_cuenta_cliente, obtener_periodo_cuenta
 from servicios.filtros_cuenta import normalizar_filtros_cuenta
 from servicios.export_cuenta import generar_excel_cuenta
 from servicios.api_b2b import (
@@ -1088,12 +1089,14 @@ def cuenta_corriente(
     ambito = _ambito_cuenta(ambito)
     tipo = _tipo_movimiento_cuenta(tipo)
     pagina_numero = _pagina_cuenta(pagina)
+    inicio_cuenta = inicio_cuenta_cliente(cliente)
     filtros_error = ""
     try:
-        filtros = normalizar_filtros_cuenta(q, desde, hasta)
+        filtros = normalizar_filtros_cuenta(q, desde, hasta, inicio=inicio_cuenta)
     except ValueError as exc:
-        filtros = normalizar_filtros_cuenta()
-        filtros_error = f"{exc} Se muestran los movimientos sin búsqueda ni filtro de fechas."
+        filtros = normalizar_filtros_cuenta(inicio=inicio_cuenta)
+        filtros_error = (f"{exc} Se muestra la cuenta desde su fecha de inicio."
+                         if inicio_cuenta else f"{exc} Se muestran los movimientos sin búsqueda ni filtro de fechas.")
         pagina_numero = 1
 
     def cuenta_url(**cambios):
@@ -1132,6 +1135,7 @@ def cuenta_corriente(
         "q_filtro": filtros["q"], "desde_filtro": filtros["desde"],
         "hasta_filtro": filtros["hasta"], "filtros_error": filtros_error,
         "cuenta_url": cuenta_url,
+        "inicio_cuenta": inicio_cuenta,
     }
     if parcial_cuenta:
         return templates.TemplateResponse(
@@ -1156,6 +1160,17 @@ def cuenta_corriente(
 
     experiencia = None
     experiencia_error = ""
+    periodo_cuenta = None
+    periodo_error = ""
+    if inicio_cuenta:
+        try:
+            periodo_cuenta = obtener_periodo_cuenta(cliente, inicio_cuenta)
+            if periodo_cuenta["saldo_total_ars"] != consolidado["saldo_ars"]:
+                raise ValueError("La cuenta cambió durante la lectura")
+        except Exception as exc:
+            print(f"[portal-cuenta] inicio no disponible: {type(exc).__name__}")
+            periodo_cuenta = None
+            periodo_error = "El saldo total incluye movimientos anteriores. Recargá para ver su composición desde septiembre."
     try:
         experiencia = obtener_experiencia_cuenta(cliente, resumen)
     except Exception as exc:
@@ -1186,6 +1201,9 @@ def cuenta_corriente(
             "cuenta_url": cuenta_url,
             "experiencia": experiencia,
             "experiencia_error": experiencia_error,
+            "inicio_cuenta": inicio_cuenta,
+            "periodo_cuenta": periodo_cuenta,
+            "periodo_error": periodo_error,
             "pago_preseleccionado": destino_preseleccionado["clave"] if destino_preseleccionado else "",
             "pago_monto_preseleccionado": str(destino_preseleccionado["disponible"]) if destino_preseleccionado else "",
             "today": datetime.now(timezone(timedelta(hours=-3))).date().isoformat(),
@@ -1204,7 +1222,7 @@ def exportar_cuenta(
     cliente: str = Depends(cliente_actual),
 ):
     try:
-        filtros = normalizar_filtros_cuenta(q, desde, hasta)
+        filtros = normalizar_filtros_cuenta(q, desde, hasta, inicio=inicio_cuenta_cliente(cliente))
         contenido = generar_excel_cuenta(
             cliente, _ambito_cuenta(ambito), _tipo_movimiento_cuenta(tipo), **filtros
         )

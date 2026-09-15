@@ -9,8 +9,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 <section class="account-ledger" id="movimientos" data-account-region data-account-url="{{ cuenta_url(pagina=movimientos.pagina_actual) }}" tabindex="-1" aria-labelledby="account-ledger-title">
 <div class="account-history-head">
     <div>
-        <h2 id="account-ledger-title">Todos tus movimientos</h2>
-        <p>Envíos, facturas, pagos y ajustes en orden de fecha.</p>
+        <h2 id="account-ledger-title">{% if inicio_cuenta|default(none) %}Movimientos desde septiembre{% else %}Todos tus movimientos{% endif %}</h2>
+        <p>{% if inicio_cuenta|default(none) %}Desde el {{ inicio_cuenta.strftime('%d/%m/%Y') }}. El historial previo está agrupado en el saldo anterior.{% else %}Envíos, facturas, pagos y ajustes en orden de fecha.{% endif %}</p>
     </div>
     {% if movimientos.total_resultados %}<p class="account-results-count">{{ movimientos.pagina_desde }}–{{ movimientos.pagina_hasta }} de {{ movimientos.total_resultados }}</p>{% endif %}
 </div>
@@ -33,11 +33,11 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                 {% endfor %}
             </select>
         </label>
-        <label><span>Desde</span><input type="date" name="desde" value="{{ desde_filtro }}"></label>
-        <label><span>Hasta</span><input type="date" name="hasta" value="{{ hasta_filtro }}"></label>
+        <label><span>Desde</span><input type="date" name="desde" value="{{ desde_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label>
+        <label><span>Hasta</span><input type="date" name="hasta" value="{{ hasta_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label>
         <button type="submit" class="btn btn-ghost">Filtrar</button>
         {% if ambito_filtro != 'consolidado' or tipo_filtro != 'todos' or q_filtro or desde_filtro or hasta_filtro %}
-        <a href="/portal/cuenta" class="account-clear-filters">Ver todo</a>
+        <a href="/portal/cuenta" class="account-clear-filters">{% if inicio_cuenta|default(none) %}Todo desde septiembre{% else %}Ver todo{% endif %}</a>
         {% endif %}
     </form>
 

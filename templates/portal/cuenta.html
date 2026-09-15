@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Mi cuenta corriente{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=1">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=2">{% endblock %}
 
 {% macro dinero(valor) -%}
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
@@ -27,6 +27,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% block content %}
 {% set total = resumen_cuenta.consolidado %}
 {% set exp = experiencia|default(none) %}
+{% set inicio = inicio_cuenta|default(none) %}
+{% set periodo = periodo_cuenta|default(none) %}
 {% set seleccion = namespace(clave='', monto='') %}
 {% for destino in destinos_pago %}
     {% if destino.clave == request.query_params.get('pagar') and destino.disponible > 0 %}
@@ -40,7 +42,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         <div>
             <div class="eyebrow">Administración</div>
             <h1>Tu cuenta, <em>en orden.</em></h1>
-            <p>Saldo, vencimientos y el detalle de tu operación.</p>
+            <p>{% if inicio %}Tu control de movimientos desde septiembre de 2026.{% else %}Saldo, vencimientos y el detalle de tu operación.{% endif %}</p>
         </div>
         <div class="account-title-actions">
             <a href="#informar-pago" class="btn btn-primary" data-open-payment>Informar un pago</a>
@@ -62,7 +64,11 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         <span class="account-kicker">Saldo consolidado · ARS</span>
         <strong class="account-balance-value">{{ dinero(total.saldo_ars|abs) }}</strong>
         <span class="account-balance-state">{{ estado_saldo(total.saldo_ars) }}</span>
-        <p>Incluye cargos, ajustes y pagos aprobados.</p>
+        {% if periodo %}
+        <dl class="account-opening"><div><dt>Saldo anterior al {{ periodo.fecha_inicio_visible }}</dt><dd>{{ dinero(periodo.saldo_anterior_ars) }}</dd></div><div><dt>Movimientos desde el {{ periodo.fecha_inicio_visible }}</dt><dd>{{ dinero(periodo.neto_desde_ars) }}</dd></div>{% if periodo.redondeo_ars %}<div><dt>Redondeo</dt><dd>{{ dinero(periodo.redondeo_ars) }}</dd></div>{% endif %}</dl>
+        <p class="account-opening-note">El saldo anterior agrupa el historial previo, según los movimientos registrados.{% if periodo.advertencia_sin_fecha %} {{ periodo.advertencia_sin_fecha }}{% endif %}</p>
+        {% elif periodo_error|default('') %}<p role="status">{{ periodo_error }}</p>
+        {% else %}<p>Incluye cargos, ajustes y pagos aprobados.</p>{% endif %}
         <details class="account-balance-breakdown">
             <summary>Cómo se compone tu saldo</summary>
             <dl><div><dt>Cargos y ajustes</dt><dd>{{ dinero(total.debe_ars) }}</dd></div><div><dt>Pagos aprobados</dt><dd>− {{ dinero(total.pagos_aprobados_ars) }}</dd></div>{% if total.haber_ars > total.pagos_aprobados_ars %}<div><dt>Ajustes a favor</dt><dd>− {{ dinero(total.haber_ars - total.pagos_aprobados_ars) }}</dd></div>{% endif %}</dl><p class="account-balance-documents">Facturado {{ dinero(total.facturado_ars) }} · A facturar {{ dinero(total.pendiente_facturacion_ars) }}</p>
@@ -99,11 +105,11 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 <div class="account-activity">
     <section class="account-costs" aria-labelledby="account-costs-title">
         <div class="account-section-heading"><div><span class="account-kicker">Tu operación</span><h2 id="account-costs-title">Costos logísticos</h2></div><span class="account-currency">ARS</span></div>
-        <div class="account-cost-total"><strong>{{ dinero(exp.costos.total_ars) }}</strong><span>Consolidado · últimos seis meses</span></div>
+        <div class="account-cost-total"><strong>{{ dinero(exp.costos.total_ars) }}</strong><span>Consolidado · {{ exp.costos.periodo_label|default('últimos seis meses') }}</span></div>
         {% set maxpositivo = exp.costos.maximo_positivo_ars %}
         {% set maxnegativo = exp.costos.maximo_negativo_ars %}
         {% set escala = maxpositivo + maxnegativo if maxpositivo + maxnegativo > 0 else 1 %}
-        <div class="account-chart{% if maxnegativo %} is-diverging{% endif %}" role="group" aria-label="Cargos y ajustes por mes. Seleccioná un mes para ver sus movimientos.">
+        <div class="account-chart{% if maxnegativo %} is-diverging{% endif %}" style="--account-months:{{ exp.costos.meses|length or 1 }}" role="group" aria-label="Cargos y ajustes por mes. Seleccioná un mes para ver sus movimientos.">
             {% if maxnegativo %}<span class="account-chart-zero" style="top:{{ (maxpositivo / escala * 120)|float }}px" aria-hidden="true">0</span>{% endif %}
             {% for mes in exp.costos.meses %}
             <a href="{{ cuenta_url(ambito='consolidado', desde=mes.desde, hasta=mes.hasta, tipo='costos', q='', pagina=None) }}#movimientos" class="account-chart-month{% if ambito_filtro == 'consolidado' and tipo_filtro == 'costos' and not q_filtro and desde_filtro == mes.desde and hasta_filtro == mes.hasta %} is-selected{% endif %}" aria-label="{{ mes.label_completo }}: {{ dinero(mes.total_ars) }}. Ver cargos y ajustes del mes" title="{{ mes.label_completo }} · Nacional {{ dinero(mes.nacional_ars) }} · Internacional {{ dinero(mes.internacional_ars) }}{% if mes.sin_clasificar_ars %} · Sin clasificar {{ dinero(mes.sin_clasificar_ars) }}{% endif %}">

@@ -1,6 +1,7 @@
 """Cuenta del portal: filtros, degradación legible y exportación propia segura."""
 
 from contextlib import contextmanager
+from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ import servicios.export_cuenta as exportacion
 
 
 CLIENTE = "CLIENTE_SESION"
+INICIO_WAIMAO = date(2026, 9, 1)
 
 
 def _resumen():
@@ -43,6 +45,23 @@ def _movimientos(items=None, total=None):
     }
 
 
+def _periodo():
+    return {
+        "saldo_anterior_ars": Decimal("400"),
+        "cargos_desde_ars": Decimal("600.50"),
+        "creditos_desde_ars": Decimal("50.25"),
+        "pagos_desde_ars": Decimal("250"),
+        "neto_desde_ars": Decimal("300.25"),
+        "saldo_total_ars": Decimal("700.25"),
+        "redondeo_ars": Decimal("0"),
+        "fecha_inicio": "2026-09-01",
+        "fecha_inicio_visible": "01/09/2026",
+        "sin_fecha_cantidad": 0,
+        "criterio": "Según estados actuales; no es un cierre auditado.",
+        "advertencia_sin_fecha": "",
+    }
+
+
 @pytest.fixture
 def cuenta_servicios(monkeypatch):
     """No conexión DB ni servicios reales incluso cuando cambia un handler."""
@@ -59,6 +78,9 @@ def cuenta_servicios(monkeypatch):
     ))
     monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args, **kwargs: (
         llamadas.append(("movimientos", args, kwargs)) or _movimientos()
+    ))
+    monkeypatch.setattr(portal, "obtener_periodo_cuenta", lambda cliente, inicio: (
+        llamadas.append(("periodo", cliente, inicio)) or _periodo()
     ))
     return llamadas
 
@@ -166,10 +188,10 @@ def test_preseleccion_solo_documento_propio_con_importe_disponible(
     assert contexto["pago_monto_preseleccionado"] == ("125.50" if seleccion == "F:99" else "")
 
 
-def _cliente_http():
+def _cliente_http(cliente_sesion=CLIENTE):
     app = FastAPI()
     app.include_router(portal.router)
-    app.dependency_overrides[portal.cliente_actual] = lambda: CLIENTE
+    app.dependency_overrides[portal.cliente_actual] = lambda: cliente_sesion
     return TestClient(app)
 
 
@@ -271,3 +293,168 @@ def test_excel_periodo_invertido_no_devuelve_toda_la_cuenta(
         )
     assert respuesta.status_code in {303, 400, 422}
     assert recibidos == []
+
+
+def test_waimao_inicia_en_septiembre_y_conserva_saldo_anterior(
+    cuenta_servicios, capturar_template,
+):
+    respuesta = portal.cuenta_corriente(SimpleNamespace(), cliente="WAIMAO")
+    contexto = respuesta["context"]
+    consulta = next(c for c in cuenta_servicios if c[0] == "movimientos")
+    assert consulta[1][:4] == ("WAIMAO", "consolidado", "todos", 1)
+    assert consulta[2] == {"q": "", "desde": "2026-09-01", "hasta": ""}
+    assert ("periodo", "WAIMAO", INICIO_WAIMAO) in cuenta_servicios
+    assert contexto["inicio_cuenta"] == INICIO_WAIMAO
+    assert contexto["desde_filtro"] == "2026-09-01"
+    assert contexto["periodo_cuenta"] == _periodo()
+    assert contexto["periodo_error"] == ""
+    assert contexto["saldo"]["saldo_pendiente_ars"] == Decimal("700.25")
+    periodo = contexto["periodo_cuenta"]
+    assert periodo["saldo_anterior_ars"] + periodo["neto_desde_ars"] == periodo["saldo_total_ars"]
+
+
+@pytest.mark.parametrize("cliente_sesion", [CLIENTE, "OTRO_CLIENTE", "WAIMAO_2"])
+def test_corte_waimao_no_recorta_otros_clientes(
+    cuenta_servicios, capturar_template, cliente_sesion,
+):
+    respuesta = portal.cuenta_corriente(SimpleNamespace(), cliente=cliente_sesion)
+    contexto = respuesta["context"]
+    consulta = next(c for c in cuenta_servicios if c[0] == "movimientos")
+    assert consulta[1][0] == cliente_sesion
+    assert consulta[2] == {}
+    assert contexto["inicio_cuenta"] is None
+    assert contexto["periodo_cuenta"] is None
+    assert contexto["periodo_error"] == ""
+    assert contexto["desde_filtro"] == ""
+    assert not any(c[0] == "periodo" for c in cuenta_servicios)
+
+
+@pytest.mark.parametrize("desde,esperado", [
+    ("", "2026-09-01"), ("2026-08-01", "2026-09-01"),
+    ("2026-09-01", "2026-09-01"), ("2026-09-10", "2026-09-10"),
+])
+def test_busqueda_waimao_respeta_el_corte_sin_perder_referencia(
+    cuenta_servicios, capturar_template, desde, esperado,
+):
+    respuesta = portal.cuenta_corriente(
+        SimpleNamespace(), cliente="WAIMAO", q="DEMO-2409", desde=desde,
+    )
+    contexto = respuesta["context"]
+    consulta = next(c for c in cuenta_servicios if c[0] == "movimientos")
+    assert consulta[2] == {"q": "DEMO-2409", "desde": esperado, "hasta": ""}
+    assert contexto["q_filtro"] == "DEMO-2409"
+    assert contexto["desde_filtro"] == esperado
+    assert parse_qs(urlsplit(contexto["cuenta_url"](pagina=2)).query)["desde"] == [esperado]
+    assert parse_qs(urlsplit(contexto["cuenta_url"](exportar=True)).query)["desde"] == [esperado]
+
+
+@pytest.mark.parametrize("filtros", [
+    {"q": "x" * 121}, {"desde": "fecha-invalida"}, {"hasta": "2026-08-31"},
+])
+def test_filtros_invalidos_waimao_no_quitan_corte_al_recuperar_pantalla(
+    cuenta_servicios, capturar_template, filtros,
+):
+    respuesta = portal.cuenta_corriente(
+        SimpleNamespace(), cliente="WAIMAO", pagina="8", **filtros,
+    )
+    contexto = respuesta["context"]
+    consulta = next(c for c in cuenta_servicios if c[0] == "movimientos")
+    assert consulta[1][3] == 1
+    assert consulta[2] == {"q": "", "desde": "2026-09-01", "hasta": ""}
+    assert contexto["desde_filtro"] == "2026-09-01"
+    assert contexto["filtros_error"]
+    assert contexto["inicio_cuenta"] == INICIO_WAIMAO
+
+
+def test_fragmento_waimao_aplica_corte_sin_leer_periodo_ni_paneles(
+    cuenta_servicios, capturar_template, monkeypatch,
+):
+    def no_necesario(*_args, **_kwargs):
+        cuenta_servicios.append(("consulta innecesaria",))
+        raise AssertionError("El filtro sólo necesita el historial")
+
+    for nombre in (
+        "resumen_cuenta_por_ambito", "listar_destinos_pago",
+        "obtener_experiencia_cuenta", "obtener_periodo_cuenta",
+    ):
+        monkeypatch.setattr(portal, nombre, no_necesario)
+    respuesta = portal.cuenta_corriente(
+        SimpleNamespace(headers=Headers({"X-Tauro-Partial": "cuenta"})),
+        cliente="WAIMAO", ambito="internacional", tipo="pagos",
+        desde="2026-08-01", q="FC 0001-00000124",
+    )
+    assert respuesta["headers"]["X-Tauro-Partial"] == "cuenta"
+    assert respuesta["context"]["inicio_cuenta"] == INICIO_WAIMAO
+    assert cuenta_servicios == [(
+        "movimientos", ("WAIMAO", "internacional", "pagos", 1, 6),
+        {"q": "FC 0001-00000124", "desde": "2026-09-01", "hasta": ""},
+    )]
+
+
+@pytest.mark.parametrize("filtros", [
+    {}, {"desde": "", "hasta": "", "q": ""},
+    {"desde": "2026-01-01", "cliente": CLIENTE, "cliente_id": CLIENTE},
+])
+def test_excel_waimao_no_elude_inicio_al_limpiar_o_manipular_filtros(
+    cuenta_servicios, monkeypatch, filtros,
+):
+    recibidos = []
+
+    def movimientos(*args, **kwargs):
+        recibidos.append((args, kwargs))
+        assert args[0] == "WAIMAO"
+        assert kwargs["desde"] == "2026-09-01"
+        assert kwargs["exportar"] is True
+        return _movimientos([{
+            "fecha_iso": "2026-09-15", "tipo": "FC", "ambito": "INTERNACIONAL",
+            "concepto": "Cargo de septiembre", "debe_ars": Decimal("100"),
+            "haber_ars": Decimal("0"), "monto_ars": Decimal("100"), "estado": "ACTIVO",
+        }])
+
+    monkeypatch.setattr(exportacion, "movimientos_cuenta_paginados", movimientos)
+    with _cliente_http("WAIMAO") as cliente:
+        respuesta = cliente.get("/portal/cuenta/exportar.xlsx", params=filtros)
+    assert respuesta.status_code == 200
+    assert len(recibidos) == 1
+    libro = load_workbook(BytesIO(respuesta.content))
+    consulta = {fila[0].value: fila[1].value for fila in libro["Consulta"]}
+    assert consulta["Cliente"] == "WAIMAO"
+    assert consulta["Desde"] == "2026-09-01"
+    filas = list(libro["Movimientos"].iter_rows(min_row=2, values_only=True))
+    assert len(filas) == 1
+    assert filas[0][0].date() >= INICIO_WAIMAO
+
+
+def test_excel_waimao_rechaza_hasta_anterior_al_inicio_sin_consultar_movimientos(
+    cuenta_servicios, monkeypatch,
+):
+    recibidos = []
+    monkeypatch.setattr(exportacion, "movimientos_cuenta_paginados", lambda *args, **kwargs: (
+        recibidos.append((args, kwargs)) or _movimientos()
+    ))
+    with _cliente_http("WAIMAO") as cliente:
+        respuesta = cliente.get("/portal/cuenta/exportar.xlsx?hasta=2026-08-31")
+    assert respuesta.status_code == 400
+    assert "01/09/2026" in respuesta.text
+    assert recibidos == []
+    assert "spreadsheetml" not in respuesta.headers.get("content-type", "")
+
+
+@pytest.mark.parametrize("problema", ["lectura", "saldo_distinto"])
+def test_periodo_no_disponible_no_oculta_saldo_anterior_ni_simula_cero(
+    cuenta_servicios, capturar_template, monkeypatch, problema,
+):
+    def periodo_fallido(*_args):
+        if problema == "lectura":
+            raise RuntimeError("detalle interno de base")
+        return {**_periodo(), "saldo_total_ars": Decimal("999999")}
+
+    monkeypatch.setattr(portal, "obtener_periodo_cuenta", periodo_fallido)
+    respuesta = portal.cuenta_corriente(SimpleNamespace(), cliente="WAIMAO")
+    contexto = respuesta["context"]
+    assert contexto["inicio_cuenta"] == INICIO_WAIMAO
+    assert contexto["periodo_cuenta"] is None
+    assert contexto["periodo_error"]
+    assert "detalle interno" not in contexto["periodo_error"]
+    assert contexto["saldo"]["saldo_pendiente_ars"] == Decimal("700.25")
+    assert contexto["desde_filtro"] == "2026-09-01"

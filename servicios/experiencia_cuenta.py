@@ -14,11 +14,14 @@ from typing import Any
 from core.database import get_conn
 from servicios.cuenta_corriente import _decimal_monto
 from servicios.facturacion_clientes import numero_factura_visible
+from servicios.periodo_cuenta import inicio_cuenta_cliente
 
 
 _AR = timezone(timedelta(hours=-3), "Argentina")
 _CERO = Decimal("0.00")
 _MESES = ("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+_MESES_COMPLETOS = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
+                   "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
 
 # EXISTS evita multiplicar las aplicaciones a un envío si hay varios ítems.
 # También valida al dueño del pago y del envío: nunca confiar sólo en la FK.
@@ -67,6 +70,7 @@ WITH recientes AS (
            p.metodo, p.referencia, COALESCE(p.estado,'APROBADO') AS estado,
            p.comprobante IS NOT NULL AS tiene_comprobante
     FROM pagos p WHERE p.cliente_id=%s
+      AND (%s::date IS NULL OR p.fecha>=%s)
     ORDER BY p.created_at DESC, p.id DESC LIMIT 8
 )
 SELECT p.*, COALESCE(a.detalle,'[]'::jsonb) AS aplicaciones,
@@ -285,10 +289,12 @@ def _meses(hoy: date) -> list[date]:
     return [date(n // 12, n % 12 + 1, 1) for n in range(indice - 5, indice + 1)]
 
 
-def _presentar_costos(filas: list[dict], hoy: date) -> dict:
+def _presentar_costos(filas: list[dict], hoy: date, desde: date | None = None) -> dict:
     por_mes = {_fecha(f["mes"]): f for f in filas}
     meses = []
-    for inicio in _meses(hoy):
+    ventana = _meses(hoy)
+    inicios = [m for m in ventana if desde is None or m >= desde.replace(day=1)]
+    for inicio in inicios:
         siguiente = (inicio.replace(day=28) + timedelta(days=4)).replace(day=1)
         fila = por_mes.get(inicio, {})
         importes = {k: _dinero_firmado(fila.get(k)) for k in (
@@ -297,11 +303,21 @@ def _presentar_costos(filas: list[dict], hoy: date) -> dict:
         meses.append({
             "clave": inicio.strftime("%Y-%m"), "label": _MESES[inicio.month - 1],
             "label_completo": f"{_MESES[inicio.month - 1]} {inicio.year}",
-            "desde": inicio.isoformat(), "hasta": min(hoy, siguiente - timedelta(days=1)).isoformat(),
+            "desde": max(inicio, desde or inicio).isoformat(),
+            "hasta": min(hoy, siguiente - timedelta(days=1)).isoformat(),
             **importes, "total_ars": sum(importes.values(), _CERO),
             "positivo_ars": sum((m for m in importes.values() if m>0), _CERO),
             "negativo_ars": -sum((m for m in importes.values() if m<0), _CERO),
         })
+    if desde is not None and desde >= ventana[0]:
+        inicio_label = f"{_MESES_COMPLETOS[desde.month - 1]} de {desde.year}"
+        periodo_label = f"Desde {inicio_label}" if desde.day == 1 else f"Desde el {desde.day} de {inicio_label}"
+    else:
+        primero, ultimo = ventana[0], ventana[-1]
+        if primero.year == ultimo.year:
+            periodo_label = f"{_MESES_COMPLETOS[primero.month - 1].capitalize()}–{_MESES_COMPLETOS[ultimo.month - 1]} de {ultimo.year}"
+        else:
+            periodo_label = f"{_MESES_COMPLETOS[primero.month - 1].capitalize()} de {primero.year}–{_MESES_COMPLETOS[ultimo.month - 1]} de {ultimo.year}"
     return {
         "meses": meses, "total_ars": sum((m["total_ars"] for m in meses), _CERO),
         "maximo_ars": max((m["total_ars"] for m in meses), default=_CERO),
@@ -309,6 +325,7 @@ def _presentar_costos(filas: list[dict], hoy: date) -> dict:
         "maximo_negativo_ars": max((m["negativo_ars"] for m in meses), default=_CERO),
         "hay_negativos": any(m["negativo_ars"] for m in meses),
         "criterio_fecha": "Cargos y ajustes según su fecha · ARS",
+        "periodo_label": periodo_label,
         "hay_sin_clasificar": any(m["sin_clasificar_ars"] for m in meses),
     }
 
@@ -323,18 +340,20 @@ def obtener_experiencia_cuenta(cliente: str, resumen: dict) -> dict:
     if not cliente or len(cliente) > 80:
         raise ValueError("El cliente no es válido.")
     hoy = _hoy_argentina()
+    inicio_cliente = inicio_cuenta_cliente(cliente)
+    inicio_costos = max(_meses(hoy)[0], inicio_cliente or _meses(hoy)[0])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             cur.execute(_VENCIMIENTOS_SQL, (cliente, hoy, hoy))
             vencimientos = _presentar_vencimientos(cur.fetchall(), hoy)
-            cur.execute(_PAGOS_SQL, (cliente,))
+            cur.execute(_PAGOS_SQL, (cliente, inicio_cliente, inicio_cliente))
             pagos = [_presentar_pago(dict(f)) for f in cur.fetchall()]
             cur.execute(_CUPO_SQL, (cliente,))
             cupo = _presentar_cupo(dict(cur.fetchone() or {}))
-            periodo = (cliente, _meses(hoy)[0], hoy + timedelta(days=1))
+            periodo = (cliente, inicio_costos, hoy + timedelta(days=1))
             cur.execute(_COSTOS_SQL, periodo + periodo)
-            costos = _presentar_costos(cur.fetchall(), hoy)
+            costos = _presentar_costos(cur.fetchall(), hoy, desde=inicio_cliente)
     return {
         "vencimientos": vencimientos, "pagos": pagos, "cupo": cupo, "costos": costos,
         "actualizado_fecha": _fecha_visible(hoy),

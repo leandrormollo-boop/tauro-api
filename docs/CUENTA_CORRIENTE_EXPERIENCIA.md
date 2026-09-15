@@ -132,6 +132,44 @@ continúa visible y el panel muestra que no está disponible: no transforma un
 error en cero vencimientos o crédito ilimitado. No se modificaron credenciales,
 precios, migraciones, reservas ni reglas de aprobación.
 
+## Inicio de control de WAIMAO — 15/09/2026
+
+Por pedido del usuario, WAIMAO comienza el control visible el **01/09/2026**.
+La política se aplica al ID autenticado exacto, normalizado, en
+`servicios/periodo_cuenta.py`; otros clientes conservan su historial. Se preguntó
+por el alcance y, sin respuesta, se mantuvo únicamente la cuenta del piloto.
+
+- La lista y el Excel imponen esa fecha mínima aunque se limpien los filtros
+  o se solicite una fecha anterior por URL. Una descarga cuyo final sea previo
+  al inicio devuelve un error explícito. El gráfico muestra sólo meses desde
+  septiembre dentro de su ventana de seis meses; el seguimiento usa la fecha
+  del pago, no la de su registro técnico ni la del envío al que se aplica.
+- El saldo total conserva la cuenta real. Se muestra por separado el saldo de
+  movimientos anteriores, el neto desde el inicio y cualquier diferencia de
+  redondeo. Se calcula con estados actuales; no reconstruye un cierre histórico
+  al 31/08. Un pago aprobado después puede cambiar el saldo anterior si su fecha
+  informada es anterior al corte. Los movimientos sin fecha quedan agrupados
+  en el saldo anterior con una advertencia explícita.
+- Las facturas aún pendientes, documentos que se pueden pagar, pagos globales
+  en revisión y cupo de emisión siguen completos. El corte no cancela deuda,
+  borra envíos ni quita documentos exigibles. Un pago o ajuste de septiembre
+  asociado a un envío de agosto sigue siendo un movimiento de septiembre.
+- La separación del saldo utiliza una consulta agregada de sólo lectura.
+  Si falla o no concuerda con el saldo obtenido en la otra consulta, el saldo
+  real sigue visible con un aviso; no se presenta un saldo anterior de cero.
+
+La vista local sigue usando datos ficticios y esta modificación está pendiente
+de publicar junto con el rediseño. No se ejecutan borrados ni migraciones.
+
+Validación del corte: **124 pruebas aprobadas** en la ronda conjunta, con
+PostgreSQL sintético real para cálculos y separación de clientes. Incluye
+límites de fechas, Excel, pagos a documentos previos, fallos de lectura y
+redondeos inferiores a un centavo. Los subtotales anterior y desde el inicio
+suman los centavos presentados en cada fila; el total mantiene la regla vigente
+por grupo y toda diferencia figura como redondeo. Navegador: septiembre como
+único mes del gráfico, limpieza de filtros conserva 01/09, Excel con el mismo
+inicio y saldo anterior legible a 320 px. PostgreSQL quedó apagado al terminar.
+
 ## Validación registrada
 
 - Ronda del portal: **26 pruebas aprobadas**, incluidas 13 nuevas de sesión,

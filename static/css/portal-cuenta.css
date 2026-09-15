@@ -47,6 +47,11 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
 .account-client .account-balance-value { display: block; font: 500 clamp(27px, 3.1vw, 44px)/1.2 var(--font-display); letter-spacing: -.045em; margin: 16px 0 8px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .account-client .account-balance-state { display: inline-block; color: var(--accent); font-size: 12px; }
 .account-client .account-balance > p { margin-top: 16px; color: var(--account-muted); font-size: 11px; }
+.account-client .account-opening { display: grid; gap: 10px; margin-top: 22px; padding-top: 15px; border-top: 1px solid var(--line-soft); }
+.account-client .account-opening > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 11px; }
+.account-client .account-opening dt { color: var(--account-muted); }
+.account-client .account-opening dd { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.account-client .account-balance > .account-opening-note { font-size: 10px; line-height: 1.6; }
 .account-client .account-balance-breakdown { margin-top: 11px; }
 .account-client .account-balance-breakdown summary { color: var(--fg-2); font-size: 11px; cursor: pointer; padding: 5px 0; }
 .account-client .account-balance-breakdown dl { display: grid; gap: 8px; padding-top: 10px; }
@@ -104,7 +109,7 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
 .account-client .account-cost-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; margin-top: 17px; }
 .account-client .account-cost-total > strong { font: 500 23px/1.3 var(--font-display); letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
 .account-client .account-cost-total > span { font-size: 10px; color: var(--account-muted); }
-.account-client .account-chart { position: relative; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 17px; padding: 5px 9px 0; margin-top: 16px; background: repeating-linear-gradient(to top, transparent 0 39px, var(--line-soft) 40px, transparent 41px); background-size: 100% 124px; background-repeat: no-repeat; }
+.account-client .account-chart { position: relative; display: grid; grid-template-columns: repeat(var(--account-months, 6), minmax(0, 1fr)); gap: 17px; padding: 5px 9px 0; margin-top: 16px; background: repeating-linear-gradient(to top, transparent 0 39px, var(--line-soft) 40px, transparent 41px); background-size: 100% 124px; background-repeat: no-repeat; }
 .account-client .account-chart-month { display: grid; grid-template-rows: 120px 23px; justify-items: center; min-width: 0; color: var(--account-muted); text-decoration: none; border-radius: 5px; }
 .account-client .account-chart-bars { display: block; width: 40px; max-width: 85%; height: 120px; }
 .account-client .account-chart-positive, .account-client .account-chart-negative { display: flex; flex-direction: column; width: 100%; }

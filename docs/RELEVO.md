@@ -6,6 +6,19 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 15/09/2026 — WAIMAO comienza el control visible desde septiembre
+
+El usuario pidió quitar los envíos anteriores a septiembre de la cuenta del
+cliente para ordenar el control. Se implementa un corte de **presentación**
+desde el 01/09/2026, sólo para WAIMAO: lista, Excel, gráfico y pagos recientes.
+El saldo anterior se agrupa por separado, calculado con estados actuales.
+El saldo real, las facturas pendientes, los documentos pagables, la emisión y
+los registros históricos se conservan. No es una cancelación de deuda ni un
+cierre histórico auditado. Se mantiene pendiente de publicar, sin migraciones.
+Validación conjunta: 124 pruebas aprobadas con PostgreSQL sintético real y
+revisión del navegador. La base local de pruebas quedó apagada al finalizar.
+Detalle y límites: [Cuenta corriente](CUENTA_CORRIENTE_EXPERIENCIA.md).
+
 ## 15/09/2026 — Cuenta corriente: operación y diseño del cliente
 
 Rama `codex/portal-experiencia-cliente`. **Preparada localmente, pendiente de
