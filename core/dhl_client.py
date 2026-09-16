@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -11,9 +12,11 @@ from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 import requests
 from dotenv import load_dotenv
 from core.fedex_client import CarrierBase
+from core.dhl_errors import error_dhl_publico
 from servicios.impuestos import incoterm as incoterm_de
 from servicios.invoice_comercial import (
     MAX_ITEMS_INVOICE, normalizar_items_invoice, total_items_invoice,
+    mensaje_desfase_valores,
 )
 
 load_dotenv()
@@ -200,45 +203,7 @@ class DHLClient(CarrierBase):
 
     @staticmethod
     def _error_legible(resp) -> str:
-        """
-        Traduce el cuerpo de error de DHL a algo accionable.
-
-        MyDHL API contesta los rechazos de validación con un `detail` genérico
-        —"Multiple problems found, see Additional Details"— y mete los problemas
-        REALES en `additionalDetails`. Leer sólo `detail` deja al admin con un
-        cartel rojo que no dice nada: pasó exactamente eso emitiendo la guía #4
-        el 06/08. Es la diferencia entre "no anda" y "el CP de destino no existe".
-        """
-        # Un 401 no es una ruta sin cobertura: MyDHL rechazó la
-        # autenticación productiva. Devolver una causa segura y accionable
-        # permite que el portal avise a TAURO sin exponer la respuesta cruda,
-        # la cuenta ni ningún secreto.
-        if getattr(resp, "status_code", None) in (401, 403):
-            return (
-                "DHL rechazó las credenciales o el acceso productivo "
-                f"(HTTP {resp.status_code})."
-            )
-
-        try:
-            j = resp.json()
-        except Exception:
-            return f"DHL rechazó la solicitud (HTTP {getattr(resp, 'status_code', '?')})."
-
-        if not isinstance(j, dict):
-            return f"DHL rechazó la solicitud (HTTP {getattr(resp, 'status_code', '?')})."
-
-        base = j.get("detail") or j.get("message") or j.get("title") or ""
-
-        detalles = j.get("additionalDetails")
-        if isinstance(detalles, str):
-            detalles = [detalles]
-        if isinstance(detalles, (list, tuple)):
-            partes = [str(d).strip() for d in detalles if str(d or "").strip()]
-            if partes:
-                # Sin el " · " los problemas se leen como una sola frase larga.
-                return " · ".join(partes)[:600]
-
-        return (base or f"DHL rechazó la solicitud (HTTP {resp.status_code}).")[:300]
+        return error_dhl_publico(resp)
 
     @staticmethod
     def _codigos_error(resp) -> str:
@@ -255,7 +220,7 @@ class DHLClient(CarrierBase):
             if valor not in (None, ""):
                 codigos.append(str(valor).strip())
         detalles = data.get("additionalDetails") or []
-        if isinstance(detalles, dict):
+        if isinstance(detalles, (str, dict)):
             detalles = [detalles]
         if isinstance(detalles, (list, tuple)):
             for detalle in detalles:
@@ -263,7 +228,11 @@ class DHLClient(CarrierBase):
                     valor = detalle.get("code") or detalle.get("errorCode")
                     if valor not in (None, ""):
                         codigos.append(str(valor).strip())
-        return ",".join(c for c in codigos[:5] if c) or "sin_codigo"
+                elif isinstance(detalle, str):
+                    prefijo = re.match(r"\s*(\d{3,6})\s*:", detalle)
+                    if prefijo:
+                        codigos.append(prefijo[1])
+        return ",".join(c for c in codigos[:5] if re.fullmatch(r"\d{3,6}", c)) or "sin_codigo"
 
     def _parsear_rates(self, data: dict) -> dict:
         """
@@ -499,7 +468,7 @@ class DHLClient(CarrierBase):
             return self._parsear_rates(resp.json())
         except Exception as e:
             print(f"[dhl] Excepción en get_rates_multibulto (ref {msg_ref}): {e}")
-            return {"encontrado": False, "error": str(e)}
+            return {"encontrado": False, "error": self._error_consulta(e)}
 
     def get_rates(self, origen: dict, destino: dict, paquete: dict = None,
                   paquetes: list = None) -> dict:
@@ -612,7 +581,15 @@ class DHLClient(CarrierBase):
 
         except Exception as e:
             print(f"[dhl] Excepción en get_rates: {e}")
-            return {"encontrado": False, "error": str(e)}
+            return {"encontrado": False, "error": self._error_consulta(e)}
+
+    @staticmethod
+    def _error_consulta(exc) -> str:
+        if isinstance(exc, requests.Timeout):
+            return "DHL no respondió a tiempo al consultar la tarifa. Probá nuevamente en unos minutos."
+        if isinstance(exc, requests.ConnectionError):
+            return "No pudimos conectar con DHL para consultar la tarifa. Probá nuevamente en unos minutos."
+        return "No pudimos leer la tarifa de DHL. Pedí a Tauro que revise la conexión con el courier."
 
     @staticmethod
     def _contacto(d: dict, por_defecto_nombre: str = "") -> dict:
@@ -830,10 +807,8 @@ class DHLClient(CarrierBase):
             if (valor_caja_crudo not in (None, "")
                     and abs(Decimal(str(total_cajas_linea))
                             - Decimal(str(total_invoice_linea))) > Decimal("0.02")):
-                return {"encontrado": False, "error": (
-                    f"Caja {i}: el valor declarado de las cajas (USD "
-                    f"{total_cajas_linea:.2f}) no coincide con la invoice "
-                    f"(USD {total_invoice_linea:.2f})."
+                return {"encontrado": False, "error": mensaje_desfase_valores(
+                    i, cajas, total_cajas_linea, total_invoice_linea,
                 )}
             total_cajas += cajas
             peso_linea = round(peso_caja * cajas, 3)

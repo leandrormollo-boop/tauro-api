@@ -193,12 +193,14 @@
     </nav>
 
     <main class="admin-main">
+      {% block flash_messages %}
       {% if flash_ok %}
         <div class="flash-msg ok">{{ flash_ok }}</div>
       {% endif %}
       {% if flash_error %}
         <div class="flash-msg error">{{ flash_error }}</div>
       {% endif %}
+      {% endblock %}
 
       {% block content %}{% endblock %}
     </main>

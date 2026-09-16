@@ -3188,7 +3188,7 @@ def admin_pedido_generar_guia(
 
     from urllib.parse import quote
     return RedirectResponse(
-        url=f"/admin/pedidos?guia_error={quote(resultado.get('error', 'error') [:200])}",
+        url=f"/admin/pedidos?guia_error={quote(str(resultado.get('error') or 'No se pudo completar la emisión.'))}",
         status_code=303,
     )
 

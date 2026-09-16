@@ -1,6 +1,7 @@
 """Regresiones de estados contradictorios y respuestas parciales de Mis envíos."""
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -38,7 +39,8 @@ def test_estado_principal_y_filtro_coinciden_sin_reescribir_historia(operacion, 
     assert sum(c["cantidad"] for c in vista["chips"]) == 1
 
 
-def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100, template="portal/envios.html"):
+def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100, template="portal/envios.html",
+            error="", puede_emitir=False, tracking_numero="DEMO-0001"):
     env = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=select_autoescape())
     env.globals.update(
         url_tracking=url_tracking, nombre_courier=nombre_courier,
@@ -47,10 +49,11 @@ def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100
         ayuda=lambda: {"mail_url": "mailto:demo@example.invalid"},
     )
     request = Request({"type": "http", "method": "GET", "path": "/portal/envios",
-                       "query_string": b"", "headers": [], "state": {"csp_nonce": "test"}})
+                       "query_string": urlencode({"error": error}).encode() if error else b"",
+                       "headers": [], "state": {"csp_nonce": "test"}})
     envio = {"id": 1, "estado": estado, "tracking_estado": tracking,
              "courier": "DHL", "remitente_pais": "CN", "destino_pais": "UY",
-             "dest_nombre": "Destinatario DEMO", "tracking": "DEMO-0001",
+             "dest_nombre": "Destinatario DEMO", "tracking": tracking_numero,
              "tracking_descripcion": "<script>no ejecutar</script>",
              "tracking_actualizado_at": datetime(2026, 9, 14, 8, 20, tzinfo=timezone.utc),
              "producto_alias": "Muestras", "precio_tauro_ars": precio,
@@ -61,8 +64,24 @@ def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100
     return env.get_template(template).render(
         **preparar_historial_envios([envio]), parcial=parcial, request=request,
         cliente="CLIENTE_DEMO", periodo=normalizar_periodo("", "", "", [(2026, 9)]),
-        periodo_query="", puede_emitir=False, s=presentar_estados_envio(envio),
+        periodo_query="", puede_emitir=puede_emitir, s=presentar_estados_envio(envio),
     )
+
+
+@pytest.mark.parametrize("estado", ["EMITIENDO", "VERIFICAR_COURIER"])
+def test_detalle_no_ofrece_reemitir_una_operacion_en_curso_o_incierta(estado):
+    html = _render(template="portal/envio_detalle.html", estado=estado,
+                   tracking=None, tracking_numero=None, puede_emitir=True)
+    assert "Emitir guía ahora" not in html
+
+
+def test_error_de_emision_se_muestra_una_vez_y_no_promete_solicitud_lista():
+    html = _render(template="portal/envio_detalle.html", estado="SOLICITADO",
+                   tracking=None, tracking_numero=None, puede_emitir=True,
+                   error="Ciudad del destinatario: DHL no encontró la ciudad.")
+    assert html.count("Ciudad del destinatario: DHL no encontró la ciudad.") == 1
+    assert "Tu solicitud está lista" not in html
+    assert "La guía sigue pendiente" in html
 
 
 def test_respuesta_parcial_conserva_estado_y_acciones_sin_repetir_navegacion():

@@ -536,7 +536,7 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
 
     piezas, detalle, total_cajas = [], [], 0
     total_items = 0
-    for b in bultos:
+    for indice, b in enumerate(bultos, start=1):
         if not isinstance(b, dict):
             return [], [], "caja_incompleta: cada caja debe tener datos válidos"
         alias = str(b.get("producto") or b.get("producto_alias") or "").strip()
@@ -629,7 +629,7 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
                     peso_total_kg=Decimal(str(fila["peso_kg"])) * cantidad,
                 )
             except (TypeError, ValueError) as exc:
-                return [], [], f"invoice_invalida: {exc}"
+                return [], [], f"invoice_invalida: Caja {indice}: {exc}"
             fila["items_invoice"] = items
             # Mantener la primera línea para lectores históricos; la lista
             # completa es la fuente de verdad para los importes y para DHL.
@@ -649,10 +649,9 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
         total_cajas_declarado = round(float(valor_caja) * cantidad, 2)
         diferencia = abs(Decimal(str(total_cajas_declarado)) - Decimal(str(total_invoice)))
         if valor_caja_explicito and diferencia > Decimal("0.02"):
-            return [], [], (
-                "valor_declarado_no_coincide: el total declarado de las cajas "
-                f"(USD {total_cajas_declarado:.2f}) debe coincidir con el subtotal "
-                f"de la invoice (USD {total_invoice:.2f})"
+            from servicios.invoice_comercial import mensaje_desfase_valores
+            return [], [], "valor_declarado_no_coincide: " + mensaje_desfase_valores(
+                indice, cantidad, total_cajas_declarado, total_invoice,
             )
         fila["valor_declarado_caja_usd"] = round(float(valor_caja), 2)
 

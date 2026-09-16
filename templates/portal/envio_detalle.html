@@ -33,7 +33,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% elif request.query_params.get('ok') == 'etiqueta' %}
     <div class="msg ok">Guardamos el nombre del envío. La guía, el tracking y tu cuenta no cambiaron.</div>
 {% elif request.query_params.get('error') %}
-    <div class="msg error">{{ request.query_params.get('error') }}</div>
+    {% with mensaje_error = request.query_params.get('error') %}
+        {% include '_error_operacion.html' %}
+    {% endwith %}
 {% endif %}
 
 <div class="card shipment-label-card">
@@ -108,6 +110,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         {% elif s.estado == "SOLICITADO" %}
             {% if ambito == 'nacional' %}La emisión nacional se habilitará cuando conectemos OCA y Andreani. No se emitió ni se generó ningún cargo.
             {% elif ambito == 'sin_clasificar' %}El origen y el destino necesitan revisión antes de emitir. No se generó ningún cargo.
+            {% elif request.query_params.get('error') %}La guía sigue pendiente. Revisá el aviso de arriba antes de volver a emitir.
             {% elif puede_emitir %}Tu solicitud está lista: emití la guía con el botón de abajo, o no hagas nada y la emite Tauro.{% else %}Recibimos tu solicitud. Tauro está generando la guía — te avisamos apenas esté lista.{% endif %}
         {% elif s.estado == "EN_PROCESO" %}
             Estamos preparando tu guía con {{ courier_nombre }}. Te avisamos apenas esté lista.
@@ -184,12 +187,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <div class="empty" style="padding:14px;">
                 Esta solicitud nacional es histórica. La integración anterior fue retirada y no puede emitirse desde el portal.
             </div>
-        {% elif not s.tracking and puede_emitir and s.estado != 'VERIFICAR_COURIER' %}
+        {% elif not s.tracking and puede_emitir and s.estado not in ('VERIFICAR_COURIER', 'EMITIENDO') %}
             {# Emisión habilitada para este cliente (flag + tope de deuda se
                validan de nuevo en el servidor: el botón es sólo la puerta). #}
-            {% if request.query_params.get('error') %}
-                <div class="msg error" style="margin-bottom:10px;">{{ request.query_params.get('error') }}</div>
-            {% endif %}
             <form method="POST" action="/portal/envios/{{ s.id }}/emitir"
                   data-confirm="¿Emitir la guía ahora? Se genera la guía real en el courier y el cargo entra a tu cuenta corriente. No se puede deshacer.">
                 <button type="submit" class="btn btn-primary btn-full">Emitir guía ahora</button>

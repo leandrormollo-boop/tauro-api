@@ -6,6 +6,18 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 16/09/2026 — Motivos accionables al emitir con DHL
+
+Rama `codex/dhl-emission-errors-20260916`, basada en `df32b56`; conserva las
+entregas previas del portal y HS. Propaga motivos de recotización y validación,
+traduce errores MyDHL al español con campo y corrección, informa caja/totales/
+diferencia de invoice, elimina truncamiento y carteles duplicados. Ante una
+respuesta incierta se conserva el bloqueo de emisión y la verificación.
+
+2.276 pruebas y 5 subpruebas aprobadas; 39 regresiones nuevas. Sin migraciones,
+dependencias nuevas ni operaciones reales. **Pendiente de publicación.**
+Detalle: [Errores DHL](DHL_ERRORES_ACCIONABLES.md).
+
 ## 16/09/2026 — Asistente HS en catálogo e invoice
 
 Rama `codex/hs-code-assistant-20260916`, basada en `5cd977b` e incluyendo toda

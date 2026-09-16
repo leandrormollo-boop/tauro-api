@@ -133,7 +133,8 @@ def test_dhl_bloquea_si_valor_por_caja_no_coincide_con_invoice():
     with mock.patch("core.dhl_client.requests.post") as post:
         resultado = _cliente().create_shipment(envio)
     assert not resultado["encontrado"]
-    assert "no coincide con la invoice" in resultado["error"]
+    assert "no coincide con la mercadería de la factura comercial" in resultado["error"]
+    assert "Diferencia: USD 200.00" in resultado["error"]
     post.assert_not_called()
 
 
@@ -261,7 +262,8 @@ def test_telefono_vacio_bloquea_antes_de_inventar_un_contacto():
 
 def test_error_de_dhl_se_reporta_sin_inventar_tracking():
     cap, r = _emitir_capturando(respuesta={"detail": "Invalid postal code"}, status=400)
-    assert not r["encontrado"] and "Invalid postal code" in r["error"]
+    assert not r["encontrado"] and "Código postal" in r["error"]
+    assert "Revisá el código postal" in r["error"]
     assert "tracking" not in r
 
 

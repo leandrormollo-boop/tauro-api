@@ -110,7 +110,8 @@ def test_error_de_dhl_llega_legible():
     with _capturar_post(respuesta_json=rechazo, status=422):
         out = _cliente().create_pickup(DATOS)
     assert out["encontrado"] is False
-    assert "cityName" in out["error"]          # el detalle real, no el genérico
+    assert "Ciudad" in out["error"]            # el campo traducido, no el genérico
+    assert "Revisá ciudad, código postal y país" in out["error"]
 
 
 def test_sin_confirmacion_no_es_exito():

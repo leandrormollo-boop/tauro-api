@@ -1,5 +1,7 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Solicitudes de guía{% endblock %}
+{# Los avisos se muestran una sola vez, debajo del título y los filtros. #}
+{% block flash_messages %}{% endblock %}
 
 {% block content %}
 <div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
@@ -21,7 +23,9 @@
 </div>
 
 {% if flash_ok %}<div class="msg ok" style="margin-bottom:16px;">{{ flash_ok }}</div>{% endif %}
-{% if flash_error %}<div class="msg error" style="margin-bottom:16px;">No se pudo generar la guía: {{ flash_error }}</div>{% endif %}
+{% if flash_error %}
+    {% with mensaje_error = flash_error %}{% include '_error_operacion.html' %}{% endwith %}
+{% endif %}
 
 <div class="card">
   <div class="table-wrap">

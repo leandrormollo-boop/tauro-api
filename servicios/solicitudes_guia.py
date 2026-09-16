@@ -2387,6 +2387,14 @@ def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
     if sol and (sol.get("courier") or "").upper() == "DHL":
         try:
             recotizacion = _recotizar_dhl_antes_de_emitir(sol)
+        except ValueError as exc:
+            # Validaciones locales de los números y bultos: conservan el
+            # campo y la corrección. Ocurren antes de contactar /shipments.
+            _liberar_reserva(solicitud_id)
+            return {"ok": False, "error": (
+                f"No pudimos validar los datos del envío: {exc}\n"
+                "No emitimos ni cobramos nada. Corregí el dato indicado antes de volver a emitir."
+            )}
         except Exception as e:
             # Toda esta etapa sucede ANTES del POST irreversible a DHL. Una
             # fila legacy mal formada o un error de parseo no puede dejar la
@@ -2549,8 +2557,14 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
     opcion = next((o for o in (resultado.get("opciones") or [])
                    if (o.get("id") or "").lower() == "dhl"), None)
     if not opcion:
-        return {"ok": False, "error":
-                "DHL no devolvió una tarifa para este envío. No emitimos ni cobramos nada."}
+        rechazo = next((o for o in (resultado.get("no_disponibles") or [])
+                        if (o.get("id") or "").lower() == "dhl"), {})
+        motivo = rechazo.get("motivo") or resultado.get("motivo") or "sin_tarifa"
+        motivo = _explicar_rechazo_recotizacion_dhl(motivo)
+        return {"ok": False, "error": (
+            "No pudimos confirmar la tarifa DHL para emitir.\n"
+            f"{motivo}\nNo emitimos ni cobramos nada."
+        )}
 
     anterior = parse_float_formulario(
         sol.get("precio_tauro_ars"), "Precio aceptado", importe=True, minimo=0.001
@@ -2586,6 +2600,27 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
     return {"ok": False, "precio_cambio": True, "error":
             f"La tarifa DHL cambió de $ {anterior_txt} a $ {actual_txt}. "
             "Revisá el nuevo importe y volvé a emitir; todavía no generamos ni cobramos nada."}
+
+
+def _explicar_rechazo_recotizacion_dhl(motivo) -> str:
+    """Conserva el rechazo del adaptador y traduce códigos internos de la API."""
+    texto = str(motivo or "sin_tarifa")
+    estados = {
+        "no_habilitado": "DHL no está habilitado para tu cuenta. Pedí a Tauro que revise tu acceso.",
+        "proximamente": "La conexión de DHL no está disponible. Tauro debe revisar su configuración.",
+        "sin_tarifa": "DHL no devolvió una tarifa ni un motivo específico. Tauro debe revisar la disponibilidad del envío.",
+        "sin_cobertura": "No se obtuvo una tarifa DHL. Revisá la ruta y consultá a Tauro si persiste; esto no confirma por sí solo que falte cobertura.",
+    }
+    if texto in estados:
+        return estados[texto]
+    codigo, _, detalle = texto.partition(":")
+    if codigo in {"valor_declarado_no_coincide", "invoice_invalida", "caja_incompleta", "peso_excedido"}:
+        return detalle.strip()
+    if codigo == "pais_no_soportado":
+        return f"País de {detalle.strip()}: seleccioná un país válido antes de emitir."
+    if codigo == "producto_no_encontrado":
+        return "El producto guardado ya no está disponible en tu catálogo. Revisá el contenido del envío."
+    return texto
 
 
 def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:

@@ -15,6 +15,21 @@ MAX_ITEMS_INVOICE = 100
 CENTAVO = Decimal("0.01")
 
 
+def mensaje_desfase_valores(indice, cantidad, total_cajas, total_invoice):
+    """Explica los totales ya validados sin recalcular ni alterar declaraciones."""
+    cajas = Decimal(str(total_cajas))
+    mercaderia = Decimal(str(total_invoice))
+    diferencia = abs(cajas - mercaderia)
+    bultos = "bulto" if cantidad == 1 else "bultos"
+    return (
+        f"Caja {indice} ({cantidad} {bultos}): el valor declarado de las cajas "
+        f"(USD {cajas:.2f}) no coincide con la mercadería de la factura comercial "
+        f"(invoice: USD {mercaderia:.2f}). Diferencia: USD {diferencia:.2f}. "
+        "Revisá el valor por caja × cantidad de cajas y la suma de unidades × "
+        "valor unitario de los artículos. Corregí el dato que no refleje el contenido real."
+    )
+
+
 def normalizar_items_invoice(items, *, peso_total_kg):
     if not isinstance(items, list) or not 1 <= len(items) <= MAX_ITEMS_INVOICE:
         raise ValueError(f"La invoice debe tener entre 1 y {MAX_ITEMS_INVOICE} ítems.")

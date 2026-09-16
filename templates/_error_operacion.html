@@ -1,0 +1,7 @@
+{# Mensajes de servicios, siempre escapados; una observación por renglón. #}
+<div class="msg error operation-error" role="alert" style="margin-bottom:16px;overflow-wrap:anywhere;">
+    <strong>Revisá este aviso antes de continuar</strong>
+    {% for linea in mensaje_error.splitlines() if linea.strip() %}
+    <p style="margin:8px 0 0;">{{ linea }}</p>
+    {% endfor %}
+</div>
