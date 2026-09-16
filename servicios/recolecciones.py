@@ -485,6 +485,35 @@ def listar(cliente_id: str, limite: int = 50) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
 
 
+def obtener(cliente_id: str, rec_id: int) -> Optional[dict]:
+    """Comprobante propio; el id de la URL nunca sustituye al dueño."""
+    _ensure_tabla()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM recolecciones WHERE cliente_id=%s AND id=%s",
+                        ((cliente_id or "").strip().upper(), int(rec_id)))
+            fila = cur.fetchone()
+    return dict(fila) if fila else None
+
+
+def listar_de_solicitudes(cliente_id: str, solicitudes: list[int]) -> dict[int, dict]:
+    """Una lectura por página, acotada a los envíos y la cuenta visibles."""
+    if not solicitudes:
+        return {}
+    _ensure_tabla()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT ON (solicitud_id)
+                       id, solicitud_id, estado, confirmation_code, courier,
+                       fecha, ready_time, close_time
+                FROM recolecciones
+                WHERE cliente_id=%s AND solicitud_id=ANY(%s)
+                ORDER BY solicitud_id, created_at DESC, id DESC
+            """, ((cliente_id or "").strip().upper(), solicitudes))
+            return {r["solicitud_id"]: dict(r) for r in cur.fetchall()}
+
+
 def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
     """Última recolección ligada a una guía del cliente.
 
@@ -497,7 +526,7 @@ def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, courier, fecha, ready_time, close_time, bultos,
+                SELECT id, solicitud_id, courier, fecha, ready_time, close_time, bultos,
                        peso_kg, direccion, instrucciones, estado,
                        confirmation_code, ubicacion, created_at, updated_at
                 FROM recolecciones

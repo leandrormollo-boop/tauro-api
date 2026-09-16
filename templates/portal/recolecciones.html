@@ -7,90 +7,42 @@
         <div>
             <div class="eyebrow">Operaciones</div>
             <h1>Recolecciones</h1>
-            <p>Pedí que el chofer pase a buscar los paquetes, en vez de llevarlos vos.</p>
+            <p>Consultá tus reservas de retiro, sus números de confirmación y horarios.</p>
         </div>
     </div>
 </div>
 
+{% from 'portal/_recoleccion_resumen.html' import comprobante_retiro with context %}
 {% set qp = request.query_params %}
-{% if qp.get('ok') == '2' %}
-    <div class="msg ok">Recolección cancelada. El chofer ya no va a pasar.</div>
-{% elif qp.get('ok') %}
-    <div class="msg ok">Listo, la recolección quedó agendada. Tené los paquetes
-    cerrados y con la etiqueta pegada antes del horario de inicio.</div>
+{% if qp.get('ok') == '2' and seleccionada and seleccionada.estado == 'CANCELADA' %}
+    <div class="msg ok" role="status">Recolección cancelada. La guía se conserva.</div>
+{% elif qp.get('ok') == '1' and seleccionada and seleccionada.estado == 'AGENDADA' and seleccionada.confirmation_code %}
+    <div class="msg ok" role="status">Listo: {{ (seleccionada.courier or 'el courier')|upper }} confirmó tu recolección. Guardá el número de reserva de abajo.</div>
 {% endif %}
 {% if qp.get('error') %}
-    <div class="msg error">{{ qp.get('error') }}</div>
+    <div class="msg error" role="alert">{{ qp.get('error') }}</div>
+{% endif %}
+{% if recolecciones_error %}
+    <div class="msg warn" role="status">No pudimos consultar todas tus recolecciones. Volvé a cargar esta página antes de pedir otro retiro para evitar duplicados.</div>
 {% endif %}
 
-{% if recolecciones %}
-<div class="card" style="margin-bottom:16px;">
-    <div class="table-wrap">
-        <table>
-            <thead>
-                <tr>
-                    <th>Fecha</th>
-                    <th>Horario</th>
-                    <th>Bultos / peso</th>
-                    <th>Dirección</th>
-                    <th>Estado</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for r in recolecciones %}
-                <tr>
-                    <td class="mono">{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else '—' }}
-                        <br><small style="color:var(--fg-3);">{{ (r.courier or 'FEDEX')|upper }}</small>
-                    </td>
-                    <td class="mono">{{ r.ready_time }} a {{ r.close_time }}</td>
-                    <td class="mono">{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ '%g'|format(r.peso_kg) }} kg total</td>
-                    <td style="font-size:13px;">{{ r.direccion or '—' }}
-                        {% if r.confirmation_code %}
-                        <br><small class="mono" style="color:var(--fg-3);">cód. {{ r.confirmation_code }}</small>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if r.estado == 'AGENDANDO' %}<span class="badge warn">Confirmando con el courier</span>
-                        {% elif r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
-                        {% elif r.estado == 'CANCELANDO' %}<span class="badge warn">Cancelando con el courier</span>
-                        {% elif r.estado == 'VERIFICAR_COURIER' %}<span class="badge warn">Verificando con el courier</span>
-                        {% elif r.estado == 'CANCELADA' %}<span class="badge">Cancelada</span>
-                        {% else %}<span class="badge">{{ r.estado|title }}</span>{% endif %}
-                    </td>
-                    <td>
-                        {% if r.estado == 'AGENDADA' %}
-                        <form method="POST" action="/portal/recolecciones/{{ r.id }}/cancelar"
-                              data-confirm="¿Cancelar la recolección del {{ r.fecha.strftime('%d/%m') if r.fecha else '' }}?">
-                            <button type="submit" class="btn btn-ghost btn-sm">Cancelar</button>
-                        </form>
-                        {% endif %}
-                    </td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-{% endif %}
+{% for r in recolecciones %}
+    {{ comprobante_retiro(r, destacado=seleccionada and seleccionada.id == r.id, mostrar_cancelar=true) }}
+{% endfor %}
 
-<div class="card">
-    <div class="card-head">
-        <div>
-            <h3>Pedir una recolección</h3>
-            <p>El chofer pasa por tu dirección en la ventana horaria que elijas.</p>
-        </div>
-    </div>
+{% if retiro_bloquea_form %}
+    {% if retiro_envio %}<p class="pickup-note">El estado de este retiro figura arriba. Para otro envío, elegí su guía en Mis envíos.</p>{% endif %}
+    <a href="/portal/envios?tipo=internacional&amp;paso=guia_lista" class="btn btn-ghost">Ver mis guías</a>
+{% else %}
+<details class="card pickup-new"{% if envio_pre or not recolecciones %} open{% endif %}>
+    <summary>{% if envio_pre %}Programar el retiro de esta guía{% elif recolecciones %}Programar otra recolección{% else %}Programar una recolección{% endif %}</summary>
+    <p>Elegí una guía emitida y el horario en su lugar de origen. Al confirmar, verás el número que devuelve el courier.</p>
 
     {% if envio_pre_error %}
         <div class="msg warn">{{ envio_pre_error }}</div>
     {% elif not puede_recolectar and dhl_requiere_envio %}
-        <div class="msg warn">
-            Para coordinar un retiro DHL, primero emití la guía. Después entrá en
-            <a href="/portal/envios?tipo=internacional&amp;paso=guia_lista"><b>Mis envíos internacionales</b></a>
-            y elegí <b>Programar retiro</b> en esa guía. Así usamos automáticamente el origen,
-            las cajas, las medidas y el valor declarado correctos.
-        </div>
+        <p>Para DHL, seleccioná la guía que querés retirar. Usamos su dirección de origen y sus cajas.</p>
+        <a class="btn btn-primary" href="/portal/envios?tipo=internacional&amp;paso=guia_lista">Elegir una guía para retirar →</a>
     {% elif not puede_recolectar %}
         <div class="msg warn">
             La programación de recolecciones todavía no está habilitada para tu cuenta.
@@ -119,10 +71,10 @@
         <input type="hidden" name="solicitud_id" value="{{ envio_pre.solicitud_id }}">
         {# Llegó desde "Mis envíos": el retiro es DE ese envío, así que
            courier, bultos y peso vienen puestos (editables igual). #}
-        <div class="msg ok" style="margin-bottom:14px;">
-            Coordinando el retiro del envío <b>#{{ envio_pre.solicitud_id }}</b>
+        <div class="msg" style="margin-bottom:14px;">
+            Preparando el retiro del envío <b>#{{ envio_pre.solicitud_id }}</b>
             ({{ envio_pre.courier }} · guía {{ envio_pre.tracking }}).
-            Ya te cargamos el origen, el courier y las cajas exactas — revisá la fecha y listo.
+            Ya cargamos su origen y sus cajas. Revisá fecha y horario; la recolección se programa cuando confirmás abajo.
         </div>
         {% endif %}
         {# El courier que va a pasar a buscar. Antes no se elegía y TODA
@@ -152,11 +104,11 @@
                        value="{{ fecha_sugerida }}" min="{{ fecha_sugerida }}" max="{{ fecha_max }}">
             </div>
             <div class="form-group">
-                <label for="rec-desde">Listos desde *</label>
+                <label for="rec-desde">Listos desde (hora del origen) *</label>
                 <input type="time" name="ready_time" id="rec-desde" required value="09:00">
             </div>
             <div class="form-group">
-                <label for="rec-hasta">Hasta *</label>
+                <label for="rec-hasta">Hasta (hora del origen) *</label>
                 <input type="time" name="close_time" id="rec-hasta" required value="17:00">
                 <small class="hint">Al menos 2 horas después: es la ventana que el
                 chofer necesita para poder pasar.</small>
@@ -180,12 +132,13 @@
                    placeholder="Timbre 3B · preguntar por Ana · portón del fondo">
         </div>
 
-        <button type="submit" class="btn btn-primary">Confirmar retiro con el courier</button>
+        <button type="submit" class="btn btn-primary">{% if envio_pre %}Programar recolección con {{ envio_pre.courier }}{% else %}Programar recolección{% endif %}</button>
         <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
             Tené los paquetes cerrados y con la etiqueta pegada antes del horario
             de inicio. Si no hay nadie, el chofer se va y hay que agendar de nuevo.
         </p>
     </form>
     {% endif %}
-</div>
+</details>
+{% endif %}
 {% endblock %}

@@ -142,6 +142,12 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 </div>
 
 <!-- ── Guía y tracking ─────────────────────────────────────── -->
+{% if recoleccion %}
+    {% from 'portal/_recoleccion_resumen.html' import comprobante_retiro with context %}
+    {{ comprobante_retiro(recoleccion) }}
+{% elif recoleccion_error %}
+    <div class="msg warn" role="status">No pudimos consultar la recolección de esta guía. Revisá <a href="/portal/recolecciones?envio={{ s.id }}">su estado</a> antes de programar otro retiro.</div>
+{% endif %}
 <div class="grid-2" style="margin-bottom:16px;">
     <div class="card">
         <div class="card-head">
@@ -176,11 +182,11 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 {% if s.bultos and s.bultos|length %}El PDF comienza con una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}El PDF comienza con la etiqueta para imprimir y pegar en la caja.{% endif %}
                 {% if s.tiene_factura_comercial %} La invoice comercial está incluida al final del mismo archivo.{% endif %}
             </p>
-            {% if ambito == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and courier_codigo != 'ENVIA' %}
+            {% if ambito == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and courier_codigo != 'ENVIA' and not recoleccion_error and (not recoleccion or recoleccion.estado == 'CANCELADA') %}
             {# El paso que sigue a tener la etiqueta: que pasen a buscarla.
                Llega al form con courier/bultos/peso de este envío puestos. #}
             <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-full" style="margin-top:8px;">
-                🚚 Coordinar retiro con {{ courier_nombre }}
+                🚚 Programar recolección con {{ courier_nombre }}
             </a>
             {% endif %}
         {% elif courier_codigo == 'ENVIA' %}

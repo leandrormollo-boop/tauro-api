@@ -1,0 +1,57 @@
+{% macro comprobante_retiro(r, destacado=false, mostrar_cancelar=false) %}
+{% set courier = (r.courier or 'FEDEX')|upper %}
+{% set confirmada = r.estado == 'AGENDADA' and r.confirmation_code %}
+<article class="pickup-card{% if confirmada %} pickup-confirmed{% endif %}{% if destacado %} pickup-selected{% endif %}" id="recoleccion-{{ r.id }}" aria-label="Recolección {{ courier }}">
+    <header class="pickup-heading">
+        <div>
+            <span class="eyebrow">Retiro · {{ courier }}</span>
+            <h2>{% if confirmada %}Recolección programada
+                {% elif r.estado == 'CANCELADA' %}Recolección cancelada
+                {% elif r.estado == 'COMPLETADA' %}Recolección completada
+                {% elif r.estado == 'CANCELANDO' %}Cancelación en proceso
+                {% else %}Recolección pendiente de confirmación{% endif %}</h2>
+        </div>
+        <span class="badge {% if confirmada or r.estado == 'COMPLETADA' %}ok{% elif r.estado != 'CANCELADA' %}warn{% endif %}">
+            {% if confirmada %}Confirmada por {{ courier }}{% elif r.estado == 'CANCELADA' %}Cancelada{% elif r.estado == 'COMPLETADA' %}Completada{% else %}En verificación{% endif %}
+        </span>
+    </header>
+    {% if confirmada %}
+    <p>Tu cuenta ya tiene este retiro programado. No necesitás volver a solicitarlo.</p>
+    {% elif r.estado == 'CANCELADA' %}
+    <p>La reserva fue cancelada. Si todavía necesitás el retiro, programá uno nuevo desde la guía vigente.</p>
+    {% elif r.estado == 'COMPLETADA' %}
+    <p>Este retiro figura como completado. Consultá el recorrido del paquete con el tracking del envío.</p>
+    {% elif r.estado == 'CANCELANDO' %}
+    <p>Estamos confirmando la cancelación con {{ courier }}. Esperá el resultado antes de pedir otro retiro.</p>
+    {% else %}
+    <p>Todavía no tenemos una confirmación concluyente. TAURO está verificando la reserva; no vuelvas a solicitarla.</p>
+    {% endif %}
+    {% if r.confirmation_code %}
+    <div class="pickup-number">
+        <span>Número de recolección {{ courier }}</span>
+        <strong class="mono">{{ r.confirmation_code }}</strong>
+        <small>Identifica la reserva del retiro. Es distinto del tracking de la guía.</small>
+    </div>
+    {% endif %}
+    <dl class="pickup-facts">
+        <div><dt>Fecha acordada</dt><dd>{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else '—' }}</dd></div>
+        <div><dt>Horario en el origen</dt><dd>{{ r.ready_time }} a {{ r.close_time }}</dd></div>
+        <div><dt>Paquetes</dt><dd>{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ '%g'|format(r.peso_kg or 0) }} kg</dd></div>
+        <div class="pickup-address"><dt>Dirección de retiro</dt><dd>{{ r.direccion or '—' }}</dd></div>
+    </dl>
+    {% if confirmada %}
+    <p class="pickup-note">La confirmación acredita la reserva, no que los paquetes ya fueron retirados. Preparalos cerrados y con sus etiquetas antes del horario de inicio.</p>
+    {% endif %}
+    <footer class="pickup-actions">
+        {% if r.solicitud_id %}<a class="btn btn-ghost btn-sm" href="/portal/envios/{{ r.solicitud_id }}">Ver envío #{{ r.solicitud_id }}</a>{% endif %}
+        {% if mostrar_cancelar and confirmada %}
+        <details><summary>Opciones de la recolección</summary>
+            <form method="POST" action="/portal/recolecciones/{{ r.id }}/cancelar"
+                  data-confirm="¿Cancelar esta recolección {{ courier }}? Se anula la reserva del retiro; la guía se conserva.">
+                <button type="submit" class="btn btn-ghost btn-sm">Cancelar recolección</button>
+            </form>
+        </details>
+        {% elif not mostrar_cancelar %}<a class="btn btn-ghost btn-sm" href="/portal/recolecciones?recoleccion={{ r.id }}{% if r.solicitud_id %}&amp;envio={{ r.solicitud_id }}{% endif %}#recoleccion-{{ r.id }}">Ver recolección</a>{% endif %}
+    </footer>
+</article>
+{% endmacro %}

@@ -139,3 +139,13 @@ def test_cancelar_usa_solo_el_codigo():
     assert out["ok"] is True
     assert "CBJ250100001" in d.call_args.args[0]
     assert d.call_args.kwargs["params"]["requestorName"]
+
+
+def test_confirmaciones_malformadas_no_fabrican_reservas():
+    for invalid in ['CBJ-DEMO', [None], [''], ['   '], [False], [123], {'code':'CBJ-DEMO'}]:
+        with _capturar_post(respuesta_json={'dispatchConfirmationNumbers':invalid}) as post:
+            out=_cliente().create_pickup(DATOS)
+        assert not out['encontrado']
+        assert out['incierto'] is True
+        assert 'confirmation_code' not in out
+        post.assert_called_once()

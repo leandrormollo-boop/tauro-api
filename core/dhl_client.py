@@ -1313,13 +1313,14 @@ class DHLClient(CarrierBase):
         try:
             data = resp.json()
             codigos = data.get("dispatchConfirmationNumbers") or []
-            if not codigos:
+            if (not isinstance(codigos, list) or not codigos
+                    or not isinstance(codigos[0], str) or not codigos[0].strip()):
                 return {"encontrado": False,
                         "error": "DHL no devolvió número de confirmación.",
                         "incierto": True, "message_reference": msg_ref}
             return {
                 "encontrado": True,
-                "confirmation_code": str(codigos[0]),
+                "confirmation_code": codigos[0].strip(),
                 # DHL no informa estación en la respuesta; se guarda vacío y
                 # cancel_pickup no la necesita (usa sólo el código).
                 "ubicacion": "",

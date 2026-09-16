@@ -285,8 +285,17 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}
                                 {% if s._ambito_portal == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
+                                {% if s.recoleccion_error %}
+                                <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-sm">Consultar recolección</a>
+                                {% elif s.recoleccion and s.recoleccion.estado != 'CANCELADA' %}
+                                <div class="pickup-inline">
+                                    <a href="/portal/recolecciones?envio={{ s.id }}#recoleccion-{{ s.recoleccion.id }}" class="btn btn-ghost btn-sm">{% if s.recoleccion.estado == 'AGENDADA' and s.recoleccion.confirmation_code %}Recolección programada{% elif s.recoleccion.estado == 'COMPLETADA' %}Recolección completada{% else %}Recolección en verificación{% endif %}</a>
+                                    {% if s.recoleccion.confirmation_code %}<small class="mono">Retiro: {{ s.recoleccion.confirmation_code }}</small>{% endif %}
+                                </div>
+                                {% else %}
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="btn btn-ghost btn-sm"
                                    title="Programar la recolección con {{ (s.courier or 'el courier')|upper }}">Programar retiro</a>
+                                {% endif %}
                                 {% endif %}
                             {% elif s.guia_url and s.estado not in ('CANCELADO', 'REEMPLAZADO') %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>

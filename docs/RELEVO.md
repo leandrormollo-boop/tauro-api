@@ -6,6 +6,23 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 16/09/2026 — Confirmación visible de recolecciones
+
+Rama `codex/pickup-confirmation-20260916`, base publicada `d2fe4a1`.
+Preparada localmente, pendiente de autorización para publicar esta entrega.
+La reserva aparece con número del courier, fecha, horario del origen y dirección
+en Recolecciones y en el detalle de la guía. Mis envíos muestra su estado y
+evita invitar a programar un retiro existente. El retorno tras crear conserva
+la guía y abre su comprobante; los éxitos se contrastan con el registro propio.
+Ante una lectura fallida o una reserva incierta no se ofrece otro formulario.
+
+DHL ya devuelve `dispatchConfirmationNumbers` y se verificó una reserva real
+en lectura; no es el tracking ni prueba de retiro físico. Se endureció la
+validación de respuestas malformadas sin alterar reservas ni reintentos.
+Sin migraciones, dependencias nuevas ni operaciones reales de prueba.
+2.318 pruebas y 5 subpruebas aprobadas; QA visual en escritorio/celular y ambos
+temas. Detalle: [Confirmación de recolecciones](RECOLECCIONES_CONFIRMACION.md).
+
 ## 16/09/2026 — Publicación autorizada del portal, HS, DHL y numeración
 
 El usuario autorizó expresamente «publica todo». Esta autorización comprende

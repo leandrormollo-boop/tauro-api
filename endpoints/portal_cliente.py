@@ -931,6 +931,7 @@ def recolecciones_view(
     request: Request,
     envio: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
+    recoleccion: Optional[int] = None,
 ):
     """
     Que el chofer pase a buscar, en vez de llevar los paquetes.
@@ -941,15 +942,25 @@ def recolecciones_view(
     coordina el retiro del envío que está mirando, no arranca de cero.
     """
     from servicios.recolecciones import (
-        listar, datos_retiro_desde_solicitud, cliente_puede_recolectar,
+        listar, datos_retiro_desde_solicitud, obtener, obtener_de_solicitud,
     )
     from datetime import date, timedelta
 
+    recolecciones_error = False
+    seleccionada = None
+    retiro_envio = None
     try:
         recolecciones = listar(cliente)
+        if recoleccion:
+            seleccionada = obtener(cliente, recoleccion)
+            if seleccionada:
+                recolecciones = [seleccionada] + [
+                    r for r in recolecciones if r["id"] != seleccionada["id"]
+                ]
     except Exception as e:
         print(f"[portal] no pude listar recolecciones: {type(e).__name__}")
         recolecciones = []
+        recolecciones_error = True
     from servicios.configuracion_couriers_cliente import mapa_permisos
     permisos_pickup = mapa_permisos(cliente, "recolectar")
     couriers_recoleccion = [
@@ -965,9 +976,21 @@ def recolecciones_view(
     envio_pre_error = None
     if envio:
         s = obtener_solicitud_de_cliente(envio, cliente)
+        if s:
+            try:
+                retiro_envio = obtener_de_solicitud(cliente, envio)
+                if retiro_envio and not seleccionada:
+                    seleccionada = retiro_envio
+                    recolecciones = [retiro_envio] + [
+                        r for r in recolecciones if r["id"] != retiro_envio["id"]
+                    ]
+            except Exception as exc:
+                recolecciones_error = True
+                print(f"[portal] no pude consultar retiro: {type(exc).__name__}")
         # Sólo precarga si la guía existe: sin guía todavía no hay nada que
         # el chofer pueda llevarse.
-        if s and s.get("tracking") and ambito_envio(s) == "internacional":
+        if (s and s.get("tracking") and ambito_envio(s) == "internacional"
+                and s.get("estado") not in ("CANCELADO", "REEMPLAZADO")):
             try:
                 envio_pre = datos_retiro_desde_solicitud(s)
             except ValueError as exc:
@@ -975,6 +998,8 @@ def recolecciones_view(
                     f"No pudimos preparar el retiro de ese envío: {exc} "
                     "Corregí los datos de la guía o escribinos antes de agendar."
                 )
+        else:
+            envio_pre_error = "Elegí una guía internacional vigente de tu cuenta para programar el retiro."
 
     dhl_requiere_envio = bool(
         not envio_pre and permisos_pickup.get("dhl", False)
@@ -1008,6 +1033,10 @@ def recolecciones_view(
     return templates.TemplateResponse(
         request=request, name="portal/recolecciones.html",
         context={"cliente": cliente, "recolecciones": recolecciones,
+                 "recolecciones_error": recolecciones_error,
+                 "seleccionada": seleccionada, "retiro_envio": retiro_envio,
+                 "retiro_bloquea_form": bool(recolecciones_error or (
+                     retiro_envio and retiro_envio.get("estado") != "CANCELADA")),
                  "remitente": remitente, "envio_pre": envio_pre,
                  "envio_pre_error": envio_pre_error,
                  "puede_recolectar": puede_recolectar,
@@ -1033,11 +1062,12 @@ def recoleccion_nueva(
 ):
     from servicios.recolecciones import crear
 
+    solicitud_id_num = None
     try:
-        bultos_num = _entero_form(bultos, "Cantidad de bultos", minimo=1, maximo=20)
         solicitud_id_num = _entero_form(
             solicitud_id, "Envío seleccionado", requerido=False, minimo=1
         )
+        bultos_num = _entero_form(bultos, "Cantidad de bultos", minimo=1, maximo=20)
         peso = _numero_form(peso_kg, "Peso total", minimo=0.001, maximo=1400)
         r = crear(cliente, fecha, ready_time, close_time, bultos_num,
                   peso, instrucciones,
@@ -1047,12 +1077,17 @@ def recoleccion_nueva(
         r = {"ok": False, "error": str(e)}
     except Exception as e:
         print(f"[portal] error agendando recolección: {type(e).__name__}")
-        r = {"ok": False, "error": "No pudimos agendarla. Probá de nuevo o escribinos."}
+        r = {"ok": False, "error": "No pudimos confirmar el retiro. Revisá su estado o escribinos antes de volver a pedirlo."}
 
+    parametros = {"envio": solicitud_id_num} if solicitud_id_num else {}
     if r.get("ok"):
-        return RedirectResponse(url="/portal/recolecciones?ok=1", status_code=303)
+        parametros.update(ok="1", recoleccion=r["id"])
+        return RedirectResponse(
+            url="/portal/recolecciones?" + urlencode(parametros) + f"#recoleccion-{r['id']}",
+            status_code=303)
+    parametros["error"] = str(r.get("error") or "Error")
     return RedirectResponse(
-        url=f"/portal/recolecciones?error={quote(str(r.get('error') or 'Error'))}",
+        url="/portal/recolecciones?" + urlencode(parametros),
         status_code=303)
 
 
@@ -1062,7 +1097,7 @@ def recoleccion_cancelar(rec_id: int, cliente: str = Depends(cliente_actual)):
 
     r = cancelar(rec_id, cliente_id=cliente)
     if r.get("ok"):
-        return RedirectResponse(url="/portal/recolecciones?ok=2", status_code=303)
+        return RedirectResponse(url=f"/portal/recolecciones?ok=2&recoleccion={rec_id}#recoleccion-{rec_id}", status_code=303)
     return RedirectResponse(
         url=f"/portal/recolecciones?error={quote(str(r.get('error') or 'Error'))}",
         status_code=303)
@@ -2056,6 +2091,17 @@ def envios_view(
     # El período puede no tener filas aunque el cliente sí tenga historia. La
     # pantalla debe decir "sin envíos en agosto", no "nunca hiciste envíos".
     vista["tiene_historial"] = periodo["tiene_actividad_historica"]
+
+    from servicios.recolecciones import listar_de_solicitudes
+    try:
+        retiros = listar_de_solicitudes(cliente, [s["id"] for s in vista["solicitudes"]])
+        retiros_error = False
+    except Exception as exc:
+        print(f"[portal] no pude consultar retiros: {type(exc).__name__}")
+        retiros, retiros_error = {}, True
+    for solicitud in vista["solicitudes"]:
+        solicitud["recoleccion"] = retiros.get(solicitud["id"])
+        solicitud["recoleccion_error"] = retiros_error
 
     from servicios.configuracion_couriers_cliente import mapa_permisos
     permisos_emision = mapa_permisos(cliente, "emitir")
@@ -3420,6 +3466,15 @@ def envio_detalle(
         )
     cancelacion = validar_cancelacion_cliente(solicitud_id, cliente)
 
+    from servicios.recolecciones import obtener_de_solicitud
+    recoleccion, recoleccion_error = None, False
+    if s.get("tracking") and ambito_envio(s) == "internacional":
+        try:
+            recoleccion = obtener_de_solicitud(cliente, solicitud_id)
+        except Exception as exc:
+            recoleccion_error = True
+            print(f"[portal] no pude consultar retiro: {type(exc).__name__}")
+
     return templates.TemplateResponse(
         request=request, name="portal/envio_detalle.html",
         context={
@@ -3427,6 +3482,7 @@ def envio_detalle(
             "puede_corregir": puede_corregir,
             "puede_cancelar": bool(cancelacion.get("ok")),
             "cancelar_bloqueo": str(cancelacion.get("error") or ""),
+            "recoleccion": recoleccion, "recoleccion_error": recoleccion_error,
         },
     )
 

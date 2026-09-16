@@ -78,4 +78,4 @@ def test_recoleccion_se_presenta_como_accion_explicita_del_envio():
     ).read_text(encoding="utf-8")
 
     assert "Programar retiro" in envios
-    assert "Confirmar retiro con el courier" in recolecciones
+    assert "Programar recolección con {{ envio_pre.courier }}" in recolecciones

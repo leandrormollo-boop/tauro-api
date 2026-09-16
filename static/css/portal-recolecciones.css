@@ -1,0 +1,21 @@
+.portal-operacion .pickup-card{border:1px solid var(--line);border-radius:20px;padding:24px;background:var(--bg-elev);margin-bottom:18px;scroll-margin-top:24px;min-width:0}
+.portal-operacion .pickup-confirmed{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.portal-operacion .pickup-selected{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 20%,transparent)}
+.portal-operacion .pickup-heading{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}
+.portal-operacion .pickup-heading h2{font-size:22px;line-height:1.25;margin:6px 0 0}
+.portal-operacion .pickup-card p{color:var(--fg-2);line-height:1.6;margin:10px 0}
+.portal-operacion .pickup-number{display:flex;flex-direction:column;gap:8px;padding:18px;border-radius:12px;background:color-mix(in srgb,var(--accent) 8%,transparent);margin:18px 0}
+.portal-operacion .pickup-number>span,.portal-operacion .pickup-facts dt{font-size:12px;color:var(--fg-2)}
+.portal-operacion .pickup-number strong{font-size:clamp(18px,2.3vw,26px);color:var(--fg);overflow-wrap:anywhere;user-select:all;letter-spacing:.025em}
+.portal-operacion .pickup-number small,.portal-operacion .pickup-note{font-size:12px;color:var(--fg-3);line-height:1.5}
+.portal-operacion .pickup-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:18px 0}
+.portal-operacion .pickup-facts dd{margin:5px 0 0;font-weight:600;overflow-wrap:anywhere}
+.portal-operacion .pickup-address{grid-column:1/-1}
+.portal-operacion .pickup-actions{display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px;margin-top:18px}
+.portal-operacion .pickup-actions summary{font-size:12px;color:var(--fg-3);cursor:pointer;padding:8px 0}
+.portal-operacion .pickup-new{margin:24px 0}
+.portal-operacion .pickup-new>summary{cursor:pointer;font-weight:600;margin-bottom:16px}
+.portal-operacion .pickup-new p{line-height:1.6}
+.portal-operacion .pickup-inline{display:flex;flex-direction:column;gap:4px;min-width:0}
+.portal-operacion .pickup-inline small{overflow-wrap:anywhere;color:var(--fg-2)}
+@media(max-width:600px){.portal-operacion .pickup-card{padding:18px 16px}.portal-operacion .pickup-facts{grid-template-columns:1fr 1fr;gap:16px}.portal-operacion .pickup-heading h2{font-size:20px}.portal-operacion .pickup-number{padding:14px}.portal-operacion .pickup-actions{flex-direction:column;align-items:stretch}.portal-operacion .pickup-actions .btn{white-space:normal;text-align:center}}
