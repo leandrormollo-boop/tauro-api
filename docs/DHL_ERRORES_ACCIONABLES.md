@@ -84,4 +84,3 @@ No se migró la versión de la API contratada por el adaptador.
 Sin migraciones ni dependencias nuevas. Ejecución: Astra, elegido por el
 usuario; sin subagentes. El router marcó arquitectura con Terra, pero la
 política de TAURO exige al menos Sol para arquitectura: se mantuvo Astra.
-

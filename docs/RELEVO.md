@@ -6,6 +6,23 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 16/09/2026 — Publicación autorizada del portal, HS, DHL y numeración
+
+El usuario autorizó expresamente «publica todo». Esta autorización comprende
+las cuatro entregas `5cd977b`, `df32b56`, `468a59e` y `8c94d8b`, sobre
+`origin/main` `2249e48`, sin divergencia. Reemplaza el estado pendiente de las
+notas de preparación siguientes. Incluye la migración aditiva de numeración;
+no habilita emisiones de prueba, pagos ni cambios de importes históricos.
+
+Validación del código que se publica: 2.300 pruebas y 5 subpruebas aprobadas,
+sin fallos ni omisiones, con PostgreSQL aislado. El despliegue se verifica por
+el estado Railway del commit, salud de aplicación y base, recursos publicados
+y sesiones reales de WAIMAO y administrador. Referencia previa: saldo visible
+de WAIMAO $2.855.643 y 610 registros en conciliación. La secuencia comienza
+en 50300 y no se reinicia en despliegues posteriores. No se emiten guías reales
+para verificar la publicación. Shopify y Tienda Nube conservan pendiente su
+piloto real de extremo a extremo.
+
 ## 16/09/2026 — Descargas con cuenta, origen y número TAURO desde 50300
 
 Rama `codex/guide-download-names-20260916`, basada en `468a59e` y con todas
