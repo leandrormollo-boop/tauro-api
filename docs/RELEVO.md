@@ -6,6 +6,21 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 16/09/2026 — Descargas con cuenta, origen y número TAURO desde 50300
+
+Rama `codex/guide-download-names-20260916`, basada en `468a59e` y con todas
+las entregas locales previas. El cliente descarga
+`TAURO - WAIMAO - DESTINATARIO - CN - 50300.pdf`. Se usa la cuenta y el
+país de origen del envío. Número interno global, estable en reintentos y
+descargas, distinto del tracking. Históricos sin número se numeran al
+descargarlos; las nuevas guías, al guardar la confirmación del courier.
+
+Migración aditiva: columna nullable, secuencia desde 50300 e índice único.
+No reiniciar la secuencia. 2.300 pruebas y 5 subpruebas aprobadas, incluidas
+24 regresiones nuevas y pruebas concurrentes con PostgreSQL aislado.
+**Pendiente de publicación; sin migraciones ni escrituras en producción.**
+Detalle: [Nombre y numeración de descargas](NOMBRES_DESCARGA_GUIAS.md).
+
 ## 16/09/2026 — Motivos accionables al emitir con DHL
 
 Rama `codex/dhl-emission-errors-20260916`, basada en `df32b56`; conserva las

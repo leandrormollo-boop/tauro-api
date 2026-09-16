@@ -1896,6 +1896,9 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                 UPDATE solicitudes_guia
                 SET estado='GUIA_LISTA', tracking=%s, label_pdf=%s,
                     commercial_invoice_pdf=%s, courier=%s,
+                    numero_guia_tauro=CASE WHEN test=FALSE THEN
+                        COALESCE(numero_guia_tauro, nextval('numero_guia_tauro_seq'))
+                        ELSE numero_guia_tauro END,
                     tracking_estado=NULL, tracking_estado_courier=NULL,
                     tracking_descripcion=NULL, tracking_consultado_at=NULL,
                     tracking_actualizado_at=NULL, tracking_finalizado_at=NULL,
@@ -2145,14 +2148,19 @@ def _segmento_nombre_pdf(valor: Optional[str], respaldo: str) -> str:
 
 
 def nombre_archivo_documentos_envio(
-    *, cliente_nombre: Optional[str], dest_nombre: Optional[str],
-    destino_pais: Optional[str],
+    *, cliente_id: str, dest_nombre: Optional[str],
+    remitente_pais: Optional[str], numero_guia_tauro: int,
 ) -> str:
-    """Nombre estable: TAURO - CLIENTE - DESTINATARIO - PAIS.pdf."""
-    cliente = _segmento_nombre_pdf(cliente_nombre, "CLIENTE")
+    """TAURO - CUENTA - DESTINATARIO - ORIGEN - NUMERO INTERNO.pdf."""
+    from servicios.paises import normalizar_iso2
+
+    if (isinstance(numero_guia_tauro, bool)
+            or not isinstance(numero_guia_tauro, int) or numero_guia_tauro < 50300):
+        raise ValueError("La guía no tiene un número interno TAURO válido.")
+    cliente = _segmento_nombre_pdf(cliente_id, "CLIENTE")
     destinatario = _segmento_nombre_pdf(dest_nombre, "DESTINATARIO")
-    pais = _segmento_nombre_pdf(destino_pais, "PAIS")
-    return f"TAURO - {cliente} - {destinatario} - {pais}.pdf"
+    pais = normalizar_iso2(remitente_pais) or "ORIGEN SIN DATO"
+    return f"TAURO - {cliente} - {destinatario} - {pais} - {numero_guia_tauro}.pdf"
 
 
 def unir_guia_e_invoice_pdf(
@@ -2199,19 +2207,17 @@ def preparar_documentos_envio_portal(
 ) -> Optional[dict]:
     """Devuelve el legajo PDF del envío sólo a su cliente propietario.
 
-    La consulta reúne documentos y metadatos en una sola lectura para que la
-    autorización, la mezcla y el nombre correspondan siempre al mismo envío.
+    Bloquea la solicitud mientras verifica documentos y asigna el número de
+    una guía histórica. Dos descargas simultáneas conservan el mismo número.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT s.label_pdf, s.commercial_invoice_pdf,
-                       COALESCE(NULLIF(BTRIM(c.nombre), ''), s.cliente_id)
-                           AS cliente_nombre,
-                       s.dest_nombre, s.destino_pais
+                       s.cliente_id, s.dest_nombre, s.remitente_pais,
+                       s.numero_guia_tauro
                 FROM solicitudes_guia s
-                LEFT JOIN clientes c ON c.cliente_id=s.cliente_id
                 WHERE s.id=%s AND s.cliente_id=%s
                   AND s.test=FALSE
                   AND s.visible_cliente=TRUE
@@ -2229,26 +2235,42 @@ def preparar_documentos_envio_portal(
                         AND (r.estado <> 'EMITIDA'
                              OR s.cargo_pendiente=TRUE)
                   )
+                FOR UPDATE OF s
                 """,
                 (solicitud_id, cliente_id.strip().upper()),
             )
             row = cur.fetchone()
-    if not row or not row.get("label_pdf"):
-        return None
-    pdf = unir_guia_e_invoice_pdf(
-        bytes(row["label_pdf"]),
-        bytes(row["commercial_invoice_pdf"])
-        if row.get("commercial_invoice_pdf") else None,
-    )
-    return {
-        "pdf": pdf,
-        "incluye_invoice": bool(row.get("commercial_invoice_pdf")),
-        "filename": nombre_archivo_documentos_envio(
-            cliente_nombre=row.get("cliente_nombre"),
-            dest_nombre=row.get("dest_nombre"),
-            destino_pais=row.get("destino_pais"),
-        ),
-    }
+            if not row or not row.get("label_pdf"):
+                return None
+            pdf = unir_guia_e_invoice_pdf(
+                bytes(row["label_pdf"]),
+                bytes(row["commercial_invoice_pdf"])
+                if row.get("commercial_invoice_pdf") else None,
+            )
+            numero = row.get("numero_guia_tauro")
+            if numero is None:
+                # Migración diferida: no renumerar masivamente historia. Se
+                # llega acá sólo tras validar dueño, visibilidad y documentos.
+                cur.execute("""
+                    UPDATE solicitudes_guia
+                    SET numero_guia_tauro=COALESCE(
+                        numero_guia_tauro, nextval('numero_guia_tauro_seq'))
+                    WHERE id=%s
+                    RETURNING numero_guia_tauro
+                """, (solicitud_id,))
+                numero = cur.fetchone()["numero_guia_tauro"]
+            documentos = {
+                "pdf": pdf,
+                "incluye_invoice": bool(row.get("commercial_invoice_pdf")),
+                "numero_guia_tauro": numero,
+                "filename": nombre_archivo_documentos_envio(
+                    cliente_id=row["cliente_id"],
+                    dest_nombre=row.get("dest_nombre"),
+                    remitente_pais=row.get("remitente_pais"),
+                    numero_guia_tauro=numero,
+                ),
+            }
+    return documentos
 
 
 def cargar_envio_externo(

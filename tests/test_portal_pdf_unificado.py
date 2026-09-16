@@ -53,17 +53,17 @@ def test_invoice_invalida_no_se_oculta_devolviendo_solo_la_guia():
 
 def test_nombre_del_archivo_sigue_formato_y_es_seguro_para_http():
     assert solicitudes_guia.nombre_archivo_documentos_envio(
-        cliente_nombre="WAIMAO",
+        cliente_id="WAIMAO",
         dest_nombre="MARSANTEX",
-        destino_pais="UY",
-    ) == "TAURO - WAIMAO - MARSANTEX - UY.pdf"
+        remitente_pais="CN", numero_guia_tauro=50300,
+    ) == "TAURO - WAIMAO - MARSANTEX - CN - 50300.pdf"
 
     nombre = solicitudes_guia.nombre_archivo_documentos_envio(
-        cliente_nombre='Waimao\r\n"malicioso',
+        cliente_id='Waimao\r\n"malicioso',
         dest_nombre="José/Álvarez; SA",
-        destino_pais="uy",
+        remitente_pais="cn", numero_guia_tauro=50301,
     )
-    assert nombre == "TAURO - WAIMAO MALICIOSO - JOSE ALVAREZ SA - UY.pdf"
+    assert nombre == "TAURO - WAIMAO MALICIOSO - JOSE ALVAREZ SA - CN - 50301.pdf"
     assert not any(caracter in nombre for caracter in ('\r', '\n', '"', '/', ';'))
 
 
@@ -76,7 +76,7 @@ def test_descarga_portal_entrega_un_solo_pdf_con_nombre_comercial(monkeypatch):
         return {
             "pdf": pdf,
             "incluye_invoice": True,
-            "filename": "TAURO - WAIMAO - MARSANTEX - UY.pdf",
+            "filename": "TAURO - WAIMAO - MARSANTEX - CN - 50300.pdf",
         }
 
     monkeypatch.setattr(portal_cliente, "preparar_documentos_envio_portal", preparar)
@@ -96,7 +96,7 @@ def test_descarga_portal_entrega_un_solo_pdf_con_nombre_comercial(monkeypatch):
     assert bytes(respuesta.body) == pdf
     assert respuesta.media_type == "application/pdf"
     assert respuesta.headers["content-disposition"] == (
-        'attachment; filename="TAURO - WAIMAO - MARSANTEX - UY.pdf"'
+        'attachment; filename="TAURO - WAIMAO - MARSANTEX - CN - 50300.pdf"'
     )
     assert respuesta.headers["cache-control"] == "private, no-store"
 
@@ -123,9 +123,11 @@ def test_preparacion_filtra_por_duenio_y_usa_los_datos_del_mismo_envio(monkeypat
             return {
                 "label_pdf": guia,
                 "commercial_invoice_pdf": invoice,
-                "cliente_nombre": "WAIMAO",
+                "cliente_id": "WAIMAO",
                 "dest_nombre": "MARSANTEX",
                 "destino_pais": "UY",
+                "remitente_pais": "CN",
+                "numero_guia_tauro": 50300,
             }
 
     cursor = Cursor()
@@ -146,7 +148,7 @@ def test_preparacion_filtra_por_duenio_y_usa_los_datos_del_mismo_envio(monkeypat
 
     assert documentos is not None
     assert documentos["incluye_invoice"] is True
-    assert documentos["filename"] == "TAURO - WAIMAO - MARSANTEX - UY.pdf"
+    assert documentos["filename"] == "TAURO - WAIMAO - MARSANTEX - CN - 50300.pdf"
     assert len(PdfReader(BytesIO(documentos["pdf"])).pages) == 2
     assert cursor.parametros == (91, "WAIMAO")
     assert "s.cliente_id=%s" in cursor.consulta

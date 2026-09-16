@@ -1548,6 +1548,20 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS label_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS commercial_invoice_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS guia_generada_at TIMESTAMPTZ;
+-- Número interno TAURO para el archivo descargable. No es el tracking del
+-- courier ni el ID de la solicitud. Se asigna sólo a guías confirmadas;
+-- históricos sin número lo reciben en su primera descarga autorizada.
+-- Nunca reiniciar la secuencia al desplegar ni reutilizar números cancelados.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS numero_guia_tauro BIGINT
+    CHECK (numero_guia_tauro >= 50300);
+CREATE SEQUENCE IF NOT EXISTS numero_guia_tauro_seq
+    AS BIGINT MINVALUE 50300 START WITH 50300 NO CYCLE;
+ALTER SEQUENCE numero_guia_tauro_seq
+    OWNED BY solicitudes_guia.numero_guia_tauro;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_solicitudes_numero_guia_tauro
+    ON solicitudes_guia(numero_guia_tauro)
+    WHERE numero_guia_tauro IS NOT NULL;
 -- Primera entrega efectiva del PDF al cliente. Las descargas posteriores
 -- siguen habilitadas, pero ya no alimentan recordatorios ni contadores.
 ALTER TABLE IF EXISTS solicitudes_guia
