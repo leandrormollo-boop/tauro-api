@@ -27,4 +27,4 @@ Sin migraciones ni dependencias nuevas. Se conservan las reservas atómicas y lo
 
 Suite completa: **2.318 pruebas y 5 subpruebas aprobadas**, 33 advertencias existentes, sin fallos ni omisiones. Pruebas de acceso entre cuentas con PostgreSQL aislado; comprobación de confirmadas, canceladas, inciertas, falta de número, fallos de lectura, escapes HTML y retorno al envío tras errores. Revisión con navegador y datos ficticios en escritorio y celular, temas claro y oscuro. Evidencia de suite final en `qa_portal_readiness_20260916/evidence/pickup-full-final.log`.
 
-Preparado en `codex/pickup-confirmation-20260916`, sobre `d2fe4a1`. Pendiente de autorización para publicar esta entrega nueva.
+Preparado en `codex/pickup-confirmation-20260916`, sobre `d2fe4a1`. El usuario autorizó publicar `31a7f5b` con «publicalo». La comprobación posterior al despliegue debe verificar salud, CSS y las reservas existentes en la sesión de WAIMAO, sin crear ni cancelar recolecciones.

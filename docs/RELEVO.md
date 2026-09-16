@@ -9,7 +9,9 @@ mocks y verificá producción después de cada push (patrón abajo).
 ## 16/09/2026 — Confirmación visible de recolecciones
 
 Rama `codex/pickup-confirmation-20260916`, base publicada `d2fe4a1`.
-Preparada localmente, pendiente de autorización para publicar esta entrega.
+Publicación autorizada por el usuario: «publicalo». Se publica `31a7f5b`
+sin divergencia con main. Verificar salud, CSS y comprobante real de WAIMAO
+tras el despliegue, sin crear ni cancelar retiros.
 La reserva aparece con número del courier, fecha, horario del origen y dirección
 en Recolecciones y en el detalle de la guía. Mis envíos muestra su estado y
 evita invitar a programar un retiro existente. El retorno tras crear conserva
