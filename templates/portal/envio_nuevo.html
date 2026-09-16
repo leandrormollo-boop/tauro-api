@@ -2,6 +2,8 @@
 {% block title %}{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío') }}{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
+<script src="/static/js/hs-assistant.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
 {% if not ambito %}
     {% set flujo = 'crear' %}
     {% include 'portal/_ambito_selector.html' %}
@@ -441,14 +443,14 @@
                     </div>
                     <input type="hidden" name="bulto_items_extra" class="invoice-extras" value="{{ (f.items_invoice[1:] if f.items_invoice else [])|tojson|forceescape }}">
                     <div class="invoice-items">
-                    <div class="bulto-invoice" data-invoice-item>
+                    <div class="bulto-invoice" data-invoice-item data-hs-scope>
                         <div class="invoice-item-heading" style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:12px;">
                             <strong data-item-number>Artículo 1</strong>
                             <button type="button" class="btn btn-ghost btn-sm invoice-item-remove" hidden style="display:none">Quitar artículo</button>
                         </div>
                         <div class="form-group shipment-content-field">
                             <label>Nombre del producto (en inglés)</label>
-                            <input type="text" name="bulto_desc_en" class="bulto-desc" maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
+                            <input type="text" name="bulto_desc_en" class="bulto-desc" data-hs-description maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
                         </div>
                         <div class="form-group">
                             <label>Cantidad de unidades</label>
@@ -461,7 +463,8 @@
                         </div>
                         <div class="form-group">
                             <label>HS code <span class="field-optional">(opcional)</span></label>
-                            <input type="text" name="bulto_hs" class="bulto-hs" placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}">
+                            <input type="text" name="bulto_hs" class="bulto-hs" data-hs-input placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}">
+                            {% include 'portal/_hs_assistant.html' %}
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>

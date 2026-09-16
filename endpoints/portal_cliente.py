@@ -1942,6 +1942,33 @@ async def api_precio_envio_multi(
 
 
 # ── API JSON: parsear pedido pegado (mail del cliente) ──────
+@router.post("/api/hs-code")
+async def api_hs_code(request: Request, cliente: str = Depends(cliente_actual)):
+    """Referencia local autenticada. No guarda declaraciones ni aprueba códigos."""
+    from servicios.hs_code import sugerir_hs
+    from starlette.concurrency import run_in_threadpool
+    headers = {"Cache-Control": "private, no-store"}
+    if not check_rate(f"hs:{cliente}", max_attempts=60, window_seconds=60):
+        return JSONResponse({"error": "Esperá un momento antes de buscar otra vez."}, status_code=429,
+                            headers={**headers, "Retry-After": "60"})
+    try:
+        raw = await request.body()
+        if len(raw) > 8192:
+            return JSONResponse({"error": "La descripción es demasiado extensa."}, status_code=413, headers=headers)
+        body = json.loads(raw)
+        if not isinstance(body, dict):
+            raise ValueError("Enviá la descripción del producto.")
+        resultado = await run_in_threadpool(sugerir_hs, body.get("descripcion"), body.get("detalle", ""))
+    except (ValueError, TypeError, UnicodeDecodeError) as exc:
+        # El mensaje no devuelve el JSON ni datos ajenos a esta consulta.
+        mensaje = str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError) else "Revisá la descripción."
+        return JSONResponse({"error": mensaje}, status_code=422, headers=headers)
+    except (OSError, KeyError):
+        return JSONResponse({"error": "El asistente HS no está disponible. Podés ingresar el código manualmente."}, status_code=503, headers=headers)
+    return JSONResponse(resultado, headers=headers)
+
+
+# ── API JSON: parsear pedido pegado (mail del cliente) ──────
 @router.post("/api/parsear-pedido")
 async def api_parsear_pedido(
     request: Request,

@@ -1,15 +1,12 @@
 # ============================================================
 # Modelos Pydantic — Producto del catálogo
 # ============================================================
-import re
 from datetime import datetime
 from pydantic import BaseModel, Field, validator
 from typing import Optional
 
 from servicios.numeros_humanos import parse_float_formulario
-
-
-HS_CODE_REGEX = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
+from servicios.hs_code import formato_hs
 
 
 def _decimal_producto(valor):
@@ -33,7 +30,7 @@ class Producto(BaseModel):
                                 description="Cómo lo llama el cliente, ej 'Mini bag'")
     nombre_invoice: str = Field(..., min_length=3, max_length=120,
                                  description="Cómo va en la commercial invoice (inglés)")
-    hs_code: str = Field(..., description="Código HS Mercosur, formato XXXX.XX.XX")
+    hs_code: str = Field(..., description="HS internacional (6 dígitos) o extensión nacional (8/10)")
     largo_cm: float = Field(..., gt=0)
     ancho_cm: float = Field(..., gt=0)
     alto_cm: float = Field(..., gt=0)
@@ -75,13 +72,7 @@ class Producto(BaseModel):
 
     @validator("hs_code")
     def validar_hs_code(cls, v):
-        v = v.strip()
-        solo_digitos = re.sub(r"\D", "", v)
-        if len(solo_digitos) == 8:
-            return f"{solo_digitos[:4]}.{solo_digitos[4:6]}.{solo_digitos[6:8]}"
-        if not HS_CODE_REGEX.match(v):
-            raise ValueError(f"HS Code inválido. Formato esperado: XXXX.XX.XX (ej 4202.21.00)")
-        return v
+        return formato_hs(v)
 
     @validator("cliente")
     def cliente_uppercase(cls, v):
@@ -105,6 +96,8 @@ class ProductoNuevo(BaseModel):
     alto_cm: float = Field(..., gt=0)
     peso_kg: float = Field(..., gt=0)
     valor_usd_default: float = Field(..., ge=0)
+
+    _normalizar_hs = validator("hs_code", allow_reuse=True)(formato_hs)
 
     _normalizar_decimales = validator(
         "largo_cm", "ancho_cm", "alto_cm", "peso_kg",

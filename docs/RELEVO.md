@@ -6,6 +6,19 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 16/09/2026 — Asistente HS en catálogo e invoice
+
+Rama `codex/hs-code-assistant-20260916`, basada en `5cd977b` e incluyendo toda
+la entrega del portal pendiente de publicar. Búsqueda automática de HS6 desde
+la descripción, selección explícita y preguntas por familia. Base local de
+5.612 códigos, derivada de USITC 2026 R19 (dominio público en su catálogo) y
+contrastada con el universo H6 de Naciones Unidas. No es un clasificador
+aduanero general ni completa extensiones nacionales automáticamente.
+
+2.237 pruebas y 5 subpruebas aprobadas. Sin migraciones, nuevas dependencias,
+llamadas IA pagas ni cambios en operaciones reales. **Pendiente de publicación.**
+Detalle: [Asistente HS](HS_CODE_ASISTIDO.md).
+
 ## 16/09/2026 — Portal y control de facturas preparados localmente
 
 El usuario autorizó implementar las mejoras de la auditoría. Rama

@@ -1,0 +1,14 @@
+.hs-assistant{margin-top:10px;font-family:var(--font-sans);font-size:13px;line-height:1.5;min-width:0}
+.hs-assistant summary{cursor:pointer;color:var(--accent-soft);font-weight:600}
+.hs-assistant p,.hs-assistant>small{color:var(--fg-3);display:block;margin:8px 0}
+.hs-assistant label{display:block;margin:10px 0!important}
+.hs-assistant input{width:100%;min-width:0}
+.hs-assistant [data-hs-status]:not(:empty){margin:10px 0;color:var(--fg-2)}
+.hs-candidate{border:1px solid var(--line);background:var(--bg-elev-2);border-radius:10px;padding:12px;margin:8px 0;overflow-wrap:anywhere}
+.hs-candidate strong{font-size:15px;color:var(--fg);display:block}
+.hs-candidate p{font-size:13px;color:var(--fg-2)}
+.hs-candidate button{white-space:normal;min-height:40px}
+.hs-assistant ul{padding-left:18px;color:var(--fg-2)}
+.hs-assistant a{color:var(--accent-soft);text-decoration:underline}
+.hs-assistant [hidden]{display:none!important}
+html[data-theme="light"] .hs-assistant summary,html[data-theme="light"] .hs-assistant a{color:var(--accent-deep,#5b3ad4)}

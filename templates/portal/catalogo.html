@@ -2,6 +2,8 @@
 {% block title %}Mis productos{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
+<script src="/static/js/hs-assistant.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
 <style nonce="{{ request.state.csp_nonce }}">
 .catalog-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .catalog-sync{margin-bottom:12px!important;padding:14px 18px!important}
@@ -19,7 +21,7 @@
 .catalog-pagination a{border:1px solid var(--border);color:var(--fg-2)}
 .catalog-pagination .actual{background:var(--accent);color:#fff;font-weight:700}
 .catalog-pagination .ellipsis{min-width:18px;color:var(--fg-3)}
-.product-dialog{width:min(820px,calc(100vw - 28px));max-height:calc(100vh - 28px);padding:0;border:1px solid var(--border);border-radius:18px;background:var(--bg-1);color:var(--fg-1);box-shadow:0 24px 90px rgba(0,0,0,.65);overflow:auto}
+.product-dialog{margin:auto;inset:0;width:min(820px,calc(100vw - 28px));max-height:calc(100vh - 28px);padding:0;border:1px solid var(--line);border-radius:18px;background:var(--bg-elev);color:var(--fg);box-shadow:0 24px 90px rgba(0,0,0,.65);overflow:auto}
 .product-dialog::backdrop{background:rgba(4,3,10,.78);backdrop-filter:blur(5px)}
 .product-dialog-panel{padding:17px 20px}
 .product-dialog .card-head{background:var(--bg-1);margin-bottom:8px}
@@ -29,11 +31,12 @@
 .product-dialog .form-grid-3,.product-dialog .form-grid-2{gap:10px}
 .product-dialog input{padding:9px 11px;min-height:38px}
 .product-dialog .hint,.product-dialog small{font-size:10.5px!important;line-height:1.35}
+.product-dialog .hs-assistant small{font-size:12px!important;line-height:1.5}
 @media(max-height:800px){.page-title{margin-bottom:12px}.page-title p{margin-top:3px}.catalog-sync h3{font-size:16px}.catalog-card .card-head p{display:none}}
 @media(max-width:900px){
   .main-inner:has(.catalog-page-title){padding:14px 10px 76px}
   .catalog-page-title{gap:10px}.catalog-page-title p{display:none}
-  .catalog-actions{display:grid;grid-template-columns:1fr 1fr}.catalog-actions .btn{justify-content:center;white-space:nowrap}
+  .catalog-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));max-width:100%}.catalog-actions .btn{justify-content:center;white-space:normal;min-width:0}
   .catalog-sync{padding:11px 14px!important}.catalog-sync>div{gap:6px}.catalog-sync h3{margin-bottom:1px!important}.catalog-sync form{display:none}
   .catalog-sync .sub{font-size:11px;line-height:1.35}
   .catalog-card{padding:12px!important}.catalog-card .card-head{margin-bottom:6px}.catalog-card .card-head p{display:none}
@@ -239,14 +242,14 @@
     <div class="card-head">
         <div>
             <h3 id="form-prod-titulo">Agregar producto</h3>
-            <p>Completá los datos como van en la invoice: descripción en inglés y HS code de la mercadería.</p>
+            <p>Describí el producto en inglés como va en la invoice. Te ayudamos a encontrar su HS code.</p>
         </div>
         <button type="button" id="form-prod-cancelar" class="btn btn-ghost btn-sm">Cerrar</button>
     </div>
 
     <div class="msg warn">Los productos nuevos (y los editados) los valida Tauro antes de que puedas usarlos en tus envíos — en el día, y te avisamos por mail. Hasta entonces figuran como "En revisión".</div>
 
-    <form method="POST" action="/portal/catalogo/add">
+    <form method="POST" action="/portal/catalogo/add" data-hs-scope>
         <input type="hidden" name="alias_original" id="alias_original" value="">
         <div class="form-grid-3">
             <div class="form-group">
@@ -263,20 +266,15 @@
             </div>
             <div class="form-group">
                 <label for="cat-invoice">Descripción para invoice (inglés)</label>
-                <input type="text" name="nombre_invoice" id="cat-invoice" required>
+                <input type="text" name="nombre_invoice" id="cat-invoice" data-hs-description required>
             </div>
             <div class="form-group">
                 <label for="cat-hs">Código de aduana (HS code)</label>
-                <input type="text" name="hs_code" id="cat-hs" required pattern="\d{4}\.\d{2}\.\d{2}" inputmode="numeric"
-                       title="Formato: 4 dígitos, punto, 2 dígitos, punto, 2 dígitos — ej: 4202.21.00">
-                {# El muro clásico del onboarding: campo obligatorio de jerga
-                   aduanera. Mejor que nos pregunte a que invente un código
-                   que viaja a la aduana. #}
-                <small class="hint">Clasifica tu producto en la aduana de destino.
-                {% set _ay = ayuda() %}
-                ¿No lo sabés? <a href="{{ _ay.whatsapp_url or _ay.mail_url }}"
-                {% if _ay.whatsapp_url %}target="_blank" rel="noopener"{% endif %}>Escribinos</a>
-                con la descripción del producto y te lo pasamos.</small>
+                <input type="text" name="hs_code" id="cat-hs" data-hs-input required
+                       pattern="[0-9]{6}|[0-9]{8}|[0-9]{10}|[0-9]{4}\.[0-9]{2}(\.[0-9]{2}(\.[0-9]{2})?)?" inputmode="numeric"
+                       placeholder="Se propone según tu descripción"
+                       title="HS de 6 dígitos o extensión nacional de 8/10. Ejemplo: 6109.10">
+                {% include 'portal/_hs_assistant.html' %}
             </div>
         </div>
 
