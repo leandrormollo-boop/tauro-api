@@ -79,7 +79,6 @@ def test_todos_los_accesos_del_cliente_exigen_visibilidad():
         assert "visible_cliente=TRUE" in _bloque(servicio, inicio, fin)
 
     assert panel.count("s.visible_cliente=TRUE") >= 2
-    assert "s.guia_descargada_at IS NOT NULL" in panel
     assert "AND s.test=FALSE AND s.visible_cliente=TRUE" in _bloque(
         servicio, "def validar_reemision_cliente(", "def _validar_cancelacion_desde_fila("
     )
@@ -308,7 +307,8 @@ def test_primera_descarga_resuelve_recordatorio_sin_bloquear_redescarga(
         paso["clave"]: paso["cantidad"]
         for paso in panel_cliente.embudo_envios("DESCARGAS")
     }
-    assert embudo["guia_lista"] == 0
+    # Descargar resuelve el recordatorio; el envío sigue listo para retirar.
+    assert embudo["guia_lista"] == 1
     assert solicitudes_guia.obtener_label_de_cliente(
         solicitud_id, "DESCARGAS"
     ) == pdf

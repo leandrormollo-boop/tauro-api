@@ -256,10 +256,10 @@ def test_catalogo_se_presenta_como_opcional_para_revendedores():
 def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     html = _template("cuenta.html")
     assert "El pago está en revisión y no modifica el saldo" in html
-    assert "Todavía no impacta el saldo" in html
+    assert "Todavía no se descuentan del saldo" in html
     assert "Facturado" in html
     assert "A facturar" in html
-    assert "Envíos" in html
+    assert "Envíos" in _template("cuenta_movimientos.html")
     assert "Pagos" in html
     assert "A favor" in html
 
@@ -267,7 +267,7 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
 def test_informar_pago_esta_antes_del_historial_y_es_compacto():
     html = _template("cuenta.html")
     assert 'class="card account-payment-card"' in html
-    assert html.index('id="informar-pago"') < html.index('{% set filas = movimientos["items"] %}')
+    assert html.index('id="informar-pago"') < html.index('{% include "portal/cuenta_movimientos.html" %}')
 
 
 def test_alta_y_edicion_de_clientes_abren_un_dialogo_sin_bajar_al_formulario():

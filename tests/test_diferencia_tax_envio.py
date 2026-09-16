@@ -35,7 +35,7 @@ def test_portal_muestra_inicial_diferencia_tax_y_total_en_el_mismo_envio():
     assert "Precio del envío" in listado
     assert "envio-price-extra diferencia" in listado
     assert "envio-price-extra tax" in listado
-    assert "Total final" in listado
+    assert "Total registrado · ARS" in listado
     assert "Costo adicional de flete" in detalle
     assert "Impuesto adicional del envío" in detalle
     assert consultas.count("AS diferencia_flete_ars") == 3

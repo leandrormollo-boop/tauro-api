@@ -32,7 +32,7 @@ def test_facturas_internacionales_filtra_dhl_y_fedex(monkeypatch):
         llamadas["control"] = kwargs
         return {"items": [], "totales": {}, "total": 0}
 
-    def listar_facturas(*, couriers):
+    def listar_facturas(*, couriers, limite=None):
         llamadas["facturas"] = couriers
         return []
 
@@ -82,7 +82,7 @@ def test_facturas_nacionales_filtra_andreani_y_oca(monkeypatch):
     monkeypatch.setattr(
         conciliacion,
         "listar_facturas_courier_control",
-        lambda *, couriers: llamadas.setdefault("couriers", couriers) and [],
+        lambda *, couriers, limite=None: llamadas.setdefault("couriers", couriers) and [],
     )
     monkeypatch.setattr(conciliacion, "listar_ajustes_para_revision", lambda: [])
     monkeypatch.setattr(admin, "_get_clientes_lista", lambda: [])
@@ -98,7 +98,7 @@ def test_facturas_nacionales_filtra_andreani_y_oca(monkeypatch):
     assert respuesta["context"]["ruta_facturas"] == "/admin/facturas-nacionales"
     assert llamadas["control"]["kwargs"]["ambito"] == "NACIONAL"
     assert llamadas["control"]["kwargs"]["courier"] == "OCA"
-    assert llamadas["couriers"] == ("ANDREANI", "OCA")
+    assert llamadas["couriers"] == ("OCA",)
 
 
 def test_resumen_facturas_calcula_metricas_por_guia_y_normaliza_vista(monkeypatch):
@@ -125,7 +125,7 @@ def test_resumen_facturas_calcula_metricas_por_guia_y_normaliza_vista(monkeypatc
     monkeypatch.setattr(
         conciliacion,
         "listar_facturas_courier_control",
-        lambda *, couriers: facturas,
+        lambda *, couriers, limite=None: facturas,
     )
     monkeypatch.setattr(
         conciliacion,

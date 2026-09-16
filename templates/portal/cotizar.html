@@ -254,7 +254,7 @@
                     <div class="quote-price-foot">
                         <span>USD {{ op.precio_final_usd }} · {{ op.dias_estimados }} días</span>
                     </div>
-                    <a href="/portal/envios/nuevo?ambito=internacional&amp;courier={{ op.carrier_id }}&amp;origen={{ form.origen_pais }}&amp;destino={{ destino_sel }}"
+                    <a href="/portal/envios/nuevo?ambito=internacional&amp;courier={{ op.carrier_id }}&amp;origen={{ form.origen_pais }}&amp;destino={{ destino_sel }}{% if cajas_cotizadas %}&amp;cajas={{ cajas_cotizadas|urlencode }}&amp;valor_cotizado={{ form.valor_declarado_usd|urlencode }}{% endif %}"
                        class="btn btn-primary btn-sm quote-select-carrier">
                         Elegir {{ op.carrier_nombre }}
                     </a>

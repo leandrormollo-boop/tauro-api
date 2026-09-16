@@ -247,10 +247,11 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
     for texto in (
         "Saldo consolidado", "Nacional", "Internacional", "Todos tus movimientos",
         "Facturado", "Pagos aprobados", "A facturar", "Pagos disponibles para aplicar",
-        "¿Qué querés pagar?", "El pago no modifica tus saldos hasta que Tauro apruebe",
+        "Vincular a documentos específicos (opcional)", "El pago no modifica tus saldos hasta que Tauro apruebe",
     ):
         assert texto in html
-    assert 'name="destino_pago" value="SIN_IMPUTAR" checked' in html
+    assert 'id="payment-documents"' in html
+    assert "Si no elegís documentos, el pago se registra a cuenta" in html
     assert 'name="idempotency_key" value="{{ idempotency_key }}"' in html
     assert 'name="seleccion_documental" value="1"' in html
     assert "data-open-payment" in html

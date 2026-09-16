@@ -697,8 +697,7 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
                      JOIN clientes c ON c.cliente_id=e.cliente_id
                      WHERE c.test=FALSE) AS total_envios,
                     (SELECT COUNT(*) FROM pagos p
-                     JOIN clientes c ON c.cliente_id=p.cliente_id
-                     WHERE c.test=FALSE) AS total_pagos,
+                     WHERE p.estado='PENDIENTE') AS total_pagos,
                     (SELECT COUNT(*) FROM productos p
                      JOIN clientes c ON c.cliente_id=p.cliente_id
                      WHERE p.activo=FALSE AND c.test=FALSE) AS productos_pendientes
@@ -3835,6 +3834,7 @@ def admin_conciliacion_couriers(
     estado: str = "",
     buscar: str = "",
     vista: str = "resumen",
+    pagina: str = "1",
     admin_token: Optional[str] = Cookie(None),
 ):
     """Control financiero por envío; costos reales nunca salen al portal."""
@@ -3842,7 +3842,7 @@ def admin_conciliacion_couriers(
         return _redirect_login()
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
-        estado=estado, buscar=buscar, vista=vista,
+        estado=estado, buscar=buscar, vista=vista, pagina=pagina,
     )
 
 
@@ -3855,12 +3855,14 @@ def _render_facturas_admin(
     buscar: str = "",
     ambito: str = "",
     vista: str = "resumen",
+    pagina: str = "1",
 ):
     from servicios.conciliacion_couriers import (
         listar_ajustes_para_revision,
         listar_control_envios,
         listar_facturas_courier_control,
     )
+    from servicios.control_facturas_ui import ESTADOS_CONTROL, ESTADOS_FACTURA, numero_pagina, preparar_presentacion
     ambito_normalizado = str(ambito or "").strip().upper()
     if ambito_normalizado == "INTERNACIONAL":
         couriers_disponibles = ("DHL", "FEDEX")
@@ -3896,17 +3898,27 @@ def _render_facturas_admin(
         "resumen", "facturas", "conciliacion", "diferencias",
     }:
         vista_normalizada = "resumen"
+    cliente = str(cliente or '').strip().upper() if vista_normalizada in ('conciliacion', 'diferencias') else ''
+    estado = str(estado or '').strip().upper()
+    estados_validos = ESTADOS_CONTROL if vista_normalizada == 'conciliacion' else ESTADOS_FACTURA if vista_normalizada == 'facturas' else ()
+    if estado not in dict(estados_validos):
+        estado = ''
+    buscar = str(buscar or '').strip() if vista_normalizada in ('conciliacion', 'facturas') else ''
     control = listar_control_envios(
         cliente=cliente, courier=courier_normalizado, ambito=ambito_normalizado,
-        estado=estado, buscar=buscar,
+        estado=estado if vista_normalizada == 'conciliacion' else '', buscar=buscar if vista_normalizada == 'conciliacion' else '',
+        pagina=numero_pagina(pagina),
     )
     ajustes = [
         ajuste for ajuste in listar_ajustes_para_revision()
         if str(ajuste.get("courier") or "").strip().upper()
         in couriers_disponibles
+        and (not courier_normalizado or str(ajuste.get('courier') or '').upper() == courier_normalizado)
+        and (not cliente.strip() or str(ajuste.get('cliente_id') or '').upper() == cliente.strip().upper())
     ]
     facturas = listar_facturas_courier_control(
-        couriers=couriers_disponibles
+        couriers=(courier_normalizado,) if courier_normalizado else couriers_disponibles,
+        limite=None,
     )
     metricas = {
         "facturas": len(facturas),
@@ -3929,6 +3941,11 @@ def _render_facturas_admin(
         ),
         "diferencias": len(ajustes),
     }
+    filtros = {'cliente': cliente, 'courier': courier_normalizado, 'estado': estado, 'buscar': buscar}
+    presentacion = preparar_presentacion(
+        control=control, facturas=facturas, ajustes=ajustes, filtros=filtros,
+        ruta=ruta_facturas, vista=vista_normalizada, pagina=pagina,
+    )
     return templates.TemplateResponse(
         request=request,
         name="admin/conciliacion_couriers.html",
@@ -3941,6 +3958,7 @@ def _render_facturas_admin(
             "couriers_disponibles": couriers_disponibles,
             "vista": vista_normalizada,
             "metricas": metricas,
+            **presentacion,
             "control": control,
             "facturas": facturas,
             "ajustes": ajustes,
@@ -3961,13 +3979,14 @@ def admin_facturas_internacionales(
     estado: str = "",
     buscar: str = "",
     vista: str = "resumen",
+    pagina: str = "1",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
-        estado=estado, buscar=buscar, ambito="INTERNACIONAL", vista=vista,
+        estado=estado, buscar=buscar, ambito="INTERNACIONAL", vista=vista, pagina=pagina,
     )
 
 
@@ -3979,13 +3998,14 @@ def admin_facturas_nacionales(
     estado: str = "",
     buscar: str = "",
     vista: str = "resumen",
+    pagina: str = "1",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
-        estado=estado, buscar=buscar, ambito="NACIONAL", vista=vista,
+        estado=estado, buscar=buscar, ambito="NACIONAL", vista=vista, pagina=pagina,
     )
 
 
@@ -4123,6 +4143,7 @@ def admin_factura_courier_detalle(
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
+    from servicios.control_facturas_ui import retorno_control
     from servicios.conciliacion_couriers import obtener_factura_courier_control
     factura = obtener_factura_courier_control(factura_id)
     if not factura:
@@ -4138,7 +4159,7 @@ def admin_factura_courier_detalle(
         request=request,
         name="admin/factura_courier_detalle.html",
         context={"seccion": seccion, "factura": factura,
-                 "ruta_retorno": ruta_retorno,
+                 "ruta_retorno": retorno_control(getattr(request, "query_params", {}).get("volver"), ruta_retorno),
                  "csrf_financiero": _csrf_dhl(f'financiera:{factura_id}'),
                  "csrf_tauro_2026": _csrf_dhl(f'tauro-2026:{factura_id}')},
         headers={'Cache-Control': 'private, no-store'},
@@ -4382,6 +4403,7 @@ def admin_conciliacion_envio_detalle(
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
+    from servicios.control_facturas_ui import retorno_control
     from servicios.conciliacion_couriers import obtener_control_envio
     envio = obtener_control_envio(solicitud_id)
     if not envio:
@@ -4399,6 +4421,7 @@ def admin_conciliacion_envio_detalle(
             "seccion": seccion,
             "envio": envio,
             "ruta_facturas": ruta_facturas,
+            "url_regreso": retorno_control(getattr(request, "query_params", {}).get("volver"), ruta_facturas + "?" + urlencode({"vista": "conciliacion", "cliente": envio["cliente_id"]})),
         },
     )
 

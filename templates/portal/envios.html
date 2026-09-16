@@ -225,6 +225,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if s.tracking_descripcion %}
                             <small class="{{ 'tracking-alert' if s.estado_cliente_ui.codigo == 'RETENIDO' else 'tracking-updated' }}">{{ s.tracking_descripcion }}</small>
                         {% endif %}
+                        {% if s.seguimiento_sin_actualizaciones %}<small class="tracking-alert">Sin nuevas actualizaciones del courier. La entrega no está confirmada.</small>{% endif %}
                         {% if s.tracking_estado and s.tracking_actualizado_at %}
                             <small class="tracking-updated">Sincronizado {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M %Z") }}</small>
                         {% endif %}

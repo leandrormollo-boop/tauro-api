@@ -1,10 +1,30 @@
-# RELEVO — estado y reglas del proyecto (act. 15/09/2026)
+# RELEVO — estado y reglas del proyecto (act. 16/09/2026)
 
 Este documento existe para que CUALQUIER agente (Codex, Claude, humano) pueda
 retomar el trabajo sin contexto previo. Leelo entero antes de tocar código.
 Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
+
+## 16/09/2026 — Portal y control de facturas preparados localmente
+
+El usuario autorizó implementar las mejoras de la auditoría. Rama
+`codex/portal-readiness-20260916`, base `2249e48`. **Pendiente de autorización
+para publicar esta nueva entrega.** Sin migraciones ni dependencias nuevas.
+
+Incluye continuidad cotización→solicitud, remitente coherente con origen,
+legibilidad móvil/claro, pagos a cuenta con vinculación documental opcional,
+incidencias de seguimiento, Excel con precio inicial explícito y control admin
+paginado con filtros, expedientes y recuperación ante fallos de red.
+No altera las reglas de acreditación ni los importes históricos.
+
+Validación: 2.202 pruebas y 5 subpruebas aprobadas, sin fallos ni omisiones,
+PostgreSQL aislado; revisión de navegador con datos simulados y escrituras
+bloqueadas. Cinco pruebas de Excel repetidas después del ajuste final.
+Detalle, fuentes y límites: [Preparación del portal](PORTAL_READINESS_20260916.md).
+Shopify/Tienda Nube aún necesitan piloto real; no se incorporan ramas ajenas.
+La aprobación de publicación del apartado siguiente corresponde al 15/09,
+no a estos cambios nuevos. Push a main continúa siendo despliegue automático.
 
 ## 15/09/2026 — Publicación autorizada del portal y cuenta corriente
 

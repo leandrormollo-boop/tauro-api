@@ -113,7 +113,7 @@ def test_schema_y_vistas_exponen_el_nombre_sin_confundirlo_con_la_guia():
     nuevo = (RAIZ / "templates/portal/envio_nuevo.html").read_text()
     detalle = (RAIZ / "templates/portal/envio_detalle.html").read_text()
     envios = (RAIZ / "templates/portal/envios.html").read_text()
-    cuenta = (RAIZ / "templates/portal/cuenta.html").read_text()
+    cuenta = (RAIZ / "templates/portal/cuenta_movimientos.html").read_text()
 
     assert "ADD COLUMN IF NOT EXISTS etiqueta_cliente TEXT" in schema
     assert "ck_solicitudes_guia_etiqueta_cliente" in schema

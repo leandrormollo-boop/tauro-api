@@ -18,7 +18,7 @@ def render_account(balance, movement=None):
         debe_ars=Decimal("3000000") + balance, haber_ars=Decimal("3000000"),
         saldo_ars=balance, facturado_ars=Decimal("3000000") + balance,
         pendiente_facturacion_ars=0, envios_ars=Decimal("3000000") + balance,
-        pagos_ars=Decimal("3000000"), diferencias_debito_ars=0,
+        pagos_ars=Decimal("3000000"), pagos_aprobados_ars=Decimal("3000000"), diferencias_debito_ars=0,
         diferencias_credito_ars=0,
     )
     empty = {key: 0 for key in ledger}
@@ -43,6 +43,7 @@ def render_account(balance, movement=None):
         ),
         ambito_filtro="consolidado", tipo_filtro="todos", vista_cuenta="movimientos",
         movimientos=dict(items=[movement or payment], total_resultados=1, pagina_desde=1, pagina_hasta=1, total_paginas=1),
+        cuenta_url=lambda **kwargs: "/portal/cuenta",
         destinos_pago=[], today="2026-09-04", idempotency_key="test",
     )
 
@@ -51,11 +52,11 @@ def render_account(balance, movement=None):
 def test_saldo_metalico_conserva_valor_y_estado(balance, state):
     html = render_account(balance)
     expected = f"$ {abs(Decimal(balance)):,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-    amount = re.search(r'<strong class="account-total-value portal-balance-metal">\s*(.*?)\s*</strong>', html)
+    amount = re.search(r'<strong class="account-balance-value">\s*(.*?)\s*</strong>', html)
     assert amount.group(1) == expected
-    status = re.search(r'<span class="account-total-state">\s*(.*?)\s*</span>', html)
+    status = re.search(r'<span class="account-balance-state">\s*(.*?)\s*</span>', html)
     assert status.group(1) == state
-    assert '<dt>Pagos aprobados</dt><dd class="portal-money-green">$ 3.000.000,00</dd>' in html
+    assert '<dt>Pagos aprobados</dt><dd>− $ 3.000.000,00</dd>' in html
     assert 'data-label="Tu cuenta">' in html
     assert '<strong class="account-amount-credit">− $ 3.000.000,00</strong>' in html
     assert 'mono amount-column account-movement-amount' in html

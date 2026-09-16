@@ -85,4 +85,11 @@ def presentar_estados_envio(envio: dict) -> dict:
          "VERIFICAR_COURIER": ("Confirmando emisión", "warn")},
         vacio=("Por confirmar", "muted"),
     )
+    # Este aviso de DHL cierra la disponibilidad del rastreo, no acredita
+    # entrega. Se conserva el último estado conocido y el mensaje original.
+    envio["seguimiento_sin_actualizaciones"] = (
+        "final status for this shipment tracking number"
+        in str(envio.get("tracking_descripcion") or "").casefold()
+        and envio["estado_cliente_ui"]["codigo"] not in {"ENTREGADO", "CANCELADO", "REEMPLAZADO"}
+    )
     return envio

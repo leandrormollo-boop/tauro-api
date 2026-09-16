@@ -21,7 +21,8 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 }
 .portal-operacion .home-hero h1 { font-size: clamp(28px, 3vw, 42px); line-height: 1.15; }
 .portal-operacion .home-hero p { max-width: 470px; font-size: 15px; line-height: 1.5; }
-.portal-operacion .home-primary-actions { margin-top: 20px; }
+.portal-operacion .home-primary-actions { margin-top: 20px; flex-wrap: wrap; }
+.portal-operacion .home-primary-actions .btn { min-width: 0; max-width: 100%; }
 .portal-operacion .home-flow {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px;
 }
@@ -88,19 +89,33 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .envio-service-cell .service-head { flex-direction: column; align-items: flex-start; gap: 8px; }
 .portal-operacion .envio-service-cell .tracking-updated,
 .portal-operacion .envio-service-cell .tracking-alert { max-width: 270px; white-space: normal; overflow-wrap: anywhere; font-size: 11px; line-height: 1.45; }
-.portal-operacion .envio-service-cell .track-link { font-size: 13px; margin-top: 9px; }
+.portal-operacion .envio-service-cell .track-link { font-size: 13px; margin-top: 9px; color: var(--accent-soft); text-decoration: underline; text-underline-offset: 3px; }
+html[data-theme="light"] .portal-operacion .envio-service-cell .track-link { color: var(--accent-deep); }
 .portal-operacion .envio-price-cell > .envio-price-final { display: block; border: 0; padding-top: 0; font-size: 15px; white-space: nowrap; overflow-wrap: normal; }
 .portal-operacion .envio-price-cell > .envio-price-final small { display: block; margin-bottom: 5px; white-space: normal; }
 .portal-operacion .envio-price-breakdown { margin-bottom: 8px; }
 .portal-operacion .envio-price-breakdown summary,
 .portal-operacion .envio-more-actions summary { cursor: pointer; color: var(--fg-3); font-size: 12px; padding: 8px 0; }
 .portal-operacion .envio-more-actions { order: 3; }
-.portal-operacion .envios-table .row-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.portal-operacion .envios-table .row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.portal-operacion .envios-table .envio-more-actions { flex-basis: 100%; }
 .portal-operacion .envios-table .row-actions .btn-sm { font-size: 12px; min-height: 36px; }
 .portal-operacion .envios-table .row-actions > a { white-space: normal; text-align: center; }
 .portal-operacion .tracking-sync-note { color: var(--fg-3); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
 
 /* Formularios cómodos: crecer verticalmente antes que comprimir el texto. */
+html[data-theme="light"] .portal-operacion .wizard-compacto form > .card,
+html[data-theme="light"] .portal-operacion .wizard-compacto .remitente-collapsible,
+html[data-theme="light"] .portal-operacion .wizard-compacto .shipment-package-card,
+html[data-theme="light"] .portal-operacion .wizard-compacto .shipment-invoice-card { background: var(--bg-elev); border-color: var(--line); box-shadow: 0 8px 24px rgba(44,31,67,.06); }
+html[data-theme="light"] .portal-operacion .wizard-compacto .paso-nav .btn-ghost { color: var(--fg); }
+html[data-theme="light"] .portal-operacion .shipment-step-counter,
+html[data-theme="light"] .portal-operacion .shipment-extra-options { background: var(--bg-elev-2); color: var(--fg-2); border-color: var(--line); }
+.portal-operacion .shipment-step-counter,
+.portal-operacion .shipment-extra-options > summary small,
+.portal-operacion .shipment-insurance-options small,
+.portal-operacion .shipment-insurance-choice > p,
+.portal-operacion .invoice-note { font-size: 12px; line-height: 1.5; }
 .portal-operacion .wizard-compacto .step label { font-size: 12px; color: var(--fg-3); }
 .portal-operacion .wizard-compacto .step.active label,
 .portal-operacion .wizard-compacto .step.done label { color: var(--fg-1); }
@@ -146,6 +161,9 @@ html[data-theme="light"] .portal-operacion .quote-form-card { background: var(--
   .portal-operacion .envios-search { grid-template-columns: 1fr; gap: 10px; }
 }
 @media (max-width: 620px) {
+  .portal-operacion .shipment-step-heading { flex-wrap: wrap; gap: 8px; }
+  .portal-operacion .shipment-step-heading > div { flex-basis: 100%; }
+  .portal-operacion .shipment-step-counter { margin-left: 36px; }
   .portal-operacion .main-inner { padding: 16px 14px 96px; }
   .portal-operacion .main:has(> .main-inner > .home-hero) { --home-panorama-height: 300px; }
   .portal-operacion .main:has(> .main-inner > .home-hero)::before { background-position: center bottom, 75% 0; background-size: 100% 100%, auto 300px; }
@@ -195,3 +213,6 @@ html[data-theme="light"] .portal-operacion .quote-form-card { background: var(--
 @media (prefers-reduced-motion: reduce) {
   .portal-operacion *, .portal-operacion *::before, .portal-operacion *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+.shipment-incident{border:1px solid var(--warn);background:var(--bg-elev);border-radius:16px;padding:22px;margin-bottom:18px}
+.shipment-incident h2{font-size:22px;margin:8px 0}.shipment-incident p{color:var(--fg-2);line-height:1.65;margin:8px 0}.shipment-incident-actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.shipment-incident small{color:var(--fg-3)}

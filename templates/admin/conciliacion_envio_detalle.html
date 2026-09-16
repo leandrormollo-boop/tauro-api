@@ -13,7 +13,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <p>{{ envio.courier|upper }} · {{ envio.dest_nombre or envio.destino_pais }} · guía interna #{{ envio.solicitud_id }}</p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    <a href="{{ ruta_facturas }}?vista=conciliacion&cliente={{ envio.cliente_id }}" class="btn btn-ghost">Volver a conciliación</a>
+    <a href="{{ url_regreso|default(ruta_facturas ~ '?vista=conciliacion&cliente=' ~ envio.cliente_id|urlencode) }}" class="btn btn-ghost">Volver a conciliación</a>
     <a href="/admin/pedidos?buscar={{ envio.tracking or envio.solicitud_id }}" class="btn btn-ghost">Ver operación</a>
   </div>
 </div>

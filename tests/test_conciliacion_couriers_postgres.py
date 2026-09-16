@@ -1066,3 +1066,68 @@ def test_linea_prorrateada_no_habilita_revision_hasta_completar_asignacion(
     )
     assert listo["duplicado"] is True
     assert listo["estado"] == "PARA_REVISION"
+
+
+def test_control_paginado_encuentra_pendiente_mas_antiguo_que_mil_envios(conciliacion_db):
+    get_conn = conciliacion_db
+    antiguo = _crear_solicitud(get_conn, sufijo='ANTIGUO')
+    _crear_cargo_activo(get_conn, antiguo)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO solicitudes_guia (
+                cliente_id, producto_alias, destino_pais, dest_nombre,
+                dest_direccion, dest_ciudad, dest_zip, courier, tracking,
+                coti_id, precio_tauro_ars
+            ) SELECT 'CLIENTE_ANTIGUO', 'Producto', 'US', 'Destinatario',
+                     'Calle 1', 'Miami', '33101', 'DHL', 'TRACK-' || %s || '-' || n,
+                     'COTI-PAGINA-' || n, 10000
+                FROM generate_series(1, 1005) n
+        """, (str(antiguo),))
+    primero = conciliacion.listar_control_envios(pagina=1)
+    segundo = conciliacion.listar_control_envios(pagina=2)
+    assert primero['total'] == 1006
+    assert primero['paginas'] == 41
+    assert len(primero['items']) == len(segundo['items']) == 25
+    assert not ({e['solicitud_id'] for e in primero['items']} & {e['solicitud_id'] for e in segundo['items']})
+    pendientes = conciliacion.listar_control_envios(pagina=999, estado='REQUIERE_ACCION')
+    assert pendientes['total'] == 1 and pendientes['pagina'] == 1
+    assert pendientes['items'][0]['solicitud_id'] == antiguo
+    assert pendientes['totales'] == {'SIN_CARGO': 1005, 'BASE_PENDIENTE': 1}
+    assert conciliacion.listar_control_envios(pagina=1, courier='OCA')['total'] == 0
+    assert conciliacion.listar_control_envios(pagina=1, cliente='OTRO')['total'] == 0
+    # El expediente debe usar ID exacto: más de mil trackings contienen ese ID.
+    assert conciliacion.obtener_control_envio(antiguo)['solicitud_id'] == antiguo
+    legacy = conciliacion.listar_control_envios(cliente='CLIENTE_ANTIGUO', limite=10)
+    assert [(r['solicitud_id'],r['control_estado']) for r in legacy['items']] == [
+        (r['solicitud_id'],r['control_estado']) for r in primero['items'][:10]]
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute('SELECT SUM(monto_ars) AS total FROM envios')
+        assert cur.fetchone()['total'] == Decimal('10000')
+        cur.execute('SELECT COUNT(*) AS cantidad FROM ajustes_cliente')
+        assert cur.fetchone()['cantidad'] == 0
+
+
+def test_listado_facturas_completo_no_pierde_documentos_anteriores(conciliacion_db):
+    with conciliacion_db() as conn, conn.cursor() as cur:
+        cur.execute("""INSERT INTO facturas_courier (courier,tipo_documento,numero,moneda,total)
+            SELECT 'DHL','FC','PAG-' || n,'ARS',100 FROM generate_series(1,105) n""")
+    assert len(conciliacion.listar_facturas_courier_control(couriers=('DHL',))) == 100
+    assert len(conciliacion.listar_facturas_courier_control(couriers=('DHL',), limite=None)) == 105
+    assert conciliacion.listar_facturas_courier_control(couriers=('OCA',), limite=None) == []
+
+
+def test_panel_cuenta_solo_pagos_por_revisar(conciliacion_db, monkeypatch):
+    from endpoints import admin
+    from types import SimpleNamespace
+    _crear_solicitud(conciliacion_db, sufijo='PAGOS')
+    with conciliacion_db() as conn, conn.cursor() as cur:
+        cur.execute("""INSERT INTO pagos(cliente_id,fecha,monto_ars,estado)
+            SELECT 'CLIENTE_PAGOS',CURRENT_DATE,100,estado
+            FROM unnest(ARRAY['APROBADO','PENDIENTE','RECHAZADO']) estado""")
+    monkeypatch.setattr(admin, 'get_conn', conciliacion_db)
+    monkeypatch.setattr(admin, '_is_auth', lambda _: True)
+    monkeypatch.setattr(admin, 'contar_solicitudes_pendientes', lambda: 0)
+    monkeypatch.setattr(admin, 'get_resumen_clientes_bulk', lambda **_: [])
+    monkeypatch.setattr(admin.templates, 'TemplateResponse', lambda **kw: kw)
+    result = admin.admin_home(SimpleNamespace(), admin_token='test')
+    assert result['context']['stats']['total_pagos'] == 1

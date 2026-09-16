@@ -75,6 +75,19 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         No vuelvas a emitir: Tauro la está verificando y te avisa cuando quede conciliada.
     </div>
 {% endif %}
+{% if s.estado_cliente_ui.codigo == 'RETENIDO' %}
+<aside class="shipment-incident" role="status" aria-label="Incidencia del envío">
+    <span class="eyebrow">Requiere revisión</span>
+    <h2>Tu envío está retenido</h2>
+    <p>{{ s.tracking_descripcion or 'El courier todavía no informó el motivo de la retención.' }}</p>
+    <p>Consultá a TAURO con la guía {{ s.tracking }} para confirmar qué falta y quién debe resolverlo. El aviso por sí solo no confirma que exista un impuesto a pagar.</p>
+    <div class="shipment-incident-actions"><a class="btn btn-primary btn-sm" href="{{ ayuda().whatsapp_url or ayuda().mail_url }}">Consultar incidencia</a><a class="btn btn-ghost btn-sm" href="{{ url_tracking(s.courier, s.tracking) }}" target="_blank" rel="noopener">Ver aviso del courier ↗</a></div>
+    {% if s.tracking_actualizado_at %}<small>Última consulta al courier: {{ s.tracking_actualizado_at.strftime('%d/%m/%Y %H:%M %Z') }}</small>{% endif %}
+</aside>
+{% endif %}
+{% if s.seguimiento_sin_actualizaciones %}
+<div class="msg warn" role="status"><strong>Seguimiento sin nuevas actualizaciones.</strong> El courier informa que éste es su último estado disponible. Conservamos el último estado conocido: todavía no hay una entrega confirmada. <a href="{{ ayuda().whatsapp_url or ayuda().mail_url }}">Consultar a TAURO</a>.</div>
+{% endif %}
 <!-- ── Timeline de estado (stepper del design system) ───── -->
 <div class="card" style="margin-bottom:16px;">
     <div class="stepper" style="margin:6px 0 8px;">

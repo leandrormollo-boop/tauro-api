@@ -6,6 +6,10 @@
   var total = document.getElementById("pago-monto");
   var destinations = Array.from(form.querySelectorAll('[name="destinos"]'));
   var summary = document.getElementById("payment-allocation-summary");
+  var documentDetails = document.getElementById("payment-documents");
+  var documentSearch = document.getElementById("payment-document-search");
+  var clearDocuments = document.getElementById("payment-clear-documents");
+  var selectedCount = document.getElementById("payment-selected-count");
   var money = new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   function numberFromInput(value) {
@@ -31,14 +35,38 @@
 
   function updateAllocation() {
     var totalValue = numberFromInput(total.value);
-    var selected = destinations.filter(function (item) { return item.checked && !item.disabled; })
+    var checked = destinations.filter(function (item) { return item.checked && !item.disabled; });
+    if (selectedCount) selectedCount.textContent = checked.length ? " · " + checked.length + " seleccionados" : "";
+    if (clearDocuments) clearDocuments.hidden = !checked.length;
+    if (!checked.length) {
+      summary.textContent = "Pago a cuenta" + (totalValue ? " por $ " + money.format(totalValue / 100) : "")
+        + ". Se descuenta del saldo consolidado cuando TAURO aprueba el comprobante.";
+      return;
+    }
+    var selected = checked
       .reduce(function (sum, item) { return sum + availableCents(item); }, 0);
     var allocated = Math.min(totalValue, selected);
     var credit = Math.max(0, totalValue - selected);
     var pending = Math.max(0, selected - totalValue);
-    summary.textContent = "Solicitás aplicar $ " + money.format(allocated / 100)
-      + " · A favor, al aprobarse: $ " + money.format(credit / 100)
-      + (pending ? " · Pendiente en los documentos: $ " + money.format(pending / 100) : "");
+    summary.textContent = "Solicitás vincular $ " + money.format(allocated / 100)
+      + " · A cuenta, sin documento: $ " + money.format(credit / 100)
+      + (pending ? " · Resto documental sin vincular: $ " + money.format(pending / 100) : "")
+      + ". Estos importes no reemplazan el saldo de tu cuenta.";
+  }
+
+  function filterDocuments() {
+    if (!documentSearch) return;
+    var query = documentSearch.value.trim().toLocaleLowerCase("es");
+    var visible = 0;
+    destinations.forEach(function (item) {
+      var label = item.closest("[data-payment-document]");
+      if (!label) return;
+      // Una búsqueda nunca borra ni esconde una imputación ya seleccionada.
+      label.hidden = !item.checked && !label.textContent.toLocaleLowerCase("es").includes(query);
+      if (!label.hidden) visible++;
+    });
+    var empty = document.getElementById("payment-no-documents");
+    if (empty) empty.hidden = !query || visible > 0;
   }
 
   function openPayment() {
@@ -54,6 +82,9 @@
         var destination = destinations.find(function (item) { return item.value === key && !item.disabled; });
         if (!destination || !availableCents(destination)) return;
         destinations.forEach(function (item) { item.checked = item === destination; });
+        if (documentDetails) documentDetails.open = true;
+        if (documentSearch) documentSearch.value = "";
+        filterDocuments();
         total.value = (availableCents(destination) / 100).toFixed(2).replace(".", ",");
         updateAllocation();
       }
@@ -61,7 +92,12 @@
       openPayment();
     });
   });
-  destinations.forEach(function (checkbox) { checkbox.addEventListener("change", updateAllocation); });
+  destinations.forEach(function (checkbox) { checkbox.addEventListener("change", function () { updateAllocation(); filterDocuments(); }); });
+  if (documentSearch) documentSearch.addEventListener("input", filterDocuments);
+  if (clearDocuments) clearDocuments.addEventListener("click", function () {
+    destinations.forEach(function (item) { item.checked = false; });
+    updateAllocation(); filterDocuments();
+  });
   total.addEventListener("input", updateAllocation);
   if (window.location.hash === "#informar-pago") openPayment();
   updateAllocation();

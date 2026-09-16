@@ -125,6 +125,11 @@ def test_excel_crea_envios_y_cuentas_separadas_reconciliadas(monkeypatch):
     assert "Envios_Internacionales" in libro.sheetnames
     assert libro["Envios_Nacionales"].max_row == 2
     assert libro["Envios_Internacionales"].max_row == 2
+    for titulo in ("Envios_Nacionales", "Envios_Internacionales"):
+        assert libro[titulo]["M1"].value == "Precio inicial (ARS)"
+        assert libro[titulo]["N1"].value == "Precio inicial (USD)"
+        assert libro[titulo]["M2"].value == 1000
+        assert "no incluye ajustes posteriores" in libro[titulo]["M1"].comment.text
     for titulo in (
         "Cuenta_Consolidada", "Cuenta_Nacional", "Cuenta_Internacional",
         "Cuenta_Sin_imputar", "Cuenta_Sin_clasificar",

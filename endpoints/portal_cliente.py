@@ -13,6 +13,7 @@
 # ============================================================
 
 import hashlib
+import json
 import os
 import re
 import secrets
@@ -1452,6 +1453,31 @@ def _bultos_cotizador_internacional(
     return paquetes, filas_form
 
 
+def _cajas_para_continuar_cotizacion(paquetes):
+    """Sólo geometría editable: nunca transporta un precio ni autoriza emitir."""
+    return json.dumps(paquetes, ensure_ascii=True, separators=(",", ":"))
+
+
+def _precargar_cajas_cotizadas(valor):
+    if not isinstance(valor, str) or len(valor) > 12000:
+        raise ValueError("No pudimos recuperar las cajas. Volvé a cotizar.")
+    try:
+        filas = json.loads(valor)
+        if not isinstance(filas, list) or not 1 <= len(filas) <= 20 or not all(isinstance(f, dict) for f in filas):
+            raise ValueError
+        paquetes, _ = _bultos_cotizador_internacional(
+            peso_kg="", largo_cm="", ancho_cm="", alto_cm="",
+            cantidades=[str(f.get("cantidad", "")) for f in filas],
+            pesos=[str(f.get("peso_kg", "")) for f in filas],
+            largos=[str(f.get("largo_cm", "")) for f in filas],
+            anchos=[str(f.get("ancho_cm", "")) for f in filas],
+            altos=[str(f.get("alto_cm", "")) for f in filas],
+        )
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ValueError("No pudimos recuperar las cajas. Volvé a cotizar.") from exc
+    return paquetes
+
+
 @router.get("/cotizar", response_class=HTMLResponse)
 def cotizar_form(
     request: Request,
@@ -1711,6 +1737,7 @@ def cotizar_post(
             # Para que cada tarjeta de opción linkee a "crear envío" con el
             # destino ya elegido.
             "destino_sel": destino_pais,
+            "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
             "es_reseller": es_reseller,
         },
     )
@@ -2280,6 +2307,8 @@ def envio_nuevo_form(
     ambito: str = "",
     courier: str = "",
     quote_id: str = "",
+    cajas: str = "",
+    valor_cotizado: str = "",
     corregir: Optional[int] = None,
     repetir: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
@@ -2299,6 +2328,8 @@ def envio_nuevo_form(
         "destino": destino,
         "courier": courier,
         "quote_id": quote_id,
+        "cajas": cajas,
+        "valor_cotizado": valor_cotizado,
     }
     if not ambito or ambito == "nacional":
         return templates.TemplateResponse(
@@ -2405,6 +2436,19 @@ def envio_nuevo_form(
             courier = courier or recomendada["id"]
         else:
             error = "La cotización venció o ya no está disponible. Cotizá nuevamente."
+    if cajas and not quote_id and not pedido_tienda:
+        try:
+            form["bultos"] = _precargar_cajas_cotizadas(cajas)
+            if valor_cotizado:
+                valor = _numero_form(valor_cotizado, "Valor declarado", importe=True, minimo=0.01)
+                form["valor_total_cotizado_usd"] = valor
+                # Un total de varias cajas no permite inferir cuánto vale
+                # cada contenido. Se muestra como referencia, sin repartirlo.
+                if sum(b['cantidad'] for b in form['bultos']) == 1:
+                    form['bultos'][0]['valor_declarado_caja_usd'] = valor
+                    form['bultos'][0]['valor_unitario_usd'] = valor
+        except ValueError as exc:
+            error = str(exc)
     # Si viene del cotizador ("tocá la opción para crear el envío"), el
     # destino elegido ya llega puesto — una promesa menos que romper.
     if destino.strip() and not pedido_tienda:
@@ -2479,6 +2523,17 @@ def envio_nuevo_form(
                     error = "El catálogo cambió desde esta venta. Revisá sus productos y embalajes antes de preparar el envío."
     if courier in {"dhl", "fedex", "ups"}:
         form["intl_courier"] = courier
+    remitente = obtener_remitente_para_envio(cliente)
+    origen_elegido = str(form.get("rem_pais") or "").strip().upper()
+    # El domicilio es una unidad: una ruta CN→AR no puede reutilizar sólo
+    # calle/ciudad/CP del remitente AR. Se conserva el país cotizado y se
+    # exige elegir o completar su domicilio, sin modificar la libreta.
+    remitente_por_completar = bool(
+        origen_elegido and remitente
+        and origen_elegido != str(remitente.get("pais") or "").strip().upper()
+    )
+    if remitente_por_completar:
+        remitente = None
     return templates.TemplateResponse(
         request=request, name="portal/envio_nuevo.html",
         context={
@@ -2486,7 +2541,8 @@ def envio_nuevo_form(
             "ambito": "internacional",
             "productos": get_productos(cliente),
             "paises_destino": _paises_con_nacional(),
-            "remitente": obtener_remitente_para_envio(cliente),
+            "remitente": remitente,
+            "remitente_por_completar": remitente_por_completar,
             "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
             "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
             "form": form,

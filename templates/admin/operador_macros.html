@@ -12,7 +12,8 @@
 {% macro resumen(filas) -%}
 <div class="op-grid">
 {% for r in filas %}<div class="card op-summary"><div class="eyebrow">{{ r.moneda }}</div>
-  <h3>{{ dinero(r.pendiente) }} pendiente verificado</h3>
+  <h3>{% if r.sin_verificar %}Historial por verificar{% else %}{{ dinero(r.pendiente) }} pendiente verificado{% endif %}</h3>
+  {% if r.sin_verificar %}<p><strong>{{ dinero(r.pendiente) }}</strong> pendiente verificado · saldo total aún incompleto</p>{% endif %}
   <p>Vencido: {{ dinero(r.vencido) }} · Crédito sin aplicar: {{ dinero(r.credito) }}</p>
   <small>{{ r.sin_verificar }} documentos con historial sin verificar. No incluidos en deuda ni crédito verificados.</small>
 </div>{% endfor %}

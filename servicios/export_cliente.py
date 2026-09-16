@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import Iterable, Iterator, Optional, Sequence
 
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -237,13 +238,21 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     columnas_envio = [
         "Fecha", "Estado", "Tipo", "Courier", "Tracking", "Producto", "Cajas",
         "Destinatario", "Ciudad", "País", "Peso (kg)", "Valor declarado (USD)",
-        "Costo (ARS)", "Costo (USD)", "Observaciones",
+        "Precio inicial (ARS)", "Precio inicial (USD)", "Observaciones",
     ]
     _hoja(wb, "Envios_Nacionales", columnas_envio, filas_por_ambito["nacional"])
     _hoja(wb, "Envios_Internacionales", columnas_envio, filas_por_ambito["internacional"])
     if filas_por_ambito["sin_clasificar"]:
         _hoja(wb, "Envios_Sin_clasificar", columnas_envio,
               filas_por_ambito["sin_clasificar"])
+
+    nota_precio = (
+        "El precio inicial del envío no incluye ajustes posteriores. "
+        "Consultá los cargos, ajustes y pagos en las hojas Cuenta."
+    )
+    for hoja in wb.worksheets:
+        for columna in (13, 14):
+            hoja.cell(row=1, column=columna).comment = Comment(nota_precio, "TAURO")
 
     # ── Cuenta corriente ────────────────────────────────────
     resumen_cuenta = resumen_cuenta_por_ambito(cliente_id)
@@ -341,6 +350,9 @@ def generar_excel_cliente(cliente_id: str) -> bytes:
     ws["B13"] = cargos_sin_clasificar
     ws["A14"] = "Productos en catálogo"
     ws["B14"] = len(filas_prod)
+    ws["A16"] = nota_precio
+    ws.merge_cells("A16:D18")
+    ws["A16"].alignment = Alignment(wrap_text=True, vertical="top")
     for fila in range(7, 14):
         ws.cell(row=fila, column=2).number_format = _FORMATO_DINERO
     ws.column_dimensions["A"].width = 31

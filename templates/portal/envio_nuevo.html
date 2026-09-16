@@ -54,6 +54,9 @@
         aduanera; el precio se valida nuevamente antes de crear la solicitud.
     </div>
 {% endif %}
+{% if form.valor_total_cotizado_usd %}
+    <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>USD {{ "{:,.2f}".format(form.valor_total_cotizado_usd).replace(",", "_").replace(".", ",").replace("_", ".") }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
+{% endif %}
 
 {# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
    (es un atajo, no el camino principal) y ni aparece cuando el envío ya
@@ -149,6 +152,9 @@
                     <span class="remitente-summary-action">Editar o cambiar</span>
                 </summary>
                 <div class="remitente-editor">
+            {% if remitente_por_completar|default(false) %}
+                <p class="msg warn" role="status">La ruta empieza en {{ nombre_pais(form.rem_pais) }}. Elegí un remitente de ese país o completá su dirección. Tu domicilio habitual no se copió porque pertenece a otro país.</p>
+            {% endif %}
             {% if remitentes %}
                 <div class="form-group">
                     <label>Traer de la libreta</label>
@@ -165,7 +171,7 @@
                                     data-estado="{{ r.estado or '' }}"
                                     data-cp="{{ r.cp }}"
                                     data-pais="{{ r.pais }}"
-                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada) %}selected{% endif %}>
+                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada and remitente and not form.rem_nombre) %}selected{% endif %}>
                                 {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
                             </option>
                         {% endfor %}
@@ -1354,11 +1360,16 @@
     }
 
     function validaPaso(i) {
-      var ok = true;
-      secs[i].querySelectorAll("input, select, textarea").forEach(function (el) {
-        if (!el.checkValidity()) { el.reportValidity(); ok = false; }
-      });
-      return ok;
+      var fields = Array.from(secs[i].querySelectorAll("input, select, textarea"));
+      var invalid = fields.find(function (el) { return !el.checkValidity(); });
+      if (!invalid) return true;
+      // Un campo inválido puede estar en el remitente colapsado. Abrirlo
+      // antes de pedir al navegador que lo enfoque.
+      var details = invalid.closest("details");
+      if (details) details.open = true;
+      invalid.reportValidity();
+      invalid.focus();
+      return false;
     }
 
     function ir(i) {

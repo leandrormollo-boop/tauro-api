@@ -78,7 +78,7 @@ def test_presentacion_exige_igualdad_exacta_a_centavos():
 
 
 def test_portal_muestra_explicacion_en_cuenta_y_detalle():
-    cuenta = (ROOT / "templates" / "portal" / "cuenta.html").read_text()
+    cuenta = (ROOT / "templates" / "portal" / "cuenta_movimientos.html").read_text()
     envio = (ROOT / "templates" / "portal" / "envio_detalle.html").read_text()
     servicio = (ROOT / "servicios" / "cuenta_corriente.py").read_text()
     for html in (cuenta, envio):

@@ -1,6 +1,18 @@
 from pathlib import Path
 
 from servicios.estados_envio import presentar_estados_envio
+
+
+def test_ultimo_tracking_disponible_no_equivale_a_entrega():
+    aviso = 'This is final status for this shipment tracking number.'
+    envio = presentar_estados_envio({'estado': 'DESPACHADO', 'tracking_estado': 'PROCESO_ENTREGA', 'tracking_descripcion': aviso})
+    assert envio['seguimiento_sin_actualizaciones'] is True
+    assert envio['estado_cliente_ui']['label'] == 'En tránsito'
+    assert envio['tracking_descripcion'] == aviso
+    assert envio['estado'] == 'DESPACHADO'
+    for estado in ('ENTREGADO', 'REEMPLAZADO', 'CANCELADO'):
+        terminado = presentar_estados_envio({'estado': estado, 'tracking_descripcion': aviso})
+        assert terminado['seguimiento_sin_actualizaciones'] is False
 from servicios.panel_cliente import preparar_historial_envios
 
 

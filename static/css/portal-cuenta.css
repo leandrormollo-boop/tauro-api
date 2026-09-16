@@ -331,3 +331,19 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
   .account-client { --account-muted: #444; color: #111; }
   .account-client .account-position, .account-client .account-history-card { border-color: #aaa; }
 }
+
+/* La deuda de la cuenta y la imputación documental son dos lecturas distintas. */
+.account-client [hidden] { display: none !important; }
+.account-client .account-quiet-state { min-height: 0; padding: 18px 0; }
+.account-client .account-payment-position { display: grid; gap: 6px; padding: 16px; margin: 0 0 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-elev); }
+.account-client .account-payment-position span { color: var(--account-muted); font-size: 13px; line-height: 1.6; }
+.account-client .account-document-selection { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+.account-client .account-document-selection > summary { cursor: pointer; padding: 12px 0; font-size: 14px; }
+.account-client .account-document-selection > summary span { color: var(--account-muted); }
+.account-client .account-document-tools { display: flex; gap: 12px; align-items: end; margin: 18px 0; flex-wrap: wrap; }
+.account-client .account-document-tools label { flex: 1 1 240px; font-size: 13px; color: var(--fg); }
+.account-client .account-document-tools input { display: block; width: 100%; margin-top: 8px; font-size: 16px; }
+.account-client .account-allocation-options { max-height: 390px; overflow-y: auto; overscroll-behavior: contain; }
+.account-client .account-capacity-detail { grid-column: 1 / -1; font-size: 12px; line-height: 1.6; }
+.account-client .account-capacity-detail summary { cursor: pointer; padding: 6px 0; }
+.account-client .account-capacity-detail p { margin: 6px 0; color: var(--account-muted); }

@@ -63,8 +63,10 @@ _LAYOUT = """<!DOCTYPE html>
   <a class="marca" href="/web">TAURO <span>SOLUTIONS</span></a>
   {cuerpo}
   <div class="aviso">⚠️ Información orientativa, actualizada a {actualizado}.
-  Las reglas aduaneras cambian seguido; antes de cada envío te confirmamos
-  los valores exactos para tu producto y destino.</div>
+  Los tributos y requisitos dependen del producto, destinatario y régimen.
+  Consultá la fuente oficial vigente antes de vender. La cotización del transporte
+  no incluye impuestos ni cargos extraordinarios salvo indicación expresa; el
+  operador puede ajustar el importe según peso, medidas y servicios efectivos.</div>
   <div class="pie">
     Tauro Solutions · Logística internacional puerta a puerta · Buenos Aires, Argentina<br>
     <a href="/guias">Todas las guías</a> · <a href="/web">Cotizá tu envío</a> ·
@@ -139,49 +141,56 @@ ciudades. El despacho de aduana está incluido en el servicio.</p>
 </ul>
 
 <h2>¿Cuánto sale?</h2>
-<p>Cotizás online en segundos, sin registrarte, con el precio final puerta a
-puerta — no una "tarifa base" que después crece.</p>
+<p>Cotizás online sin registrarte y recibís una estimación del transporte.
+El precio se valida con las direcciones, peso y medidas reales. Los tributos,
+seguros y recargos extraordinarios sólo se incluyen cuando se indican
+expresamente. Si el courier informa una diferencia posterior, TAURO revisa
+el respaldo y registra el ajuste por separado en tu cuenta.</p>
 {_CTA}
 """,
     },
     "brasil": {
         "nombre": "Brasil",
         "emoji": "🇧🇷",
-        "resumen": "El gigante de al lado, con reglas nuevas desde mayo 2026 que lo hicieron más accesible.",
+        "resumen": "Compras personales y envíos comerciales: el régimen aplicable cambia los impuestos y requisitos.",
         "titulo_seo": "Exportar a Brasil desde Argentina (2026): Remessa Conforme, impuestos y tiempos · TAURO Solutions",
-        "descripcion_seo": "Guía actualizada 2026 para vender de Argentina a Brasil: nuevas reglas de mayo 2026, impuesto 0% hasta USD 50, ICMS, tiempos y documentación.",
+        "descripcion_seo": "Guía para enviar de Argentina a Brasil: condiciones de Remessa Conforme, diferencias con operaciones fuera del programa, ICMS y documentación.",
         "cuerpo": f"""
 <h1>Exportar a Brasil desde Argentina</h1>
 <p class="fecha">Guía actualizada · {ACTUALIZADO}</p>
 
 <div class="destacado">
-<b>Buena noticia (mayo 2026):</b> Brasil eliminó la "taxa das blusinhas".
-Los envíos de hasta <b>USD 50 pagan 0% de impuesto federal</b> de importación
-(sigue el ICMS estadual). Arriba de USD 50: 60% de impuesto de importación
-<b>con un descuento fijo de USD 30</b>, más ICMS.
+<b>El beneficio depende del régimen.</b> Una venta B2B o un envío por TAURO
+no queda incluido automáticamente en el Programa Remessa Conforme (PRC).
+Antes de prometer impuestos al comprador, verificá su elegibilidad.
 </div>
 
-<h2>Impuestos (2026)</h2>
+<h2>Impuestos: compras en plataformas certificadas PRC</h2>
 <ul>
-  <li><b>Hasta USD 50:</b> 0% de impuesto federal + ICMS del estado de
-      destino (entre 17% y 20% según el estado).</li>
-  <li><b>Más de USD 50:</b> 60% de impuesto de importación con descuento
-      fijo de USD 30, + ICMS.</li>
-  <li>La aduana brasileña es de las más estrictas de la región: la
-      documentación prolija no es opcional.</li>
+  <li>Receita Federal informa 0% de impuesto de importación hasta USD 50;
+      entre USD 50,01 y USD 3.000, 60% con descuento de USD 30.</li>
+  <li>El valor aduanero incluye producto, flete y seguro. El ICMS se calcula
+      aparte y depende del estado de destino.</li>
+  <li>Fuera del PRC, la tabla de compras internacionales hasta USD 3.000
+      indica 60%, sin ese descuento, más ICMS. No es una liquidación
+      automática para cualquier operación comercial.</li>
 </ul>
+<p>Para envíos entre empresas, muestras u otros regímenes, confirmá los
+requisitos y el tratamiento correspondiente antes del despacho.</p>
+<p><small>Sección impositiva revisada el 16/09/2026.
+<a href="https://www.gov.br/receitafederal/pt-br/assuntos/aduana-e-comercio-exterior/manuais/remessas-postal-e-expressa/regras-futuras" target="_blank" rel="noopener">Fuente: Receita Federal, reglas de remesas</a>.</small></p>
 
 <h2>Tiempos</h2>
 <p>Por courier puerta a puerta: <b>3 a 6 días hábiles</b> a las principales
-ciudades, despacho incluido.</p>
+ciudades como referencia de transporte; la liberación aduanera puede extender el plazo.</p>
 
 <h2>Claves para que no se trabe</h2>
 <ul>
   <li>Descripción del producto <b>precisa y honesta</b> — subvaluar es la
       forma más rápida de perder el paquete y el cliente.</li>
   <li>Código HS correcto por producto.</li>
-  <li>Datos completos del destinatario, <b>CPF incluido</b> — sin CPF la
-      aduana brasileña no libera.</li>
+  <li>Datos fiscales completos del destinatario: <b>CPF o CNPJ</b> según
+      corresponda. Confirmá su habilitación para el tipo de operación.</li>
 </ul>
 {_CTA}
 """,
@@ -300,20 +309,24 @@ principales ciudades.</p>
         "emoji": "🇪🇸",
         "resumen": "La puerta de entrada a Europa: reglas claras y parejas para toda la UE.",
         "titulo_seo": "Exportar a España desde Argentina (2026): IVA, aranceles UE y tiempos · TAURO Solutions",
-        "descripcion_seo": "Guía para enviar de Argentina a España: IVA 21% desde el primer euro, arancel solo arriba de 150 EUR, tiempos puerta a puerta y documentación.",
+        "descripcion_seo": "Guía para enviar de Argentina a España: IVA, derechos para pequeños paquetes, condiciones por producto y documentación.",
         "cuerpo": f"""
 <h1>Exportar a España desde Argentina</h1>
 <p class="fecha">Guía actualizada · {ACTUALIZADO}</p>
 
-<h2>Impuestos (reglas de la Unión Europea)</h2>
+<h2>Impuestos y derechos de importación</h2>
 <ul>
-  <li><b>IVA (21% en España): se paga siempre</b>, desde el primer euro —
-      la UE eliminó el mínimo libre de IVA en 2021.</li>
-  <li><b>Arancel: solo si el envío supera los 150 EUR</b> de valor. Por
-      debajo de eso, pagás IVA pero no arancel.</li>
-  <li>El porcentaje de arancel arriba de 150 EUR depende del producto
-      (su código HS).</li>
+  <li>El IVA y los aranceles son conceptos distintos. El tratamiento depende
+      del producto, territorio de destino y régimen de importación.</li>
+  <li><b>No asumas exención de arancel por estar debajo de EUR 150.</b>
+      El Consejo de la UE informa un derecho transitorio de EUR 3 por
+      categoría de bienes en pequeños paquetes de valor inferior a EUR 150,
+      aplicable desde el 1 de julio de 2026.</li>
+  <li>Ese derecho no reemplaza al IVA ni permite calcular por sí solo el
+      costo final. Confirmá la clasificación y las condiciones del envío.</li>
 </ul>
+<p><small>Sección impositiva revisada el 16/09/2026.
+<a href="https://www.consilium.europa.eu/en/policies/eu-action-influx-of-small-parcels/" target="_blank" rel="noopener">Fuente: Consejo de la Unión Europea, pequeños paquetes</a>.</small></p>
 
 <h2>Tiempos</h2>
 <p>Por courier puerta a puerta: <b>3 a 6 días hábiles</b> a Madrid,
@@ -416,7 +429,7 @@ balanza diga 3.</p>
   <li><b>Repartí en más de una caja</b> si el producto lo permite: dos cajas
       chicas pueden facturar menos que una grande medio vacía.</li>
   <li><b>Cargá las medidas reales de tus productos</b> en tu catálogo TAURO:
-      cotizamos con el peso facturable exacto, sin sorpresas al despachar.</li>
+      estimamos el peso facturable con esos datos. El courier vuelve a verificar peso y medidas.</li>
 </ul>
 """ + _CTA + """
 

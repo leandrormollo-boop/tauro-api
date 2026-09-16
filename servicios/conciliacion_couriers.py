@@ -2411,10 +2411,16 @@ def listar_control_envios(
     estado: str = "",
     buscar: str = "",
     limite: int = 1000,
+    pagina: int | None = None,
+    por_pagina: int = 25,
+    solicitud_id: int | None = None,
 ) -> dict[str, Any]:
     """Vista interna de cada envío y su estado de conciliación."""
     condiciones = ["(e.id IS NOT NULL OR NULLIF(BTRIM(s.tracking), '') IS NOT NULL)"]
     parametros: list[Any] = []
+    if solicitud_id is not None:
+        condiciones.append("s.id = %s")
+        parametros.append(int(solicitud_id))
     if cliente.strip():
         condiciones.append("s.cliente_id = %s")
         parametros.append(cliente.strip().upper())
@@ -2442,8 +2448,7 @@ def listar_control_envios(
     where = " AND ".join(condiciones)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
+            consulta = f"""
                 SELECT s.id AS solicitud_id, s.cliente_id, s.created_at,
                        s.tracking, s.courier, s.dest_nombre, s.destino_pais,
                        s.peso_kg, COALESCE(e.monto_ars, s.precio_tauro_ars)
@@ -2486,9 +2491,52 @@ def listar_control_envios(
                 ) con ON TRUE
                 LEFT JOIN ajustes_cliente aj ON aj.conciliacion_id = con.id
                 WHERE {where}
-                ORDER BY s.created_at DESC, s.id DESC
-                LIMIT %s
-                """,
+                """
+            if pagina is not None:
+                # Se cuentan todos los registros antes de paginar. El límite
+                # histórico de 1.000 no debe ocultar pendientes antiguos.
+                cte = f"""WITH base AS ({consulta}), control AS (
+                    SELECT *, CASE
+                      WHEN cargo_id IS NULL OR cargo_estado IS DISTINCT FROM 'ACTIVO' THEN 'SIN_CARGO'
+                      WHEN snapshot_id IS NULL THEN 'BASE_PENDIENTE'
+                      WHEN ajuste_estado='APLICADO' OR conciliacion_estado='CERRADA' THEN 'CONCILIADO'
+                      WHEN ajuste_estado='PROPUESTO' OR conciliacion_estado='PARA_REVISION' THEN 'DIFERENCIA_PENDIENTE'
+                      WHEN conciliacion_estado='BORRADOR' THEN 'EVIDENCIA_PENDIENTE'
+                      WHEN matches_confirmados > 0 THEN 'LISTO_PARA_CALCULAR'
+                      WHEN matches_propuestos > 0 THEN 'MATCH_PENDIENTE'
+                      ELSE 'ESPERANDO_FACTURA' END AS control_estado
+                    FROM base
+                )"""
+                cur.execute(cte + " SELECT control_estado, COUNT(*) AS cantidad FROM control GROUP BY control_estado", parametros)
+                totales = {r['control_estado']: int(r['cantidad']) for r in cur.fetchall()}
+                estado_normalizado = estado.strip().upper()
+                accion = tuple(k for k in totales if k not in ('SIN_CARGO', 'CONCILIADO', 'ESPERANDO_FACTURA'))
+                if estado_normalizado == 'REQUIERE_ACCION':
+                    seleccionados = accion
+                elif estado_normalizado:
+                    seleccionados = (estado_normalizado,)
+                else:
+                    seleccionados = tuple(totales)
+                total = sum(totales.get(k, 0) for k in seleccionados)
+                tamano = max(1, min(int(por_pagina), 100))
+                paginas = max(1, (total + tamano - 1) // tamano)
+                pagina_actual = max(1, min(int(pagina), paginas))
+                offset = (pagina_actual - 1) * tamano
+                cur.execute(cte + """
+                    SELECT * FROM control WHERE control_estado = ANY(%s)
+                    ORDER BY created_at DESC, solicitud_id DESC
+                    LIMIT %s OFFSET %s
+                """, (*parametros, list(seleccionados), tamano, offset))
+                return {
+                    'items': [dict(fila) for fila in cur.fetchall()],
+                    'totales': totales, 'total': total,
+                    'pagina': pagina_actual, 'paginas': paginas,
+                    'por_pagina': tamano,
+                    'desde': offset + 1 if total else 0,
+                    'hasta': min(offset + tamano, total),
+                }
+            cur.execute(
+                consulta + ' ORDER BY s.created_at DESC, s.id DESC LIMIT %s',
                 (*parametros, max(1, min(int(limite), 1000))),
             )
             filas = [dict(fila) for fila in cur.fetchall()]
@@ -2526,7 +2574,7 @@ def listar_control_envios(
 
 
 def listar_facturas_courier_control(
-    limite: int = 100,
+    limite: int | None = 100,
     *,
     couriers: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -2569,9 +2617,9 @@ def listar_facturas_courier_control(
                 {where}
                 GROUP BY f.id
                 ORDER BY f.created_at DESC, f.id DESC
-                LIMIT %s
+                {'LIMIT %s' if limite is not None else ''}
                 """,
-                (*parametros, max(1, min(int(limite), 500))),
+                (*parametros, max(1, min(int(limite), 500))) if limite is not None else parametros,
             )
             return [dict(fila) for fila in cur.fetchall()]
 
@@ -2842,7 +2890,7 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
 
 def obtener_control_envio(solicitud_id: int) -> dict[str, Any] | None:
     """Expediente ADMIN de una guía: base, documentos, cálculo y auditoría."""
-    control = listar_control_envios(buscar=str(int(solicitud_id)), limite=1000)
+    control = listar_control_envios(solicitud_id=solicitud_id, limite=1)
     envio = next(
         (
             dict(fila) for fila in control["items"]

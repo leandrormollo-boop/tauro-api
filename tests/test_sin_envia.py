@@ -109,5 +109,5 @@ def test_admin_y_cliente_no_ofrecen_emitir_una_solicitud_historica():
     assert "No se puede emitir ni generar cargos" in admin
     assert "courier_codigo == 'ENVIA'" in detalle
     assert "no puede emitirse desde el portal" in detalle
-    assert "s.estado == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA'" in listado
+    assert "s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA'" in listado
     assert "(s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente" in listado
