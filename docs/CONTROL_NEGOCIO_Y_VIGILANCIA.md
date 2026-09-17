@@ -1,6 +1,7 @@
 # Control del negocio y vigilancia DHL
 
-Estado: implementado localmente el 17/09/2026. Pendiente de autorización de publicación.
+Estado: publicación autorizada el 17/09/2026 con «ok perfecto. publicalo».
+Cambio aprobado: `6a776c4`; verificar el despliegue y las rondas reales después del push.
 Rama: `codex/admin-control-20260917`. Base: `d88ffc08`.
 Vista: `/admin/home`, protegida por la autenticación de Admin.
 
