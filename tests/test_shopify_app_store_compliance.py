@@ -21,7 +21,7 @@ def test_portal_no_pide_dominio_para_instalar_shopify():
 
     assert 'action="/shopify/install"' not in plantilla
     assert 'name="shop"' not in plantilla
-    assert "TAURO nunca te pide escribir el dominio" in plantilla
+    assert "En tu administrador de Shopify, entrá en Apps" in plantilla
     assert "https://admin.shopify.com/" in plantilla
 
 

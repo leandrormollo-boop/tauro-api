@@ -1,0 +1,88 @@
+/* La explicación se muestra como texto normal hasta que carga el script. */
+.tauro-help {
+  display: inline-flex;
+  vertical-align: middle;
+  align-items: center;
+  margin: 0 0 0 3px;
+  padding: 0;
+  font: 400 13px/1.5 var(--font-body, Inter, sans-serif);
+  letter-spacing: normal;
+  text-transform: none;
+}
+button.tauro-help-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  min-width: 28px;
+  margin: -2px 0;
+  padding: 0;
+  color: var(--fg-2, #b9bfc7);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  box-shadow: none;
+  cursor: pointer;
+  font: 600 12px/1 var(--font-body, Inter, sans-serif);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.tauro-help-button > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+button.tauro-help-button:hover,
+button.tauro-help-button[aria-expanded="true"] {
+  color: var(--accent, #a78bfa);
+  background: var(--bg-elev-2, #1a1628);
+}
+button.tauro-help-button:focus-visible {
+  outline: 2px solid var(--accent, #a78bfa);
+  outline-offset: 2px;
+}
+.tauro-help-panel,
+.tauro-help .tauro-help-panel {
+  position: fixed;
+  inset: auto;
+  z-index: 10000;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line, #2a2440);
+  border-radius: 10px;
+  color: var(--fg, #f4f5f7);
+  background: var(--bg-elev, #13101e);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 24%);
+  font: 400 13px/1.5 var(--font-body, Inter, sans-serif);
+  letter-spacing: normal;
+  text-transform: none;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.tauro-help-panel[hidden] { display: none !important; }
+.tauro-help-panel strong { font: inherit; font-weight: 600; }
+.account-balance > .account-kicker { display: inline; }
+.form-group > label:has(+ .tauro-help),
+.shipment-label-form label:has(+ .tauro-help),
+.hs-assistant > small { display: inline; }
+.form-group > .tauro-help + input,
+.form-group > .tauro-help + select,
+.form-group > .tauro-help + textarea,
+.form-group > .tauro-help + .input-unit { margin-top: 6px; }
+@media (forced-colors: active) {
+  .tauro-help-panel { border: 1px solid CanvasText; }
+  button.tauro-help-button { color: ButtonText; }
+}

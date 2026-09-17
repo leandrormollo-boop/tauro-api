@@ -44,7 +44,7 @@
   </div>
 {% endif %}
 {% if entrada.estado == 'PARA_REVISION' and lectura_vigente %}
-  <div class="card"><h3>3. Registrar la evidencia revisada</h3><p>Compará el original con la tabla. Si hay un error, no confirmes: usá la carga manual. La propuesta original queda conservada.</p>
+  <div class="card"><h3>3. Registrar la evidencia revisada</h3><p>Compará la tabla con el PDF. Si hay errores, no confirmes: usá la carga manual.</p>
     <form method="POST" action="/admin/conciliacion-couriers/entrada-dhl/{{ entrada.id }}/importar" data-confirm="¿Registrar esta extracción revisada? No modificará saldos ni aprobará diferencias.">
       <input type="hidden" name="csrf_dhl" value="{{ csrf_dhl }}"><input type="hidden" name="revision_sha256" value="{{ entrada.revision_sha256 }}">
       <label style="display:flex;gap:10px;align-items:start;margin:16px 0;"><input style="width:auto;margin-top:4px;" type="checkbox" name="revisado" value="si" required>Comparé el PDF con el número, moneda, totales, guías, cargos y pesos de esta lectura.</label>

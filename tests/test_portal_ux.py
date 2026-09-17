@@ -58,8 +58,8 @@ def test_cotizador_no_promete_precio_cerrado_ni_conversion_completa():
     html = _template("cotizar.html")
     assert "Precio cerrado" not in html
     assert "lo convertís en envío" not in html
-    assert "Obtené una estimación" in html
-    assert "volvemos a cotizar" in html
+    assert "Precio estimado" in html
+    assert "Se confirma con la dirección completa antes de emitir" in html
     assert "Recomendado" not in html
 
 
@@ -214,7 +214,7 @@ def test_paquete_e_invoice_estan_separados_y_sin_perder_multibulto():
         assert f'name="{campo}"' not in paquete
 
     assert 'name="bulto_valor_usd" class="bulto-valor"' in invoice
-    assert "DHL calcula cantidad × valor unitario" in invoice
+    assert "cantidad de unidades × valor unitario" in invoice
     assert "data-invoice-line-total" in invoice
     hs = invoice[invoice.index('name="bulto_hs"'):invoice.index('name="bulto_hs"') + 180]
     assert "required" not in hs
@@ -249,14 +249,14 @@ def test_opciones_secundarias_del_paquete_no_alargan_el_paso_principal():
 def test_catalogo_se_presenta_como_opcional_para_revendedores():
     html = _template("envio_nuevo.html")
     assert "El catálogo es opcional" in html
-    assert "integrar una tienda" in html
+    assert "completar la caja manualmente" in html
     assert "Todavía no tenés productos en el catálogo" not in html
 
 
 def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     html = _template("cuenta.html")
-    assert "El pago está en revisión y no modifica el saldo" in html
-    assert "Todavía no se descuentan del saldo" in html
+    assert "El saldo se actualiza cuando TAURO aprueba el pago" in html
+    assert "Los pagos en revisión aún no se descuentan" in html
     assert "Facturado" in html
     assert "A facturar" in html
     assert "Envíos" in _template("cuenta_movimientos.html")

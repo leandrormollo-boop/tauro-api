@@ -19,7 +19,7 @@
 </tr>{% else %}<tr><td colspan="7">No hay documentos para este filtro.</td></tr>{% endfor %}
 </tbody></table></div><div class="op-actions"><span>{{ total }} documentos · Página {{ pagina }}</span>{% if pagina>1 %}<a href="?pagina={{ pagina-1 }}&estado={{ estado_filtro|urlencode }}">Anterior</a>{% endif %}{% if pagina*50<total %}<a href="?pagina={{ pagina+1 }}&estado={{ estado_filtro|urlencode }}">Siguiente</a>{% endif %}</div></section>
 
-<section class="card"><h2>Pagos al operador</h2><p>Comprobantes de pagos ya realizados. Registrar aquí no hace una transferencia ni modifica la cuenta del cliente.</p>
+<section class="card"><h2>Pagos al operador</h2><p>Registrá pagos ya realizados. Esto no transfiere dinero ni modifica la cuenta del cliente.</p>
 <div class="op-table"><table><thead><tr><th>Pago / fecha</th><th>Referencia</th><th>Importe</th><th>Sin aplicar</th><th>Respaldo</th></tr></thead><tbody>
 {% for p in pagos %}<tr><td>#{{ p.id }} · {{ op.fecha(p.fecha) }}{% if p.revertido %}<small>REVERTIDO · {{ p.motivo_reversion }}</small>{% endif %}</td><td>{{ p.referencia }}</td><td>{{ p.moneda }} {{ op.dinero(p.importe) }}</td><td>{{ p.moneda }} {{ op.dinero(p.disponible) }}</td><td><a href="/admin/operadores/{{ courier }}/pagos/{{ p.id }}/pdf">Comprobante PDF</a>{% for fid in p.facturas or [] %}<small><a href="/admin/operadores/{{ courier }}/facturas/{{ fid }}">Aplicación a documento #{{ fid }}</a></small>{% endfor %}{% if not p.revertido %}{{ op.reversa(csrf,courier,'pago',p.id) }}{% endif %}</td></tr>{% else %}<tr><td colspan="5">Todavía no hay pagos documentados.</td></tr>{% endfor %}
 </tbody></table></div><p class="op-note">Para aplicar un pago, abrí la factura correspondiente. Un mismo pago puede distribuirse entre varias facturas.</p>
@@ -31,9 +31,9 @@
 <label>Comprobante PDF · hasta 8 MB<input type="file" name="comprobante_pdf" accept="application/pdf" required></label></div>
 {{ op.confirmar('Verifiqué el comprobante: este pago ya se realizó y los datos son correctos. El registro queda inmutable.') }}<button class="btn btn-primary">Registrar comprobante</button></form>
 </details></section>
-<section class="card"><h2>Plazo de pago acordado</h2>
+<section class="card"><h2>Plazo de pago acordado<span data-help="Plazo de pago">Se aplica a documentos nuevos sin vencimiento propio. No cambia facturas anteriores ni el plazo de cobro a clientes.</span></h2>
 <p>Actual: <strong>{% if condicion and condicion.plazo_dias is not none %}{{ condicion.plazo_dias }} días corridos desde emisión{% else %}Sin definir{% endif %}</strong>.</p>
-<p class="op-note">Se usa sólo si el documento no trae vencimiento. Cambiarlo no modifica facturas anteriores. El plazo de cobro a clientes se configura por separado.</p>
+
 <details><summary>Configurar plazo</summary><form method="POST" action="/admin/operadores/{{ courier }}/acciones/plazo">
 {{ op.tokens(csrf,nuevo_id,'plazo',courier) }}<div class="op-grid"><label>Días acordados (vacío: sin definir)<input type="number" min="0" max="365" name="plazo_dias" value="{{ condicion.plazo_dias if condicion and condicion.plazo_dias is not none else '' }}"></label><label>Respaldo del acuerdo<textarea name="motivo" minlength="5" maxlength="1000" required placeholder="Dónde se verificó el plazo con el operador"></textarea></label></div>
 {{ op.confirmar('Verifiqué este plazo con el operador. Se aplicará a documentos nuevos sin vencimiento propio.') }}<button class="btn btn-primary">Guardar plazo</button></form></details>

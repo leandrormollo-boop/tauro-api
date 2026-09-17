@@ -63,10 +63,7 @@
       </summary>
       <form method="POST" action="/portal/password/forgot" id="password-forgot-form" style="margin-top:12px;">
         <input type="hidden" name="quote_id" value="{{ quote_id or '' }}">
-        <p class="sub" style="margin-bottom:8px;">
-          Te enviamos un link de un solo uso para crear una nueva contraseña.
-          Vence en 30 minutos.
-        </p>
+        <p class="sub" style="margin-bottom:8px;">Revisá tu email. El enlace vence en 30 minutos y se usa una sola vez.</p>
         <div class="form-group">
           <label for="identificador_reset">Email o usuario</label>
           <input type="text" id="identificador_reset" name="identificador" required

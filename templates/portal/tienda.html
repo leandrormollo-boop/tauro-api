@@ -7,8 +7,7 @@
     <div>
         <div class="eyebrow">Integraciones</div>
         <h1>Mi tienda</h1>
-        <p class="sub">Conectá tu Shopify o Tiendanube: cada venta con envío aparece acá,
-        lista para convertirse en guía con un click.</p>
+        <p class="sub">Conectá tu tienda y prepará envíos desde tus pedidos.</p>
     </div>
 </div>
 
@@ -130,13 +129,8 @@
 {# ── Qué paga el comprador ──────────────────────────── #}
 {% if dominio_cfg %}
 <div class="card" style="margin-bottom:24px;">
-    <h3 style="margin:0 0 4px;">Envío en tu checkout</h3>
-    <p class="sub" style="margin:0 0 14px;">
-        Podés configurar tus embalajes y ofrecer tarifas de TAURO en el checkout
-        de una tienda compatible. La función se activa por tienda y requiere
-        autorización y zonas de envío configuradas. Cuando entra una venta,
-        recibimos el pedido para que revises las cajas y generes la guía desde el portal.
-    </p>
+    <h3 style="margin:0 0 4px;">Envío en tu checkout<span data-help="Tarifas en tu tienda">La función se activa por tienda y requiere autorización y zonas de envío configuradas.</span></h3>
+    <p class="sub" style="margin:0 0 14px;">Configurá embalajes y tarifas por tienda. Revisá cada pedido antes de emitir su guía.</p>
     <a href="https://admin.shopify.com/" target="_blank" rel="noopener noreferrer"
        class="btn btn-ghost btn-sm">Configurar envíos en Shopify →</a>
 </div>
@@ -146,10 +140,7 @@
 {% if huerfanas %}
 <div class="card" style="margin-bottom:24px;border-color:rgba(245,184,0,.45);">
     <h3 style="margin:0 0 4px;">Tiendas que instalaron la app</h3>
-    <p class="sub" style="margin:0 0 16px;">
-        Instalaron TAURO desde Shopify pero todavía no están atadas a una cuenta.
-        Si alguna es tuya, vinculala y sus ventas empiezan a caer acá.
-    </p>
+    <p class="sub" style="margin:0 0 16px;">Estas tiendas instalaron TAURO y aún no tienen una cuenta vinculada. Vinculá únicamente las que te pertenezcan.</p>
     {% for h in huerfanas %}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--line-soft);">
         <b>{{ h.dominio }}</b>
@@ -227,10 +218,10 @@
 <div class="card">
     <h3 style="margin:0 0 4px;">Conectar Tiendanube</h3>
     {% if tiendanube_activa %}
-        <p class="sub" style="margin:0 0 18px;">Un click: te lleva a Tiendanube, aceptás los permisos y volvés con tu tienda conectada. Sin copiar claves.</p>
+        <p class="sub" style="margin:0 0 18px;">Autorizá la conexión en Tiendanube para vincular tu tienda.</p>
         <a href="/portal/tienda/tiendanube/instalar" class="btn btn-primary">Instalar app de Tiendanube</a>
     {% else %}
-        <p class="sub" style="margin:0;">La app oficial de TAURO para Tiendanube está en trámite de aprobación. Apenas esté habilitada, vas a poder conectarla desde acá con un botón.</p>
+        <p class="sub" style="margin:0;">La conexión con Tiendanube está pendiente de aprobación.</p>
     {% endif %}
 </div>
 
@@ -238,12 +229,7 @@
 <div class="card">
     <h3 style="margin:0 0 4px;">Conectar Shopify</h3>
     {% if shopify_app_activa %}
-    <p class="sub" style="margin:0 0 18px;">
-        Por seguridad, la instalación siempre empieza dentro de Shopify. Abrí tu
-        administrador, entrá en <b>Apps</b> y elegí <b>TAURO Solutions</b>.
-        Shopify te muestra los permisos y vuelve al portal con ventas, productos,
-        imágenes y stock vinculados. TAURO nunca te pide escribir el dominio de tu tienda.
-    </p>
+    <p class="sub" style="margin:0 0 18px;">En tu administrador de Shopify, entrá en Apps, elegí TAURO Solutions y autorizá los permisos para conectar tu tienda.</p>
     <a href="https://admin.shopify.com/" target="_blank" rel="noopener noreferrer"
        class="btn btn-primary">Abrir Shopify Admin →</a>
     {% else %}

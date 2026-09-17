@@ -8,11 +8,7 @@
 </div>
 
 <div class="card" style="max-width:560px;">
-  <p style="color:var(--fg-4);margin:0 0 14px;">
-    Este alta registra el débito en la cuenta corriente. La factura TAURO se
-    documenta después, por lote, desde la ficha del cliente: acá no se cargan
-    número de comprobante ni PDF.
-  </p>
+  <p style="color:var(--fg-4);margin:0 0 14px;">Guardar genera un cargo en la cuenta del cliente. La factura se carga después, desde su ficha.</p>
   <form method="POST" action="/admin/envios/nuevo">
     <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 

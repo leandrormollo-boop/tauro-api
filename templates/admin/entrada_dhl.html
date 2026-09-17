@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="/static/css/entrada-dhl.css?v=1">
 <section class="dhl-intake">
 <div class="page-title page-title-row"><div><div class="eyebrow">Facturas del operador · uso interno</div>
-  <h1>Entrada de facturas DHL</h1><p>Guardá el original, revisá la lectura y registrá la factura. Los saldos no cambian en estos pasos.</p></div>
+  <h1>Entrada de facturas DHL</h1><p>Guardá y revisá la factura. Importarla no modifica saldos.</p></div>
   <a href="/admin/conciliacion-couriers" class="btn btn-ghost">Volver al control</a></div>
 {% if request.query_params.get('ok') %}<div class="msg ok">La búsqueda de Gmail quedó iniciada en segundo plano. La bandeja conservará cualquier documento nuevo para revisión.</div>{% endif %}
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
@@ -30,7 +30,7 @@
       <input type="hidden" name="csrf_gmail_historico" value="{{ csrf_gmail_historico }}">
       <input type="hidden" name="anio" value="2026">
       <button class="btn btn-ghost">Buscar todo 2026</button>
-      <small>Backfill supervisado: conserva y lee los PDF; no aplica diferencias ni cambia saldos.</small>
+      <small>Importa los PDF históricos sin modificar saldos.</small>
     </form>
   {% else %}
     <div class="msg {{ 'error' if gmail.estado in ('REAUTORIZAR','ERROR','ERROR_BASE') else '' }}">{{ 'Google solicita volver a autorizar la casilla.' if gmail.estado == 'REAUTORIZAR' else 'Gmail todavía no está conectado al servidor.' }}</div>
@@ -51,7 +51,7 @@
     </div><button class="btn btn-primary">Guardar PDF y abrir revisión</button>
   </form>
 </div>
-<div class="card"><h3>Documentos recibidos</h3><p>Los PDFs repetidos se abren en el registro existente. Una factura con contenido diferente se bloquea al intentar importarla.</p>
+<div class="card"><h3>Documentos recibidos<span data-help="Documentos duplicados">Un PDF repetido abre el registro existente. Si el mismo documento tiene otro contenido, se bloquea su importación.</span></h3>
   <div class="table-wrap"><table><thead><tr><th>Documento</th><th>Origen</th><th>Recibido</th><th>Estado</th><th></th></tr></thead><tbody>
   {% for e in bandeja['items'] %}<tr><td><strong>{{ e.numero_esperado }}</strong><br><small>{{ e.archivo_nombre }}</small></td>
     <td>{{ 'Correo DHL' if e.canal == 'CORREO_DHL' else 'Carga manual' }}</td><td>{{ e.created_at.strftime('%d/%m/%Y %H:%M') }}</td><td><span class="badge {{ 'ok' if e.estado == 'IMPORTADA' else 'warn' }}">{{ e.estado.replace('_',' ')|title }}</span></td>

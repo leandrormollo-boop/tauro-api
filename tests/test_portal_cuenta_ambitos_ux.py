@@ -245,9 +245,9 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
     script = (RAIZ / "static" / "js" / "portal-cuenta.js").read_text(encoding="utf-8")
 
     for texto in (
-        "Saldo consolidado", "Nacional", "Internacional", "Todos tus movimientos",
-        "Facturado", "Pagos aprobados", "A facturar", "Pagos disponibles para aplicar",
-        "Vincular a documentos específicos (opcional)", "El pago no modifica tus saldos hasta que Tauro apruebe",
+        "Saldo total", "Nacional", "Internacional", "Todos tus movimientos",
+        "Facturado", "Pagos aprobados", "A facturar", "Pagos por vincular",
+        "Vincular a documentos específicos (opcional)", "El pago se descuenta del saldo cuando TAURO aprueba el comprobante",
     ):
         assert texto in html
     assert 'id="payment-documents"' in html

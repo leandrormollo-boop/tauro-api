@@ -39,7 +39,7 @@
              placeholder="Mínimo 6 caracteres (opcional)"
              autocomplete="new-password">
       <small style="color:var(--fg-4);">
-        Si la dejás vacía, el cliente podrá entrar solo por link mágico al email. Después podés resetearla desde el detalle del cliente.
+        Sin contraseña, el cliente ingresa con un enlace por email.
       </small>
     </div>
     {% endif %}
@@ -145,7 +145,7 @@
                value="{% if cliente and cliente.markup_nac_valor is not none %}{{ cliente.markup_nac_valor }}{% endif %}"
                placeholder="ej: 3500 para +ARS 3.500 por envío nacional">
         <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
-          Se aplicará cuando conectemos Andreani/OCA directamente. Hoy no habilita cotizaciones ni guías nacionales.
+          Disponible al habilitar OCA y Andreani. Hoy no permite cotizar ni emitir envíos nacionales.
         </p>
       </div>
     </div>

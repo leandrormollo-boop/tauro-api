@@ -110,4 +110,4 @@ def test_formulario_admin_exhibe_casilleros_tax_y_evitar_duplicados():
 
     assert 'name="tax_tracking"' in html
     assert 'name="tax_importe"' in html
-    assert "dejá estos casilleros vacíos" in html
+    assert "dejá estos campos vacíos para no duplicarlo" in html

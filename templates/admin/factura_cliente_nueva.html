@@ -8,7 +8,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% block content %}
 <div class="page-title page-title-row">
   <div><div class="eyebrow">Facturación por lote</div><h1>{{ cliente_id }}</h1>
-    <p>Seleccioná cargos del mismo ámbito. La factura documenta deuda existente y no la duplica.</p></div>
+    <p>Seleccioná cargos del mismo ámbito. La factura no genera deuda adicional.</p></div>
   <a href="/admin/clientes/{{ cliente_id }}/facturas" class="btn btn-ghost">Ver facturas</a>
 </div>
 

@@ -16,21 +16,21 @@
         </span>
     </header>
     {% if confirmada %}
-    <p>Tu cuenta ya tiene este retiro programado. No necesitás volver a solicitarlo.</p>
+    <p>Retiro reservado. No necesitás solicitarlo de nuevo.</p>
     {% elif r.estado == 'CANCELADA' %}
-    <p>La reserva fue cancelada. Si todavía necesitás el retiro, programá uno nuevo desde la guía vigente.</p>
+    <p>Si necesitás otro retiro, programalo desde la guía vigente.</p>
     {% elif r.estado == 'COMPLETADA' %}
-    <p>Este retiro figura como completado. Consultá el recorrido del paquete con el tracking del envío.</p>
+    <p>Seguí el paquete con el tracking del envío.</p>
     {% elif r.estado == 'CANCELANDO' %}
     <p>Estamos confirmando la cancelación con {{ courier }}. Esperá el resultado antes de pedir otro retiro.</p>
     {% else %}
-    <p>Todavía no tenemos una confirmación concluyente. TAURO está verificando la reserva; no vuelvas a solicitarla.</p>
+    <p>TAURO está verificando la reserva. No vuelvas a solicitarla hasta tener confirmación.</p>
     {% endif %}
     {% if r.confirmation_code %}
     <div class="pickup-number">
-        <span>Número de recolección {{ courier }}</span>
+        <span>Número de recolección {{ courier }}<span data-help="Número de recolección">Identifica la reserva del retiro; es distinto del tracking del envío. La reserva no confirma que los paquetes ya hayan sido retirados.</span></span>
         <strong class="mono">{{ r.confirmation_code }}</strong>
-        <small>Identifica la reserva del retiro. Es distinto del tracking de la guía.</small>
+
     </div>
     {% endif %}
     <dl class="pickup-facts">
@@ -40,7 +40,7 @@
         <div class="pickup-address"><dt>Dirección de retiro</dt><dd>{{ r.direccion or '—' }}</dd></div>
     </dl>
     {% if confirmada %}
-    <p class="pickup-note">La confirmación acredita la reserva, no que los paquetes ya fueron retirados. Preparalos cerrados y con sus etiquetas antes del horario de inicio.</p>
+    <p class="pickup-note">Prepará los paquetes cerrados y etiquetados antes del horario de inicio.</p>
     {% endif %}
     <footer class="pickup-actions">
         {% if r.solicitud_id %}<a class="btn btn-ghost btn-sm" href="/portal/envios/{{ r.solicitud_id }}">Ver envío #{{ r.solicitud_id }}</a>{% endif %}

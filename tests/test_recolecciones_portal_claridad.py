@@ -56,7 +56,7 @@ def test_exito_muestra_numero_y_no_invita_a_repetir_retiro(page):
     assert 'Número de recolección DHL' in body
     assert 'CBJ-DEMO-71' in body and '18/09/2026' in body
     assert 'Horario en el origen' in body
-    assert 'no que los paquetes ya fueron retirados' in body
+    assert 'La reserva no confirma que los paquetes ya hayan sido retirados' in body
     assert 'action="/portal/recolecciones/nueva"' not in body
     assert 'primero emití la guía' not in body
 

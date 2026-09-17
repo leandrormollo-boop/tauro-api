@@ -14,7 +14,7 @@
         Guías por emitir
         {% if solicitudes %}<span class="badge warn" style="margin-left:8px;">{{ solicitudes|length }}</span>{% endif %}
     </h3>
-    <p class="sub" style="margin:0 0 16px;">Solicitudes que el cliente ya armó y esperan que Tauro genere la guía.</p>
+    <p class="sub" style="margin:0 0 16px;">Solicitudes pendientes de emisión.</p>
 
     {% if solicitudes %}
     <div style="overflow-x:auto;">
@@ -51,12 +51,7 @@
         Ventas sin armar
         {% if pedidos_tienda %}<span class="badge" style="margin-left:8px;">{{ pedidos_tienda|length }}</span>{% endif %}
     </h3>
-    <p class="sub" style="margin:0 0 16px;">
-        Ventas que entraron de su tienda y todavía no convirtió en envío.
-        <b>La pelota está de su lado</b> — pero si preferís gestionarlas vos, armás
-        la solicitud desde <a href="/admin/envios/nuevo" style="color:var(--accent-soft);">cargar envío</a>
-        con estos datos y le avisás.
-    </p>
+    <p class="sub" style="margin:0 0 16px;">Pedidos de la tienda pendientes de preparar. Podés crear la solicitud desde Cargar envío.</p>
 
     {% if pedidos_tienda %}
     <div style="overflow-x:auto;">

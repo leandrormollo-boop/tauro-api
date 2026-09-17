@@ -191,7 +191,7 @@ def test_lista_clientes_muestra_control_financiero_consolidado(monkeypatch):
 def test_panel_explica_match_unico_y_aprobacion_manual():
     html = (ROOT / "templates/admin/conciliacion_couriers.html").read_text()
 
-    assert "Una fila representa una guía completa" in html
+    assert "Cada fila agrupa todos los cargos de una guía" in html
     assert "Ninguna se aplica automáticamente" in html
     assert "Factura recibida" in html
     assert "Match con envío" in html

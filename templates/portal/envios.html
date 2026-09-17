@@ -17,7 +17,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <div>
             <div class="eyebrow">Operaciones</div>
             <h1><span aria-hidden="true">{% if tipo_filtro == 'nacional' %}🇦🇷{% elif tipo_filtro == 'internacional' %}🌐{% else %}📦{% endif %}</span> Mis envíos{% if tipo_filtro %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</h1>
-            <p>{% if tipo_filtro == 'nacional' %}Operaciones dentro de Argentina, sin mezclar con tu actividad internacional.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones, separadas de tus envíos dentro de Argentina.{% else %}Todo tu historial nacional e internacional, ordenado del más reciente al más antiguo.{% endif %}</p>
+            <p>{% if tipo_filtro == 'nacional' %}Envíos dentro de Argentina.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones.{% else %}Tus envíos, del más reciente al más antiguo.{% endif %}</p>
         </div>
         <div class="envios-page-actions">
             {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para

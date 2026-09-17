@@ -15,7 +15,7 @@
         <div>
             <span class="eyebrow">Cotizador</span>
             <h1>{% if opciones %}Compará las opciones{% else %}Cotizá tu envío{% endif %}</h1>
-            <p>{% if opciones %}Usalas como referencia y continuá con el destino precargado.{% else %}Obtené una estimación clara, caja por caja, con ruta, peso y medidas.{% endif %}</p>
+            <p>{% if opciones %}Usalas como referencia y continuá con el destino precargado.{% else %}Estimá el precio con la ruta, el peso y las medidas.{% endif %}</p>
         </div>
         {% if opciones %}
         <div class="quote-modify-actions">
@@ -133,14 +133,14 @@
                                        placeholder="Ej. Auckland">
                             </div>
                             <div class="form-group">
-                                <label for="destino_cp_internacional">Código postal de destino</label>
+                                <label for="destino_cp_internacional">Código postal de destino</label><span data-help="Ciudad y código postal">Permiten validar cobertura y zonas remotas. Corregí los datos sugeridos si no coinciden con el destino.</span>
                                 <input type="text" name="destino_cp_internacional" id="destino_cp_internacional"
                                        required autocomplete="postal-code"
                                        value="{{ form.destino_cp_internacional or '' }}"
                                        placeholder="Ej. 1010">
                             </div>
                         </div>
-                        <p class="quote-location-note">La ciudad y el código postal permiten validar cobertura y zonas remotas. Podés corregir los datos sugeridos.</p>
+
                     </div>
 
                     <div class="quote-form-block" data-quote-section="packages">
@@ -217,7 +217,7 @@
                 </div>
 
                 <div class="quote-submit-row" id="quote-submit-row">
-                    <p>Esta es una estimación por ciudad y código postal. En el envío final volvemos a cotizar con la dirección completa.</p>
+                    <p>Precio estimado. Se confirma con la dirección completa antes de emitir.</p>
                     <button type="submit" class="btn btn-primary" id="quote-submit">Cotizar <span aria-hidden="true">→</span></button>
                 </div>
             </form>
@@ -271,7 +271,7 @@
             </div>
 
             <div class="quote-result-actions">
-                <p class="quote-result-note">Elegí una opción. Conservamos el courier y volvemos a validar el precio con la dirección completa antes de crear la solicitud.</p>
+                <p class="quote-result-note">Elegí una opción para continuar con el envío.</p>
             </div>
         </section>
         {% endif %}

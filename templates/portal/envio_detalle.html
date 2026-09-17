@@ -41,8 +41,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 <div class="card shipment-label-card">
     <form method="POST" action="/portal/envios/{{ s.id }}/etiqueta" class="shipment-label-form">
         <div>
-            <label for="etiqueta_cliente">Nombre para reconocer este envío</label>
-            <small>Es privado y organizativo. Si lo dejás vacío, mostramos destinatario y ruta.</small>
+            <label for="etiqueta_cliente">Nombre para reconocer este envío</label><span data-help="Nombre del envío">Nombre interno. Si lo dejás vacío, mostramos el destinatario y la ruta. No cambia la guía.</span>
+
         </div>
         <input type="text" id="etiqueta_cliente" name="etiqueta_cliente" maxlength="80"
                value="{{ s.etiqueta_cliente or '' }}" placeholder="Ej. Pedido 21036 · Enrique Vila">
@@ -126,7 +126,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 <div class="card" style="margin-bottom:16px;padding:16px 18px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
     <div>
         <strong>Acciones del envío</strong>
-        <p style="margin:3px 0 0;color:var(--fg-3);font-size:12.5px;">Repetir crea uno independiente. Cancelar conserva el historial pero descarta esta operación.</p>
+        <p style="margin:3px 0 0;color:var(--fg-3);font-size:12.5px;">Repetir crea un envío nuevo. Cancelar conserva el historial.</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         {% if ambito == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-ghost btn-sm">Repetir envío</a>{% endif %}
@@ -152,7 +152,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="card">
         <div class="card-head">
             <div>
-                <h3>Guía {{ courier_nombre }}</h3>
+                <h3>Guía {{ courier_nombre }}<span data-help="Archivo de la guía">El PDF incluye una etiqueta por caja.{% if s.tiene_factura_comercial %} La factura comercial está al final del archivo.{% endif %}</span></h3>
                 <p>Etiquetas para imprimir y pegar en cada caja.</p>
             </div>
         </div>
@@ -178,10 +178,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 Disponible mientras DHL no registre movimientos y la guía no esté facturada ni tenga retiro activo.
             </p>
             {% endif %}
-            <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
-                {% if s.bultos and s.bultos|length %}El PDF comienza con una etiqueta por caja — pegá cada una en la caja que corresponde.{% else %}El PDF comienza con la etiqueta para imprimir y pegar en la caja.{% endif %}
-                {% if s.tiene_factura_comercial %} La invoice comercial está incluida al final del mismo archivo.{% endif %}
-            </p>
+
             {% if ambito == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and courier_codigo != 'ENVIA' and not recoleccion_error and (not recoleccion or recoleccion.estado == 'CANCELADA') %}
             {# El paso que sigue a tener la etiqueta: que pasen a buscarla.
                Llega al form con courier/bultos/peso de este envío puestos. #}
@@ -219,7 +216,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="card">
         <div class="card-head">
             <div>
-                <h3>Tracking</h3>
+                <h3>Tracking{% if courier_codigo == 'DHL' %}<span data-help="Actualización del tracking">El portal consulta DHL una vez al día. El seguimiento oficial puede tener movimientos posteriores.</span>{% endif %}</h3>
                 <p>Seguimiento oficial en la red de {{ courier_nombre }}.</p>
             </div>
         </div>
@@ -235,7 +232,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             {% endif %}
             <p class="tracking-sync-note">
                 {% if s.tracking_actualizado_at %}Última sincronización: {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M %Z") }}.{% else %}Todavía no recibimos una actualización del courier.{% endif %}
-                {% if courier_codigo == 'DHL' %}El portal consulta DHL una vez al día. El seguimiento oficial puede tener movimientos posteriores.{% endif %}
+
             </p>
             <a href="{{ track_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Seguir envío →</a>
         {% else %}

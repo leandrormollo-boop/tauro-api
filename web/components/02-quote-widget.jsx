@@ -98,8 +98,7 @@ const PAISES_FALLBACK = [
 ];
 
 const MENSAJE_COTIZACION_NACIONAL =
-  "Los envíos dentro de Argentina se habilitarán con OCA y Andreani. " +
-  "Todavía no se pueden cotizar desde este formulario.";
+  "Envíos nacionales aún no disponibles. Se habilitarán con OCA y Andreani.";
 
 function normalizeCountry(value) {
   return String(value ?? "").trim().toUpperCase();
@@ -304,8 +303,8 @@ function QuoteWidget({ compact = false }) {
           </div>
 
           <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
-            <Field label="Peso (kg)" value={peso} onChange={setPeso} inputMode="decimal" />
-            <Field label="Valor declarado (USD)" value={valor} onChange={setValor} inputMode="decimal" money />
+            <Field label="Peso (kg)" help="Peso de la caja cerrada, con mercadería y embalaje. La tarifa también considera el peso volumétrico." value={peso} onChange={setPeso} inputMode="decimal" />
+            <Field label="Valor declarado (USD)" help="Valor total de la mercadería que enviás, expresado en dólares. Debe coincidir con la factura comercial." value={valor} onChange={setValor} inputMode="decimal" money />
           </div>
 
           <div style={{ marginBottom: 6, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
@@ -479,13 +478,27 @@ function EmailCapture({ quoteId, referencia }) {
   );
 }
 
-function Field({ label, value, onChange, type = "text", inputMode, money = false }) {
+function InfoAyuda({ label, text }) {
+  const ref = useRefQ(null);
+  React.useLayoutEffect(() => {
+    const element = ref.current;
+    element.textContent = text;
+    element.dataset.help = label;
+    window.TauroHelp?.mount(element);
+    return () => window.TauroHelp?.unmount(element);
+  }, [label, text]);
+  return <span ref={ref} />;
+}
+
+function Field({ label, help, value, onChange, type = "text", inputMode, money = false }) {
+  const id = React.useId();
   return (
-    <label style={{ display: "block" }}>
+    <div>
       <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-        {label}
+        <label htmlFor={id}>{label}</label>{help && <InfoAyuda label={label} text={help} />}
       </div>
       <input
+        id={id}
         type={type}
         inputMode={inputMode}
         value={value}
@@ -509,7 +522,7 @@ function Field({ label, value, onChange, type = "text", inputMode, money = false
           if (Number.isFinite(parsed)) onChange(String(parsed));
         }}
       />
-    </label>
+    </div>
   );
 }
 

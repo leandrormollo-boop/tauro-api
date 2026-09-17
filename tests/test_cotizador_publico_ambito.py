@@ -15,7 +15,7 @@ def test_widget_rechaza_ar_a_ar_antes_del_request():
     assert guarda in fuente
     assert fuente.index(guarda) < fuente.index(request)
     assert "OCA y Andreani" in fuente
-    assert "Todavía no se pueden cotizar desde este formulario." in fuente
+    assert "Envíos nacionales aún no disponibles." in fuente
 
 
 def test_widget_envia_isos_normalizados():
@@ -30,5 +30,5 @@ def test_widget_envia_isos_normalizados():
 def test_html_publico_referencia_el_bundle_actual():
     html = WEB_HTML.read_text(encoding="utf-8")
 
-    assert '/static/js/app.js?v=16' in html
+    assert '/static/js/app.js?v=17' in html
     assert '/static/js/app.js?v=5' not in html

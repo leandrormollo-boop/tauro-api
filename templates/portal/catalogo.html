@@ -63,7 +63,7 @@
     <div>
         <div class="eyebrow">Catálogo</div>
         <h1>Mis productos</h1>
-        <p>Tu catálogo operativo: productos, imágenes y stock de Shopify junto con los datos aduaneros de TAURO.</p>
+        <p>Productos, stock y datos para tus envíos.</p>
     </div>
     <div class="catalog-actions">
         <a href="/portal/paquetes#productos" class="btn btn-ghost">Asociar embalajes</a>
@@ -233,7 +233,7 @@
     </nav>
     {% endif %}
     {% else %}
-        <p class="empty">Todavía no tenés productos cargados. Conectá Shopify o usá “Agregar manualmente” cuando lo necesites.</p>
+        <p class="empty">No hay productos. Conectá Shopify o agregá uno manualmente.</p>
     {% endif %}
 </div>
 
@@ -242,12 +242,12 @@
     <div class="card-head">
         <div>
             <h3 id="form-prod-titulo">Agregar producto</h3>
-            <p>Describí el producto en inglés como va en la invoice. Te ayudamos a encontrar su HS code.</p>
+            <p>Completá los datos del producto para tus envíos.</p>
         </div>
         <button type="button" id="form-prod-cancelar" class="btn btn-ghost btn-sm">Cerrar</button>
     </div>
 
-    <div class="msg warn">Los productos nuevos (y los editados) los valida Tauro antes de que puedas usarlos en tus envíos — en el día, y te avisamos por mail. Hasta entonces figuran como "En revisión".</div>
+    <div class="msg warn">Los productos nuevos o editados quedan en revisión hasta que TAURO los apruebe.</div>
 
     <form method="POST" action="/portal/catalogo/add" data-hs-scope>
         <input type="hidden" name="alias_original" id="alias_original" value="">
@@ -258,11 +258,9 @@
                      no coincide letra por letra, el envío se cotiza sólo por
                      peso real y se cobra de menos. Antes decía "cómo lo llamás
                      vos" con ejemplo "Mini bag", así que nadie ponía el SKU. -->
-                <label for="cat-alias">SKU — igual al de tu tienda</label>
+                <label for="cat-alias">SKU — igual al de tu tienda</label><span data-help="SKU">Copiá el SKU exacto de Shopify o Tiendanube para vincular el producto con sus medidas y datos de envío.</span>
                 <input type="text" name="alias_interno" id="cat-alias" required>
-                <small class="hint">Tiene que ser <strong>idéntico</strong> al SKU del producto
-                en Shopify o Tiendanube. Es lo que nos permite cotizar el envío con las medidas
-                reales; si no coincide, cobramos de menos.</small>
+
             </div>
             <div class="form-group">
                 <label for="cat-invoice">Descripción para invoice (inglés)</label>
@@ -305,14 +303,9 @@
         </div>
 
         <div class="form-group">
-            <label for="cat-tax">Impuestos de destino estimados (USD) <span style="color:var(--fg-3);font-weight:400;">— opcional</span></label>
+            <label for="cat-tax">Impuestos de destino estimados (USD) <span style="color:var(--fg-3);font-weight:400;">— opcional</span></label><span data-help="Impuestos estimados">Estimación por producto. Se muestra al comprador si activás “mostrar impuestos” en Mi tienda. El importe final lo determina la aduana.</span>
             <input type="text" name="tax_estimado_usd" id="cat-tax" inputmode="decimal" data-numero="monto">
-            <small style="color:var(--fg-3);font-size:12px;">
-                Lo que aproximadamente paga este producto de impuestos al entrar al país de destino.
-                Se usa sólo si activás "mostrar impuestos" en
-                <a href="/portal/tienda" style="color:var(--accent-soft);">Mi tienda</a>, para que tu
-                comprador vea el costo real y no se lleve sorpresas.
-            </small>
+
         </div>
 
         <button type="submit" class="btn btn-primary" id="btn-guardar-prod">Agregar al catálogo</button>

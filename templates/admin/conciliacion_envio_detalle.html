@@ -30,7 +30,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 
 <div class="card" style="margin-bottom:18px;">
   <div class="card-head">
-    <div><h3>Estado y próxima acción</h3><p>El precio original permanece inmutable; cada diferencia posterior se aplica como un movimiento separado.</p></div>
+    <div><h3>Estado y próxima acción<span data-help="Ajustes al cliente">Cada diferencia aprobada se registra por separado. El precio original se conserva.</span></h3></div>
     <span class="badge {% if envio.control_estado == 'CONCILIADO' %}ok{% elif envio.control_estado in ('BASE_PENDIENTE','DIFERENCIA_PENDIENTE') %}warn{% else %}muted{% endif %}">{{ envio.control_estado.replace('_',' ')|title }}</span>
   </div>
   {% if envio.control_estado == 'BASE_PENDIENTE' %}
@@ -53,7 +53,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 </div>
 
 <div class="card" style="margin-bottom:18px;">
-  <div class="card-head"><div><h3>Documentos courier vinculados</h3><p>Una fila por factura y guía; los cargos internos se despliegan sin generar matches separados.</p></div></div>
+  <div class="card-head"><div><h3>Documentos courier vinculados<span data-help="Documentos vinculados">Cada fila agrupa los cargos de una misma factura y guía.</span></h3></div></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Documento</th><th>Guía</th><th>Desglose</th><th>Total facturado</th><th>Peso</th><th>Match único</th></tr></thead>
     <tbody>
@@ -72,7 +72,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 </div>
 
 <div class="card" style="margin-bottom:18px;">
-  <div class="card-head"><div><h3>Versiones de conciliación</h3><p>Cada nueva diferencia toma como base el último precio ya cerrado para evitar cargos duplicados.</p></div></div>
+  <div class="card-head"><div><h3>Versiones de conciliación<span data-help="Versiones de conciliación">Cada diferencia parte del último precio cerrado para evitar cargos duplicados.</span></h3></div></div>
   <div class="table-wrap"><table>
     <thead><tr><th>Versión</th><th>Cálculo interno</th><th>Precio cliente</th><th>Movimiento generado</th><th>Peso / motivo</th><th>Estado</th></tr></thead>
     <tbody>

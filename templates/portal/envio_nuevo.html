@@ -372,7 +372,7 @@
                     </div>
                     <div class="shipment-package-main">
                         <div class="form-group shipment-catalog-field">
-                            <label>Precargar del catálogo <span class="field-optional">(opcional)</span></label>
+                            <label>Precargar del catálogo <span class="field-optional">(opcional)</span></label><span data-help="Precargar del catálogo">El catálogo es opcional. Precarga peso, medidas y contenido de un producto guardado. También podés completar la caja manualmente.</span>
                             <select name="bulto_producto" class="bulto-producto">
                                 <option value="">— caja manual —</option>
                                 {% for p in productos %}
@@ -386,9 +386,6 @@
                                     </option>
                                 {% endfor %}
                             </select>
-                            {% if not productos %}
-                            <p class="field-help">El catálogo es opcional. Podés completar la caja manualmente; sirve para automatizar cargas o integrar una tienda.</p>
-                            {% endif %}
                         </div>
                         <div class="bulto-fisico">
                             <div class="form-group">
@@ -408,11 +405,11 @@
                                 <div class="input-unit"><input type="text" name="bulto_alto" class="bulto-alto" inputmode="decimal" data-numero="decimal" value="{{ f.alto_cm or '' }}" required><span>cm</span></div>
                             </div>
                             <div class="form-group">
-                                <label>Cajas iguales</label>
+                                <label>Cajas iguales</label><span data-help="Cajas iguales">Usá una sola fila para cajas con las mismas medidas, peso y contenido. Indicá cuántas enviás.</span>
                                 <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
                             </div>
                             <div class="form-group shipment-box-value">
-                                <label>Valor por caja</label>
+                                <label>Valor por caja</label><span data-help="Valor por caja">Valor total de la mercadería dentro de una caja. El total declarado multiplica este valor por la cantidad de cajas iguales.</span>
                                 <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_caja_usd" class="bulto-valor-caja" inputmode="decimal" data-numero="monto" value="{{ f.valor_declarado_caja_usd or '' }}" required></div>
                                 <small data-box-declared-total>Total cajas: USD —</small>
                             </div>
@@ -422,14 +419,14 @@
                 {% endfor %}
             </div>
             <button type="button" id="btn-add-bulto" class="btn-add-bulto">+ Agregar otro tipo de caja</button>
-            <p class="shipment-step-help">El valor por caja es el total de mercadería que contiene una caja. Si las cajas son iguales, indicá la cantidad en una sola fila.</p>
+
         </div>
 
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
             <div class="shipment-step-heading">
                 <div>
-                    <h4><span class="n">4</span> Contenido para la invoice comercial <span class="badge warn">Aduana</span></h4>
-                    <p>Podés declarar varios productos distintos dentro de una misma caja. DHL calcula cantidad × valor unitario por artículo.</p>
+                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Cada artículo se calcula como cantidad de unidades × valor unitario.</span></h4>
+
                 </div>
                 <span class="shipment-step-counter">Valores en USD</span>
             </div>
@@ -457,7 +454,7 @@
                             <input type="text" name="bulto_unidades_aduana" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group shipment-declared-value">
-                            <label>Valor unitario</label>
+                            <label>Valor unitario</label><span data-help="Valor unitario">Precio de una unidad del producto en USD. El subtotal se calcula al multiplicarlo por la cantidad de unidades.</span>
                             <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_usd" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_unitario_usd or '' }}" required></div>
                             <small class="invoice-line-total" data-invoice-line-total>Subtotal: USD —</small>
                         </div>
@@ -476,9 +473,9 @@
                             </select>
                         </div>
                         <div class="form-group invoice-net-weight" {% if not f.items_invoice %}hidden{% endif %}>
-                            <label>Peso neto total de este artículo</label>
+                            <label>Peso neto total de este artículo</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span>
                             <div class="input-unit"><input type="text" name="bulto_peso_neto" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
-                            <small>Peso de todas las unidades de este artículo, sin embalaje.</small>
+
                         </div>
                     </div>
                     </div>
@@ -487,12 +484,12 @@
                 </article>
                 {% endfor %}
             </div>
-            <div class="invoice-note"><strong>Importante:</strong> el valor unitario es el precio de una unidad del producto, no el valor total de la caja. El subtotal se calcula automáticamente. Si cargás varias cajas iguales en una fila, declarás aquí los artículos de todas esas cajas. La suma debe coincidir con el total declarado del paso 3. Los envíos con varios artículos por caja se emiten con DHL.</div>
+            <div class="invoice-note">Declará los artículos de <strong>todas las cajas de la fila</strong>. La suma debe coincidir con el total declarado del paso 3. Varios artículos por caja: disponible con DHL.</div>
 
             {% set seguro_sel = (form.asegurar_carga or 'NO')|upper %}
             <fieldset class="shipment-insurance-choice">
-                <legend>¿Querés asegurar la carga?</legend>
-                <p>La protección se calcula sobre el valor declarado total y se incluye en la cotización de DHL.</p>
+                <legend>¿Querés asegurar la carga?<span data-help="Seguro de carga">El costo del seguro depende del valor declarado total y se incluye en la cotización de DHL.</span></legend>
+
                 <div class="shipment-insurance-options">
                     <label>
                         <input type="radio" name="asegurar_carga" value="NO" {% if seguro_sel != 'SI' %}checked{% endif %} required>
@@ -511,10 +508,10 @@
                 </summary>
                 <div class="shipment-extra-body">
             <div class="form-group shipment-label-field">
-                <label for="etiqueta_cliente">Nombre para reconocer este envío <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label>
+                <label for="etiqueta_cliente">Nombre para reconocer este envío <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label><span data-help="Nombre del envío">Nombre interno para encontrar el envío en tu cuenta. No modifica la guía ni el tracking.</span>
                 <input type="text" name="etiqueta_cliente" id="etiqueta_cliente" maxlength="80"
                        value="{{ form.etiqueta_cliente or '' }}" placeholder="Ej. Pedido 21036 · Enrique Vila">
-                <small>Lo vas a ver en “Mis envíos” y “Mi cuenta”. No modifica la guía ni el tracking.</small>
+
             </div>
             <div class="form-grid-2">
                 <div class="form-group">
