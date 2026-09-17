@@ -211,7 +211,7 @@ SELECT
           AND PG_GET_CONSTRAINTDEF(c.oid) ILIKE '%cotizacion_id%'
     ) AS leads_cotizacion_fk_restrict,
     (
-        SELECT COUNT(*) = 8
+        SELECT COUNT(*) = 9
         FROM information_schema.columns
         WHERE table_schema = CURRENT_SCHEMA()
           AND table_name = 'solicitudes_guia'
@@ -219,7 +219,7 @@ SELECT
               'tracking_estado', 'tracking_estado_courier',
               'tracking_descripcion', 'tracking_consultado_at',
               'tracking_actualizado_at', 'tracking_finalizado_at',
-              'tracking_error', 'tracking_error_at'
+              'tracking_error', 'tracking_error_at', 'tracking_vigilancia_desde'
           )
     ) AS tracking_dhl_columnas_existen,
     EXISTS (

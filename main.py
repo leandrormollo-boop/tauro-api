@@ -1620,10 +1620,13 @@ def _entero_cron(nombre: str, default: int, minimo: int, maximo: int) -> int:
     return valor
 
 
-from servicios.tracking_envios import actualizar_trackings_diarios_seguro
+from servicios.tracking_envios import (
+    actualizar_trackings_diarios_seguro, actualizar_vigilancia_dhl_seguro,
+    horarios_tracking,
+)
 
-_DHL_TRACKING_HORA = _entero_cron("DHL_TRACKING_CRON_HOUR", 5, 0, 23)
-_DHL_TRACKING_MINUTO = _entero_cron("DHL_TRACKING_CRON_MINUTE", 20, 0, 59)
+# horarios_tracking valida DHL_TRACKING_CRON_HOUR / DHL_TRACKING_CRON_MINUTE.
+_DHL_TRACKING_HORA, _DHL_TRACKING_MINUTO = horarios_tracking()
 scheduler.add_job(
     actualizar_trackings_diarios_seguro,
     trigger="cron",
@@ -1632,6 +1635,16 @@ scheduler.add_job(
     max_instances=1,
     coalesce=True,
     id="tracking_dhl_diario",
+    replace_existing=True,
+)
+scheduler.add_job(
+    actualizar_vigilancia_dhl_seguro,
+    trigger="cron",
+    hour=(_DHL_TRACKING_HORA + 12) % 24,
+    minute=_DHL_TRACKING_MINUTO,
+    max_instances=1,
+    coalesce=True,
+    id="tracking_dhl_vigilancia",
     replace_existing=True,
 )
 
@@ -1941,7 +1954,8 @@ import threading
 threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
 # Ejecuta el primer control sin esperar al próximo horario de cron. El filtro
 # por fecha de Argentina y el advisory lock mantienen, aun con reinicios o
-# varios workers, una sola consulta por día y por guía pendiente.
+# varios workers, una consulta diaria normal y una por cada media jornada
+# argentina para las guías en vigilancia.
 threading.Thread(
     target=actualizar_trackings_diarios_seguro,
     daemon=True,
@@ -1953,6 +1967,8 @@ print(
     "[scheduler] Rastreo DHL diario: "
     f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
 )
+print("[scheduler] Segunda ronda DHL en vigilancia: "
+      f"{(_DHL_TRACKING_HORA + 12) % 24:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)")
 print(
     "[scheduler] Facturas DHL por Gmail: lunes y viernes "
     f"{_DHL_GMAIL_HORA:02d}:{_DHL_GMAIL_MINUTO:02d} (Argentina; si está conectado)"

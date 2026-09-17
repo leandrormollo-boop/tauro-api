@@ -90,7 +90,8 @@ def test_listados_y_dashboard_excluyen_datos_de_prueba():
     )
 
     assert "WHERE test=FALSE ORDER BY cliente_id" in admin
-    assert "WHERE activo=TRUE AND test=FALSE" in admin
+    control = (RAIZ / "servicios" / "control_negocio.py").read_text(encoding="utf-8")
+    assert "WHERE activo=TRUE AND test=FALSE" in control
     assert 'where_activos = "WHERE c.test = FALSE"' in cuenta
     assert "WHERE c.test = FALSE" in bandeja
     assert guias.count("s.test=FALSE") >= 7

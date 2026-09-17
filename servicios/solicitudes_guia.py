@@ -1606,6 +1606,8 @@ def actualizar_solicitud_guia(
                         tracking_consultado_at=NULL,
                         tracking_actualizado_at=NULL,
                         tracking_finalizado_at=NULL,
+                        tracking_vigilancia_desde=CASE WHEN tracking IS NOT DISTINCT FROM %s
+                            THEN tracking_vigilancia_desde ELSE NULL END,
                         tracking_error=NULL,
                         tracking_error_at=NULL,
                         updated_at=NOW()
@@ -1613,7 +1615,7 @@ def actualizar_solicitud_guia(
                       AND estado NOT IN ('EMITIENDO', 'VERIFICAR_COURIER')
                     RETURNING id
                     """,
-                    (estado, _clean(tracking), _clean(guia_url), solicitud_id),
+                    (estado, _clean(tracking), _clean(guia_url), _clean(tracking), solicitud_id),
                 )
                 print(f"[solicitudes] solicitud {solicitud_id}: valores PISADOS "
                       f"por el admin (tracking={tracking!r})")
@@ -1902,6 +1904,7 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                     tracking_estado=NULL, tracking_estado_courier=NULL,
                     tracking_descripcion=NULL, tracking_consultado_at=NULL,
                     tracking_actualizado_at=NULL, tracking_finalizado_at=NULL,
+                    tracking_vigilancia_desde=NULL,
                     tracking_error=NULL, tracking_error_at=NULL,
                     courier_message_reference=COALESCE(%s, courier_message_reference),
                     courier_error=NULL, cargo_pendiente=TRUE, cargo_error=NULL,

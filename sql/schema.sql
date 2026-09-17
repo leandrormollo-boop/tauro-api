@@ -1657,6 +1657,13 @@ ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS tracking_error TEXT;
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS tracking_error_at TIMESTAMPTZ;
+-- Una retención mantiene dos rondas diarias hasta la entrega, aunque luego
+-- vuelva a tránsito. El historial se conserva al cerrar la vigilancia.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_vigilancia_desde TIMESTAMPTZ;
+UPDATE solicitudes_guia
+SET tracking_vigilancia_desde=COALESCE(tracking_actualizado_at, NOW())
+WHERE tracking_estado='RETENIDO' AND tracking_vigilancia_desde IS NULL;
 
 DO $$
 BEGIN

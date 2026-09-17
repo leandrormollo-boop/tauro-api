@@ -686,44 +686,36 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    # Stats generales — 4 COUNT en una sola conexión
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT
-                    (SELECT COUNT(*) FROM clientes
-                     WHERE activo=TRUE AND test=FALSE) AS clientes_activos,
-                    (SELECT COUNT(*) FROM envios e
-                     JOIN clientes c ON c.cliente_id=e.cliente_id
-                     WHERE c.test=FALSE) AS total_envios,
-                    (SELECT COUNT(*) FROM pagos p
-                     WHERE p.estado='PENDIENTE') AS total_pagos,
-                    (SELECT COUNT(*) FROM productos p
-                     JOIN clientes c ON c.cliente_id=p.cliente_id
-                     WHERE p.activo=FALSE AND c.test=FALSE) AS productos_pendientes
-            """)
-            stats_row = cur.fetchone()
-            clientes_activos     = stats_row["clientes_activos"]
-            total_envios         = stats_row["total_envios"]
-            total_pagos          = stats_row["total_pagos"]
-            productos_pendientes = stats_row["productos_pendientes"]
-    solicitudes_pendientes = contar_solicitudes_pendientes()
+    # Un snapshot coherente y de sólo lectura: abrir el panel no repara
+    # estados operativos ni modifica cargos, conciliaciones o pagos.
+    from servicios.control_negocio import obtener_control_negocio, periodo_control
+    parametros = getattr(request, "query_params", {})
+    periodo = periodo_control(parametros.get("desde", ""), parametros.get("hasta", ""))
+    control = obtener_control_negocio(
+        periodo["desde"], periodo["hasta"],
+        pagina=parametros.get("pagina", 1),
+        vigilancia=parametros.get("vigilancia", "todos"), conexion=get_conn,
+        pagina_cargos=parametros.get("pagina_cargos", 1), cargos=parametros.get("cargos", "todos"),
+    )
 
-    # Resumen por cliente — bulk query (reemplaza N+1)
-    resumen = get_resumen_clientes_bulk(solo_activos=True)
+    def enlace_control(**cambios):
+        valores = dict(desde=periodo["desde"].isoformat(), hasta=periodo["hasta"].isoformat(),
+                       vigilancia=control["vigilancia"]["filtro"],
+                       pagina=control["vigilancia"]["pagina"],
+                       cargos=control["cargos_control"]["filtro"],
+                       pagina_cargos=control["cargos_control"]["pagina"])
+        ancla = cambios.pop("ancla", "vigilancia")
+        valores.update(cambios)
+        return "/admin/home?" + urlencode(valores) + "#" + ancla
 
     return templates.TemplateResponse(
         request=request, name="admin/home.html",
         context={
             "seccion": "home",
-            "stats": {
-                "clientes_activos": clientes_activos,
-                "total_envios": total_envios,
-                "total_pagos": total_pagos,
-                "productos_pendientes": productos_pendientes,
-                "solicitudes_pendientes": solicitudes_pendientes,
-            },
-            "resumen_clientes": resumen,
+            "stats": control["stats"],
+            "control": control,
+            "periodo": periodo,
+            "enlace_control": enlace_control,
         },
     )
 

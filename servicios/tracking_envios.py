@@ -1,6 +1,6 @@
 """Rastreo persistido de envíos del portal.
 
-La API del courier se consulta desde un job diario. Las páginas del cliente
+La API del courier se consulta desde jobs diarios (dos rondas en vigilancia). Las páginas del cliente
 leen el último snapshot confirmado en PostgreSQL: abrir o refrescar el portal
 no consume cuota de DHL ni vuelve inestable la interfaz.
 """
@@ -8,8 +8,11 @@ no consume cuota de DHL ni vuelve inestable la interfaz.
 from __future__ import annotations
 
 import os
+import re
 import unicodedata
+from datetime import datetime, timedelta
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from core.database import get_conn
 from core.dhl_client import DHLClient
@@ -24,13 +27,12 @@ ESTADOS_FINALES = {ENTREGADO}
 _LOCK_NAME = "tauro:tracking:dhl:diario:v1"
 _DELIVERY_CODES = {"OK", "DEL", "DL"}
 _HOLD_CODES = {"OH"}
-_DELIVERY_WORDS = (
-    "DELIVERED",
-    "ENTREGADO",
-    "DELIVERY COMPLETED",
-    "SHIPMENT DELIVERED",
-)
 _HOLD_WORDS = (
+    "NOT DELIVERED",
+    "NOT YET DELIVERED",
+    "UNDELIVERED",
+    "UNABLE TO DELIVER",
+    "NO ENTREGADO",
     "ON HOLD",
     "HELD",
     "RETENIDO",
@@ -49,6 +51,36 @@ _HOLD_WORDS = (
     "DAMAGED",
     "MISSING",
 )
+
+_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def horarios_tracking() -> tuple[int, int]:
+    """Configuración compartida por el cron y la vista de vigilancia."""
+    def entero(nombre, default, maximo):
+        try:
+            valor = int(os.getenv(nombre, str(default)))
+        except ValueError:
+            return default
+        return valor if 0 <= valor <= maximo else default
+    return (entero("DHL_TRACKING_CRON_HOUR", 5, 23),
+            entero("DHL_TRACKING_CRON_MINUTE", 20, 59))
+
+
+def ventana_vigilancia(ahora: Optional[datetime] = None) -> datetime:
+    """Dos ventanas por fecha argentina; reiniciar no habilita otra consulta."""
+    ahora = (ahora or datetime.now(_AR)).astimezone(_AR)
+    return ahora.replace(hour=0 if ahora.hour < 12 else 12,
+                         minute=0, second=0, microsecond=0)
+
+
+def proximo_control_vigilancia(ahora: Optional[datetime] = None) -> datetime:
+    ahora = (ahora or datetime.now(_AR)).astimezone(_AR)
+    hora, minuto = horarios_tracking()
+    rondas = [ahora.replace(hour=h, minute=minuto, second=0, microsecond=0)
+              + timedelta(days=d) for d in (0, 1)
+              for h in (hora, (hora + 12) % 24)]
+    return min(r for r in rondas if r > ahora)
 
 
 def _texto(valor: Any, maximo: int = 300) -> str:
@@ -135,14 +167,15 @@ def normalizar_respuesta_dhl(respuesta: dict) -> dict:
     )
     clasificacion = _texto_clasificacion(_detalle_evento(evento))
 
-    if codigo in _DELIVERY_CODES or any(
-        palabra in clasificacion for palabra in _DELIVERY_WORDS
-    ):
+    if codigo in _DELIVERY_CODES:
         estado = ENTREGADO
     elif codigo in _HOLD_CODES or any(
         palabra in clasificacion for palabra in _HOLD_WORDS
     ):
         estado = RETENIDO
+    elif re.search(r"^(?:(?:SHIPMENT\s+)?(?:DELIVERED|ENTREGADO)|DELIVERY COMPLETED)\b",
+                   _texto_clasificacion(descripcion)):
+        estado = ENTREGADO
     else:
         estado = PROCESO_ENTREGA
 
@@ -167,6 +200,10 @@ def _candidato_dhl(solicitud_id: int) -> Optional[dict]:
                   AND estado NOT IN ('CANCELADO', 'ENTREGADO')
                   AND estado <> 'REEMPLAZADO'
                   AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
+                  AND test=FALSE
+                  AND EXISTS (SELECT 1 FROM clientes c
+                              WHERE c.cliente_id=solicitudes_guia.cliente_id
+                                AND c.test=FALSE)
                 """,
                 (int(solicitud_id),),
             )
@@ -214,6 +251,9 @@ def actualizar_tracking_dhl(
                         tracking_descripcion = %s,
                         tracking_consultado_at = NOW(),
                         tracking_actualizado_at = NOW(),
+                        tracking_vigilancia_desde = CASE WHEN %s = 'RETENIDO'
+                            THEN COALESCE(tracking_vigilancia_desde, NOW())
+                            ELSE tracking_vigilancia_desde END,
                         tracking_finalizado_at = CASE
                             WHEN %s = 'ENTREGADO'
                                 THEN COALESCE(tracking_finalizado_at, NOW())
@@ -223,6 +263,7 @@ def actualizar_tracking_dhl(
                         tracking_error_at = NULL,
                         updated_at = NOW()
                     WHERE id = %s
+                      AND tracking = %s AND UPPER(courier)='DHL'
                       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
                       AND estado <> 'REEMPLAZADO'
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
@@ -235,7 +276,9 @@ def actualizar_tracking_dhl(
                         normalizado.get("estado_courier") or "",
                         normalizado.get("descripcion") or "",
                         normalizado["estado"],
+                        normalizado["estado"],
                         int(solicitud_id),
+                        candidato["tracking"],
                     ),
                 )
             else:
@@ -247,27 +290,32 @@ def actualizar_tracking_dhl(
                         tracking_error_at = NOW(),
                         updated_at = NOW()
                     WHERE id = %s
+                      AND tracking = %s AND UPPER(courier)='DHL'
                       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
                       AND estado <> 'REEMPLAZADO'
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                     RETURNING id
                     """,
-                    (_texto(normalizado.get("error"), 240), int(solicitud_id)),
+                    (_texto(normalizado.get("error"), 240), int(solicitud_id),
+                     candidato["tracking"]),
                 )
             guardado = cur.fetchone()
     return {
         **normalizado,
         "solicitud_id": int(solicitud_id),
         "guardado": bool(guardado),
+        **({"omitido": True, "motivo": "guia_cambio_durante_consulta"} if not guardado else {}),
     }
 
 
-def actualizar_trackings_diarios_dhl(limite: Optional[int] = None) -> dict:
-    """Actualiza una vez por día las guías DHL todavía no entregadas.
+def actualizar_trackings_diarios_dhl(limite: Optional[int] = None, *,
+                                    solo_vigilancia: bool = False) -> dict:
+    """Una consulta diaria normal; dos rondas para las guías en vigilancia.
 
-    Un advisory lock impide que dos procesos web ejecuten el mismo lote. Los
-    envíos entregados quedan excluidos para siempre; los errores se vuelven a
-    intentar al día siguiente, sin martillar la API al refrescar la página.
+    Un advisory lock impide que dos procesos web ejecuten el mismo lote.
+    Una retención inicia vigilancia persistente, aun después de liberarse.
+    Cada intento ocupa su ventana, incluidos errores. Los estados finales y
+    las guías de prueba quedan excluidos.
     """
     if limite is None:
         try:
@@ -305,20 +353,31 @@ def actualizar_trackings_diarios_dhl(limite: Optional[int] = None) -> dict:
                       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
                       AND estado <> 'REEMPLAZADO'
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
+                      AND test=FALSE
+                      AND EXISTS (SELECT 1 FROM clientes c
+                                  WHERE c.cliente_id=solicitudes_guia.cliente_id
+                                    AND c.test=FALSE)
+                      AND (NOT %s OR tracking_vigilancia_desde IS NOT NULL
+                           OR tracking_estado='RETENIDO')
                       AND (
                           tracking_consultado_at IS NULL
-                          OR (
+                          OR CASE WHEN tracking_vigilancia_desde IS NOT NULL
+                                      OR tracking_estado='RETENIDO'
+                              THEN tracking_consultado_at < %s
+                              ELSE (
                               tracking_consultado_at AT TIME ZONE
                                   'America/Argentina/Buenos_Aires'
                           )::date < (
                               NOW() AT TIME ZONE
                                   'America/Argentina/Buenos_Aires'
-                          )::date
+                          )::date END
                       )
-                    ORDER BY tracking_consultado_at ASC NULLS FIRST, id ASC
+                    ORDER BY (tracking_vigilancia_desde IS NOT NULL
+                              OR tracking_estado='RETENIDO') DESC NULLS LAST,
+                             tracking_consultado_at ASC NULLS FIRST, id ASC
                     LIMIT %s
                     """,
-                    (limite,),
+                    (solo_vigilancia, ventana_vigilancia(), limite),
                 )
                 ids = [int(fila["id"]) for fila in cur.fetchall()]
 
@@ -348,6 +407,20 @@ def actualizar_trackings_diarios_dhl(limite: Optional[int] = None) -> dict:
         finally:
             with lock_conn.cursor() as cur:
                 cur.execute("SELECT pg_advisory_unlock(hashtext(%s))", (_LOCK_NAME,))
+
+
+def actualizar_vigilancia_dhl_seguro() -> dict:
+    """Segunda ronda: sólo guías que tuvieron una retención."""
+    try:
+        resultado = actualizar_trackings_diarios_dhl(solo_vigilancia=True)
+    except Exception as exc:
+        resultado = {"ok": False, "error": type(exc).__name__}
+    print("[tracking-dhl] vigilancia: "
+          f"consultados={resultado.get('consultados', 0)} "
+          f"errores={resultado.get('errores', 0)} "
+          f"omitido={resultado.get('motivo', '')} "
+          f"error={resultado.get('error', '')}")
+    return resultado
 
 
 def actualizar_trackings_diarios_seguro() -> dict:

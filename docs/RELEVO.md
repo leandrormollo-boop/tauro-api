@@ -6,6 +6,26 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 17/09/2026 — Control gerencial y vigilancia DHL, pendiente de publicación
+
+Rama `codex/admin-control-20260917`, base `d88ffc08`. Nuevo `/admin/home`:
+atención operativa, rentabilidad por cliente y mes, cobertura de costos,
+cuentas corrientes y vigilancia. Márgenes confirmados separados de estimados;
+costos desconocidos nunca se consideran cero. Totales Decimal/SQL, lectura
+coherente sin reparación automática de estados, créditos separados de deuda.
+Retenidos DHL: campo persistente `tracking_vigilancia_desde`, migración y
+readiness; siguen vigilados al liberarse hasta entrega/cancelación/reemplazo.
+Dos rondas, por defecto 05:20 y 17:20 Argentina, ventanas por media jornada y
+lock compartido entre workers. No confundir “not delivered” con entrega.
+Listas paginadas de vigilancia y excepciones con totales completos.
+2.345 pruebas + 5 subpruebas aprobadas; QA local 1280/390/320 con datos ficticios.
+No se publicó ni se hicieron operaciones reales. Requiere autorización
+explícita de producción; las autorizaciones anteriores corresponden a versiones
+ya publicadas. Modelo efectivo Astra por preferencia del usuario y riesgo de
+arquitectura, por encima del piso del router. No hubo delegación.
+Detalle, criterios contables, límites y próxima etapa:
+[Control del negocio y vigilancia](CONTROL_NEGOCIO_Y_VIGILANCIA.md).
+
 ## 17/09/2026 — Publicación autorizada de identificación de envíos y cancelados
 
 Rama `codex/shipment-identity-20260917`, base `d2f5887`. El usuario pidió

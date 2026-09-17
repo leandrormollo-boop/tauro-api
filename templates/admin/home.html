@@ -1,86 +1,101 @@
 {% extends "admin/base_admin.html" %}
-{% block title %}Panel de control{% endblock %}
-
+{% block title %}Control del negocio{% endblock %}
 {% block content %}
-<div class="page-title">
-  <div class="eyebrow">Tauro Admin</div>
-  <h1>Panel de control</h1>
-  <p>Accedé directamente al área que necesitás administrar.</p>
-</div>
+<link rel="stylesheet" href="/static/css/admin-control.css?v=1">
+{% set t = control.totales %}{% set op = control.operacion %}{% set cc = control.cuentas_resumen %}
+{% macro dinero_o_pendiente(valor, cantidad) -%}
+  {% if cantidad %}{{ dinero_ars(valor) }}{% else %}<span class="control-muted">Sin confirmar</span>{% endif %}
+{%- endmacro %}
+<div class="control-dashboard">
+  <header class="control-header">
+    <div><div class="eyebrow">Tauro Admin</div><h1>Control del negocio</h1><p>Actualizado {{ control.actualizado }} · Argentina</p>{% if vista_previa|default(false) %}<span class="badge warn">Vista de prueba · datos ficticios</span>{% endif %}</div>
+    <a href="/admin/pedidos" class="btn btn-primary">Envíos y guías ↗</a>
+  </header>
+  <nav class="control-tabs" aria-label="Áreas de control">
+    <a href="#prioridades">Atención hoy</a><a href="#rentabilidad">Rentabilidad</a>
+    <a href="#cuentas">Cuentas corrientes</a><a href="#vigilancia">Vigilancia <b>{{ op.vigilados }}</b></a>
+  </nav>
 
-<div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 28px;">
-  <a href="/admin/facturas-internacionales" class="stat-card stat-link">
-    <div class="label">Control de operadores</div>
-    <div class="value" style="font-size:22px;">Facturas internacionales</div>
-    <div class="ir">DHL y FedEx →</div>
-  </a>
-  <a href="/admin/facturas-nacionales" class="stat-card stat-link">
-    <div class="label">Control de operadores</div>
-    <div class="value" style="font-size:22px;">Facturas nacionales</div>
-    <div class="ir">Andreani y OCA →</div>
-  </a>
-  <a href="/admin/clientes" class="stat-card stat-link">
-    <div class="label">Administración</div>
-    <div class="value" style="font-size:22px;">Lista de clientes</div>
-    <div class="ir">{{ stats.clientes_activos }} activos · abrir →</div>
-  </a>
-</div>
-
-<div class="eyebrow" style="margin-bottom:12px;">Pendientes operativos</div>
-<div class="card-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 28px;">
-  <a href="/admin/pagos/pendientes" class="stat-card stat-link">
-    <div class="label">Pagos por revisar</div>
-    <div class="value">{{ stats.total_pagos }}</div>
-    <div class="ir">Abrir pagos →</div>
-  </a>
-  <a href="/admin/productos" class="stat-card stat-link {% if stats.productos_pendientes > 0 %}urge{% endif %}">
-    <div class="label">Productos pendientes</div>
-    <div class="value {% if stats.productos_pendientes > 0 %}warn{% endif %}">
-      {{ stats.productos_pendientes }}
+  <section id="prioridades" class="control-section" aria-labelledby="prioridades-title">
+    <div class="control-section-heading"><h2 id="prioridades-title">Atención hoy</h2><span>Operación actual · todos los períodos</span></div>
+    <div class="control-priorities">
+      <a class="control-priority {{ 'is-critical' if op.retenidos }}" href="{{ enlace_control(vigilancia='retenidos') }}"><span>Retenidos</span><strong>{{ op.retenidos }}</strong><small>Ver qué ocurrió ↗</small></a>
+      <a class="control-priority {{ 'is-pending' if stats.total_pagos }}" href="/admin/pagos/pendientes"><span>Pagos por revisar</span><strong>{{ stats.total_pagos }}</strong><small>{{ dinero_ars(cc.pendiente) }} informados ↗</small></a>
+      <a class="control-priority {{ 'is-pending' if op.sin_cargo }}" href="{{ enlace_control(cargos='pendientes',pagina_cargos=1,ancla='excepciones') }}"><span>Guías con cargo pendiente</span><strong>{{ op.sin_cargo }}</strong><small>Verificar la cuenta ↗</small></a>
+      <a class="control-priority {{ 'is-critical' if op.cancelados_con_cargo }}" href="{{ enlace_control(cargos='cancelados',pagina_cargos=1,ancla='excepciones') }}"><span>Cancelados con cargo</span><strong>{{ op.cancelados_con_cargo }}</strong><small>Revisar antes de cobrar ↗</small></a>
     </div>
-    <div class="ir">{% if stats.productos_pendientes > 0 %}Validar ahora →{% else %}Ver catálogo →{% endif %}</div>
-  </a>
-  <a href="/admin/pedidos" class="stat-card stat-link {% if stats.solicitudes_pendientes > 0 %}urge{% endif %}">
-    <div class="label">Guías pendientes</div>
-    <div class="value {% if stats.solicitudes_pendientes > 0 %}warn{% endif %}">
-      {{ stats.solicitudes_pendientes }}
-    </div>
-    <div class="ir">{% if stats.solicitudes_pendientes > 0 %}Emitir ahora →{% else %}Ver solicitudes →{% endif %}</div>
-  </a>
-</div>
+    <div class="control-shortcuts"><span>{{ op.en_curso }} envíos en curso</span><a href="/admin/pedidos">{{ stats.solicitudes_pendientes }} guías pendientes ↗</a><a href="/admin/productos">{{ stats.productos_pendientes }} productos por validar ↗</a></div>
+  </section>
 
-<!-- Resumen por cliente -->
-<div class="card">
-  <h3>Saldo por cliente</h3>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Cliente</th>
-          <th>Cargos al cliente ARS</th>
-          <th>Pagado ARS</th>
-          <th>Saldo pendiente</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for c in resumen_clientes %}
-        <tr>
-          <td><strong>{{ c.cliente_id }}</strong><br><small style="color:var(--fg-4)">{{ c.email }}</small></td>
-          <td class="mono">{{ dinero_ars(c.facturado) }}</td>
-          <td class="mono">{{ dinero_ars(c.pagado) }}</td>
-          <td class="mono">
-            <span class="badge {% if c.saldo > 0 %}warn{% elif c.saldo < 0 %}ok{% else %}muted{% endif %}">
-              {{ dinero_ars(c.saldo) }}
-            </span>
-          </td>
-          <td><a href="/admin/clientes/{{ c.cliente_id }}" class="btn btn-sm btn-ghost">Ver →</a></td>
-        </tr>
-        {% else %}
-        <tr><td colspan="5" style="color:var(--fg-4);text-align:center;padding:24px;">Sin clientes todavía.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <section id="rentabilidad" class="control-section" aria-labelledby="rentabilidad-title">
+    <div class="control-section-heading"><div><div class="eyebrow">Resultado de los envíos</div><h2 id="rentabilidad-title">Rentabilidad <span data-help="Rentabilidad">Contribución de los envíos: cargos activos más ajustes aplicados menos costo del courier, en ARS registrados. No es utilidad neta: no descuenta gastos de estructura ni separa impuestos. Cada costo requiere respaldo.</span></h2></div></div>
+    <form method="get" action="/admin/home#rentabilidad" class="control-period">
+      <label>Desde<input type="date" name="desde" value="{{ periodo.desde }}" required></label>
+      <label>Hasta<input type="date" name="hasta" value="{{ periodo.hasta }}" required></label>
+      <button class="btn btn-primary" type="submit">Aplicar</button><a href="/admin/home#rentabilidad" class="btn btn-ghost">Este mes</a>
+      <a href="/admin/home?desde={{ periodo.ultimos_90_desde }}&hasta={{ periodo.hoy }}#rentabilidad" class="btn btn-ghost">Últimos 90 días</a>
+      <span data-help="Período">Agrupa envíos por fecha del cargo y usa sus importes actualizados a hoy, incluidos ajustes posteriores. Este filtro sólo cambia Rentabilidad. El resto del panel muestra la situación actual.</span>
+    </form>
+    {% if periodo.error %}<p class="flash-msg error" role="alert">{{ periodo.error }}</p>{% endif %}
+    <div class="control-kpis">
+      <article><span>Cargos a clientes</span><strong>{{ dinero_ars(t.cargos) }}</strong><small>{{ t.envios|int }} envíos con cargo activo</small></article>
+      <article><span>Margen confirmado <span data-help="Margen confirmado">Sólo envíos con la última conciliación cerrada y evidencia completa. No incluye márgenes estimados. Un costo ausente no se toma como cero.</span></span><strong class="{{ 'control-negative' if t.margen_confirmado < 0 }}">{{ dinero_o_pendiente(t.margen_confirmado, t.confirmados) }}</strong><small>{% if t.porcentaje is not none %}{{ t.porcentaje|string|replace('.',',') }}% sobre cargos confirmados{% else %}Falta cerrar costos{% endif %}</small></article>
+      <article><span>Margen estimado <span data-help="Margen estimado">Cargos actuales menos costo cotizado guardado al emitir. Sólo envíos sin costo final confirmado. Puede cambiar al recibir las facturas y recargos.</span></span><strong>{% if t.estimados %}{{ dinero_ars(t.margen_estimado) }}{% else %}—{% endif %}</strong><small>{{ t.estimados|int }} envíos por conciliar</small></article>
+      <article><span>Costos confirmados</span><strong>{{ t.cobertura }}<small>%</small></strong><small>{{ t.confirmados|int }} de {{ t.envios|int }} envíos · {{ t.sin_costo|int }} sin costo</small></article>
+    </div>
+    {% if t.envios %}
+    <div class="control-coverage" role="img" aria-label="{{ t.cobertura }} por ciento de envíos con costo confirmado"><span style="width:{{ t.cobertura }}%"></span></div>
+    <div class="control-chart-grid">
+      <article class="card"><h3>Cargos por cliente</h3><p class="control-muted">Los {{ [control.clientes|length,8]|min }} clientes con más cargos del período.</p>
+        {% for c in control.clientes[:8] %}<div class="control-bar-row"><div><a href="{{ c.url }}">{{ c.cliente_id }}</a><strong>{{ dinero_ars(c.cargos) }}</strong></div><div class="control-bar-track"><span style="width:{{ c.ancho }}%"></span></div></div>{% endfor %}
+      </article>
+      <article class="card"><h3>Margen confirmado por mes</h3><p class="control-muted">El estimado queda separado del resultado confirmado.</p>
+        {% for m in control.meses %}<div class="control-bar-row"><div><span>{{ m.mes.strftime('%m/%Y') }}</span><strong class="{{ 'control-negative' if m.margen_confirmado < 0 }}">{{ dinero_o_pendiente(m.margen_confirmado,m.confirmados) }}</strong></div><div class="control-bar-track"><span class="{{ 'negative' if m.margen_confirmado < 0 else 'confirmed' }}" style="width:{{ m.ancho }}%"></span></div><small>{{ m.confirmados|int }}/{{ m.envios|int }} costos confirmados{% if m.estimados %} · Estimado: {{ dinero_ars(m.margen_estimado) }}{% endif %}</small></div>{% endfor %}
+      </article>
+    </div>
+    {% endif %}
+    <div class="card control-table-card"><div class="control-table-heading"><h3>Resultado por cliente</h3>{% if t.perdidas %}<span class="badge error">{{ t.perdidas|int }} envíos con pérdida confirmada</span>{% endif %}</div>
+      <div class="table-wrap"><table class="control-table"><thead><tr><th>Cliente / envíos</th><th>Cargos ARS</th><th>Margen confirmado</th><th>Margen estimado</th><th>Costos confirmados</th><th>Control</th></tr></thead><tbody>
+      {% for c in control.clientes %}<tr><td data-label="Cliente / envíos"><a href="{{ c.url }}"><strong>{{ c.cliente_id }}</strong></a><small>{{ c.envios|int }} envíos{% if c.perdidas %} · <span class="control-negative">{{ c.perdidas|int }} con pérdida</span>{% endif %}</small></td><td data-label="Cargos ARS">{{ dinero_ars(c.cargos) }}</td><td data-label="Margen confirmado" class="{{ 'control-negative' if c.margen_confirmado < 0 }}">{{ dinero_o_pendiente(c.margen_confirmado,c.confirmados) }}<small>{% if c.porcentaje is not none %}{{ c.porcentaje|string|replace('.',',') }}%{% endif %}</small></td><td data-label="Margen estimado">{% if c.estimados %}{{ dinero_ars(c.margen_estimado) }}{% else %}—{% endif %}</td><td data-label="Costos confirmados">{{ c.confirmados|int }}/{{ c.envios|int }}<small>{% if c.sin_costo %}{{ c.sin_costo|int }} sin costo{% else %}{{ c.estimados|int }} estimados{% endif %}</small></td><td data-label="Control"><a href="{{ c.control_url }}" class="control-action">Conciliar ↗</a></td></tr>
+      {% else %}<tr><td colspan="6" class="control-empty">No hay envíos con cargo en este período.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div>
+  </section>
+
+  <section id="cuentas" class="control-section" aria-labelledby="cuentas-title">
+    <div class="control-section-heading"><div><div class="eyebrow">Cobranza actual</div><h2 id="cuentas-title">Cuentas corrientes</h2></div><a href="/admin/clientes" class="btn btn-ghost">Clientes ↗</a></div>
+    <div class="control-kpis control-kpis-three">
+      <article><span>Por cobrar <span data-help="Por cobrar">Suma los saldos deudores completos, incluidos clientes inactivos. No compensa con el crédito de otros clientes. Es saldo de cuenta, no deuda vencida.</span></span><strong>{{ dinero_ars(cc.deuda) }}</strong><small>{{ cc.deudores }} clientes con saldo pendiente</small></article>
+      <article><span>Pagos por aprobar</span><strong>{{ dinero_ars(cc.pendiente) }}</strong><small>Aún no reducen la deuda</small></article>
+      <article><span>Crédito de clientes</span><strong>{{ dinero_ars(cc.favor) }}</strong><small>Saldos a favor</small></article>
+    </div>
+    <div class="card control-table-card"><div class="table-wrap"><table class="control-table"><thead><tr><th>Cliente</th><th>Cargos acumulados</th><th>Pagos aprobados</th><th>Saldo actual</th><th>Por aprobar</th><th>Cuenta</th></tr></thead><tbody>
+      {% for c in control.cuentas %}<tr><td data-label="Cliente"><strong>{{ c.cliente_id }}</strong>{% if not c.activo %}<small>Cuenta inactiva</small>{% endif %}</td><td data-label="Cargos acumulados">{{ dinero_ars(c.cargos) }}</td><td data-label="Pagos aprobados">{{ dinero_ars(c.pagos) }}</td><td data-label="Saldo actual"><strong class="{{ 'control-warning' if c.saldo > 0 }}">{{ dinero_ars(c.saldo|abs) }}</strong><small>{{ 'Por cobrar' if c.saldo > 0 else ('A favor' if c.saldo < 0 else 'Al día') }}</small></td><td data-label="Por aprobar">{{ dinero_ars(c.pendiente) }}</td><td data-label="Cuenta"><a class="control-action" href="{{ c.url }}">Ver cuenta ↗</a></td></tr>
+      {% else %}<tr><td colspan="6" class="control-empty">Sin cuentas para mostrar.</td></tr>{% endfor %}
+    </tbody></table></div></div>
+  </section>
+
+  <section id="vigilancia" class="control-section" aria-labelledby="vigilancia-title">
+    <div class="control-section-heading"><div><div class="eyebrow">Seguimiento hasta la entrega</div><h2 id="vigilancia-title">Zona de vigilancia <span data-help="Vigilancia">Un estado retenido activa el control. La guía sigue vigilada al volver a tránsito. Deja de consultarse cuando se entrega, cancela o reemplaza. DHL se consulta en dos rondas diarias; otros operadores requieren seguimiento manual.</span></h2></div><span class="badge warn">{{ op.vigilados }} en vigilancia</span></div>
+    <p class="control-schedule">DHL · {{ control.horarios }} h Argentina <span>Próxima ronda: {{ control.proxima_ronda }}</span></p>
+    {% if op.sin_rastreo_reciente %}<p class="control-warning">Rastreos DHL sin actualización confirmada en 36 horas: {{ op.sin_rastreo_reciente }}. <span data-help="Rastreo pendiente">Dentro y fuera de vigilancia. Si aún no hubo eventos, cuenta desde la emisión de la guía; las guías recién emitidas no se consideran atrasadas.</span><a href="{{ enlace_control(vigilancia='sin_actualizar',pagina=1) }}">Revisar ↗</a></p>{% endif %}
+    <nav class="control-filters" aria-label="Filtrar vigilancia">{% for valor,label in [('todos','Todos en vigilancia'),('retenidos','Retenidos'),('liberados','En seguimiento'),('errores','Error de consulta'),('sin_actualizar','Sin actualizar')] %}<a href="{{ enlace_control(vigilancia=valor,pagina=1) }}" {% if control.vigilancia.filtro==valor %}aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+    <div class="control-watch-list">
+      {% for s in control.vigilancia['items'] %}<article class="control-watch {{ 'is-held' if s.tracking_estado=='RETENIDO' }}">
+        <div class="control-watch-identity"><span class="eyebrow">{{ s.cliente_id }}</span><h3>{{ s.dest_nombre }}</h3><p>{{ s.remitente_pais or '—' }} → {{ s.destino_pais }} · {{ s.courier }}</p><strong>{{ ('TAURO ' ~ s.numero_guia_tauro) if s.numero_guia_tauro else ('Envío #' ~ s.id) }}</strong><small>{{ s.tracking }}</small></div>
+        <div class="control-watch-state"><span class="badge {{ 'error' if s.tracking_estado=='RETENIDO' else 'warn' }}">{{ 'RETENIDO' if s.tracking_estado=='RETENIDO' else ('EN SEGUIMIENTO' if s.en_vigilancia else 'SIN ACTUALIZAR') }}</span><p>{{ s.tracking_descripcion or 'Sin descripción del courier.' }}</p><small>{% if s.dias is not none %}{{ s.dias }} días en vigilancia{% elif s.en_vigilancia %}Inicio de vigilancia pendiente{% else %}Rastreo diario{% endif %}</small>{% if s.tracking_error %}<details><summary class="control-negative">Falló la última consulta</summary><p>{{ s.tracking_error }}</p></details>{% endif %}</div>
+        <div class="control-watch-update"><small>Último dato confirmado</small><strong class="{{ 'control-warning' if s.atrasado }}">{{ s.tracking_actualizado_at_label }}</strong><small>Intento: {{ s.tracking_consultado_at_label }}</small><small>{% if s.courier|upper=='DHL' %}{{ '2 rondas diarias' if s.en_vigilancia else '1 ronda diaria' }}{% else %}Seguimiento manual{% endif %}</small><a class="btn btn-ghost btn-sm" href="/admin/conciliacion-couriers/envios/{{ s.id }}">Ver costos ↗</a>{% if s.courier|upper in ('DHL','FEDEX','UPS','ANDREANI','OCA','CORREO','ENVIA') %}<a class="btn btn-ghost btn-sm" href="{{ url_tracking(s.courier,s.tracking) }}" target="_blank" rel="noopener noreferrer">Rastrear ↗</a>{% endif %}</div>
+      </article>{% else %}<div class="card control-empty">No hay envíos en este filtro de vigilancia.</div>{% endfor %}
+    </div>
+    <div class="control-pagination"><span>{{ control.vigilancia.total }} resultados · Página {{ control.vigilancia.pagina }} de {{ control.vigilancia.paginas }}</span><div>{% if control.vigilancia.pagina>1 %}<a class="btn btn-ghost btn-sm" href="{{ enlace_control(pagina=control.vigilancia.pagina-1) }}">Anterior</a>{% endif %}{% if control.vigilancia.pagina<control.vigilancia.paginas %}<a class="btn btn-ghost btn-sm" href="{{ enlace_control(pagina=control.vigilancia.pagina+1) }}">Siguiente</a>{% endif %}</div></div>
+  </section>
+
+  <section id="excepciones" class="control-section" aria-labelledby="excepciones-title">
+    <div class="control-section-heading"><h2 id="excepciones-title">Cargos a revisar</h2><span>Los más antiguos primero</span></div>
+    <nav class="control-filters" aria-label="Filtrar cargos">{% for valor,label in [('todos','Todos'),('pendientes','Cargo pendiente'),('cancelados','Cancelados con cargo')] %}<a href="{{ enlace_control(cargos=valor,pagina_cargos=1,ancla='excepciones') }}" {% if control.cargos_control.filtro==valor %}aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}</nav>
+    {% for s in control.alertas %}<div class="control-exception"><div><strong>{{ s.cliente_id }} · {{ s.dest_nombre }}</strong><small>{{ s.tracking }} · {{ s.estado }}</small></div><span class="badge {{ 'error' if s.estado in ('CANCELADO','REEMPLAZADO') else 'warn' }}">{{ 'Cargo activo en guía cancelada' if s.estado in ('CANCELADO','REEMPLAZADO') else 'Cargo pendiente de control' }}</span><a class="control-action" href="/admin/conciliacion-couriers/envios/{{ s.id }}">Revisar ↗</a></div>{% else %}<div class="card control-empty">Sin excepciones de cargo detectadas.</div>{% endfor %}
+    <div class="control-pagination"><span>{{ control.cargos_control.total }} resultados · Página {{ control.cargos_control.pagina }} de {{ control.cargos_control.paginas }}</span><div>{% if control.cargos_control.pagina>1 %}<a class="btn btn-ghost btn-sm" href="{{ enlace_control(pagina_cargos=control.cargos_control.pagina-1,ancla='excepciones') }}">Anterior</a>{% endif %}{% if control.cargos_control.pagina<control.cargos_control.paginas %}<a class="btn btn-ghost btn-sm" href="{{ enlace_control(pagina_cargos=control.cargos_control.pagina+1,ancla='excepciones') }}">Siguiente</a>{% endif %}</div></div>
+  </section>
+  <div class="control-footer-links"><a href="/admin/facturas-internacionales">Facturas internacionales ↗</a><a href="/admin/facturas-nacionales">Facturas nacionales ↗</a><a href="/admin/guias-reemplazadas">Control de guías descartadas ↗</a></div>
 </div>
 {% endblock %}
