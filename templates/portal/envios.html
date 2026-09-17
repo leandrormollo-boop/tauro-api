@@ -6,7 +6,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 
 {% block content %}
 <section class="envios-page">
-<link rel="stylesheet" href="/static/css/portal-envios.css?v=1">
+<link rel="stylesheet" href="/static/css/portal-envios.css?v=2">
 <div class="envios-async-region" data-envios-region aria-busy="false">
 <div class="envios-async-status" data-envios-status role="status" aria-live="polite" hidden>
     <span class="envios-async-spinner" aria-hidden="true"></span>
@@ -188,7 +188,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <thead>
                 <tr>
                     <th>Envío</th>
-                    <th>Destino</th>
+                    <th>Ruta</th>
                     <th>Servicio y estado</th>
                     <th>Precio del envío</th>
                     <th></th>
@@ -196,37 +196,30 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             </thead>
             <tbody>
             {% for s in solicitudes %}
-                <tr>
-                    <td data-label="Envío">
-                        {% if s.etiqueta_cliente %}
-                            <strong class="shipment-client-label">{{ s.etiqueta_cliente }}</strong>
-                            <br><small style="color:var(--fg-3)">{{ s.producto_alias }} · {{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</small>
-                        {% elif s.bultos and s.bultos|length > 1 %}
-                            {% for b in s.bultos %}
-                                <strong>{{ b.producto_alias }}</strong> <small style="color:var(--fg-3)">x{{ b.cantidad }}</small>{% if not loop.last %}<br>{% endif %}
-                            {% endfor %}
-                            <br><small style="color:var(--fg-3)">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }} · {{ s.cantidad }} cajas</small>
-                        {% else %}
-                            <strong>{{ s.producto_alias }}</strong>
-                            <br><small style="color:var(--fg-3)">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }} · x{{ s.cantidad }}</small>
-                        {% endif %}
+                {% set es_baja = s.estado in ('CANCELADO', 'REEMPLAZADO') %}
+                <tr class="shipment-row{% if es_baja %} is-cancelled{% endif %}">
+                    <td data-label="Envío" class="shipment-identity-cell">
+                        <strong class="shipment-recipient">{{ s.dest_nombre or 'Destinatario sin informar' }}</strong>
+                        {% if s.etiqueta_cliente %}<span class="shipment-reference">{{ s.etiqueta_cliente }}</span>{% endif %}
+                        <small class="shipment-number mono">{% if s.numero_guia_tauro %}TAURO {{ s.numero_guia_tauro }}{% else %}Envío #{{ s.id }}{% endif %}</small>
+                        <small class="shipment-date">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</small>
                     </td>
-                    <td data-label="Destino">
-                        <span class="envio-destination-name">{{ s.dest_nombre }}</span>
-                        <br><small style="color:var(--fg-3)">{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) }}</small>
+                    <td data-label="Ruta" class="shipment-route-cell">
+                        <span class="shipment-route">{{ s.remitente_ciudad or '' }}{% if s.remitente_ciudad and s.remitente_pais %}, {% endif %}{{ nombre_pais(s.remitente_pais) if s.remitente_pais else '' }} <span aria-label="hacia">→</span> {{ s.dest_ciudad or '' }}{% if s.dest_ciudad and s.destino_pais %}, {% endif %}{{ nombre_pais(s.destino_pais) if s.destino_pais else '' }}</span>
+                        <small class="shipment-package">{{ s.cantidad or 1 }} {{ 'bulto' if (s.cantidad or 1) == 1 else 'bultos' }}{% if s.producto_alias %} · {{ s.producto_alias }}{% endif %}</small>
                     </td>
                     <td data-label="Servicio y estado" class="envio-service-cell">
                         <span class="service-head">
                             <span><strong>{{ (s.courier or '—')|upper }}</strong> · {% if s._ambito_portal == 'nacional' %}Nacional{% elif s._ambito_portal == 'internacional' %}Internacional{% else %}Sin clasificar{% endif %}</span>
                             <span style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
-                                <span class="badge {{ s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
+                                <span class="badge {{ 'shipment-cancelled-badge' if es_baja else s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado if es_baja else s.estado_cliente_ui.label }}</span>
                             </span>
                         </span>
-                        {% if s.tracking_descripcion %}
+                        {% if s.tracking_descripcion and not es_baja %}
                             <small class="{{ 'tracking-alert' if s.estado_cliente_ui.codigo == 'RETENIDO' else 'tracking-updated' }}">{{ s.tracking_descripcion }}</small>
                         {% endif %}
-                        {% if s.seguimiento_sin_actualizaciones %}<small class="tracking-alert">Sin nuevas actualizaciones del courier. La entrega no está confirmada.</small>{% endif %}
-                        {% if s.tracking_estado and s.tracking_actualizado_at %}
+                        {% if s.seguimiento_sin_actualizaciones and not es_baja %}<small class="tracking-alert">Sin nuevas actualizaciones del courier. La entrega no está confirmada.</small>{% endif %}
+                        {% if s.tracking_estado and s.tracking_actualizado_at and not es_baja %}
                             <small class="tracking-updated">Sincronizado {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M %Z") }}</small>
                         {% endif %}
                         {% if s.tracking %}
@@ -241,7 +234,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     </td>
                     <td class="mono envio-price-cell" data-label="Precio del envío">
                         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
-                            <span style="color:var(--fg-3);">Sin cargo</span>
+                            <strong class="shipment-no-charge">Sin cargo</strong>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
                             {% if s.diferencia_flete_ars or s.tax_cliente_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}
                             <details class="envio-price-breakdown">
@@ -257,7 +250,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                             {% endif %}
                             <span class="envio-price-final portal-money-green"><small>Total registrado · ARS</small>{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span>
                         {% else %}—{% endif %}
-                        {% if s.precio_cliente_final_ars %}
+                        {% if s.precio_cliente_final_ars and not es_baja %}
                             <br><small style="color:var(--fg-3)"><span style="font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;">a tu cliente</span> $ {{ "{:,.0f}".format(s.precio_cliente_final_ars).replace(",", ".") }}</small>
                         {% endif %}
                     </td>
@@ -299,7 +292,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                 {% endif %}
                             {% elif s.guia_url and s.estado not in ('CANCELADO', 'REEMPLAZADO') %}
                                 <a href="{{ s.guia_url }}" target="_blank" class="btn btn-ghost btn-sm">Ver guía</a>
-                            {% elif (s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente and not s.tracking and s.estado not in ('CANCELADO', 'EMITIENDO', 'VERIFICAR_COURIER') %}
+                            {% elif (s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente and not s.tracking and s.estado not in ('CANCELADO', 'REEMPLAZADO', 'EMITIENDO', 'VERIFICAR_COURIER') %}
                                 {# Estaba SOLO en el detalle, un click adentro, así que
                                    desde acá parecía que el cliente no podía emitir. El
                                    servidor revalida las tres llaves (es suya, flag,

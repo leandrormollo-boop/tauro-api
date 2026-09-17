@@ -690,7 +690,7 @@ def movimientos_cuenta_paginados(
     tipo_filtro = str(tipo or "todos").strip().lower()
     if ambito_filtro not in {"consolidado", "nacional", "internacional"}:
         raise ValueError("El filtro de ámbito no es válido.")
-    if tipo_filtro not in {"todos", "cargos", "costos", "pagos", "diferencias", "revision"}:
+    if tipo_filtro not in {"todos", "cargos", "costos", "pagos", "diferencias", "revision", "cancelados"}:
         raise ValueError("El filtro de tipo de movimiento no es válido.")
     pagina = max(1, int(pagina))
     page_size = max(1, min(int(page_size), 100))
@@ -710,7 +710,7 @@ def movimientos_cuenta_paginados(
             WHERE estado = 'APLICADA'
             GROUP BY pago_id
         ),
-        movimientos AS (
+        movimientos_base AS (
             SELECT
                 e.fecha,
                 e.created_at,
@@ -901,6 +901,45 @@ def movimientos_cuenta_paginados(
             JOIN solicitudes_guia s ON s.id=a.solicitud_id
             WHERE e.cliente_id=%s AND e.estado='ACTIVO'
               AND a.estado='APLICADO'
+
+            UNION ALL
+
+            -- Historial informativo: una fila por solicitud, sin tocar el libro.
+            -- Un cargo activo nunca se oculta por el estado de la solicitud.
+            SELECT
+                (s.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+                s.created_at, 40, s.id,
+                CASE WHEN s.estado='REEMPLAZADO' THEN 'ENVIO_REEMPLAZADO'
+                     ELSE 'ENVIO_CANCELADO' END,
+                CASE WHEN s.ambito IN ('NACIONAL', 'INTERNACIONAL')
+                     THEN s.ambito ELSE 'SIN_CLASIFICAR' END,
+                'Envío sin cargo', NULL::text,
+                0::numeric, 0::numeric, 0::numeric, s.estado,
+                FALSE, NULL::integer, NULL::integer, s.id, NULL::text,
+                NULLIF(BTRIM(s.tracking), ''),
+                NULLIF(BTRIM(s.dest_nombre), ''),
+                NULLIF(BTRIM(s.remitente_nombre), ''),
+                NULLIF(BTRIM(s.etiqueta_cliente), ''),
+                NULLIF(BTRIM(s.remitente_ciudad), ''),
+                NULLIF(BTRIM(s.remitente_pais), ''),
+                NULLIF(BTRIM(s.dest_ciudad), ''),
+                NULLIF(BTRIM(s.destino_pais), ''),
+                NULL::numeric, NULL::text, NULL::jsonb
+            FROM solicitudes_guia s
+            WHERE s.cliente_id=%s AND s.visible_cliente AND s.test=FALSE
+              AND s.estado IN ('CANCELADO', 'REEMPLAZADO')
+              AND NOT EXISTS (
+                  SELECT 1 FROM envios e
+                  WHERE e.solicitud_id=s.id AND e.cliente_id=s.cliente_id
+                    AND e.estado NOT IN ('CANCELADO', 'NC')
+              )
+        ),
+        movimientos AS (
+            SELECT m.*, s.numero_guia_tauro, s.producto_alias AS producto_envio,
+                   s.cantidad AS cantidad_bultos, s.estado AS estado_envio
+            FROM movimientos_base m
+            LEFT JOIN solicitudes_guia s ON s.id=m.solicitud_id
+              AND s.cliente_id=%s AND s.visible_cliente AND s.test=FALSE
         ),
         filtrados AS (
             SELECT * FROM movimientos
@@ -912,14 +951,15 @@ def movimientos_cuenta_paginados(
                   OR (%s = 'pagos' AND tipo IN ('PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO'))
                   OR (%s = 'diferencias' AND tipo = 'DIFERENCIA')
                   OR (%s = 'revision' AND tipo = 'PAGO_PENDIENTE')
+                  OR (%s = 'cancelados' AND tipo IN ('ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'))
               )
               __FILTROS_BUSQUEDA__
         )
     """
     filtros = (
-        cliente, cliente, cliente, cliente, cliente,
+        cliente, cliente, cliente, cliente, cliente, cliente, cliente,
         ambito_sql, ambito_sql,
-        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
+        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
     )
     condiciones = []
     parametros_busqueda = []
@@ -929,7 +969,8 @@ def movimientos_cuenta_paginados(
         # sólo la aplicación correspondiente, no otras aplicaciones del pago.
         condiciones.append("""AND (
             CONCAT_WS(' ', concepto, referencia, numero_guia, numero_factura,
-                etiqueta_envio, destinatario, origen_ciudad, destino_ciudad) ILIKE %s
+                etiqueta_envio, destinatario, origen_ciudad, destino_ciudad,
+                origen_pais, destino_pais, numero_guia_tauro::text, producto_envio) ILIKE %s
             OR EXISTS (
                 SELECT 1
                 FROM pagos_aplicaciones bus_pa

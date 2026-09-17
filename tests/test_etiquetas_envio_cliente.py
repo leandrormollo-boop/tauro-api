@@ -123,7 +123,7 @@ def test_schema_y_vistas_exponen_el_nombre_sin_confundirlo_con_la_guia():
     assert "Nombre para reconocer este envío" in detalle
     assert "La guía anterior quedó descartada" in detalle
     assert "s.etiqueta_cliente" in envios
-    assert "m.etiqueta_envio or m.destinatario" in cuenta
+    assert "m.destinatario or m.etiqueta_envio" in cuenta
     assert "Guía / tracking" in cuenta
     assert ">Importe<" not in cuenta
 

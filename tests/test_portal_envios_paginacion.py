@@ -201,7 +201,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert 'placeholder="Tracking, destinatario o ciudad"' in html
     assert "envios-search-icon" not in html
     assert "{{ con_busqueda }}" in html
-    assert 'class="envio-destination-name"' in html
+    assert 'class="shipment-recipient"' in html
     assert 'class="track-link mono"' in html
     # Los links de tipo y de paso no incluyen `pagina`: cambiar un filtro
     # siempre vuelve a la primera hoja.

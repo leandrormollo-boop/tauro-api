@@ -222,7 +222,7 @@ def preparar_historial_envios(
             campos = (
                 "etiqueta_cliente", "dest_nombre", "dest_ciudad",
                 "destino_pais", "remitente_ciudad", "remitente_pais",
-                "producto_alias", "api_referencia",
+                "producto_alias", "api_referencia", "numero_guia_tauro",
             )
             texto = " ".join(
                 str(solicitud.get(campo) or "") for campo in campos

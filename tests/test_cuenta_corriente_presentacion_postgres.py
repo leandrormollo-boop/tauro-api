@@ -164,3 +164,71 @@ def test_pagos_rechazados_y_en_revision_visibles_sin_impacto(cuenta_db):
     revision = cuenta_corriente.movimientos_cuenta_paginados("PAGOS_QA", tipo="revision")
     assert len(revision["items"]) == 1
     assert revision["items"][0]["estado"] == "PENDIENTE"
+
+
+def test_cancelados_son_historia_sin_cargo_y_no_ocultan_cargos_activos(cuenta_db):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from servicios.export_cuenta import generar_excel_cuenta
+
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            for cliente in ('PROPIO', 'AJENO'):
+                cur.execute("INSERT INTO clientes (cliente_id,nombre,email) VALUES (%s,%s,%s)",
+                            (cliente, cliente, cliente + '@example.invalid'))
+            escenarios = (
+                # cliente, estado operativo, estado contable, visible, test
+                ('PROPIO', 'CANCELADO', 'CANCELADO', True, False),
+                ('PROPIO', 'CANCELADO', None, True, False),
+                ('PROPIO', 'REEMPLAZADO', 'CANCELADO', True, False),
+                ('PROPIO', 'CANCELADO', 'ACTIVO', True, False),
+                ('PROPIO', 'CANCELADO', None, False, False),
+                ('PROPIO', 'CANCELADO', None, True, True),
+                ('AJENO', 'CANCELADO', None, True, False),
+            )
+            ids = []
+            for i, (cliente, estado, cargo, visible, test) in enumerate(escenarios):
+                cur.execute("""INSERT INTO solicitudes_guia
+                    (cliente_id,estado,producto_alias,destino_pais,dest_nombre,
+                     dest_direccion,dest_ciudad,dest_zip,remitente_ciudad,remitente_pais,
+                     tracking,ambito,created_at,visible_cliente,test,numero_guia_tauro)
+                    VALUES (%s,%s,'Muestras','AR',%s,'QA 123','Buenos Aires','1000',
+                            'Shenzhen','CN',%s,'INTERNACIONAL','2026-09-16 12:00Z',%s,%s,%s)
+                    RETURNING id""", (cliente, estado, f'Destino {i}', f'QA-{i}', visible, test, 50300+i))
+                sid = cur.fetchone()['id']; ids.append(sid)
+                if cargo:
+                    cur.execute("""INSERT INTO envios
+                        (cliente_id,solicitud_id,fecha,monto_ars,estado,ambito)
+                        VALUES (%s,%s,'2026-09-16',900,%s,'INTERNACIONAL')""", (cliente,sid,cargo))
+            cur.execute("SELECT id,estado,monto_ars FROM envios ORDER BY id")
+            cargos_antes = cur.fetchall()
+    filtros = dict(desde='2026-09-01', hasta='2026-09-30')
+    todos = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', **filtros)
+    assert todos['total_resultados'] == 4
+    assert {m['solicitud_id'] for m in todos['items']} == set(ids[:4])
+    assert sum(m['debe_ars']-m['haber_ars'] for m in todos['items']) == Decimal('900.00')
+    bajas = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', tipo='cancelados', **filtros)
+    assert bajas['total_resultados'] == 3
+    assert {m['solicitud_id'] for m in bajas['items']} == set(ids[:3])
+    assert {m['tipo'] for m in bajas['items']} == {'ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'}
+    for m in bajas['items']:
+        assert m['debe_ars'] == m['haber_ars'] == m['monto_ars'] == 0
+        assert m['valor_envio_ars'] is None
+        assert m['origen_ciudad'] == 'Shenzhen'
+        assert m['destino_ciudad'] == 'Buenos Aires'
+    costos = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', tipo='costos', **filtros)
+    assert costos['total_resultados'] == 1
+    assert costos['items'][0]['debe_ars'] == Decimal('900.00')
+    encontrada = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', q='50300', **filtros)
+    assert encontrada['total_resultados'] == 1
+    assert encontrada['items'][0]['numero_guia_tauro'] == 50300
+    assert cuenta_corriente.movimientos_cuenta_paginados('PROPIO', ambito='nacional')['total_resultados'] == 0
+    assert cuenta_corriente.movimientos_cuenta_paginados('PROPIO', hasta='2026-08-31')['total_resultados'] == 0
+    libro = load_workbook(BytesIO(generar_excel_cuenta('PROPIO', tipo='cancelados', **filtros)))
+    filas = list(libro['Movimientos'].values)[1:]
+    assert len(filas) == 3
+    assert all(row[7:10] == (0, 0, 0) for row in filas)
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,estado,monto_ars FROM envios ORDER BY id")
+            assert cur.fetchall() == cargos_antes

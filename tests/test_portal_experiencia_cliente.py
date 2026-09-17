@@ -57,6 +57,7 @@ def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100
              "tracking_descripcion": "<script>no ejecutar</script>",
              "tracking_actualizado_at": datetime(2026, 9, 14, 8, 20, tzinfo=timezone.utc),
              "producto_alias": "Muestras", "precio_tauro_ars": precio,
+             "precio_cliente_final_ars": precio * 2, "numero_guia_tauro": 50300,
              "precio_inicial_cliente_ars": precio, "precio_final_cliente_ars": precio,
              "tiene_label": True, "bultos": [], "cantidad": 1,
              "resumen_pesos": {"real_total_kg": 1, "volumetrico_total_kg": 1,
@@ -145,3 +146,22 @@ def test_retiro_solo_para_guias_sin_movimiento(template):
     assert '/portal/recolecciones?envio=1' in _render(estado="GUIA_LISTA", tracking=None, template=template)
     for tracking in ("ENTREGADO", "RETENIDO", "PROCESO_ENTREGA"):
         assert '/portal/recolecciones?envio=1' not in _render(estado="GUIA_LISTA", tracking=tracking, template=template)
+
+
+@pytest.mark.parametrize("estado", ["CANCELADO", "REEMPLAZADO"])
+@pytest.mark.parametrize("template", ["portal/envios.html", "portal/envio_detalle.html"])
+def test_baja_no_muestra_costos_aunque_conserve_importes_historicos(estado, template):
+    html = _render(estado=estado, precio=987654, template=template)
+    assert '987.654' not in html
+    assert '1.975.308' not in html
+    assert 'Sin cargo' in html
+    assert estado in html
+    assert '/portal/envios/1/guia.pdf' not in html
+
+
+def test_numero_tauro_permite_encontrar_el_mismo_envio():
+    vista = preparar_historial_envios([
+        dict(id=7, numero_guia_tauro=50300, estado='GUIA_LISTA', remitente_pais='CN', destino_pais='AR'),
+        dict(id=8, numero_guia_tauro=50301, estado='GUIA_LISTA', remitente_pais='CN', destino_pais='AR'),
+    ], buscar='50300')
+    assert [s['id'] for s in vista['solicitudes']] == [7]

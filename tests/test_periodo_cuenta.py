@@ -217,7 +217,9 @@ def test_dos_ajustes_medios_centavos_concilian_periodo_lista_y_excel(periodo_db)
                 CREATE TABLE solicitudes_guia(id integer,cliente_id text,tracking text,
                     visible_cliente boolean DEFAULT true,test boolean DEFAULT false,
                     dest_nombre text,remitente_nombre text,etiqueta_cliente text,
-                    remitente_ciudad text,remitente_pais text,dest_ciudad text,destino_pais text);
+                    remitente_ciudad text,remitente_pais text,dest_ciudad text,destino_pais text,
+                    created_at timestamptz DEFAULT NOW(),ambito text,estado text,
+                    numero_guia_tauro bigint,producto_alias text,cantidad integer DEFAULT 1);
                 CREATE TABLE conciliaciones_envio(id integer,tax_cliente_ars numeric DEFAULT 0,
                     diferencia_flete_ars numeric DEFAULT 0,motivo_diferencia text DEFAULT 'OTRO',
                     precio_cliente_inicial_ars numeric DEFAULT 100,peso_cotizado_kg numeric,

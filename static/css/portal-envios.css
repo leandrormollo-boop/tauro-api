@@ -43,3 +43,34 @@
 @media (prefers-reduced-motion: reduce) {
   .envios-async-spinner { animation-duration: 1.4s; }
 }
+
+/* Una ficha reconocible por envío, también en pantallas chicas. */
+.envios-table { border-collapse: separate; border-spacing: 0 10px; }
+.envios-table th:nth-child(1) { width: 23%; }
+.envios-table th:nth-child(2) { width: 22%; }
+.envios-table th:nth-child(3) { width: 21%; }
+.envios-table th:nth-child(4) { width: 16%; }
+.envios-table th:nth-child(5) { width: 18%; }
+.envios-table .shipment-row td { padding: 18px 12px; vertical-align: top; background: var(--bg-elev-2); border-block: 1px solid var(--line); }
+.envios-table .shipment-row td:first-child { border-left: 3px solid var(--accent); border-radius: 10px 0 0 10px; }
+.envios-table .shipment-row td:last-child { border-right: 1px solid var(--line); border-radius: 0 10px 10px 0; background: var(--bg-elev-2); }
+.envios-table .shipment-recipient { display: block; font-size: 15px; line-height: 1.4; font-weight: 650; color: var(--fg); }
+.envios-table .shipment-reference { display: block; margin-top: 5px; font-size: 12px; color: var(--fg-2); }
+.envios-table .shipment-number, .envios-table .shipment-date, .envios-table .shipment-package { display: block; margin-top: 6px; color: var(--fg-3); font-size: 11px; line-height: 1.5; }
+.envios-table .shipment-route { font-size: 12px; line-height: 1.7; color: var(--fg-2); }
+.envios-table .shipment-cancelled-badge { background: #f59e0b18; border: 1px solid #f7bd6155; color: var(--warn); font-size: 11px; font-weight: 750; letter-spacing: .04em; }
+.envios-table .shipment-row.is-cancelled td:first-child { border-left-color: #f7bd61; }
+.envios-table .shipment-no-charge { font-weight: 600; font-size: 13px; color: var(--fg-2); }
+.envios-table .row-actions { flex-direction: column; align-items: stretch; }
+@media (max-width: 640px) {
+  .envios-table .shipment-row { margin: 10px 0; padding: 15px; gap: 15px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; background: var(--bg-elev-2); }
+  .envios-table .shipment-row.is-cancelled { border-left-color: #f7bd61; }
+  .envios-table .shipment-row td, .envios-table .shipment-row td:first-child, .envios-table .shipment-row td:last-child { padding: 0; border: 0; border-radius: 0; background: transparent; }
+  .envios-table .shipment-identity-cell, .envios-table .shipment-route-cell { grid-column: 1 / -1; }
+  .envios-table .shipment-identity-cell::before { display: none; }
+  .envios-table .shipment-recipient { font-size: 16px; }
+  .envios-table .shipment-row td[data-label]::before { font-size: 10px; margin-bottom: 6px; }
+  .envios-table .envio-service-cell .badge { font-size: 10px; padding: 5px 7px; }
+  .envios-table .envio-service-cell .service-head { font-size: 11px; }
+  .envios-table .envio-service-cell .track-link { font-size: 11px; }
+}

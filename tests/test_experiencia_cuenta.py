@@ -308,7 +308,10 @@ def movimientos_aislados(cuenta_aislada, monkeypatch):
                     ADD COLUMN test boolean DEFAULT false, ADD COLUMN dest_nombre text,
                     ADD COLUMN remitente_nombre text, ADD COLUMN etiqueta_cliente text,
                     ADD COLUMN remitente_ciudad text, ADD COLUMN remitente_pais text,
-                    ADD COLUMN dest_ciudad text, ADD COLUMN destino_pais text;
+                    ADD COLUMN dest_ciudad text, ADD COLUMN destino_pais text,
+                    ADD COLUMN created_at timestamptz DEFAULT NOW(), ADD COLUMN ambito text,
+                    ADD COLUMN numero_guia_tauro bigint, ADD COLUMN producto_alias text,
+                    ADD COLUMN cantidad integer DEFAULT 1;
                 ALTER TABLE facturas_cliente ADD COLUMN pdf bytea;
                 ALTER TABLE facturas_cliente_items ADD COLUMN ajuste_id integer;
                 ALTER TABLE pagos_aplicaciones ADD COLUMN updated_at timestamptz DEFAULT NOW();

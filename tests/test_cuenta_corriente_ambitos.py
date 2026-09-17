@@ -655,7 +655,7 @@ def test_movimientos_paginados_filtra_en_sql_y_conserva_factura(monkeypatch):
     assert "AS destinatario" in sql
     assert "AS remitente" in sql
     assert "AS valor_envio_ars" in sql
-    assert cursor.ejecutadas[0][1][5:7] == ("NACIONAL", "NACIONAL")
+    assert cursor.ejecutadas[0][1][7:9] == ("NACIONAL", "NACIONAL")
 
 
 class _CursorClasificar:

@@ -1209,7 +1209,7 @@ def listar_solicitudes_cliente(
             # para dibujar un tilde en cada fila.
             query = """
                 SELECT s.id, s.cliente_id, s.estado, s.producto_alias, s.cantidad,
-                       s.etiqueta_cliente,
+                       s.etiqueta_cliente, s.numero_guia_tauro, s.remitente_ciudad,
                        s.remitente_pais, s.ambito, s.destino_pais, s.dest_nombre,
                        s.dest_ciudad, s.observaciones, s.peso_kg,
                        s.valor_declarado_usd, s.precio_tauro_ars,

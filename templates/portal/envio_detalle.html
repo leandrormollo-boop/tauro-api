@@ -342,9 +342,12 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <div class="card-head">
             <div>
                 <h3>Cuenta del envío</h3>
-                <p>Precio aceptado y diferencias aprobadas por factura del operador.</p>
+                <p>{% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}Este envío no genera cargos.{% else %}Precio aceptado y diferencias aprobadas por factura del operador.{% endif %}</p>
             </div>
         </div>
+        {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
+        <div class="mini-row"><span class="badge warn">{{ s.estado }}</span><strong>Sin cargo</strong></div>
+        {% else %}
         <div class="mini-row">
             <span>Precio inicial aceptado</span>
             <strong class="portal-money-green">{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</strong>
@@ -400,6 +403,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
           <strong>{{ d.concepto_courier or d.motivo_legible }}</strong>
         </div>
         <p style="font-size:12px;color:var(--fg-3);margin-top:10px;">{{ d.leyenda }}</p>
+        {% endif %}
         {% endif %}
         {% if s.observaciones %}
         <hr class="divider">

@@ -347,3 +347,33 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
 .account-client .account-capacity-detail { grid-column: 1 / -1; font-size: 12px; line-height: 1.6; }
 .account-client .account-capacity-detail summary { cursor: pointer; padding: 6px 0; }
 .account-client .account-capacity-detail p { margin: 6px 0; color: var(--account-muted); }
+
+/* El destinatario y la ruta identifican el mismo envío que en Mis envíos. */
+.account-client .account-history-card { padding: 0; border: 0; background: transparent; }
+.account-client .account-table { border-collapse: separate; border-spacing: 0 10px; }
+.account-client .account-table .account-movement-row td { background: var(--bg-elev); border-block: 1px solid var(--line); padding: 18px 14px; }
+.account-client .account-movement-row td:first-child { border-left: 3px solid var(--accent); border-radius: 10px 0 0 10px; }
+.account-client .account-movement-row td:last-child { border-right: 1px solid var(--line); border-radius: 0 10px 10px 0; }
+.account-client .account-movement-row.is-cancelled td:first-child { border-left-color: #f7bd61; }
+.account-client .account-movement-heading { align-items: flex-start; flex-direction: column; gap: 9px; }
+.account-client .account-shipment-title { font-size: 15px; font-weight: 650; }
+.account-client .account-shipment-identity { display: grid; gap: 5px; margin-top: 6px; overflow-wrap: anywhere; }
+.account-client .account-shipment-reference { color: var(--fg-2); font-size: 12px; }
+.account-client .account-shipment-route { color: var(--fg-2); font-size: 12px; line-height: 1.6; }
+.account-client .account-table .shipment-cancelled-badge { background: #f59e0b18; border: 1px solid #f7bd6155; color: var(--account-attention); font-size: 10px; font-weight: 750; letter-spacing: .04em; }
+.account-client .account-table .account-movement-amount { display: table-cell; }
+.account-client .account-movement-amount > strong, .account-client .account-movement-amount > small { display: block; margin-top: 8px; }
+.account-client .account-movement-amount .shipment-no-charge { color: var(--fg-2); }
+@media (max-width: 640px) {
+  .account-client .account-table .account-movement-row { margin: 10px 0; padding: 16px 14px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; background: var(--bg-elev); }
+  .account-client .account-table .account-movement-row.is-cancelled { border-left-color: #f7bd61; }
+  .account-client .account-table .account-movement-row td, .account-client .account-table .account-movement-row td:first-child, .account-client .account-table .account-movement-row td:last-child { display: block; padding: 0; border: 0; border-radius: 0; background: transparent; }
+  .account-client .account-shipment-title { font-size: 16px; }
+  .account-client .account-table td[data-label="Detalle"] { grid-row: 1; }
+  .account-client .account-table td[data-label="Detalle"]::before { display: none; }
+  .account-client .account-table td[data-label="Fecha"], .account-client .account-table td[data-label="Tu cuenta"] { grid-row: 3; }
+  .account-client .account-table td[data-label="Guía / tracking"] { grid-row: 2; }
+}
+.account-client .account-unified-filters .tselect,
+.account-client .account-unified-filters .tselect-btn { min-width: 0; max-width: 100%; width: 100%; }
+.account-client .account-unified-filters .tselect-label { min-width: 0; }

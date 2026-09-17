@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Mi cuenta corriente{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=3">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=4">{% endblock %}
 
 {% macro dinero(valor) -%}
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}

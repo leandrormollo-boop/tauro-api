@@ -299,7 +299,7 @@ def test_movimientos_agrupan_datos_sin_forzar_scroll_horizontal():
     for etiqueta in columnas_portal:
         assert f'data-label="{etiqueta}"' in portal_html
     assert "{{ ubicacion(m.origen_ciudad, m.origen_pais) }} → {{ ubicacion(m.destino_ciudad, m.destino_pais) }}" in portal_html
-    assert "m.etiqueta_envio or m.destinatario" in portal_html
+    assert "m.destinatario or m.etiqueta_envio" in portal_html
     assert "min-width: 1220px" not in css
     assert ".account-table { width: 100%; min-width: 0; table-layout: fixed; }" in css
     assert "NULLIF(BTRIM(s.dest_nombre), '') AS destinatario" in admin_py

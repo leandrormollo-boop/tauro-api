@@ -131,7 +131,7 @@ templates.env.globals["numero_ars"] = numero_ars
 AMBITOS_PORTAL = {"nacional", "internacional"}
 AMBITOS_CUENTA = {"consolidado", "nacional", "internacional"}
 TIPOS_MOVIMIENTO_CUENTA = {
-    "todos", "cargos", "pagos", "diferencias", "revision", "costos",
+    "todos", "cargos", "pagos", "diferencias", "revision", "costos", "cancelados",
 }
 # Mantiene resumen, filtros y una página completa dentro del viewport de
 # escritorio; el resto queda accesible con paginación explícita.

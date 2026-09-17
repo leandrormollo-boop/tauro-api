@@ -40,7 +40,7 @@ def generar_excel_cuenta(cliente: str, ambito="consolidado", tipo="todos", **fil
         ("Desde", filtros.get("desde") or "Sin límite"),
         ("Hasta", filtros.get("hasta") or "Sin límite"),
         ("Movimientos", resultado["total_resultados"]),
-        ("Criterio", "Los pagos en revisión y rechazados no modifican el saldo."),
+        ("Criterio", "Los pagos en revisión, rechazados y envíos cancelados o reemplazados no modifican el saldo."),
         ("Alcance", "Movimientos del período seleccionado; no es un saldo de apertura o cierre."),
     ):
         informacion.append([_celda(informacion, etiqueta), _celda(informacion, valor)])
