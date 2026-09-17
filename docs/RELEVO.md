@@ -6,7 +6,7 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
-## 17/09/2026 — Identificación de envíos y cancelados (pendiente de publicar)
+## 17/09/2026 — Publicación autorizada de identificación de envíos y cancelados
 
 Rama `codex/shipment-identity-20260917`, base `d2f5887`. El usuario pidió
 identificar cada envío y hacer visible CANCELADO sin costo en ambas pantallas.
@@ -15,7 +15,9 @@ filas separadas, tarjetas en móvil. Cancelados/reemplazados sin importes tambi�
 en el detalle. La cuenta incorpora historia informativa sin impacto contable,
 con filtro propio; nunca oculta un cargo activo por una inconsistencia de estado.
 Sin migración ni cambios de saldo. 2.324 pruebas + 5 subpruebas aprobadas;
-QA visual local en ambos temas y tamaños 1280/390/320. No se publicó.
+QA visual local en ambos temas y tamaños 1280/390/320. El usuario autorizó
+«publicalo». Se publica `7414c12` sobre `d2f5887`, sin divergencia con main;
+verificar Railway, salud y ambas vistas en la sesión existente de WAIMAO.
 Detalle: [Identificación y cancelados](IDENTIFICACION_ENVIOS_Y_CANCELADOS.md).
 
 ## 17/09/2026 — Publicación autorizada de textos y ayudas contextuales

@@ -1,7 +1,8 @@
 # Identificación de envíos y cancelaciones — 17/09/2026
 
 Preparado en `codex/shipment-identity-20260917`, sobre `d2f5887`.
-Pendiente de autorización para publicar. Sin migraciones ni operaciones reales.
+Publicación autorizada por el usuario: «publicalo». Cambio `7414c12`.
+Sin migraciones ni operaciones reales de prueba.
 
 ## Presentación
 
