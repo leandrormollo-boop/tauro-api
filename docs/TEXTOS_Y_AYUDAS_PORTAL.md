@@ -1,7 +1,9 @@
 # Textos breves y ayudas contextuales — 17/09/2026
 
 Preparado en `codex/portal-copy-help-20260917`, desde `3ca332d`.
-**Pendiente de autorización para publicar.** No se hizo push a main.
+**Publicación autorizada por el usuario: «publicalo».** Cambio `2a9088c`,
+sobre `3ca332d`, sin divergencia. La evidencia posterior se guarda en
+`qa_portal_copy_20260917/release-after.json`.
 
 ## Resultado
 

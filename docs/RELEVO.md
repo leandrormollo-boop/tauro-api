@@ -6,7 +6,7 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
-## 17/09/2026 — Textos breves y ayudas contextuales (sin publicar)
+## 17/09/2026 — Publicación autorizada de textos y ayudas contextuales
 
 Rama `codex/portal-copy-help-20260917`, base `3ca332d`. Se simplificó la
 redacción de 40 plantillas y de la web pública. Ayudas ⓘ junto a conceptos y
@@ -14,7 +14,9 @@ campos; operan por puntero, teclado y clic. Importes, avisos de aprobación,
 errores y acciones requeridas siguen visibles. Sin cambios de negocio ni DB.
 Bundle público recompilado, versión 17. Suite completa: 2.318 pruebas y
 5 subpruebas aprobadas. QA local sin escrituras reales.
-**Pendiente de autorización explícita para producción; no se hizo push.**
+El usuario autorizó publicar con «publicalo». Se publica el cambio `2a9088c`
+sobre `3ca332d`, sin divergencia. Comprobar Railway, salud, recursos y ayudas
+en las sesiones existentes; sin operaciones reales de prueba.
 Detalle y criterio editorial: [Textos y ayudas](TEXTOS_Y_AYUDAS_PORTAL.md).
 
 ## 16/09/2026 — Confirmación visible de recolecciones
