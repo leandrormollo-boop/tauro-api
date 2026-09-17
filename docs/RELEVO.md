@@ -6,6 +6,24 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 17/09/2026 — Navegación y solapas históricas, listo en prueba local
+
+Rama `codex/navigation-history-20260917`, base `c1ad266`. Cotizador, nueva guía
+internacional y formularios operativos del Admin conservan el avance al volver.
+Borradores por cuenta/flujo en la pestaña, cuatro horas de inactividad; tarifas
+recalculadas, archivos se vuelven a adjuntar. Acuse de éxito limpia sólo el
+borrador guardado y evita reenviarlo al regresar desde la caché del navegador.
+Mis envíos y Cuenta corriente separan Todos / Modificados / Cancelados. Los dos
+últimos conservan historia sin cargo; no se enmascara deuda histórica incoherente.
+Cancelación Admin atómica entre solicitud/cargo, pagos conservados, protección
+de facturas del módulo actual y bloqueo de cambios de estado que eludan el
+circuito de anulación o reemplazo. Sin migraciones ni escrituras en producción.
+2.356 pruebas + 5 subpruebas y 8 pruebas JS aprobadas; recorridos locales con
+datos ficticios y comprobación móvil. Modelo efectivo Astra por preferencia del
+usuario; piso del router Sol/high. Sin delegación. **No publicado: falta la
+aprobación específica para esta versión.** Ver criterios y evidencia en
+[Navegación y envíos históricos](NAVEGACION_Y_ENVIOS_HISTORICOS.md).
+
 ## 17/09/2026 — Publicación autorizada del control gerencial y vigilancia DHL
 
 Rama `codex/admin-control-20260917`, base `d88ffc08`. Nuevo `/admin/home`:

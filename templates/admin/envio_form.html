@@ -9,8 +9,8 @@
 
 <div class="card" style="max-width:560px;">
   <p style="color:var(--fg-4);margin:0 0 14px;">Guardar genera un cargo en la cuenta del cliente. La factura se carga después, desde su ficha.</p>
-  <form method="POST" action="/admin/envios/nuevo">
-    <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+  <form data-draft-auto method="POST" action="/admin/envios/nuevo">
+    <input type="hidden" data-draft-persist name="idempotency_key" value="{{ idempotency_key }}">
 
     <div class="form-group">
       <label>Cliente *</label>

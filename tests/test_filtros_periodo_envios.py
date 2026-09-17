@@ -137,7 +137,7 @@ def test_endpoint_portal_aplica_el_rango_al_cliente_autenticado(monkeypatch):
     )
 
 
-def test_buscador_portal_descarta_todos_los_filtros_activos(monkeypatch):
+def test_buscador_portal_conserva_solapa_y_descarta_fecha_y_ambito(monkeypatch):
     from endpoints import portal_cliente as portal
     from servicios import configuracion_couriers_cliente as permisos
 
@@ -178,7 +178,7 @@ def test_buscador_portal_descarta_todos_los_filtros_activos(monkeypatch):
         "limite": None, "desde": None, "hasta": None,
     })]
     assert argumentos_vista == [{
-        "tipo": "", "paso": "", "pagina": "1", "buscar": "TRACK-123",
+        "tipo": "", "paso": "despachados", "pagina": "1", "buscar": "TRACK-123",
     }]
     assert respuesta.context["periodo"]["etiqueta"] == "Todo el historial"
     assert respuesta.context["periodo_query"] == ""

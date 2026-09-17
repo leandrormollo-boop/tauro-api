@@ -14,6 +14,12 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     </div>
     {% if movimientos.total_resultados %}<p class="account-results-count">{{ movimientos.pagina_desde }}–{{ movimientos.pagina_hasta }} de {{ movimientos.total_resultados }}</p>{% endif %}
 </div>
+<nav class="account-history-tabs" aria-label="Estado de los envíos en cuenta">
+    {% for clave, etiqueta in (("todos", "Todos"), ("modificados", "Modificados"), ("cancelados", "Cancelados")) %}
+    <a href="{{ cuenta_url(tipo=clave, pagina=1) }}#movimientos" class="btn btn-sm {{ 'btn-primary' if tipo_filtro == clave or (clave == 'todos' and tipo_filtro not in ('modificados','cancelados')) else 'btn-ghost' }}"{% if tipo_filtro == clave %} aria-current="page"{% endif %}>{{ etiqueta }}</a>
+    {% endfor %}
+    <span data-help="Historial de envíos">Todos muestra los movimientos vigentes. Las guías reemplazadas están en Modificados y las anuladas en Cancelados, sin sumar cargos.</span>
+</nav>
     {% if filtros_error|default('') %}<div class="msg error" role="alert">{{ filtros_error }}</div>{% endif %}
     <form class="account-unified-filters" method="get" action="/portal/cuenta#movimientos" role="search" aria-label="Filtrar movimientos">
         <label class="account-search"><span>Buscar un movimiento</span><input type="search" name="q" value="{{ q_filtro }}" placeholder="Destinatario, guía o referencia" maxlength="120"></label>
@@ -25,14 +31,18 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                 {% endfor %}
             </select>
         </label>
+        {% if tipo_filtro in ('modificados','cancelados') %}
+        <input type="hidden" name="tipo" value="{{ tipo_filtro }}">
+        {% else %}
         <label>
             <span>Tipo</span>
             <select name="tipo">
-                {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos y facturas"), ("costos", "Cargos y ajustes"), ("pagos", "Pagos"), ("diferencias", "Ajustes"), ("revision", "En revisión"), ("cancelados", "Cancelados / reemplazados")) %}
+                {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos y facturas"), ("costos", "Cargos y ajustes"), ("pagos", "Pagos"), ("diferencias", "Ajustes"), ("revision", "En revisión")) %}
                 <option value="{{ clave }}" {% if tipo_filtro == clave %}selected{% endif %}>{{ etiqueta }}</option>
                 {% endfor %}
             </select>
         </label>
+        {% endif %}
         <label><span>Desde</span><input type="date" name="desde" value="{{ desde_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label>
         <label><span>Hasta</span><input type="date" name="hasta" value="{{ hasta_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label>
         <button type="submit" class="btn btn-ghost">Filtrar</button>

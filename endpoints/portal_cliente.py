@@ -117,6 +117,7 @@ templates = Jinja2Templates(directory="templates")
 
 # Helpers de courier disponibles en TODOS los templates del portal: la URL
 # de tracking y la división nacional/internacional salen de un solo lugar.
+from servicios.borradores import confirmar_borrador
 from servicios.couriers_urls import ambito_envio, es_nacional, nombre_courier, url_tracking
 from servicios.presentacion import dinero_ars, numero_ars
 templates.env.globals["url_tracking"] = url_tracking
@@ -131,7 +132,7 @@ templates.env.globals["numero_ars"] = numero_ars
 AMBITOS_PORTAL = {"nacional", "internacional"}
 AMBITOS_CUENTA = {"consolidado", "nacional", "internacional"}
 TIPOS_MOVIMIENTO_CUENTA = {
-    "todos", "cargos", "pagos", "diferencias", "revision", "costos", "cancelados",
+    "todos", "cargos", "pagos", "diferencias", "revision", "costos", "cancelados", "modificados",
 }
 # Mantiene resumen, filtros y una página completa dentro del viewport de
 # escritorio; el resto queda accesible con paginación explícita.
@@ -2064,11 +2065,11 @@ def envios_view(
 ):
     # Esta es la vista de historial, no un preview: no ocultar silenciosamente
     # los envíos anteriores al límite por defecto del servicio.
-    # Sin query se muestra el historial completo. El buscador es global: no
-    # hereda ámbito, estado ni período de la pantalla desde la que se ejecutó.
+    # Todos muestra envíos vigentes. La búsqueda abarca todas las fechas y
+    # ámbitos, conservando la solapa elegida (incluye la historia por separado).
     busqueda_global = str(buscar or "").strip()[:80]
     if busqueda_global:
-        tipo, paso, anio, mes, semana = "", "", "", "", ""
+        tipo, anio, mes, semana = "", "", "", ""
     else:
         tipo = _ambito_portal(tipo)
     periodos_disponibles = periodos_solicitudes_cliente(cliente)
@@ -2711,6 +2712,7 @@ def envio_nuevo_post(
     pedido_tienda_id: str = Form(""),
     reemplaza_solicitud_id: str = Form(""),
     reemision_motivo: str = Form(""),
+    borrador_token: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
     if _ambito_post(ambito) != "internacional":
@@ -2950,6 +2952,7 @@ def envio_nuevo_post(
         "pedido_tienda_id": pedido_tienda_id,
         "reemplaza_solicitud_id": reemplaza_solicitud_id,
         "reemision_motivo": reemision_motivo,
+        "borrador_token": borrador_token if isinstance(borrador_token, str) else "",
     }
 
     error_step = 1
@@ -3374,17 +3377,17 @@ def envio_nuevo_post(
         )
         if resultado_emision.get("ok"):
             return RedirectResponse(
-                url=f"/portal/envios/{solicitud_creada['id']}?ok=reemision",
+                url=confirmar_borrador(f"/portal/envios/{solicitud_creada['id']}?ok=reemision", borrador_token),
                 status_code=303,
             )
         return RedirectResponse(
-            url=(f"/portal/envios/{solicitud_creada['id']}?error="
-                 f"{quote(str(resultado_emision.get('error') or 'No se pudo emitir'))}"),
+            url=confirmar_borrador((f"/portal/envios/{solicitud_creada['id']}?error="
+                 f"{quote(str(resultado_emision.get('error') or 'No se pudo emitir'))}"), borrador_token),
             status_code=303,
         )
 
     return RedirectResponse(
-        url="/portal/envios?tipo=internacional&ok=solicitado",
+        url=confirmar_borrador("/portal/envios?tipo=internacional&ok=solicitado", borrador_token),
         status_code=303,
     )
 

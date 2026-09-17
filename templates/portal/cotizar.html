@@ -57,7 +57,7 @@
 
     <div class="quote-stage" id="quote-stage" aria-busy="false">
         <section class="card quote-form-card {% if opciones %}is-hidden{% endif %}" id="quote-form-panel">
-            <form id="form-cotizar" method="POST" action="/portal/cotizar">
+            <form data-draft-key="cotizar:internacional" data-draft-server="{{ 1 if request.method == 'POST' else 0 }}" id="form-cotizar" method="POST" action="/portal/cotizar">
                 <input type="hidden" name="ambito" value="internacional">
                 <div class="quote-form-overview">
                     <div class="quote-form-overview-copy">
@@ -66,9 +66,9 @@
                         <small id="quote-step-description">Indicá desde dónde sale el envío y a qué país llega.</small>
                     </div>
                     <div class="quote-stepper" aria-label="Progreso de la cotización">
-                        <span class="is-active" data-quote-step="route"><b>1</b><small>Ruta</small></span>
+                        <span class="is-active" data-quote-step="route" role="button" tabindex="0" aria-label="Volver a la ruta"><b>1</b><small>Ruta</small></span>
                         <i aria-hidden="true"></i>
-                        <span data-quote-step="packages"><b>2</b><small>Caja</small></span>
+                        <span data-quote-step="packages" role="button" tabindex="0" aria-label="Ir a las cajas"><b>2</b><small>Caja</small></span>
                     </div>
                 </div>
                 <div class="quote-route-confirmation" id="quote-route-confirmation" hidden>
@@ -140,7 +140,7 @@
                                        placeholder="Ej. 1010">
                             </div>
                         </div>
-
+                        <button type="button" id="quote-route-next" class="btn btn-primary btn-sm">Continuar con las cajas →</button>
                     </div>
 
                     <div class="quote-form-block" data-quote-section="packages">
@@ -316,6 +316,16 @@
     var destinationCity = document.getElementById("destino_ciudad_internacional");
     var destinationPostal = document.getElementById("destino_cp_internacional");
     var editingRoute = false;
+    var quoteDraft = window.TauroDraft && window.TauroDraft.attach(form, {
+      capture: function () { return {packages:packageList.querySelectorAll('[data-package-row]').length, editingRoute:form.dataset.editingRoute === "1"}; },
+      prepare: function (data) {
+        var count = Math.max(1, Math.min(20, Number(data.packages) || 1));
+        while (packageList.querySelectorAll('[data-package-row]').length < count) packageList.appendChild(packageTemplate.content.cloneNode(true));
+        Array.from(packageList.querySelectorAll('[data-package-row]')).slice(count).forEach(function (row) { row.remove(); });
+      },
+      restore: function (data) { editingRoute = Boolean(data.editingRoute); }
+    });
+
 
     function applyLocationReference(select, cityInput, postalInput, force) {
         if (!select || !cityInput || !postalInput) return;
@@ -348,6 +358,7 @@
 
     function showQuoteStep(routeReady, quoteReady) {
         var showPackages = routeReady && !editingRoute;
+      if (form) form.dataset.editingRoute = editingRoute ? "1" : "0";
         if (form) form.classList.add("quote-flow-enabled");
         if (routeBlock) routeBlock.classList.toggle("is-step-hidden", showPackages);
         if (packagesBlock) packagesBlock.classList.toggle("is-step-hidden", !showPackages);
@@ -491,25 +502,15 @@
         form.addEventListener("change", function (event) {
             if (event.target && event.target.id === "origen_pais") {
                 applyLocationReference(origin, originCity, originPostal, true);
-                editingRoute = false;
-            }
+                  }
             if (event.target && event.target.id === "destino_pais") {
                 applyLocationReference(destination, destinationCity, destinationPostal, true);
-                editingRoute = false;
-            }
+                  }
             syncQuotePreview();
         });
         if (routeBlock) {
             routeBlock.addEventListener("focusin", function (event) {
                 if (event.target && event.target.matches("input")) editingRoute = true;
-            });
-            routeBlock.addEventListener("focusout", function () {
-                window.setTimeout(function () {
-                    if (!routeBlock.contains(document.activeElement)) {
-                        editingRoute = false;
-                        syncQuotePreview();
-                    }
-                }, 0);
             });
         }
         applyLocationReference(origin, originCity, originPostal, false);
@@ -517,19 +518,29 @@
         syncQuotePreview();
     }
 
-    if (editRoute) {
-        editRoute.addEventListener("click", function () {
-            editingRoute = true;
-            var destination = document.getElementById("destino_pais");
-            if (destination) {
-                destination.value = "";
-                destination.dispatchEvent(new Event("change", {bubbles: true}));
-            }
-            syncQuotePreview();
-            var origin = document.getElementById("origen_pais");
-            if (origin) origin.focus({ preventScroll: true });
-        });
+    function goRoute() {
+      editingRoute = true;
+      syncQuotePreview();
+      if (origin) origin.focus({preventScroll:true});
     }
+    function goPackages() {
+      var invalid = Array.from(routeBlock.querySelectorAll("input,select")).find(function (el) { return !el.checkValidity(); });
+      if (invalid) { editingRoute = true; syncQuotePreview(); invalid.reportValidity(); return; }
+      editingRoute = false;
+      syncQuotePreview();
+      var weight = packageList.querySelector('[name="bulto_peso"]');
+      if (weight) weight.focus({preventScroll:true});
+    }
+    if (editRoute) editRoute.addEventListener("click", goRoute);
+    var nextRoute = document.querySelector("#quote-route-next");
+    if (nextRoute) nextRoute.addEventListener("click", goPackages);
+    [[routeStep, goRoute], [packagesStep, goPackages]].forEach(function (pair) {
+      if (!pair[0]) return;
+      pair[0].addEventListener("click", pair[1]);
+      pair[0].addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pair[1](); }
+      });
+    });
 
     if (form) {
         form.addEventListener("submit", function () {
@@ -544,8 +555,7 @@
             if (result) result.classList.add("is-hidden");
             panel.classList.remove("is-hidden");
             modify.hidden = true;
-            var origin = document.getElementById("origen_pais");
-            if (origin) origin.focus({ preventScroll: true });
+            goPackages();
         });
     }
     if (result) {

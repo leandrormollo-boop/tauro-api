@@ -12,6 +12,7 @@
   var scopeLinks = dialog.querySelectorAll("[data-cotizar-scope]");
   var opener = null;
   var requestSerial = 0;
+  var cachedQuotes = {};
 
   function numberFrom(value) {
     var normalized = String(value || "").trim();
@@ -102,6 +103,7 @@
     root.dataset.quoteWindowReady = "1";
 
     var form = root.querySelector("#form-cotizar-nacional");
+    if (window.TauroDraft) window.TauroDraft.attach(form);
     var panel = root.querySelector("#national-quote-form-panel");
     var result = root.querySelector("#national-result");
     var loader = root.querySelector("#national-loading");
@@ -194,6 +196,16 @@
     var destinationCity = root.querySelector("#destino_ciudad_internacional");
     var destinationPostal = root.querySelector("#destino_cp_internacional");
     var editingRoute = false;
+    var quoteDraft = window.TauroDraft && window.TauroDraft.attach(form, {
+      capture: function () { return {packages:packageList.querySelectorAll('[data-package-row]').length, editingRoute:form.dataset.editingRoute === "1"}; },
+      prepare: function (data) {
+        var count = Math.max(1, Math.min(20, Number(data.packages) || 1));
+        while (packageList.querySelectorAll('[data-package-row]').length < count) packageList.appendChild(packageTemplate.content.cloneNode(true));
+        Array.from(packageList.querySelectorAll('[data-package-row]')).slice(count).forEach(function (row) { row.remove(); });
+      },
+      restore: function (data) { editingRoute = Boolean(data.editingRoute); }
+    });
+
 
     function applyLocationReference(select, cityInput, postalInput, force) {
       if (!select || !cityInput || !postalInput) return;
@@ -206,6 +218,7 @@
 
     function showStep(routeReady, quoteReady) {
       var showPackages = routeReady && !editingRoute;
+      if (form) form.dataset.editingRoute = editingRoute ? "1" : "0";
       if (form) form.classList.add("quote-flow-enabled");
       if (routeBlock) routeBlock.classList.toggle("is-step-hidden", showPackages);
       if (packagesBlock) packagesBlock.classList.toggle("is-step-hidden", !showPackages);
@@ -333,11 +346,9 @@
       form.addEventListener("change", function (event) {
         if (event.target && event.target.id === "origen_pais") {
           applyLocationReference(origin, originCity, originPostal, true);
-          editingRoute = false;
         }
         if (event.target && event.target.id === "destino_pais") {
           applyLocationReference(destination, destinationCity, destinationPostal, true);
-          editingRoute = false;
         }
         syncPreview();
       });
@@ -345,15 +356,7 @@
         routeBlock.addEventListener("focusin", function (event) {
           if (event.target && event.target.matches("input")) editingRoute = true;
         });
-        routeBlock.addEventListener("focusout", function () {
-          window.setTimeout(function () {
-            if (!routeBlock.contains(document.activeElement)) {
-              editingRoute = false;
-              syncPreview();
-            }
-          }, 0);
-        });
-      }
+        }
       applyLocationReference(origin, originCity, originPostal, false);
       applyLocationReference(destination, destinationCity, destinationPostal, false);
       syncPreview();
@@ -395,27 +398,36 @@
       });
     }
 
-    if (editRoute) {
-      editRoute.addEventListener("click", function () {
-        editingRoute = true;
-        var destination = root.querySelector("#destino_pais");
-        if (destination) {
-          destination.value = "";
-          destination.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        syncPreview();
-        var origin = root.querySelector("#origen_pais");
-        if (origin) origin.focus({ preventScroll: true });
-      });
+    function goRoute() {
+      editingRoute = true;
+      syncPreview();
+      if (origin) origin.focus({preventScroll:true});
     }
+    function goPackages() {
+      var invalid = Array.from(routeBlock.querySelectorAll("input,select")).find(function (el) { return !el.checkValidity(); });
+      if (invalid) { editingRoute = true; syncPreview(); invalid.reportValidity(); return; }
+      editingRoute = false;
+      syncPreview();
+      var weight = packageList.querySelector('[name="bulto_peso"]');
+      if (weight) weight.focus({preventScroll:true});
+    }
+    if (editRoute) editRoute.addEventListener("click", goRoute);
+    var nextRoute = root.querySelector("#quote-route-next");
+    if (nextRoute) nextRoute.addEventListener("click", goPackages);
+    [[routeStep, goRoute], [packagesStep, goPackages]].forEach(function (pair) {
+      if (!pair[0]) return;
+      pair[0].addEventListener("click", pair[1]);
+      pair[0].addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pair[1](); }
+      });
+    });
 
     if (modify) {
       modify.addEventListener("click", function () {
         if (result) result.classList.add("is-hidden");
         if (panel) panel.classList.remove("is-hidden");
         modify.hidden = true;
-        var origin = root.querySelector("#origen_pais");
-        if (origin) origin.focus({ preventScroll: true });
+        goPackages();
       });
     }
 
@@ -425,15 +437,44 @@
   }
 
   function mountQuote(quote) {
+    var previous = content.querySelector("form");
+    if (previous && previous.tauroDraft) { previous.tauroDraft.save(); previous.tauroDraft.stop(); }
     content.replaceChildren(quote);
     content.scrollTop = 0;
     markScope(quote.classList.contains("national-quote-screen") ? "nacional" : "internacional");
     initializeQuote(quote);
+    keepCurrentQuote();
+  }
+
+  function keepCurrentQuote() {
+    var root = content.querySelector(".quote-screen");
+    if (!root) return;
+    var form = root.querySelector("form");
+    if (form && form.tauroDraft) form.tauroDraft.save();
+    var scope = root.classList.contains("national-quote-screen") ? "nacional" : "internacional";
+    var stage = content.querySelector('[aria-busy="true"]');
+    if (stage) {
+      stage.setAttribute("aria-busy", "false");
+      var loader = stage.querySelector("#toro-loading, #national-loading");
+      var panel = stage.querySelector("#quote-form-panel, #national-quote-form-panel");
+      if (loader) loader.hidden = true;
+      if (panel) panel.classList.remove("is-hidden");
+      var submit = stage.querySelector('[type="submit"]');
+      if (submit) submit.disabled = false;
+    }
+    cachedQuotes[scope] = {root:root, scroll:content.scrollTop};
   }
 
   function loadScope(scope) {
+    keepCurrentQuote();
     var normalized = scope === "nacional" ? "nacional" : "internacional";
     markScope(normalized);
+    requestSerial += 1;
+    if (cachedQuotes[normalized]) {
+      var saved = cachedQuotes[normalized];
+      content.replaceChildren(saved.root); content.scrollTop = saved.scroll;
+      return;
+    }
     loading("Preparando el cotizador " + normalized + "…");
     var serial = ++requestSerial;
     fetch("/portal/cotizar?ambito=" + normalized, {
@@ -489,7 +530,7 @@
   });
   dialog.addEventListener("close", function () {
     requestSerial += 1;
-    content.replaceChildren();
+    keepCurrentQuote();
     if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
     opener = null;
   });

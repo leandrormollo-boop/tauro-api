@@ -116,8 +116,9 @@
     </div>
 </div>
 {% endif %}
-<form method="POST" action="/portal/envios/nuevo"
+<form data-draft-server="{{ 1 if error else 0 }}" method="POST" action="/portal/envios/nuevo"
       {% if reemision_origen %}data-confirm="¿Confirmar la corrección? DHL emitirá un tracking nuevo. La guía anterior quedará reemplazada y sólo la nueva se aplicará a tu cuenta corriente."{% endif %}>
+    <input type="hidden" name="borrador_token" value="{{ form.borrador_token or '' }}">
     <input type="hidden" name="ambito" value="internacional">
     <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
     <input type="hidden" name="reemplaza_solicitud_id" value="{{ form.reemplaza_solicitud_id or '' }}">
@@ -582,7 +583,7 @@
             <button type="button" id="wizard-back-final" class="btn btn-ghost">
                 ← Atrás
             </button>
-            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Cancelar</a>
+            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Salir</a>
             <button type="submit" class="btn btn-primary">
                 {{ 'Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud' }}
             </button>
@@ -1192,6 +1193,9 @@
     // vació el form, un timer viejo no puede pintar un precio fantasma
     // encima del estado "idle" (y priceSeq++ invalida respuestas en vuelo).
     clearTimeout(priceTimer);
+    var seq = ++priceSeq;
+    intlOpciones = [];
+    pintarBotonesCourier();
     if (precioCotizado) precioCotizado.value = "";
     if (!bultos.length || !destino) { priceSeq++; renderLivePrice("idle"); return; }
 
@@ -1206,7 +1210,6 @@
     }
 
     priceTimer = setTimeout(function () {
-      var seq = ++priceSeq;
       renderLivePrice("loading");
       fetch("/portal/api/precio-multi", {
         method: "POST",
@@ -1250,6 +1253,33 @@
   });
   var originCountry = document.getElementById("rem_pais");
   if (originCountry) originCountry.addEventListener("change", refreshLivePrice);
+  var shipmentDraft = window.TauroDraft && window.TauroDraft.attach(shipmentForm, {
+    capture: function () {
+      return {boxes:bultoRows().length, invoices:invoiceRows().map(leerArticulos),
+        courier:courierElegido, step:document.getElementById("shipment-wizard").dataset.step};
+    },
+    prepare: function (data) {
+      var count = Math.max(1, Math.min(20, Number(data.boxes) || 1));
+      while (bultoRows().length < count) agregarBulto("", 1);
+      bultoRows().slice(count).forEach(function (row) { row.remove(); });
+      invoiceRows().slice(count).forEach(function (row) { row.remove(); });
+      invoiceRows().forEach(function (row, i) {
+        articulosDe(row).slice(1).forEach(function (item) { item.remove(); });
+        var items = (data.invoices || [])[i] || [];
+        items.slice(1,100).forEach(function (item) { agregarArticulo(row, item); });
+      });
+    },
+    restore: function (data) {
+      // Las filas adicionales no tienen name: se reconstruyen arriba desde
+      // el contenido explícito, sin conservar HTML ni handlers del borrador.
+      invoiceRows().forEach(sincronizarArticulos);
+      renumerarBultos(); actualizarResumenRemitente(); actualizarResumenSeguro();
+      courierElegido = ["dhl", "fedex", "ups"].indexOf(data.courier) >= 0 ? data.courier : courierElegido;
+      if (intlCourier) intlCourier.value = courierElegido;
+      document.getElementById("shipment-wizard").dataset.initialStep = String(data.step || 1);
+      pintarBotonesCourier();
+    }
+  });
   refreshLivePrice();
 
   // ── Pegar pedido → precargar form ─────────────────────────
@@ -1344,7 +1374,7 @@
     var initialStep = parseInt((wizard && wizard.dataset.initialStep) || "1", 10);
     var actual = Math.max(0, Math.min((isNaN(initialStep) ? 1 : initialStep) - 1, secs.length - 1));
 
-    function pintar() {
+    function pintar(scroll) {
       secs.forEach(function (sec, i) {
         sec.style.display = (i === actual) ? "" : "none";
       });
@@ -1353,10 +1383,12 @@
         st.classList.toggle("done", k < actual);
         st.querySelector("span").textContent = k < actual ? "✓" : String(k + 1);
         st.style.cursor = "pointer";
+        st.setAttribute("role", "button"); st.tabIndex = 0;
+        st.setAttribute("aria-current", k === actual ? "step" : "false");
       });
       if (barra) barra.style.display = (actual === secs.length - 1) ? "" : "none";
       if (wizard) wizard.dataset.step = String(actual + 1);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      if (scroll) window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
     function validaPaso(i) {
@@ -1372,13 +1404,15 @@
       return false;
     }
 
-    function ir(i) {
+    function ir(i, fromHistory) {
       // El stepper puede volver a un paso terminado, pero no saltear uno
       // futuro: cada pantalla se valida antes de avanzar a la siguiente.
       if (i > actual + 1) i = actual + 1;
       if (i > actual && !validaPaso(actual)) return;
       actual = Math.max(0, Math.min(i, secs.length - 1));
-      pintar();
+      pintar(true);
+      if (!fromHistory) history.pushState(history.state, "", "#paso-" + (actual + 1));
+      if (shipmentDraft) shipmentDraft.save();
       if (actual === secs.length - 1 && typeof refreshLivePrice === "function") {
         refreshLivePrice();   // llegó al paso del precio: cotizar ya
       }
@@ -1386,6 +1420,9 @@
 
     steps.forEach(function (st, k) {
       st.addEventListener("click", function () { ir(k); });
+      st.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); ir(k); }
+      });
     });
 
     // Botonera Atrás / Siguiente al pie de cada paso.
@@ -1415,7 +1452,17 @@
       volverFinal.addEventListener("click", function () { ir(actual - 1); });
     }
 
-    pintar();
+    history.replaceState(history.state, "", "#paso-" + (actual + 1));
+    window.addEventListener("popstate", function () {
+      var match = location.hash.match(/^#paso-([1-4])$/);
+      if (match) ir(Number(match[1]) - 1, true);
+    });
+    // Validación nativa de un campo en otra pantalla: abrir ese paso.
+    if (shipmentForm) shipmentForm.addEventListener("invalid", function (event) {
+      var index = Array.from(secs).findIndex(function (sec) { return sec.contains(event.target); });
+      if (index >= 0) { actual = index; pintar(false); }
+    }, true);
+    pintar(false);
   })();
 </script>
 </div>

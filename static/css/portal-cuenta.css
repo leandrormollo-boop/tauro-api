@@ -377,3 +377,7 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
 .account-client .account-unified-filters .tselect,
 .account-client .account-unified-filters .tselect-btn { min-width: 0; max-width: 100%; width: 100%; }
 .account-client .account-unified-filters .tselect-label { min-width: 0; }
+
+.account-history-tabs { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
+
+.account-history-tabs .btn { padding:8px 10px; font-size:12px; }

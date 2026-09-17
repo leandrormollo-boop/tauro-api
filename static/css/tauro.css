@@ -6004,3 +6004,7 @@ html[data-theme="light"] .main:has(> .main-inner > .home-hero) .home-scope-activ
     -webkit-backdrop-filter: none;
   }
 }
+
+.draft-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin:0 0 12px; }
+.draft-bar .draft-status { color:var(--fg-3); font-size:12px; }
+.draft-bar .draft-reset { padding:4px 8px; font-size:12px; }

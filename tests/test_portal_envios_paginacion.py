@@ -59,8 +59,8 @@ def test_filtros_todos_internacionales_y_nacionales_son_distintos():
         _historial(), tipo="nacional", por_pagina=20
     )
 
-    assert [s["id"] for s in todos["solicitudes"]] == [1, 2, 3, 4, 5, 6, 7]
-    assert [s["id"] for s in internacionales["solicitudes"]] == [1, 3, 5, 7]
+    assert [s["id"] for s in todos["solicitudes"]] == [1, 2, 3, 4, 5, 6]
+    assert [s["id"] for s in internacionales["solicitudes"]] == [1, 3, 5]
     assert [s["id"] for s in nacionales["solicitudes"]] == [2, 4, 6]
 
 
@@ -98,7 +98,7 @@ def test_pagina_invalida_o_fuera_de_rango_se_normaliza():
     assert invalida["pagina_actual"] == 1
     assert negativa["pagina_actual"] == 1
     assert excesiva["pagina_actual"] == 1
-    assert [s["id"] for s in excesiva["solicitudes"]] == [1, 2, 3, 4, 5, 6, 7]
+    assert [s["id"] for s in excesiva["solicitudes"]] == [1, 2, 3, 4, 5, 6]
 
 
 def test_filtro_sin_resultados_no_se_confunde_con_cliente_sin_historial():
@@ -216,7 +216,19 @@ def test_endpoint_real_usa_el_contrato_paginado_de_historial():
     assert "buscar=busqueda_global" in endpoint
     assert 'pagina: str = "1"' in endpoint
     assert 'tipo = _ambito_portal(tipo)' in endpoint
-    assert 'tipo, paso, anio, mes, semana = "", "", "", "", ""' in endpoint
+    assert 'tipo, anio, mes, semana = "", "", "", ""' in endpoint
     assert "periodos_solicitudes_cliente(cliente)" in endpoint
     assert 'desde=periodo["desde"]' in endpoint
     assert 'hasta=periodo["hasta"]' in endpoint
+
+
+def test_historia_separada_tiene_contadores_busqueda_y_paginas_propios():
+    history = [_envio(1, 'DHL', 'GUIA_LISTA'), _envio(2, 'DHL', 'REEMPLAZADO'), _envio(3, 'DHL', 'CANCELADO')]
+    for paso, expected in [('',1),('modificados',2),('canceladas',3)]:
+        view=preparar_historial_envios(history,paso=paso,buscar='TRACK',por_pagina=1)
+        assert [s['id'] for s in view['solicitudes']]==[expected]
+        assert view['total_internacionales']==1
+        assert view['total_resultados']==view['total_paginas']==1
+    empty=preparar_historial_envios(history[1:])
+    assert empty['solicitudes']==[] and empty['tiene_historial']
+    assert empty['total_busqueda']==0

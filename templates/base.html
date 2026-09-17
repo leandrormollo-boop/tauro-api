@@ -24,14 +24,15 @@
       document.getElementById("portal-theme-color").content = tema === "light" ? "#f5f3f8" : "#0c0a14";
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/tauro.css?v=48">
+    <link rel="stylesheet" href="/static/css/tauro.css?v=49">
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=2">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=1">{% endif %}
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/info-ayuda.css?v=1">
+    <script src="/static/js/form-draft.js?v=1"></script>
     <script src="/static/js/info-ayuda.js?v=1" defer></script>
     <script src="/static/js/tauro-ui.js?v=8" defer></script>
-    <script src="/static/js/portal-cotizador.js?v=3" defer></script>
+    <script src="/static/js/portal-cotizador.js?v=4" defer></script>
     <script src="/static/js/portal-theme.js?v=1" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png?v=2">
     <link rel="apple-touch-icon" href="/static/img/favicon-180.png">
@@ -45,7 +46,7 @@
     <meta name="apple-mobile-web-app-title" content="TAURO">
     <script src="/static/js/portal-pwa.js?v=1" defer></script>
 </head>
-<body{% if cliente %} class="portal-operacion"{% endif %}>
+<body data-draft-scope="{{ ('portal:' ~ cliente) if cliente else '' }}"{% if cliente %} class="portal-operacion"{% endif %}>
 {% if not cliente %}
 <button type="button" class="theme-toggle theme-toggle-floating" data-theme-toggle aria-label="Cambiar apariencia" title="Cambiar apariencia">
     <span class="theme-toggle-track" aria-hidden="true">

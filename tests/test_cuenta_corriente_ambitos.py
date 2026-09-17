@@ -890,7 +890,7 @@ def test_cancelar_envio_es_transicion_unica_con_ownership_y_auditoria(monkeypatc
     assert cc.cancelar_envio(9, cliente_id="DUENO") is False
     assert len(auditorias) == 1
     assert auditorias[0]["event"] == "cuenta.cancelar_cargo"
-    sql = cursor.ejecutadas[0][0]
+    sql = next(sql for sql, _ in cursor.ejecutadas if sql.startswith("UPDATE envios"))
     assert "estado = 'ACTIVO'" in sql
     assert "NULLIF(BTRIM(nro_fc), '') IS NULL" in sql
     assert "RETURNING id, cliente_id" in sql

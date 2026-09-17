@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
     ("GUIA_LISTA", "PROCESO_ENTREGA", "PROCESO_ENTREGA", "despachados"),
     ("DESPACHADO", None, "DESPACHADO", "despachados"),
     ("GUIA_LISTA", None, "GUIA_LISTA", "guia_lista"),
-    ("REEMPLAZADO", "ENTREGADO", "REEMPLAZADO", "canceladas"),
+    ("REEMPLAZADO", "ENTREGADO", "REEMPLAZADO", "modificados"),
     ("CANCELADO", "RETENIDO", "CANCELADO", "canceladas"),
     ("ENTREGADO", "PROCESO_ENTREGA", "ENTREGADO", "entregados"),
 ])
@@ -63,7 +63,7 @@ def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100
              "resumen_pesos": {"real_total_kg": 1, "volumetrico_total_kg": 1,
                                "facturable_total_kg": 1, "divisor": 5000, "cobra_por_volumen": False}}
     return env.get_template(template).render(
-        **preparar_historial_envios([envio]), parcial=parcial, request=request,
+        **preparar_historial_envios([envio], paso={"CANCELADO":"canceladas", "REEMPLAZADO":"modificados"}.get(estado,"")), parcial=parcial, request=request,
         cliente="CLIENTE_DEMO", periodo=normalizar_periodo("", "", "", [(2026, 9)]),
         periodo_query="", puede_emitir=puede_emitir, s=presentar_estados_envio(envio),
     )

@@ -29,6 +29,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 
 from core.database import get_conn
+from servicios.borradores import confirmar_borrador
 from servicios.cuenta_corriente import (
     registrar_pago, registrar_envio, cancelar_envio,
     get_envios_cliente, get_pagos,
@@ -2312,6 +2313,7 @@ async def admin_envio_nuevo(
     # Default vacío permite que un form abierto antes del deploy reciba un
     # error humano y una clave nueva, en vez del JSON 422 de FastAPI.
     idempotency_key: str = Form(""),
+    borrador_token: str = Form(""),
     descripcion: str = Form(""),
     tracking: str = Form(""),
     estado: str = Form("ACTIVO"),
@@ -2356,7 +2358,7 @@ async def admin_envio_nuevo(
             tracking=tracking,
             idempotency_key=idempotency_key_normalizada,
         )
-        return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
+        return RedirectResponse(url=confirmar_borrador(f"/admin/clientes/{cliente_id.upper()}", borrador_token), status_code=303)
     except ValueError as e:
         clientes = _get_clientes_lista()
         today = datetime.now().strftime("%Y-%m-%d")
@@ -2971,15 +2973,19 @@ def admin_pedido_estado(
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    actualizar_solicitud_guia(
-        solicitud_id,
-        estado=estado,
-        tracking=tracking,
-        guia_url=guia_url,
-        # El checkbox "pisar valores" permite corregir (o vaciar) un tracking
-        # mal tipeado sin SQL a mano. Es opt-in por fila, nunca el default.
-        pisar=(pisar == "1"),
-    )
+    try:
+        actualizar_solicitud_guia(
+            solicitud_id,
+            estado=estado,
+            tracking=tracking,
+            guia_url=guia_url,
+            # El checkbox "pisar valores" permite corregir (o vaciar) un tracking
+            # mal tipeado sin SQL a mano. Es opt-in por fila, nunca el default.
+            pisar=(pisar == "1"),
+        )
+    except ValueError as exc:
+        from urllib.parse import quote
+        return RedirectResponse(url="/admin/pedidos?error=" + quote(str(exc)), status_code=303)
     _notificar_estado_async(solicitud_id, estado)
     return RedirectResponse(url="/admin/pedidos?ok=actualizado", status_code=303)
 
@@ -3157,7 +3163,7 @@ async def admin_pedido_editar(
         return RedirectResponse(
             url=f"/admin/pedidos/{solicitud_id}/editar?error={quote(str(e))}",
             status_code=303)
-    return RedirectResponse(url="/admin/pedidos?ok=editado", status_code=303)
+    return RedirectResponse(url=confirmar_borrador("/admin/pedidos?ok=editado", form.get("borrador_token")), status_code=303)
 
 
 @router.post("/pedidos/{solicitud_id}/generar-guia")
@@ -3527,6 +3533,7 @@ async def admin_envio_realizado_post(
     costo_courier_estimado_ars: str = Form(...),
     courier: str = Form("FEDEX"),
     origen_pais: str = Form("AR"),
+    borrador_token: str = Form(""),
     observaciones: str = Form(""),
     guia_pdf: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
@@ -3579,7 +3586,7 @@ async def admin_envio_realizado_post(
 
     if resultado.get("ok"):
         return RedirectResponse(
-            url=f"/admin/clientes/{cliente_id.strip().upper()}?ok=envio_cargado",
+            url=confirmar_borrador(f"/admin/clientes/{cliente_id.strip().upper()}?ok=envio_cargado", borrador_token),
             status_code=303)
     return RedirectResponse(
         url=f"/admin/envios-realizados/nuevo?error={quote(str(resultado.get('error') or 'error'))}",

@@ -472,7 +472,11 @@ def validar_reemision_cliente(
                 SELECT s.id, s.cliente_id, s.estado, s.courier, s.tracking,
                        s.tracking_estado, s.cargo_pendiente,
                        e.id AS cargo_id, e.estado AS cargo_estado,
-                       e.nro_fc AS cargo_nro_fc, e.monto_ars AS cargo_monto_ars,
+                       COALESCE(NULLIF(BTRIM(e.nro_fc), ''), (
+                           SELECT 'Factura TAURO' FROM facturas_cliente_items fi
+                           JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                           WHERE fi.envio_id=e.id AND fc.estado='EMITIDA' LIMIT 1
+                       )) AS cargo_nro_fc, e.monto_ars AS cargo_monto_ars,
                        r.solicitud_nueva_id AS reemision_existente_id,
                        EXISTS (
                            SELECT 1 FROM ajustes_cliente a
@@ -644,7 +648,11 @@ def validar_cancelacion_cliente(
                 SELECT s.id, s.cliente_id, s.estado, s.courier, s.tracking,
                        s.tracking_estado, s.cargo_pendiente,
                        e.id AS cargo_id, e.estado AS cargo_estado,
-                       e.nro_fc AS cargo_nro_fc, e.monto_ars AS cargo_monto_ars,
+                       COALESCE(NULLIF(BTRIM(e.nro_fc), ''), (
+                           SELECT 'Factura TAURO' FROM facturas_cliente_items fi
+                           JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                           WHERE fi.envio_id=e.id AND fc.estado='EMITIDA' LIMIT 1
+                       )) AS cargo_nro_fc, e.monto_ars AS cargo_monto_ars,
                        r.id AS control_existente_id,
                        EXISTS (
                            SELECT 1 FROM ajustes_cliente a
@@ -752,7 +760,11 @@ def cancelar_solicitud_cliente(
             cur.execute(
                 """
                 SELECT id AS cargo_id, estado AS cargo_estado,
-                       nro_fc AS cargo_nro_fc, monto_ars AS cargo_monto_ars
+                       COALESCE(NULLIF(BTRIM(nro_fc), ''), (
+                           SELECT 'Factura TAURO' FROM facturas_cliente_items fi
+                           JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                           WHERE fi.envio_id=envios.id AND fc.estado='EMITIDA' LIMIT 1
+                       )) AS cargo_nro_fc, monto_ars AS cargo_monto_ars
                 FROM envios
                 WHERE solicitud_id=%s AND cliente_id=%s
                 ORDER BY id DESC LIMIT 1
@@ -774,6 +786,9 @@ def cancelar_solicitud_cliente(
                     SET estado='CANCELADO'
                     WHERE id=%s AND cliente_id=%s AND estado='ACTIVO'
                       AND NULLIF(BTRIM(nro_fc), '') IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM facturas_cliente_items fi
+                          JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                          WHERE fi.envio_id=envios.id AND fc.estado='EMITIDA')
                     RETURNING id
                     """,
                     (fila["cargo_id"], cliente_id),
@@ -967,7 +982,12 @@ def crear_solicitud_guia(
                     )
                 cur.execute(
                     """
-                    SELECT e.id, e.estado, e.nro_fc,
+                    SELECT e.id, e.estado,
+                           COALESCE(NULLIF(BTRIM(e.nro_fc), ''), (
+                             SELECT 'Factura TAURO' FROM facturas_cliente_items fi
+                             JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                             WHERE fi.envio_id=e.id AND fc.estado='EMITIDA' LIMIT 1
+                           )) AS nro_fc,
                            EXISTS (
                                SELECT 1 FROM ajustes_cliente a
                                WHERE a.solicitud_id=e.solicitud_id
@@ -1592,9 +1612,20 @@ def actualizar_solicitud_guia(
     estado = (estado or "").strip().upper()
     if estado not in ESTADOS_SOLICITUD:
         raise ValueError(f"Estado inválido: {estado}")
+    if estado == "REEMPLAZADO":
+        raise ValueError("Usá la corrección de guía: el reemplazo debe anular el cargo anterior y vincular la guía nueva.")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT estado FROM solicitudes_guia WHERE id=%s FOR UPDATE", (solicitud_id,))
+            actual = cur.fetchone()
+            if actual and actual["estado"] in ("CANCELADO", "REEMPLAZADO"):
+                raise ValueError("Este envío ya está anulado o reemplazado. Creá uno nuevo para conservar su historial.")
+            if estado == "CANCELADO":
+                cur.execute("""SELECT id FROM envios WHERE solicitud_id=%s
+                    AND estado NOT IN ('CANCELADO','NC') FOR UPDATE""", (solicitud_id,))
+                if cur.fetchone():
+                    raise ValueError("El envío tiene un cargo activo. Anulalo desde la cuenta del cliente para cancelar envío y cargo juntos. Si está facturado, requiere una nota de crédito.")
             if pisar:
                 cur.execute(
                     """
@@ -2665,7 +2696,11 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                        r.solicitud_anterior_id,
                        e_anterior.monto_ars AS monto_reemplazado_ars,
                        e_anterior.estado AS cargo_reemplazado_estado,
-                       e_anterior.nro_fc AS cargo_reemplazado_fc,
+                       COALESCE(NULLIF(BTRIM(e_anterior.nro_fc), ''), (
+                           SELECT 'Factura TAURO' FROM facturas_cliente_items fi
+                           JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                           WHERE fi.envio_id=e_anterior.id AND fc.estado='EMITIDA' LIMIT 1
+                       )) AS cargo_reemplazado_fc,
                        CASE
                          WHEN LOWER(COALESCE(s.courier, '')) = 'dhl'
                          THEN COALESCE(cc.puede_emitir, FALSE)

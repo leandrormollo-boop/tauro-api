@@ -42,8 +42,8 @@ def test_cotizador_internacional_se_resuelve_en_dos_pasos_compactos():
     assert 'id="quote-submit-row"' in template
     assert 'form.classList.add("quote-flow-enabled")' in javascript
     assert 'submit.disabled = !quoteReady' in javascript
-    assert 'destination.value = ""' in javascript
-    assert 'destination.dispatchEvent(new Event("change"' in javascript
+    assert 'destination.value = ""' not in javascript
+    assert "function goRoute()" in javascript
     assert ".quote-flow-enabled .quote-form-block.is-step-hidden { display: none; }" in css
     assert "max-width: 880px;" in css
     assert ".quote-screen-window .quote-operator-strip { display: none; }" in css

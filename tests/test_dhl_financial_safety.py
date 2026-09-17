@@ -209,7 +209,7 @@ def test_estado_generico_no_puede_sacar_una_guia_de_verificacion(monkeypatch):
     with pytest.raises(ValueError, match="conciliación"):
         sg.actualizar_solicitud_guia(9, estado="GUIA_LISTA", tracking="DHL-9")
 
-    assert "estado NOT IN ('EMITIENDO', 'VERIFICAR_COURIER')" in consultas[0]
+    assert any("estado NOT IN ('EMITIENDO', 'VERIFICAR_COURIER')" in sql for sql in consultas)
 
 
 def test_recuperar_label_no_modifica_tracking_estado_ni_cargo(monkeypatch):

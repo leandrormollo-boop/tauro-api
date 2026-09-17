@@ -79,8 +79,10 @@ def test_contadores_incluyen_canceladas_y_suman_total():
     vista = preparar_historial_envios(historial)
     conteos = {chip["clave"]: chip["cantidad"] for chip in vista["chips"]}
 
-    assert conteos["canceladas"] == 2
-    assert sum(conteos.values()) == vista["total_busqueda"] == 4
+    assert conteos["canceladas"] == 1
+    assert conteos["modificados"] == 1
+    assert sum(conteos.values()) == 4
+    assert vista["total_busqueda"] == 2
 
 
 def test_plantillas_no_duplican_mapas_de_estados():

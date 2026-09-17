@@ -690,7 +690,7 @@ def movimientos_cuenta_paginados(
     tipo_filtro = str(tipo or "todos").strip().lower()
     if ambito_filtro not in {"consolidado", "nacional", "internacional"}:
         raise ValueError("El filtro de ámbito no es válido.")
-    if tipo_filtro not in {"todos", "cargos", "costos", "pagos", "diferencias", "revision", "cancelados"}:
+    if tipo_filtro not in {"todos", "cargos", "costos", "pagos", "diferencias", "revision", "cancelados", "modificados"}:
         raise ValueError("El filtro de tipo de movimiento no es válido.")
     pagina = max(1, int(pagina))
     page_size = max(1, min(int(page_size), 100))
@@ -945,13 +945,14 @@ def movimientos_cuenta_paginados(
             SELECT * FROM movimientos
             WHERE (%s IS NULL OR ambito = %s)
               AND (
-                  %s = 'todos'
+                  (%s = 'todos' AND tipo NOT IN ('ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'))
                   OR (%s = 'cargos' AND tipo IN ('FC', 'PENDIENTE_FACTURA'))
                   OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'DIFERENCIA'))
                   OR (%s = 'pagos' AND tipo IN ('PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO'))
                   OR (%s = 'diferencias' AND tipo = 'DIFERENCIA')
                   OR (%s = 'revision' AND tipo = 'PAGO_PENDIENTE')
-                  OR (%s = 'cancelados' AND tipo IN ('ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'))
+                  OR (%s = 'cancelados' AND tipo = 'ENVIO_CANCELADO')
+                  OR (%s = 'modificados' AND tipo = 'ENVIO_REEMPLAZADO')
               )
               __FILTROS_BUSQUEDA__
         )
@@ -959,7 +960,7 @@ def movimientos_cuenta_paginados(
     filtros = (
         cliente, cliente, cliente, cliente, cliente, cliente, cliente,
         ambito_sql, ambito_sql,
-        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
+        tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro, tipo_filtro,
     )
     condiciones = []
     parametros_busqueda = []
@@ -2052,6 +2053,13 @@ def cancelar_envio(
         raise ValueError("Falta el cliente propietario del cargo.")
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Mismo orden de locks que emisión/cancelación del portal: solicitud
+            # antes que cargo. La baja operativa y contable se confirman juntas.
+            cur.execute("""SELECT s.id FROM solicitudes_guia s
+                JOIN envios e ON e.solicitud_id=s.id AND e.cliente_id=s.cliente_id
+                WHERE e.id=%s AND (%s IS NULL OR e.cliente_id=%s)
+                FOR UPDATE OF s""", (envio_id, cliente_normalizado, cliente_normalizado))
+            cur.execute("SELECT id FROM envios WHERE id=%s FOR UPDATE", (envio_id,))
             cur.execute(
                 """
                 UPDATE envios
@@ -2059,6 +2067,11 @@ def cancelar_envio(
                 WHERE id = %s
                   AND estado = 'ACTIVO'
                   AND NULLIF(BTRIM(nro_fc), '') IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM facturas_cliente_items i
+                      JOIN facturas_cliente f ON f.id=i.factura_id
+                      WHERE i.envio_id=envios.id AND f.estado='EMITIDA')
+                  AND NOT EXISTS (SELECT 1 FROM ajustes_cliente a
+                      WHERE a.solicitud_id=envios.solicitud_id AND a.estado <> 'ANULADO')
                   AND (%s IS NULL OR cliente_id = %s)
                 RETURNING id, cliente_id, monto_ars, ambito, estado
                 """,
@@ -2069,6 +2082,11 @@ def cancelar_envio(
                 return False
             resultado = dict(actualizado)
             resultado["monto_ars"] = _decimal_monto(resultado["monto_ars"])
+            cur.execute("""UPDATE solicitudes_guia s
+                SET estado=CASE WHEN s.estado='REEMPLAZADO' THEN s.estado ELSE 'CANCELADO' END,
+                    cargo_pendiente=FALSE, updated_at=NOW()
+                FROM envios e WHERE e.id=%s AND e.solicitud_id=s.id
+                    AND e.cliente_id=s.cliente_id AND e.estado='CANCELADO'""", (envio_id,))
             registrar_evento_con_cursor(
                 cur,
                 event="cuenta.cancelar_cargo",
@@ -2111,7 +2129,7 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT s.cliente_id, s.precio_tauro_ars, s.tracking,
+                SELECT s.cliente_id, s.estado, s.precio_tauro_ars, s.tracking,
                        s.courier, s.ambito, s.producto_alias,
                        s.remitente_pais, s.destino_pais,
                        r.solicitud_anterior_id,
@@ -2130,6 +2148,8 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
 
             if not sol:
                 raise ValueError(f"La solicitud {solicitud_id} no existe: sin cargo")
+            if sol.get("estado") in ("CANCELADO", "REEMPLAZADO"):
+                raise ValueError("Un envío cancelado o reemplazado no puede generar cargos.")
             monto = _decimal_monto(sol["precio_tauro_ars"])
             if monto <= 0:
                 # Sin precio no se inventa un cargo: se avisa para que el
@@ -2156,7 +2176,11 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
                     SELECT s.id, s.cliente_id, s.estado, s.tracking,
                            s.origen_plataforma,
                            e.id AS cargo_id, e.estado AS cargo_estado,
-                           e.nro_fc AS cargo_nro_fc,
+                           COALESCE(NULLIF(BTRIM(e.nro_fc), ''), (
+                           SELECT 'Factura TAURO' FROM facturas_cliente_items fi
+                           JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                           WHERE fi.envio_id=e.id AND fc.estado='EMITIDA' LIMIT 1
+                       )) AS cargo_nro_fc,
                            EXISTS (
                                SELECT 1 FROM ajustes_cliente a
                                WHERE a.solicitud_id=s.id
@@ -2232,6 +2256,9 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
                           %s
                     WHERE id=%s AND estado='ACTIVO'
                       AND COALESCE(nro_fc, '')=''
+                      AND NOT EXISTS (SELECT 1 FROM facturas_cliente_items fi
+                          JOIN facturas_cliente fc ON fc.id=fi.factura_id
+                          WHERE fi.envio_id=envios.id AND fc.estado='EMITIDA')
                     RETURNING id
                     """,
                     (

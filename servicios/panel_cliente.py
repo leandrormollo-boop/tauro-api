@@ -73,9 +73,16 @@ PASOS_EMBUDO = [
         "accion_de": None,
     },
     {
+        "clave": "modificados",
+        "titulo": "Modificados",
+        "detalle": "Guías anteriores reemplazadas, sin cargo",
+        "url": "/portal/envios?paso=modificados",
+        "accion_de": None,
+    },
+    {
         "clave": "canceladas",
-        "titulo": "Canceladas",
-        "detalle": "Canceladas o reemplazadas",
+        "titulo": "Cancelados",
+        "detalle": "Envíos cancelados, sin cargo",
         "url": "/portal/envios?paso=canceladas",
         "accion_de": None,
     },
@@ -97,8 +104,8 @@ def paso_de_estado(estado: str, tracking_estado: str | None = None) -> str | Non
     por su cuenta, el día que se agregue un estado uno contaría y el otro no,
     y el cliente vería una tarjeta que dice 3 llevándolo a una lista de 2.
 
-    Los estados cancelado y reemplazado conservan su propia pestaña para que
-    los contadores siempre sumen el total visible.
+    Cancelados y reemplazados tienen pestañas propias. El total de Todos
+    sólo cuenta los envíos vigentes.
     """
     estado = estado_principal_envio(estado, tracking_estado)
     if estado in ("SOLICITADO", "EN_PROCESO", "EMITIENDO", "VERIFICAR_COURIER"):
@@ -113,7 +120,9 @@ def paso_de_estado(estado: str, tracking_estado: str | None = None) -> str | Non
         return "retenidos"
     if estado == "ENTREGADO":
         return "entregados"
-    if estado in ("CANCELADO", "REEMPLAZADO"):
+    if estado == "REEMPLAZADO":
+        return "modificados"
+    if estado == "CANCELADO":
         return "canceladas"
     print(f"[panel] estado sin mapear en el embudo: {estado!r}")
     return None
@@ -241,7 +250,9 @@ def preparar_historial_envios(
 
     # Los contadores describen la búsqueda activa. Sin búsqueda mantienen el
     # comportamiento histórico porque ``filtradas`` equivale a ``por_tipo``.
-    total_busqueda = len(filtradas)
+    total_busqueda = sum(
+        s.get("estado") not in ("CANCELADO", "REEMPLAZADO") for s in filtradas
+    )
     conteos: dict[str, int] = {}
     for solicitud in filtradas:
         clave = paso_de_estado(solicitud.get("estado"), solicitud.get("tracking_estado"))
@@ -261,7 +272,13 @@ def preparar_historial_envios(
         ]
     else:
         paso = ""
+        filtradas = [s for s in filtradas if s.get("estado") not in ("CANCELADO", "REEMPLAZADO")]
 
+    historicos = {"modificados": "REEMPLAZADO", "canceladas": "CANCELADO"}
+    historial_del_grupo = [s for s in historial if (
+        s.get("estado") == historicos[paso] if paso in historicos
+        else s.get("estado") not in ("CANCELADO", "REEMPLAZADO")
+    )]
     por_pagina = max(1, int(por_pagina or ENVIOS_POR_PAGINA))
     total_resultados = len(filtradas)
     total_paginas = max(1, (total_resultados + por_pagina - 1) // por_pagina)
@@ -286,13 +303,13 @@ def preparar_historial_envios(
         "tiene_historial": tiene_historial,
         "resumen_periodo": resumen_periodo,
         "total_nacionales": sum(
-            s["_ambito_portal"] == "nacional" for s in historial
+            s["_ambito_portal"] == "nacional" for s in historial_del_grupo
         ),
         "total_internacionales": sum(
-            s["_ambito_portal"] == "internacional" for s in historial
+            s["_ambito_portal"] == "internacional" for s in historial_del_grupo
         ),
         "total_sin_clasificar": sum(
-            s["_ambito_portal"] == "sin_clasificar" for s in historial
+            s["_ambito_portal"] == "sin_clasificar" for s in historial_del_grupo
         ),
     }
 

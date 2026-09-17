@@ -20,7 +20,7 @@
 <a href="/admin/pedidos" class="btn btn-ghost">← Volver</a>
 {% else %}
 <div class="card" style="max-width:720px;">
-  <form method="POST" action="/admin/pedidos/{{ s.id }}/editar">
+  <form data-draft-auto method="POST" action="/admin/pedidos/{{ s.id }}/editar">
 
     <h3 style="margin:0 0 12px;">Destinatario</h3>
     <div class="form-grid-2">

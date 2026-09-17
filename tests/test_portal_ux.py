@@ -34,7 +34,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=48" in base
+    assert "tauro.css?v=49" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -137,7 +137,7 @@ def test_cotizador_actualiza_resumen_progreso_y_cajas_en_vivo():
     assert 'value.toLocaleString("es-AR"' in html
     assert "function showQuoteStep(routeReady, quoteReady)" in html
     assert 'submit.disabled = !quoteReady' in html
-    assert 'destination.value = ""' in html
+    assert 'destination.value = ""' not in html
     assert 'last.classList.add("is-entering")' in html
     assert 'row.classList.add("is-removing")' in html
 

@@ -21,7 +21,7 @@
 
     <div class="quote-stage national-quote-stage" id="national-quote-stage" aria-busy="false">
         <section class="card quote-form-card national-quote-form {% if resultado_nacional %}is-hidden{% endif %}" id="national-quote-form-panel">
-            <form id="form-cotizar-nacional" method="POST" action="/portal/cotizar">
+            <form data-draft-key="cotizar:nacional" data-draft-server="{{ 1 if request.method == 'POST' else 0 }}" id="form-cotizar-nacional" method="POST" action="/portal/cotizar">
                 <input type="hidden" name="ambito" value="nacional">
                 <input type="hidden" name="origen_pais" value="AR">
                 <input type="hidden" name="destino_pais" value="AR">
@@ -182,6 +182,7 @@
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
     var form = document.getElementById("form-cotizar-nacional");
+    if (window.TauroDraft) window.TauroDraft.attach(form);
     var panel = document.getElementById("national-quote-form-panel");
     var result = document.getElementById("national-result");
     var loader = document.getElementById("national-loading");

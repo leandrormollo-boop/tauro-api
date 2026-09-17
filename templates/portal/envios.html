@@ -33,9 +33,10 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% endif %}
 
 <form method="GET" action="/portal/envios" class="envios-search" role="search" id="envios-search-form">
+    {% if paso_filtro %}<input type="hidden" name="paso" value="{{ paso_filtro }}">{% endif %}
     <label for="envios-buscar">
         <strong>Encontrá tu envío</strong>
-        <span>Buscá en todo tu historial por tracking, nombre o destino</span>
+        <span>Buscá por tracking, nombre o destino</span>
     </label>
     <div class="envios-search-control">
         <input type="search" id="envios-buscar" name="buscar" maxlength="80"
@@ -124,18 +125,23 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
    internacional para que los dos se puedan combinar. #}
 {% set solo_tipo = ("?tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 {% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
-{% if not busqueda_filtro %}
 <nav class="chips-embudo" aria-label="Filtrar por estado">
-    <a href="/portal/envios?{{ ('tipo=' ~ tipo_filtro) if tipo_filtro else '' }}{{ con_periodo }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
+    <a href="/portal/envios?{{ ('tipo=' ~ tipo_filtro) if tipo_filtro else '' }}{{ con_periodo }}{{ con_busqueda }}" class="chip-e {% if paso_filtro not in ('modificados', 'canceladas') %}on{% endif %}"{% if paso_filtro not in ('modificados', 'canceladas') %} aria-current="true"{% endif %}>
         <b>{{ total_busqueda }}</b> Todos
     </a>
-    {% for c in chips %}
+    {% for c in chips if c.clave in ('modificados', 'canceladas') %}
     <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_busqueda }}{{ con_periodo }}"
        class="chip-e {% if paso_filtro == c.clave %}on{% endif %} {% if c.cantidad and c.accion_de == 'cliente' %}espera{% endif %}"
        {% if paso_filtro == c.clave %}aria-current="true"{% endif %}
        title="{{ c.detalle }}">
         <b>{{ c.cantidad }}</b> {{ c.titulo }}
     </a>
+    {% endfor %}
+</nav>
+{% if paso_filtro not in ('modificados','canceladas') %}
+<nav class="chips-embudo" aria-label="Filtrar envíos vigentes">
+    {% for c in chips if c.clave not in ('modificados','canceladas') %}
+    <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_busqueda }}{{ con_periodo }}" class="chip-e {% if paso_filtro == c.clave %}on{% endif %}"{% if paso_filtro == c.clave %} aria-current="true"{% endif %}><b>{{ c.cantidad }}</b> {{ c.titulo }}</a>
     {% endfor %}
 </nav>
 {% endif %}
@@ -178,7 +184,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
     <div class="msg envios-empty-filter" id="envios-resultados" tabindex="-1">
-        {% if busqueda_filtro %}No encontramos “{{ busqueda_filtro }}” en todo tu historial.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
+        {% if busqueda_filtro %}No encontramos “{{ busqueda_filtro }}” en esta solapa.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
         <a href="/portal/envios?tipo={{ tipo_filtro }}{{ con_periodo }}">Ver todo el período</a>
     </div>
 {% else %}

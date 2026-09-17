@@ -204,13 +204,16 @@ def test_cancelados_son_historia_sin_cargo_y_no_ocultan_cargos_activos(cuenta_db
             cargos_antes = cur.fetchall()
     filtros = dict(desde='2026-09-01', hasta='2026-09-30')
     todos = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', **filtros)
-    assert todos['total_resultados'] == 4
-    assert {m['solicitud_id'] for m in todos['items']} == set(ids[:4])
+    assert todos['total_resultados'] == 1
+    assert {m['solicitud_id'] for m in todos['items']} == {ids[3]}
     assert sum(m['debe_ars']-m['haber_ars'] for m in todos['items']) == Decimal('900.00')
     bajas = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', tipo='cancelados', **filtros)
-    assert bajas['total_resultados'] == 3
-    assert {m['solicitud_id'] for m in bajas['items']} == set(ids[:3])
-    assert {m['tipo'] for m in bajas['items']} == {'ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'}
+    assert bajas['total_resultados'] == 2
+    assert {m['solicitud_id'] for m in bajas['items']} == set(ids[:2])
+    assert {m['tipo'] for m in bajas['items']} == {'ENVIO_CANCELADO'}
+    modificados = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', tipo='modificados', **filtros)
+    assert {m['solicitud_id'] for m in modificados['items']} == {ids[2]}
+    assert modificados['items'][0]['debe_ars'] == modificados['items'][0]['haber_ars'] == 0
     for m in bajas['items']:
         assert m['debe_ars'] == m['haber_ars'] == m['monto_ars'] == 0
         assert m['valor_envio_ars'] is None
@@ -219,16 +222,81 @@ def test_cancelados_son_historia_sin_cargo_y_no_ocultan_cargos_activos(cuenta_db
     costos = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', tipo='costos', **filtros)
     assert costos['total_resultados'] == 1
     assert costos['items'][0]['debe_ars'] == Decimal('900.00')
-    encontrada = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', q='50300', **filtros)
+    encontrada = cuenta_corriente.movimientos_cuenta_paginados('PROPIO', q='50300', tipo='cancelados', **filtros)
     assert encontrada['total_resultados'] == 1
     assert encontrada['items'][0]['numero_guia_tauro'] == 50300
     assert cuenta_corriente.movimientos_cuenta_paginados('PROPIO', ambito='nacional')['total_resultados'] == 0
     assert cuenta_corriente.movimientos_cuenta_paginados('PROPIO', hasta='2026-08-31')['total_resultados'] == 0
     libro = load_workbook(BytesIO(generar_excel_cuenta('PROPIO', tipo='cancelados', **filtros)))
     filas = list(libro['Movimientos'].values)[1:]
-    assert len(filas) == 3
+    assert len(filas) == 2
     assert all(row[7:10] == (0, 0, 0) for row in filas)
     with cuenta_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT id,estado,monto_ars FROM envios ORDER BY id")
             assert cur.fetchall() == cargos_antes
+
+
+def _cargo_operativo(db, cliente='DEMO', estado='GUIA_LISTA', nro_fc=''):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO clientes(cliente_id,email) VALUES (%s,'demo@example.invalid') ON CONFLICT DO NOTHING", (cliente,))
+        cur.execute("""INSERT INTO solicitudes_guia(cliente_id,estado,producto_alias,destino_pais,
+            dest_nombre,dest_direccion,dest_ciudad,dest_zip,remitente_pais,ambito,tracking)
+            VALUES(%s,%s,'Muestra','US','Destino','Prueba','Miami','33101','AR','INTERNACIONAL','DEMO') RETURNING id""",(cliente,estado))
+        sid=cur.fetchone()['id']
+        cur.execute("""INSERT INTO envios(cliente_id,solicitud_id,fecha,monto_ars,estado,ambito,nro_fc)
+            VALUES(%s,%s,CURRENT_DATE,100,'ACTIVO','INTERNACIONAL',%s) RETURNING id""",(cliente,sid,nro_fc))
+        return sid,cur.fetchone()['id']
+
+
+def test_anular_admin_retira_cargo_y_estado_juntos_preservando_pago(cuenta_db):
+    sid,eid=_cargo_operativo(cuenta_db)
+    with cuenta_db() as conn, conn.cursor() as cur:
+        cur.execute("INSERT INTO pagos(cliente_id,fecha,monto_ars,estado) VALUES('DEMO',CURRENT_DATE,30,'APROBADO')")
+    assert cuenta_corriente.get_facturado_real('DEMO') == 100
+    assert cuenta_corriente.cancelar_envio(eid,cliente_id='AJENO') is False
+    assert cuenta_corriente.cancelar_envio(eid,cliente_id='DEMO')['estado']=='CANCELADO'
+    assert cuenta_corriente.get_facturado_real('DEMO') == 0
+    assert cuenta_corriente.total_pagado('DEMO') == 30
+    assert cuenta_corriente.cancelar_envio(eid,cliente_id='DEMO') is False
+    with cuenta_db() as conn, conn.cursor() as cur:
+        cur.execute('SELECT estado FROM solicitudes_guia WHERE id=%s',(sid,))
+        assert cur.fetchone()['estado']=='CANCELADO'
+        cur.execute('SELECT monto_ars FROM envios WHERE id=%s',(eid,))
+        assert cur.fetchone()['monto_ars']==100  # historial intacto
+    assert cuenta_corriente.movimientos_cuenta_paginados('DEMO',tipo='cancelados')['total_resultados']==1
+
+
+def test_baja_admin_se_revierte_si_falla_la_auditoria(cuenta_db,monkeypatch):
+    sid,eid=_cargo_operativo(cuenta_db)
+    def fallo(*a,**kw):raise RuntimeError('auditoria no disponible')
+    monkeypatch.setattr(cuenta_corriente,'registrar_evento_con_cursor',fallo)
+    with pytest.raises(RuntimeError):cuenta_corriente.cancelar_envio(eid,cliente_id='DEMO')
+    with cuenta_db() as conn,conn.cursor() as cur:
+        cur.execute('SELECT s.estado,e.estado AS cargo FROM solicitudes_guia s JOIN envios e ON e.solicitud_id=s.id WHERE s.id=%s',(sid,))
+        assert dict(cur.fetchone())=={'estado':'GUIA_LISTA','cargo':'ACTIVO'}
+
+
+def test_estado_manual_no_puede_dejar_cargo_en_un_envio_cancelado(cuenta_db,monkeypatch):
+    from servicios import solicitudes_guia as sg
+    monkeypatch.setattr(sg,'get_conn',cuenta_db)
+    sid,eid=_cargo_operativo(cuenta_db)
+    with pytest.raises(ValueError,match='cargo activo'):sg.actualizar_solicitud_guia(sid,estado='CANCELADO')
+    with pytest.raises(ValueError,match='corrección'):sg.actualizar_solicitud_guia(sid,estado='REEMPLAZADO')
+    cuenta_corriente.cancelar_envio(eid,cliente_id='DEMO')
+    with pytest.raises(ValueError,match='historial'):sg.actualizar_solicitud_guia(sid,estado='GUIA_LISTA',pisar=True)
+    assert cuenta_corriente.get_facturado_real('DEMO')==0
+
+
+def test_facturado_no_se_oculta_al_intentar_cancelarlo(cuenta_db):
+    sid,eid=_cargo_operativo(cuenta_db)
+    with cuenta_db() as conn,conn.cursor() as cur:
+        cur.execute("""INSERT INTO facturas_cliente(cliente_id,tipo,punto_venta,numero,fecha_emision,subtotal,total,pdf,created_by)
+            VALUES('DEMO','FC',1,1,CURRENT_DATE,100,100,%s,'qa') RETURNING id""",(b'%PDF-QA',))
+        fid=cur.fetchone()['id']
+        cur.execute("INSERT INTO facturas_cliente_items(factura_id,envio_id,descripcion,monto) VALUES(%s,%s,'Flete',100)",(fid,eid))
+    assert cuenta_corriente.cancelar_envio(eid,cliente_id='DEMO') is False
+    assert cuenta_corriente.get_facturado_real('DEMO')==100
+    with cuenta_db() as conn,conn.cursor() as cur:
+        cur.execute('SELECT estado FROM solicitudes_guia WHERE id=%s',(sid,))
+        assert cur.fetchone()['estado']=='GUIA_LISTA'
