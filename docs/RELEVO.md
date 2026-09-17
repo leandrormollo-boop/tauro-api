@@ -6,7 +6,7 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
-## 17/09/2026 — Navegación y solapas históricas, listo en prueba local
+## 17/09/2026 — Publicación autorizada de navegación y solapas históricas
 
 Rama `codex/navigation-history-20260917`, base `c1ad266`. Cotizador, nueva guía
 internacional y formularios operativos del Admin conservan el avance al volver.
@@ -20,8 +20,11 @@ de facturas del módulo actual y bloqueo de cambios de estado que eludan el
 circuito de anulación o reemplazo. Sin migraciones ni escrituras en producción.
 2.356 pruebas + 5 subpruebas y 8 pruebas JS aprobadas; recorridos locales con
 datos ficticios y comprobación móvil. Modelo efectivo Astra por preferencia del
-usuario; piso del router Sol/high. Sin delegación. **No publicado: falta la
-aprobación específica para esta versión.** Ver criterios y evidencia en
+usuario; piso del router Sol/high. Sin delegación. El usuario autorizó esta
+versión con «ok publica», después de aclarar el alcance de los borradores.
+Se publica `1db8340` sobre `c1ad266`, junto con este registro de aprobación;
+verificar Railway, recursos, sesiones reales y saldos sin operaciones de prueba.
+Ver criterios y evidencia en
 [Navegación y envíos históricos](NAVEGACION_Y_ENVIOS_HISTORICOS.md).
 
 ## 17/09/2026 — Publicación autorizada del control gerencial y vigilancia DHL

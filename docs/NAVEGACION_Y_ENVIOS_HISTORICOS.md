@@ -1,8 +1,9 @@
 # Navegación y envíos históricos — 17/09/2026
 
 Estado: implementado y verificado localmente. Rama
-`codex/navigation-history-20260917`, base `c1ad266`. Pendiente autorización
-específica de publicación; no se modificaron registros de producción.
+`codex/navigation-history-20260917`, base `c1ad266`, cambio `1db8340`.
+El usuario autorizó la publicación con «ok publica» el 17/09/2026. Se publica
+junto con el registro de aprobación; no se modificaron registros históricos.
 
 ## Volver y continuar
 
@@ -78,7 +79,7 @@ bloqueada. No se emitieron guías, retiros, facturas ni pagos reales para probar
 
 ## Publicación y comprobación pendiente
 
-Después de autorización, integrar en main y comprobar el despliegue Railway.
+Con autorización recibida, integrar en main y comprobar el despliegue Railway.
 Verificar salud, recursos estáticos y sesiones reales de cliente/Admin. Comparar
 saldos antes/después y confirmar la separación de las tres solapas sin ejecutar
 operaciones reales de prueba. La publicación no requiere cambios de esquema.
