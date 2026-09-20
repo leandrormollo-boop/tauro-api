@@ -7,6 +7,7 @@
 # algo serio, mover a Redis.
 # ============================================================
 
+import hashlib
 import threading
 import time
 from collections import defaultdict, deque
@@ -65,3 +66,32 @@ def client_ip(request) -> str:
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
+
+
+def check_auth_rate(key: str, max_attempts: int = 5, window_seconds: int = 300) -> bool:
+    """Límite durable y atómico. Un fallo de DB no habilita el login."""
+    from core.database import get_conn
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM auth_intentos WHERE vence < NOW() - INTERVAL '1 day'")
+            cur.execute("""
+                INSERT INTO auth_intentos (clave_hash, cantidad, vence)
+                VALUES (%s, 1, NOW() + %s * INTERVAL '1 second')
+                ON CONFLICT (clave_hash) DO UPDATE SET
+                    cantidad = CASE WHEN auth_intentos.vence <= NOW() THEN 1
+                                    ELSE auth_intentos.cantidad + 1 END,
+                    vence = CASE WHEN auth_intentos.vence <= NOW() THEN EXCLUDED.vence
+                                 ELSE auth_intentos.vence END
+                WHERE auth_intentos.vence <= NOW() OR auth_intentos.cantidad < %s
+                RETURNING cantidad
+            """, (digest, window_seconds, max_attempts))
+            return cur.fetchone() is not None
+
+
+def reset_auth_rate(key: str) -> None:
+    from core.database import get_conn
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM auth_intentos WHERE clave_hash = %s",
+                        (hashlib.sha256(key.encode()).hexdigest(),))

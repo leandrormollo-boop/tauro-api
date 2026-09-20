@@ -15,6 +15,13 @@
 
     <form method="POST" action="/admin/recuperar/canjear" id="admin-recupero-form" hidden>
       <input type="hidden" name="token" id="admin-recupero-token" value="">
+      {% if totp_activo %}
+      <div class="form-group">
+        <label for="codigo">Código del autenticador</label>
+        <input id="codigo" name="codigo" inputmode="numeric" autocomplete="one-time-code"
+               pattern="[0-9]{6}" maxlength="6" required>
+      </div>
+      {% endif %}
       <button type="submit" class="btn btn-primary btn-full">Continuar</button>
     </form>
 
@@ -39,8 +46,7 @@
     document.getElementById("admin-recupero-token").value = token;
     token = "";
     form.hidden = false;
-    document.getElementById("recupero-estado").textContent = "Link verificado. Ingresando al panel…";
-    form.requestSubmit();
+    document.getElementById("recupero-estado").textContent = "Confirmá el acceso para continuar.";
   } else {
     token = "";
     document.getElementById("recupero-estado").hidden = true;

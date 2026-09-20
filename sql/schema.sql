@@ -312,6 +312,24 @@ CREATE INDEX IF NOT EXISTS idx_admin_recupero_vence
 CREATE INDEX IF NOT EXISTS idx_admin_recupero_creado
     ON admin_recupero (creado);
 
+CREATE TABLE IF NOT EXISTS admin_sesiones (
+    token_hash TEXT PRIMARY KEY CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+    firma TEXT NOT NULL,
+    creado TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    vence TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sesiones_vence ON admin_sesiones (vence);
+CREATE TABLE IF NOT EXISTS admin_totp_uso (
+    secreto_hash TEXT PRIMARY KEY,
+    paso BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auth_intentos (
+    clave_hash TEXT PRIMARY KEY,
+    cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+    vence TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_intentos_vence ON auth_intentos (vence);
+
 -- ── Rutas predefinidas (ex RUTAS_DEFAULT) ──────────────────
 CREATE TABLE IF NOT EXISTS rutas (
     ruta_id        TEXT PRIMARY KEY,      -- ej "AR-US"

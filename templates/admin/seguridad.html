@@ -7,6 +7,12 @@
   <h1>Seguridad</h1>
 </div>
 
+<div class="card" style="margin-bottom:20px"><h2>Acceso al administrador</h2>
+  <p>Segundo factor: <strong>{{ 'Activo' if totp_activo else 'Pendiente de activar' }}</strong>.</p>
+  <p>Sesiones individuales de ocho horas. Cerrar sesión invalida ese acceso.</p>
+  {% if not totp_activo %}<p>Para activarlo, vinculá tu autenticador y configurá ADMIN_TOTP_SECRET en Railway. La recuperación por email también pedirá el código.</p>{% endif %}
+</div>
+
 <div class="card-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:28px;">
   <div class="stat-card">
     <div class="label">Eventos en 24 h</div>

@@ -92,6 +92,8 @@ from servicios.tracking_fedex_tauro import (
 )
 from modelos.ruta import Ruta
 from servicios.rate_limit import check_rate, reset_rate, client_ip
+from servicios.rate_limit import check_auth_rate, reset_auth_rate
+from servicios import admin_sesiones
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -238,7 +240,7 @@ if not ADMIN_PASSWORD:
 # salvo que se apague explícitamente para desarrollo local por HTTP.
 COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "1") != "0"
 
-# Token en memoria (se regenera en cada restart — suficiente para un solo admin)
+# Clave de firmas de acciones DHL. Nunca se entrega como cookie de sesión.
 _ADMIN_TOKEN: str = secrets.token_urlsafe(32)
 
 _MIGRATION_LOCK = threading.Lock()
@@ -264,17 +266,17 @@ _TRACKING_STATUS = {
 # ── Auth ────────────────────────────────────────────────────
 
 def admin_actual(admin_token: Optional[str] = Cookie(None)) -> bool:
-    if admin_token and admin_token == _ADMIN_TOKEN:
+    if _is_auth(admin_token):
         return True
     raise Exception("no auth")
 
 
 def check_admin(admin_token: Optional[str] = Cookie(None)) -> bool:
-    return admin_token == _ADMIN_TOKEN
+    return _is_auth(admin_token)
 
 
 def require_admin(admin_token: Optional[str] = Cookie(None)):
-    if admin_token != _ADMIN_TOKEN:
+    if not _is_auth(admin_token):
         raise Exception("redirect")
 
 
@@ -317,7 +319,7 @@ def _redirect_login():
 
 
 def _is_auth(admin_token: Optional[str]) -> bool:
-    return admin_token == _ADMIN_TOKEN
+    return admin_sesiones.verificar(admin_token, ADMIN_PASSWORD, _totp_secret())
 
 
 def _migration_snapshot() -> dict:
@@ -417,7 +419,8 @@ def admin_login(request: Request, password: str = Form(...),
                 codigo: str = Form(default="")):
     ip = client_ip(request)
     totp_activo = bool(_totp_secret())
-    if not check_rate(f"admin_login:{ip}", max_attempts=5, window_seconds=300):
+    if not (check_auth_rate("admin_login:cuenta", max_attempts=15, window_seconds=300)
+            and check_auth_rate(f"admin_login:{ip}", max_attempts=5, window_seconds=300)):
         return templates.TemplateResponse(
             request=request, name="admin/login.html",
             context={"error": "Demasiados intentos. Esperá unos minutos e intentá de nuevo.",
@@ -425,7 +428,7 @@ def admin_login(request: Request, password: str = Form(...),
             status_code=429,
         )
     # Comparación de tiempo constante para no filtrar la contraseña por timing.
-    password_ok = secrets.compare_digest(password, ADMIN_PASSWORD)
+    password_ok = secrets.compare_digest(password.encode(), ADMIN_PASSWORD.encode())
 
     # Segundo factor (si ADMIN_TOTP_SECRET está cargada). El código se CONSUME
     # (anti-replay) sólo si la contraseña ya es correcta: así un atacante no
@@ -434,8 +437,7 @@ def admin_login(request: Request, password: str = Form(...),
     totp_ok = True
     if totp_activo:
         if password_ok:
-            from servicios.totp import verificar_codigo
-            totp_ok = verificar_codigo(_totp_secret(), codigo)
+            totp_ok = admin_sesiones.verificar_totp(_totp_secret(), codigo)
         else:
             totp_ok = False
 
@@ -450,13 +452,14 @@ def admin_login(request: Request, password: str = Form(...),
                      "totp_activo": totp_activo},
             status_code=401,
         )
-    reset_rate(f"admin_login:{ip}")
+    reset_auth_rate(f"admin_login:{ip}")
+    reset_auth_rate("admin_login:cuenta")
     from servicios.auditoria import registrar_desde_request
     registrar_desde_request(request, event="admin.login", actor_type="admin",
                             success=True, status_code=303)
     response = RedirectResponse(url="/admin/home", status_code=303)
     response.set_cookie(
-        key="admin_token", value=_ADMIN_TOKEN,
+        key="admin_token", value=admin_sesiones.crear(ADMIN_PASSWORD, _totp_secret()),
         httponly=True, max_age=60 * 60 * 8,
         samesite="lax", secure=COOKIE_SECURE,
     )
@@ -644,7 +647,7 @@ def admin_recuperar_form(request: Request):
     response = templates.TemplateResponse(
         request=request,
         name="admin/recuperar.html",
-        context={},
+        context={"totp_activo": bool(_totp_secret())},
     )
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -652,8 +655,12 @@ def admin_recuperar_form(request: Request):
 
 
 @router.post("/recuperar/canjear")
-def admin_recuperar_usar(token: str = Form(...)):
+def admin_recuperar_usar(token: str = Form(...), codigo: str = Form(default="")):
     """Canjea el secreto enviado en el body por una sesión de admin."""
+    if not check_auth_rate("admin_recupero:canje", max_attempts=10, window_seconds=300):
+        return Response("Demasiados intentos. Esperá cinco minutos.", status_code=429)
+    if _totp_secret() and not admin_sesiones.verificar_totp(_totp_secret(), codigo):
+        return Response("Código incorrecto o ya utilizado. Volvé a abrir el link e ingresá un código nuevo.", status_code=401)
     try:
         valido = _canjear_token_recupero(token)
     except Exception as e:
@@ -665,7 +672,7 @@ def admin_recuperar_usar(token: str = Form(...)):
         )
     response = RedirectResponse(url="/admin/home", status_code=303)
     response.set_cookie(
-        key="admin_token", value=_ADMIN_TOKEN,
+        key="admin_token", value=admin_sesiones.crear(ADMIN_PASSWORD, _totp_secret()),
         httponly=True, max_age=60 * 60 * 8,
         samesite="lax", secure=COOKIE_SECURE,
     )
@@ -674,7 +681,8 @@ def admin_recuperar_usar(token: str = Form(...)):
 
 
 @router.get("/logout")
-def admin_logout():
+def admin_logout(admin_token: Optional[str] = Cookie(None)):
+    admin_sesiones.revocar(admin_token)
     response = RedirectResponse(url="/admin/login", status_code=303)
     response.delete_cookie("admin_token")
     return response
@@ -763,7 +771,8 @@ def admin_seguridad(request: Request, admin_token: Optional[str] = Cookie(None))
 
     return templates.TemplateResponse(
         request=request, name="admin/seguridad.html",
-        context={"seccion": "seguridad", "stats": stats, "eventos": eventos},
+        context={"seccion": "seguridad", "stats": stats, "eventos": eventos,
+                 "totp_activo": bool(_totp_secret())},
     )
 
 
