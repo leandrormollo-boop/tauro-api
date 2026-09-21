@@ -74,6 +74,7 @@ from servicios.solicitudes_guia import (
     cancelar_solicitud_cliente, periodos_solicitudes_cliente,
 )
 from servicios.periodos_envios import normalizar_periodo
+from servicios.rutas_frecuentes import obtener_rutas_frecuentes
 from servicios.carriers import courier_default_cliente
 from servicios.carrier_contract import Ambito, public_catalog
 from servicios.impuestos import normalizar as normalizar_tax, tax_paga_cliente
@@ -1528,6 +1529,7 @@ def cotizar_form(
         context={
             "cliente": cliente,
             "ambito": ambito,
+            "rutas_frecuentes": obtener_rutas_frecuentes(cliente) if ambito == "internacional" else [],
             "provincias": opciones_provincias(),
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
@@ -1746,6 +1748,7 @@ def cotizar_post(
         context={
             "cliente": cliente,
             "ambito": "internacional",
+            "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
             "referencias_paises": referencias_paises_formulario(),

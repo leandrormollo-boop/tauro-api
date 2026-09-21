@@ -83,6 +83,27 @@
                             <div><strong>Origen y destino</strong><small>Seleccioná los dos países</small></div>
                             <em data-quote-state="route">Pendiente</em>
                         </div>
+                        <div class="quote-route-tools" data-route-shortcuts hidden>
+                            <div class="quote-frequent-heading">
+                                {% if rutas_frecuentes %}
+                                <strong>Tus rutas frecuentes</strong>
+                                <span data-help="Tus rutas frecuentes">Tus guías vigentes de los últimos 12 meses. No incluye canceladas, reemplazadas ni pruebas. El botón completa los países; revisá ciudad y código postal.</span>
+                                {% endif %}
+                                <button type="button" class="quote-reverse-route" data-route-reverse disabled>⇄ Invertir ruta</button>
+                            </div>
+                            {% if rutas_frecuentes %}
+                            <div class="quote-frequent-list" role="group" aria-label="Tus rutas frecuentes">
+                                {% for ruta in rutas_frecuentes %}
+                                <button type="button" class="quote-frequent-route"
+                                        data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}"
+                                        aria-pressed="false" aria-label="Cotizar de {{ ruta.origen_nombre }} a {{ ruta.destino_nombre }}"
+                                        title="{{ ruta.envios }} envíos en los últimos 12 meses">
+                                    <span>{{ ruta.origen_nombre }}</span><span aria-hidden="true">→</span><span>{{ ruta.destino_nombre }}</span>
+                                </button>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
                         <div class="quote-route-grid">
                             <div class="form-group">
                                 <label for="origen_pais">Origen</label>
@@ -498,6 +519,7 @@
     }
 
     if (form) {
+        form.addEventListener("tauro:route-choice", function () { editingRoute = true; });
         form.addEventListener("input", syncQuotePreview);
         form.addEventListener("change", function (event) {
             if (event.target && event.target.id === "origen_pais") {
@@ -513,8 +535,11 @@
                 if (event.target && event.target.matches("input")) editingRoute = true;
             });
         }
-        applyLocationReference(origin, originCity, originPostal, false);
-        applyLocationReference(destination, destinationCity, destinationPostal, false);
+        // Un campo vacío del borrador también expresa una decisión del cliente.
+        if (!(quoteDraft && quoteDraft.restored) && form.dataset.draftServer !== "1") {
+            applyLocationReference(origin, originCity, originPostal, false);
+            applyLocationReference(destination, destinationCity, destinationPostal, false);
+        }
         syncQuotePreview();
     }
 

@@ -342,6 +342,7 @@
     }
 
     if (form) {
+      form.addEventListener("tauro:route-choice", function () { editingRoute = true; });
       form.addEventListener("input", syncPreview);
       form.addEventListener("change", function (event) {
         if (event.target && event.target.id === "origen_pais") {
@@ -357,8 +358,11 @@
           if (event.target && event.target.matches("input")) editingRoute = true;
         });
         }
-      applyLocationReference(origin, originCity, originPostal, false);
-      applyLocationReference(destination, destinationCity, destinationPostal, false);
+      // Conservar también los campos que el cliente dejó vacíos en su borrador.
+      if (!(quoteDraft && quoteDraft.restored) && form.dataset.draftServer !== "1") {
+        applyLocationReference(origin, originCity, originPostal, false);
+        applyLocationReference(destination, destinationCity, destinationPostal, false);
+      }
       syncPreview();
 
       form.addEventListener("submit", function (event) {
@@ -443,6 +447,7 @@
     content.scrollTop = 0;
     markScope(quote.classList.contains("national-quote-screen") ? "nacional" : "internacional");
     initializeQuote(quote);
+    if (window.TauroRutasFrecuentes) window.TauroRutasFrecuentes.attach(quote);
     keepCurrentQuote();
   }
 

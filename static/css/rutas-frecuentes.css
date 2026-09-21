@@ -1,0 +1,18 @@
+.quote-route-tools { margin: 0 0 20px; }
+.quote-route-tools[hidden] { display: none; }
+.quote-frequent-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.quote-frequent-heading > strong { font-size: 13px; font-weight: 600; color: var(--fg); }
+.quote-reverse-route { margin-left: auto; border: 0; background: transparent; color: var(--fg-2); padding: 7px 0 7px 12px; font: inherit; font-size: 12px; cursor: pointer; }
+.quote-reverse-route:hover:not(:disabled) { color: var(--fg); }
+.quote-reverse-route:disabled { opacity: .4; cursor: default; }
+.quote-frequent-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.quote-frequent-route { display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px; min-height: 42px; max-width: 100%; padding: 10px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-elev-2); color: var(--fg); font: inherit; font-size: 13px; line-height: 1.35; cursor: pointer; transition: border-color .15s, background .15s; }
+.quote-frequent-route > [aria-hidden] { color: var(--fg-3); }
+.quote-frequent-route:hover { border-color: var(--accent, #a78bfa); }
+.quote-frequent-route[aria-pressed="true"] { border-color: var(--accent, #a78bfa); background: color-mix(in srgb, var(--accent, #a78bfa) 13%, transparent); }
+.quote-frequent-route:focus-visible, .quote-reverse-route:focus-visible { outline: 2px solid var(--accent, #a78bfa); outline-offset: 3px; }
+@media (max-width: 480px) {
+  .quote-frequent-list { gap: 7px; }
+  .quote-frequent-route { flex: 1 1 145px; padding: 10px; font-size: 12px; }
+  .quote-reverse-route { min-height: 42px; }
+}
