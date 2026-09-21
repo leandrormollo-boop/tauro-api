@@ -1,6 +1,6 @@
 # Rutas frecuentes del cliente
 
-Implementación local revisada el 21 de septiembre de 2026. Pendiente de aprobación para producción. Base de la rama: `d09deee5d8eb9e2e86108adb6678fb2131554657`.
+Implementación revisada el 21 de septiembre de 2026. Publicación autorizada por el usuario mediante «avancemos» tras revisar la entrega. El resultado operativo del despliegue se registra en la evidencia local. Base de la rama: `d09deee5d8eb9e2e86108adb6678fb2131554657`.
 
 ## Comportamiento
 
@@ -28,4 +28,4 @@ Vista local: `http://127.0.0.1:8784/portal/cotizar?ambito=internacional`. Utiliz
 
 ## Registro de ejecución
 
-Router determinístico TAURO: arquitectura con datos privados; mínimo Sol/high. Ejecución por Astra, manteniendo el modelo superior solicitado por el usuario. Sin delegación ni API de modelos. Controles: aislamiento por sesión, consulta de producción de sólo lectura, pruebas locales y revisión de interfaz. Resultado: función preparada para revisión; publicación no realizada. Los cambios de lanzamiento pendientes en otras ramas no forman parte de esta entrega.
+Router determinístico TAURO: arquitectura con datos privados y publicación productiva aprobada; mínimo Sol/high. Ejecución por Astra, manteniendo el modelo superior solicitado por el usuario. Sin delegación ni API de modelos. Controles: aislamiento por sesión, consulta de producción de sólo lectura, pruebas locales y revisión de interfaz. Resultado previo al despliegue: función validada y publicación autorizada. Los cambios de lanzamiento pendientes en otras ramas no forman parte de esta entrega.
