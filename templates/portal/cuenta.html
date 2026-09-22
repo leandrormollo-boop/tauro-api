@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Mi cuenta corriente{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=5">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=6">{% endblock %}
 
 {% macro dinero(valor) -%}
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
@@ -45,6 +45,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             <p>{% if inicio %}Movimientos desde septiembre de 2026.{% else %}Saldo, vencimientos y el detalle de tu operación.{% endif %}</p>
         </div>
         <div class="account-title-actions">
+            <a href="#pagos" class="btn btn-ghost">Imputar un pago</a>
             <a href="#informar-pago" class="btn btn-primary" data-open-payment>Informar un pago</a>
             <a href="{{ cuenta_url(exportar=true, pagina=None) }}" class="btn btn-ghost" download data-account-export aria-label="Descargar movimientos filtrados en Excel"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg> Descargar Excel</a>
         </div>
@@ -96,7 +97,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <dl class="account-payment-totals">
         <div><dt>Pagos en revisión<span data-help="Pagos en revisión">Comprobantes recibidos que TAURO todavía no aprobó. No se descuentan del saldo.</span></dt><dd>{{ dinero(resumen_cuenta.pagos_pendientes_ars|default(0)) }}</dd></div>
         <div><dt>Pagos por vincular<span data-help="Pagos por vincular">Pagos aprobados, ya descontados del saldo total, que aún no se vincularon a una factura o cargo.</span></dt><dd>{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd></div>
-        {% if exp and exp.cupo.configurado %}<div class="account-capacity"><dt>Disponible para nuevos envíos</dt><dd>{{ dinero(exp.cupo.disponible_ars) }}</dd><small>De un límite de {{ dinero(exp.cupo.tope_ars) }}{% if exp.cupo.reservado_ars %} · {{ dinero(exp.cupo.reservado_ars) }} reservado{% endif %} · Se vuelve a verificar al emitir</small><details class="account-capacity-detail"><summary>Cómo se calcula el disponible</summary><p>El cupo descuenta los cargos de envíos menos los pagos aprobados, y las reservas de emisión. Los ajustes posteriores se incluyen en tu saldo, pero no consumen este cupo.</p><p>Cargos menos pagos: {{ dinero(exp.cupo.deuda_ars|default(0)) }} · Reservas: {{ dinero(exp.cupo.reservado_ars) }}. Un saldo a favor no amplía el límite.</p></details></div>{% endif %}
+        {% if exp and exp.cupo.configurado %}<div class="account-capacity"><dt>Disponible para nuevos envíos</dt><dd>{{ dinero(exp.cupo.disponible_ars) }}</dd><small>De un límite de {{ dinero(exp.cupo.tope_ars) }}{% if exp.cupo.reservado_ars %} · {{ dinero(exp.cupo.reservado_ars) }} reservado{% endif %} · Se vuelve a verificar al emitir</small><details class="account-capacity-detail"><summary>Cómo se calcula el disponible</summary><p>El disponible considera cargos, ajustes aplicados, pagos aprobados y reservas de emisión.</p><p>Cargos menos pagos: {{ dinero(exp.cupo.deuda_ars|default(0)) }} · Reservas: {{ dinero(exp.cupo.reservado_ars) }}. Un saldo a favor no amplía el límite.</p></details></div>{% endif %}
     </dl>
 </div>
 <details class="account-scopes"><summary>Ver saldos por ámbito <span>Nacional / Internacional</span></summary><div class="account-scope-list">{{ resumen_ambito("Nacional", "nacional", resumen_cuenta.nacional) }}{{ resumen_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}</div>{% if resumen_cuenta.cargos_sin_clasificar_ars %}<p class="account-classification-note">Pendiente de clasificar: {{ dinero(resumen_cuenta.cargos_sin_clasificar_ars) }}</p>{% endif %}</details>
@@ -128,11 +129,14 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 
         <details class="account-chart-values"><summary>Ver importes por mes</summary><div class="account-chart-values-scroll"><table><caption class="sr-only">Costos logísticos mensuales en pesos argentinos</caption><thead><tr><th>Mes</th><th>Nacional</th><th>Internacional</th>{% if exp.costos.hay_sin_clasificar %}<th>Sin clasificar</th>{% endif %}<th>Total</th></tr></thead><tbody>{% for mes in exp.costos.meses %}<tr><th scope="row">{{ mes.label_completo }}</th><td>{{ dinero(mes.nacional_ars) }}</td><td>{{ dinero(mes.internacional_ars) }}</td>{% if exp.costos.hay_sin_clasificar %}<td>{{ dinero(mes.sin_clasificar_ars) }}</td>{% endif %}<td>{{ dinero(mes.total_ars) }}</td></tr>{% endfor %}</tbody></table></div></details>
     </section>
-    <section class="account-payment-tracking" aria-labelledby="account-payments-title">
-        <div class="account-section-heading"><div><span class="account-kicker">Comprobantes</span><h2 id="account-payments-title">Seguimiento de pagos</h2></div><a class="account-text-action" href="{{ cuenta_url(tipo='pagos', pagina=None) }}#movimientos" data-account-link="pagos">Ver movimientos <span aria-hidden="true">↗</span></a></div>
+    <section class="account-payment-tracking" id="pagos" aria-labelledby="account-payments-title">
+        <div class="account-section-heading"><div><span class="account-kicker">Tus pagos</span><h2 id="account-payments-title">Pagos e imputaciones</h2></div><a class="account-text-action" href="{{ cuenta_url(tipo='pagos', pagina=None) }}#movimientos" data-account-link="pagos">Ver movimientos <span aria-hidden="true">↗</span></a></div>
         {% for pago in exp.pagos %}
-        <details class="account-payment-record"{% if loop.first and pago.estado == 'PENDIENTE' %} open{% endif %}>
-            <summary><span class="account-payment-record-title"><strong>{{ dinero(pago.monto_ars) }}</strong><span>{{ pago.fecha or 'Fecha sin informar' }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</span></span><span class="account-status {% if pago.estado == 'PENDIENTE' %}is-attention{% elif pago.estado == 'RECHAZADO' %}is-rejected{% else %}is-confirmed{% endif %}">{{ pago.estado_label }}</span><span class="account-detail-chevron" aria-hidden="true"></span></summary>
+        <article class="account-payment-item" id="pago-{{ pago.id }}">
+        <div class="account-payment-header"><span class="account-payment-record-title"><strong>{{ dinero(pago.monto_ars) }}</strong><span>{{ pago.fecha or 'Fecha sin informar' }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</span></span><span class="account-status {% if pago.estado == 'PENDIENTE' %}is-attention{% elif pago.estado == 'RECHAZADO' %}is-rejected{% else %}is-confirmed{% endif %}">{{ pago.estado_label }}</span></div>
+        <div class="account-imputation-row"><div><strong>{{ pago.imputacion_label|default("Sin envíos asignados") }}</strong>{% if pago.puede_imputar %}<small>{{ dinero(pago.sin_imputar_ars) }} disponibles para imputar</small>{% endif %}</div><a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/imputar">{{ "Elegir envíos" if pago.puede_imputar else "Ver imputación" }}</a></div>
+        <details class="account-payment-record">
+            <summary><span>Ver detalle{% if pago.tiene_comprobante %} y comprobante{% endif %}</span><span class="account-detail-chevron" aria-hidden="true"></span></summary>
             <div class="account-payment-record-body">
                 <ol class="account-payment-steps" aria-label="Progreso del comprobante">{% for paso in pago.pasos %}<li{% if paso.completo %} class="is-complete"{% endif %}><span>{{ paso.label }}</span>{% if paso.fecha %}<time>{{ paso.fecha }}</time>{% endif %}</li>{% endfor %}</ol>
                 {% if pago.estado == 'RECHAZADO' %}<p class="account-payment-explanation">Comprobante rechazado: no modifica el saldo. Consultá a TAURO antes de volver a informarlo.</p>{% elif pago.estado == 'PENDIENTE' %}<p class="account-payment-explanation">Recibimos el comprobante. Se descuenta del saldo cuando TAURO lo aprueba.</p>{% else %}<p class="account-payment-explanation">Pago acreditado en tu cuenta.</p>{% endif %}
@@ -144,6 +148,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                 {% endif %}
             </div>
         </details>
+        </article>
         {% else %}<p class="account-inline-empty">{% if inicio %}No hay pagos registrados desde el {{ inicio.strftime('%d/%m/%Y') }}. Los pagos aprobados anteriores ya están incluidos en tu saldo.{% else %}Todavía no hay comprobantes para mostrar. Cuando informes un pago, vas a poder seguir su revisión desde acá.{% endif %}</p>{% endfor %}
     </section>
 </div>
@@ -157,7 +162,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         </span>
         <span class="account-payment-action">Cargar comprobante</span>
     </summary>
-    <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data" id="payment-report-form">
+    <form method="POST" action="/portal/pagos/informar" enctype="multipart/form-data" id="payment-report-form" data-payment-allocation-form>
         <input type="hidden" name="volver_ambito" value="{{ ambito_filtro }}">
         <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
         <input type="hidden" name="seleccion_documental" value="1">
@@ -182,25 +187,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             </div>
         </div>
 
-        <details class="account-document-selection" id="payment-documents"{% if seleccion.clave %} open{% endif %}>
-          <summary>Vincular a documentos específicos (opcional)<span id="payment-selected-count"></span></summary>
-          <p class="account-payment-notice" id="payment-document-warning">No sumes esta lista para calcular tu deuda: puede haber pagos ya descontados del saldo sin vincular a estos documentos. Si no sabés cuál elegir, informá el pago a cuenta.</p>
-          <div class="account-document-tools"><label for="payment-document-search">Buscar por guía o documento<input type="search" id="payment-document-search" placeholder="Número de guía o factura" autocomplete="off"></label><button type="button" class="btn btn-ghost btn-sm" id="payment-clear-documents" hidden>Quitar selección</button></div>
-          <fieldset class="account-allocation-options" aria-describedby="payment-document-warning">
-            <legend>Documentos para solicitar una imputación</legend>
-            {% for d in destinos_pago %}
-            <label data-payment-document>
-              <input type="checkbox" name="destinos" value="{{ d.clave }}" data-saldo="{{ d.disponible }}"{% if d.clave == seleccion.clave %} checked{% endif %}{% if d.disponible <= 0 %} disabled{% endif %}>
-              <span><strong>{{ d.descripcion }}</strong>{% if d.tracking %} · {{ d.tracking }}{% endif %}
-                <small>{{ d.ambito|title }} · Sin aplicación documental {{ dinero(d.saldo) }}{% if d.solicitado %} · en revisión {{ dinero(d.solicitado) }}{% endif %} · Disponible para vincular {{ dinero(d.disponible) }}</small>
-              </span>
-            </label>
-            {% else %}
-            <p>No hay documentos disponibles para vincular. Podés informar el pago a cuenta.</p>
-            {% endfor %}
-          </fieldset>
-          <p id="payment-no-documents" hidden>No hay documentos que coincidan con la búsqueda.</p>
-        </details>
+        {% from 'portal/_selector_envios_pago.html' import selector_envios %}
+        {{ selector_envios(destinos_pago, seleccion.clave) }}
         <div class="account-split-allocation">
           <p id="payment-allocation-summary" aria-live="polite">Pago a cuenta. Se descuenta del saldo consolidado cuando TAURO aprueba el comprobante.</p>
         </div>
@@ -219,5 +207,5 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% include "portal/cuenta_movimientos.html" %}
 </section>
 
-<script src="/static/js/portal-cuenta.js?v=2" defer nonce="{{ request.state.csp_nonce }}"></script>
+<script src="/static/js/portal-cuenta.js?v=3" defer nonce="{{ request.state.csp_nonce }}"></script>
 {% endblock %}

@@ -1,0 +1,18 @@
+{% macro dinero(valor) -%}$ {{ '{:,.2f}'.format(valor|default(0, true)).replace(',', '_').replace('.', ',').replace('_', '.') }}{%- endmacro %}
+{% macro selector_envios(destinos_pago, seleccion='') -%}
+<section class="account-document-selection" id="payment-documents" aria-labelledby="payment-selection-title">
+  <div class="account-selection-heading"><h3 id="payment-selection-title">¿Qué envíos estás pagando?</h3><span id="payment-selected-count" aria-live="polite"></span></div>
+  <p class="account-payment-notice">Elegí uno o varios. Lo que no asignes queda a cuenta.<span data-help="Imputación del pago">Si el envío ya está facturado, elegí su factura. Vincular el pago no lo descuenta dos veces del saldo. Un pago nuevo requiere aprobación de TAURO.</span></p>
+  <div class="account-document-tools"><label for="payment-document-search">Buscar envío o factura<input type="search" id="payment-document-search" placeholder="Destinatario, guía o factura" autocomplete="off"></label><button type="button" class="btn btn-ghost btn-sm" id="payment-clear-documents" hidden>Quitar selección</button></div>
+  <fieldset class="account-allocation-options">
+    <legend class="sr-only">Envíos y facturas disponibles</legend>
+    {% for d in destinos_pago %}
+    <label data-payment-document>
+      <input type="checkbox" name="destinos" value="{{ d.clave }}" data-saldo="{{ d.disponible }}" data-kind="{{ d.clase }}"{% if d.clave == seleccion %} checked{% endif %}{% if d.disponible <= 0 %} disabled{% endif %}>
+      <span class="account-selection-document"><strong>{{ d.descripcion }}</strong>{% if d.tracking %}<span class="mono">{{ d.tracking }}</span>{% endif %}<small>{{ d.ambito|title }} · {{ dinero(d.disponible) }} por vincular{% if d.solicitado %} · {{ dinero(d.solicitado) }} en revisión{% endif %}</small><span class="account-allocation-line" data-allocation-line hidden></span></span>
+    </label>
+    {% else %}<p>No hay envíos o facturas disponibles para este pago.</p>{% endfor %}
+  </fieldset>
+  <p id="payment-no-documents" hidden>No encontramos coincidencias.</p>
+</section>
+{%- endmacro %}

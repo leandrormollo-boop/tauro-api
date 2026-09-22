@@ -58,7 +58,8 @@ from servicios.facturacion_clientes import (
 from servicios.documentos_portal import (
     descriptor_documento, obtener_documento, miniatura_documento,
 )
-from servicios.experiencia_cuenta import obtener_experiencia_cuenta
+from servicios.experiencia_cuenta import obtener_experiencia_cuenta, obtener_pago_cliente
+from servicios.imputacion_pagos_portal import imputar_pago_cliente
 from servicios.periodo_cuenta import inicio_cuenta_cliente, obtener_periodo_cuenta
 from servicios.filtros_cuenta import normalizar_filtros_cuenta
 from servicios.export_cuenta import generar_excel_cuenta
@@ -1371,6 +1372,29 @@ async def informar_pago(
     return RedirectResponse(
         url=f"/portal/cuenta?ambito={volver_ambito}&ok=1", status_code=303
     )
+
+
+@router.get("/pagos/{pago_id}/imputar")
+def ver_imputacion_pago(request: Request, pago_id: int, cliente: str = Depends(cliente_actual)):
+    pago = obtener_pago_cliente(cliente, pago_id)
+    if not pago:
+        raise HTTPException(status_code=404, detail="Pago no disponible")
+    vinculados = {f"F:{a['factura_id']}" if a.get('factura_id') else f"E:{a['envio_id']}"
+                  for a in pago['aplicaciones']}
+    destinos = [d for d in listar_destinos_pago(cliente)
+                if d['clave'] not in vinculados and d['disponible'] > 0] if pago['puede_imputar'] else []
+    return templates.TemplateResponse(request=request, name="portal/pago_imputar.html",
+        context={"cliente":cliente,"pago":pago,"destinos_pago":destinos})
+
+
+@router.post("/pagos/{pago_id}/imputar")
+async def guardar_imputacion_pago(request: Request, pago_id: int, cliente: str = Depends(cliente_actual)):
+    form = await request.form()
+    try:
+        imputar_pago_cliente(cliente, pago_id, list(form.getlist("destinos")), form.get("disponible_esperado"))
+    except ValueError as exc:
+        return RedirectResponse(f"/portal/pagos/{pago_id}/imputar?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/portal/pagos/{pago_id}/imputar?guardado=1", status_code=303)
 
 
 @router.get("/documentos/{tipo}/{documento_id}/contenido")

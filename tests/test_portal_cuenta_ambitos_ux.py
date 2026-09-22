@@ -18,7 +18,7 @@ IDEMPOTENCY_KEY = "a" * 43
 def _template_cuenta_completo():
     return "\n".join(
         (RAIZ / "templates" / "portal" / nombre).read_text(encoding="utf-8")
-        for nombre in ("cuenta.html", "cuenta_movimientos.html")
+        for nombre in ("cuenta.html", "cuenta_movimientos.html", "_selector_envios_pago.html")
     )
 
 
@@ -247,7 +247,7 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
     for texto in (
         "Saldo total", "Nacional", "Internacional", "Todos tus movimientos",
         "Facturado", "Pagos aprobados", "A facturar", "Pagos por vincular",
-        "Vincular a documentos específicos (opcional)", "El pago se descuenta del saldo cuando TAURO aprueba el comprobante",
+        "¿Qué envíos estás pagando?", "El pago se descuenta del saldo cuando TAURO aprueba el comprobante",
     ):
         assert texto in html
     assert 'id="payment-documents"' in html

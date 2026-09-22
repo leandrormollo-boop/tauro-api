@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% from 'portal/_selector_envios_pago.html' import selector_envios, dinero %}
+{% block title %}Imputar pago{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=6">{% endblock %}
+{% block content %}
+<section class="account-page account-client account-imputation-page">
+  <a class="account-text-action" href="/portal/cuenta#pagos">← Mi cuenta</a>
+  <div class="account-title"><div><div class="eyebrow">Mi cuenta · Pago #{{ pago.id }}</div><h1>{{ 'Imputar pago' if pago.puede_imputar else 'Imputación del pago' }}</h1><p>{{ pago.fecha }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</p></div></div>
+  {% if request.query_params.get('error') %}<div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>{% endif %}
+  {% if request.query_params.get('guardado') %}<div class="msg ok" role="status">{{ 'Imputación guardada. El pago sigue en revisión.' if pago.estado == 'PENDIENTE' else 'Imputación guardada.' }}</div>{% endif %}
+  <div class="account-imputation-position"><div><span>Total del pago</span><strong>{{ dinero(pago.monto_ars) }}</strong><span class="account-status">{{ pago.estado_label }}</span></div><div><span>Disponible para imputar</span><strong>{{ dinero(pago.sin_imputar_ars) }}</strong></div></div>
+  <h2 class="account-imputation-label">{{ pago.imputacion_label }}</h2>
+  {% if pago.aplicaciones %}<ul class="account-payment-documents">{% for a in pago.aplicaciones %}<li><span>{{ a.documento }}</span><strong>{{ dinero(a.monto_ars) }}</strong></li>{% endfor %}</ul>{% endif %}
+  {% if pago.puede_imputar and destinos_pago %}
+  <form action="/portal/pagos/{{ pago.id }}/imputar" method="post" id="payment-allocation-form" data-payment-allocation-form data-existing-payment>
+    <input type="hidden" name="disponible_esperado" id="pago-monto" value="{{ pago.sin_imputar_ars }}">
+    {{ selector_envios(destinos_pago) }}
+    <div class="account-split-allocation"><p id="payment-allocation-summary" aria-live="polite">Elegí los envíos de este pago.</p></div>
+    <div class="account-imputation-actions"><button type="submit" class="btn btn-primary">Confirmar imputación</button><a class="btn btn-ghost" href="/portal/cuenta#pagos">Volver a Mi cuenta</a></div>
+    {% if pago.estado == 'PENDIENTE' %}<p class="account-payment-notice">Se confirmará cuando TAURO apruebe el pago.</p>{% endif %}
+  </form>
+  {% elif pago.puede_imputar %}<p class="account-payment-notice">No hay envíos o facturas con saldo disponible. El importe sin asignar queda a cuenta.</p>{% endif %}
+</section>
+<script src="/static/js/portal-cuenta.js?v=3" defer></script>
+{% endblock %}

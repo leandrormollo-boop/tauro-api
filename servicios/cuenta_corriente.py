@@ -1251,7 +1251,7 @@ def listar_destinos_pago(cliente_id: str) -> List[Dict[str, Any]]:
                         'ENVIO'::text AS clase,
                         e.id AS origen_id,
                         e.fecha,
-                        COALESCE(NULLIF(BTRIM(e.descripcion), ''), 'Envío')
+                        COALESCE(NULLIF(BTRIM(s.dest_nombre), ''), NULLIF(BTRIM(e.descripcion), ''), 'Envío')
                             AS descripcion,
                         COALESCE(NULLIF(BTRIM(e.tracking), ''),
                                  NULLIF(BTRIM(s.tracking), '')) AS tracking,
@@ -1260,9 +1260,11 @@ def listar_destinos_pago(cliente_id: str) -> List[Dict[str, Any]]:
                         COALESCE(ae.pagado, 0) AS pagado,
                         COALESCE(ae.solicitado, 0) AS solicitado
                     FROM envios e
-                    LEFT JOIN solicitudes_guia s ON s.id=e.solicitud_id
+                    LEFT JOIN solicitudes_guia s ON s.id=e.solicitud_id AND s.cliente_id=e.cliente_id
                     LEFT JOIN aplicaciones_envio ae ON ae.envio_id=e.id
                     WHERE e.cliente_id=%s AND e.estado='ACTIVO'
+                      AND (s.id IS NULL OR (COALESCE(s.visible_cliente,TRUE) AND NOT COALESCE(s.test,FALSE)
+                           AND COALESCE(s.estado,'') NOT IN ('CANCELADO','REEMPLAZADO')))
                       AND e.monto_ars > 0
                       AND e.ambito IN ('NACIONAL','INTERNACIONAL')
                       AND NULLIF(BTRIM(e.nro_fc), '') IS NULL
@@ -1374,8 +1376,11 @@ def _armar_aplicaciones_documentales(
         else:
             cur.execute(
                 """
-                SELECT id, cliente_id, estado, monto_ars, ambito
-                  FROM envios WHERE id=%s FOR UPDATE
+                SELECT e.id, e.cliente_id, e.estado, e.monto_ars, e.ambito,
+                       s.estado AS estado_solicitud, s.visible_cliente, s.test
+                  FROM envios e
+                  LEFT JOIN solicitudes_guia s ON s.id=e.solicitud_id AND s.cliente_id=e.cliente_id
+                 WHERE e.id=%s FOR UPDATE OF e
                 """,
                 (origen_id,),
             )
@@ -1384,6 +1389,8 @@ def _armar_aplicaciones_documentales(
                 not documento or documento["cliente_id"] != cliente_id
                 or documento["estado"] != "ACTIVO"
                 or documento["ambito"] not in _AMBITOS_CONTABLES
+                or documento.get("estado_solicitud") in ("CANCELADO", "REEMPLAZADO")
+                or documento.get("visible_cliente") is False or documento.get("test") is True
             ):
                 raise ValueError("Un cargo seleccionado ya no está disponible.")
             cur.execute(

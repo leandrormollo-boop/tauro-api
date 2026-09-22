@@ -71,20 +71,29 @@ WITH recientes AS (
            p.comprobante IS NOT NULL AS tiene_comprobante
     FROM pagos p WHERE p.cliente_id=%s
       AND (%s::date IS NULL OR p.fecha>=%s)
+      AND (%s::integer IS NULL OR p.id=%s)
     ORDER BY p.created_at DESC, p.id DESC LIMIT 8
 )
 SELECT p.*, COALESCE(a.detalle,'[]'::jsonb) AS aplicaciones,
-       COALESCE(a.cantidad,0) AS cantidad_aplicaciones
+       COALESCE(a.cantidad,0) AS cantidad_aplicaciones,
+       COALESCE(a.total_vinculado,0) AS total_vinculado,
+       COALESCE(a.envios,0) AS cantidad_envios,
+       COALESCE(a.facturas,0) AS cantidad_facturas
 FROM recientes p
 LEFT JOIN LATERAL (
     SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
                'documento', d.documento, 'tracking', d.tracking,
                'monto_ars', d.monto_ars::text, 'estado', d.estado,
-               'ambito', d.ambito
-           ) ORDER BY d.id) AS detalle, MAX(d.cantidad) AS cantidad
+               'ambito', d.ambito, 'envio_id', d.envio_id, 'factura_id', d.factura_id
+           ) ORDER BY d.id) AS detalle, MAX(d.cantidad) AS cantidad,
+           MAX(d.total_vinculado) AS total_vinculado,
+           MAX(d.envios) AS envios, MAX(d.facturas) AS facturas
     FROM (
-        SELECT pa.id, pa.monto_ars, pa.estado, pa.ambito,
+        SELECT pa.id, pa.monto_ars, pa.estado, pa.ambito, pa.envio_id, pa.factura_id,
                COUNT(*) OVER () AS cantidad,
+               SUM(pa.monto_ars) OVER () AS total_vinculado,
+               COUNT(pa.envio_id) OVER () AS envios,
+               COUNT(pa.factura_id) OVER () AS facturas,
                CASE WHEN f.id IS NOT NULL THEN
                    f.tipo || ' ' || LPAD(f.punto_venta::text,4,'0')
                        || '-' || LPAD(f.numero::text,8,'0')
@@ -255,7 +264,24 @@ def _presentar_pago(fila: dict) -> dict:
         "monto_ars": _decimal_monto(a.get("monto_ars")),
         "estado": str(a.get("estado") or ""),
         "ambito": str(a.get("ambito") or ""),
+        "envio_id": a.get("envio_id"), "factura_id": a.get("factura_id"),
     } for a in fila.get("aplicaciones") or []]
+    monto = _decimal_monto(fila.get("monto_ars"))
+    vinculado = _decimal_monto(fila.get("total_vinculado", sum((a["monto_ars"] for a in aplicaciones), _CERO)))
+    disponible = max(_CERO, monto - vinculado) if estado in ("APROBADO", "PENDIENTE") else _CERO
+    envios = int(fila.get("cantidad_envios") or 0)
+    facturas = int(fila.get("cantidad_facturas") or 0)
+    destinos = []
+    if envios:
+        destinos.append(f"{envios} envío" + ("s" if envios != 1 else ""))
+    if facturas:
+        destinos.append(f"{facturas} factura" + ("s" if facturas != 1 else ""))
+    if estado == "RECHAZADO":
+        imputacion_label = "Pago rechazado · Sin imputación"
+    elif destinos:
+        imputacion_label = ("Pago imputado a " if estado == "APROBADO" else "Imputación en revisión: ") + " y ".join(destinos)
+    else:
+        imputacion_label = "Sin envíos asignados" if not vinculado else "Imputado por ámbito"
     return {
         "id": fila["id"], "fecha": _fecha_visible(fila.get("fecha")),
         "registrado_at": registro, "estado": estado, "estado_label": etiqueta,
@@ -265,6 +291,9 @@ def _presentar_pago(fila: dict) -> dict:
         "tiene_comprobante": bool(fila.get("tiene_comprobante")),
         "aplicaciones": aplicaciones,
         "cantidad_aplicaciones": int(fila.get("cantidad_aplicaciones") or len(aplicaciones)),
+        "imputacion_label": imputacion_label, "cantidad_envios": envios,
+        "cantidad_facturas": facturas, "sin_imputar_ars": disponible,
+        "puede_imputar": disponible > 0 and estado in ("PENDIENTE", "APROBADO"),
         "pasos": [
             {"label": "Comprobante recibido" if fila.get("tiene_comprobante") else "Pago registrado",
              "fecha": registro, "completo": True, "actual": False},
@@ -351,7 +380,7 @@ def obtener_experiencia_cuenta(cliente: str, resumen: dict) -> dict:
             cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             cur.execute(_VENCIMIENTOS_SQL, (cliente, hoy, hoy))
             vencimientos = _presentar_vencimientos(cur.fetchall(), hoy)
-            cur.execute(_PAGOS_SQL, (cliente, inicio_cliente, inicio_cliente))
+            cur.execute(_PAGOS_SQL, (cliente, inicio_cliente, inicio_cliente, None, None))
             pagos = [_presentar_pago(dict(f)) for f in cur.fetchall()]
             cur.execute(_CUPO_SQL, (cliente,))
             cupo = _presentar_cupo(dict(cur.fetchone() or {}))
@@ -364,3 +393,16 @@ def obtener_experiencia_cuenta(cliente: str, resumen: dict) -> dict:
         "pagos_en_revision_ars": _decimal_monto(resumen.get("pagos_pendientes_ars")),
         "credito_sin_imputar_ars": _decimal_monto(resumen.get("credito_sin_imputar_ars")),
     }
+
+
+def obtener_pago_cliente(cliente: str, pago_id: int) -> dict | None:
+    """Detalle propio completo, incluso de pagos anteriores al corte visual."""
+    cliente = str(cliente or "").strip().upper()
+    if not cliente or pago_id <= 0:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(_PAGOS_SQL.replace("ORDER BY pa.id LIMIT 24", "ORDER BY pa.id"),
+                        (cliente, None, None, pago_id, pago_id))
+            fila = cur.fetchone()
+    return _presentar_pago(dict(fila)) if fila else None

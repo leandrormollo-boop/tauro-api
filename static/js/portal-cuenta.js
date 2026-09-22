@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  var form = document.getElementById("payment-report-form");
+  var form = document.querySelector("[data-payment-allocation-form]");
   if (!form) return;
   var paymentDetails = document.getElementById("informar-pago");
   var total = document.getElementById("pago-monto");
@@ -36,22 +36,38 @@
   function updateAllocation() {
     var totalValue = numberFromInput(total.value);
     var checked = destinations.filter(function (item) { return item.checked && !item.disabled; });
-    if (selectedCount) selectedCount.textContent = checked.length ? " · " + checked.length + " seleccionados" : "";
+    var remaining = totalValue, shipments = 0, invoices = 0, uncovered = 0;
+    if (selectedCount) selectedCount.textContent = checked.length ? checked.length + (checked.length === 1 ? " seleccionado" : " seleccionados") : "";
     if (clearDocuments) clearDocuments.hidden = !checked.length;
+    destinations.forEach(function (item) {
+      var line = item.closest("[data-payment-document]").querySelector("[data-allocation-line]");
+      if (line) line.hidden = !item.checked;
+      if (!item.checked || item.disabled) return;
+      var amount = Math.min(remaining, availableCents(item));
+      remaining -= amount;
+      if (amount) { if (item.dataset.kind === "FACTURA") invoices++; else shipments++; }
+      else uncovered++;
+      if (line) {
+        line.textContent = amount ? "$ " + money.format(amount / 100) + " de este pago"
+          + (amount < availableCents(item) ? " · Parcial" : "") : "Sin importe para asignar";
+        line.classList.toggle("is-empty", !amount);
+      }
+    });
+    var submit = form.querySelector('button[type="submit"]');
+    var existing = form.hasAttribute("data-existing-payment");
+    if (submit) submit.disabled = uncovered > 0 || (existing && !checked.length);
     if (!checked.length) {
-      summary.textContent = "Pago a cuenta" + (totalValue ? " por $ " + money.format(totalValue / 100) : "")
-        + ". Se descuenta del saldo consolidado cuando TAURO aprueba el comprobante.";
+      summary.textContent = existing ? "Elegí los envíos que querés vincular."
+        : "Pago a cuenta" + (totalValue ? " por $ " + money.format(totalValue / 100) : "")
+          + ". Podés elegir los envíos ahora o después.";
       return;
     }
-    var selected = checked
-      .reduce(function (sum, item) { return sum + availableCents(item); }, 0);
-    var allocated = Math.min(totalValue, selected);
-    var credit = Math.max(0, totalValue - selected);
-    var pending = Math.max(0, selected - totalValue);
-    summary.textContent = "Solicitás vincular $ " + money.format(allocated / 100)
-      + " · A cuenta, sin documento: $ " + money.format(credit / 100)
-      + (pending ? " · Resto documental sin vincular: $ " + money.format(pending / 100) : "")
-      + ". Estos importes no reemplazan el saldo de tu cuenta.";
+    var labels = [];
+    if (shipments) labels.push(shipments + (shipments === 1 ? " envío" : " envíos"));
+    if (invoices) labels.push(invoices + (invoices === 1 ? " factura" : " facturas"));
+    summary.textContent = (labels.length ? "A imputar a " + labels.join(" y ") + ": $ " + money.format((totalValue - remaining) / 100) : "Ingresá el monto del pago.")
+      + (remaining ? " · A cuenta: $ " + money.format(remaining / 100) : "")
+      + (uncovered && totalValue ? ". Quitá los envíos que quedan sin importe o revisá el monto." : "");
   }
 
   function filterDocuments() {
@@ -70,6 +86,7 @@
   }
 
   function openPayment() {
+    if (!paymentDetails) return;
     paymentDetails.open = true;
     paymentDetails.scrollIntoView({ behavior: "auto", block: "start" });
     total.focus({ preventScroll: true });
@@ -82,7 +99,7 @@
         var destination = destinations.find(function (item) { return item.value === key && !item.disabled; });
         if (!destination || !availableCents(destination)) return;
         destinations.forEach(function (item) { item.checked = item === destination; });
-        if (documentDetails) documentDetails.open = true;
+
         if (documentSearch) documentSearch.value = "";
         filterDocuments();
         total.value = (availableCents(destination) / 100).toFixed(2).replace(".", ",");

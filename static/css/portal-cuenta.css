@@ -381,3 +381,44 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
 .account-history-tabs { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
 
 .account-history-tabs .btn { padding:8px 10px; font-size:12px; }
+
+/* Imputaciones visibles: cada pago muestra su destino antes de abrir el detalle. */
+.account-client #pagos { scroll-margin-top:24px; }
+.account-client .account-payment-item { border:1px solid var(--line); border-radius:18px; padding:16px 18px; margin:12px 0; background:var(--bg-elev); }
+.account-client .account-payment-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.account-client .account-payment-header .account-payment-record-title { min-width:0; overflow-wrap:anywhere; }
+.account-client .account-payment-item .account-payment-record > summary { font-size:12px; min-height:36px; padding-block:8px; }
+.account-client .account-imputation-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.account-client .account-imputation-row strong { display:block; font-size:13px; font-weight:500; }
+.account-client .account-imputation-row small { display:block; margin-top:5px; color:var(--account-muted); font-size:11px; }
+.account-client .account-imputation-row .btn { flex-shrink:0; }
+.account-client .account-payment-item .account-payment-record { margin-top:12px; border-bottom:0; }
+.account-client .account-document-selection { padding:20px; border:1px solid var(--line); border-radius:18px; margin:20px 0; background:var(--bg-elev); }
+.account-client .account-selection-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.account-client .account-selection-heading h3 { font-size:17px; margin:0; }
+.account-client #payment-selected-count { color:var(--accent); font-size:12px; }
+.account-client .account-document-selection .account-payment-notice { margin-bottom:14px; }
+.account-client .account-document-tools input { min-height:44px; padding:11px 14px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:12px; font-family:var(--font-body); }
+.account-client .account-document-tools input:focus { outline:2px solid var(--accent); outline-offset:2px; }
+.account-client .account-allocation-options { border:0; padding:0; max-height:440px; overflow:auto; overscroll-behavior:contain; grid-template-columns:1fr; }
+.account-client .account-allocation-options label { display:flex; border:1px solid var(--line); border-radius:12px; background:var(--bg); cursor:pointer; margin:0; }
+.account-client .account-allocation-options label:has(input:checked) { border-color:var(--accent); background:var(--accent-glow); }
+.account-client .account-selection-document { display:flex; flex-direction:column; gap:5px; min-width:0; overflow-wrap:anywhere; }
+.account-client .account-selection-document .mono { font-size:12px; color:var(--fg-2); }
+.account-client .account-allocation-line { font-size:12px; color:var(--accent); font-weight:600; }
+.account-client .account-allocation-line.is-empty { color:var(--account-attention); }
+.account-client .account-imputation-page { max-width:920px; margin:auto; }
+.account-client .account-imputation-position { display:flex; gap:32px; flex-wrap:wrap; padding:22px; background:var(--bg-elev); border:1px solid var(--line); border-radius:18px; margin:24px 0; }
+.account-client .account-imputation-position > div { display:flex; flex-direction:column; gap:8px; }
+.account-client .account-imputation-position strong { font:500 26px var(--font-display); }
+.account-client .account-imputation-position span { font-size:12px; color:var(--fg-2); }
+.account-client .account-imputation-label { font-size:17px; margin:20px 0; }
+.account-client .account-imputation-actions { display:flex; flex-wrap:wrap; gap:12px; margin:20px 0; }
+.account-client .account-imputation-actions button:disabled { opacity:.5; cursor:default; }
+@media(max-width:600px) {
+ .account-client .account-payment-header { flex-wrap:wrap; }
+ .account-client .account-imputation-row { align-items:flex-start; flex-direction:column; gap:12px; }
+ .account-client .account-imputation-row .btn { width:100%; }
+ .account-client .account-document-selection { padding:14px; }
+ .account-client .account-selection-heading { align-items:flex-start; flex-direction:column; gap:6px; }
+}
