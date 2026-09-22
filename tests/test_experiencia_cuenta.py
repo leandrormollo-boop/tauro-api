@@ -224,9 +224,10 @@ def test_lecturas_reales_aislan_cliente_parciales_reservas_y_costos(cuenta_aisla
     assert "PRIVADO" not in str(resultado)
     p1 = next(p for p in resultado["pagos"] if p["id"] == 1)
     assert len(p1["aplicaciones"]) == 1  # No factura/envío de OTRO.
-    assert resultado["cupo"]["deuda_ars"] == Decimal("308.00")
+    # El cupo incluye los ajustes aplicados (+20 -5), igual que el libro.
+    assert resultado["cupo"]["deuda_ars"] == Decimal("323.00")
     assert resultado["cupo"]["reservado_ars"] == Decimal("100.00")
-    assert resultado["cupo"]["disponible_ars"] == Decimal("592.00")
+    assert resultado["cupo"]["disponible_ars"] == Decimal("577.00")
     costos = resultado["costos"]
     assert costos["total_ars"] == Decimal("185.00")  # Septiembre: 100+20-5+70.
     assert [m["clave"] for m in costos["meses"]] == ["2026-09"]
@@ -317,6 +318,8 @@ def movimientos_aislados(cuenta_aislada, monkeypatch):
                 ALTER TABLE pagos_aplicaciones ADD COLUMN updated_at timestamptz DEFAULT NOW();
                 ALTER TABLE ajustes_cliente ADD COLUMN tipo text DEFAULT 'DEBITO',
                     ADD COLUMN conciliacion_id integer, ADD COLUMN motivo text,
+                    ADD COLUMN origen text NOT NULL DEFAULT 'CONCILIACION_COURIER',
+                    ADD COLUMN precio_anterior_ars numeric(18,4) DEFAULT 100,
                     ADD COLUMN precio_nuevo_ars numeric(18,4) DEFAULT 100;
                 CREATE TABLE conciliaciones_envio(
                     id integer PRIMARY KEY, tax_cliente_ars numeric DEFAULT 0,

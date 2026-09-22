@@ -213,6 +213,8 @@ def test_dos_ajustes_medios_centavos_concilian_periodo_lista_y_excel(periodo_db)
                 ALTER TABLE facturas_cliente ADD COLUMN cliente_id text, ADD COLUMN tipo text,
                     ADD COLUMN punto_venta integer, ADD COLUMN numero integer, ADD COLUMN pdf bytea;
                 ALTER TABLE ajustes_cliente ADD COLUMN conciliacion_id integer,
+                    ADD COLUMN origen text NOT NULL DEFAULT 'CONCILIACION_COURIER',
+                    ADD COLUMN precio_anterior_ars numeric DEFAULT 100,
                     ADD COLUMN motivo text, ADD COLUMN precio_nuevo_ars numeric DEFAULT 100;
                 CREATE TABLE solicitudes_guia(id integer,cliente_id text,tracking text,
                     visible_cliente boolean DEFAULT true,test boolean DEFAULT false,

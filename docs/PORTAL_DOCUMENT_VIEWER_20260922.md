@@ -1,6 +1,6 @@
 # Visor privado de documentos del portal
 
-Implementado sobre `954bc2b`, en `codex/portal-document-viewer-20260922`. Pendiente de autorización de publicación de esta funcionalidad. No cambia el esquema ni migra documentos.
+Implementado sobre `954bc2b`, en `codex/portal-document-viewer-20260922`, e integrado sobre `dedebe8` antes de publicar. Publicación autorizada explícitamente por el dueño el 22/09/2026: «publicalo». No cambia el esquema ni migra documentos.
 
 ## Resultado
 
@@ -53,3 +53,12 @@ Router determinístico: `architecture --final-decision --approved`, ruta base Te
 - El ajuste de página descuenta ese marco para mantener el documento completo dentro del visor.
 - Validación visual en navegador integrado a 320 px y viewport de escritorio de 1280 × 900: marco visible, página completa sin desbordamiento al ajustar; segunda página, zoom, cierre y retorno del foco operativos. Sintaxis JS y diff verificados.
 - Ajuste local, pendiente de publicación.
+
+## Preparación de la publicación autorizada
+
+- Se conserva íntegra la actualización productiva `dedebe8` de ajustes de precio por envío; integración sin conflictos.
+- Se actualizan únicamente fixtures y expectativas de cuatro pruebas anteriores que no contemplaban sus columnas y los ajustes aplicados al cupo. No se cambia la lógica financiera durante esta publicación.
+- Suite final integrada: **2.428 pruebas y 5 subpruebas aprobadas**, 33 advertencias; JavaScript: **17 aprobadas**, sintaxis y diff correctos. PostgreSQL local aislado, sin llamadas externas.
+- Router `production_release --production-change --security-sensitive --external-write --final-decision --approved`: mínimo Sol/high y ejecución autorizada; revisión del agente principal Astra, sin delegación. Evidencia en `qa_document_viewer_20260922/release-routing.jsonl` y `release-tests-final.txt`.
+- Publicar mediante avance de `main`, sin force-push. Verificar el commit exacto en Railway, `/health`, recursos del visor y lectura autenticada de documentos propios.
+- Versión anterior operativa: `dedebe86e05d430bbb78b128a4826bcd6f89f9e7`, despliegue `c61ccff8-71da-4c03-8df6-5390d00014a1`. El visor no requiere una migración para volver a esa versión.
