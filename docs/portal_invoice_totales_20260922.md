@@ -1,6 +1,6 @@
 # Invoice por valor total y alineación del formulario
 
-Estado: preparado localmente; sin publicación ni emisión real de guías.
+Estado: publicación autorizada por el usuario con «Avancemos» el 22/09/2026, después de revisar el resultado y su condición de prueba local. No se autoriza ni se realiza una emisión real de guías en esta publicación.
 Base: `2e8930ddc98ec8603dde9d6d3497abe16791aaea`.
 
 El cliente declara cantidad y total de cada artículo. Por ejemplo, 3 prendas por USD 100 conservan USD 100; el unitario de USD 33,333 que exige DHL no vuelve a multiplicarse para determinar el total. Se guarda `valor_total_usd` en `items_invoice`, con `Decimal` y dos decimales. Los formularios y solicitudes anteriores por unitario siguen admitidos.
@@ -13,6 +13,8 @@ La entrada de totales permite los formatos ES/EN que ya usa TAURO. Invoice y Sma
 
 Paquete separa catálogo de las seis medidas/datos y alinea los controles a 46 px. Invoice comparte alturas y márgenes. Se revisaron escritorio, 390 px, modo claro/oscuro, agregar/quitar cajas y artículos, navegación atrás y recuperación del borrador. Los ensayos usaron sólo datos ficticios y bloquearon operaciones de courier.
 
-Validación: 2.396 pruebas Python y 5 subtests, 17 pruebas JavaScript; 24 pruebas enfocadas adicionales incluyendo validación offline contra el YAML oficial. Evidencia local en `qa_package_layout_20260922` del workspace padre. Sin cambios de base de datos, tarifas, autenticación ni despliegue.
+Validación: 2.396 pruebas Python y 5 subtests, 17 pruebas JavaScript; 24 pruebas enfocadas adicionales incluyendo validación offline contra el YAML oficial. Evidencia local en `qa_package_layout_20260922` del workspace padre. Sin cambios de base de datos, tarifas ni autenticación.
 
 Enrutamiento: router determinista `architecture` -> Terra/medium; elevado a Astra por tratar datos declarados y arquitectura (política local: mínimo Sol para revisión final). Sin delegación. Controles: cálculos deterministas, red externa bloqueada durante tests, DB local desechable, ningún dato personal en evidencia, ninguna guía real emitida. La publicación requiere aprobación explícita según la política del workspace.
+
+Release: router determinista `production_release --production-change --final-decision --approved` selecciona Sol/high y habilita la ejecución. Se mantiene Astra para ejecutar y verificar la publicación. Se publica únicamente este cambio validado y esta constancia de autorización.
