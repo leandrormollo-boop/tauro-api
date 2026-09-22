@@ -281,9 +281,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                             </details>
                             {% endif %}
                             {% if s.tiene_label and s.estado not in ('CANCELADO', 'REEMPLAZADO') %}
-                                <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-primary btn-sm">
-                                    {% if s.guia_descargada_at %}Volver a descargar{% elif s.tiene_factura_comercial %}Guía + invoice{% else %}Guía PDF{% endif %}
-                                </a>
+                                {% from 'portal/_documentos.html' import tarjeta_documento %}
+                                {{ tarjeta_documento('guia', s.id, 'Guía ' ~ (s.courier or '')|upper, '/portal/envios/' ~ s.id ~ '/guia.pdf', s.tracking or '', compacto=True, texto_descarga='Descargar guía + invoice' if s.tiene_factura_comercial else 'Descargar guía') }}
                                 {# Guía emitida = hay algo que retirar. El form
                                    llega con courier/bultos/peso de ESTE envío. #}
                                 {% if s._ambito_portal == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}

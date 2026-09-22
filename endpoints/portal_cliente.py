@@ -55,6 +55,9 @@ from servicios.cuenta_corriente import (
 from servicios.facturacion_clientes import (
     get_factura_cliente_pdf,
 )
+from servicios.documentos_portal import (
+    descriptor_documento, obtener_documento, miniatura_documento,
+)
 from servicios.experiencia_cuenta import obtener_experiencia_cuenta
 from servicios.periodo_cuenta import inicio_cuenta_cliente, obtener_periodo_cuenta
 from servicios.filtros_cuenta import normalizar_filtros_cuenta
@@ -128,6 +131,7 @@ templates.env.globals["nombre_courier"] = nombre_courier
 templates.env.globals["nombre_pais"] = nombre_pais
 templates.env.globals["dinero_ars"] = dinero_ars
 templates.env.globals["numero_ars"] = numero_ars
+templates.env.globals["descriptor_documento"] = descriptor_documento
 
 
 AMBITOS_PORTAL = {"nacional", "internacional"}
@@ -1367,6 +1371,38 @@ async def informar_pago(
     return RedirectResponse(
         url=f"/portal/cuenta?ambito={volver_ambito}&ok=1", status_code=303
     )
+
+
+@router.get("/documentos/{tipo}/{documento_id}/contenido")
+def contenido_documento_portal(
+    tipo: str, documento_id: int, cliente: str = Depends(cliente_actual),
+):
+    try:
+        documento = obtener_documento(tipo, documento_id, cliente)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="No pudimos abrir este documento")
+    if documento is None:
+        raise HTTPException(status_code=404, detail="Documento no disponible")
+    return Response(documento.contenido, media_type=documento.tipo, headers={
+        "Content-Disposition": "inline",
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+    })
+
+
+@router.get("/documentos/{tipo}/{documento_id}/miniatura")
+def miniatura_documento_portal(
+    tipo: str, documento_id: int, cliente: str = Depends(cliente_actual),
+):
+    try:
+        documento = obtener_documento(tipo, documento_id, cliente)
+        if documento is None:
+            raise HTTPException(status_code=404, detail="Documento no disponible")
+        contenido = miniatura_documento(documento)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Miniatura no disponible")
+    return Response(contenido, media_type="image/jpeg", headers={
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @router.get("/facturas/{factura_id}/pdf")

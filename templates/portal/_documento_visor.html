@@ -1,0 +1,26 @@
+<dialog class="document-viewer" id="document-viewer" aria-labelledby="document-viewer-title" aria-describedby="document-viewer-detail">
+    <div class="document-viewer-shell">
+        <header class="document-viewer-header">
+            <div><h2 id="document-viewer-title">Documento</h2><p id="document-viewer-detail"></p></div>
+            <a class="document-viewer-download" data-viewer-download download>Descargar</a>
+            <button type="button" data-viewer-close aria-label="Cerrar visor" autofocus>×</button>
+        </header>
+        <div class="document-viewer-toolbar" aria-label="Controles del documento">
+            <div data-viewer-pagination>
+                <button type="button" data-viewer-prev aria-label="Página anterior">‹</button>
+                <span data-viewer-pages aria-live="polite">Página 1</span>
+                <button type="button" data-viewer-next aria-label="Página siguiente">›</button>
+            </div>
+            <div>
+                <button type="button" data-viewer-out aria-label="Alejar">−</button>
+                <button type="button" data-viewer-fit aria-label="Ajustar página">Ajustar</button>
+                <button type="button" data-viewer-in aria-label="Acercar">+</button>
+            </div>
+        </div>
+        <div class="document-viewer-stage" data-viewer-stage>
+            <p class="document-viewer-message" data-viewer-status role="status">Abriendo documento…</p>
+            <canvas data-viewer-canvas role="img" aria-label="Vista del documento" hidden></canvas>
+        </div>
+        <div class="sr-only" data-viewer-text></div>
+    </div>
+</dialog>

@@ -152,8 +152,14 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if not m.numero_guia and not m.numero_factura %}<span>—</span>{% endif %}
                         <span class="account-document-actions">
                             {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}">Ver envío</a>{% endif %}
-                            {% if m.archivo_url %}<a href="{{ m.archivo_url }}" target="_blank" rel="noopener">Descargar</a>{% endif %}
                         </span>
+                        {% if m.archivo_url %}
+                        {% set documento = descriptor_documento(m.archivo_url) %}
+                        {% if documento %}
+                        {% from 'portal/_documentos.html' import tarjeta_documento %}
+                        {{ tarjeta_documento(documento.tipo, documento.id, documento.titulo, documento.url, m.numero_factura or m.numero_guia or '', compacto=True) }}
+                        {% endif %}
+                        {% endif %}
                     </td>
                     <td class="mono amount-column account-movement-amount" data-label="Tu cuenta">
                         <span class="badge muted account-scope-badge">{{ (m.ambito or 'Sin imputar').replace('_', ' ')|title }}</span>

@@ -1,0 +1,18 @@
+{% macro tarjeta_documento(tipo, id, titulo, descarga, detalle='', compacto=False, texto_descarga='Descargar') -%}
+<article class="document-card{% if compacto %} document-card-compact{% endif %}">
+    <a class="document-preview" href="{{ descarga }}" target="_blank" rel="noopener"
+       data-document-open data-document-url="/portal/documentos/{{ tipo }}/{{ id }}/contenido"
+       data-document-title="{{ titulo }}" data-document-detail="{{ detalle }}"
+       data-document-download="{{ descarga }}" data-document-download-label="{{ texto_descarga }}"
+       aria-label="Ver {{ titulo }}{% if detalle %}: {{ detalle }}{% endif %}">
+        <span class="document-thumb" aria-hidden="true">
+            <svg viewBox="0 0 24 28" width="24" height="28" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 1h9l6 6v19H3V1h2Z"/><path d="M14 1v7h6M7 13h9M7 17h9M7 21h6"/></svg>
+            <img data-document-thumb="/portal/documentos/{{ tipo }}/{{ id }}/miniatura" alt="" width="80" height="104" loading="lazy" decoding="async">
+        </span>
+        <span class="document-description"><strong>{{ titulo }}</strong>{% if detalle %}<small>{{ detalle }}</small>{% endif %}<span class="document-view-label">Ver documento <span aria-hidden="true">↗</span></span></span>
+    </a>
+    <a class="document-download" href="{{ descarga }}" download aria-label="{{ texto_descarga }}: {{ titulo }}{% if detalle %} · {{ detalle }}{% endif %}" title="{{ texto_descarga }}">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></svg>
+    </a>
+</article>
+{%- endmacro %}

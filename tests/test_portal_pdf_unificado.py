@@ -176,7 +176,7 @@ def test_descarga_portal_falla_cerrada_si_no_puede_unificar(monkeypatch):
     assert marcadas == []
 
 
-def test_portal_ofrece_un_solo_boton_para_guia_e_invoice():
+def test_tarjetas_conservan_descarga_unificada_y_separan_vista_previa_invoice():
     detalle = (RAIZ / "templates" / "portal" / "envio_detalle.html").read_text(
         encoding="utf-8",
     )
@@ -184,6 +184,7 @@ def test_portal_ofrece_un_solo_boton_para_guia_e_invoice():
         encoding="utf-8",
     )
 
-    assert "Descargar guía + invoice PDF" in detalle
-    assert "Guía + invoice" in listado
-    assert 'href="/portal/envios/{{ s.id }}/factura-comercial.pdf"' not in detalle
+    assert "Descargar guía + invoice" in detalle
+    assert "Descargar guía + invoice" in listado
+    assert "tarjeta_documento('guia'" in detalle
+    assert "tarjeta_documento('invoice'" in detalle

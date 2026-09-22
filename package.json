@@ -2,9 +2,11 @@
   "name": "tauro-web",
   "private": true,
   "scripts": {
-    "build:web": "node scripts/build_web.mjs"
+    "build:web": "node scripts/build_web.mjs",
+    "vendor:pdfjs": "node scripts/vendor_pdfjs.mjs"
   },
   "dependencies": {
+    "pdfjs-dist": "6.3.289",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

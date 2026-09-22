@@ -137,7 +137,11 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                 <ol class="account-payment-steps" aria-label="Progreso del comprobante">{% for paso in pago.pasos %}<li{% if paso.completo %} class="is-complete"{% endif %}><span>{{ paso.label }}</span>{% if paso.fecha %}<time>{{ paso.fecha }}</time>{% endif %}</li>{% endfor %}</ol>
                 {% if pago.estado == 'RECHAZADO' %}<p class="account-payment-explanation">Comprobante rechazado: no modifica el saldo. Consultá a TAURO antes de volver a informarlo.</p>{% elif pago.estado == 'PENDIENTE' %}<p class="account-payment-explanation">Recibimos el comprobante. Se descuenta del saldo cuando TAURO lo aprueba.</p>{% else %}<p class="account-payment-explanation">Pago acreditado en tu cuenta.</p>{% endif %}
                 {% if pago.aplicaciones %}<ul class="account-payment-documents" aria-label="Documentos del pago">{% for aplicacion in pago.aplicaciones %}<li><span>{{ aplicacion.documento }}{% if aplicacion.tracking %}<small class="mono">{{ aplicacion.tracking }}</small>{% endif %}</span><strong>{{ dinero(aplicacion.monto_ars) }}</strong></li>{% endfor %}</ul>{% endif %}
-                <div class="account-record-footer"><span>{{ pago.metodo or 'Método sin informar' }}</span>{% if pago.tiene_comprobante %}<a href="/portal/pagos/{{ pago.id }}/comprobante" target="_blank" rel="noopener">Ver comprobante <span class="sr-only">(abre otra pestaña)</span></a>{% endif %}</div>
+                <div class="account-record-footer"><span>{{ pago.metodo or 'Método sin informar' }}</span></div>
+                {% if pago.tiene_comprobante %}
+                {% from 'portal/_documentos.html' import tarjeta_documento %}
+                {{ tarjeta_documento('pago', pago.id, 'Comprobante de pago', '/portal/pagos/' ~ pago.id ~ '/comprobante', pago.referencia or '', compacto=True) }}
+                {% endif %}
             </div>
         </details>
         {% else %}<p class="account-inline-empty">{% if inicio %}No hay pagos registrados desde el {{ inicio.strftime('%d/%m/%Y') }}. Los pagos aprobados anteriores ya están incluidos en tu saldo.{% else %}Todavía no hay comprobantes para mostrar. Cuando informes un pago, vas a poder seguir su revisión desde acá.{% endif %}</p>{% endfor %}

@@ -43,7 +43,7 @@ def construir_content_security_policy(
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         f"img-src {' '.join(imagenes)}; connect-src {' '.join(conexiones)}; "
-        "object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'"
+        "worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'"
     )
 
 

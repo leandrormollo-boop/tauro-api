@@ -162,9 +162,11 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 {% if s.reemplazada_por_solicitud_id %}<br><a href="/portal/envios/{{ s.reemplazada_por_solicitud_id }}">Descargar la guía final →</a>{% endif %}
             </div>
         {% elif s.tiene_label %}
-            <a href="/portal/envios/{{ s.id }}/guia.pdf" class="btn btn-primary btn-full">
-                {% if s.guia_descargada_at %}⬇ Volver a descargar guía{% elif s.tiene_factura_comercial %}⬇ Descargar guía + invoice PDF{% else %}⬇ Descargar guía PDF{% endif %}
-            </a>
+            {% from 'portal/_documentos.html' import tarjeta_documento %}
+            {{ tarjeta_documento('guia', s.id, 'Guía ' ~ courier_nombre, '/portal/envios/' ~ s.id ~ '/guia.pdf', s.tracking or '', texto_descarga='Descargar guía + invoice' if s.tiene_factura_comercial else 'Descargar guía') }}
+            {% if s.tiene_factura_comercial %}
+            {{ tarjeta_documento('invoice', s.id, 'Factura comercial', '/portal/envios/' ~ s.id ~ '/factura-comercial.pdf', 'Invoice', compacto=True) }}
+            {% endif %}
             {% if s.guia_descargada_at %}
             <p style="color:var(--ok);font-size:12.5px;margin-top:8px;">
                 Guía descargada por primera vez el {{ s.guia_descargada_at.strftime("%d/%m/%Y a las %H:%M") }}. Podés descargarla nuevamente cuando quieras.

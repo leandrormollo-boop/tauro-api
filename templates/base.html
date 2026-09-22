@@ -27,6 +27,8 @@
     <link rel="stylesheet" href="/static/css/tauro.css?v=49">
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=2">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=1">{% endif %}
+    {% if cliente %}<link rel="stylesheet" href="/static/css/documentos.css?v=1">
+    <script src="/static/js/documentos.js?v=1" defer></script>{% endif %}
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/info-ayuda.css?v=1">
     <link rel="stylesheet" href="/static/css/rutas-frecuentes.css?v=1">
@@ -377,5 +379,6 @@ document.querySelectorAll("[data-set-tipo]").forEach(function (btn) {
   });
 })();
 </script>
+{% if cliente %}{% include "portal/_documento_visor.html" %}{% endif %}
 </body>
 </html>
