@@ -2,8 +2,10 @@
     <div class="document-viewer-shell">
         <header class="document-viewer-header">
             <div><h2 id="document-viewer-title">Documento</h2><p id="document-viewer-detail"></p></div>
-            <a class="document-viewer-download" data-viewer-download download>Descargar</a>
-            <button type="button" data-viewer-close aria-label="Cerrar visor" autofocus>×</button>
+            <a class="document-viewer-download" data-viewer-download download aria-label="Descargar documento" title="Descargar documento">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 18v3h14v-3"/></svg>
+            </a>
+            <button type="button" data-viewer-close aria-label="Cerrar visor" autofocus><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
         </header>
         <div class="document-viewer-toolbar" aria-label="Controles del documento">
             <div data-viewer-pagination>

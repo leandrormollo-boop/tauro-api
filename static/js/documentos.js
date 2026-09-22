@@ -9,7 +9,7 @@
   const prev = find('prev'), next = find('next'), zoomIn = find('in'), zoomOut = find('out'), fit = find('fit');
   let sequence = 0, renderSequence = 0, abort, pdfTask, pdf, picture, renderTask;
   let pageNumber = 1, zoom = 1, opener, scrollX = 0, scrollY = 0, originalStyle;
-  let library, renderQueue = Promise.resolve();
+  let library, closing = false, closeTimer, renderQueue = Promise.resolve();
   const enableControls = enabled => {
     for (const button of [prev, next, zoomIn, zoomOut, fit]) button.disabled = !enabled;
     if (enabled) {
@@ -29,7 +29,24 @@
     picture?.close(); picture = null;
     transcript.textContent = '';
   }
+  function requestClose() {
+    if (!dialog.open || closing) return;
+    closing = true;
+    ++sequence; ++renderSequence;
+    abort?.abort();
+    renderTask?.cancel();
+    // Conserva la página pintada durante la salida; después libera el PDF.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      dialog.close();
+      return;
+    }
+    dialog.classList.add('is-closing');
+    closeTimer = setTimeout(() => dialog.close(), 140);
+  }
   function close() {
+    clearTimeout(closeTimer);
+    dialog.classList.remove('is-closing');
+    closing = false;
     ++sequence; ++renderSequence;
     cancelDocument();
     canvas.width = canvas.height = 1;
@@ -41,11 +58,12 @@
     }
   }
   dialog.addEventListener('close', close);
-  find('close').addEventListener('click', () => dialog.close());
+  find('close').addEventListener('click', requestClose);
+  dialog.addEventListener('cancel', event => { event.preventDefault(); requestClose(); });
   let backdropDown = false;
   dialog.addEventListener('pointerdown', event => { backdropDown = event.target === dialog; });
   dialog.addEventListener('click', event => {
-    if (backdropDown && event.target === dialog) dialog.close();
+    if (backdropDown && event.target === dialog) requestClose();
     backdropDown = false;
   });
   function render() {
@@ -56,21 +74,23 @@
     renderQueue = renderQueue.catch(() => {}).then(async () => {
       if (current !== sequence || revision !== renderSequence || !dialog.open || (!pdf && !picture)) return;
       enableControls(false);
-      message('Cargando página…');
+      if (canvas.hidden) message('Cargando página…');
+      stage.setAttribute('aria-busy', 'true');
       const page = pdf ? await pdf.getPage(number) : null;
       if (current !== sequence || revision !== renderSequence) return;
       const natural = page ? page.getViewport({ scale: 1 }) : picture;
-      const available = Math.max(160, stage.clientWidth - (window.innerWidth <= 600 ? 24 : 48));
-      const availableHeight = Math.max(160, stage.clientHeight - (window.innerWidth <= 600 ? 24 : 48));
+      const stageStyle = getComputedStyle(stage);
+      const available = Math.max(120, stage.clientWidth - parseFloat(stageStyle.paddingLeft) - parseFloat(stageStyle.paddingRight));
+      const availableHeight = Math.max(120, stage.clientHeight - parseFloat(stageStyle.paddingTop) - parseFloat(stageStyle.paddingBottom));
       const factor = Math.min(available / natural.width, availableHeight / natural.height, 1.5) * scale;
       const width = natural.width * factor, height = natural.height * factor;
       // Evita canvases gigantes incluso en páginas de tamaño atípico.
       const ratio = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(8_000_000 / (width * height)), 8192 / Math.max(width, height));
-      canvas.width = Math.max(1, Math.floor(width * ratio));
-      canvas.height = Math.max(1, Math.floor(height * ratio));
-      canvas.style.width = `${Math.round(width)}px`;
-      canvas.style.height = `${Math.round(height)}px`;
-      const context = canvas.getContext('2d', { alpha: false });
+      // Pinta fuera de pantalla para que cambiar de página o zoom no parpadee.
+      const nextCanvas = document.createElement('canvas');
+      nextCanvas.width = Math.max(1, Math.floor(width * ratio));
+      nextCanvas.height = Math.max(1, Math.floor(height * ratio));
+      const context = nextCanvas.getContext('2d', { alpha: false });
       if (page) {
         renderTask = page.render({ canvasContext: context, viewport: page.getViewport({ scale: factor }), transform: [ratio, 0, 0, ratio, 0, 0], background: 'white' });
         await renderTask.promise;
@@ -80,10 +100,14 @@
           if (current === sequence && revision === renderSequence) transcript.textContent = text.items.map(item => item.str || '').join(' ').slice(0, 100000);
         }).catch(() => {});
       } else {
-        context.fillStyle = 'white'; context.fillRect(0, 0, canvas.width, canvas.height);
-        context.drawImage(picture, 0, 0, canvas.width, canvas.height);
+        context.fillStyle = 'white'; context.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
+        context.drawImage(picture, 0, 0, nextCanvas.width, nextCanvas.height);
       }
       if (current !== sequence || revision !== renderSequence) return;
+      canvas.width = nextCanvas.width; canvas.height = nextCanvas.height;
+      canvas.style.width = `${Math.round(width)}px`; canvas.style.height = `${Math.round(height)}px`;
+      canvas.getContext('2d', { alpha: false }).drawImage(nextCanvas, 0, 0);
+      stage.setAttribute('aria-busy', 'false');
       canvas.setAttribute('aria-label', `${document.getElementById('document-viewer-title').textContent}${pdf ? `, página ${number} de ${pdf.numPages}` : ''}`);
       canvas.hidden = false; status.hidden = true;
       pagination.hidden = !pdf;
@@ -92,12 +116,14 @@
       enableControls(true);
     }).catch(error => {
       if (current !== sequence || revision !== renderSequence || error?.name === 'RenderingCancelledException') return;
+      stage.setAttribute('aria-busy', 'false');
       message('No pudimos mostrar esta página. Podés descargar el archivo.');
       enableControls(true);
     });
     return renderQueue;
   }
   async function open(link) {
+    if (dialog.open || closing) return;
     ++sequence; ++renderSequence;
     cancelDocument();
     const current = sequence;
@@ -106,7 +132,8 @@
     document.getElementById('document-viewer-title').textContent = link.dataset.documentTitle;
     document.getElementById('document-viewer-detail').textContent = link.dataset.documentDetail || '';
     find('download').href = link.dataset.documentDownload;
-    find('download').textContent = link.dataset.documentDownloadLabel || 'Descargar';
+    find('download').setAttribute('aria-label', link.dataset.documentDownloadLabel || 'Descargar documento');
+    find('download').title = link.dataset.documentDownloadLabel || 'Descargar documento';
     pagination.hidden = true; fit.textContent = 'Ajustar';
     enableControls(false); message('Abriendo documento…');
     scrollX = window.scrollX; scrollY = window.scrollY;

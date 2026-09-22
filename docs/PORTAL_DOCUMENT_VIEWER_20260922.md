@@ -36,3 +36,12 @@ Evidencia local: `qa_document_viewer_20260922/` en el workspace TAURO; preview e
 ## Registro de ejecución
 
 Router determinístico: `architecture --final-decision --approved`, ruta base Terra/medium. Revisión elevada al agente principal de la sesión Astra por arquitectura y permisos, conforme al mínimo de riesgo del AGENTS.md. Sin subagentes ni API de modelos. Autorización usada: implementar el visor; no autoriza publicar, borrar históricos, emitir guías ni registrar pagos reales.
+
+## Ajuste visual solicitado: visor compacto
+
+- Ancho máximo reducido de 1100 a 480 px; en paneles angostos la altura se adapta al ancho del documento.
+- Tarjeta flotante con bordes suaves, fondo tenue y controles en una barra pequeña debajo del PDF; descarga y cierre como íconos.
+- Entrada de 180 ms y salida de 120 ms. Cierre con X, Escape y fondo conserva la imagen durante la transición y restaura foco/scroll al finalizar. Respeta movimiento reducido.
+- Cambio de página y zoom renderizan fuera de pantalla y reemplazan el canvas al terminar, evitando el parpadeo.
+- Validado en Chrome, viewport móvil 390 × 844 y navegador integrado de Codex de 320 px; páginas, zoom 125%, cierre durante render, Escape, clic afuera y reapertura. Sin errores JS; 17 pruebas JS existentes aprobadas. No se repitió la suite Python porque este ajuste sólo modifica presentación y JS.
+- Sigue pendiente de publicación.
