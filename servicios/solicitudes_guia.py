@@ -1251,15 +1251,17 @@ def listar_solicitudes_cliente(
                        COALESCE(cargo_periodo.monto_ars,
                                 fin.precio_cliente_inicial_ars,
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
-                       COALESCE(fin.ajuste_cliente_ars, 0)
+                       COALESCE(aju.total_aplicado, 0)
                            AS diferencia_cliente_ars,
                        COALESCE(fin.diferencia_flete_ars,
                                 fin.ajuste_cliente_ars, 0)
                            AS diferencia_flete_ars,
                        COALESCE(fin.tax_cliente_ars, 0)
                            AS tax_cliente_ars,
+                       COALESCE(aju.total_comercial, 0)
+                           AS ajuste_comercial_ars,
                        COALESCE(cargo_periodo.monto_ars
-                                    + COALESCE(fin.ajuste_cliente_ars, 0),
+                                    + COALESCE(aju.total_aplicado, 0),
                                 fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -1294,6 +1296,15 @@ def listar_solicitudes_cliente(
                     WHERE c.solicitud_id=s.id AND c.estado='CERRADA'
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COALESCE(SUM(a.monto_ars), 0) AS total_aplicado,
+                        COALESCE(SUM(a.monto_ars) FILTER (
+                            WHERE a.origen='AJUSTE_COMERCIAL_ADMIN'
+                        ), 0) AS total_comercial
+                    FROM ajustes_cliente a
+                    WHERE a.solicitud_id=s.id AND a.estado='APLICADO'
+                ) aju ON TRUE
                 WHERE s.cliente_id = %s AND s.test=FALSE
                   AND s.visible_cliente=TRUE
             """
@@ -1757,15 +1768,17 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                        COALESCE(cargo.monto_ars,
                                 fin.precio_cliente_inicial_ars,
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
-                       COALESCE(fin.ajuste_cliente_ars, 0)
+                       COALESCE(aju.total_aplicado, 0)
                            AS diferencia_cliente_ars,
                        COALESCE(fin.diferencia_flete_ars,
                                 fin.ajuste_cliente_ars, 0)
                            AS diferencia_flete_ars,
                        COALESCE(fin.tax_cliente_ars, 0)
                            AS tax_cliente_ars,
+                       COALESCE(aju.total_comercial, 0)
+                           AS ajuste_comercial_ars,
                        COALESCE(cargo.monto_ars
-                                    + COALESCE(fin.ajuste_cliente_ars, 0),
+                                    + COALESCE(aju.total_aplicado, 0),
                                 fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -1800,6 +1813,15 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
                     WHERE c.solicitud_id=s.id AND c.estado='CERRADA'
                     ORDER BY c.version DESC LIMIT 1
                 ) fin ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COALESCE(SUM(a.monto_ars), 0) AS total_aplicado,
+                        COALESCE(SUM(a.monto_ars) FILTER (
+                            WHERE a.origen='AJUSTE_COMERCIAL_ADMIN'
+                        ), 0) AS total_comercial
+                    FROM ajustes_cliente a
+                    WHERE a.solicitud_id=s.id AND a.estado='APLICADO'
+                ) aju ON TRUE
                 WHERE s.id = %s AND s.cliente_id = %s AND s.test=FALSE
                   AND s.visible_cliente=TRUE
                 """,
@@ -1874,15 +1896,17 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                        COALESCE(cargo.monto_ars,
                                 fin.precio_cliente_inicial_ars,
                                 s.precio_tauro_ars) AS precio_inicial_cliente_ars,
-                       COALESCE(fin.ajuste_cliente_ars, 0)
+                       COALESCE(aju.total_aplicado, 0)
                            AS diferencia_cliente_ars,
                        COALESCE(fin.diferencia_flete_ars,
                                 fin.ajuste_cliente_ars, 0)
                            AS diferencia_flete_ars,
                        COALESCE(fin.tax_cliente_ars, 0)
                            AS tax_cliente_ars,
+                       COALESCE(aju.total_comercial, 0)
+                           AS ajuste_comercial_ars,
                        COALESCE(cargo.monto_ars
-                                    + COALESCE(fin.ajuste_cliente_ars, 0),
+                                    + COALESCE(aju.total_aplicado, 0),
                                 fin.precio_cliente_final_ars,
                                 s.precio_tauro_ars) AS precio_final_cliente_ars,
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
@@ -1906,6 +1930,15 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                     WHERE ce.solicitud_id=s.id AND ce.estado='CERRADA'
                     ORDER BY ce.version DESC LIMIT 1
                 ) fin ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COALESCE(SUM(a.monto_ars), 0) AS total_aplicado,
+                        COALESCE(SUM(a.monto_ars) FILTER (
+                            WHERE a.origen='AJUSTE_COMERCIAL_ADMIN'
+                        ), 0) AS total_comercial
+                    FROM ajustes_cliente a
+                    WHERE a.solicitud_id=s.id AND a.estado='APLICADO'
+                ) aju ON TRUE
                 WHERE s.id = %s
                 """,
                 (solicitud_id,),
@@ -2766,12 +2799,20 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                 # momentos distintos. Ademas no se vuelve a reservar un
                 # cargo_pendiente que ya tenga asiento en `envios`.
                 cur.execute("""
+                    WITH cuenta AS (SELECT %s::text AS cliente_id)
                     SELECT
                         COALESCE((
                             SELECT SUM(e.monto_ars)
                             FROM envios e
-                            WHERE e.cliente_id=%s
+                            WHERE e.cliente_id=cuenta.cliente_id
                               AND e.estado NOT IN ('CANCELADO', 'NC')
+                        ), 0) + COALESCE((
+                            SELECT SUM(a.monto_ars)
+                            FROM ajustes_cliente a
+                            JOIN envios e ON e.solicitud_id=a.solicitud_id
+                            WHERE e.cliente_id=cuenta.cliente_id
+                              AND e.estado='ACTIVO'
+                              AND a.estado='APLICADO'
                         ), 0) - COALESCE((
                             SELECT SUM(p.monto_ars)
                             FROM pagos p
@@ -2793,6 +2834,7 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                                 )
                             )
                         ), 0) AS reservado
+                    FROM cuenta
                 """, (cliente_id, cliente_id, cliente_id, solicitud_id))
                 resumen_credito = cur.fetchone() or {}
                 deuda = Decimal(str(resumen_credito.get("deuda") or 0))

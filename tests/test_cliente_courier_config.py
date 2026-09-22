@@ -185,7 +185,14 @@ def test_dhl_operativo_exige_ambas_cuentas_y_produccion(monkeypatch):
     assert config.estado_integracion("dhl")["operativa"] is False
 
     monkeypatch.setenv("DHL_ACCOUNT_NUMBER_IMPO", "987654321")
-    assert config.estado_integracion("dhl")["operativa"] is True
+    estado = config.estado_integracion("dhl")
+    assert estado["operativa"] is True
+    assert estado["referencias_cuentas"] == (
+        {"sentido": "EXPO", "cuenta": "•••••6789"},
+        {"sentido": "IMPO", "cuenta": "•••••4321"},
+    )
+    assert "123456789" not in repr(estado)
+    assert "987654321" not in repr(estado)
 
 
 def test_dhl_rechaza_cuentas_con_formato_invalido(monkeypatch):

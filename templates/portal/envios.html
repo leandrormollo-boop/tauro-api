@@ -242,7 +242,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                             <strong class="shipment-no-charge">Sin cargo</strong>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
-                            {% if s.diferencia_flete_ars or s.tax_cliente_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}
+                            {% if s.diferencia_flete_ars or s.tax_cliente_ars or s.ajuste_comercial_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}
                             <details class="envio-price-breakdown">
                             <summary>Ver desglose</summary>
                             <span class="envio-price-initial portal-money-green"><small>Inicial</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
@@ -251,6 +251,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                             {% endif %}
                             {% if s.tax_cliente_ars %}
                                 <span class="envio-price-extra tax"><b>TAX</b><span>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</span></span>
+                            {% endif %}
+                            {% if s.ajuste_comercial_ars %}
+                                <span class="envio-price-extra ajuste-comercial"><b>{{ "Descuento TAURO" if s.ajuste_comercial_ars < 0 else "Ajuste de precio" }}</b><span>{{ "+" if s.ajuste_comercial_ars > 0 else "−" }} {{ dinero_ars(s.ajuste_comercial_ars|abs) }}</span></span>
                             {% endif %}
                             </details>
                             {% endif %}

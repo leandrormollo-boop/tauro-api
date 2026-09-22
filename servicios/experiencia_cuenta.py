@@ -118,6 +118,10 @@ SELECT c.tope_deuda_ars,
        COALESCE((SELECT SUM(e.monto_ars) FROM envios e
                  WHERE e.cliente_id=c.cliente_id
                    AND e.estado NOT IN ('CANCELADO','NC')),0)
+       + COALESCE((SELECT SUM(a.monto_ars) FROM ajustes_cliente a
+                   JOIN envios e ON e.solicitud_id=a.solicitud_id
+                   WHERE e.cliente_id=c.cliente_id AND e.estado='ACTIVO'
+                     AND a.estado='APLICADO'),0)
        - COALESCE((SELECT SUM(p.monto_ars) FROM pagos p
                    WHERE p.cliente_id=c.cliente_id
                      AND COALESCE(p.estado,'APROBADO')='APROBADO'),0) AS deuda,

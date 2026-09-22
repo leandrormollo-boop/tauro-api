@@ -2709,17 +2709,42 @@ CREATE TABLE IF NOT EXISTS ajustes_cliente (
             AND NULLIF(BTRIM(referencia_aplicacion), '') IS NOT NULL)
     )
 );
+-- Los ajustes nacidos de una factura del courier conservan su conciliación.
+-- Un cambio comercial decidido por ADMIN no inventa una factura: se registra
+-- en el mismo libro, pero con origen explícito y sin conciliacion_id.
+ALTER TABLE ajustes_cliente
+    ALTER COLUMN conciliacion_id DROP NOT NULL;
+ALTER TABLE ajustes_cliente
+    ADD COLUMN IF NOT EXISTS origen TEXT NOT NULL
+        DEFAULT 'CONCILIACION_COURIER';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid='ajustes_cliente'::regclass
+          AND conname='ck_ajuste_origen'
+    ) THEN
+        ALTER TABLE ajustes_cliente ADD CONSTRAINT ck_ajuste_origen CHECK (
+            (origen='CONCILIACION_COURIER' AND conciliacion_id IS NOT NULL)
+            OR (origen='AJUSTE_COMERCIAL_ADMIN' AND conciliacion_id IS NULL)
+        );
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS ix_ajuste_cliente_estado_fecha
     ON ajustes_cliente (estado, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_ajuste_cliente_solicitud_origen
+    ON ajustes_cliente (solicitud_id, origen, created_at DESC);
 
 CREATE OR REPLACE FUNCTION tauro_validar_ajuste_cliente()
 RETURNS TRIGGER AS $$
 DECLARE
     conciliacion_actual RECORD;
     precio_previo NUMERIC(18,4);
+    cargo_actual RECORD;
 BEGIN
     IF TG_OP = 'UPDATE' AND (
         OLD.conciliacion_id IS DISTINCT FROM NEW.conciliacion_id
+        OR OLD.origen IS DISTINCT FROM NEW.origen
         OR OLD.solicitud_id IS DISTINCT FROM NEW.solicitud_id
         OR OLD.tipo IS DISTINCT FROM NEW.tipo
         OR OLD.monto_ars IS DISTINCT FROM NEW.monto_ars
@@ -2728,6 +2753,40 @@ BEGIN
         OR OLD.idempotency_key IS DISTINCT FROM NEW.idempotency_key
     ) THEN
         RAISE EXCEPTION 'Los importes y la identidad del ajuste son inmutables';
+    END IF;
+
+    IF NEW.origen = 'AJUSTE_COMERCIAL_ADMIN' THEN
+        IF NEW.conciliacion_id IS NOT NULL THEN
+            RAISE EXCEPTION 'Un ajuste comercial no puede simular una conciliación';
+        END IF;
+        IF NEW.estado <> 'APLICADO' THEN
+            RAISE EXCEPTION 'El ajuste comercial de ADMIN debe quedar aplicado';
+        END IF;
+        IF NULLIF(BTRIM(NEW.motivo), '') IS NULL THEN
+            RAISE EXCEPTION 'El ajuste comercial requiere un motivo';
+        END IF;
+
+        SELECT e.id, e.monto_ars, e.estado
+          INTO cargo_actual
+          FROM envios e
+         WHERE e.solicitud_id=NEW.solicitud_id
+         FOR UPDATE;
+        IF NOT FOUND OR cargo_actual.estado <> 'ACTIVO' THEN
+            RAISE EXCEPTION 'El envío no tiene un cargo activo ajustable';
+        END IF;
+
+        SELECT cargo_actual.monto_ars + COALESCE(SUM(a.monto_ars), 0)
+          INTO precio_previo
+          FROM ajustes_cliente a
+         WHERE a.solicitud_id=NEW.solicitud_id
+           AND a.estado='APLICADO'
+           AND (TG_OP <> 'UPDATE' OR a.id <> NEW.id);
+        IF ABS(precio_previo - NEW.precio_anterior_ars) > 0.02
+           OR ABS(NEW.precio_nuevo_ars - NEW.precio_anterior_ars
+                - NEW.monto_ars) > 0.02 THEN
+            RAISE EXCEPTION 'El ajuste comercial no parte del precio vigente';
+        END IF;
+        RETURN NEW;
     END IF;
 
     SELECT solicitud_id, estado, precio_cliente_inicial_ars,

@@ -19,6 +19,8 @@
   .api-state { display:block;margin-top:3px;font-family:var(--font-mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase; }
   .api-state.ready { color:var(--ok); }
   .api-state.pending { color:var(--fg-4); }
+  .account-references { display:flex;gap:4px;flex-wrap:wrap;margin-top:5px; }
+  .account-reference { padding:2px 5px;border:1px solid var(--line-soft);border-radius:999px;color:var(--fg-3);font-family:var(--font-mono);font-size:8px;letter-spacing:.04em;white-space:nowrap; }
   .permission { display:flex;align-items:center;justify-content:center; }
   .permission label { display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--line);border-radius:9px;cursor:pointer;background:var(--bg-elev-2); }
   .permission input { width:17px;height:17px;accent-color:var(--accent);cursor:pointer; }
@@ -92,6 +94,13 @@
           <div>
             <strong>{{ c.nombre }}</strong>
             <span class="api-state {{ 'ready' if c.integracion_disponible else 'pending' }}" title="{{ c.detalle_integracion }}">{{ c.estado_integracion }}</span>
+            {% if c.id == 'dhl' and c.referencias_cuentas %}
+            <span class="account-references" aria-label="Cuentas DHL configuradas">
+              {% for referencia in c.referencias_cuentas %}
+              <span class="account-reference" title="{{ 'Origen Argentina' if referencia.sentido == 'EXPO' else 'Origen fuera de Argentina' }}">{{ referencia.sentido }} · {{ referencia.cuenta }}</span>
+              {% endfor %}
+            </span>
+            {% endif %}
           </div>
         </div>
         <div class="permission {% if not c.integracion_implementada %}disabled{% endif %}" data-label="Cotizar">

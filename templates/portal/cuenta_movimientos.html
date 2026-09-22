@@ -70,7 +70,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                 {% for m in filas %}
                 {% set es_baja = m.tipo in ('ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO') %}
                 {% set cargo_por_conciliar = not es_baja and m.estado_envio in ('CANCELADO', 'REEMPLAZADO') %}
-                <tr class="account-movement-row{% if es_baja %} is-cancelled{% elif m.tipo == 'DIFERENCIA' %} account-row-difference{% endif %}">
+                <tr class="account-movement-row{% if es_baja %} is-cancelled{% elif m.tipo in ('DIFERENCIA', 'AJUSTE_PRECIO') %} account-row-difference{% endif %}">
                     <td class="mono" data-label="Fecha">{{ m.fecha or '—' }}</td>
                     <td data-label="Detalle">
                         <span class="account-movement-heading">
@@ -86,6 +86,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                             <span class="badge warn">Pendiente de factura</span>
                         {% elif m.tipo == 'DIFERENCIA' %}
                             <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">Ajuste del courier</span>
+                        {% elif m.tipo == 'AJUSTE_PRECIO' %}
+                            <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">{{ "Descuento TAURO" if m.haber_ars else "Ajuste de precio" }}</span>
                         {% else %}
                             <span class="badge">Facturado</span>
                         {% endif %}
@@ -104,41 +106,43 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% endif %}
                         {% if not es_baja %}
                         <details class="account-movement-details"><summary>Ver desglose <span class="account-detail-chevron" aria-hidden="true"></span></summary><div class="account-movement-detail-body">
-                        {% if not m.solicitud_id and m.referencia and m.tipo != 'DIFERENCIA' %}<small>Referencia: {{ m.referencia }}</small>{% endif %}
+                        {% if not m.solicitud_id and m.referencia and m.tipo not in ('DIFERENCIA', 'AJUSTE_PRECIO') %}<small>Referencia: {{ m.referencia }}</small>{% endif %}
                         {% if m.numero_factura %}<small>Factura {{ m.numero_factura }}</small>{% endif %}
                         {% if m.numero_guia %}<small class="mono">Guía {{ m.numero_guia }}</small>{% endif %}
-                        {% if m.tipo not in ('DIFERENCIA', 'PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO') and m.valor_envio_ars is not none %}<small>Cargo del envío: <strong>{{ dinero(m.valor_envio_ars) }}</strong></small>{% endif %}
-                        {% if m.tipo == 'DIFERENCIA' and m.diferencia_detalle %}
+                        {% if m.tipo not in ('DIFERENCIA', 'AJUSTE_PRECIO', 'PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO') and m.valor_envio_ars is not none %}<small>Cargo del envío: <strong>{{ dinero(m.valor_envio_ars) }}</strong></small>{% endif %}
+                        {% if m.tipo in ('DIFERENCIA', 'AJUSTE_PRECIO') and m.diferencia_detalle %}
                           {% set d = m.diferencia_detalle %}
                           {% if d.montos_completos %}
                           <div class="account-difference-flow" aria-label="Cálculo del costo final">
                               <span class="account-difference-value">
-                                  <small>Valor cotizado</small>
+                                  <small>{{ "Precio anterior" if m.tipo == 'AJUSTE_PRECIO' else "Valor cotizado" }}</small>
                                   <strong>{{ dinero(d.valor_inicial_ars) }}</strong>
                               </span>
                               <span class="account-difference-operator">{% if d.es_credito %}−{% else %}+{% endif %}</span>
                               <span class="account-difference-value is-adjustment {% if d.es_credito %}is-credit{% endif %}">
-                                  <small>Diferencia</small>
+                                  <small>{% if m.tipo == 'AJUSTE_PRECIO' %}{{ "Descuento" if d.es_credito else "Ajuste" }}{% else %}Diferencia{% endif %}</small>
                                   <strong>{{ dinero(d.diferencia_ars|abs) }}</strong>
                               </span>
                               <span class="account-difference-operator">=</span>
                               <span class="account-difference-value is-final">
-                                  <small>Costo final</small>
+                                  <small>{{ "Nuevo precio" if m.tipo == 'AJUSTE_PRECIO' else "Costo final" }}</small>
                                   <strong>{{ dinero(d.valor_final_ars) }}</strong>
                               </span>
                           </div>
                           {% endif %}
-                          {% if d.es_peso %}
+                          {% if m.tipo == 'AJUSTE_PRECIO' %}
+                          <small class="account-difference-reason">Motivo: {{ d.concepto_courier or d.motivo_legible }}</small>
+                          {% elif d.es_peso %}
                           <small class="account-difference-reason">Peso inicial {{ d.peso_inicial_kg }} kg → peso facturado {{ d.peso_facturado_kg }} kg · diferencia {{ d.diferencia_peso_kg }} kg{% if d.motivo == 'MIXTO' and d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
                           {% else %}
                           <small class="account-difference-reason">Motivo: {{ d.concepto_courier or d.motivo_legible }}</small>
                           {% endif %}
                           <small class="account-difference-policy">{{ d.leyenda }}</small>
                         {% endif %}
-                        {% if m.valor_envio_ars is not none and m.tipo == 'DIFERENCIA' and (not m.diferencia_detalle or not m.diferencia_detalle.montos_completos) %}<small>Valor final del envío {{ dinero(m.valor_envio_ars) }}</small>{% endif %}
+                        {% if m.valor_envio_ars is not none and m.tipo in ('DIFERENCIA', 'AJUSTE_PRECIO') and (not m.diferencia_detalle or not m.diferencia_detalle.montos_completos) %}<small>Valor final del envío {{ dinero(m.valor_envio_ars) }}</small>{% endif %}
                         {% if m.tipo == 'PAGO_PENDIENTE' or m.estado == 'PENDIENTE' %}<small>Todavía no impacta el saldo</small>{% endif %}
                         {% if m.tipo == 'PAGO_RECHAZADO' or m.estado == 'RECHAZADO' %}<small>No acreditado. Consultá a TAURO para revisar el comprobante.</small>{% endif %}
-                        {% if not m.solicitud_id and not m.numero_factura and not m.numero_guia and not m.referencia and m.tipo not in ('DIFERENCIA', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO') %}<small>{{ m.concepto or 'Movimiento registrado en tu cuenta.' }}</small>{% endif %}
+                        {% if not m.solicitud_id and not m.numero_factura and not m.numero_guia and not m.referencia and m.tipo not in ('DIFERENCIA', 'AJUSTE_PRECIO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO') %}<small>{{ m.concepto or 'Movimiento registrado en tu cuenta.' }}</small>{% endif %}
                         </div></details>
                         {% endif %}
                     </td>
@@ -156,9 +160,9 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if es_baja %}
                         <strong class="shipment-no-charge">Sin cargo</strong>
                         <span data-help="Envío sin cargo">Este envío no suma cargos al saldo de tu cuenta.</span>
-                        {% elif m.tipo == 'DIFERENCIA' %}
+                        {% elif m.tipo in ('DIFERENCIA', 'AJUSTE_PRECIO') %}
                         {% if m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong>{% elif m.debe_ars %}<strong>+ {{ dinero(m.debe_ars) }}</strong>{% endif %}
-                        <small class="account-impact-explanation">El ajuste ya está incluido en el costo final.</small>
+                        <small class="account-impact-explanation">{% if m.tipo == 'AJUSTE_PRECIO' %}El ajuste ya está incluido en el precio final.{% else %}El ajuste ya está incluido en el costo final.{% endif %}</small>
                         {% elif m.haber_ars %}<strong class="account-amount-credit">− {{ dinero(m.haber_ars) }}</strong><small>Se descuenta del saldo</small>
                         {% elif m.debe_ars %}<strong>+ {{ dinero(m.debe_ars) }}</strong><small>{% if cargo_por_conciliar %}Cargo aún registrado<span data-help="Cargo pendiente de conciliar">El envío está cancelado o reemplazado, pero conserva un cargo activo. Consultá a TAURO para conciliarlo.</span>{% else %}Se suma al saldo{% endif %}</small>
                         {% elif m.tipo == 'PAGO_PENDIENTE' %}<strong>{{ dinero(m.monto_ars) }}</strong><small>Todavía no modifica el saldo</small>

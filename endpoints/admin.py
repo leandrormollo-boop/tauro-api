@@ -1583,6 +1583,7 @@ def admin_cliente_regenerar_api_key(
 def admin_cliente_detail(
     request: Request, cliente_id: str,
     ok: Optional[str] = None,
+    error: Optional[str] = None,
     pwd_error: Optional[str] = None,
     page: int = 1,
     anio: str = "",
@@ -1626,9 +1627,13 @@ def admin_cliente_detail(
                 anio, mes, semana, periodos_disponibles,
             )
             filtro_fecha_sql = ""
+            filtro_fecha_ajustes_sql = ""
             filtro_fecha_params = []
             if periodo["desde"] is not None:
                 filtro_fecha_sql = " AND fecha >= %s AND fecha < %s"
+                filtro_fecha_ajustes_sql = (
+                    " AND e_aj.fecha >= %s AND e_aj.fecha < %s"
+                )
                 filtro_fecha_params = [periodo["desde"], periodo["hasta"]]
 
             # Conteos y montos del período en una sola consulta determinística.
@@ -1669,11 +1674,23 @@ def admin_cliente_detail(
                        ) AS facturados,
                        COALESCE(SUM(monto_ars) FILTER (
                            WHERE estado='ACTIVO'
+                       ), 0) + COALESCE((
+                           SELECT SUM(a.monto_ars)
+                           FROM ajustes_cliente a
+                           JOIN envios e_aj
+                             ON e_aj.solicitud_id=a.solicitud_id
+                           WHERE e_aj.cliente_id=%s
+                             AND e_aj.estado='ACTIVO'
+                             AND a.estado='APLICADO'
+                """ + filtro_fecha_ajustes_sql + """
                        ), 0) AS total_ars
                 FROM envios
                 WHERE cliente_id=%s
                 """ + filtro_fecha_sql,
-                tuple([cliente_id, *filtro_fecha_params]),
+                tuple([
+                    cliente_id, *filtro_fecha_params,
+                    cliente_id, *filtro_fecha_params,
+                ]),
             )
             resumen_fila = cur.fetchone() or {}
             total_envios = int(resumen_fila.get("n") or 0)
@@ -1726,7 +1743,14 @@ def admin_cliente_detail(
                        fc.tipo AS factura_cliente_tipo,
                        fc.punto_venta AS factura_cliente_punto_venta,
                        fc.numero AS factura_cliente_numero,
-                       (fc.pdf IS NOT NULL) AS tiene_factura_cliente_pdf
+                       (fc.pdf IS NOT NULL) AS tiene_factura_cliente_pdf,
+                       e.monto_ars + COALESCE(aju.total_aplicado, 0)
+                           AS precio_final_ars,
+                       COALESCE(aju.total_comercial, 0)
+                           AS ajuste_comercial_ars,
+                       aju.ultimo_motivo_comercial,
+                       COALESCE(aju.cantidad_comercial, 0)
+                           AS cantidad_ajustes_comerciales
                 FROM envios e
                 LEFT JOIN solicitudes_guia s
                   ON s.id = e.solicitud_id
@@ -1738,6 +1762,26 @@ def admin_cliente_detail(
                     WHERE i.envio_id=e.id AND f.estado='EMITIDA'
                     ORDER BY f.id DESC LIMIT 1
                 ) fc ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COALESCE(SUM(a.monto_ars) FILTER (
+                            WHERE a.estado='APLICADO'
+                        ), 0) AS total_aplicado,
+                        COALESCE(SUM(a.monto_ars) FILTER (
+                            WHERE a.estado='APLICADO'
+                              AND a.origen='AJUSTE_COMERCIAL_ADMIN'
+                        ), 0) AS total_comercial,
+                        COUNT(*) FILTER (
+                            WHERE a.estado='APLICADO'
+                              AND a.origen='AJUSTE_COMERCIAL_ADMIN'
+                        ) AS cantidad_comercial,
+                        (ARRAY_AGG(a.motivo ORDER BY a.id DESC) FILTER (
+                            WHERE a.estado='APLICADO'
+                              AND a.origen='AJUSTE_COMERCIAL_ADMIN'
+                        ))[1] AS ultimo_motivo_comercial
+                    FROM ajustes_cliente a
+                    WHERE a.solicitud_id=e.solicitud_id
+                ) aju ON TRUE
                 WHERE e.cliente_id = %s
                 """ + filtro_fecha_envio_sql + """
                 ORDER BY e.fecha DESC, e.id DESC
@@ -1748,6 +1792,11 @@ def admin_cliente_detail(
                 ]),
             )
             envios = [dict(r) for r in cur.fetchall()]
+            for envio in envios:
+                if envio.get("solicitud_id"):
+                    alcance = f"precio:{cliente_id}:{envio['id']}"
+                    envio["precio_csrf"] = _csrf_dhl(alcance)
+                    envio["precio_idempotency"] = _nueva_idempotency_key()
 
             # Pagos con su imputación en una sola consulta (sin N+1).
             cur.execute(
@@ -1805,6 +1854,13 @@ def admin_cliente_detail(
         )
     elif ok == "envio_visible":
         flash_ok = "Envío nuevamente visible en el portal del cliente."
+    elif ok == "precio_ajustado":
+        flash_ok = (
+            "Nuevo precio aplicado. La cotización original quedó intacta y "
+            "el ajuste ya impacta en la cuenta corriente."
+        )
+    elif ok == "precio_sin_cambios":
+        flash_ok = "El envío ya tenía ese precio final; no se creó ningún movimiento."
     if pwd_error == "corta":
         flash_ok = None  # priorizar error
         # (no hay flash_error context aquí — lo paso por flash_ok como mensaje crudo)
@@ -1846,6 +1902,7 @@ def admin_cliente_detail(
             "puede_clasificar_cargos": puede_clasificar_cargos,
             "pagination": pagination,
             "flash_ok": flash_ok,
+            "flash_error": error or None,
         },
     )
 
@@ -1891,6 +1948,51 @@ def admin_clasificar_cargo(
     return RedirectResponse(
         url=f"/admin/clientes/{cliente_id.strip().upper()}", status_code=303
     )
+
+
+@router.post("/clientes/{cliente_id}/envios/{envio_id}/precio")
+def admin_ajustar_precio_envio(
+    request: Request,
+    cliente_id: str,
+    envio_id: int,
+    nuevo_precio_ars: str = Form(...),
+    motivo: str = Form(...),
+    idempotency_key: str = Form(...),
+    csrf_precio: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Cambia el precio final con un asiento auditable; nunca pisa el original."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    cliente = cliente_id.strip().upper()
+    destino = f"/admin/clientes/{quote(cliente)}"
+    alcance = f"precio:{cliente}:{int(envio_id)}"
+    if not _csrf_dhl_valido(csrf_precio, alcance):
+        return RedirectResponse(
+            url=f"{destino}?error={quote('El formulario venció. Recargá la página e intentá nuevamente.')}",
+            status_code=303,
+        )
+    try:
+        clave = _idempotency_key_form(idempotency_key)
+        nuevo = _importe_contable_form(
+            nuevo_precio_ars, "Nuevo precio", permitir_cero=True
+        )
+        from servicios.ajustes_precio_admin import aplicar_nuevo_precio
+        resultado = aplicar_nuevo_precio(
+            cliente_id=cliente,
+            envio_id=int(envio_id),
+            nuevo_precio_ars=nuevo,
+            motivo=motivo,
+            actor="admin",
+            idempotency_key=clave,
+        )
+    except ValueError as exc:
+        return RedirectResponse(
+            url=f"{destino}?error={quote(str(exc)[:300])}", status_code=303
+        )
+    ok = "precio_sin_cambios" if resultado.get("sin_cambios") else "precio_ajustado"
+    return RedirectResponse(url=f"{destino}?ok={ok}#envios-cliente", status_code=303)
 
 
 @router.get("/clientes/{cliente_id}/acceso-precios", response_class=HTMLResponse)

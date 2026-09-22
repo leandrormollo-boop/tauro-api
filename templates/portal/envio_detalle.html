@@ -364,6 +364,12 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <strong>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</strong>
         </div>
         {% endif %}
+        {% if s.ajuste_comercial_ars %}
+        <div class="mini-row envio-account-extra ajuste-comercial">
+            <span><b>{{ "Descuento TAURO" if s.ajuste_comercial_ars < 0 else "Ajuste de precio" }}</b><small>Cambio comercial aplicado por TAURO</small></span>
+            <strong>{{ "+" if s.ajuste_comercial_ars > 0 else "−" }} {{ dinero_ars(s.ajuste_comercial_ars|abs) }}</strong>
+        </div>
+        {% endif %}
         <div class="mini-row envio-account-total">
             <span>Precio final del envío</span>
             <strong class="portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
@@ -396,7 +402,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             </strong>
         </div>
         <p style="font-size:12px;color:var(--fg-3);margin-top:10px;">{{ d.leyenda }}</p>
-        {% elif s.diferencia_cliente_ars %}
+        {% elif s.diferencia_flete_ars or s.tax_cliente_ars %}
         <hr class="divider">
         <div class="mini-row">
           <span>Motivo de la diferencia</span>

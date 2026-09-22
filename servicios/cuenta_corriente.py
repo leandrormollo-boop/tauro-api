@@ -838,17 +838,25 @@ def movimientos_cuenta_paginados(
 
             SELECT
                 (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
-                a.aplicado_at, 35, a.id,
-                'DIFERENCIA',
+                a.aplicado_at,
+                CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' THEN 36 ELSE 35 END,
+                a.id,
+                CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN'
+                     THEN 'AJUSTE_PRECIO' ELSE 'DIFERENCIA' END,
                 CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                      THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
                 CASE
+                    WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' AND a.tipo='CREDITO'
+                        THEN 'Descuento comercial'
+                    WHEN a.origen='AJUSTE_COMERCIAL_ADMIN'
+                        THEN 'Ajuste de precio'
                     WHEN ABS(c.tax_cliente_ars) > 0
                      AND ABS(c.diferencia_flete_ars) > 0 THEN 'Diferencia + TAX'
                     WHEN ABS(c.tax_cliente_ars) > 0 THEN 'TAX'
                     ELSE 'Diferencia de envío'
                 END,
-                COALESCE(c.motivo_diferencia, a.motivo),
+                CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' THEN a.motivo
+                     ELSE COALESCE(c.motivo_diferencia, a.motivo) END,
                 CASE WHEN a.tipo='DEBITO' THEN ABS(a.monto_ars) ELSE 0 END,
                 CASE WHEN a.tipo='CREDITO' THEN ABS(a.monto_ars) ELSE 0 END,
                 ABS(a.monto_ars), a.estado, FALSE, e.id, NULL::integer,
@@ -893,14 +901,26 @@ def movimientos_cuenta_paginados(
                         WHERE m.solicitud_id=a.solicitud_id
                           AND m.estado='CONFIRMADO'
                           AND i.concepto_tipo <> 'FLETE'
-                    ), '')
-                )
+                    ), ''),
+                    'origen', a.origen
+                ) || CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' THEN
+                    JSONB_BUILD_OBJECT(
+                        'valor_inicial_ars', ROUND(a.precio_anterior_ars, 2),
+                        'diferencia_ars', ROUND(a.monto_ars, 2),
+                        'motivo', 'AJUSTE_COMERCIAL',
+                        'concepto_courier', a.motivo
+                    )
+                ELSE '{}'::jsonb END
             FROM ajustes_cliente a
-            JOIN conciliaciones_envio c ON c.id=a.conciliacion_id
+            LEFT JOIN conciliaciones_envio c ON c.id=a.conciliacion_id
             JOIN envios e ON e.solicitud_id=a.solicitud_id
             JOIN solicitudes_guia s ON s.id=a.solicitud_id
             WHERE e.cliente_id=%s AND e.estado='ACTIVO'
               AND a.estado='APLICADO'
+              AND (
+                    (a.origen='CONCILIACION_COURIER' AND c.id IS NOT NULL)
+                    OR a.origen='AJUSTE_COMERCIAL_ADMIN'
+              )
 
             UNION ALL
 
@@ -947,7 +967,7 @@ def movimientos_cuenta_paginados(
               AND (
                   (%s = 'todos' AND tipo NOT IN ('ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'))
                   OR (%s = 'cargos' AND tipo IN ('FC', 'PENDIENTE_FACTURA'))
-                  OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'DIFERENCIA'))
+                  OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'DIFERENCIA', 'AJUSTE_PRECIO'))
                   OR (%s = 'pagos' AND tipo IN ('PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO'))
                   OR (%s = 'diferencias' AND tipo = 'DIFERENCIA')
                   OR (%s = 'revision' AND tipo = 'PAGO_PENDIENTE')
@@ -1053,7 +1073,7 @@ def movimientos_cuenta_paginados(
             item[campo] = Decimal(str(item.get(campo) or 0)).quantize(
                 _CENTAVO, rounding=ROUND_HALF_UP
             )
-        if item.get("tipo") == "DIFERENCIA":
+        if item.get("tipo") in ("DIFERENCIA", "AJUSTE_PRECIO"):
             item["diferencia_detalle"] = presentar_diferencia(
                 item.get("diferencia_detalle")
             )

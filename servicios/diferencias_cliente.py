@@ -14,6 +14,7 @@ _MOTIVOS = {
     "IMPUESTOS": "Impuestos del courier",
     "RECARGO": "Recargo del courier",
     "DESCUENTO": "Descuento del courier",
+    "AJUSTE_COMERCIAL": "Ajuste comercial de TAURO",
     "OTRO": "Diferencia del courier",
 }
 
@@ -48,6 +49,7 @@ def presentar_diferencia(datos: Mapping[str, Any] | None) -> dict[str, Any]:
     motivo = str(
         fuente.get("motivo") or fuente.get("motivo_diferencia") or "OTRO"
     ).strip().upper()
+    origen = str(fuente.get("origen") or "").strip().upper()
     inicial = _decimal_opcional(
         fuente.get("peso_inicial_kg", fuente.get("peso_cotizado_kg"))
     )
@@ -83,5 +85,10 @@ def presentar_diferencia(datos: Mapping[str, Any] | None) -> dict[str, Any]:
         "motivo": motivo,
         "motivo_legible": _MOTIVOS.get(motivo, motivo.replace("_", " ").title()),
         "concepto_courier": concepto,
-        "leyenda": "TAURO traslada la diferencia del courier sin agregar margen.",
+        "origen": origen,
+        "leyenda": (
+            "TAURO aplicó este cambio comercial sin modificar la cotización original."
+            if origen == "AJUSTE_COMERCIAL_ADMIN"
+            else "TAURO traslada la diferencia del courier sin agregar margen."
+        ),
     }

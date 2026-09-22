@@ -42,6 +42,13 @@ COURIERS_CLIENTE = tuple(
 COURIER_IDS = frozenset(c["id"] for c in COURIERS_CLIENTE)
 
 
+def _cuenta_enmascarada(valor: str) -> str | None:
+    cuenta = str(valor or "").strip()
+    if len(cuenta) != 9 or not cuenta.isdigit():
+        return None
+    return f"•••••{cuenta[-4:]}"
+
+
 def estado_integracion(courier: str) -> dict:
     """Estado operativo real del courier, sin tocar su API.
 
@@ -72,6 +79,12 @@ def estado_integracion(courier: str) -> dict:
             or os.getenv("DHL_ACCOUNT_NUMBER_IMPORT")
             or ""
         ).strip()
+        referencias_cuentas = tuple(
+            referencia for referencia in (
+                {"sentido": "EXPO", "cuenta": _cuenta_enmascarada(cuenta_expo)},
+                {"sentido": "IMPO", "cuenta": _cuenta_enmascarada(cuenta_impo)},
+            ) if referencia["cuenta"]
+        )
         requisitos = {
             "DHL_API_KEY": bool((os.getenv("DHL_API_KEY") or "").strip()),
             "DHL_API_SECRET": bool((os.getenv("DHL_API_SECRET") or "").strip()),
@@ -93,6 +106,7 @@ def estado_integracion(courier: str) -> dict:
                 "operativa": False,
                 "estado": "Falta configurar producción",
                 "detalle": "; ".join(motivos) + ".",
+                "referencias_cuentas": referencias_cuentas,
             }
         return {
             "operativa": True,
@@ -101,6 +115,7 @@ def estado_integracion(courier: str) -> dict:
                 "Credenciales y cuentas DHL cargadas. MyDHL valida el acceso "
                 "productivo en cada cotización."
             ),
+            "referencias_cuentas": referencias_cuentas,
         }
 
     return {
@@ -203,6 +218,7 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
             "integracion_disponible": integracion_disponible,
             "estado_integracion": integracion["estado"],
             "detalle_integracion": integracion["detalle"],
+            "referencias_cuentas": integracion.get("referencias_cuentas", ()),
             "configurado": configurado,
             "pricing_configurado": pricing_configurado,
             # Configuración persistida (lo que ve/edita el admin) y permiso

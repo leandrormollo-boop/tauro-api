@@ -197,7 +197,19 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
           <td class="admin-shipment-person">{{ e.destinatario or "—" }}</td>
           <td class="mono">{{ e.fecha.strftime("%d/%m/%Y") if e.fecha else "—" }}</td>
           <td class="admin-shipment-person">{{ e.remitente or "—" }}</td>
-          <td class="mono admin-shipment-value">$ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
+          <td class="mono admin-shipment-value">
+            {% if e.precio_final_ars != e.monto_ars %}
+            <small style="display:block;color:var(--fg-4);">Original $ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</small>
+            <strong>$ {{ "{:,.2f}".format(e.precio_final_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</strong>
+            {% if e.ajuste_comercial_ars %}
+            <small style="display:block;color:{% if e.ajuste_comercial_ars < 0 %}var(--ok){% else %}var(--warn){% endif %};">
+              Ajuste ADMIN {{ "+" if e.ajuste_comercial_ars > 0 else "−" }} $ {{ "{:,.2f}".format(e.ajuste_comercial_ars|abs).replace(",", "X").replace(".", ",").replace("X", ".") }}
+            </small>
+            {% endif %}
+            {% else %}
+            $ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
+            {% endif %}
+          </td>
           <td>
             {% if e.ambito == 'NACIONAL' %}
               <span class="badge ok">NACIONAL</span>
@@ -269,6 +281,33 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             </form>
             {% elif e.solicitud_test %}
             <small style="display:block;color:var(--fg-4);margin-top:6px;">Caso de prueba: oculto automáticamente.</small>
+            {% endif %}
+            {% if e.solicitud_id and not e.solicitud_test and e.estado == 'ACTIVO' and e.solicitud_estado not in ('CANCELADO', 'REEMPLAZADO') %}
+            <details style="margin-top:6px;min-width:220px;">
+              <summary class="btn btn-sm btn-ghost" style="list-style:none;cursor:pointer;">Ajustar precio</summary>
+              <form method="POST"
+                    action="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/precio"
+                    style="display:grid;gap:7px;margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-2);"
+                    data-confirm="¿Confirmás el nuevo precio final? La cotización original no se modifica y la diferencia impactará en la cuenta corriente del cliente.">
+                <input type="hidden" name="csrf_precio" value="{{ e.precio_csrf }}">
+                <input type="hidden" name="idempotency_key" value="{{ e.precio_idempotency }}">
+                <label style="font-size:11px;color:var(--fg-3);">
+                  Nuevo precio final (ARS)
+                  <input type="text" name="nuevo_precio_ars" required inputmode="decimal"
+                         value="{{ '{:.2f}'.format(e.precio_final_ars).replace('.', ',') }}"
+                         aria-label="Nuevo precio final en pesos">
+                </label>
+                <label style="font-size:11px;color:var(--fg-3);">
+                  Motivo del cambio
+                  <textarea name="motivo" required minlength="8" maxlength="500"
+                            rows="2" placeholder="Ej.: descuento comercial acordado"></textarea>
+                </label>
+                <small style="color:var(--fg-4);line-height:1.35;">
+                  Vigente: $ {{ "{:,.2f}".format(e.precio_final_ars).replace(",", "X").replace(".", ",").replace("X", ".") }} · original: $ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
+                </small>
+                <button type="submit" class="btn btn-sm btn-primary">Aplicar nuevo precio</button>
+              </form>
+            </details>
             {% endif %}
           </td>
         </tr>
