@@ -80,8 +80,11 @@
       if (current !== sequence || revision !== renderSequence) return;
       const natural = page ? page.getViewport({ scale: 1 }) : picture;
       const stageStyle = getComputedStyle(stage);
-      const available = Math.max(120, stage.clientWidth - parseFloat(stageStyle.paddingLeft) - parseFloat(stageStyle.paddingRight));
-      const availableHeight = Math.max(120, stage.clientHeight - parseFloat(stageStyle.paddingTop) - parseFloat(stageStyle.paddingBottom));
+      const canvasStyle = getComputedStyle(canvas);
+      const available = Math.max(120, stage.clientWidth - parseFloat(stageStyle.paddingLeft) - parseFloat(stageStyle.paddingRight)
+        - parseFloat(canvasStyle.paddingLeft) - parseFloat(canvasStyle.paddingRight));
+      const availableHeight = Math.max(120, stage.clientHeight - parseFloat(stageStyle.paddingTop) - parseFloat(stageStyle.paddingBottom)
+        - parseFloat(canvasStyle.paddingTop) - parseFloat(canvasStyle.paddingBottom));
       const factor = Math.min(available / natural.width, availableHeight / natural.height, 1.5) * scale;
       const width = natural.width * factor, height = natural.height * factor;
       // Evita canvases gigantes incluso en páginas de tamaño atípico.

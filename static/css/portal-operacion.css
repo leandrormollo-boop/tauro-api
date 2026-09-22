@@ -1,5 +1,5 @@
 /* Lectura y operación cotidiana. Sólo el portal autenticado; sin dependencias. */
-.portal-operacion { --fg-3: #ada8ba; --fg-4: #9691a4; }
+.portal-operacion { --fg-3: #ada8ba; --fg-4: #9691a4; --portal-window-radius: 32px; }
 html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .main-inner { max-width: 1440px; padding: 30px 36px 44px; }
 .portal-operacion .sidebar .side-item { min-height: 44px; font-size: 14px; }
@@ -12,6 +12,9 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .eyebrow { font-size: 11px; letter-spacing: .09em; }
 .portal-operacion .badge { font-size: 11px; line-height: 1.4; white-space: normal; }
 .portal-operacion .card { border-radius: 16px; }
+/* Todas las ventanas del portal comparten la misma curva, también en móvil. */
+.portal-operacion dialog { border-radius: var(--portal-window-radius); }
+.portal-operacion .client-dialog > .client-form-card { border-radius: inherit; }
 .portal-operacion .page-title p { font-size: 14px; line-height: 1.55; }
 
 /* La pieza de marca acompaña el trabajo y conserva el avión original. */

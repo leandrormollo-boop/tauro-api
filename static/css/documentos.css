@@ -20,13 +20,13 @@
 .document-card-compact .document-description small { font-size:10px; }
 .account-tracking-cell .document-card { min-width:190px; }
 /* Una tarjeta flotante centrada en el documento, con controles discretos. */
-.document-viewer { padding:0; border:0; border-radius:24px; width:min(480px,calc(100vw - 40px)); max-width:none; height:min(680px,84dvh); max-height:none; margin:auto; background:transparent; color:var(--fg); overflow:visible; box-shadow:0 16px 64px #0003; }
+.document-viewer { padding:0; border:0; border-radius:var(--portal-window-radius,32px); width:min(480px,calc(100vw - 40px)); max-width:none; height:min(680px,84dvh); max-height:none; margin:auto; background:transparent; color:var(--fg); overflow:hidden; box-shadow:0 16px 64px #0003; }
 .document-viewer[open] { animation:document-reveal 180ms cubic-bezier(.2,.8,.2,1) both; }
 .document-viewer::backdrop { background:rgba(8,7,15,.38); backdrop-filter:blur(3px); animation:document-backdrop-in 180ms ease-out both; }
 .document-viewer.is-closing { animation:document-dismiss 120ms ease-in both; pointer-events:none; }
 .document-viewer.is-closing::backdrop { animation:document-backdrop-out 120ms ease-in both; }
-.document-viewer-shell { display:flex; flex-direction:column; height:100%; min-height:0; padding:6px; border:1px solid color-mix(in srgb,var(--fg) 9%,transparent); border-radius:inherit; background:color-mix(in srgb,var(--bg-elev) 96%,transparent); backdrop-filter:blur(18px); }
-.document-viewer-header { display:flex; gap:8px; align-items:center; padding:8px 10px 12px; }
+.document-viewer-shell { display:flex; flex-direction:column; height:100%; min-height:0; padding:6px; border:1px solid color-mix(in srgb,var(--fg) 9%,transparent); border-radius:inherit; overflow:hidden; background:color-mix(in srgb,var(--bg-elev) 96%,transparent); backdrop-filter:blur(18px); }
+.document-viewer-header { display:flex; gap:8px; align-items:center; padding:10px 14px 12px; }
 .document-viewer-header > div { flex:1; min-width:0; }
 .document-viewer-header h2 { font:500 13px var(--font-body); margin:0; overflow-wrap:anywhere; }
 .document-viewer-header p { font-size:10px; color:var(--fg-3); margin:3px 0 0; overflow-wrap:anywhere; }
@@ -42,7 +42,8 @@
 .document-viewer-toolbar span { font-size:11px; min-width:42px; text-align:center; color:var(--fg-2); font-variant-numeric:tabular-nums; }
 .document-viewer [data-viewer-fit] { font-size:11px; width:54px; border-radius:16px; }
 .document-viewer-stage { flex:1; min-height:0; overflow:auto; padding:8px 14px; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:var(--line) transparent; border-radius:14px; }
-.document-viewer canvas { display:block; margin:0 auto; background:white; border-radius:3px; box-shadow:0 3px 16px #0002; }
+/* El margen blanco permite redondear el marco sin recortar el documento. */
+.document-viewer canvas { display:block; box-sizing:content-box; margin:0 auto; padding:8px; background:white; border-radius:22px; box-shadow:0 3px 16px #0002; }
 .document-viewer canvas[hidden],.document-viewer [hidden] { display:none!important; }
 .document-viewer-message { display:grid; place-items:center; height:100%; text-align:center; color:var(--fg-2); font-size:13px; padding:24px; max-width:360px; margin:auto; }
 @keyframes document-reveal { from { opacity:0; transform:translateY(10px) scale(.96); } to { opacity:1; transform:translateY(0) scale(1); } }
@@ -50,8 +51,8 @@
 @keyframes document-backdrop-in { from { opacity:0; } to { opacity:1; } }
 @keyframes document-backdrop-out { from { opacity:1; } to { opacity:0; } }
 @media(max-width:600px) {
- .document-viewer { width:calc(100vw - 24px); height:min(620px,86dvh,calc((100vw - 48px)*1.5 + 100px)); max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); border-radius:20px; }
- .document-viewer-header { padding:8px 8px 10px; }
+ .document-viewer { width:calc(100vw - 24px); height:min(620px,86dvh,calc((100vw - 48px)*1.5 + 100px)); max-height:calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+ .document-viewer-header { padding:10px 12px; }
  .document-viewer-stage { padding:6px 8px; }
  .document-viewer-toolbar { margin-top:8px; gap:8px; }
  .document-viewer button,.document-viewer-download { min-width:34px; min-height:34px; }

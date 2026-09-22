@@ -45,3 +45,11 @@ Router determinístico: `architecture --final-decision --approved`, ruta base Te
 - Cambio de página y zoom renderizan fuera de pantalla y reemplazan el canvas al terminar, evitando el parpadeo.
 - Validado en Chrome, viewport móvil 390 × 844 y navegador integrado de Codex de 320 px; páginas, zoom 125%, cierre durante render, Escape, clic afuera y reapertura. Sin errores JS; 17 pruebas JS existentes aprobadas. No se repitió la suite Python porque este ajuste sólo modifica presentación y JS.
 - Sigue pendiente de publicación.
+
+## Esquinas redondeadas en las ventanas
+
+- Regla común de 32 px para los diálogos del portal, conservada en móvil y en las tarjetas internas de formularios de clientes.
+- El visor recorta su fondo según esa curva. El documento lleva un marco blanco de 8 px y esquinas de 22 px: el margen protege todos los píxeles del PDF o imagen y no modifica el archivo.
+- El ajuste de página descuenta ese marco para mantener el documento completo dentro del visor.
+- Validación visual en navegador integrado a 320 px y viewport de escritorio de 1280 × 900: marco visible, página completa sin desbordamiento al ajustar; segunda página, zoom, cierre y retorno del foco operativos. Sintaxis JS y diff verificados.
+- Ajuste local, pendiente de publicación.
