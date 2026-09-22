@@ -748,7 +748,12 @@ class DHLClient(CarrierBase):
         # exportDeclaration representa las unidades que declara la factura.
         # Para solicitudes históricas sin `unidades_aduana`, ambas cantidades
         # siguen coincidiendo y el payload conserva el comportamiento anterior.
-        piezas, line_items, valor_total = [], [], 0.0
+        piezas, line_items, valor_total = [], [], Decimal("0.00")
+        usa_totales_explicitos = any(
+            "valor_total_usd" in item for b in bultos
+            if isinstance(b.get("items_invoice"), list)
+            for item in b["items_invoice"] if isinstance(item, dict)
+        )
         valor_total_cajas = 0.0
         total_cajas = 0
         for i, b in enumerate(bultos, start=1):
@@ -773,7 +778,7 @@ class DHLClient(CarrierBase):
             if not math.isfinite(peso_caja) or not 0 < peso_caja <= MAX_DHL_PACKAGE_KG:
                 return {"encontrado": False,
                         "error": f"Cada bulto DHL debe pesar hasta {MAX_DHL_PACKAGE_KG:g} kg."}
-            if not math.isfinite(valor_u) or valor_u <= 0:
+            if (not math.isfinite(valor_u) or valor_u <= 0) and "items_invoice" not in b:
                 return {"encontrado": False,
                         "error": "El valor unitario de cada ítem debe ser mayor a cero."}
             total_invoice_linea = round(valor_u * unidades_aduana, 2)
@@ -806,7 +811,9 @@ class DHLClient(CarrierBase):
             total_cajas_linea = round(valor_caja * cajas, 2)
             if (valor_caja_crudo not in (None, "")
                     and abs(Decimal(str(total_cajas_linea))
-                            - Decimal(str(total_invoice_linea))) > Decimal("0.02")):
+                            - Decimal(str(total_invoice_linea))) > (
+                                Decimal("0") if any("valor_total_usd" in item for item in items_invoice or [])
+                                else Decimal("0.02"))):
                 return {"encontrado": False, "error": mensaje_desfase_valores(
                     i, cajas, total_cajas_linea, total_invoice_linea,
                 )}
@@ -821,7 +828,7 @@ class DHLClient(CarrierBase):
                         "height": round(float(b.get("alto_cm") or b.get("alto") or 10), 3),
                     },
                 })
-            valor_total += total_invoice_linea
+            valor_total += Decimal(str(total_invoice_linea))
             valor_total_cajas += total_cajas_linea
             for item in items_invoice or [{
                 **b, "unidades_aduana": unidades_aduana,
@@ -832,7 +839,10 @@ class DHLClient(CarrierBase):
                     "number": len(line_items) + 1,
                     "description": (item.get("descripcion_en") or b.get("producto_alias")
                                     or "Merchandise")[:75],
-                    "price": round(float(item["valor_unitario_usd"]), 2),
+                    "price": round(float(item["valor_unitario_usd"]),
+                                   3 if "valor_total_usd" in item else 2),
+                    **({"preCalculatedLineItemTotalValue": float(total_items_invoice([item]))}
+                       if usa_totales_explicitos else {}),
                     "quantity": {
                         "value": item["unidades_aduana"], "unitOfMeasurement": "PCS",
                     },
@@ -900,7 +910,7 @@ class DHLClient(CarrierBase):
             "content": {
                 "packages": piezas,
                 "isCustomsDeclarable": True,
-                "declaredValue": round(valor_total or 1, 2),
+                "declaredValue": float(valor_total.quantize(Decimal("0.01"))) or 1,
                 "declaredValueCurrency": "USD",
                 "description": (line_items[0]["description"] if line_items else "Merchandise")[:70],
                 # DDP si el cliente eligió hacerse cargo de los impuestos,
@@ -915,6 +925,17 @@ class DHLClient(CarrierBase):
                         # fecha que se está realizando el envío".
                         "number": datetime.now(TZ_AR).strftime("%Y%m%d"),
                         "date": datetime.now(TZ_AR).strftime("%Y-%m-%d"),
+                        **({
+                            "preCalculatedTotalValues": {
+                                "preCalculatedTotalGoodsValue": float(valor_total),
+                                "preCalculatedTotalInvoiceValue": float(valor_total),
+                            },
+                            # Esta invoice declara sólo mercadería: no contiene
+                            # cargos adicionales ni impuestos estimados.
+                            "indicativeCustomsValues": {
+                                "totalWithImportDutiesAndTaxes": float(valor_total),
+                            },
+                        } if usa_totales_explicitos else {}),
                     },
                     "exportReason": "permanent",
                 },

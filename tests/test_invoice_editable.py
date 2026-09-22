@@ -31,18 +31,18 @@ def _html():
 
 def test_cada_renglon_tiene_los_campos_de_la_invoice():
     html = _html()
-    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_valor_usd",
+    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_total_usd",
                   "bulto_hs", "bulto_pais_fab"):
         assert f'name="{campo}"' in html, f"falta {campo} en el renglón del producto"
 
 
-def test_valor_unitario_esta_en_invoice_y_no_en_paquete():
+def test_valor_total_esta_en_invoice_y_no_en_paquete():
     html = _html()
     paquete = html[html.index("shipment-step-package"):html.index("shipment-step-invoice")]
     invoice = html[html.index("shipment-step-invoice"):html.index('class="submit-bar"')]
-    assert 'name="bulto_valor_usd"' not in paquete
-    assert 'name="bulto_valor_usd"' in invoice
-    assert "cantidad de unidades × valor unitario" in invoice
+    assert 'name="bulto_total_usd"' not in paquete
+    assert 'name="bulto_total_usd"' in invoice
+    assert "cantidad y valor total de cada artículo" in invoice
     assert "actualizarSubtotalInvoice(invoice)" in html
     assert "refreshLivePrice()" in html
 
@@ -97,7 +97,7 @@ def test_elegir_producto_precarga_su_invoice():
 
 def test_el_submit_recibe_los_overrides():
     firma = inspect.signature(pc.envio_nuevo_post)
-    for campo in ("bulto_desc_en", "bulto_valor_usd", "bulto_valor_caja_usd",
+    for campo in ("bulto_desc_en", "bulto_total_usd", "bulto_valor_caja_usd",
                   "bulto_hs", "bulto_pais_fab", "asegurar_carga"):
         assert campo in firma.parameters, f"el submit no recibe {campo}"
 

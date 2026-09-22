@@ -4,7 +4,7 @@ Los importes se calculan con Decimal; se convierten sólo al serializar JSON.
 Las solicitudes anteriores sin items_invoice mantienen su contrato escalar.
 """
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from servicios.numeros_humanos import (
     parse_entero_humano, parse_importe_humano, parse_numero_humano,
@@ -25,8 +25,8 @@ def mensaje_desfase_valores(indice, cantidad, total_cajas, total_invoice):
         f"Caja {indice} ({cantidad} {bultos}): el valor declarado de las cajas "
         f"(USD {cajas:.2f}) no coincide con la mercadería de la factura comercial "
         f"(invoice: USD {mercaderia:.2f}). Diferencia: USD {diferencia:.2f}. "
-        "Revisá el valor por caja × cantidad de cajas y la suma de unidades × "
-        "valor unitario de los artículos. Corregí el dato que no refleje el contenido real."
+        "Revisá el valor por caja × cantidad de cajas y la suma de los valores "
+        "totales de los artículos. Corregí el dato que no refleje el contenido real."
     )
 
 
@@ -46,11 +46,23 @@ def normalizar_items_invoice(items, *, peso_total_kg):
         unidades = parse_entero_humano(item.get("unidades_aduana"))
         if unidades is None or not 1 <= unidades <= 9999:
             raise ValueError(f"Ítem {indice}: la cantidad debe ser un entero entre 1 y 9999.")
-        valor = parse_importe_humano(item.get("valor_unitario_usd"))
+        # Un total explícito es la fuente de verdad. Nunca se reconstruye
+        # multiplicando un unitario redondeado (100 / 3 no cierra en centavos).
+        total_explicito = "valor_total_usd" in item
+        campo = "valor_total_usd" if total_explicito else "valor_unitario_usd"
+        etiqueta = "total del artículo" if total_explicito else "unitario"
+        valor = parse_importe_humano(item.get(campo))
         if valor is None or not CENTAVO <= valor <= Decimal("999999999.99"):
-            raise ValueError(f"Ítem {indice}: completá un valor unitario válido mayor a cero.")
+            raise ValueError(f"Ítem {indice}: completá un valor {etiqueta} válido mayor a cero.")
         if valor != valor.quantize(CENTAVO):
-            raise ValueError(f"Ítem {indice}: el valor unitario admite hasta dos decimales.")
+            raise ValueError(f"Ítem {indice}: el valor {etiqueta} admite hasta dos decimales.")
+        total = valor if total_explicito else valor * unidades
+        if total_explicito:
+            # MyDHL price admite milésimas; los campos preCalculated preservan
+            # el total exacto de la declaración, incluso con división periódica.
+            valor = (total / unidades).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+            if valor <= 0:
+                raise ValueError(f"Ítem {indice}: el total es demasiado bajo para esa cantidad de unidades.")
         pais_crudo = str(item.get("pais_origen") or "").strip()
         pais = normalizar(pais_crudo) if pais_crudo else ""
         if pais_crudo and not pais:
@@ -71,7 +83,9 @@ def normalizar_items_invoice(items, *, peso_total_kg):
             )
         resultado.append({
             "descripcion_en": descripcion, "unidades_aduana": unidades,
-            "valor_unitario_usd": float(valor), "hs_code": hs,
+            "valor_unitario_usd": float(valor),
+            **({"valor_total_usd": float(total)} if total_explicito else {}),
+            "hs_code": hs,
             "pais_origen": pais, "peso_neto_kg": float(peso),
         })
     if sum(Decimal(str(i["peso_neto_kg"])) for i in resultado) > peso_total:
@@ -81,6 +95,34 @@ def normalizar_items_invoice(items, *, peso_total_kg):
 
 def total_items_invoice(items):
     return sum(
-        (Decimal(str(i["valor_unitario_usd"])) * int(i["unidades_aduana"])
+        (Decimal(str(i["valor_total_usd"])) if "valor_total_usd" in i else
+         Decimal(str(i["valor_unitario_usd"])) * int(i["unidades_aduana"])
          for i in items), Decimal("0.00"),
     ).quantize(CENTAVO)
+
+
+def invoice_requiere_dhl(bultos):
+    """Los otros adapters sólo representan un ítem por caja física.
+
+    Mantener ese contrato para los totales que se representan exactamente;
+    nunca enviarles una invoice múltiple ni un unitario que deban redondear.
+    """
+    for b in bultos:
+        if "items_invoice" not in b:
+            continue
+        items = b["items_invoice"]
+        if not isinstance(items, list) or len(items) != 1:
+            return True
+        item = items[0]
+        if "valor_total_usd" not in item:
+            return True  # Conserva la restricción anterior para invoices extendidas.
+        try:
+            precio = Decimal(str(item["valor_unitario_usd"]))
+            unidades = int(item["unidades_aduana"])
+            if (unidades != int(b.get("cantidad") or b.get("unidades") or 1)
+                    or precio != precio.quantize(CENTAVO)
+                    or precio * unidades != Decimal(str(item["valor_total_usd"]))):
+                return True
+        except (KeyError, TypeError, ValueError, ArithmeticError):
+            return True
+    return False

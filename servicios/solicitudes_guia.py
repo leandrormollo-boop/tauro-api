@@ -3322,9 +3322,10 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     # bultos) es el MISMO contrato para los dos, por eso todo el armado de
     # arriba se comparte y sumar un courier no duplica esta función.
     courier = (courier or "FEDEX").upper()
-    if courier != "DHL" and any("items_invoice" in b for b in bultos):
+    from servicios.invoice_comercial import invoice_requiere_dhl
+    if courier != "DHL" and invoice_requiere_dhl(bultos):
         _liberar_reserva(solicitud_id)
-        return {"ok": False, "error": "La invoice con varios artículos por caja requiere DHL."}
+        return {"ok": False, "error": "Esta declaración por cantidad y valor total requiere DHL."}
     if courier == "DHL":
         from core.dhl_client import DHLClient
         cliente_courier = DHLClient()

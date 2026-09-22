@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío') }}{% endblock %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
+{% endblock %}
 
 {% block content %}
 <link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
@@ -373,7 +376,7 @@
                     </div>
                     <div class="shipment-package-main">
                         <div class="form-group shipment-catalog-field">
-                            <label>Precargar del catálogo <span class="field-optional">(opcional)</span></label><span data-help="Precargar del catálogo">El catálogo es opcional. Precarga peso, medidas y contenido de un producto guardado. También podés completar la caja manualmente.</span>
+                            <div class="shipment-field-label"><label>Precargar del catálogo <span class="field-optional">(opcional)</span></label><span data-help="Precargar del catálogo">El catálogo es opcional. Precarga peso, medidas y contenido de un producto guardado. También podés completar la caja manualmente.</span></div>
                             <select name="bulto_producto" class="bulto-producto">
                                 <option value="">— caja manual —</option>
                                 {% for p in productos %}
@@ -390,28 +393,28 @@
                         </div>
                         <div class="bulto-fisico">
                             <div class="form-group">
-                                <label>Peso por caja</label>
-                                <div class="input-unit"><input type="text" name="bulto_peso" class="bulto-peso" inputmode="decimal" data-numero="decimal" value="{{ f.peso_kg or '' }}" required><span>kg</span></div>
+                                <div class="shipment-field-label"><label>Peso por caja</label></div>
+                                <div class="input-unit"><input type="text" name="bulto_peso" aria-label="Peso por caja" class="bulto-peso" inputmode="decimal" data-numero="decimal" value="{{ f.peso_kg or '' }}" required><span>kg</span></div>
                             </div>
                             <div class="form-group">
-                                <label>Largo</label>
-                                <div class="input-unit"><input type="text" name="bulto_largo" class="bulto-largo" inputmode="decimal" data-numero="decimal" value="{{ f.largo_cm or '' }}" required><span>cm</span></div>
+                                <div class="shipment-field-label"><label>Largo</label></div>
+                                <div class="input-unit"><input type="text" name="bulto_largo" aria-label="Largo" class="bulto-largo" inputmode="decimal" data-numero="decimal" value="{{ f.largo_cm or '' }}" required><span>cm</span></div>
                             </div>
                             <div class="form-group">
-                                <label>Ancho</label>
-                                <div class="input-unit"><input type="text" name="bulto_ancho" class="bulto-ancho" inputmode="decimal" data-numero="decimal" value="{{ f.ancho_cm or '' }}" required><span>cm</span></div>
+                                <div class="shipment-field-label"><label>Ancho</label></div>
+                                <div class="input-unit"><input type="text" name="bulto_ancho" aria-label="Ancho" class="bulto-ancho" inputmode="decimal" data-numero="decimal" value="{{ f.ancho_cm or '' }}" required><span>cm</span></div>
                             </div>
                             <div class="form-group">
-                                <label>Alto</label>
-                                <div class="input-unit"><input type="text" name="bulto_alto" class="bulto-alto" inputmode="decimal" data-numero="decimal" value="{{ f.alto_cm or '' }}" required><span>cm</span></div>
+                                <div class="shipment-field-label"><label>Alto</label></div>
+                                <div class="input-unit"><input type="text" name="bulto_alto" aria-label="Alto" class="bulto-alto" inputmode="decimal" data-numero="decimal" value="{{ f.alto_cm or '' }}" required><span>cm</span></div>
                             </div>
                             <div class="form-group">
-                                <label>Cajas iguales</label><span data-help="Cajas iguales">Usá una sola fila para cajas con las mismas medidas, peso y contenido. Indicá cuántas enviás.</span>
-                                <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
+                                <div class="shipment-field-label"><label>Cajas iguales</label><span data-help="Cajas iguales">Usá una sola fila para cajas con las mismas medidas, peso y contenido. Indicá cuántas enviás.</span></div>
+                                <input type="text" name="bulto_cantidad" aria-label="Cajas iguales" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
                             </div>
                             <div class="form-group shipment-box-value">
-                                <label>Valor por caja</label><span data-help="Valor por caja">Valor total de la mercadería dentro de una caja. El total declarado multiplica este valor por la cantidad de cajas iguales.</span>
-                                <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_caja_usd" class="bulto-valor-caja" inputmode="decimal" data-numero="monto" value="{{ f.valor_declarado_caja_usd or '' }}" required></div>
+                                <div class="shipment-field-label"><label>Valor por caja</label><span data-help="Valor por caja">Valor total de la mercadería dentro de una caja. El total declarado multiplica este valor por la cantidad de cajas iguales.</span></div>
+                                <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_caja_usd" aria-label="Valor por caja" class="bulto-valor-caja" inputmode="decimal" data-numero="monto" value="{{ f.valor_declarado_caja_usd or '' }}" required></div>
                                 <small data-box-declared-total>Total cajas: USD —</small>
                             </div>
                         </div>
@@ -426,7 +429,7 @@
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
             <div class="shipment-step-heading">
                 <div>
-                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Cada artículo se calcula como cantidad de unidades × valor unitario.</span></h4>
+                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Ingresá cantidad y valor total de cada artículo.</span></h4>
 
                 </div>
                 <span class="shipment-step-counter">Valores en USD</span>
@@ -452,12 +455,12 @@
                         </div>
                         <div class="form-group">
                             <label>Cantidad de unidades</label>
-                            <input type="text" name="bulto_unidades_aduana" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
+                            <input type="text" name="bulto_unidades_aduana" aria-label="Cantidad de unidades" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group shipment-declared-value">
-                            <label>Valor unitario</label><span data-help="Valor unitario">Precio de una unidad del producto en USD. El subtotal se calcula al multiplicarlo por la cantidad de unidades.</span>
-                            <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_usd" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_unitario_usd or '' }}" required></div>
-                            <small class="invoice-line-total" data-invoice-line-total>Subtotal: USD —</small>
+                            <div class="shipment-field-label"><label>Valor total</label><span data-help="Valor total">Valor de todas las unidades de este artículo, en todas las cajas de esta fila. No hace falta dividirlo por la cantidad.</span></div>
+                            <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_total_usd if f.valor_total_usd is defined else (f.items_invoice[0].valor_total_usd if f.items_invoice and f.items_invoice[0].valor_total_usd is defined else ('%.2f'|format((f.valor_unitario_usd|float) * (f.unidades_aduana|int)) if f.valor_unitario_usd else '')) }}" required></div>
+                            <small class="invoice-line-total" data-invoice-line-total></small>
                         </div>
                         <div class="form-group">
                             <label>HS code <span class="field-optional">(opcional)</span></label>
@@ -475,7 +478,7 @@
                         </div>
                         <div class="form-group invoice-net-weight" {% if not f.items_invoice %}hidden{% endif %}>
                             <label>Peso neto total de este artículo</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span>
-                            <div class="input-unit"><input type="text" name="bulto_peso_neto" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
+                            <div class="input-unit"><input type="text" name="bulto_peso_neto" aria-label="Peso neto total del artículo" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
 
                         </div>
                     </div>
@@ -800,17 +803,17 @@
     actualizarResumenSeguro();
   }
 
-  function numeroInvoice(valor) {
-    var limpio = String(valor || "").trim().replace(/\s/g, "");
-    if (!limpio) return NaN;
-    if (limpio.indexOf(",") >= 0 && limpio.indexOf(".") >= 0) {
-      limpio = limpio.lastIndexOf(",") > limpio.lastIndexOf(".")
-        ? limpio.replace(/\./g, "").replace(",", ".")
-        : limpio.replace(/,/g, "");
-    } else if (limpio.indexOf(",") >= 0) {
-      limpio = limpio.replace(",", ".");
-    }
-    return Number(limpio);
+  function numeroInvoice(valor, tipo) {
+    var normalizado = window.TauroNumeros.canonico(valor, tipo || "monto");
+    return normalizado.error || normalizado.valor === "" ? NaN : Number(normalizado.valor);
+  }
+
+  function totalArticuloGuardado(item) {
+    if (!item) return "";
+    if (Object.prototype.hasOwnProperty.call(item, "valor_total_usd")) return item.valor_total_usd;
+    var valor = numeroInvoice(item.valor_unitario_usd);
+    var unidades = numeroInvoice(item.unidades_aduana, "entero");
+    return valor > 0 && unidades > 0 ? (Math.round(valor * 100) * unidades / 100).toFixed(2) : "";
   }
 
   function articulosDe(invoice) {
@@ -822,7 +825,7 @@
       var v = function (sel) { return ((item.querySelector(sel) || {}).value || "").trim(); };
       return {
         descripcion_en: v(".bulto-desc"), unidades_aduana: v(".bulto-unidades-aduana"),
-        valor_unitario_usd: v(".bulto-valor"), hs_code: v(".bulto-hs"),
+        valor_total_usd: v(".bulto-valor"), hs_code: v(".bulto-hs"),
         pais_origen: v(".bulto-pais-fab"), peso_neto_kg: v(".invoice-peso-neto"),
       };
     });
@@ -830,9 +833,10 @@
 
   function subtotalArticulos(invoice) {
     return leerArticulos(invoice).reduce(function (total, item) {
-      var unidades = numeroInvoice(item.unidades_aduana);
-      var valor = numeroInvoice(item.valor_unitario_usd);
-      return total + (unidades > 0 && valor > 0 ? unidades * Math.round(valor * 100) : NaN);
+      var unidades = numeroInvoice(item.unidades_aduana, "entero");
+      var valor = numeroInvoice(item.valor_total_usd);
+      return total + (unidades > 0 && Number.isInteger(unidades) && valor > 0
+        ? Math.round(valor * 100) : NaN);
     }, 0) / 100;
   }
 
@@ -847,11 +851,11 @@
       var mostrarPeso = items.length > 1 || Boolean(peso.value);
       item.querySelector(".invoice-net-weight").hidden = !mostrarPeso;
       peso.required = items.length > 1;
-      var unidades = numeroInvoice(items[i].unidades_aduana);
-      var valor = numeroInvoice(items[i].valor_unitario_usd);
+      var unidades = numeroInvoice(items[i].unidades_aduana, "entero");
+      var valor = numeroInvoice(items[i].valor_total_usd);
       item.querySelector("[data-invoice-line-total]").textContent = unidades > 0 && valor > 0
-        ? "Subtotal: USD " + (unidades * Math.round(valor * 100) / 100).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
-        : "Subtotal: USD —";
+        ? "Por unidad: ≈ USD " + (valor / unidades).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 3})
+        : "";
     });
     var total = subtotalArticulos(invoice);
     invoice.querySelector("[data-invoice-box-total]").textContent = Number.isFinite(total)
@@ -872,11 +876,12 @@
     });
     var mapa = {
       descripcion_en: ".bulto-desc", unidades_aduana: ".bulto-unidades-aduana",
-      valor_unitario_usd: ".bulto-valor", hs_code: ".bulto-hs",
+      valor_total_usd: ".bulto-valor", hs_code: ".bulto-hs",
       pais_origen: ".bulto-pais-fab", peso_neto_kg: ".invoice-peso-neto",
     };
     Object.keys(mapa).forEach(function (k) {
-      nuevo.querySelector(mapa[k]).value = datos && datos[k] != null ? datos[k] : (k === "unidades_aduana" ? "1" : "");
+      nuevo.querySelector(mapa[k]).value = k === "valor_total_usd" ? totalArticuloGuardado(datos)
+        : (datos && datos[k] != null ? datos[k] : (k === "unidades_aduana" ? "1" : ""));
     });
     invoice.querySelector(".invoice-items").appendChild(nuevo);
     sincronizarArticulos(invoice);
@@ -911,7 +916,7 @@
     if (!invoice) return;
     var cajas = numeroInvoice(((row.querySelector(".bulto-cantidad") || {}).value || ""));
     var porCaja = numeroInvoice(((row.querySelector(".bulto-valor-caja") || {}).value || ""));
-    var totalCajas = cajas * porCaja;
+    var totalCajas = cajas * Math.round(porCaja * 100) / 100;
     var totalInvoice = subtotalArticulos(invoice);
     var nota = row.querySelector("[data-box-declared-total]");
     var valorInvoice = invoice.querySelector(".bulto-valor");
@@ -919,10 +924,10 @@
       nota.textContent = Number.isFinite(totalCajas) && totalCajas > 0
         ? "Total cajas: USD " + totalCajas.toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
         : "Total cajas: USD —";
-      nota.classList.toggle("is-mismatch", Number.isFinite(totalCajas) && Number.isFinite(totalInvoice) && Math.abs(totalCajas - totalInvoice) > 0.02);
+      nota.classList.toggle("is-mismatch", Number.isFinite(totalCajas) && Number.isFinite(totalInvoice) && Math.abs(Math.round(totalCajas * 100) - Math.round(totalInvoice * 100)) > 0);
     }
     if (valorInvoice) {
-      var difiere = Number.isFinite(totalCajas) && totalCajas > 0 && Number.isFinite(totalInvoice) && totalInvoice > 0 && Math.abs(totalCajas - totalInvoice) > 0.02;
+      var difiere = Number.isFinite(totalCajas) && totalCajas > 0 && Number.isFinite(totalInvoice) && totalInvoice > 0 && Math.abs(Math.round(totalCajas * 100) - Math.round(totalInvoice * 100)) > 0;
       valorInvoice.setCustomValidity(difiere
         ? "El total declarado de las cajas debe coincidir con el subtotal de la invoice."
         : "");
@@ -974,7 +979,10 @@
     setea(row, ".bulto-ancho", op.dataset.ancho);
     setea(row, ".bulto-alto", op.dataset.alto);
     setea(row, ".bulto-valor-caja", op.dataset.valor);
-    setea(invoice, ".bulto-valor", op.dataset.valor);
+    setea(invoice, ".bulto-valor", totalArticuloGuardado({
+      valor_unitario_usd: op.dataset.valor,
+      unidades_aduana: invoice.querySelector(".bulto-unidades-aduana").value,
+    }));
     setea(invoice, ".bulto-desc", op.dataset.desc);
     setea(invoice, ".bulto-hs", op.dataset.hs);
     actualizarSubtotalInvoice(invoice);
@@ -998,12 +1006,11 @@
         ancho_cm: v(row, ".bulto-ancho"),
         alto_cm: v(row, ".bulto-alto"),
         valor_declarado_caja_usd: v(row, ".bulto-valor-caja"),
-        valor_unitario_usd: v(invoice, ".bulto-valor"),
+        // El total exacto viaja dentro de items_invoice, nunca como unitario.
         descripcion_en: v(invoice, ".bulto-desc"),
         hs_code: v(invoice, ".bulto-hs"),
         pais_origen: v(invoice, ".bulto-pais-fab"),
-        ...(articulosDe(invoice).length > 1 || v(invoice, ".invoice-peso-neto")
-          ? {items_invoice: leerArticulos(invoice)} : {}),
+        items_invoice: leerArticulos(invoice),
       };
     }).filter(function (b) { return b.producto || b.peso_kg || b.descripcion_en; });
   }
@@ -1266,6 +1273,8 @@
       invoiceRows().forEach(function (row, i) {
         articulosDe(row).slice(1).forEach(function (item) { item.remove(); });
         var items = (data.invoices || [])[i] || [];
+        // Migrar borradores anteriores guardados con precio unitario.
+        if (items[0]) row.querySelector(".bulto-valor").value = totalArticuloGuardado(items[0]);
         items.slice(1,100).forEach(function (item) { agregarArticulo(row, item); });
       });
     },

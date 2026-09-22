@@ -208,13 +208,13 @@ def test_paquete_e_invoice_estan_separados_y_sin_perder_multibulto():
                   "bulto_cantidad"):
         assert f'name="{campo}"' in paquete
         assert f'name="{campo}"' not in invoice
-    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_valor_usd",
+    for campo in ("bulto_desc_en", "bulto_unidades_aduana", "bulto_total_usd",
                   "bulto_hs", "bulto_pais_fab"):
         assert f'name="{campo}"' in invoice
         assert f'name="{campo}"' not in paquete
 
-    assert 'name="bulto_valor_usd" class="bulto-valor"' in invoice
-    assert "cantidad de unidades × valor unitario" in invoice
+    assert 'name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor"' in invoice
+    assert "cantidad y valor total de cada artículo" in invoice
     assert "data-invoice-line-total" in invoice
     hs = invoice[invoice.index('name="bulto_hs"'):invoice.index('name="bulto_hs"') + 180]
     assert "required" not in hs

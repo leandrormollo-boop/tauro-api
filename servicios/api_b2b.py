@@ -610,7 +610,7 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
                             f"y el máximo es {MAX_KG_POR_CAJA}kg.")
 
         valor_unitario = _num(fila.get("valor_unitario_usd"), importe=True)
-        if valor_unitario in (None, numero_invalido):
+        if valor_unitario in (None, numero_invalido) and "items_invoice" not in b:
             return [], [], ("caja_incompleta: el valor unitario de la invoice "
                             "debe ser mayor a cero")
 
@@ -621,7 +621,8 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
         if valor_caja is numero_invalido:
             return [], [], ("caja_incompleta: el valor declarado por caja debe "
                             "ser un monto válido mayor a cero")
-        total_invoice = round(float(valor_unitario) * unidades_aduana, 2)
+        total_invoice = (round(float(valor_unitario) * unidades_aduana, 2)
+                         if valor_unitario not in (None, numero_invalido) else 0)
         if "items_invoice" in b:
             try:
                 items = normalizar_items_invoice(
@@ -648,7 +649,9 @@ def _piezas_del_catalogo(cliente_id: str, bultos: list):
             valor_caja = round(total_invoice / cantidad, 2)
         total_cajas_declarado = round(float(valor_caja) * cantidad, 2)
         diferencia = abs(Decimal(str(total_cajas_declarado)) - Decimal(str(total_invoice)))
-        if valor_caja_explicito and diferencia > Decimal("0.02"):
+        tolerancia = (Decimal("0") if any("valor_total_usd" in item
+                      for item in fila.get("items_invoice", [])) else Decimal("0.02"))
+        if valor_caja_explicito and diferencia > tolerancia:
             from servicios.invoice_comercial import mensaje_desfase_valores
             return [], [], "valor_declarado_no_coincide: " + mensaje_desfase_valores(
                 indice, cantidad, total_cajas_declarado, total_invoice,

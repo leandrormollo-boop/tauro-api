@@ -72,7 +72,7 @@
                     <article>
                         <span>Caja {{ caja_numero }} · Ítem {{ loop.index }}{% if item.hs_code %} · HS {{ item.hs_code }}{% else %} · Sin HS code{% endif %}</span>
                         <strong>{{ item.descripcion_en or b.producto_alias or s.producto_alias or "Mercadería" }}</strong>
-                        <small>{{ item.unidades_aduana or b.cantidad or 1 }} unidad{{ "es" if (item.unidades_aduana or b.cantidad or 1)|int != 1 else "" }} × USD {{ item.valor_unitario_usd or "—" }}{% if item.peso_neto_kg %} · {{ item.peso_neto_kg }} kg netos{% endif %}</small>
+                        <small>{{ item.unidades_aduana or b.cantidad or 1 }} unidad{{ "es" if (item.unidades_aduana or b.cantidad or 1)|int != 1 else "" }} {% if item.valor_total_usd is defined %}· Total USD {{ '%.2f'|format(item.valor_total_usd) }}{% else %}× USD {{ item.valor_unitario_usd or "—" }}{% endif %}{% if item.peso_neto_kg %} · {{ item.peso_neto_kg }} kg netos{% endif %}</small>
                     </article>
                     {% endfor %}
                     {% endfor %}

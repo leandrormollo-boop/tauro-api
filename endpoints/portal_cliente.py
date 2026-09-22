@@ -2664,7 +2664,8 @@ def envio_nuevo_post(
     # distintos por accidente.
     bulto_valor_caja_usd: list[str] = Form([]),
     bulto_desc_en: list[str] = Form([]),
-    bulto_valor_usd: list[str] = Form([]),
+    bulto_valor_usd: list[str] = Form([]),  # Formularios anteriores: unitario.
+    bulto_total_usd: list[str] = Form([]),  # Nuevo formulario: total del artículo.
     bulto_hs: list[str] = Form([]),
     bulto_pais_fab: list[str] = Form([]),
     bulto_items_extra: list[str] = Form([]),
@@ -2788,6 +2789,8 @@ def envio_nuevo_post(
             "hs_code": _campo(bulto_hs),
             "pais_origen": _campo(bulto_pais_fab),
         }
+        if isinstance(bulto_total_usd, (list, tuple)) and i < len(bulto_total_usd):
+            fila_form["valor_total_usd"] = _campo(bulto_total_usd)
         cantidad_valida = True
         try:
             cant = _entero_form(
@@ -2877,7 +2880,8 @@ def envio_nuevo_post(
         # Se conserva la entrada para que un error no borre el trabajo del cliente.
         raw_extra = _campo(bulto_items_extra)
         peso_neto = _campo(bulto_peso_neto)
-        if raw_extra or peso_neto:
+        total_explicito = "valor_total_usd" in fila_form
+        if raw_extra or peso_neto or total_explicito:
             import json
             from servicios.invoice_comercial import normalizar_items_invoice, MAX_ITEMS_INVOICE
             try:
@@ -2888,17 +2892,20 @@ def envio_nuevo_post(
                     raise ValueError(f"Máximo {MAX_ITEMS_INVOICE} ítems por envío.")
                 if not all(isinstance(item, dict) for item in extras):
                     raise ValueError("Revisá los artículos adicionales de la invoice.")
-                if extras or peso_neto:
+                if extras or peso_neto or total_explicito:
                     primero = {k: fila_form.get(k, "") for k in (
                         "descripcion_en", "unidades_aduana", "valor_unitario_usd",
                         "hs_code", "pais_origen",
                     )}
+                    if total_explicito:
+                        primero["valor_total_usd"] = fila_form["valor_total_usd"]
                     primero["peso_neto_kg"] = peso_neto
                     fila_form["items_invoice"] = [primero, *extras]
                     fila["items_invoice"] = normalizar_items_invoice(
                         fila_form["items_invoice"],
                         peso_total_kg=Decimal(str(fila.get("peso_kg") or 0)) * cant,
                     )
+                    fila["valor_unitario_usd"] = fila["items_invoice"][0]["valor_unitario_usd"]
             except (TypeError, ValueError) as exc:
                 errores_invoice.append(f"Caja {i + 1}: {exc}")
         filas.append(fila)
@@ -3250,6 +3257,10 @@ def envio_nuevo_post(
             dims0 = (prod0.largo_cm, prod0.ancho_cm, prod0.alto_cm)
             valor_declarado = round(prod0.valor_usd_default * total_cajas, 2)
         else:
+            from servicios.invoice_comercial import invoice_requiere_dhl
+            if (str(intl_courier or "dhl").lower() != "dhl"
+                    and invoice_requiere_dhl(bultos_detalle)):
+                raise ValueError("Esta declaración por cantidad y valor total requiere DHL. Elegí DHL en Opciones adicionales.")
             primero = bultos_detalle[0]
             alias_display = primero["producto_alias"]
             total_cajas = sum(b["cantidad"] for b in bultos_detalle)

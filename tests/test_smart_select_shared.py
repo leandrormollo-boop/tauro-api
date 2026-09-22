@@ -11,6 +11,7 @@ import pytest
 
 
 RAIZ = Path(__file__).resolve().parent.parent
+NUMEROS = (RAIZ / "static/js/tauro-numeros.js").read_text(encoding="utf-8")
 UI = (RAIZ / "static" / "js" / "tauro-ui.js").read_text(encoding="utf-8")
 CSS = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
 PORTAL_BASE = (RAIZ / "templates" / "base.html").read_text(encoding="utf-8")
@@ -18,8 +19,8 @@ ADMIN_BASE = (RAIZ / "templates" / "admin" / "base_admin.html").read_text(encodi
 
 
 def test_portal_y_admin_cargan_la_ui_compartida_con_cache_independiente():
-    assert '/static/js/tauro-ui.js?v=8' in PORTAL_BASE
-    assert '/static/js/tauro-ui.js?v=8' in ADMIN_BASE
+    assert '/static/js/tauro-ui.js?v=9' in PORTAL_BASE
+    assert '/static/js/tauro-ui.js?v=9' in ADMIN_BASE
     assert '/static/css/tauro.css?v=49' in PORTAL_BASE
     assert '/static/css/tauro.css?v=30' in ADMIN_BASE
 
@@ -67,13 +68,13 @@ def test_smart_number_solo_normaliza_al_salir_o_enviar_y_no_adivina_pricing():
     assert 'if (tipo === "pricing")' in UI
     assert 'input.dataset.pricingSelect' in UI
     assert 'modoPricing === "FIJO_ARS" ? "monto" : "decimal"' in UI
-    assert 'tipo === "monto" || tipo === "importe"' in UI
-    assert 'if (esMonto && primerGrupoValido)' in UI
-    assert 'tipo === "entero"' in UI
-    assert '/^0+$/.test(parteDecimalEntero)' in UI
-    assert 'parteDecimalEntero.length === 3 && Number(parteEnteraEntero) !== 0' in UI
-    assert '`0.500` nunca se convierte en 500' in UI
-    assert 'se pide corrección humana en vez de cambiar la cantidad' in UI
+    assert 'tipo === "monto" || tipo === "importe"' in NUMEROS
+    assert 'if (esMonto && primerGrupoValido)' in NUMEROS
+    assert 'tipo === "entero"' in NUMEROS
+    assert '/^0+$/.test(parteDecimalEntero)' in NUMEROS
+    assert 'parteDecimalEntero.length === 3 && Number(parteEnteraEntero) !== 0' in NUMEROS
+    assert '`0.500` nunca se convierte en 500' in NUMEROS
+    assert 'se pide corrección humana en vez de cambiar la cantidad' in NUMEROS
     assert 'input.value = resultado.valor' in UI
 
 
