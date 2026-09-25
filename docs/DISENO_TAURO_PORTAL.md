@@ -17,3 +17,9 @@ Cotizador: distribución compacta desde 780 px, cajas adicionales en solapas, in
 Nacional OCA: campos y selectores con el estilo común, Origen → Destino → Paquetes, borrador de la pestaña, validaciones y recuperación de los datos exactos desde la revisión de tarifa mediante un GET autenticado y restringido al cliente propietario.
 
 Esto fija el criterio de las próximas modificaciones; no implica que en esta revisión se haya rediseñado cada pantalla del sitio o del Admin.
+
+## Atajos flotantes en PC
+
+El usuario pidió llevar la barra inferior a escritorio con un tratamiento similar al dock de macOS. Desde 901 px, usar la misma navegación como barra flotante centrada en el área de trabajo: superficie translúcida violeta, bordes redondeados, nombres visibles y elevación suave de iconos. Accesos: Inicio, Cotizar, Nuevo envío, Mis envíos, Mis clientes y Cuenta. En móvil se conservan los cinco accesos existentes. Respetar teclado, movimiento reducido y espacio para acciones al pie; no mostrar el dock al imprimir ni en login.
+
+Verificación local: 26 pruebas existentes de PWA y cotizador aprobadas; PC 1280×720 en claro y oscuro, apertura/cierre del cotizador desde el dock, foco por teclado, cinco accesos en móvil 390×844 y consola sin errores. El dock queda fuera de los botones Atrás/Siguiente en la vista nacional verificada. Implementación con CSS y enlaces del portal, sin bibliotecas ni JavaScript adicional. Pendiente de publicación.

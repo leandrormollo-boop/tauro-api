@@ -1,0 +1,107 @@
+/* Los mismos accesos móviles, como dock flotante en escritorio. */
+.tabbar-desktop { display: none; }
+
+@media (min-width: 901px) {
+  .portal-operacion { --dock-clearance: 108px; }
+  html:has(.portal-operacion) { scroll-padding-bottom: 124px; }
+  .portal-operacion .shell .main-inner { padding-bottom: var(--dock-clearance); }
+  .portal-operacion .shell .submit-bar,
+  .portal-operacion .shell .wizard-compacto .paso-nav { bottom: var(--dock-clearance); }
+
+  .portal-operacion .tabbar {
+    position: fixed;
+    z-index: 70;
+    left: calc(50% + var(--side-w) / 2);
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+    width: max-content;
+    max-width: calc(100vw - var(--side-w) - 32px);
+    padding: 8px 10px;
+    border: 1px solid rgba(167,139,250,.24);
+    border-radius: 27px;
+    background: linear-gradient(160deg,rgba(59,45,83,.88),rgba(22,17,34,.95));
+    backdrop-filter: blur(20px) saturate(135%);
+    -webkit-backdrop-filter: blur(20px) saturate(135%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.10),0 12px 38px rgba(0,0,0,.28),0 0 26px rgba(124,92,246,.07);
+  }
+  .portal-operacion .tabbar-item {
+    position: relative;
+    display: flex;
+    flex: 0 0 72px;
+    min-width: 0;
+    min-height: 65px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 2px 3px 6px;
+    border-radius: 18px;
+    color: var(--fg-2);
+    font: 500 10px/1.2 var(--font-body);
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .portal-operacion .tabbar-ico,
+  .portal-operacion .tabbar-cta-ico {
+    box-sizing: border-box;
+    width: 40px;
+    height: 40px;
+    padding: 9px;
+    border: 1px solid rgba(167,139,250,.20);
+    border-radius: 14px;
+    background: linear-gradient(155deg,rgba(167,139,250,.14),rgba(124,92,246,.04));
+    color: #d9ccff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.10),0 3px 7px rgba(0,0,0,.13);
+    transform-origin: 50% 85%;
+    transition: transform .2s cubic-bezier(.2,.8,.2,1),background .2s,box-shadow .2s;
+  }
+  .portal-operacion .tabbar-cta-ico {
+    display: grid;
+    place-items: center;
+    background: linear-gradient(145deg,#9978ff,#6f48dd);
+    border-color: rgba(210,193,255,.35);
+    color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22),0 4px 14px rgba(124,92,246,.25);
+  }
+  .portal-operacion .tabbar-lbl { white-space: nowrap; }
+  .portal-operacion .tabbar-item.active { color: var(--fg); }
+  .portal-operacion .tabbar-item.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    box-shadow: 0 0 6px var(--accent-glow);
+  }
+  .portal-operacion .tabbar-item.active .tabbar-ico { border-color: rgba(167,139,250,.5); }
+  .portal-operacion .tabbar-item:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+  .portal-operacion .tabbar-item:focus-visible :is(.tabbar-ico,.tabbar-cta-ico) { transform: translateY(-3px); }
+  .portal-operacion .tabbar-badge { position: absolute; top: -2px; right: 4px; left: auto; min-width: 22px; height: 18px; padding: 0 4px; font-size: 9px; border-radius: 7px; }
+  .portal-operacion .tabbar-badge::before { display: none; }
+
+  html[data-theme="light"] .portal-operacion .tabbar {
+    background: linear-gradient(150deg,rgba(255,255,255,.92),rgba(232,224,247,.90));
+    border-color: rgba(118,85,215,.22);
+    box-shadow: inset 0 1px 0 #fff,0 12px 38px rgba(64,43,102,.14),0 0 24px rgba(124,92,246,.05);
+  }
+  html[data-theme="light"] .portal-operacion .tabbar-ico { color: var(--accent-deep); border-color: rgba(118,85,215,.22); background: linear-gradient(145deg,#fff,#e9e0fa); }
+}
+@media (min-width: 901px) and (hover: hover) and (pointer: fine) {
+  .portal-operacion .tabbar-item:hover { color: var(--fg); }
+  .portal-operacion .tabbar-item:hover :is(.tabbar-ico,.tabbar-cta-ico) { transform: translateY(-5px) scale(1.10); box-shadow: inset 0 1px 0 rgba(255,255,255,.15),0 8px 18px rgba(124,92,246,.22); }
+  .portal-operacion .tabbar-item:has(+ .tabbar-item:hover) :is(.tabbar-ico,.tabbar-cta-ico),
+  .portal-operacion .tabbar-item:hover + .tabbar-item :is(.tabbar-ico,.tabbar-cta-ico) { transform: translateY(-2px) scale(1.04); }
+}
+@media (max-width: 900px) {
+  .portal-operacion .tabbar .tabbar-desktop { display: none; }
+  .portal-operacion .national-shipment .ns-actions { bottom: calc(var(--tabbar-h,62px) + env(safe-area-inset-bottom,0px) + 8px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .portal-operacion .tabbar :is(.tabbar-ico,.tabbar-cta-ico) { transition: none; transform: none !important; }
+}
+@media print { .portal-operacion .tabbar { display: none !important; } }
