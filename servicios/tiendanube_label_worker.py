@@ -38,7 +38,11 @@ from servicios.oca_adapter import (
     OCAUnavailableError,
     OCAUnsupportedOperation,
 )
-from servicios.tiendanube_labels import _ensure_tables, labels_execution_ready
+from servicios.tiendanube_labels import (
+    LabelsUnavailableError,
+    _ensure_tables,
+    labels_execution_ready,
+)
 from servicios.tiendanube_rate_quotes import (
     RateQuoteContractError,
     RateQuoteNotFoundError,
@@ -254,66 +258,62 @@ def _fallback_task(row: Mapping[str, Any]) -> LabelTask:
 
 
 def _ensure_worker_tables() -> None:
+    """Verifica el schema del worker; las migraciones ocurren antes del tráfico."""
     global _worker_tables_ready
     if _worker_tables_ready:
         return
+
     _ensure_tables()
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                ALTER TABLE tiendanube_label_outbox
-                    ADD COLUMN IF NOT EXISTS claim_id TEXT;
-                ALTER TABLE tiendanube_label_outbox
-                    ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        to_regclass(
+                            'tiendanube_label_execution'
+                        ) IS NOT NULL
+                        AND to_regclass(
+                            'tiendanube_label_documents'
+                        ) IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_attribute a
+                             WHERE a.attrelid = to_regclass(
+                                       'tiendanube_label_outbox'
+                                   )
+                               AND a.attname = 'claim_id'
+                               AND NOT a.attisdropped
+                        )
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_attribute a
+                             WHERE a.attrelid = to_regclass(
+                                       'tiendanube_label_outbox'
+                                   )
+                               AND a.attname = 'claimed_at'
+                               AND NOT a.attisdropped
+                        )
+                        AS schema_ready
+                    """
+                )
+                row = cur.fetchone()
+            conn.commit()
+    except Exception as exc:
+        raise LabelsUnavailableError(
+            "No se pudo verificar el esquema del worker de Labels."
+        ) from exc
 
-                CREATE TABLE IF NOT EXISTS tiendanube_label_execution (
-                    outbox_id              BIGINT PRIMARY KEY,
-                    store_id               TEXT NOT NULL,
-                    label_id               TEXT NOT NULL,
-                    stage                  TEXT NOT NULL,
-                    external_operation_id  TEXT,
-                    tracking_number        TEXT,
-                    document_key           TEXT,
-                    document_url           TEXT,
-                    document_size          INTEGER,
-                    claim_id               TEXT,
-                    claimed_at             TIMESTAMPTZ,
-                    creada_en              TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    actualizada_en         TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    FOREIGN KEY (outbox_id)
-                        REFERENCES tiendanube_label_outbox(id) ON DELETE CASCADE,
-                    FOREIGN KEY (store_id, label_id)
-                        REFERENCES tiendanube_labels(store_id, label_id)
-                        ON DELETE CASCADE,
-                    CONSTRAINT ck_tn_label_execution_stage CHECK (
-                        stage IN ('CREATE_SHIPMENT', 'FETCH_LABEL', 'PUBLISH', 'DONE')
-                    )
-                );
-
-                CREATE TABLE IF NOT EXISTS tiendanube_label_documents (
-                    store_id       TEXT NOT NULL,
-                    label_id       TEXT NOT NULL,
-                    document_key   TEXT NOT NULL,
-                    pdf_sha256     CHAR(64) NOT NULL,
-                    pdf_size       INTEGER NOT NULL,
-                    pdf_content    BYTEA NOT NULL,
-                    token_hash     CHAR(64) NOT NULL,
-                    activa         BOOLEAN NOT NULL DEFAULT TRUE,
-                    creada_en      TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    revocada_en    TIMESTAMPTZ,
-                    PRIMARY KEY (store_id, label_id),
-                    UNIQUE (document_key),
-                    FOREIGN KEY (store_id, label_id)
-                        REFERENCES tiendanube_labels(store_id, label_id)
-                        ON DELETE CASCADE,
-                    CONSTRAINT ck_tn_label_document_size CHECK (
-                        pdf_size > 0 AND octet_length(pdf_content) = pdf_size
-                    )
-                );
-                """
-            )
-        conn.commit()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise LabelsUnavailableError(
+            "El worker de Labels requiere aplicar sql/schema.sql "
+            "antes de habilitar tráfico."
+        )
     _worker_tables_ready = True
 
 

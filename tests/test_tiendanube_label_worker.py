@@ -875,6 +875,19 @@ def test_repository_claim_usa_skip_locked_y_recovery_distingue_create():
     assert "PENDIENTE" in recovery_source
 
 
+def test_worker_no_migra_schema_en_hot_path():
+    from servicios import tiendanube_label_worker as worker
+
+    source = inspect.getsource(worker._ensure_worker_tables)
+    normalized = " ".join(source.split())
+
+    assert "to_regclass" in normalized
+    assert "schema_ready" in normalized
+    assert "CREATE TABLE" not in normalized
+    assert "ALTER TABLE" not in normalized
+    assert "LOCK TABLE" not in normalized
+
+
 def test_main_programa_worker_de_labels_cada_cinco_segundos():
     source = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
 
