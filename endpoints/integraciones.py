@@ -425,14 +425,16 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
 
 def _contrato_privacidad_tiendanube(evento: str, datos: dict) -> bool:
     """Valida el contrato LGPD sin reinterpretar cuerpos entre rutas."""
-    if datos.get("event") and datos["event"] != evento:
+    from servicios.tiendanube_app import evento_privacidad_canonico
+
+    if datos.get("event") and evento_privacidad_canonico(datos["event"]) != evento:
         return False
-    if evento == "store/redact":
+    if evento == "app/store_redact":
         return set(datos).issubset({"store_id", "event"})
     customer = datos.get("customer")
     if not isinstance(customer, dict) or not str(customer.get("id") or "").strip():
         return False
-    if evento == "customers/redact":
+    if evento == "customer/redact":
         return (
             isinstance(datos.get("orders_to_redact"), list)
             and not any(k in datos for k in ("data_request", "orders_requested", "id"))
@@ -451,9 +453,13 @@ def _contrato_privacidad_tiendanube(evento: str, datos: dict) -> bool:
 @router.post("/tiendanube/privacidad/{tipo}")
 async def tiendanube_privacidad_webhook(request: Request, tipo: str):
     eventos = {
-        "store-redact": "store/redact",
-        "customers-redact": "customers/redact",
+        "app-store-redact": "app/store_redact",
+        "customer-redact": "customer/redact",
         "customers-data-request": "customers/data_request",
+        # Compatibilidad de URL durante el cambio; ambos persisten el nombre
+        # oficial. Partners debe configurarse con las rutas de arriba.
+        "store-redact": "app/store_redact",
+        "customers-redact": "customer/redact",
     }
     if tipo not in eventos:
         return JSONResponse({"ok": False}, status_code=404)
@@ -480,6 +486,7 @@ async def _recibir_webhook_tiendanube(request: Request, evento_ruta: str = ""):
     from servicios.tiendanube_app import (
         app_configurada, encolar_webhook, lanzar_procesamiento_eventos,
         webhook_evento_id, EVENTOS_ACEPTADOS, EVENTOS_PRIVACIDAD,
+        evento_privacidad_canonico,
     )
 
     cuerpo = await request.body()
@@ -501,7 +508,9 @@ async def _recibir_webhook_tiendanube(request: Request, evento_ruta: str = ""):
     if not isinstance(datos, dict):
         return JSONResponse({"ok": False}, status_code=400)
     store_id = str(datos.get("store_id") or "").strip()
-    evento = evento_ruta or str(datos.get("event") or "").strip().lower()
+    evento = evento_privacidad_canonico(
+        evento_ruta or str(datos.get("event") or "").strip().lower()
+    )
     if not store_id or evento not in EVENTOS_ACEPTADOS:
         return JSONResponse({"ok": False}, status_code=400)
     if evento in EVENTOS_PRIVACIDAD:

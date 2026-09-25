@@ -38,8 +38,8 @@ def cola(monkeypatch):
 
 
 @pytest.mark.parametrize("tipo,evento,datos", [
-    ("store-redact", "store/redact", {"store_id": 123}),
-    ("customers-redact", "customers/redact", {
+    ("app-store-redact", "app/store_redact", {"store_id": 123}),
+    ("customer-redact", "customer/redact", {
         "store_id": 123, "customer": {"id": 4}, "orders_to_redact": [8],
     }),
     ("customers-data-request", "customers/data_request", {
@@ -53,13 +53,27 @@ def test_acepta_contrato_oficial_sin_event_con_firma_original(cola, tipo, evento
     assert cola == [{**datos, "event": evento}]
 
 
+@pytest.mark.parametrize("tipo,evento,datos", [
+    ("store-redact", "app/store_redact", {"store_id": 123}),
+    ("customers-redact", "customer/redact", {
+        "store_id": 123, "customer": {"id": 4}, "orders_to_redact": [8],
+    }),
+])
+def test_aliases_de_ruta_previos_persisten_evento_oficial(cola, tipo, evento, datos):
+    respuesta = asyncio.run(
+        integraciones.tiendanube_privacidad_webhook(Request(datos), tipo)
+    )
+    assert respuesta["encolado"] is True
+    assert cola == [{**datos, "event": evento}]
+
+
 @pytest.mark.parametrize("tipo,datos", [
-    ("store-redact", {"store_id": 123, "event": "order/created", "id": 8}),
-    ("store-redact", {"store_id": 123, "id": 8}),
-    ("store-redact", {"store_id": 123, "customer": {"id": 4}, "orders_to_redact": []}),
-    ("customers-redact", {"store_id": 123, "customer": {"id": 4},
+    ("app-store-redact", {"store_id": 123, "event": "order/created", "id": 8}),
+    ("app-store-redact", {"store_id": 123, "id": 8}),
+    ("app-store-redact", {"store_id": 123, "customer": {"id": 4}, "orders_to_redact": []}),
+    ("customer-redact", {"store_id": 123, "customer": {"id": 4},
                           "orders_requested": [8], "data_request": {"id": 9}}),
-    ("customers-redact", {"store_id": 123, "customer": [], "orders_to_redact": [8]}),
+    ("customer-redact", {"store_id": 123, "customer": [], "orders_to_redact": [8]}),
     ("customers-data-request", {"store_id": 123, "customer": {"id": 4},
                                 "orders_to_redact": [8]}),
 ])
@@ -71,7 +85,7 @@ def test_no_reinterpreta_otros_cuerpos_firmados_como_borrados(cola, tipo, datos)
 
 def test_privacidad_requiere_hmac_antes_de_encolar(cola):
     respuesta = asyncio.run(integraciones.tiendanube_privacidad_webhook(
-        Request({"store_id": 123}, firma_valida=False), "store-redact",
+        Request({"store_id": 123}, firma_valida=False), "app-store-redact",
     ))
     assert respuesta.status_code == 401
     assert cola == []
@@ -82,7 +96,7 @@ def test_privacidad_no_ackea_si_no_hay_commit(cola, monkeypatch):
         raise RuntimeError("db caída")
     monkeypatch.setattr(tiendanube_app, "encolar_webhook", fallo)
     respuesta = asyncio.run(integraciones.tiendanube_privacidad_webhook(
-        Request({"store_id": 123}), "store-redact",
+        Request({"store_id": 123}), "app-store-redact",
     ))
     assert respuesta.status_code == 503
 

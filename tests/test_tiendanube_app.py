@@ -157,7 +157,7 @@ def test_webhooks_requeridos_cubren_lifecycle_pedidos_y_privacidad():
     assert set(WEBHOOKS_REQUERIDOS) == {
         "order/created", "order/updated", "order/cancelled",
         "app/uninstalled", "app/suspended", "app/resumed",
-        "store/redact", "customers/redact", "customers/data_request",
+        "app/store_redact", "customer/redact", "customers/data_request",
     }
 
 
@@ -1245,10 +1245,10 @@ def test_fallo_db_de_privacidad_se_convierte_en_reintento(monkeypatch):
 
     with pytest.raises(
         tiendanube_app.TiendanubeRetryableError,
-        match="EVENTO_TRANSITORIO_CUSTOMERS_REDACT",
+        match="EVENTO_TRANSITORIO_CUSTOMER_REDACT",
     ):
         tiendanube_app._procesar_evento({
-            "evento": "customers/redact",
+            "evento": "customer/redact",
             "store_id": "123",
         })
 
@@ -1367,7 +1367,7 @@ def test_worker_persiste_cuarentena_visible(monkeypatch):
 
     evento = {
         "evento_id": "evt-stale-1",
-        "evento": "store/redact",
+        "evento": "app/store_redact",
         "store_id": "123",
         "intentos": 1,
     }
@@ -1394,7 +1394,7 @@ def test_worker_persiste_cuarentena_visible(monkeypatch):
     assert "SET estado = %s" in sql
     assert "INSERT INTO tiendanube_privacidad_solicitudes" in sql
     assert any(
-        params == ("evt-stale-1", "123", "store/redact")
+        params == ("evt-stale-1", "123", "app/store_redact")
         for _query, params in cursor.ejecutadas
     )
 

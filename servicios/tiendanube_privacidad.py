@@ -232,7 +232,10 @@ def resolver_cuarentena(
                        resuelto_at = COALESCE(resuelto_at, NOW())
                  WHERE id = %s
                    AND estado = 'CUARENTENA'
-                   AND tipo IN ('store/redact', 'app/uninstalled', 'app/suspended')
+                   AND tipo IN (
+                       'app/store_redact', 'store/redact',
+                       'app/uninstalled', 'app/suspended'
+                   )
                 RETURNING id, request_id, store_id, tipo, resolucion, resuelto_at
                 """,
                 (accion, solicitud_id),

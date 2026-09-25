@@ -46,10 +46,21 @@ WEBHOOKS_API_REQUERIDOS = (
 )
 WEBHOOK_LABEL_STATUS = "fulfillment_order/label_status_updated"
 EVENTOS_PEDIDOS = {"order/created", "order/updated", "order/cancelled"}
-EVENTOS_PRIVACIDAD = {"store/redact", "customers/redact", "customers/data_request"}
+# Nombres oficiales del contrato LGPD de Tiendanube. Los dos aliases legacy se
+# aceptan sólo para drenar eventos guardados por versiones anteriores.
+EVENTOS_PRIVACIDAD = {"app/store_redact", "customer/redact", "customers/data_request"}
+EVENTOS_PRIVACIDAD_LEGACY = {"store/redact", "customers/redact"}
+_ALIASES_PRIVACIDAD = {
+    "store/redact": "app/store_redact",
+    "customers/redact": "customer/redact",
+}
 EVENTOS_LIFECYCLE = {"app/uninstalled", "app/suspended", "app/resumed"}
 WEBHOOKS_REQUERIDOS = (*WEBHOOKS_API_REQUERIDOS, *sorted(EVENTOS_PRIVACIDAD))
-EVENTOS_ACEPTADOS = set(WEBHOOKS_REQUERIDOS) | {WEBHOOK_LABEL_STATUS}
+EVENTOS_ACEPTADOS = (
+    set(WEBHOOKS_REQUERIDOS)
+    | EVENTOS_PRIVACIDAD_LEGACY
+    | {WEBHOOK_LABEL_STATUS}
+)
 _LABEL_STATUSES = {
     "STARTED",
     "IN_PROGRESS",
@@ -72,6 +83,12 @@ class TiendanubeWebhookError(TiendanubeError):
 
 class TiendanubeLabelFeatureError(TiendanubeWebhookError):
     """No fue posible determinar con certeza el feature oficial de Labels."""
+
+
+def evento_privacidad_canonico(evento: str) -> str:
+    """Normaliza aliases previos sin publicarlos como contrato nuevo."""
+    normalizado = str(evento or "").strip().lower()
+    return _ALIASES_PRIVACIDAD.get(normalizado, normalizado)
 
 
 def privacidad_configurada() -> bool:
@@ -1076,7 +1093,7 @@ def _desactivar_shipping(store_id: str) -> None:
 
 
 def desinstalar(store_id: str, install_generation: str = "") -> bool:
-    """Tombstone durable: no borra antes de recibir store/redact."""
+    """Tombstone durable: no borra antes de recibir app/store_redact."""
     _ensure_tabla()
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1180,7 +1197,7 @@ def _normalizar_ids(valores) -> list[str]:
 
 def sanitizar_payload_webhook(datos: dict) -> dict:
     """Elimina email/teléfono/identificación antes de escribir la cola."""
-    evento = str((datos or {}).get("event") or "").strip().lower()
+    evento = evento_privacidad_canonico((datos or {}).get("event") or "")
     base = {
         "store_id": str((datos or {}).get("store_id") or ""),
         "event": evento,
@@ -1198,7 +1215,7 @@ def sanitizar_payload_webhook(datos: dict) -> dict:
             "label_id": str((datos or {}).get("label_id") or "")[:128],
             "status": str((datos or {}).get("status") or "").strip().upper()[:40],
         })
-    elif evento == "customers/redact":
+    elif evento == "customer/redact":
         customer = (datos or {}).get("customer") or {}
         base["customer_id"] = str(customer.get("id") or "")[:80]
         base["orders_to_redact"] = _normalizar_ids(
@@ -1328,7 +1345,7 @@ def _validar_evento_destructivo_remoto(evento: dict) -> None:
     """Impide que un webhook atrasado destruya una reinstalación vigente.
 
     Tiendanube no incluye la generación OAuth en el webhook. Por eso, antes de
-    aplicar uninstall, suspend o store/redact sobre una instalación activa se
+    aplicar uninstall, suspend o app/store_redact sobre una instalación activa se
     comprueba el token actual. Un token todavía válido contradice el evento y
     se manda a cuarentena; una caída o respuesta ambigua se reintenta.
     """
@@ -1608,7 +1625,7 @@ def _procesar_store_redact(evento: dict) -> str:
                 generacion_actual = str(
                     instalacion_actual.get("install_generation") or ""
                 )
-                # store/redact suele llegar después de uninstall. Si la tienda
+                # app/store_redact suele llegar después de uninstall. Si la tienda
                 # ya fue reinstalada, atribuir el evento tardío a la generación
                 # nueva borraría una instalación activa: se deja en ERROR para
                 # revisión humana, sin tocar datos ni carrier.
@@ -1841,7 +1858,7 @@ def _procesar_label_status_updated(evento: dict) -> str:
 
 
 def _procesar_evento(evento: dict) -> str:
-    topic = str(evento.get("evento") or "")
+    topic = evento_privacidad_canonico(evento.get("evento") or "")
     try:
         if topic in EVENTOS_PEDIDOS:
             return _procesar_pedido_evento(evento)
@@ -1867,11 +1884,11 @@ def _procesar_evento(evento: dict) -> str:
             ):
                 raise TiendanubeError("GENERACION_OBSOLETA")
             return "REACTIVADA"
-        if topic == "customers/redact":
+        if topic == "customer/redact":
             return _procesar_customers_redact(evento)
         if topic == "customers/data_request":
             return _procesar_data_request(evento)
-        if topic == "store/redact":
+        if topic == "app/store_redact":
             _validar_evento_destructivo_remoto(evento)
             return _procesar_store_redact(evento)
     except TiendanubeQuarantineError:

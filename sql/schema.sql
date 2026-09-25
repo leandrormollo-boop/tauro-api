@@ -780,7 +780,7 @@ CREATE INDEX IF NOT EXISTS ix_tiendanube_privacidad_pendientes
     ON tiendanube_privacidad_solicitudes(estado, creado_at);
 
 -- Tombstone de privacidad: un order/updated atrasado no puede reintroducir
--- datos personales después de customers/redact o store/redact.
+-- datos personales después de customer/redact o app/store_redact.
 CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
     dominio           TEXT NOT NULL,
     pedido_externo_id TEXT NOT NULL,
@@ -789,7 +789,7 @@ CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
 );
 
 -- Shipping Carrier: sólo se persisten hashes de los secretos de callback.
--- Eliminar esta configuración durante store/redact borra también la evidencia
+-- Eliminar esta configuración durante app/store_redact borra también la evidencia
 -- de labels por las FKs ON DELETE CASCADE definidas debajo.
 CREATE TABLE IF NOT EXISTS tiendanube_shipping_config (
     store_id                  TEXT PRIMARY KEY,

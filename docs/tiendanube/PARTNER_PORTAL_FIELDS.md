@@ -22,8 +22,8 @@ archivo ni a tickets de homologación.
 - Términos: `https://taurosolutions.ar/terminos`
 - Soporte: `https://taurosolutions.ar/ayuda/tiendanube`
 - Webhook general: `https://taurosolutions.ar/integraciones/tiendanube/webhook`
-- Store redact: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/store-redact`
-- Customer redact: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/customers-redact`
+- App/store redact: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/app-store-redact`
+- Customer redact: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/customer-redact`
 - Customers data request: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/customers-data-request`
 
 Publicar y verificar estas tres rutas antes de cargarlas en Partners. Los
@@ -84,8 +84,8 @@ No habilitar todavía suspensión ni reactivación opcionales.
 
 ## Avisos de privacidad configurados en Partners, por aplicación
 
-- `store/redact`
-- `customers/redact`
+- `app/store_redact`
+- `customer/redact`
 - `customers/data_request`
 
 No intentar crearlos con POST `/webhooks` ni exigir que aparezcan en su
