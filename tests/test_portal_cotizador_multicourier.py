@@ -293,20 +293,19 @@ def test_el_post_rapido_ya_no_esta_atado_a_fedex_ni_a_rutas_manual():
 
 def test_la_vista_no_esconde_dhl_despues_de_dos_opciones():
     ruta = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                        "templates", "portal", "cotizar.html")
+                        "templates", "portal", "_quote_results.html")
     html = open(ruta, encoding="utf-8").read()
     assert "opciones[:2]" not in html
     assert "opciones[2:]" not in html
     assert "op.carrier_logo" in html
     assert 'class="quote-carrier-logo"' in html
     assert "no_disponibles" in html
-    assert "        {% endif %}\n\n        {% if no_disponibles %}" in html
+    assert "{% if no_disponibles %}" in html
 
 
 def test_la_vista_permite_agregar_y_quitar_cajas():
-    ruta = os.path.join(os.path.dirname(os.path.dirname(__file__)),
-                        "templates", "portal", "cotizar.html")
-    html = open(ruta, encoding="utf-8").read()
+    from test_cotizador_unificado import render_quote
+    html = render_quote()
     for campo in (
         "bulto_cantidad", "bulto_peso", "bulto_largo",
         "bulto_ancho", "bulto_alto",

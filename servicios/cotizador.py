@@ -272,8 +272,7 @@ def cotizar_referencia_couriers(
         raise ValueError("Elegí países válidos para origen y destino.")
     if origen_iso == "AR" and destino_iso == "AR":
         raise ValueError(
-            "Los envíos nacionales se habilitarán cuando conectemos "
-            "Andreani y OCA directamente. Todavía no se puede cotizar ni emitir."
+            "Para enviar dentro de Argentina, seleccioná Nacional."
         )
 
     try:
@@ -394,6 +393,8 @@ def cotizar_referencia_couriers(
     opciones = []
     no_disponibles = []
     for tarjeta in tarjetas:
+        if tarjeta.get("id") not in acceso_couriers["couriers_habilitados"]:
+            continue
         if tarjeta.get("estado") != "cotizado":
             # No exponer el error crudo: puede contener nombres de cuentas o
             # variables internas. Sí distinguir un problema de autenticación

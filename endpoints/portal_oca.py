@@ -32,7 +32,12 @@ def nuevo(request: Request, cliente: str = Depends(cliente_actual)):
     try:
         config, _ = oca.adapter_cliente(cliente)
         return pantalla(
-            request, cliente, disponible=True, asegurada=config.insured_operation
+            request, cliente, disponible=True, asegurada=config.insured_operation,
+            form={key: request.query_params[key][:100] for key in (
+                "origen_provincia", "origen_localidad", "origen_cp", "destino_provincia",
+                "destino_localidad", "destino_cp", "cantidad_bultos", "peso_kg",
+                "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_ars"
+            ) if key in request.query_params}
         )
     except Exception:
         return pantalla(request, cliente, disponible=False)

@@ -1,0 +1,25 @@
+<div data-quote-response data-scope="{{ ambito }}">
+{% if error %}<p class="uq-error" role="alert">{{ error }}</p>{% endif %}
+{% if opciones %}
+<div class="uq-result-caption"><span>Tarifas para esta ruta</span><strong>{{ opciones|length }} {{ 'opciones' if opciones|length != 1 else 'opción' }}</strong></div>
+{% for op in opciones %}
+<article class="uq-price" data-carrier="{{ op.carrier_id }}">
+    <div class="uq-price-head"><div><strong>{{ op.carrier_nombre }}</strong><small>{{ op.servicio }}</small></div>{% if op.carrier_logo %}<img class="quote-carrier-logo" src="{{ op.carrier_logo }}" alt="" aria-hidden="true">{% endif %}</div>
+    <div class="uq-price-amount">{{ dinero_ars(op.precio_final_ars) }} <small>ARS</small></div>
+    <div class="uq-delivery">{% if op.dias_estimados and op.dias_estimados != 'A confirmar' %}Entrega estimada: <strong>{{ op.dias_estimados }} días hábiles</strong>{% else %}Plazo de entrega: <strong>A confirmar</strong>{% endif %}</div>
+    {% if ambito == 'nacional' %}<small class="uq-tax">IVA incluido · Puerta a puerta</small>{% endif %}
+    <a class="btn btn-primary uq-choose" href="{% if ambito == 'nacional' %}{{ op.continuar_url }}{% else %}/portal/envios/nuevo?ambito=internacional&amp;courier={{ op.carrier_id }}&amp;origen={{ form.origen_pais }}&amp;destino={{ form.destino_pais }}&amp;origen_ciudad={{ form.origen_ciudad|urlencode }}&amp;origen_cp={{ form.origen_cp_internacional|urlencode }}&amp;destino_ciudad={{ form.destino_ciudad_internacional|urlencode }}&amp;destino_cp={{ form.destino_cp_internacional|urlencode }}&amp;cajas={{ cajas_cotizadas|urlencode }}&amp;valor_cotizado={{ form.valor_declarado_usd|urlencode }}{% endif %}">Continuar con {{ op.carrier_nombre }} <span aria-hidden="true">→</span></a>
+    {% if es_reseller and op.reseller_quote_id %}
+    <form method="POST" action="/portal/cotizaciones/reseller.pdf" target="_blank" class="uq-reseller">
+        <input type="hidden" name="quote_id" value="{{ op.reseller_quote_id }}">
+        <label>Precio en el PDF (ARS)<input type="text" name="precio" value="{{ '%.2f'|format(op.precio_final_ars) }}" inputmode="decimal" data-numero="monto" required></label>
+        <button type="submit" class="btn btn-ghost btn-sm">Descargar cotización PDF</button>
+    </form>
+    {% endif %}
+</article>
+{% endfor %}
+<p class="uq-price-note">Precio estimado <span data-help="Sobre la cotización">Se confirma con la dirección y el contenido completos antes de emitir. El plazo es estimado por el operador y puede variar por aduana y condiciones de entrega.</span></p>
+{% endif %}
+{% if no_disponibles %}<div class="uq-unavailable">{% for courier in no_disponibles %}<p><strong>{{ courier.nombre }}</strong><span>{{ courier.motivo }}</span></p>{% endfor %}</div>{% endif %}
+{% if not opciones and not error and not no_disponibles %}<div class="uq-empty"><span class="uq-empty-symbol" aria-hidden="true">↗</span><strong>Tu próxima ruta empieza acá</strong><p>Completá origen, destino y paquetes.<br>Las tarifas aparecen automáticamente.</p></div>{% endif %}
+</div>

@@ -65,7 +65,7 @@ def test_pdf_no_permite_bajar_del_precio_del_cliente(monkeypatch):
 
 def test_flag_esta_en_admin_y_el_boton_solo_en_bloque_reseller():
     admin_html = (ROOT / "templates/admin/cliente_acceso_precios.html").read_text()
-    portal_html = (ROOT / "templates/portal/cotizar.html").read_text()
+    portal_html = (ROOT / "templates/portal/_quote_results.html").read_text()
     endpoint = (ROOT / "endpoints/portal_cliente.py").read_text()
 
     assert 'name="es_reseller"' in admin_html

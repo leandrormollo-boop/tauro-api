@@ -472,3 +472,12 @@ def test_sin_cuit_no_manda_el_bloque_vacio():
 
 def test_una_importacion_se_emite_con_la_cuenta_de_impo():
     assert _emitir()["accounts"][0]["number"] == "730089966"
+
+
+def test_tarifa_sin_plazo_no_inventa_dias():
+    producto=_producto("P",120)
+    producto['totalPrice'][0]['currencyType']='BILLC'
+    producto.pop('deliveryCapabilities')
+    resultado=_cliente()._parsear_rates({'products':[producto]})
+    assert resultado['encontrado'] is True
+    assert resultado['dias_estimados']=='A confirmar'

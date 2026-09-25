@@ -290,7 +290,7 @@ class DHLClient(CarrierBase):
             "moneda": precio_facturado.get("priceCurrency", "USD"),
             "servicio": prod.get("productName", "DHL Express Worldwide"),
             "dias_estimados": str(
-                prod.get("deliveryCapabilities", {}).get("totalTransitDays", "2-4")
+                (prod.get("deliveryCapabilities") or {}).get("totalTransitDays") or "A confirmar"
             ),
         }
 

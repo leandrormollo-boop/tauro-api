@@ -418,7 +418,11 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
         # caja paga por su propio peso volumétrico y sumarlas cotiza de
         # menos. Un precio de menos hoy es una pérdida al facturar.
         multi = paquetes is not None and len(paquetes) > 1
-        cliente = c["cliente"]()
+        try:
+            cliente = c["cliente"]()
+        except Exception:
+            salida.append({**base, "estado": "sin_tarifa"})
+            continue
         if multi and not getattr(cliente, "MULTIBULTO", False):
             salida.append({
                 **base,
@@ -476,7 +480,7 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
             **base,
             "estado": "cotizado",
             "servicio": (resultado.get("servicio") or c["servicio"]).replace("_", " ").title(),
-            "dias_estimados": str(resultado.get("dias_estimados", "3-5")),
+            "dias_estimados": str(resultado.get("dias_estimados") or "A confirmar"),
             "costo": costo,
             "moneda": moneda,
             "costo_lista": costo_lista,
