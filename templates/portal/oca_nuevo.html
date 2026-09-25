@@ -1,27 +1,36 @@
 {% extends 'base.html' %}
 {% block title %}Envío nacional · OCA{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-nacional.css?v=1"><script src="/static/js/portal-nacional.js?v=1" defer></script>{% endblock %}
+{% macro input(prefix,key,label,span=6,required=true,limit=30,kind='text') %}
+{% set name=prefix~'_'~key %}<div class="ns-field ns-span-{{span}}"><label for="{{name}}">{{label}}{% if not required %}<small>Opcional</small>{% endif %}</label><input id="{{name}}" name="{{name}}" value="{{form.get(name,'')}}" type="{{kind}}" maxlength="{{limit}}" {% if required %}required{% endif %}></div>
+{% endmacro %}
 {% block content %}
-<style nonce="{{request.state.csp_nonce}}">
-.oca-form{max-width:1000px;margin:24px auto}.oca-columns{display:grid;grid-template-columns:1fr 1fr;gap:20px}.oca-box{padding:24px;border:1px solid var(--border);border-radius:18px;margin:18px 0}.oca-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px}.oca-fields label{display:block}.oca-fields input,.oca-fields select{display:block;width:100%;padding:10px;margin-top:6px}.oca-full{grid-column:1/-1}.oca-price{font-size:32px;font-weight:700}@media(max-width:700px){.oca-columns,.oca-fields{grid-template-columns:1fr}.oca-form{padding:12px}.oca-full{grid-column:auto}}
-</style>
-<main class="oca-form"><a href="/portal/envios?tipo=nacional">← Mis envíos nacionales</a><h1>Envío nacional con OCA</h1><p>Puerta a puerta dentro de Argentina.</p>
+<div class="national-shipment">
+<header class="ns-heading"><div><a class="ns-back" href="/portal/envios?tipo=nacional">← Mis envíos</a><h1>Crear envío nacional</h1></div><div class="ns-operator"><img src="/static/img/carriers/oca.png" alt="OCA"><span>Puerta a puerta</span></div></header>
 {% if error or request.query_params.get('error') %}<p class="msg error" role="alert">{{error or request.query_params.get('error')}}</p>{% endif %}
-{% if not disponible %}<section class="oca-box"><h2>OCA requiere habilitación</h2><p>TAURO debe confirmar la configuración del servicio, los permisos y la tarifa de tu cuenta antes de cotizar o emitir.</p></section>
+{% if not disponible %}<section class="ns-card"><h2>OCA aún no está habilitado</h2><p>Contactá a TAURO para activar el servicio en tu cuenta.</p></section>
 {% elif tarifa %}
-<section class="oca-box"><h2>Revisá tu cotización</h2><p class="oca-price">{{dinero_ars(tarifa.precio_ars)}}</p><p>Precio final de TAURO en pesos, IVA incluido. Válido hasta {{tarifa.expires_at.strftime('%H:%M')}} (Argentina); se confirma nuevamente antes de emitir.</p>
-{% for key,label in [('origin','Origen'),('destination','Destino')] %}{% set a=tarifa.payload[key] %}<p><strong>{{label}}:</strong> {{a.calle}} {{a.nro}} {{a.piso}} {{a.depto}}, {{a.localidad}}, {{a.provincia}} · CP {{a.cp}}</p>{% endfor %}
-{% set b=tarifa.payload.packages[0] %}<p>{{b.quantity}} bulto(s) de {{b.weight_kg}} kg · {{b.length_cm}} × {{b.width_cm}} × {{b.height_cm}} cm por bulto.</p><p>Valor declarado: ARS {{tarifa.payload.declared_value}}.</p>
-<form method="post" action="/portal/oca/cotizacion/{{tarifa.id}}/confirmar"><button class="btn btn-primary">Guardar solicitud</button></form><p>Al guardar todavía no se emite la guía ni se genera un cargo. Podrás emitir desde el detalle si tu cuenta está habilitada.</p><a href="/portal/oca/nuevo">Volver a cotizar</a></section>
+<section class="ns-card ns-review"><header><h2>Revisá tu envío</h2><span class="ns-price">{{dinero_ars(tarifa.precio_ars)}}<small>ARS · IVA incluido</small></span></header>
+<div class="ns-review-route">{% for key,label in [('origin','Origen'),('destination','Destino')] %}{% set a=tarifa.payload[key] %}<div><small>{{label}}</small><strong>{{a.contacto}}</strong><p>{{a.calle}} {{a.nro}}{% if a.piso %} · Piso {{a.piso}}{% endif %}{% if a.depto %} · Dpto. {{a.depto}}{% endif %}<br>{{a.localidad}}, {{a.provincia}} · {{a.cp}}</p></div>{% endfor %}</div>
+{% set b=tarifa.payload.packages[0] %}<p class="ns-review-package">{{b.quantity}} bulto(s) · {{b.weight_kg}} kg · {{b.length_cm}} × {{b.width_cm}} × {{b.height_cm}} cm por bulto.<br>Valor declarado: ARS {{tarifa.payload.declared_value}}.</p>
+<div class="ns-review-note">Tarifa válida hasta las {{tarifa.expires_at.strftime('%H:%M')}} <span data-help="Vigencia de la tarifa">Hora de Argentina. El precio se confirma nuevamente antes de emitir.</span></div>
+<form method="post" action="/portal/oca/cotizacion/{{tarifa.id}}/confirmar"><div class="ns-actions"><a class="btn btn-ghost" href="/portal/oca/cotizacion/{{tarifa.id}}/editar">← Editar datos</a><button class="btn btn-primary">Guardar solicitud</button></div></form><p class="ns-disclaimer">Guardar no emite la guía ni genera un cargo.</p></section>
 {% else %}
-<form method="post" action="/portal/oca/cotizar"><div class="oca-columns">
-{% for prefix,label in [('origen','Origen del retiro'),('destino','Destinatario')] %}
-<section class="oca-box"><h2>{{label}}</h2><div class="oca-fields">
-{% for key,text,maxlength,required in [('nombre','Nombre / contacto',30,true),('apellido','Apellido',30,prefix=='destino'),('calle','Calle',30,true),('numero','Número',6,true),('piso','Piso',6,false),('depto','Departamento',4,false),('localidad','Localidad',30,true),('cp','Código postal',8,true),('email','Email',100,prefix=='origen'),('telefono','Teléfono',20,false)] %}
-{% if key!='apellido' or prefix=='destino' %}{% set name=prefix~'_'~key %}<label>{{text}}<input name="{{name}}" value="{{form.get(name,'')}}" maxlength="{{maxlength}}" {% if required %}required{% endif %} {% if key=='email' %}type="email"{% endif %}></label>{% endif %}
-{% endfor %}<label class="oca-full">Provincia<select name="{{prefix}}_provincia" required><option value="">Elegí una provincia</option>{% for code,name in provincias %}<option value="{{code}}" {% if form.get(prefix~'_provincia')==code %}selected{% endif %}>{{name}}</option>{% endfor %}</select></label>
-</div></section>{% endfor %}</div>
-<section class="oca-box"><h2>Paquetes</h2><p>Los bultos de esta solicitud deben tener el mismo peso y medidas.</p><div class="oca-fields">
-{% for name,label,default,step,maximum in [('cantidad_bultos','Cantidad de bultos','1','1','20'),('peso_kg','Peso por bulto (kg)','','0.01','1000'),('largo_cm','Largo (cm)','','0.01','300'),('ancho_cm','Ancho (cm)','','0.01','300'),('alto_cm','Alto (cm)','','0.01','300'),('valor_declarado_ars','Valor declarado total (ARS)','','1','999999999')] %}<label>{{label}}<input type="number" name="{{name}}" value="{{form.get(name,default)}}" min="{{step}}" max="{{maximum}}" step="{{step}}" required></label>{% endfor %}
-</div><p>{{'Servicio con seguro según las condiciones de la operativa contratada.' if asegurada else 'La cobertura depende de las condiciones de la operativa contratada con OCA.'}}</p></section>
-<button class="btn btn-primary">Cotizar envío</button></form>{% endif %}</main>
+<form method="post" action="/portal/oca/cotizar" data-national-form data-draft-key="envio:oca" data-draft-server="{{1 if form else 0}}">
+<nav class="ns-steps" aria-label="Pasos del envío" hidden>{% for number,title in [(1,'Origen'),(2,'Destino'),(3,'Paquetes')] %}<button type="button" data-national-step="{{number}}"><span>{{number}}</span>{{title}}</button>{% endfor %}</nav>
+{% for prefix,label,step in [('origen','Dónde retiramos',1),('destino','A quién entregamos',2)] %}
+<section class="ns-card" data-national-panel="{{step}}"><div class="ns-section-heading"><h2>{{label}}</h2><span class="ns-step-caption">{{step}} de 3</span></div><div class="ns-fields">
+{{input(prefix,'nombre','Nombre / contacto',6 if prefix=='destino' else 12)}}
+{% if prefix=='destino' %}{{input(prefix,'apellido','Apellido')}}{% endif %}
+<div class="ns-field ns-span-6"><label for="{{prefix}}_provincia">Provincia</label><select id="{{prefix}}_provincia" name="{{prefix}}_provincia" required><option value="">Elegí provincia</option>{% for code,name in provincias %}<option value="{{code}}" {% if form.get(prefix~'_provincia')==code %}selected{% endif %}>{{'CABA' if code=='C' else name}}</option>{% endfor %}</select></div>
+{{input(prefix,'localidad','Localidad')}}
+{{input(prefix,'calle','Calle',8)}}{{input(prefix,'numero','Número',4,limit=6)}}
+{{input(prefix,'cp','Código postal',4,limit=8)}}{{input(prefix,'piso','Piso',4,false,6)}}{{input(prefix,'depto','Departamento',4,false,4)}}
+{{input(prefix,'email','Email',8,prefix=='origen',100,'email')}}{{input(prefix,'telefono','Teléfono',4,false,20,'tel')}}
+</div></section>{% endfor %}
+<section class="ns-card" data-national-panel="3"><div class="ns-section-heading"><h2>Tus paquetes</h2><span data-help="Cajas del envío">Las cajas de esta solicitud deben tener el mismo peso y medidas. Completá las medidas de la caja cerrada.</span><span class="ns-step-caption">3 de 3</span></div><div class="ns-fields ns-package-fields">
+{% for name,label,default,kind in [('cantidad_bultos','Cantidad de cajas','1','entero'),('peso_kg','Peso por caja (kg)','','decimal'),('valor_declarado_ars','Valor total (ARS)','','monto'),('largo_cm','Largo (cm)','','decimal'),('ancho_cm','Ancho (cm)','','decimal'),('alto_cm','Alto (cm)','','decimal')] %}<div class="ns-field ns-span-4"><label for="{{name}}">{{label}}</label><input id="{{name}}" name="{{name}}" value="{{form.get(name,default)}}" type="text" inputmode="{{'numeric' if kind=='entero' else 'decimal'}}" data-numero="{{kind}}" maxlength="12" required></div>{% endfor %}
+</div><p class="ns-coverage">Cobertura del envío <span data-help="Cobertura OCA">{{'Servicio con seguro según las condiciones de la operativa contratada.' if asegurada else 'La cobertura depende de las condiciones de la operativa contratada con OCA.'}}</span></p></section>
+<footer class="ns-actions"><button type="button" class="btn btn-ghost" data-national-back hidden>← Atrás</button><span data-national-status role="status"></span><button type="button" class="btn btn-primary" data-national-next hidden>Siguiente →</button><button type="submit" class="btn btn-primary" data-national-submit>Ver tarifa</button></footer>
+</form>{% endif %}</div>
 {% endblock %}

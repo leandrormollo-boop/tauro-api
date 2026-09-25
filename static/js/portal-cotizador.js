@@ -66,26 +66,87 @@
       var submit = form.querySelector('[data-quote-submit]'), initial = true, hasCurrentQuote = false;
       var packageList = form.querySelector('#quote-package-list');
       var template = form.querySelector('#quote-package-template');
+      var activeBox = 0, mobileStep = 1;
+      var mobile = window.matchMedia('(max-width: 779px)');
+      var tabs = form.querySelector('[data-package-tabs]');
+      if (tabs) form.querySelector('.uq-section-title').insertBefore(tabs, form.querySelector('#quote-add-package'));
+      var stepNav = panel.querySelector('.uq-step-nav'), actions = panel.querySelector('.uq-mobile-actions');
+      function showStep(step, focus) {
+        mobileStep = Math.max(1, Math.min(3, step)); panel.dataset.mobileStep = mobileStep;
+        stepNav.hidden = !mobile.matches; actions.hidden = !mobile.matches;
+        stepNav.querySelectorAll('[data-quote-step]').forEach(function (button) {
+          var selected = Number(button.dataset.quoteStep) === mobileStep;
+          button.setAttribute('aria-current', selected ? 'step' : 'false');
+        });
+        actions.querySelector('[data-quote-back]').disabled = mobileStep === 1;
+        actions.querySelector('[data-quote-next]').hidden = mobileStep === 3;
+        actions.querySelector('[data-quote-step-status]').textContent = mobileStep + ' de 3';
+        if (focus && mobile.matches) {
+          var heading = mobileStep === 3 ? panel.querySelector('.uq-results h2') : mobileStep === 2 ? form.querySelector('.uq-section-title h2') : stepNav;
+          heading.tabIndex = -1; heading.focus({preventScroll:true});
+          var viewport = root.closest('[data-cotizar-contenido]'); if (viewport) viewport.scrollTop = 0;
+        }
+      }
+      function validate(section) {
+        var invalid = Array.from(section.querySelectorAll('[required]')).find(function (input) {
+          if (input.dataset.numero) {
+            var value = numeric(input.value, input.dataset.numero);
+            input.setCustomValidity(!Number.isFinite(value) || value <= 0 ? 'Ingresá un valor mayor que cero.'
+              : input.dataset.numero === 'entero' && !Number.isInteger(value) ? 'Ingresá una cantidad entera.' : '');
+          }
+          return !input.validity.valid;
+        });
+        if (!invalid) return true;
+        if (invalid.closest('[data-package-row]')) {
+          activeBox = Array.from(packageList.children).indexOf(invalid.closest('[data-package-row]')); renumber();
+        }
+        invalid.reportValidity(); return false;
+      }
+      function advance(step) {
+        if (step > mobileStep && mobileStep === 1 && !validate(form.querySelector('.uq-route-grid'))) return;
+        if (step === 3 && !validate(form.querySelector('.uq-packages'))) {showStep(2, false); return;}
+        showStep(step, true); if (form.tauroDraft) form.tauroDraft.save();
+      }
+      panel.querySelectorAll('[data-quote-step]').forEach(function (button) {button.addEventListener('click', function () {advance(Number(button.dataset.quoteStep));});});
+      actions.querySelector('[data-quote-back]').addEventListener('click', function () {advance(mobileStep - 1);});
+      actions.querySelector('[data-quote-next]').addEventListener('click', function () {advance(mobileStep + 1);});
+      mobile.addEventListener('change', function () {showStep(mobileStep, false);});
       function renumber() {
         if (!packageList) return;
         var rows = packageList.querySelectorAll('[data-package-row]');
+        activeBox = Math.max(0, Math.min(activeBox, rows.length - 1));
+        tabs.replaceChildren(); tabs.hidden = rows.length < 2;
         rows.forEach(function (row, i) {
+          row.hidden = i !== activeBox;
+          var tab = document.createElement('button'); tab.type = 'button'; tab.textContent = 'Caja ' + (i + 1);
+          tab.setAttribute('aria-pressed', String(i === activeBox));
+          tab.addEventListener('click', function () {activeBox = i; renumber(); if (form.tauroDraft) form.tauroDraft.save();}); tabs.appendChild(tab);
+          if (i === activeBox && rows.length > 1) {
+            var close = document.createElement('button'); close.type='button'; close.textContent='×';
+            close.dataset.removePackageIndex=String(i); close.className='uq-box-remove';
+            close.setAttribute('aria-label','Quitar caja ' + (i + 1)); tabs.appendChild(close);
+          }
           row.querySelector('[data-package-number]').textContent = i + 1;
           var remove = row.querySelector('[data-remove-package]');
           remove.hidden = rows.length === 1;
+          row.querySelector('.uq-box-title').hidden = true;
           remove.setAttribute('aria-label', 'Quitar caja ' + (i + 1));
         });
         form.querySelector('#quote-add-package').disabled = rows.length >= 20;
       }
-      if (window.TauroDraft) window.TauroDraft.attach(form, packageList ? {
-        capture: function () { return {packages: packageList.children.length}; },
+      if (window.TauroDraft) window.TauroDraft.attach(form, {
+        capture: function () { return {packages: packageList ? packageList.children.length : 1, activeBox:activeBox, mobileStep:mobileStep}; },
         prepare: function (saved) {
+          activeBox = Number(saved.activeBox) || 0; mobileStep = Number(saved.mobileStep) || 1;
+          if (!packageList) return;
           var count = Math.max(1, Math.min(20, Number(saved.packages) || 1));
           while (packageList.children.length < count) packageList.appendChild(template.content.cloneNode(true));
           Array.from(packageList.children).slice(count).forEach(function (row) { row.remove(); });
         }
-      } : {});
-      renumber();
+      });
+      var draftBar = form.querySelector('.draft-bar');
+      if (draftBar) form.querySelector('.uq-route-tools').prepend(draftBar);
+      renumber(); showStep(mobileStep, false);
       var locations = window.TauroQuoteLocations && window.TauroQuoteLocations.attach(form);
       locationControls[scope] = locations;
       if (locations && scope === active) locations.resume();
@@ -109,7 +170,7 @@
         weights();
         if (locations && locations.pending()) return false;
         return Array.from(form.querySelectorAll('[required]')).every(function (input) {
-          if (!input.value.trim() || !input.checkValidity()) return false;
+          if (!input.value.trim() || !input.validity.valid) return false;
           if (!input.dataset.numero) return true;
           var number = numeric(input.value, input.dataset.numero);
           return Number.isFinite(number) && number > 0 && (input.dataset.numero !== 'entero' || Number.isInteger(number));
@@ -146,7 +207,7 @@
         render: function (block) {
           result.replaceChildren(block); result.setAttribute('aria-busy', 'false');
           hasCurrentQuote = Boolean(block.querySelector('.uq-price'));
-          submit.textContent = hasCurrentQuote ? 'Ver tarifas ↓' : 'Volver a consultar';
+          submit.textContent = hasCurrentQuote ? 'Ver tarifas' : 'Volver a consultar';
           status.textContent = block.querySelector('.uq-price') ? 'Tarifas actualizadas.' : 'Revisá el resultado de la consulta.';
         },
         error: function (error) { result.setAttribute('aria-busy', 'false'); message(result, error.message, true); status.textContent = 'Podés volver a consultar.'; }
@@ -168,17 +229,37 @@
       });
       form.addEventListener('submit', function (event) {
         event.preventDefault();
-        if (hasCurrentQuote) { result.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center'}); return; }
-        if (!form.reportValidity()) return;
+        if (hasCurrentQuote) { showStep(3, true); return; }
+        if (!validate(form.querySelector('.uq-route-grid')) || !validate(form.querySelector('.uq-packages'))) return;
         control.resume(); control.run();
       });
+      form.addEventListener('keydown', function (event) {
+        if (mobile.matches && event.key === 'Enter' && event.target.tagName === 'INPUT'
+            && event.target.getAttribute('aria-expanded') !== 'true') {
+          event.preventDefault(); advance(mobileStep + 1);
+        }
+      });
       form.addEventListener('click', function (event) {
+        if (event.target.closest('[data-quote-reverse]')) {
+          if (locations) locations.cancel(); control.pause();
+          window.TauroReverseQuoteRoute(form);
+          if (locations) {locations.refresh(); locations.resume();}
+          if (form.tauroDraft) form.tauroDraft.save();
+          control.resume(); return;
+        }
         var remove = event.target.closest('[data-remove-package]');
-        if (event.target.closest('#quote-add-package') && packageList.children.length < 20) packageList.appendChild(template.content.cloneNode(true));
+        var removeIndex = event.target.closest('[data-remove-package-index]');
+        if (event.target.closest('#quote-add-package') && packageList.children.length < 20) {packageList.appendChild(template.content.cloneNode(true)); activeBox = packageList.children.length - 1;}
+        else if (removeIndex && packageList.children.length > 1) packageList.children[Number(removeIndex.dataset.removePackageIndex)].remove();
         else if (remove && packageList.children.length > 1) remove.closest('[data-package-row]').remove();
         else return;
         renumber(); if (form.tauroDraft) form.tauroDraft.save(); control.changed();
       });
+      form.addEventListener('invalid', function (event) {
+        var row = event.target.closest('[data-package-row]');
+        if (row) {activeBox = Array.from(packageList.children).indexOf(row); renumber();}
+        showStep(event.target.closest('.uq-packages') ? 2 : 1, false);
+      }, true);
     });
     if (window.TauroRutasFrecuentes) window.TauroRutasFrecuentes.attach(root);
     function select(scope, changeUrl) {

@@ -259,7 +259,7 @@ def test_http_portal_auth_propiedad_y_precio_privado(db, monkeypatch):
             assert (await client.get("/portal/oca/nuevo")).status_code == 303
             client.cookies.set("token", token)
             r = await client.get("/portal/oca/nuevo")
-            assert r.status_code == 200 and "Cotizar envío" in r.text
+            assert r.status_code == 200 and "Ver tarifa" in r.text
             r = await client.post(
                 "/portal/oca/cotizar", data={**datos(), "precio_ars": "1"}
             )
@@ -268,6 +268,19 @@ def test_http_portal_auth_propiedad_y_precio_privado(db, monkeypatch):
             r = await client.get(url)
             assert r.status_code == 200 and "Guardar solicitud" in r.text
             assert "costo_ars" not in r.text and "config_hash" not in r.text
+            edited = await client.get(url + "/editar")
+            assert edited.status_code == 200
+            from html.parser import HTMLParser
+            fields = {}
+            class Inputs(HTMLParser):
+                def handle_starttag(self, tag, attrs):
+                    attrs = dict(attrs)
+                    if tag == 'input' and 'name' in attrs:
+                        fields[attrs['name']] = attrs.get('value', '')
+            Inputs().feed(edited.text)
+            for key in ('origen_nombre', 'origen_calle', 'destino_apellido', 'destino_cp'):
+                assert fields[key] == datos()[key]
+            assert 'costo_ars' not in edited.text and 'config_hash' not in edited.text
             a = await client.post(url + "/confirmar")
             b = await client.post(url + "/confirmar")
             assert a.headers["location"] == b.headers["location"]
@@ -277,6 +290,7 @@ def test_http_portal_auth_propiedad_y_precio_privado(db, monkeypatch):
                 "token", auth.generar_token("otro@example.invalid", "OTRO")
             )
             assert (await client.get(url)).status_code == 303
+            assert (await client.get(url + "/editar")).status_code == 303
 
     asyncio.run(run())
 

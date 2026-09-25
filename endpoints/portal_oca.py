@@ -7,7 +7,7 @@ from servicios.rate_limit import check_rate
 from fastapi.responses import RedirectResponse
 from endpoints.portal_cliente import cliente_actual, templates
 from servicios import oca_portal as oca
-from servicios.provincias import opciones
+from servicios.provincias import opciones, normalizar_provincia
 from servicios.solicitudes_guia import obtener_solicitud_de_cliente
 
 router = APIRouter(prefix="/portal/oca", tags=["portal"])
@@ -103,6 +103,33 @@ def confirmar(request: Request, ident: str, cliente: str = Depends(cliente_actua
             ),
             303,
         )
+
+
+@router.get("/cotizacion/{ident}/editar")
+def editar(request: Request, ident: str, cliente: str = Depends(cliente_actual)):
+    """Recover this client's exact quote inputs; editing always requires a new rate."""
+    try:
+        row = oca.obtener(ident, cliente)
+        config, _ = oca.adapter_cliente(cliente)
+    except oca.OCAPortalError:
+        return RedirectResponse("/portal/oca/nuevo", 303)
+    payload = row["payload"]
+    form = {}
+    for side, prefix in [("origin", "origen"), ("destination", "destino")]:
+        address = payload[side]
+        for key, source in [("nombre", "contacto"), ("calle", "calle"), ("numero", "nro"),
+                            ("piso", "piso"), ("depto", "depto"), ("localidad", "localidad"),
+                            ("cp", "cp"), ("email", "email"), ("telefono", "telefono")]:
+            form[prefix + "_" + key] = address.get(source, "")
+        form[prefix + "_provincia"] = normalizar_provincia(address["provincia"])
+    form["destino_nombre"] = payload["recipient"]["first_name"]
+    form["destino_apellido"] = payload["recipient"]["last_name"]
+    box = payload["packages"][0]
+    for field, source in [("cantidad_bultos", "quantity"), ("peso_kg", "weight_kg"),
+                          ("largo_cm", "length_cm"), ("ancho_cm", "width_cm"), ("alto_cm", "height_cm")]:
+        form[field] = box[source]
+    form["valor_declarado_ars"] = payload["declared_value"]
+    return pantalla(request, cliente, disponible=True, asegurada=config.insured_operation, form=form)
 
 
 @router.post("/envios/{ident}/etiqueta")

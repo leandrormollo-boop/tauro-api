@@ -115,6 +115,7 @@
         control.search({country:country.value, query:input.value, mode:input === city ? 'city' : 'postal', province:province ? province.value : ''});
       }
       controls.push({pending:control.pending, cancel:function () {control.cancel(); hide();},
+        refresh:function () {control.cancel(); hide(); status.hidden=true; paired=Boolean(city.value && postal.value); note.hidden=reference.value !== '1';},
         resume:function () {if (city.value && !postal.value) lookup(city); else if (postal.value && !city.value) lookup(postal);}});
       [city, postal].forEach(function (input) {
         input.autocomplete = 'off'; input.setAttribute('role', 'combobox');
@@ -149,6 +150,7 @@
       note.hidden = reference.value !== '1';
     });
     return {pending:function () {return controls.some(function (c) {return c.pending();});},
+      refresh:function () {controls.forEach(function (c) {c.refresh();});},
       resume:function () {controls.forEach(function (c) {c.resume();});},
       cancel:function () {controls.forEach(function (c) {c.cancel();});}};
   }

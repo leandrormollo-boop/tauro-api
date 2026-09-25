@@ -21,15 +21,18 @@
     {% for scope in ['internacional','nacional'] %}
     {% set f = form if ambito == scope else {} %}
     <section class="uq-panel" data-quote-panel="{{ scope }}" {% if scope != ambito %}hidden{% endif %}>
+        <nav class="uq-step-nav" aria-label="Pasos de cotización" hidden>{% for step,title in [(1,'Ruta'),(2,'Paquetes'),(3,'Tarifas')] %}<button type="button" data-quote-step="{{ step }}"><span>{{ step }}</span>{{ title }}</button>{% endfor %}</nav>
         <div class="uq-layout">
         <form id="{{ 'form-cotizar' if scope == 'internacional' else 'form-cotizar-nacional' }}" data-unified-form="{{ scope }}" data-draft-key="cotizar:{{ scope }}" data-draft-server="{{ 1 if request.method == 'POST' and ambito == scope else 0 }}" action="/portal/cotizar" method="POST">
             <input type="hidden" name="ambito" value="{{ scope }}">
             {% if scope == 'nacional' %}<input type="hidden" name="origen_pais" value="AR"><input type="hidden" name="destino_pais" value="AR">{% endif %}
+            <div class="uq-route-tools" data-quote-route-section>
             {% if scope == 'internacional' %}
-            <details class="uq-frequent" data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-head"><span>Tus últimos destinos</span><button type="button" data-route-reverse disabled>⇄ Invertir</button></div>
-            {% if rutas_frecuentes %}<div class="quote-frequent-list">{% for ruta in rutas_frecuentes %}<button type="button" class="quote-frequent-route" data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}" aria-pressed="false">{{ ruta.origen_nombre }} <span aria-hidden="true">→</span> {{ ruta.destino_nombre }}</button>{% endfor %}</div>{% endif %}</details>
+            <details class="uq-frequent" data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-popover"><div class="uq-frequent-head"><span>Tus últimos destinos</span></div>
+            {% if rutas_frecuentes %}<div class="quote-frequent-list">{% for ruta in rutas_frecuentes %}<button type="button" class="quote-frequent-route" data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}" aria-pressed="false">{{ ruta.origen_nombre }} <span aria-hidden="true">→</span> {{ ruta.destino_nombre }}</button>{% endfor %}</div>{% endif %}</div></details>
             {% endif %}
-            <div class="uq-route-grid">
+            <button type="button" class="uq-reverse" data-quote-reverse aria-label="Invertir origen y destino"><span aria-hidden="true">⇄</span> Invertir</button></div>
+            <div class="uq-route-grid" data-quote-route-section>
             {% for side,label,letter in [('origen','Origen','A'),('destino','Destino','B')] %}
                 <fieldset class="uq-route" data-location-side="{{ side }}"><legend><b>{{ letter }}</b>{{ label }}</legend>
                 {% if scope == 'internacional' %}
@@ -43,19 +46,18 @@
                     {{ field(side ~ '_localidad','Localidad',f.get(side ~ '_localidad','')) }}{{ field(side ~ '_cp','Código postal',f.get(side ~ '_cp',''),placeholder='Ej. 5000') }}
                 {% endif %}
                 <input type="hidden" name="{{ side }}_referencia" value="{{ f.get(side ~ '_referencia','') }}" data-draft-persist>
-                <div class="uq-location-note" data-location-note hidden>Referencia para cotizar <span data-help="Ciudad y código postal">El código sugerido sirve para estimar la tarifa. Al emitir completás el domicilio y CP exactos. Datos: GeoNames, CC BY 4.0.</span><a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a></div>
+                <div class="uq-location-note" data-location-note hidden><span data-help="Código de referencia">Código genérico de la localidad para cotizar. Al emitir completás el domicilio y CP exactos.</span></div>
                 </fieldset>
             {% endfor %}
             </div>
-            <section class="uq-packages"><div class="uq-section-title"><h2>Paquetes</h2><span data-help="Peso y medidas">Ingresá el peso y las medidas de cada caja cerrada. El operador compara peso real y volumétrico según su servicio.</span></div>
+            <section class="uq-packages"><div class="uq-section-title"><h2>Paquetes</h2><span data-help="Peso y medidas">Ingresá el peso y las medidas de cada caja cerrada. El operador compara peso real y volumétrico según su servicio. En nacional, las cajas deben tener el mismo peso y medidas.</span>{% if scope == 'internacional' %}<button type="button" class="uq-add" id="quote-add-package">+ Otra caja</button>{% endif %}</div>
             {% if scope == 'internacional' %}
+                <nav class="uq-box-tabs" data-package-tabs aria-label="Cajas del envío" hidden></nav>
                 <div id="quote-package-list">{% for b in f.get('bultos') or [{}] %}{{ boxes(b,loop.index) }}{% endfor %}</div>
                 <div class="uq-weights" data-quote-weights hidden><span>Peso real <b data-weight-real>—</b></span><span>Peso volumétrico <b data-weight-volume>—</b></span><span>Peso facturable <b data-weight-billable>—</b></span><span data-help="Peso de referencia">Se cobra por volumen cuando supera el peso real. Referencia internacional: largo × ancho × alto / 5000. El operador confirma el peso final.</span></div>
                 <template id="quote-package-template">{{ boxes() }}</template>
-                <button type="button" class="uq-add" id="quote-add-package">+ Agregar otra caja</button>
                 {{ field('valor_declarado_usd','Valor declarado total (USD)',f.get('valor_declarado_usd',''),true,'monto','Ej. 100') }}
             {% else %}
-                <small class="uq-package-note">Para cajas del mismo peso y medidas.</small>
                 <div class="uq-package-grid">
                 {% for name,label,kind,default in [('cantidad_bultos','Cantidad','entero','1'),('peso_kg','Peso (kg)','decimal',''),('largo_cm','Largo (cm)','decimal',''),('ancho_cm','Ancho (cm)','decimal',''),('alto_cm','Alto (cm)','decimal','')] %}{{ field(name,label,f.get(name,default),true,kind) }}{% endfor %}
                 </div>{{ field('valor_declarado_ars','Valor declarado total (ARS)',f.get('valor_declarado_ars',''),true,'monto','Ej. 40.000') }}
@@ -65,6 +67,8 @@
         </form>
         <aside class="uq-results" aria-label="Opciones de envío"><div class="uq-results-head"><h2>Opciones de envío</h2><span data-help="Operadores de tu cuenta">Comparamos los operadores habilitados para tu cuenta y esta ruta, con tu tarifa acordada.</span></div><div data-quote-results>{% if scope == ambito %}{% include 'portal/_quote_results.html' %}{% else %}<div data-quote-response data-scope="{{ scope }}"><div class="uq-empty"><span class="uq-empty-symbol" aria-hidden="true">↗</span><strong>Tu próxima ruta empieza acá</strong><p>Completá origen, destino y paquetes.<br>Las tarifas aparecen automáticamente.</p></div></div>{% endif %}</div></aside>
         </div>
+        <footer class="uq-mobile-actions" hidden><button type="button" class="btn btn-ghost" data-quote-back>Atrás</button><span data-quote-step-status role="status"></span><button type="button" class="btn btn-primary" data-quote-next>Siguiente</button></footer>
+        <small class="uq-source">Referencias de localidades: <a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a> · CC BY 4.0</small>
     </section>
     {% endfor %}
 </div>
