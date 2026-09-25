@@ -107,49 +107,6 @@ async def cotizar(request:Request,cliente:str=Depends(cliente_actual)):
     return await _guardar(request,partial(quotes.cotizar_carrito,cliente))
 
 
-@router.post("/portal/paquetes/shopify/{tienda_id}/autorizar")
-def autorizar(tienda_id:int,request:Request,cliente:str=Depends(cliente_actual)):
-    _csrf(request)
-    t = quotes.tienda_propia(cliente,tienda_id)
-    if not t or t["plataforma"] != "shopify":
-        raise HTTPException(404,"La tienda no está vinculada.")
-    from servicios.shopify_app import instalacion
-    i = instalacion(t["dominio"])
-    if not i or i.get("cliente_id") != cliente:
-        raise HTTPException(403,"La tienda necesita completar su vinculación.")
-    from endpoints.shopify import _redirect_oauth
-    return _redirect_oauth(t["dominio"],cotizar_checkout=True)
-
-
-@router.post("/portal/paquetes/shopify/{tienda_id}/activar")
-async def activar(tienda_id:int,request:Request,cliente:str=Depends(cliente_actual)):
-    from servicios.paquetes_shopify import activar as connect, CheckoutNoDisponible
-    try:
-        return await _guardar(request,lambda _:connect(cliente,tienda_id))
-    except CheckoutNoDisponible as exc:
-        return JSONResponse({"ok":False,"error":str(exc)},status_code=409)
-
-
-@router.post("/portal/paquetes/shopify/{tienda_id}/pausar")
-async def pausar(tienda_id:int,request:Request,cliente:str=Depends(cliente_actual)):
-    from servicios.paquetes_shopify import pausar as pause
-    return await _guardar(request,lambda _:pause(cliente,tienda_id))
-
-
-@router.post("/integraciones/paquetes/shopify/{token}")
-async def shopify_rates(token:str,request:Request):
-    from servicios.paquetes_shopify import cotizar_callback, CheckoutNoDisponible
-    data = await _body(request)
-    try:
-        result = await cotizar_callback(data,token)
-        return JSONResponse(result,headers={"Cache-Control":"no-store"})
-    except (pkg.PaqueteError,CheckoutNoDisponible):
-        return JSONResponse({"rates":[]},status_code=503,headers={"Cache-Control":"no-store"})
-    except Exception as exc:
-        print(f"[paquetes] callback Shopify no disponible: {type(exc).__name__}")
-        return JSONResponse({"rates":[]},status_code=503,headers={"Cache-Control":"no-store"})
-
-
 def cliente_api(x_api_key: str = Header(default=None)):
     from servicios.api_b2b import obtener_cliente_por_api_key
     if not x_api_key:

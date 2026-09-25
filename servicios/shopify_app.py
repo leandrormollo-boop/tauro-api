@@ -373,11 +373,11 @@ def _base_url() -> str:
 
 # ── Instalación (OAuth) ─────────────────────────────────────
 
-def url_instalacion(dominio: str, state: str, *, cotizar_checkout: bool = False) -> str:
+def url_instalacion(dominio: str, state: str) -> str:
     """A dónde mandamos al comerciante para que autorice la app."""
     params = {
         "client_id": _credenciales_publicas()[0],
-        "scope": SCOPES + (",write_shipping" if cotizar_checkout else ""),
+        "scope": SCOPES,
         "redirect_uri": f"{_base_url()}/shopify/callback",
         "state": state,
     }

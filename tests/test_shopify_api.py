@@ -94,9 +94,11 @@ def test_app_publica_recibe_oauth_y_conserva_webhooks_legados(monkeypatch):
 
     assert shopify_app.app_configurada()
     assert shopify_app.api_key_publica() == "client-publico"
-    assert "client_id=client-publico" in shopify_app.url_instalacion(
+    installation_url = shopify_app.url_instalacion(
         "tauro-qa.myshopify.com", "state-qa",
     )
+    assert "client_id=client-publico" in installation_url
+    assert "write_shipping" not in installation_url
 
     cuerpo = b'{"id":1}'
     firma_publica = base64.b64encode(

@@ -36,10 +36,10 @@ con datos ficticios, nunca con solicitudes reales de borrado.
 - `write_shipping`
 - `read_orders`
 - `write_fulfillment_orders`
-- `read_customers`
 
 El Partner Team debe confirmar la disponibilidad de
 `write_fulfillment_orders`. Todo write scope implica su read equivalente. No
+pedir `read_customers`: la v1 no consulta ese recurso y privacidad no lo exige. No
 solicitar Products ni Locations mientras el producto no use esos endpoints.
 
 ## Admin links
