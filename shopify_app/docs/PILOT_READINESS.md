@@ -59,5 +59,10 @@ Referencias primarias revisadas:
 - Crear un pedido de prueba, comprobar su ingreso al portal, emitir una guía de
   prueba y confirmar fulfillment + tracking.
 - Registrar evidencia del recorrido y del consentimiento de scopes.
+- Obtener aprobación Level 2 de protected customer data en Dev Dashboard.
+- Obtener confirmación escrita sobre el cobro externo del flete físico o, si
+  Shopify lo clasifica como cargo de app, implementar App Pricing/Billing.
+- Preparar screencast en inglés/subtitulado, instrucciones del revisor y prueba
+  de los tres webhooks de compliance por HTTPS.
 
 No desplegar ni presentar al App Store hasta que esos puntos tengan evidencia.
