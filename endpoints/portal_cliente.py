@@ -46,7 +46,6 @@ from servicios.catalogo import (
     actualizar_producto_cliente, eliminar_producto_cliente,
 )
 from servicios.cotizador import cotizar_referencia_couriers
-from servicios.cotizador_nacional import preparar_cotizacion_nacional
 from servicios.cuenta_corriente import (
     saldo, total_pagado, get_facturado_real, get_facturas_recientes,
     movimientos, resumir_facturacion, resumen_cuenta_por_ambito,
@@ -1582,8 +1581,7 @@ def cotizar_form(
     cliente: str = Depends(cliente_actual),
 ):
     ambito = _ambito_portal(ambito)
-    if ambito == "nacional":
-        return RedirectResponse("/portal/oca/nuevo", status_code=303)
+    ambito = ambito or "internacional"
     from servicios.cotizaciones_reseller import cliente_es_reseller
     es_reseller = cliente_es_reseller(cliente)
     return templates.TemplateResponse(
@@ -1591,7 +1589,7 @@ def cotizar_form(
         context={
             "cliente": cliente,
             "ambito": ambito,
-            "rutas_frecuentes": obtener_rutas_frecuentes(cliente) if ambito == "internacional" else [],
+            "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
             "provincias": opciones_provincias(),
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
@@ -1610,6 +1608,20 @@ def cotizar_form(
     )
 
 
+@router.get("/cotizar/ubicaciones")
+def ubicaciones_cotizador(pais: str = "", q: str = "", tipo: str = "city",
+                         provincia: str = "", cliente: str = Depends(cliente_actual)):
+    from servicios.rate_limit import check_rate
+    from servicios.ubicaciones_cotizador import buscar_ubicaciones
+    import sqlite3
+    if not check_rate("portal_places:" + cliente, max_attempts=90, window_seconds=60):
+        raise HTTPException(429, "Esperá un momento para buscar otra ubicación.")
+    try:
+        return buscar_ubicaciones(pais, q, tipo, provincia)
+    except (OSError, sqlite3.Error):
+        return {"suggestions": [], "automatic": None, "unavailable": True}
+
+
 @router.post("/cotizar", response_class=HTMLResponse)
 def cotizar_post(
     request: Request,
@@ -1623,6 +1635,8 @@ def cotizar_post(
     origen_cp_internacional: str = Form(""),
     destino_ciudad_internacional: str = Form(""),
     destino_cp_internacional: str = Form(""),
+    origen_referencia: str = Form(""),
+    destino_referencia: str = Form(""),
     peso_kg: str = Form(""),
     largo_cm: str = Form(""),
     ancho_cm: str = Form(""),
@@ -1645,6 +1659,9 @@ def cotizar_post(
     bulto_alto: list[str] = Form([]),
     cliente: str = Depends(cliente_actual),
 ):
+    from servicios.rate_limit import check_rate
+    if not check_rate("portal_quote:" + cliente, max_attempts=30, window_seconds=60):
+        raise HTTPException(429, "Esperá un minuto antes de volver a cotizar.")
     ambito_normalizado = _ambito_post(ambito)
     if ambito_normalizado == "nacional":
         form_nacional = {
@@ -1675,39 +1692,33 @@ def cotizar_post(
                 raise ValueError(
                     "El cotizador nacional sólo admite origen y destino dentro de Argentina."
                 )
-            resultado_nacional = preparar_cotizacion_nacional(
-                origen_provincia=origen_provincia,
-                origen_localidad=origen_localidad,
-                origen_cp=origen_cp,
-                modalidad_origen=modalidad_origen,
-                destino_provincia=destino_provincia,
-                destino_localidad=destino_localidad,
-                destino_cp=destino_cp,
-                modalidad_destino=modalidad_destino,
-                cantidad_bultos=cantidad_bultos,
-                peso_kg=peso_kg,
-                largo_cm=largo_cm,
-                ancho_cm=ancho_cm,
-                alto_cm=alto_cm,
-                valor_declarado_ars=valor_declarado_ars,
-            )
-            print(
-                f"[portal-cotizar-nacional] cliente={cliente} "
-                f"ruta={resultado_nacional['origen']['provincia_codigo']}->"
-                f"{resultado_nacional['destino']['provincia_codigo']} "
-                "lista_para_adapters"
-            )
+            from servicios.cotizador_portal_nacional import cotizar_referencia_nacional
+            resultado_nacional = cotizar_referencia_nacional(
+                cliente, origen_referencia=origen_referencia == "1",
+                destino_referencia=destino_referencia == "1", **form_nacional)
+            if not resultado_nacional["opciones"] and not resultado_nacional["no_disponibles"]:
+                error_nacional = "Tu cuenta todavía no tiene operadores nacionales habilitados para cotizar."
         except ValueError as exc:
             error_nacional = str(exc)
+        except Exception:
+            error_nacional = "No pudimos consultar las tarifas. Intentá nuevamente."
 
+        form_nacional.update(origen_referencia="1" if origen_referencia == "1" else "",
+                             destino_referencia="1" if destino_referencia == "1" else "")
         return templates.TemplateResponse(
             request=request,
-            name="portal/cotizar.html",
+            name=("portal/_quote_results.html" if getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow" else "portal/cotizar.html"),
             context={
                 "cliente": cliente,
                 "ambito": "nacional",
                 "provincias": opciones_provincias(),
                 "resultado_nacional": resultado_nacional,
+                "opciones": (resultado_nacional or {}).get("opciones", []),
+                "no_disponibles": (resultado_nacional or {}).get("no_disponibles", []),
+                "resultado": (resultado_nacional or {}).get("resumen"),
+                "paises_origen": _paises_con_nacional(),
+                "paises_destino": _paises_con_nacional(),
+                "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
                 "error": error_nacional,
                 "form": form_nacional,
             },
@@ -1802,14 +1813,17 @@ def cotizar_post(
                 f"sin opciones ({estados or 'sin resultados'})"
             )
             raise ValueError("Ningún courier devolvió una tarifa para esa referencia.")
-    except Exception as e:
+    except ValueError as e:
         error = str(e)
+    except Exception:
+        error = "No pudimos consultar las tarifas. Intentá nuevamente."
 
     return templates.TemplateResponse(
-        request=request, name="portal/cotizar.html",
+        request=request, name=("portal/_quote_results.html" if getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow" else "portal/cotizar.html"),
         context={
             "cliente": cliente,
             "ambito": "internacional",
+            "provincias": opciones_provincias(),
             "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
             "paises_origen": _paises_con_nacional(),
             "paises_destino": _paises_con_nacional(),
@@ -1828,6 +1842,8 @@ def cotizar_post(
                 "origen_cp_internacional": origen_cp_internacional,
                 "destino_ciudad_internacional": destino_ciudad_internacional,
                 "destino_cp_internacional": destino_cp_internacional,
+                "origen_referencia": "1" if origen_referencia == "1" else "",
+                "destino_referencia": "1" if destino_referencia == "1" else "",
                 "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
                 "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
                 "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),
@@ -2448,6 +2464,10 @@ def envio_nuevo_form(
     quote_id: str = "",
     cajas: str = "",
     valor_cotizado: str = "",
+    origen_ciudad: str = "",
+    origen_cp: str = "",
+    destino_ciudad: str = "",
+    destino_cp: str = "",
     corregir: Optional[int] = None,
     repetir: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
@@ -2596,6 +2616,11 @@ def envio_nuevo_form(
         form["destino_pais"] = normalizar_pais(destino)
     if origen.strip() and not pedido_tienda:
         form["rem_pais"] = normalizar_pais(origen)
+    if cajas and not (quote_id or pedido_tienda or destinatario_id or corregir or repetir):
+        for key, value in (("rem_ciudad", origen_ciudad), ("rem_zip", origen_cp),
+                           ("dest_ciudad", destino_ciudad), ("dest_zip", destino_cp)):
+            if isinstance(value, str) and value.strip():
+                form[key] = value.strip()[:100]
     courier = (courier or "").strip().lower()
 
     # Inicio directo desde "Mis clientes". El id nunca alcanza por sí solo:
@@ -2671,7 +2696,9 @@ def envio_nuevo_form(
     # exige elegir o completar su domicilio, sin modificar la libreta.
     remitente_por_completar = bool(
         origen_elegido and remitente
-        and origen_elegido != str(remitente.get("pais") or "").strip().upper()
+        and (origen_elegido != str(remitente.get("pais") or "").strip().upper()
+             or (form.get("rem_ciudad") and form["rem_ciudad"].casefold() != str(remitente.get("ciudad") or "").strip().casefold())
+             or (form.get("rem_zip") and form["rem_zip"].casefold() != str(remitente.get("cp") or "").strip().casefold()))
     )
     if remitente_por_completar:
         remitente = None

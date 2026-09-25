@@ -46,6 +46,15 @@
     return String(id).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
   }
 
+  function countryFlag(select, value) {
+    if (!select.hasAttribute('data-country-flags') || !/^[A-Z]{2}$/.test(value)) return null;
+    var img = document.createElement('img');
+    img.src = '/static/img/flags/' + value.toLowerCase() + '.svg';
+    img.className = 'tselect-flag'; img.alt = ''; img.loading = 'lazy';
+    img.width = 24; img.height = 18;
+    return img;
+  }
+
   function construirTSelect(select) {
     if (enhancedSelects.has(select)) return;
     if (select.multiple || select.hasAttribute("data-no-tselect")) return;
@@ -79,7 +88,13 @@
     btn.setAttribute("aria-label", textoAccesible + ": " + labelDe(select));
     var lbl = document.createElement("span");
     lbl.className = "tselect-label";
-    lbl.textContent = labelDe(select);
+    function updateLabel() {
+      lbl.textContent = '';
+      var flag = countryFlag(select, select.value);
+      if (flag) lbl.appendChild(flag);
+      lbl.appendChild(document.createTextNode(labelDe(select)));
+    }
+    updateLabel();
     var caret = document.createElement("span");
     caret.className = "tselect-caret";
     caret.setAttribute("aria-hidden", "true");
@@ -188,6 +203,8 @@
         var optionText = document.createElement("span");
         optionText.textContent = opt.text;
         itemEl.appendChild(check);
+        var flag = countryFlag(select, opt.value);
+        if (flag) itemEl.appendChild(flag);
         itemEl.appendChild(optionText);
         if (!opt.disabled) {
           itemEl.addEventListener("mouseenter", function () {
@@ -231,7 +248,7 @@
     function elegir(i) {
       if (i < 0 || i >= select.options.length || select.options[i].disabled) return;
       select.selectedIndex = i;
-      lbl.textContent = labelDe(select);
+      updateLabel();
       btn.setAttribute("aria-label", textoAccesible + ": " + labelDe(select));
       select.dispatchEvent(new Event("change", { bubbles: true }));
     }
@@ -393,13 +410,13 @@
         get: function () { return selectValueSetter && Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").get.call(this); },
         set: function (v) {
           selectValueSetter.set.call(this, v);
-          lbl.textContent = labelDe(this);
+          updateLabel();
           btn.setAttribute("aria-label", textoAccesible + ": " + labelDe(this));
         },
       });
     } catch (err) { /* el listener de change cubre navegadores restrictivos */ }
     select.addEventListener("change", function () {
-      lbl.textContent = labelDe(select);
+      updateLabel();
       btn.setAttribute("aria-label", textoAccesible + ": " + labelDe(select));
       btn.removeAttribute("aria-invalid");
     });

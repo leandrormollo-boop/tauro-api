@@ -1,594 +1,71 @@
 {% extends "base.html" %}
+{% from 'portal/_scope_icons.html' import scope_icon %}
 {% block title %}Cotizar{% endblock %}
-
+{% macro field(name, label, value='', numeric=false, kind='decimal', placeholder='') %}
+<div class="uq-field"><label for="{{ name }}">{{ label }}</label><input id="{{ name }}" name="{{ name }}" value="{{ value }}" type="text" {% if numeric %}inputmode="{{ 'numeric' if kind == 'entero' else 'decimal' }}" data-numero="{{ kind }}"{% endif %} required maxlength="100" placeholder="{{ placeholder }}"></div>
+{% endmacro %}
+{% macro boxes(b={}, index=1) %}
+<div class="uq-box" data-package-row><div class="uq-box-title"><strong>Caja <span data-package-number>{{ index }}</span></strong><button type="button" data-remove-package aria-label="Quitar caja {{ index }}">Quitar</button></div><div class="uq-package-grid">
+{% for name,label,key,default in [('bulto_cantidad','Cantidad','cantidad',1),('bulto_peso','Peso (kg)','peso_kg',''),('bulto_largo','Largo (cm)','largo_cm',''),('bulto_ancho','Ancho (cm)','ancho_cm',''),('bulto_alto','Alto (cm)','alto_cm','')] %}
+<label>{{ label }}<input name="{{ name }}" type="text" inputmode="{{ 'numeric' if name == 'bulto_cantidad' else 'decimal' }}" data-numero="{{ 'entero' if name == 'bulto_cantidad' else 'decimal' }}" value="{{ b.get(key,default) }}" required maxlength="12"></label>
+{% endfor %}</div></div>
+{% endmacro %}
 {% block content %}
-{% if not ambito %}
-    {% set flujo = 'cotizar' %}
-    {% set nacional_url = '/portal/cotizar?ambito=nacional' %}
-    {% set internacional_url = '/portal/cotizar?ambito=internacional' %}
-    {% include 'portal/_ambito_selector.html' %}
-{% elif ambito == 'nacional' %}
-    {% include 'portal/_cotizador_nacional.html' %}
-{% else %}
-<div class="quote-screen {% if opciones %}has-results{% endif %}">
-    <header class="quote-screen-head">
-        <div>
-            <span class="eyebrow">Cotizador</span>
-            <h1>{% if opciones %}Compará las opciones{% else %}Cotizá tu envío{% endif %}</h1>
-            <p>{% if opciones %}Usalas como referencia y continuá con el destino precargado.{% else %}Estimá el precio con la ruta, el peso y las medidas.{% endif %}</p>
-        </div>
-        {% if opciones %}
-        <div class="quote-modify-actions">
-            <button type="button" class="btn btn-ghost btn-sm" id="quote-modify">Modificar datos</button>
-            <noscript><a href="/portal/cotizar?ambito=internacional" class="btn btn-ghost btn-sm">Nueva cotización</a></noscript>
-        </div>
-        {% endif %}
-    </header>
-
-    <div class="quote-operator-strip" aria-label="Estado de integraciones internacionales">
-        <div class="quote-operator-layout">
-            <div class="quote-operator-strip-copy">
-                <span class="quote-operator-strip-title">Operadores internacionales</span>
-                <strong>Conexiones para cotizar</strong>
-            </div>
-            <div class="quote-operator-list">
-                {% for operador in operadores_internacionales %}
-                <span class="quote-operator-chip {{ 'ready' if operador.estado == 'disponible_segun_cuenta' else 'pending' }}" data-carrier="{{ operador.id }}">
-                    {% if operador.logo %}
-                    <span class="quote-operator-logo-shell" aria-hidden="true">
-                        <img class="quote-operator-logo" src="{{ operador.logo }}" alt="">
-                    </span>
-                    {% endif %}
-                    <span class="quote-operator-copy">
-                        <strong>{{ operador.nombre }}</strong>
-                        <small class="quote-operator-state"><i aria-hidden="true"></i>{{ operador.estado_label }}</small>
-                    </span>
-                </span>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-
-    {% if error %}
-    <div class="msg error quote-error">
-        <strong>No pudimos cotizar ese envío.</strong> {{ error }}
-    </div>
-    {% endif %}
-
-    <div class="quote-stage" id="quote-stage" aria-busy="false">
-        <section class="card quote-form-card {% if opciones %}is-hidden{% endif %}" id="quote-form-panel">
-            <form data-draft-key="cotizar:internacional" data-draft-server="{{ 1 if request.method == 'POST' else 0 }}" id="form-cotizar" method="POST" action="/portal/cotizar">
-                <input type="hidden" name="ambito" value="internacional">
-                <div class="quote-form-overview">
-                    <div class="quote-form-overview-copy">
-                        <span>Cotización paso a paso</span>
-                        <strong id="quote-step-title">Paso 1 de 2 · Elegí la ruta</strong>
-                        <small id="quote-step-description">Indicá desde dónde sale el envío y a qué país llega.</small>
-                    </div>
-                    <div class="quote-stepper" aria-label="Progreso de la cotización">
-                        <span class="is-active" data-quote-step="route" role="button" tabindex="0" aria-label="Volver a la ruta"><b>1</b><small>Ruta</small></span>
-                        <i aria-hidden="true"></i>
-                        <span data-quote-step="packages" role="button" tabindex="0" aria-label="Ir a las cajas"><b>2</b><small>Caja</small></span>
-                    </div>
-                </div>
-                <div class="quote-route-confirmation" id="quote-route-confirmation" hidden>
-                    <span><small>Ruta elegida</small><strong id="quote-route-summary">Elegí destino</strong></span>
-                    <button type="button" id="quote-edit-route">Cambiar ruta</button>
-                </div>
-                <p class="quote-completion" id="quote-progress-label" aria-live="polite">Elegí origen y destino para continuar.</p>
-                <div class="quote-form-sections">
-                    <div class="quote-form-block" data-quote-section="route">
-                        <div class="quote-block-head">
-                            <span>1</span>
-                            <div><strong>Origen y destino</strong><small>Seleccioná los dos países</small></div>
-                            <em data-quote-state="route">Pendiente</em>
-                        </div>
-                        <div class="quote-route-tools" data-route-shortcuts hidden>
-                            <div class="quote-frequent-heading">
-                                {% if rutas_frecuentes %}
-                                <strong>Tus rutas frecuentes</strong>
-                                <span data-help="Tus rutas frecuentes">Tus guías vigentes de los últimos 12 meses. No incluye canceladas, reemplazadas ni pruebas. El botón completa los países; revisá ciudad y código postal.</span>
-                                {% endif %}
-                                <button type="button" class="quote-reverse-route" data-route-reverse disabled>⇄ Invertir ruta</button>
-                            </div>
-                            {% if rutas_frecuentes %}
-                            <div class="quote-frequent-list" role="group" aria-label="Tus rutas frecuentes">
-                                {% for ruta in rutas_frecuentes %}
-                                <button type="button" class="quote-frequent-route"
-                                        data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}"
-                                        aria-pressed="false" aria-label="Cotizar de {{ ruta.origen_nombre }} a {{ ruta.destino_nombre }}"
-                                        title="{{ ruta.envios }} envíos en los últimos 12 meses">
-                                    <span>{{ ruta.origen_nombre }}</span><span aria-hidden="true">→</span><span>{{ ruta.destino_nombre }}</span>
-                                </button>
-                                {% endfor %}
-                            </div>
-                            {% endif %}
-                        </div>
-                        <div class="quote-route-grid">
-                            <div class="form-group">
-                                <label for="origen_pais">Origen</label>
-                                <select name="origen_pais" id="origen_pais" data-searchable required>
-                                    {% for iso, nom in paises_origen %}
-                                    {% set ref = referencias_paises.get(iso, {}) %}
-                                    <option value="{{ iso }}"
-                                            data-ref-city="{{ ref.get('city', '') }}"
-                                            data-ref-postal="{{ ref.get('postal_code', '') }}"
-                                            {% if iso == (form.origen_pais or 'AR') %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="destino_pais">Destino</label>
-                                <select name="destino_pais" id="destino_pais" data-searchable required>
-                                    <option value="" disabled {% if not form.destino_pais %}selected{% endif %}>Elegí destino</option>
-                                    {% for iso, nom in paises_destino %}
-                                    {% set ref = referencias_paises.get(iso, {}) %}
-                                    <option value="{{ iso }}"
-                                            data-ref-city="{{ ref.get('city', '') }}"
-                                            data-ref-postal="{{ ref.get('postal_code', '') }}"
-                                            {% if iso == form.destino_pais %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="quote-location-grid">
-                            <div class="form-group">
-                                <label for="origen_ciudad">Ciudad de origen</label>
-                                <input type="text" name="origen_ciudad" id="origen_ciudad"
-                                       required autocomplete="address-level2"
-                                       value="{{ form.origen_ciudad or '' }}"
-                                       placeholder="Ej. Buenos Aires">
-                            </div>
-                            <div class="form-group">
-                                <label for="origen_cp_internacional">Código postal de origen</label>
-                                <input type="text" name="origen_cp_internacional" id="origen_cp_internacional"
-                                       required autocomplete="postal-code"
-                                       value="{{ form.origen_cp_internacional or '' }}"
-                                       placeholder="Ej. 1043">
-                            </div>
-                            <div class="form-group">
-                                <label for="destino_ciudad_internacional">Ciudad de destino</label>
-                                <input type="text" name="destino_ciudad_internacional" id="destino_ciudad_internacional"
-                                       required autocomplete="address-level2"
-                                       value="{{ form.destino_ciudad_internacional or '' }}"
-                                       placeholder="Ej. Auckland">
-                            </div>
-                            <div class="form-group">
-                                <label for="destino_cp_internacional">Código postal de destino</label><span data-help="Ciudad y código postal">Permiten validar cobertura y zonas remotas. Corregí los datos sugeridos si no coinciden con el destino.</span>
-                                <input type="text" name="destino_cp_internacional" id="destino_cp_internacional"
-                                       required autocomplete="postal-code"
-                                       value="{{ form.destino_cp_internacional or '' }}"
-                                       placeholder="Ej. 1010">
-                            </div>
-                        </div>
-                        <button type="button" id="quote-route-next" class="btn btn-primary btn-sm">Continuar con las cajas →</button>
-                    </div>
-
-                    <div class="quote-form-block" data-quote-section="packages">
-                        <div class="quote-block-head">
-                            <span>2</span>
-                            <div><strong>Información de la caja</strong><small>Peso, medidas y valor declarado</small></div>
-                            <em data-quote-state="packages">Pendiente</em>
-                        </div>
-                        <div class="quote-package-list" id="quote-package-list">
-                            {% for b in form.bultos or [{}] %}
-                            <div class="quote-package-row" data-package-row>
-                                <div class="quote-package-row-head">
-                                    <strong>Caja <span data-package-number>{{ loop.index }}</span></strong>
-                                    <button type="button" class="quote-remove-package" data-remove-package aria-label="Quitar caja {{ loop.index }}">Quitar</button>
-                                </div>
-                                <div class="quote-package-grid">
-                                    <div class="form-group">
-                                        <label>Cantidad iguales</label>
-                                        <input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" required value="{{ b.cantidad or 1 }}">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Peso por caja (kg)</label>
-                                        <input type="text" name="bulto_peso" inputmode="decimal" data-numero="decimal" required value="{{ b.peso_kg or '' }}" placeholder="Ej. 5,5">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Largo (cm)</label>
-                                        <input type="text" name="bulto_largo" inputmode="decimal" data-numero="decimal" required value="{{ b.largo_cm or '' }}">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Ancho (cm)</label>
-                                        <input type="text" name="bulto_ancho" inputmode="decimal" data-numero="decimal" required value="{{ b.ancho_cm or '' }}">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Alto (cm)</label>
-                                        <input type="text" name="bulto_alto" inputmode="decimal" data-numero="decimal" required value="{{ b.alto_cm or '' }}">
-                                    </div>
-                                </div>
-                                <div class="mini-row" data-package-weights aria-live="polite">
-                                    <span>Peso por caja</span>
-                                    <strong>Completá peso y medidas</strong>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        </div>
-                        <div class="quote-package-actions">
-                            <button type="button" class="btn btn-ghost btn-sm" id="quote-add-package"><span aria-hidden="true">+</span> Agregar otra caja</button>
-                            <div class="form-group quote-declared-value">
-                                <label for="valor_declarado_usd">Valor declarado total (USD)</label>
-                                <input type="text" name="valor_declarado_usd" id="valor_declarado_usd" inputmode="decimal" data-numero="monto" required value="{{ form.valor_declarado_usd or '' }}" placeholder="Ej. 100">
-                            </div>
-                        </div>
-                        <template id="quote-package-template">
-                            <div class="quote-package-row" data-package-row>
-                                <div class="quote-package-row-head">
-                                    <strong>Caja <span data-package-number></span></strong>
-                                    <button type="button" class="quote-remove-package" data-remove-package>Quitar</button>
-                                </div>
-                                <div class="quote-package-grid">
-                                    <div class="form-group"><label>Cantidad iguales</label><input type="text" name="bulto_cantidad" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" required value="1"></div>
-                                    <div class="form-group"><label>Peso por caja (kg)</label><input type="text" name="bulto_peso" inputmode="decimal" data-numero="decimal" required placeholder="Ej. 5,5"></div>
-                                    <div class="form-group"><label>Largo (cm)</label><input type="text" name="bulto_largo" inputmode="decimal" data-numero="decimal" required></div>
-                                    <div class="form-group"><label>Ancho (cm)</label><input type="text" name="bulto_ancho" inputmode="decimal" data-numero="decimal" required></div>
-                                    <div class="form-group"><label>Alto (cm)</label><input type="text" name="bulto_alto" inputmode="decimal" data-numero="decimal" required></div>
-                                </div>
-                                <div class="mini-row" data-package-weights aria-live="polite"><span>Peso por caja</span><strong>Completá peso y medidas</strong></div>
-                            </div>
-                        </template>
-                        <div class="card" style="margin-top:14px;padding:12px 16px;" id="quote-weight-summary" aria-live="polite">
-                            <div class="mini-row"><span>Peso real total</span><strong data-weight-real>—</strong></div>
-                            <div class="mini-row"><span>Peso volumétrico total · divisor 5000</span><strong data-weight-volume>—</strong></div>
-                            <div class="mini-row"><span>Peso facturable total</span><strong data-weight-billable>—</strong></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="quote-submit-row" id="quote-submit-row">
-                    <p>Precio estimado. Se confirma con la dirección completa antes de emitir.</p>
-                    <button type="submit" class="btn btn-primary" id="quote-submit">Cotizar <span aria-hidden="true">→</span></button>
-                </div>
-            </form>
-        </section>
-
-        <div id="toro-loading" class="dots-loader quote-loader" role="status" aria-live="polite" hidden>
-            <div class="matrix-pill"><div class="matrix"></div></div>
-            <p>Consultando tarifas de la ruta…</p>
-        </div>
-
-        {% if opciones %}
-        <section id="resultado" class="quote-result-panel fade-up" tabindex="-1"
-                 aria-label="Opciones estimadas para tu envío" aria-live="polite">
-            <div class="quote-result-summary">
-                <div><span>Ruta</span><strong>{{ resultado.ruta }}</strong></div>
-                <div><span>Peso facturable · {{ resultado.cantidad_bultos }} caja{% if resultado.cantidad_bultos != 1 %}s{% endif %}</span><strong>{{ resultado.peso_usado_kg }} kg</strong></div>
-                <div><span>Real / volumétrico</span><strong>{{ resultado.peso_real_kg }} / {{ resultado.peso_volumetrico_kg }} kg</strong></div>
-                {% if resultado.cobra_por_volumen %}<div><span>Criterio</span><strong class="warn">Se cobra por volumen</strong></div>{% endif %}
-                <div><span>Valor declarado</span><strong>USD {{ '%g'|format(resultado.valor_declarado_usd) }}</strong></div>
-            </div>
-
-            <div class="quote-options quote-options-compact">
-                {% for op in opciones %}
-                <article class="price-card quote-price-card" data-carrier="{{ op.carrier_id }}"
-                         aria-label="{{ op.servicio_nombre }}: {{ '{:,.0f}'.format(op.precio_final_ars).replace(',', '.') }} pesos estimados, {{ op.dias_estimados }} días estimados.">
-                    <div class="pc-badge quote-carrier-head">
-                        <span><strong>{{ op.carrier_nombre }}</strong><small>{{ op.servicio }}</small></span>
-                        {% if op.carrier_logo %}<img class="quote-carrier-logo" src="{{ op.carrier_logo }}" alt="" aria-hidden="true">{% endif %}
-                    </div>
-                    <div class="quote-price-body">
-                        <div class="was">Estimación del transporte</div>
-                        <div class="big">$ {{ "{:,.0f}".format(op.precio_final_ars).replace(",", ".") }}<span class="cur">ARS</span></div>
-                    </div>
-                    <div class="quote-price-foot">
-                        <span>USD {{ op.precio_final_usd }} · {{ op.dias_estimados }} días</span>
-                    </div>
-                    <a href="/portal/envios/nuevo?ambito=internacional&amp;courier={{ op.carrier_id }}&amp;origen={{ form.origen_pais }}&amp;destino={{ destino_sel }}{% if cajas_cotizadas %}&amp;cajas={{ cajas_cotizadas|urlencode }}&amp;valor_cotizado={{ form.valor_declarado_usd|urlencode }}{% endif %}"
-                       class="btn btn-primary btn-sm quote-select-carrier">
-                        Elegir {{ op.carrier_nombre }}
-                    </a>
-                    {% if es_reseller and op.reseller_quote_id %}
-                    <form method="POST" action="/portal/cotizaciones/reseller.pdf" target="_blank" style="margin-top:10px;display:grid;gap:7px;">
-                        <input type="hidden" name="quote_id" value="{{ op.reseller_quote_id }}">
-                        <label for="precio-reseller-{{ loop.index }}" style="font-size:11px;color:var(--fg-3);">Precio a mostrar en el PDF (ARS)</label>
-                        <input id="precio-reseller-{{ loop.index }}" type="text" name="precio" value="{{ '%.2f'|format(op.precio_final_ars) }}" inputmode="decimal" data-numero="monto" required>
-                        <button type="submit" class="btn btn-ghost btn-sm">Descargar cotización PDF</button>
-                    </form>
-                    {% endif %}
-                </article>
-                {% endfor %}
-            </div>
-
-            <div class="quote-result-actions">
-                <p class="quote-result-note">Elegí una opción para continuar con el envío.</p>
-            </div>
-        </section>
-        {% endif %}
-
-        {% if no_disponibles %}
-        <div class="quote-unavailable" aria-label="Couriers sin tarifa para esta referencia">
-            {% for courier in no_disponibles %}
-            <span><strong>{{ courier.nombre }}</strong> — {{ courier.motivo or 'No cotizó esta referencia.' }}</span>
+<div class="quote-screen unified-quote" data-quote-active="{{ ambito or 'internacional' }}">
+    <header class="uq-heading"><div><span class="eyebrow">TAURO SOLUTIONS</span><h1>Cotizá tu próximo envío</h1></div><span class="uq-live"><i></i>Tarifas de tu cuenta</span></header>
+    <nav class="uq-scopes" aria-label="Tipo de envío">
+        {% for scope,title,subtitle in [('nacional','Nacional','Dentro de Argentina'),('internacional','Internacional','Entre países')] %}
+        <a href="/portal/cotizar?ambito={{ scope }}" data-quote-scope="{{ scope }}" class="{{ 'is-active' if scope == ambito else '' }}" {% if scope == ambito %}aria-current="true"{% endif %}>{{ scope_icon(scope) }}<span><strong>{{ title }}</strong><small>{{ subtitle }}</small></span></a>
+        {% endfor %}
+    </nav>
+    {% for scope in ['internacional','nacional'] %}
+    {% set f = form if ambito == scope else {} %}
+    <section class="uq-panel" data-quote-panel="{{ scope }}" {% if scope != ambito %}hidden{% endif %}>
+        <div class="uq-layout">
+        <form id="{{ 'form-cotizar' if scope == 'internacional' else 'form-cotizar-nacional' }}" data-unified-form="{{ scope }}" data-draft-key="cotizar:{{ scope }}" data-draft-server="{{ 1 if request.method == 'POST' and ambito == scope else 0 }}" action="/portal/cotizar" method="POST">
+            <input type="hidden" name="ambito" value="{{ scope }}">
+            {% if scope == 'nacional' %}<input type="hidden" name="origen_pais" value="AR"><input type="hidden" name="destino_pais" value="AR">{% endif %}
+            {% if scope == 'internacional' %}
+            <details class="uq-frequent" data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-head"><span>Tus últimos destinos</span><button type="button" data-route-reverse disabled>⇄ Invertir</button></div>
+            {% if rutas_frecuentes %}<div class="quote-frequent-list">{% for ruta in rutas_frecuentes %}<button type="button" class="quote-frequent-route" data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}" aria-pressed="false">{{ ruta.origen_nombre }} <span aria-hidden="true">→</span> {{ ruta.destino_nombre }}</button>{% endfor %}</div>{% endif %}</details>
+            {% endif %}
+            <div class="uq-route-grid">
+            {% for side,label,letter in [('origen','Origen','A'),('destino','Destino','B')] %}
+                <fieldset class="uq-route" data-location-side="{{ side }}"><legend><b>{{ letter }}</b>{{ label }}</legend>
+                {% if scope == 'internacional' %}
+                    {% set name = side ~ '_pais' %}
+                    <div class="uq-field"><label for="{{ name }}">País</label><select name="{{ name }}" id="{{ name }}" required data-country-flags data-search-placeholder="Buscar país o código"><option value="">Elegí país</option>{% for iso,nom in paises_destino %}<option value="{{ iso }}" {% if iso == f.get(name, 'AR' if side == 'origen' else '') %}selected{% endif %}>{{ nom }} ({{ iso }})</option>{% endfor %}</select></div>
+                    {% set city = 'origen_ciudad' if side == 'origen' else 'destino_ciudad_internacional' %}{% set postal = side ~ '_cp_internacional' %}
+                    {{ field(city,'Ciudad',f.get(city,'')) }}{{ field(postal,'Código postal',f.get(postal,'')) }}
+                {% else %}
+                    {% set name = side ~ '_provincia' %}
+                    <div class="uq-field"><label for="{{ name }}">Provincia</label><select name="{{ name }}" id="{{ name }}" required><option value="">Elegí provincia</option>{% for code,nom in provincias %}<option value="{{ code }}" {% if code == f.get(name) %}selected{% endif %}>{{ 'CABA' if code == 'C' else nom }}</option>{% endfor %}</select></div>
+                    {{ field(side ~ '_localidad','Localidad',f.get(side ~ '_localidad','')) }}{{ field(side ~ '_cp','Código postal',f.get(side ~ '_cp',''),placeholder='Ej. 5000') }}
+                {% endif %}
+                <input type="hidden" name="{{ side }}_referencia" value="{{ f.get(side ~ '_referencia','') }}" data-draft-persist>
+                <div class="uq-location-note" data-location-note hidden>Referencia para cotizar <span data-help="Ciudad y código postal">El código sugerido sirve para estimar la tarifa. Al emitir completás el domicilio y CP exactos. Datos: GeoNames, CC BY 4.0.</span><a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a></div>
+                </fieldset>
             {% endfor %}
+            </div>
+            <section class="uq-packages"><div class="uq-section-title"><h2>Paquetes</h2><span data-help="Peso y medidas">Ingresá el peso y las medidas de cada caja cerrada. El operador compara peso real y volumétrico según su servicio.</span></div>
+            {% if scope == 'internacional' %}
+                <div id="quote-package-list">{% for b in f.get('bultos') or [{}] %}{{ boxes(b,loop.index) }}{% endfor %}</div>
+                <div class="uq-weights" data-quote-weights hidden><span>Peso real <b data-weight-real>—</b></span><span>Peso volumétrico <b data-weight-volume>—</b></span><span>Peso facturable <b data-weight-billable>—</b></span><span data-help="Peso de referencia">Se cobra por volumen cuando supera el peso real. Referencia internacional: largo × ancho × alto / 5000. El operador confirma el peso final.</span></div>
+                <template id="quote-package-template">{{ boxes() }}</template>
+                <button type="button" class="uq-add" id="quote-add-package">+ Agregar otra caja</button>
+                {{ field('valor_declarado_usd','Valor declarado total (USD)',f.get('valor_declarado_usd',''),true,'monto','Ej. 100') }}
+            {% else %}
+                <small class="uq-package-note">Para cajas del mismo peso y medidas.</small>
+                <div class="uq-package-grid">
+                {% for name,label,kind,default in [('cantidad_bultos','Cantidad','entero','1'),('peso_kg','Peso (kg)','decimal',''),('largo_cm','Largo (cm)','decimal',''),('ancho_cm','Ancho (cm)','decimal',''),('alto_cm','Alto (cm)','decimal','')] %}{{ field(name,label,f.get(name,default),true,kind) }}{% endfor %}
+                </div>{{ field('valor_declarado_ars','Valor declarado total (ARS)',f.get('valor_declarado_ars',''),true,'monto','Ej. 40.000') }}
+            {% endif %}
+            </section>
+            <div class="uq-form-foot"><span data-quote-status role="status" aria-live="polite">Completá los datos para ver las tarifas.</span><button type="submit" class="btn btn-ghost btn-sm" data-quote-submit>Consultar tarifas</button></div>
+        </form>
+        <aside class="uq-results" aria-label="Opciones de envío"><div class="uq-results-head"><h2>Opciones de envío</h2><span data-help="Operadores de tu cuenta">Comparamos los operadores habilitados para tu cuenta y esta ruta, con tu tarifa acordada.</span></div><div data-quote-results>{% if scope == ambito %}{% include 'portal/_quote_results.html' %}{% else %}<div data-quote-response data-scope="{{ scope }}"><div class="uq-empty"><span class="uq-empty-symbol" aria-hidden="true">↗</span><strong>Tu próxima ruta empieza acá</strong><p>Completá origen, destino y paquetes.<br>Las tarifas aparecen automáticamente.</p></div></div>{% endif %}</div></aside>
         </div>
-        {% endif %}
-    </div>
+    </section>
+    {% endfor %}
 </div>
-
-<script nonce="{{ request.state.csp_nonce }}">
-(function () {
-    var form = document.getElementById("form-cotizar");
-    var panel = document.getElementById("quote-form-panel");
-    var result = document.getElementById("resultado");
-    var loader = document.getElementById("toro-loading");
-    var modify = document.getElementById("quote-modify");
-    var stage = document.getElementById("quote-stage");
-    var packageList = document.getElementById("quote-package-list");
-    var packageTemplate = document.getElementById("quote-package-template");
-    var addPackage = document.getElementById("quote-add-package");
-    var routeSummary = document.getElementById("quote-route-summary");
-    var progressLabel = document.getElementById("quote-progress-label");
-    var submit = document.getElementById("quote-submit");
-    var submitRow = document.getElementById("quote-submit-row");
-    var routeBlock = document.querySelector('[data-quote-section="route"]');
-    var packagesBlock = document.querySelector('[data-quote-section="packages"]');
-    var routeConfirmation = document.getElementById("quote-route-confirmation");
-    var editRoute = document.getElementById("quote-edit-route");
-    var stepTitle = document.getElementById("quote-step-title");
-    var stepDescription = document.getElementById("quote-step-description");
-    var routeStep = document.querySelector('[data-quote-step="route"]');
-    var packagesStep = document.querySelector('[data-quote-step="packages"]');
-    var origin = document.getElementById("origen_pais");
-    var destination = document.getElementById("destino_pais");
-    var originCity = document.getElementById("origen_ciudad");
-    var originPostal = document.getElementById("origen_cp_internacional");
-    var destinationCity = document.getElementById("destino_ciudad_internacional");
-    var destinationPostal = document.getElementById("destino_cp_internacional");
-    var editingRoute = false;
-    var quoteDraft = window.TauroDraft && window.TauroDraft.attach(form, {
-      capture: function () { return {packages:packageList.querySelectorAll('[data-package-row]').length, editingRoute:form.dataset.editingRoute === "1"}; },
-      prepare: function (data) {
-        var count = Math.max(1, Math.min(20, Number(data.packages) || 1));
-        while (packageList.querySelectorAll('[data-package-row]').length < count) packageList.appendChild(packageTemplate.content.cloneNode(true));
-        Array.from(packageList.querySelectorAll('[data-package-row]')).slice(count).forEach(function (row) { row.remove(); });
-      },
-      restore: function (data) { editingRoute = Boolean(data.editingRoute); }
-    });
-
-
-    function applyLocationReference(select, cityInput, postalInput, force) {
-        if (!select || !cityInput || !postalInput) return;
-        var option = select.options[select.selectedIndex];
-        var city = option ? option.dataset.refCity || "" : "";
-        var postal = option ? option.dataset.refPostal || "" : "";
-        if (force || !cityInput.value.trim()) cityInput.value = city;
-        if (force || !postalInput.value.trim()) postalInput.value = postal;
-    }
-
-    function numberFrom(value) {
-        var normalized = String(value || "").trim();
-        if (normalized.indexOf(",") >= 0) normalized = normalized.replace(/\./g, "").replace(",", ".");
-        var result = Number(normalized);
-        return Number.isFinite(result) ? result : 0;
-    }
-
-    function selectedName(select) {
-        if (!select || !select.value) return "";
-        var option = select.options[select.selectedIndex];
-        return option ? option.text.replace(/\s*\([A-Z]{2}\)\s*$/, "") : select.value;
-    }
-
-    function setSectionState(section, complete) {
-        var block = document.querySelector('[data-quote-section="' + section + '"]');
-        var label = document.querySelector('[data-quote-state="' + section + '"]');
-        if (block) block.classList.toggle("is-complete", complete);
-        if (label) label.textContent = complete ? "Listo" : "Pendiente";
-    }
-
-    function showQuoteStep(routeReady, quoteReady) {
-        var showPackages = routeReady && !editingRoute;
-      if (form) form.dataset.editingRoute = editingRoute ? "1" : "0";
-        if (form) form.classList.add("quote-flow-enabled");
-        if (routeBlock) routeBlock.classList.toggle("is-step-hidden", showPackages);
-        if (packagesBlock) packagesBlock.classList.toggle("is-step-hidden", !showPackages);
-        if (routeConfirmation) routeConfirmation.hidden = !showPackages;
-        if (submitRow) submitRow.hidden = !showPackages;
-        if (routeStep) {
-            routeStep.classList.toggle("is-active", !showPackages);
-            routeStep.classList.toggle("is-complete", showPackages);
-        }
-        if (packagesStep) {
-            packagesStep.classList.toggle("is-active", showPackages);
-            packagesStep.classList.toggle("is-complete", showPackages && quoteReady);
-        }
-        if (stepTitle) stepTitle.textContent = showPackages
-            ? "Paso 2 de 2 · Completá la caja"
-            : "Paso 1 de 2 · Elegí la ruta";
-        if (stepDescription) stepDescription.textContent = showPackages
-            ? "Ingresá peso, medidas y valor declarado para obtener la tarifa."
-            : "Indicá desde dónde sale el envío y a qué país llega.";
-    }
-
-    function syncQuotePreview() {
-        if (!form || !packageList) return;
-        var declared = document.getElementById("valor_declarado_usd");
-        var rows = Array.from(packageList.querySelectorAll("[data-package-row]"));
-        var countriesReady = Boolean(origin && origin.value && destination && destination.value);
-        var locationReady = Boolean(
-            originCity && originCity.value.trim()
-            && originPostal && originPostal.value.trim()
-            && destinationCity && destinationCity.value.trim()
-            && destinationPostal && destinationPostal.value.trim()
-        );
-        var routeReady = countriesReady && locationReady;
-        var packagesReady = rows.length > 0;
-        var physicalBoxes = 0;
-        var totalWeight = 0;
-        var totalVolumetric = 0;
-        var totalBillable = 0;
-
-        rows.forEach(function (row) {
-            var quantity = Math.max(1, Math.round(numberFrom((row.querySelector('[name="bulto_cantidad"]') || {}).value)) || 1);
-            var weight = numberFrom((row.querySelector('[name="bulto_peso"]') || {}).value);
-            var length = numberFrom((row.querySelector('[name="bulto_largo"]') || {}).value);
-            var width = numberFrom((row.querySelector('[name="bulto_ancho"]') || {}).value);
-            var height = numberFrom((row.querySelector('[name="bulto_alto"]') || {}).value);
-            physicalBoxes += quantity;
-            totalWeight += quantity * weight;
-            var volumetric = length * width * height / 5000;
-            totalVolumetric += quantity * volumetric;
-            totalBillable += quantity * Math.max(weight, volumetric);
-            var rowSummary = row.querySelector("[data-package-weights]");
-            if (rowSummary) {
-                var rowStrong = rowSummary.querySelector("strong");
-                if (weight > 0 && length > 0 && width > 0 && height > 0) {
-                    rowStrong.textContent = "Real " + formatWeight(weight) + " · Volumétrico " + formatWeight(volumetric) + " · Facturable " + formatWeight(Math.max(weight, volumetric)) + (volumetric > weight ? " · Se cobra por volumen" : "");
-                } else {
-                    rowStrong.textContent = "Completá peso y medidas";
-                }
-            }
-            if (!(weight > 0 && length > 0 && width > 0 && height > 0)) packagesReady = false;
-        });
-
-        var realOutput = document.querySelector("[data-weight-real]");
-        var volumeOutput = document.querySelector("[data-weight-volume]");
-        var billableOutput = document.querySelector("[data-weight-billable]");
-        if (realOutput) realOutput.textContent = totalWeight > 0 ? formatWeight(totalWeight) : "—";
-        if (volumeOutput) volumeOutput.textContent = totalVolumetric > 0 ? formatWeight(totalVolumetric) : "—";
-        if (billableOutput) billableOutput.textContent = totalBillable > 0 ? formatWeight(totalBillable) + (totalVolumetric > totalWeight ? " · Se cobra por volumen" : "") : "—";
-
-        var declaredReady = numberFrom(declared && declared.value) > 0;
-        var originName = selectedName(origin) || "Origen";
-        var destinationName = selectedName(destination);
-        if (routeSummary) routeSummary.textContent = originName + " → " + (destinationName || "Elegí destino");
-
-        setSectionState("route", routeReady);
-        setSectionState("packages", packagesReady && declaredReady);
-
-        if (progressLabel) {
-            if (!countriesReady) progressLabel.textContent = "Elegí origen y destino para continuar.";
-            else if (!locationReady || editingRoute) progressLabel.textContent = "Completá ciudad y código postal de la ruta.";
-            else if (!packagesReady) progressLabel.textContent = "Completá el peso y las medidas de cada caja.";
-            else if (!declaredReady) progressLabel.textContent = "Indicá el valor declarado total.";
-            else progressLabel.textContent = "Todo listo para consultar la tarifa.";
-        }
-        var quoteReady = routeReady && packagesReady && declaredReady;
-        showQuoteStep(routeReady, quoteReady);
-        if (submit) {
-            submit.disabled = !quoteReady;
-            submit.classList.toggle("is-ready", quoteReady);
-        }
-    }
-
-    function formatWeight(value) {
-        return value.toLocaleString("es-AR", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + " kg";
-    }
-
-    function syncPackages() {
-        if (!packageList) return;
-        var rows = packageList.querySelectorAll("[data-package-row]");
-        rows.forEach(function (row, index) {
-            var number = row.querySelector("[data-package-number]");
-            var remove = row.querySelector("[data-remove-package]");
-            if (number) number.textContent = String(index + 1);
-            if (remove) {
-                remove.hidden = rows.length === 1;
-                remove.setAttribute("aria-label", "Quitar caja " + String(index + 1));
-            }
-        });
-        if (addPackage) addPackage.disabled = rows.length >= 20;
-        syncQuotePreview();
-    }
-
-    if (addPackage && packageList && packageTemplate) {
-        addPackage.addEventListener("click", function () {
-            if (packageList.querySelectorAll("[data-package-row]").length >= 20) return;
-            packageList.appendChild(packageTemplate.content.cloneNode(true));
-            syncPackages();
-            var rows = packageList.querySelectorAll("[data-package-row]");
-            var last = rows[rows.length - 1];
-            if (last) last.classList.add("is-entering");
-            var weight = last && last.querySelector('input[name="bulto_peso"]');
-            if (weight) weight.focus({ preventScroll: true });
-        });
-        packageList.addEventListener("click", function (event) {
-            var remove = event.target.closest("[data-remove-package]");
-            if (!remove) return;
-            var row = remove.closest("[data-package-row]");
-            if (row && packageList.querySelectorAll("[data-package-row]").length > 1) {
-                row.classList.add("is-removing");
-                window.setTimeout(function () {
-                    row.remove();
-                    syncPackages();
-                }, 160);
-            }
-        });
-        syncPackages();
-    }
-
-    if (form) {
-        form.addEventListener("tauro:route-choice", function () { editingRoute = true; });
-        form.addEventListener("input", syncQuotePreview);
-        form.addEventListener("change", function (event) {
-            if (event.target && event.target.id === "origen_pais") {
-                applyLocationReference(origin, originCity, originPostal, true);
-                  }
-            if (event.target && event.target.id === "destino_pais") {
-                applyLocationReference(destination, destinationCity, destinationPostal, true);
-                  }
-            syncQuotePreview();
-        });
-        if (routeBlock) {
-            routeBlock.addEventListener("focusin", function (event) {
-                if (event.target && event.target.matches("input")) editingRoute = true;
-            });
-        }
-        // Un campo vacío del borrador también expresa una decisión del cliente.
-        if (!(quoteDraft && quoteDraft.restored) && form.dataset.draftServer !== "1") {
-            applyLocationReference(origin, originCity, originPostal, false);
-            applyLocationReference(destination, destinationCity, destinationPostal, false);
-        }
-        syncQuotePreview();
-    }
-
-    function goRoute() {
-      editingRoute = true;
-      syncQuotePreview();
-      if (origin) origin.focus({preventScroll:true});
-    }
-    function goPackages() {
-      var invalid = Array.from(routeBlock.querySelectorAll("input,select")).find(function (el) { return !el.checkValidity(); });
-      if (invalid) { editingRoute = true; syncQuotePreview(); invalid.reportValidity(); return; }
-      editingRoute = false;
-      syncQuotePreview();
-      var weight = packageList.querySelector('[name="bulto_peso"]');
-      if (weight) weight.focus({preventScroll:true});
-    }
-    if (editRoute) editRoute.addEventListener("click", goRoute);
-    var nextRoute = document.querySelector("#quote-route-next");
-    if (nextRoute) nextRoute.addEventListener("click", goPackages);
-    [[routeStep, goRoute], [packagesStep, goPackages]].forEach(function (pair) {
-      if (!pair[0]) return;
-      pair[0].addEventListener("click", pair[1]);
-      pair[0].addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pair[1](); }
-      });
-    });
-
-    if (form) {
-        form.addEventListener("submit", function () {
-            panel.classList.add("is-hidden");
-            if (result) result.classList.add("is-hidden");
-            loader.hidden = false;
-            if (stage) stage.setAttribute("aria-busy", "true");
-        });
-    }
-    if (modify) {
-        modify.addEventListener("click", function () {
-            if (result) result.classList.add("is-hidden");
-            panel.classList.remove("is-hidden");
-            modify.hidden = true;
-            goPackages();
-        });
-    }
-    if (result) {
-        window.setTimeout(function () {
-            result.focus({ preventScroll: true });
-        }, 0);
-    }
-})();
-</script>
-{% endif %}
 {% endblock %}

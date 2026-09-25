@@ -127,3 +127,17 @@ def test_valor_de_cotizacion_se_conserva_sin_inventar_reparto_aduanero(monkeypat
         assert form['bultos'][0]['valor_declarado_caja_usd'] == 100.50
     else:
         assert 'valor_declarado_caja_usd' not in form['bultos'][0]
+
+
+def test_cotizador_traslada_ciudad_y_cp_sin_mezclar_otro_domicilio(monkeypatch):
+    _preparar_wizard(monkeypatch)
+    monkeypatch.setattr(pc,'obtener_remitente_para_envio',lambda _:dict(pais='AR',ciudad='Buenos Aires',cp='1000',direccion='Calle 1'))
+    cajas=json.dumps([dict(cantidad=1,peso_kg=2,largo_cm=20,ancho_cm=20,alto_cm=20)])
+    contexto=pc.envio_nuevo_form(_request(),ambito='internacional',cajas=cajas,origen='AR',destino='US',
+        origen_ciudad='Córdoba',origen_cp='5000',destino_ciudad='Miami',destino_cp='33101',cliente='DEMO')['context']
+    assert contexto['form']['rem_ciudad']=='Córdoba'
+    assert contexto['form']['rem_zip']=='5000'
+    assert contexto['form']['dest_ciudad']=='Miami'
+    assert contexto['form']['dest_zip']=='33101'
+    assert contexto['remitente'] is None
+    assert contexto['remitente_por_completar'] is True

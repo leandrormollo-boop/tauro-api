@@ -369,7 +369,7 @@ class FedExClient(CarrierBase):
                     lista = float(list_detail["totalNetCharge"])
                     if lista > 0:
                         costo_lista = lista
-                transit = (detail.get("commit", {}) or {}).get("transitDays", {}).get("value", "3-5")
+                transit = ((detail.get("commit") or {}).get("transitDays") or {}).get("value") or "A confirmar"
                 return {
                     "servicio": detail.get("serviceType", "INTERNATIONAL_PRIORITY"),
                     "servicio_nombre": detail.get("serviceName")

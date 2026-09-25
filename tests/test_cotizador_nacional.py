@@ -277,6 +277,8 @@ def test_post_nacional_acepta_coma_y_no_llama_carriers_internacionales(monkeypat
     monkeypatch.setattr(portal, "cotizar_referencia_couriers", no_llamar)
     monkeypatch.setattr(portal.templates, "TemplateResponse", respuesta_falsa)
 
+    from test_cotizador_unificado import configurar
+    factory, adapter = configurar(monkeypatch)
     respuesta = portal.cotizar_post(
         request=SimpleNamespace(),
         ambito="nacional",
@@ -289,7 +291,7 @@ def test_post_nacional_acepta_coma_y_no_llama_carriers_internacionales(monkeypat
         destino_provincia="Mendoza",
         destino_localidad="Mendoza",
         destino_cp="5500",
-        modalidad_destino="sucursal",
+        modalidad_destino="domicilio",
         cantidad_bultos="2",
         peso_kg="5,5",
         largo_cm="30,5",
@@ -302,9 +304,9 @@ def test_post_nacional_acepta_coma_y_no_llama_carriers_internacionales(monkeypat
     assert respuesta.status_code == 200
     assert respuesta.template == "portal/cotizar.html"
     assert respuesta.context["error"] is None
-    assert respuesta.context["resultado_nacional"]["bultos"][0]["peso_unitario_kg"] == "5.5"
-    assert respuesta.context["resultado_nacional"]["totales"]["peso_kg"] == "11"
-    assert respuesta.context["resultado_nacional"]["ruta"] == "Santa Fe → Mendoza"
+    assert str(adapter.quote.call_args.args[0].packages[0].weight_kg) == "5.5"
+    assert respuesta.context["resultado_nacional"]["resumen"]["peso_real_kg"] == "11"
+    assert respuesta.context["resultado_nacional"]["resumen"]["ruta"] == "Santa Fe → Mendoza"
 
 
 def test_post_nacional_deriva_argentina_si_un_form_viejo_no_manda_paises(monkeypatch):
@@ -316,6 +318,8 @@ def test_post_nacional_deriva_argentina_si_un_form_viejo_no_manda_paises(monkeyp
         ),
     )
 
+    from test_cotizador_unificado import configurar
+    factory, adapter = configurar(monkeypatch)
     respuesta = portal.cotizar_post(
         request=SimpleNamespace(),
         ambito="nacional",
@@ -339,8 +343,8 @@ def test_post_nacional_deriva_argentina_si_un_form_viejo_no_manda_paises(monkeyp
     )
 
     assert respuesta.context["error"] is None
-    assert respuesta.context["resultado_nacional"]["origen"]["pais"] == "AR"
-    assert respuesta.context["resultado_nacional"]["destino"]["pais"] == "AR"
+    assert adapter.quote.call_args.args[0].origin["pais"] == "AR"
+    assert adapter.quote.call_args.args[0].destination["pais"] == "AR"
 
 
 def test_post_nacional_rechaza_un_pais_forzado(monkeypatch):

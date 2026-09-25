@@ -1,542 +1,257 @@
-/* Cotizador nacional/internacional dentro de una ventana nativa <dialog>.
-   La página /portal/cotizar sigue siendo el fallback sin JavaScript y la
-   única fuente del formulario/resultados: no hay dos motores de precios. */
+/* Una pantalla, dos borradores. Las respuestas pertenecen a la revisión exacta
+   de los datos: nunca se puede elegir una tarifa de una edición anterior. */
+(function (factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory;
+  else window.TauroQuoteRequest = factory;
+})(function quoteRequest(io) {
+  var revision = 0, timer, controller, paused = false;
+  function cancel() {
+    revision += 1;
+    clearTimeout(timer);
+    if (controller) controller.abort();
+    controller = null;
+  }
+  async function run() {
+    cancel();
+    if (paused || !io.ready()) return;
+    var current = revision;
+    controller = new AbortController();
+    io.loading();
+    try {
+      var response = await io.fetch(controller.signal);
+      if (current === revision && !paused) io.render(response);
+    } catch (error) {
+      if (current === revision && !paused && error.name !== 'AbortError') io.error(error);
+    }
+  }
+  function changed() {
+    cancel();
+    io.invalidate(io.ready());
+    if (!paused && io.ready()) timer = setTimeout(run, io.delay === undefined ? 900 : io.delay);
+  }
+  return {changed: changed, run: run, pause: function () { paused = true; cancel(); },
+    resume: function () { paused = false; changed(); }};
+});
+
 (function () {
-  "use strict";
+  'use strict';
+  if (typeof document === 'undefined') return;
+  var dialog = document.getElementById('quote-window-dialog');
+  var content = dialog && dialog.querySelector('[data-cotizar-contenido]');
+  var opener, loadingController, initialized = new WeakMap();
 
-  var dialog = document.getElementById("quote-window-dialog");
-  if (!dialog) return;
-
-  var content = dialog.querySelector("[data-cotizar-contenido]");
-  var closeButton = dialog.querySelector("[data-cotizar-cerrar]");
-  var scopeLinks = dialog.querySelectorAll("[data-cotizar-scope]");
-  var opener = null;
-  var requestSerial = 0;
-  var cachedQuotes = {};
-
-  function numberFrom(value) {
-    var normalized = String(value || "").trim();
-    if (normalized.indexOf(",") >= 0) {
-      normalized = normalized.replace(/\./g, "").replace(",", ".");
+  function numeric(value, kind) {
+    if (window.TauroNumeros) {
+      var canonical = window.TauroNumeros.canonico(value, kind || "decimal");
+      return canonical.error ? NaN : Number(canonical.valor);
     }
-    var parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
+    var text = String(value || '').trim();
+    if (text.includes(',')) text = text.replace(/\./g, '').replace(',', '.');
+    return Number(text);
   }
-
-  function selectedName(select) {
-    if (!select || !select.value) return "";
-    var option = select.options[select.selectedIndex];
-    return option
-      ? option.text.replace(/\s*\([A-Z]{2}\)\s*$/, "")
-      : select.value;
+  function message(container, text, error) {
+    var el = document.createElement('p');
+    el.className = error ? 'uq-error' : 'uq-idle';
+    el.textContent = text;
+    if (error) el.setAttribute('role', 'alert');
+    container.replaceChildren(el);
   }
-
-  function loading(message) {
-    content.replaceChildren();
-    var state = document.createElement("div");
-    state.className = "quote-window-loading";
-    state.setAttribute("role", "status");
-    state.textContent = message || "Preparando el cotizador…";
-    content.appendChild(state);
-  }
-
-  function failure(message) {
-    content.replaceChildren();
-    var state = document.createElement("div");
-    state.className = "quote-window-failure";
-
-    var title = document.createElement("strong");
-    title.textContent = "No pudimos abrir el cotizador";
-    var detail = document.createElement("p");
-    detail.textContent = message || "Revisá tu conexión y volvé a intentar.";
-    var fallback = document.createElement("a");
-    fallback.className = "btn btn-primary btn-sm";
-    fallback.href = "/portal/cotizar?ambito=internacional";
-    fallback.textContent = "Abrir la página completa";
-
-    state.appendChild(title);
-    state.appendChild(detail);
-    state.appendChild(fallback);
-    content.appendChild(state);
-  }
-
-  function quoteFromHtml(html) {
-    var parsed = new DOMParser().parseFromString(html, "text/html");
-    var quote = parsed.querySelector(".quote-screen");
-    if (!quote) {
-      throw new Error("La sesión puede haber vencido o la respuesta no contiene el cotizador.");
-    }
-    var imported = document.importNode(quote, true);
-    imported.classList.add("quote-screen-window");
-    return imported;
-  }
-
-  function setSectionState(root, section, complete) {
-    var block = root.querySelector('[data-quote-section="' + section + '"]');
-    var label = root.querySelector('[data-quote-state="' + section + '"]');
-    if (block) block.classList.toggle("is-complete", complete);
-    if (label) label.textContent = complete ? "Listo" : "Pendiente";
-  }
-
-  function markScope(scope) {
-    scopeLinks.forEach(function (link) {
-      var active = link.dataset.cotizarScope === scope;
-      link.classList.toggle("on", active);
-      if (active) link.setAttribute("aria-current", "true");
-      else link.removeAttribute("aria-current");
-    });
-  }
-
-  function showInlineError(root, stage, message) {
-    var notice = root.querySelector("[data-quote-window-error]");
-    if (!notice) {
-      notice = document.createElement("div");
-      notice.className = "msg error quote-error";
-      notice.dataset.quoteWindowError = "1";
-      root.insertBefore(notice, stage || null);
-    }
-    notice.textContent = message || "No pudimos consultar la tarifa.";
-  }
-
-  function initializeNationalQuote(root) {
-    if (!root || root.dataset.quoteWindowReady === "1") return;
-    root.dataset.quoteWindowReady = "1";
-
-    var form = root.querySelector("#form-cotizar-nacional");
-    if (window.TauroDraft) window.TauroDraft.attach(form);
-    var panel = root.querySelector("#national-quote-form-panel");
-    var result = root.querySelector("#national-result");
-    var loader = root.querySelector("#national-loading");
-    var modify = root.querySelector("#national-modify");
-    var stage = root.querySelector("#national-quote-stage");
-
-    if (form) {
-      form.addEventListener("submit", function (event) {
-        if (event.defaultPrevented) return;
-        event.preventDefault();
-        if (!form.reportValidity()) return;
-
-        if (panel) panel.classList.add("is-hidden");
-        if (result) result.classList.add("is-hidden");
-        if (loader) loader.hidden = false;
-        if (stage) stage.setAttribute("aria-busy", "true");
-
-        var serial = ++requestSerial;
-        fetch(form.action, {
-          method: "POST",
-          body: new FormData(form),
-          credentials: "same-origin",
-          headers: { "X-Requested-With": "TauroQuoteWindow" }
-        })
-          .then(function (response) {
-            if (!response.ok) throw new Error("El servidor respondió " + response.status + ".");
-            return response.text();
-          })
-          .then(function (html) {
-            if (serial !== requestSerial || !dialog.open) return;
-            mountQuote(quoteFromHtml(html));
-          })
-          .catch(function (error) {
-            if (serial !== requestSerial || !dialog.open) return;
-            if (loader) loader.hidden = true;
-            if (panel) panel.classList.remove("is-hidden");
-            if (stage) stage.setAttribute("aria-busy", "false");
-            showInlineError(root, stage, error.message);
-          });
-      });
-    }
-
-    if (modify) {
-      modify.addEventListener("click", function () {
-        if (result) result.classList.add("is-hidden");
-        if (panel) panel.classList.remove("is-hidden");
-        modify.hidden = true;
-        var province = root.querySelector("#origen_provincia");
-        if (province) province.focus({ preventScroll: true });
-      });
-    }
-    if (result) {
-      window.setTimeout(function () { result.focus({ preventScroll: true }); }, 0);
-    }
-  }
-
-  function initializeQuote(root) {
-    if (root && root.classList.contains("national-quote-screen")) {
-      initializeNationalQuote(root);
-      return;
-    }
-    if (!root || root.dataset.quoteWindowReady === "1") return;
-    root.dataset.quoteWindowReady = "1";
-
-    var form = root.querySelector("#form-cotizar");
-    var panel = root.querySelector("#quote-form-panel");
-    var result = root.querySelector("#resultado");
-    var loader = root.querySelector("#toro-loading");
-    var modify = root.querySelector("#quote-modify");
-    var stage = root.querySelector("#quote-stage");
-    var packageList = root.querySelector("#quote-package-list");
-    var packageTemplate = root.querySelector("#quote-package-template");
-    var addPackage = root.querySelector("#quote-add-package");
-    var routeSummary = root.querySelector("#quote-route-summary");
-    var progressLabel = root.querySelector("#quote-progress-label");
-    var submit = root.querySelector("#quote-submit");
-    var submitRow = root.querySelector("#quote-submit-row");
-    var routeBlock = root.querySelector('[data-quote-section="route"]');
-    var packagesBlock = root.querySelector('[data-quote-section="packages"]');
-    var routeConfirmation = root.querySelector("#quote-route-confirmation");
-    var editRoute = root.querySelector("#quote-edit-route");
-    var stepTitle = root.querySelector("#quote-step-title");
-    var stepDescription = root.querySelector("#quote-step-description");
-    var routeStep = root.querySelector('[data-quote-step="route"]');
-    var packagesStep = root.querySelector('[data-quote-step="packages"]');
-    var origin = root.querySelector("#origen_pais");
-    var destination = root.querySelector("#destino_pais");
-    var originCity = root.querySelector("#origen_ciudad");
-    var originPostal = root.querySelector("#origen_cp_internacional");
-    var destinationCity = root.querySelector("#destino_ciudad_internacional");
-    var destinationPostal = root.querySelector("#destino_cp_internacional");
-    var editingRoute = false;
-    var quoteDraft = window.TauroDraft && window.TauroDraft.attach(form, {
-      capture: function () { return {packages:packageList.querySelectorAll('[data-package-row]').length, editingRoute:form.dataset.editingRoute === "1"}; },
-      prepare: function (data) {
-        var count = Math.max(1, Math.min(20, Number(data.packages) || 1));
-        while (packageList.querySelectorAll('[data-package-row]').length < count) packageList.appendChild(packageTemplate.content.cloneNode(true));
-        Array.from(packageList.querySelectorAll('[data-package-row]')).slice(count).forEach(function (row) { row.remove(); });
-      },
-      restore: function (data) { editingRoute = Boolean(data.editingRoute); }
-    });
-
-
-    function applyLocationReference(select, cityInput, postalInput, force) {
-      if (!select || !cityInput || !postalInput) return;
-      var option = select.options[select.selectedIndex];
-      var city = option ? option.dataset.refCity || "" : "";
-      var postal = option ? option.dataset.refPostal || "" : "";
-      if (force || !cityInput.value.trim()) cityInput.value = city;
-      if (force || !postalInput.value.trim()) postalInput.value = postal;
-    }
-
-    function showStep(routeReady, quoteReady) {
-      var showPackages = routeReady && !editingRoute;
-      if (form) form.dataset.editingRoute = editingRoute ? "1" : "0";
-      if (form) form.classList.add("quote-flow-enabled");
-      if (routeBlock) routeBlock.classList.toggle("is-step-hidden", showPackages);
-      if (packagesBlock) packagesBlock.classList.toggle("is-step-hidden", !showPackages);
-      if (routeConfirmation) routeConfirmation.hidden = !showPackages;
-      if (submitRow) submitRow.hidden = !showPackages;
-      if (routeStep) {
-        routeStep.classList.toggle("is-active", !showPackages);
-        routeStep.classList.toggle("is-complete", showPackages);
-      }
-      if (packagesStep) {
-        packagesStep.classList.toggle("is-active", showPackages);
-        packagesStep.classList.toggle("is-complete", showPackages && quoteReady);
-      }
-      if (stepTitle) stepTitle.textContent = showPackages
-        ? "Paso 2 de 2 · Completá la caja"
-        : "Paso 1 de 2 · Elegí la ruta";
-      if (stepDescription) stepDescription.textContent = showPackages
-        ? "Ingresá peso, medidas y valor declarado para obtener la tarifa."
-        : "Indicá desde dónde sale el envío y a qué país llega.";
-    }
-
-    function syncPreview() {
-      if (!form || !packageList) return;
-      var declared = root.querySelector("#valor_declarado_usd");
-      var rows = Array.from(packageList.querySelectorAll("[data-package-row]"));
-      var countriesReady = Boolean(
-        origin && origin.value && destination && destination.value
-      );
-      var locationReady = Boolean(
-        originCity && originCity.value.trim()
-        && originPostal && originPostal.value.trim()
-        && destinationCity && destinationCity.value.trim()
-        && destinationPostal && destinationPostal.value.trim()
-      );
-      var routeReady = countriesReady && locationReady;
-      var packagesReady = rows.length > 0;
-      var physicalBoxes = 0;
-      var totalWeight = 0;
-
-      rows.forEach(function (row) {
-        var quantityInput = row.querySelector('[name="bulto_cantidad"]');
-        var weightInput = row.querySelector('[name="bulto_peso"]');
-        var lengthInput = row.querySelector('[name="bulto_largo"]');
-        var widthInput = row.querySelector('[name="bulto_ancho"]');
-        var heightInput = row.querySelector('[name="bulto_alto"]');
-        var quantity = Math.max(1, Math.round(numberFrom(quantityInput && quantityInput.value)) || 1);
-        var weight = numberFrom(weightInput && weightInput.value);
-        var length = numberFrom(lengthInput && lengthInput.value);
-        var width = numberFrom(widthInput && widthInput.value);
-        var height = numberFrom(heightInput && heightInput.value);
-        physicalBoxes += quantity;
-        totalWeight += quantity * weight;
-        if (!(weight > 0 && length > 0 && width > 0 && height > 0)) packagesReady = false;
-      });
-
-      var declaredReady = numberFrom(declared && declared.value) > 0;
-      var originName = selectedName(origin) || "Origen";
-      var destinationName = selectedName(destination);
-      if (routeSummary) {
-        routeSummary.textContent = originName + " → " + (destinationName || "Elegí destino");
-      }
-      setSectionState(root, "route", routeReady);
-      setSectionState(root, "packages", packagesReady && declaredReady);
-
-      if (progressLabel) {
-        if (!countriesReady) progressLabel.textContent = "Elegí origen y destino para continuar.";
-        else if (!locationReady || editingRoute) progressLabel.textContent = "Completá ciudad y código postal de la ruta.";
-        else if (!packagesReady) progressLabel.textContent = "Completá el peso y las medidas de cada caja.";
-        else if (!declaredReady) progressLabel.textContent = "Indicá el valor declarado total.";
-        else progressLabel.textContent = "Todo listo para consultar la tarifa.";
-      }
-      var quoteReady = routeReady && packagesReady && declaredReady;
-      showStep(routeReady, quoteReady);
-      if (submit) {
-        submit.disabled = !quoteReady;
-        submit.classList.toggle("is-ready", quoteReady);
-      }
-    }
-
-    function syncPackages() {
-      if (!packageList) return;
-      var rows = packageList.querySelectorAll("[data-package-row]");
-      rows.forEach(function (row, index) {
-        var number = row.querySelector("[data-package-number]");
-        var remove = row.querySelector("[data-remove-package]");
-        if (number) number.textContent = String(index + 1);
-        if (remove) {
+  function init(root) {
+    if (initialized.has(root)) return initialized.get(root);
+    var controls = {}, locationControls = {}, active = root.dataset.quoteActive || 'internacional';
+    root.querySelectorAll('[data-unified-form]').forEach(function (form) {
+      var scope = form.dataset.unifiedForm, panel = form.closest('[data-quote-panel]');
+      var result = panel.querySelector('[data-quote-results]');
+      var status = form.querySelector('[data-quote-status]');
+      var submit = form.querySelector('[data-quote-submit]'), initial = true, hasCurrentQuote = false;
+      var packageList = form.querySelector('#quote-package-list');
+      var template = form.querySelector('#quote-package-template');
+      function renumber() {
+        if (!packageList) return;
+        var rows = packageList.querySelectorAll('[data-package-row]');
+        rows.forEach(function (row, i) {
+          row.querySelector('[data-package-number]').textContent = i + 1;
+          var remove = row.querySelector('[data-remove-package]');
           remove.hidden = rows.length === 1;
-          remove.setAttribute("aria-label", "Quitar caja " + String(index + 1));
-        }
-      });
-      if (addPackage) addPackage.disabled = rows.length >= 20;
-      syncPreview();
-    }
-
-    if (addPackage && packageList && packageTemplate) {
-      addPackage.addEventListener("click", function () {
-        if (packageList.querySelectorAll("[data-package-row]").length >= 20) return;
-        packageList.appendChild(packageTemplate.content.cloneNode(true));
-        syncPackages();
-        var rows = packageList.querySelectorAll("[data-package-row]");
-        var last = rows[rows.length - 1];
-        if (last) last.classList.add("is-entering");
-        var weight = last && last.querySelector('[name="bulto_peso"]');
-        if (weight) weight.focus({ preventScroll: true });
-      });
-
-      packageList.addEventListener("click", function (event) {
-        var remove = event.target.closest("[data-remove-package]");
-        if (!remove) return;
-        var row = remove.closest("[data-package-row]");
-        if (row && packageList.querySelectorAll("[data-package-row]").length > 1) {
-          row.classList.add("is-removing");
-          window.setTimeout(function () {
-            row.remove();
-            syncPackages();
-          }, 160);
-        }
-      });
-      syncPackages();
-    }
-
-    if (form) {
-      form.addEventListener("tauro:route-choice", function () { editingRoute = true; });
-      form.addEventListener("input", syncPreview);
-      form.addEventListener("change", function (event) {
-        if (event.target && event.target.id === "origen_pais") {
-          applyLocationReference(origin, originCity, originPostal, true);
-        }
-        if (event.target && event.target.id === "destino_pais") {
-          applyLocationReference(destination, destinationCity, destinationPostal, true);
-        }
-        syncPreview();
-      });
-      if (routeBlock) {
-        routeBlock.addEventListener("focusin", function (event) {
-          if (event.target && event.target.matches("input")) editingRoute = true;
+          remove.setAttribute('aria-label', 'Quitar caja ' + (i + 1));
         });
-        }
-      // Conservar también los campos que el cliente dejó vacíos en su borrador.
-      if (!(quoteDraft && quoteDraft.restored) && form.dataset.draftServer !== "1") {
-        applyLocationReference(origin, originCity, originPostal, false);
-        applyLocationReference(destination, destinationCity, destinationPostal, false);
+        form.querySelector('#quote-add-package').disabled = rows.length >= 20;
       }
-      syncPreview();
-
-      form.addEventListener("submit", function (event) {
-        if (event.defaultPrevented) return;
-        event.preventDefault();
-        if (!form.reportValidity()) return;
-
-        if (panel) panel.classList.add("is-hidden");
-        if (result) result.classList.add("is-hidden");
-        if (loader) loader.hidden = false;
-        if (stage) stage.setAttribute("aria-busy", "true");
-        if (submit) submit.disabled = true;
-
-        var serial = ++requestSerial;
-        fetch(form.action, {
-          method: "POST",
-          body: new FormData(form),
-          credentials: "same-origin",
-          headers: { "X-Requested-With": "TauroQuoteWindow" }
-        })
-          .then(function (response) {
-            if (!response.ok) throw new Error("El servidor respondió " + response.status + ".");
-            return response.text();
-          })
-          .then(function (html) {
-            if (serial !== requestSerial || !dialog.open) return;
-            mountQuote(quoteFromHtml(html));
-          })
-          .catch(function (error) {
-            if (serial !== requestSerial || !dialog.open) return;
-            if (loader) loader.hidden = true;
-            if (panel) panel.classList.remove("is-hidden");
-            if (stage) stage.setAttribute("aria-busy", "false");
-            if (submit) submit.disabled = false;
-            showInlineError(root, stage, error.message);
-          });
+      if (window.TauroDraft) window.TauroDraft.attach(form, packageList ? {
+        capture: function () { return {packages: packageList.children.length}; },
+        prepare: function (saved) {
+          var count = Math.max(1, Math.min(20, Number(saved.packages) || 1));
+          while (packageList.children.length < count) packageList.appendChild(template.content.cloneNode(true));
+          Array.from(packageList.children).slice(count).forEach(function (row) { row.remove(); });
+        }
+      } : {});
+      renumber();
+      var locations = window.TauroQuoteLocations && window.TauroQuoteLocations.attach(form);
+      locationControls[scope] = locations;
+      if (locations && scope === active) locations.resume();
+      function weights() {
+        var summary = form.querySelector('[data-quote-weights]');
+        if (!summary || !packageList) return;
+        var real = 0, volume = 0, billable = 0, complete = true;
+        packageList.querySelectorAll('[data-package-row]').forEach(function (row) {
+          function val(name) { var el = row.querySelector('[name="' + name + '"]'); return numeric(el.value, el.dataset.numero); }
+          var quantity = val('bulto_cantidad'), weight = val('bulto_peso');
+          var vol = val('bulto_largo') * val('bulto_ancho') * val('bulto_alto') / 5000;
+          if (![quantity, weight, vol].every(function (v) { return Number.isFinite(v) && v > 0; })) complete = false;
+          real += quantity * weight; volume += quantity * vol; billable += quantity * Math.max(weight, vol);
+        });
+        summary.hidden = !complete;
+        if (complete) [["real",real],["volume",volume],["billable",billable]].forEach(function (item) {
+          summary.querySelector('[data-weight-' + item[0] + ']').textContent = item[1].toLocaleString('es-AR',{maximumFractionDigits:2}) + ' kg';
+        });
+      }
+      function ready() {
+        weights();
+        if (locations && locations.pending()) return false;
+        return Array.from(form.querySelectorAll('[required]')).every(function (input) {
+          if (!input.value.trim() || !input.checkValidity()) return false;
+          if (!input.dataset.numero) return true;
+          var number = numeric(input.value, input.dataset.numero);
+          return Number.isFinite(number) && number > 0 && (input.dataset.numero !== 'entero' || Number.isInteger(number));
+        });
+      }
+      var control = window.TauroQuoteRequest({
+        ready: ready,
+        invalidate: function (complete) {
+          hasCurrentQuote = false; submit.textContent = 'Consultar tarifas';
+          if (initial && !complete) { initial = false; return; }
+          initial = false;
+          result.setAttribute('aria-busy', 'false');
+          status.textContent = complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.';
+          message(result, complete ? 'Las tarifas se actualizan automáticamente.' : 'Tus opciones aparecerán al completar los datos.');
+        },
+        loading: function () {
+          result.setAttribute('aria-busy', 'true');
+          status.textContent = 'Consultando tus operadores…';
+          message(result, 'Consultando tarifas disponibles…');
+        },
+        fetch: async function (signal) {
+          var timeout = setTimeout(function () { control.pause(); message(result, 'La consulta demoró demasiado. Volvé a consultar.', true); result.setAttribute('aria-busy','false'); status.textContent='Volvé a consultar las tarifas.'; }, 90000);
+          try {
+            var response = await fetch(form.action, {method: 'POST', body: new FormData(form), credentials: 'same-origin', signal: signal, headers: {'X-Requested-With': 'TauroQuoteWindow'}});
+            if (response.redirected && new URL(response.url).pathname.includes('/login')) throw new Error('Tu sesión venció. Volvé a ingresar al portal.');
+            if (response.status === 429) throw new Error('Realizaste varias consultas seguidas. Esperá un minuto y volvé a consultar.');
+            if (!response.ok) throw new Error('No pudimos consultar las tarifas. Revisá los datos e intentá nuevamente.');
+            var parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
+            var block = parsed.querySelector('[data-quote-response][data-scope="' + scope + '"]');
+            if (!block) throw new Error('No pudimos recuperar las tarifas. Volvé a ingresar al portal.');
+            return document.importNode(block, true);
+          } finally { clearTimeout(timeout); }
+        },
+        render: function (block) {
+          result.replaceChildren(block); result.setAttribute('aria-busy', 'false');
+          hasCurrentQuote = Boolean(block.querySelector('.uq-price'));
+          submit.textContent = hasCurrentQuote ? 'Ver tarifas ↓' : 'Volver a consultar';
+          status.textContent = block.querySelector('.uq-price') ? 'Tarifas actualizadas.' : 'Revisá el resultado de la consulta.';
+        },
+        error: function (error) { result.setAttribute('aria-busy', 'false'); message(result, error.message, true); status.textContent = 'Podés volver a consultar.'; }
       });
-    }
-
-    function goRoute() {
-      editingRoute = true;
-      syncPreview();
-      if (origin) origin.focus({preventScroll:true});
-    }
-    function goPackages() {
-      var invalid = Array.from(routeBlock.querySelectorAll("input,select")).find(function (el) { return !el.checkValidity(); });
-      if (invalid) { editingRoute = true; syncPreview(); invalid.reportValidity(); return; }
-      editingRoute = false;
-      syncPreview();
-      var weight = packageList.querySelector('[name="bulto_peso"]');
-      if (weight) weight.focus({preventScroll:true});
-    }
-    if (editRoute) editRoute.addEventListener("click", goRoute);
-    var nextRoute = root.querySelector("#quote-route-next");
-    if (nextRoute) nextRoute.addEventListener("click", goPackages);
-    [[routeStep, goRoute], [packagesStep, goPackages]].forEach(function (pair) {
-      if (!pair[0]) return;
-      pair[0].addEventListener("click", pair[1]);
-      pair[0].addEventListener("keydown", function (e) {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pair[1](); }
+      controls[scope] = control;
+      form.addEventListener('input', control.changed);
+      form.addEventListener('change', function (event) {
+        // Cambiar país invalida ciudad/CP; nunca inventamos un domicilio a
+        // partir de la capital del país ni conservamos la ubicación anterior.
+        if (scope === 'internacional' && /^(origen|destino)_pais$/.test(event.target.name)) {
+          var names = event.target.name === 'origen_pais' ? ['origen_ciudad', 'origen_cp_internacional'] : ['destino_ciudad_internacional', 'destino_cp_internacional'];
+          names.forEach(function (name) { form.elements[name].value = ''; });
+        }
+        if (scope === 'nacional' && /^(origen|destino)_provincia$/.test(event.target.name)) {
+          var side = event.target.name.split('_')[0];
+          form.elements[side + '_localidad'].value = ''; form.elements[side + '_cp'].value = '';
+        }
+        control.changed();
+      });
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (hasCurrentQuote) { result.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center'}); return; }
+        if (!form.reportValidity()) return;
+        control.resume(); control.run();
+      });
+      form.addEventListener('click', function (event) {
+        var remove = event.target.closest('[data-remove-package]');
+        if (event.target.closest('#quote-add-package') && packageList.children.length < 20) packageList.appendChild(template.content.cloneNode(true));
+        else if (remove && packageList.children.length > 1) remove.closest('[data-package-row]').remove();
+        else return;
+        renumber(); if (form.tauroDraft) form.tauroDraft.save(); control.changed();
       });
     });
-
-    if (modify) {
-      modify.addEventListener("click", function () {
-        if (result) result.classList.add("is-hidden");
-        if (panel) panel.classList.remove("is-hidden");
-        modify.hidden = true;
-        goPackages();
+    if (window.TauroRutasFrecuentes) window.TauroRutasFrecuentes.attach(root);
+    function select(scope, changeUrl) {
+      active = scope === 'nacional' ? 'nacional' : 'internacional'; root.dataset.quoteActive = active;
+      root.querySelectorAll('[data-quote-panel]').forEach(function (panel) { panel.hidden = panel.dataset.quotePanel !== active; });
+      root.querySelectorAll('[data-quote-scope]').forEach(function (link) {
+        var selected = link.dataset.quoteScope === active;
+        link.classList.toggle('is-active', selected);
+        if (selected) link.setAttribute('aria-current', 'true'); else link.removeAttribute('aria-current');
       });
-    }
-
-    if (result) {
-      window.setTimeout(function () { result.focus({ preventScroll: true }); }, 0);
-    }
-  }
-
-  function mountQuote(quote) {
-    var previous = content.querySelector("form");
-    if (previous && previous.tauroDraft) { previous.tauroDraft.save(); previous.tauroDraft.stop(); }
-    content.replaceChildren(quote);
-    content.scrollTop = 0;
-    markScope(quote.classList.contains("national-quote-screen") ? "nacional" : "internacional");
-    initializeQuote(quote);
-    if (window.TauroRutasFrecuentes) window.TauroRutasFrecuentes.attach(quote);
-    keepCurrentQuote();
-  }
-
-  function keepCurrentQuote() {
-    var root = content.querySelector(".quote-screen");
-    if (!root) return;
-    var form = root.querySelector("form");
-    if (form && form.tauroDraft) form.tauroDraft.save();
-    var scope = root.classList.contains("national-quote-screen") ? "nacional" : "internacional";
-    var stage = content.querySelector('[aria-busy="true"]');
-    if (stage) {
-      stage.setAttribute("aria-busy", "false");
-      var loader = stage.querySelector("#toro-loading, #national-loading");
-      var panel = stage.querySelector("#quote-form-panel, #national-quote-form-panel");
-      if (loader) loader.hidden = true;
-      if (panel) panel.classList.remove("is-hidden");
-      var submit = stage.querySelector('[type="submit"]');
-      if (submit) submit.disabled = false;
-    }
-    cachedQuotes[scope] = {root:root, scroll:content.scrollTop};
-  }
-
-  function loadScope(scope) {
-    keepCurrentQuote();
-    var normalized = scope === "nacional" ? "nacional" : "internacional";
-    markScope(normalized);
-    requestSerial += 1;
-    if (cachedQuotes[normalized]) {
-      var saved = cachedQuotes[normalized];
-      content.replaceChildren(saved.root); content.scrollTop = saved.scroll;
-      return;
-    }
-    loading("Preparando el cotizador " + normalized + "…");
-    var serial = ++requestSerial;
-    fetch("/portal/cotizar?ambito=" + normalized, {
-      credentials: "same-origin",
-      headers: { "X-Requested-With": "TauroQuoteWindow" }
-    })
-      .then(function (response) {
-        if (!response.ok) throw new Error("El servidor respondió " + response.status + ".");
-        return response.text();
-      })
-      .then(function (html) {
-        if (serial !== requestSerial || !dialog.open) return;
-        mountQuote(quoteFromHtml(html));
-      })
-      .catch(function (error) {
-        if (serial !== requestSerial || !dialog.open) return;
-        failure(error.message);
+      Object.keys(controls).forEach(function (scope) {
+        if (locationControls[scope]) locationControls[scope].cancel();
+        if (scope === active) {
+          if (locationControls[scope]) locationControls[scope].resume();
+          controls[scope].resume();
+        } else controls[scope].pause();
       });
+      if (changeUrl && !root.closest('dialog')) history.replaceState(history.state, '', '/portal/cotizar?ambito=' + active);
+    }
+    root.addEventListener('click', function (event) {
+      var link = event.target.closest('[data-quote-scope]');
+      if (link && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.button) { event.preventDefault(); if (active !== link.dataset.quoteScope) select(link.dataset.quoteScope, true); }
+    });
+    var api = {select: select, pause: function () {
+      Object.values(controls).forEach(function (control) { control.pause(); });
+      Object.values(locationControls).forEach(function (control) { if (control) control.cancel(); });
+    }};
+    initialized.set(root, api);
+    // Conservar el resultado de un POST sin JS hasta la primera edición.
+    Object.keys(controls).forEach(function (scope) {
+      if (scope !== active) controls[scope].pause();
+      else if (!root.querySelector('[data-quote-panel="' + scope + '"] .uq-price')) controls[scope].changed();
+    });
+    return api;
   }
-
-  function openQuote(event, trigger) {
-    var href = new URL(trigger.href, window.location.origin);
-    // En la página completa se conserva la navegación tradicional para no
-    // duplicar IDs ni anidar un segundo cotizador sobre el primero.
-    if (window.location.pathname === "/portal/cotizar") return;
-
-    event.preventDefault();
+  document.querySelectorAll('.unified-quote').forEach(init);
+  if (!dialog) return;
+  async function open(trigger) {
     opener = trigger;
-    if (typeof dialog.showModal !== "function") {
-      window.location.assign(trigger.href);
-      return;
-    }
+    if (!dialog.showModal) { location.assign(trigger.href); return; }
     if (!dialog.open) dialog.showModal();
-    var sideToggle = document.getElementById("side-toggle");
-    if (sideToggle) sideToggle.checked = false;
-    loadScope(href.searchParams.get("ambito"));
-  }
-
-  document.addEventListener("click", function (event) {
-    var trigger = event.target.closest && event.target.closest("a[data-cotizar-ventana]");
-    if (trigger) openQuote(event, trigger);
-  });
-
-  if (closeButton) closeButton.addEventListener("click", function () { dialog.close(); });
-  dialog.addEventListener("click", function (event) {
-    var scope = event.target.closest && event.target.closest("[data-cotizar-scope]");
-    if (scope) {
-      event.preventDefault();
-      loadScope(scope.dataset.cotizarScope);
-      return;
+    var sideToggle = document.getElementById('side-toggle'); if (sideToggle) sideToggle.checked = false;
+    var root = content.querySelector('.unified-quote');
+    var scope = new URL(trigger.href).searchParams.get('ambito') || (root && root.dataset.quoteActive) || 'internacional';
+    if (root) { init(root).select(scope, false); return; }
+    if (loadingController) loadingController.abort();
+    loadingController = new AbortController();
+    message(content, 'Preparando el cotizador…');
+    try {
+      var response = await fetch('/portal/cotizar?ambito=' + scope, {credentials: 'same-origin', signal: loadingController.signal});
+      if (!response.ok) throw new Error('No pudimos abrir el cotizador. Intentá nuevamente.');
+      var parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
+      var quote = parsed.querySelector('.unified-quote');
+      if (!quote) throw new Error('Tu sesión venció. Volvé a ingresar al portal.');
+      if (!dialog.open) return;
+      root = document.importNode(quote, true); content.replaceChildren(root); init(root);
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      message(content, error.message, true);
+      var fallback = document.createElement('a'); fallback.href='/portal/cotizar?ambito=' + scope; fallback.textContent='Abrir cotizador'; fallback.className='btn btn-primary'; content.appendChild(fallback);
     }
-    if (event.target === dialog) dialog.close();
+  }
+  document.addEventListener('click', function (event) {
+    var trigger = event.target.closest('a[data-cotizar-ventana]');
+    if (!trigger || event.ctrlKey || event.metaKey || event.shiftKey || event.button) return;
+    if (window.location.pathname === '/portal/cotizar') return;
+    event.preventDefault(); open(trigger);
   });
-  dialog.addEventListener("close", function () {
-    requestSerial += 1;
-    keepCurrentQuote();
-    if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
-    opener = null;
+  dialog.querySelector('[data-cotizar-cerrar]').addEventListener('click', function () { dialog.close(); });
+  dialog.addEventListener('click', function (event) { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener('close', function () {
+    if (loadingController) loadingController.abort();
+    var root = content.querySelector('.unified-quote'); if (root) init(root).pause();
+    if (opener && document.contains(opener)) opener.focus({preventScroll: true});
   });
 })();

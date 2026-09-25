@@ -1,3 +1,4 @@
+{% from 'portal/_scope_icons.html' import scope_icon %}
 <section class="scope-screen" aria-labelledby="scope-title">
     <header class="scope-head">
         <span class="eyebrow">{{ 'Cotizador' if flujo == 'cotizar' else 'Nuevo envío' }}</span>
@@ -7,7 +8,7 @@
 
     <div class="scope-grid">
         <a href="{{ nacional_url }}" class="scope-card scope-card-national">
-            <span class="scope-icon" aria-hidden="true">🇦🇷</span>
+            <span class="scope-icon" aria-hidden="true">{{ scope_icon('nacional') }}</span>
             <span class="scope-copy">
                 <small>Dentro de Argentina</small>
                 <strong>Envío nacional</strong>
@@ -17,7 +18,7 @@
         </a>
 
         <a href="{{ internacional_url }}" class="scope-card scope-card-international">
-            <span class="scope-icon" aria-hidden="true">🌐</span>
+            <span class="scope-icon" aria-hidden="true">{{ scope_icon('internacional') }}</span>
             <span class="scope-copy">
                 <small>Entre países</small>
                 <strong>Envío internacional</strong>

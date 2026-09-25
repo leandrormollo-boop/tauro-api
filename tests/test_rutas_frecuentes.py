@@ -153,4 +153,4 @@ def test_endpoint_usa_la_cuenta_de_la_sesion_en_get_y_post(monkeypatch):
         assert response.status_code == 200 and seen == ['WAIMAO', 'WAIMAO']
         assert response.json()['form']['origen_pais'] == 'CN'
         client.get('/portal/cotizar?ambito=nacional')
-        assert seen == ['WAIMAO', 'WAIMAO']
+        assert seen == ['WAIMAO', 'WAIMAO', 'WAIMAO']

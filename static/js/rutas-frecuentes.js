@@ -60,7 +60,7 @@
 
   function attach(root) {
     root.querySelectorAll('#form-cotizar').forEach(function (form) {
-      if (initialized.has(form)) return;
+      if (initialized.has(form)) { sync(form); return; }
       initialized.add(form);
       var shortcuts = form.querySelector('[data-route-shortcuts]');
       if (shortcuts) shortcuts.hidden = false;

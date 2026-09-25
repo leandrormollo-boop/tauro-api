@@ -11,7 +11,8 @@ def test_web_y_portal_consumen_catalogo_publico_sin_habilitar_operaciones():
     web = (ROOT / "web/components/02-quote-widget.jsx").read_text()
     assert '@app.get("/operadores"' in main
     assert "_operadores_cliente(" in endpoint
-    assert "operadores_internacionales" in portal
+    assert "_quote_results.html" in portal
+    assert "Operadores de tu cuenta" in portal
     assert "fetch(`${API_URL}/operadores`)" in web
     assert "disponible_segun_cuenta" in web
     assert "integracion_preparada" in web
