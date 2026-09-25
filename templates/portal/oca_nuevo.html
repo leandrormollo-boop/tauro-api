@@ -2,7 +2,7 @@
 {% block title %}Envío nacional · OCA{% endblock %}
 {% block extra_css %}<link rel="stylesheet" href="/static/css/portal-nacional.css?v=1"><script src="/static/js/portal-nacional.js?v=1" defer></script>{% endblock %}
 {% macro input(prefix,key,label,span=6,required=true,limit=30,kind='text') %}
-{% set name=prefix~'_'~key %}<div class="ns-field ns-span-{{span}}"><label for="{{name}}">{{label}}{% if not required %}<small>Opcional</small>{% endif %}</label><input id="{{name}}" name="{{name}}" value="{{form.get(name,'')}}" type="{{kind}}" maxlength="{{limit}}" {% if required %}required{% endif %}></div>
+{% set name=prefix~'_'~key %}<div class="ns-field ns-span-{{span}}"><label for="ns_{{name}}">{{label}}{% if not required %}<small>Opcional</small>{% endif %}</label><input id="ns_{{name}}" name="{{name}}" value="{{form.get(name,'')}}" type="{{kind}}" maxlength="{{limit}}" {% if required %}required{% endif %}></div>
 {% endmacro %}
 {% block content %}
 <div class="national-shipment">
@@ -22,14 +22,14 @@
 <section class="ns-card" data-national-panel="{{step}}"><div class="ns-section-heading"><h2>{{label}}</h2><span class="ns-step-caption">{{step}} de 3</span></div><div class="ns-fields">
 {{input(prefix,'nombre','Nombre / contacto',6 if prefix=='destino' else 12)}}
 {% if prefix=='destino' %}{{input(prefix,'apellido','Apellido')}}{% endif %}
-<div class="ns-field ns-span-6"><label for="{{prefix}}_provincia">Provincia</label><select id="{{prefix}}_provincia" name="{{prefix}}_provincia" required><option value="">Elegí provincia</option>{% for code,name in provincias %}<option value="{{code}}" {% if form.get(prefix~'_provincia')==code %}selected{% endif %}>{{'CABA' if code=='C' else name}}</option>{% endfor %}</select></div>
+<div class="ns-field ns-span-6"><label for="ns_{{prefix}}_provincia">Provincia</label><select id="ns_{{prefix}}_provincia" name="{{prefix}}_provincia" required><option value="">Elegí provincia</option>{% for code,name in provincias %}<option value="{{code}}" {% if form.get(prefix~'_provincia')==code %}selected{% endif %}>{{'CABA' if code=='C' else name}}</option>{% endfor %}</select></div>
 {{input(prefix,'localidad','Localidad')}}
 {{input(prefix,'calle','Calle',8)}}{{input(prefix,'numero','Número',4,limit=6)}}
 {{input(prefix,'cp','Código postal',4,limit=8)}}{{input(prefix,'piso','Piso',4,false,6)}}{{input(prefix,'depto','Departamento',4,false,4)}}
 {{input(prefix,'email','Email',8,prefix=='origen',100,'email')}}{{input(prefix,'telefono','Teléfono',4,false,20,'tel')}}
 </div></section>{% endfor %}
 <section class="ns-card" data-national-panel="3"><div class="ns-section-heading"><h2>Tus paquetes</h2><span data-help="Cajas del envío">Las cajas de esta solicitud deben tener el mismo peso y medidas. Completá las medidas de la caja cerrada.</span><span class="ns-step-caption">3 de 3</span></div><div class="ns-fields ns-package-fields">
-{% for name,label,default,kind in [('cantidad_bultos','Cantidad de cajas','1','entero'),('peso_kg','Peso por caja (kg)','','decimal'),('valor_declarado_ars','Valor total (ARS)','','monto'),('largo_cm','Largo (cm)','','decimal'),('ancho_cm','Ancho (cm)','','decimal'),('alto_cm','Alto (cm)','','decimal')] %}<div class="ns-field ns-span-4"><label for="{{name}}">{{label}}</label><input id="{{name}}" name="{{name}}" value="{{form.get(name,default)}}" type="text" inputmode="{{'numeric' if kind=='entero' else 'decimal'}}" data-numero="{{kind}}" maxlength="12" required></div>{% endfor %}
+{% for name,label,default,kind in [('cantidad_bultos','Cantidad de cajas','1','entero'),('peso_kg','Peso por caja (kg)','','decimal'),('valor_declarado_ars','Valor total (ARS)','','monto'),('largo_cm','Largo (cm)','','decimal'),('ancho_cm','Ancho (cm)','','decimal'),('alto_cm','Alto (cm)','','decimal')] %}<div class="ns-field ns-span-4"><label for="ns_{{name}}">{{label}}</label><input id="ns_{{name}}" name="{{name}}" value="{{form.get(name,default)}}" type="text" inputmode="{{'numeric' if kind=='entero' else 'decimal'}}" data-numero="{{kind}}" maxlength="12" required></div>{% endfor %}
 </div><p class="ns-coverage">Cobertura del envío <span data-help="Cobertura OCA">{{'Servicio con seguro según las condiciones de la operativa contratada.' if asegurada else 'La cobertura depende de las condiciones de la operativa contratada con OCA.'}}</span></p></section>
 <footer class="ns-actions"><button type="button" class="btn btn-ghost" data-national-back hidden>← Atrás</button><span data-national-status role="status"></span><button type="button" class="btn btn-primary" data-national-next hidden>Siguiente →</button><button type="submit" class="btn btn-primary" data-national-submit>Ver tarifa</button></footer>
 </form>{% endif %}</div>

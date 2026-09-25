@@ -5,7 +5,7 @@ Preferencia expresa de Leandro, 25 de septiembre de 2026: reducir al mínimo el 
 - Priorizar información de trabajo y acciones dentro de la ventana. En escritorio, cotizador con ruta, paquetes y tarifas visibles juntos.
 - No esconder datos esenciales con overflow ni reducir el texto hasta volverlo ilegible para aparentar que todo entra. Con zoom, teclado móvil, pantallas muy bajas o listados extensos debe conservarse acceso a todo el contenido.
 - Para formularios largos, agrupar en pasos cortos con Atrás/Siguiente que conserven los valores; ninguna vuelta debe reiniciar la carga.
-- Mantener la tipografía, violeta, radios suaves, campos alineados y componentes comunes de TAURO; revisar temas claro y oscuro.
+- Mantener la tipografía, violeta, radios suaves, campos alineados y componentes comunes de TAURO; revisar temas claro y oscuro. En oscuro, distinguir los campos editables con un fondo violeta tenue, borde fino y relieve mínimo; reservar el halo para el foco. Mantener el color de error cuando corresponda.
 - Aclaraciones secundarias en pequeños controles de información accesibles con mouse, teclado y toque. Errores que requieren una acción deben seguir visibles.
 - Rutas frecuentes cerradas inicialmente. Invertir debe estar visible y cambiar toda la ruta —país/provincia, localidad y CP— sin tocar cajas ni valor declarado.
 - El autocompletado de ciudad/CP usa coincidencias exactas. Prefijos muestran sugerencias; varias localidades requieren elección. La referencia genérica sirve para cotizar y no reemplaza la validación del domicilio al emitir.
