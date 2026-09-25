@@ -1,0 +1,5 @@
+{% extends 'base.html' %}
+{% block title %}Seguimiento OCA{% endblock %}
+{% block content %}<div class="page-title"><a href="/portal/envios/{{s.id}}">← Volver al envío</a><h1>Seguimiento OCA</h1><p>Guía {{s.tracking}}</p></div>
+{% if error %}<p role="alert">{{error}}</p>{% endif %}
+<ul>{% for event in events %}<li><strong>{{event.label}}</strong> · {{event.occurred_at_iso}} {{event.location}}</li>{% else %}<li>Todavía no hay movimientos disponibles.</li>{% endfor %}</ul>{% endblock %}

@@ -311,6 +311,8 @@ except Exception as _mig_err:
 # Static files (CSS, JS, imágenes), portal del cliente y admin
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(portal_router)
+from endpoints.portal_oca import router as portal_oca_router
+app.include_router(portal_oca_router)
 app.include_router(admin_router)
 app.include_router(integraciones_router)
 app.include_router(tiendanube_shipping_router)

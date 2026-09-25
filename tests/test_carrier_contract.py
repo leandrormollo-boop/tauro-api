@@ -29,7 +29,7 @@ def test_ambitos_no_mezclan_nacionales_e_internacionales():
 def test_capacidades_son_declarativas_y_no_dependen_de_credenciales():
     assert capability_supported("dhl", Capacidad.EMITIR) is True
     assert capability_supported("oca", "cotizar") is True
-    assert capability_supported("oca", "tracking") is False
+    assert capability_supported("oca", "tracking") is True
     assert capability_supported("oca", "recolectar") is False
     assert capability_supported("ups", "recolectar") is False
     assert capability_supported("no-existe", Capacidad.COTIZAR) is False
@@ -45,7 +45,7 @@ def test_catalogo_publico_no_expone_variables_ni_promete_credenciales():
         "integracion_preparada"
     )
     assert next(item for item in catalogo if item["id"] == "oca")["capacidades"] == (
-        "cotizar",
+        "cancelar", "cotizar", "emitir", "etiqueta", "tracking",
     )
     assert all("variables_requeridas" not in item for item in catalogo)
 

@@ -445,6 +445,6 @@ def test_detalle_nacional_no_promete_una_guia_que_aun_no_puede_emitir():
     )
 
     assert "ambito == 'nacional'" in detalle
-    assert "La emisión nacional se habilitará" in detalle
-    assert "No se emitió ni se generó ningún cargo" in detalle
-    assert "se habilitará con las conexiones directas de OCA y Andreani" in detalle
+    assert "La emisión nacional requiere habilitación de TAURO para tu cuenta" in detalle
+    assert "todavía no se generó ningún cargo" in detalle
+    assert "not s.tracking and puede_emitir" in detalle

@@ -62,7 +62,8 @@ def test_sin_filas_conserva_pricing_pero_no_habilita_ninguna_operacion(monkeypat
     assert not next(c for c in matriz["couriers"] if c["id"] == "dhl")["puede_emitir"]
     assert not next(c for c in matriz["couriers"] if c["id"] == "fedex")["puede_emitir"]
     assert all(c["pricing"] == {"tipo": "FIJO_ARS", "valor": 95_000}
-               for c in matriz["couriers"])
+               for c in matriz["couriers"] if c["id"] != "oca")
+    assert next(c for c in matriz["couriers"] if c["id"] == "oca")["pricing"] is None
 
 
 def test_melcior_dhl_mas_14000_no_cambia_fedex(monkeypatch):
@@ -357,7 +358,7 @@ def test_emision_resuelve_permiso_del_courier_dentro_del_lock():
     assert "cc.courier = LOWER" in fuente
     assert "THEN COALESCE(cc.puede_emitir, FALSE)" in fuente
     assert "THEN COALESCE(c.puede_emitir, FALSE)" not in fuente
-    assert "LOWER(COALESCE(s.courier, '')) = 'dhl'" in fuente
+    assert "LOWER(COALESCE(s.courier, '')) IN ('dhl', 'oca')" in fuente
 
 
 def test_schema_y_admin_exponen_la_matriz_completa():
@@ -477,6 +478,8 @@ def test_post_admin_persiste_dhl_tramos_y_auditoria_en_la_misma_transaccion(
         ("MELCIOR", "dhl", True, True, False, "FIJO_ARS", 14_000.0,
          100.0, 20_000.0, 200.0, 100.0),
         ("MELCIOR", "ups", False, False, False, None, None,
+         None, None, None, None),
+        ("MELCIOR", "oca", False, False, False, None, None,
          None, None, None, None),
     ]
     auditorias = [

@@ -4087,3 +4087,24 @@ CREATE TABLE IF NOT EXISTS paquetes_planes_pedido (
     creado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY(cliente_id, pedido_id)
 );
+
+
+-- OCA portal: extender sólo el check de IDs, sin habilitar cuentas existentes.
+ALTER TABLE cliente_courier_config DROP CONSTRAINT IF EXISTS cliente_courier_config_courier_check;
+ALTER TABLE cliente_courier_config ADD CONSTRAINT cliente_courier_config_courier_check
+    CHECK (courier IN ('fedex','dhl','ups','oca'));
+CREATE TABLE IF NOT EXISTS oca_portal_cotizaciones (
+    id TEXT PRIMARY KEY,
+    cliente_id TEXT NOT NULL REFERENCES clientes(cliente_id),
+    payload JSONB NOT NULL,
+    config_hash TEXT NOT NULL,
+    quote_id TEXT NOT NULL,
+    precio_ars NUMERIC(14,2) NOT NULL CHECK (precio_ars > 0),
+    costo_ars NUMERIC(14,2) NOT NULL CHECK (costo_ars >= 0 AND costo_ars <= precio_ars),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '15 minutes',
+    solicitud_id INTEGER UNIQUE REFERENCES solicitudes_guia(id),
+    external_id TEXT,
+    tracking TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_oca_portal_cliente ON oca_portal_cotizaciones(cliente_id, created_at);

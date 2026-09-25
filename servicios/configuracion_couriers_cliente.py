@@ -2,7 +2,7 @@
 
 La ausencia de una fila conserva el pricing general como referencia, pero no
 habilita ninguna operación. Cotizar, emitir y pedir pickups exigen una fila
-explícita. Hoy la única API habilitable es DHL; FedEx y UPS quedan visibles
+explícita. DHL y OCA pueden habilitarse con sus controles productivos; FedEx y UPS quedan visibles
 como pendientes.
 """
 from __future__ import annotations
@@ -33,11 +33,11 @@ def _metadata_operable(courier_id: str) -> dict:
     }
 
 
-# La tabla productiva hoy admite estos tres IDs. El orden se conserva para no
+# La tabla admite los operadores implementados y los pendientes. El orden se conserva para no
 # mover la matriz del admin; estado, nombre, logo y capacidades vienen de la
 # única fuente de verdad compartida con portal y web.
 COURIERS_CLIENTE = tuple(
-    _metadata_operable(courier_id) for courier_id in ("fedex", "dhl", "ups")
+    _metadata_operable(courier_id) for courier_id in ("fedex", "dhl", "ups", "oca")
 )
 COURIER_IDS = frozenset(c["id"] for c in COURIERS_CLIENTE)
 
@@ -66,6 +66,16 @@ def estado_integracion(courier: str) -> dict:
             "estado": "API pendiente",
             "detalle": "La integración todavía no está habilitada en TAURO.",
         }
+
+    if courier == "oca":
+        from servicios.oca_portal import config_productiva
+        try:
+            config_productiva()
+            return {"operativa": True, "estado": "Configuración presente",
+                    "detalle": "OCA puerta a puerta productivo; requiere permisos y tarifa por cliente."}
+        except Exception:
+            return {"operativa": False, "estado": "Falta configurar producción",
+                    "detalle": "OCA requiere contrato, seguro y habilitación productiva confirmados."}
 
     if courier == "dhl":
         entorno = (os.getenv("DHL_ENVIRONMENT") or "").strip().lower()
@@ -199,6 +209,9 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
             if tipo_especifico
             else general
         )
+        if courier_id == "oca":
+            # Nunca heredar pricing internacional ni reglas expresadas en USD.
+            pricing = _pricing_especifico(tipo_especifico, valor_especifico) if tipo_especifico in {"PCT", "MULTIPLICADOR", "FIJO_ARS"} else None
         tramos = _tramos_pricing(fila)
         if tramos and pricing is not None:
             # Los overrides existentes del courier conservan precedencia.
@@ -209,6 +222,8 @@ def _armar_matriz(cliente: dict, filas: Iterable[dict]) -> dict:
         # Sin regla de precio (ni propia ni general) el courier no puede
         # cotizar ni emitir, aunque el admin haya tildado el permiso: un
         # precio igual al costo o con margen inventado nunca sale al portal.
+        if courier_id == "oca" and tramos:
+            pricing = None
         pricing_configurado = pricing is not None
         config_puede_cotizar = bool(fila["puede_cotizar"]) if fila else False
         config_puede_emitir = bool(fila["puede_emitir"]) if fila else False
@@ -388,6 +403,8 @@ def parsear_fila(
         )
 
     tipo = (markup_tipo or "").strip().upper()
+    if courier == "oca" and (tipo not in {"", "PCT", "MULTIPLICADOR", "FIJO_ARS"} or any(str(v or "").strip() for v in (markup_low_max_usd, markup_low_ars, markup_high_min_usd, markup_high_usd))):
+        raise ValueError("OCA requiere pricing PCT, MULTIPLICADOR o FIJO_ARS, sin tramos USD.")
     valor = None
     if tipo:
         if tipo not in PRICING_MODES:
@@ -494,7 +511,7 @@ def guardar_matriz_con_cursor(cur, cliente_id: str, configuraciones: list[dict])
     cliente_id = (cliente_id or "").strip().upper()
     ids = [c["courier"] for c in configuraciones]
     if len(ids) != len(COURIER_IDS) or set(ids) != set(COURIER_IDS):
-        raise ValueError("La configuración debe incluir FedEx, DHL y UPS una sola vez.")
+        raise ValueError("La configuración debe incluir FedEx, DHL, UPS y OCA una sola vez.")
     for config in configuraciones:
         cur.execute(
             """
