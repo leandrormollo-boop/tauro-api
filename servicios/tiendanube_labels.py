@@ -87,242 +87,112 @@ class LabelRepository(Protocol):
 
 
 def _ensure_tables() -> None:
-    """Crea la evidencia y el outbox sin depender de un deploy de migración."""
+    """Comprueba el esquema sin ejecutar DDL dentro de un callback.
+
+    sql/schema.sql debe aplicarse antes de habilitar Labels. Si falta una
+    tabla, columna o constraint, el borde falla cerrado y Tiendanube reintenta;
+    nunca intenta migrar mientras atiende tráfico.
+    """
     global _tabla_lista
     if _tabla_lista:
         return
 
-    # La FK hace que el flujo de redacción ya existente, que elimina la
-    # configuración del store, también elimine estos payloads con PII.
-    from servicios.tiendanube_shipping import _ensure_tabla as ensure_shipping
-    from servicios.tiendanube_rate_quotes import ensure_rate_quote_storage
-
-    ensure_shipping()
-    ensure_rate_quote_storage()
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tiendanube_labels (
-                    store_id                TEXT NOT NULL,
-                    label_id                TEXT NOT NULL,
-                    fulfillment_order_id    TEXT NOT NULL,
-                    rate_quote_snapshot_id  TEXT,
-                    order_id                TEXT,
-                    tiendanube_status       TEXT,
-                    download_token_hash     TEXT,
-                    download_token_revoked_at TIMESTAMPTZ,
-                    generate_payload        JSONB,
-                    generate_fingerprint    CHAR(64),
-                    generate_payload_complete BOOLEAN NOT NULL DEFAULT FALSE,
-                    estado                  TEXT NOT NULL,
-                    external_operation_id   TEXT,
-                    tracking_number         TEXT,
-                    creada_en               TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    actualizada_en          TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    PRIMARY KEY (store_id, label_id),
-                    FOREIGN KEY (store_id)
-                        REFERENCES tiendanube_shipping_config(store_id)
-                        ON DELETE CASCADE,
-                    CONSTRAINT fk_tn_label_rate_quote_snapshot
-                        FOREIGN KEY (store_id, rate_quote_snapshot_id)
-                        REFERENCES tiendanube_rate_quote_snapshots(store_id, snapshot_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tiendanube_label_outbox (
-                    id                      BIGSERIAL PRIMARY KEY,
-                    store_id                TEXT NOT NULL,
-                    label_id                TEXT NOT NULL,
-                    operacion               TEXT NOT NULL
-                        CHECK (operacion IN ('GENERATE', 'CANCEL')),
-                    payload                 JSONB NOT NULL,
-                    payload_fingerprint     CHAR(64) NOT NULL,
-                    payload_complete        BOOLEAN NOT NULL DEFAULT FALSE,
-                    estado                  TEXT NOT NULL,
-                    intentos                INTEGER NOT NULL DEFAULT 0,
-                    proximo_intento_en      TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    ultimo_error_codigo     TEXT,
-                    creada_en               TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    actualizada_en          TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    procesada_en            TIMESTAMPTZ,
-                    UNIQUE (store_id, label_id, operacion),
-                    FOREIGN KEY (store_id, label_id)
-                        REFERENCES tiendanube_labels(store_id, label_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tiendanube_fulfillment_order_orders (
-                    store_id             TEXT NOT NULL,
-                    fulfillment_order_id TEXT NOT NULL,
-                    order_id             TEXT NOT NULL,
-                    creada_en            TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    actualizada_en       TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    PRIMARY KEY (store_id, fulfillment_order_id),
-                    FOREIGN KEY (store_id)
-                        REFERENCES tiendanube_shipping_config(store_id)
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tiendanube_rate_quote_claims (
-                    store_id             TEXT NOT NULL,
-                    snapshot_id          TEXT NOT NULL,
-                    fulfillment_order_id TEXT NOT NULL,
-                    creada_en            TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    PRIMARY KEY (
-                        store_id, snapshot_id, fulfillment_order_id
-                    ),
-                    FOREIGN KEY (store_id, snapshot_id)
-                        REFERENCES tiendanube_rate_quote_snapshots(store_id, snapshot_id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY (store_id, fulfillment_order_id)
-                        REFERENCES tiendanube_fulfillment_order_orders(
-                            store_id, fulfillment_order_id
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        to_regclass('tiendanube_shipping_config') IS NOT NULL
+                        AND to_regclass(
+                            'tiendanube_rate_quote_snapshots'
+                        ) IS NOT NULL
+                        AND to_regclass(
+                            'tiendanube_fulfillment_order_orders'
+                        ) IS NOT NULL
+                        AND to_regclass(
+                            'tiendanube_rate_quote_claims'
+                        ) IS NOT NULL
+                        AND to_regclass('tiendanube_labels') IS NOT NULL
+                        AND to_regclass(
+                            'tiendanube_label_outbox'
+                        ) IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_attribute a
+                             WHERE a.attrelid =
+                                       to_regclass('tiendanube_labels')
+                               AND a.attname =
+                                       'generate_payload_complete'
+                               AND NOT a.attisdropped
                         )
-                        ON DELETE CASCADE
-                )
-                """
-            )
-            cur.execute(
-                """
-                DO $$
-                DECLARE
-                    restriccion RECORD;
-                BEGIN
-                    LOCK TABLE tiendanube_rate_quote_claims
-                        IN ACCESS EXCLUSIVE MODE;
-
-                    -- Migra solamente la PK legacy exacta. La búsqueda por
-                    -- columnas mantiene el cambio seguro aunque la constraint
-                    -- tenga un nombre no estándar.
-                    FOR restriccion IN
-                        SELECT c.conname
-                          FROM pg_constraint c
-                         WHERE c.conrelid =
-                                   'tiendanube_rate_quote_claims'::regclass
-                           AND c.contype = 'p'
-                           AND (
-                               SELECT ARRAY_AGG(a.attname ORDER BY u.ord)
-                                 FROM UNNEST(c.conkey) WITH ORDINALITY
-                                      u(attnum, ord)
-                                 JOIN pg_attribute a
-                                   ON a.attrelid = c.conrelid
-                                  AND a.attnum = u.attnum
-                           ) = ARRAY['store_id', 'snapshot_id']::name[]
-                    LOOP
-                        EXECUTE FORMAT(
-                            'ALTER TABLE tiendanube_rate_quote_claims '
-                            'DROP CONSTRAINT %I',
-                            restriccion.conname
-                        );
-                    END LOOP;
-
-                    IF NOT EXISTS (
-                        SELECT 1
-                          FROM pg_constraint c
-                         WHERE c.conrelid =
-                                   'tiendanube_rate_quote_claims'::regclass
-                           AND c.contype = 'p'
-                           AND (
-                               SELECT ARRAY_AGG(a.attname ORDER BY u.ord)
-                                 FROM UNNEST(c.conkey) WITH ORDINALITY
-                                      u(attnum, ord)
-                                 JOIN pg_attribute a
-                                   ON a.attrelid = c.conrelid
-                                  AND a.attnum = u.attnum
-                           ) = ARRAY[
-                               'store_id',
-                               'snapshot_id',
-                               'fulfillment_order_id'
-                           ]::name[]
-                    ) THEN
-                        IF EXISTS (
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_attribute a
+                             WHERE a.attrelid =
+                                       to_regclass('tiendanube_labels')
+                               AND a.attname = 'rate_quote_snapshot_id'
+                               AND NOT a.attisdropped
+                        )
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_attribute a
+                             WHERE a.attrelid =
+                                       to_regclass(
+                                           'tiendanube_label_outbox'
+                                       )
+                               AND a.attname = 'payload_complete'
+                               AND NOT a.attisdropped
+                        )
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_constraint c
+                             WHERE c.conrelid = to_regclass(
+                                       'tiendanube_rate_quote_claims'
+                                   )
+                               AND c.contype = 'p'
+                               AND ARRAY(
+                                   SELECT a.attname
+                                     FROM UNNEST(c.conkey)
+                                          WITH ORDINALITY u(attnum, ord)
+                                     JOIN pg_attribute a
+                                       ON a.attrelid = c.conrelid
+                                      AND a.attnum = u.attnum
+                                    ORDER BY u.ord
+                               ) = ARRAY[
+                                   'store_id',
+                                   'snapshot_id',
+                                   'fulfillment_order_id'
+                               ]::name[]
+                        )
+                        AND EXISTS (
                             SELECT 1
                               FROM pg_constraint c
                              WHERE c.conrelid =
-                                       'tiendanube_rate_quote_claims'::regclass
-                               AND c.contype = 'p'
-                        ) THEN
-                            RAISE EXCEPTION
-                                'PK inesperada en tiendanube_rate_quote_claims';
-                        END IF;
-                        ALTER TABLE tiendanube_rate_quote_claims
-                            ADD PRIMARY KEY (
-                                store_id,
-                                snapshot_id,
-                                fulfillment_order_id
-                            );
-                    END IF;
-                END $$
-                """
-            )
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_tiendanube_label_outbox_pendiente
-                    ON tiendanube_label_outbox
-                        (estado, proximo_intento_en, id)
-                """
-            )
-            cur.execute(
-                """
-                ALTER TABLE tiendanube_labels
-                    ADD COLUMN IF NOT EXISTS generate_payload_complete
-                        BOOLEAN NOT NULL DEFAULT FALSE
-                """
-            )
-            cur.execute(
-                """
-                ALTER TABLE tiendanube_labels
-                    ADD COLUMN IF NOT EXISTS rate_quote_snapshot_id TEXT
-                """
-            )
-            cur.execute(
-                """
-                ALTER TABLE tiendanube_labels
-                    ADD COLUMN IF NOT EXISTS order_id TEXT;
-                ALTER TABLE tiendanube_labels
-                    ADD COLUMN IF NOT EXISTS tiendanube_status TEXT;
-                ALTER TABLE tiendanube_labels
-                    ADD COLUMN IF NOT EXISTS download_token_hash TEXT;
-                ALTER TABLE tiendanube_labels
-                    ADD COLUMN IF NOT EXISTS download_token_revoked_at TIMESTAMPTZ
-                """
-            )
-            cur.execute(
-                """
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                         WHERE conrelid = 'tiendanube_labels'::regclass
-                           AND conname = 'fk_tn_label_rate_quote_snapshot'
-                    ) THEN
-                        ALTER TABLE tiendanube_labels
-                            ADD CONSTRAINT fk_tn_label_rate_quote_snapshot
-                            FOREIGN KEY (store_id, rate_quote_snapshot_id)
-                            REFERENCES tiendanube_rate_quote_snapshots(store_id, snapshot_id)
-                            ON DELETE CASCADE;
-                    END IF;
-                END $$
-                """
-            )
-            cur.execute(
-                """
-                ALTER TABLE tiendanube_label_outbox
-                    ADD COLUMN IF NOT EXISTS payload_complete
-                        BOOLEAN NOT NULL DEFAULT FALSE
-                """
-            )
-        conn.commit()
+                                       to_regclass('tiendanube_labels')
+                               AND c.conname =
+                                       'fk_tn_label_rate_quote_snapshot'
+                        )
+                        AS schema_ready
+                    """
+                )
+                row = cur.fetchone()
+            conn.commit()
+    except Exception as exc:
+        raise LabelsUnavailableError(
+            "No se pudo verificar el esquema durable de Labels."
+        ) from exc
+
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise LabelsUnavailableError(
+            "El esquema Labels no está migrado; aplicá sql/schema.sql "
+            "antes de habilitar tráfico."
+        )
     _tabla_lista = True
 
 

@@ -460,15 +460,19 @@ def test_claims_migran_pk_legacy_a_auditoria_por_ffo():
         Path(tiendanube_labels.__file__).parents[1] / "sql" / "schema.sql"
     ).read_text(encoding="utf-8")
 
-    for source in (runtime_source, schema_source):
-        normalized = " ".join(source.split())
-        assert "PRIMARY KEY" in normalized
-        assert "store_id, snapshot_id, fulfillment_order_id" in normalized
-        assert "ARRAY['store_id', 'snapshot_id']::name[]" in normalized
-        assert (
-            "'store_id', 'snapshot_id', 'fulfillment_order_id'" in normalized
-        )
-        assert "LOCK TABLE tiendanube_rate_quote_claims" in normalized
+    runtime_normalized = " ".join(runtime_source.split())
+    assert "to_regclass" in runtime_normalized
+    assert "schema_ready" in runtime_normalized
+    assert "LOCK TABLE" not in runtime_normalized
+    assert "CREATE TABLE" not in runtime_normalized
+    assert "ALTER TABLE" not in runtime_normalized
+
+    schema_normalized = " ".join(schema_source.split())
+    assert "PRIMARY KEY" in schema_normalized
+    assert "store_id, snapshot_id, fulfillment_order_id" in schema_normalized
+    assert "ARRAY['store_id', 'snapshot_id']::name[]" in schema_normalized
+    assert "'store_id', 'snapshot_id', 'fulfillment_order_id'" in schema_normalized
+    assert "LOCK TABLE tiendanube_rate_quote_claims" in schema_normalized
 
 
 def test_readiness_de_labels_exige_flags_secreto_y_oca(monkeypatch):
@@ -580,7 +584,9 @@ def test_token_invalido_no_persiste():
 
 
 def test_outbox_tiene_clave_idempotente_y_fk_de_redaccion():
-    source = inspect.getsource(tiendanube_labels._ensure_tables)
+    source = (
+        Path(tiendanube_labels.__file__).parents[1] / "sql" / "schema.sql"
+    ).read_text(encoding="utf-8")
     normalized = " ".join(source.split())
 
     assert "UNIQUE (store_id, label_id, operacion)" in normalized
