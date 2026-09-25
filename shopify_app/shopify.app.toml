@@ -2,10 +2,10 @@
 
 client_id = "c8357c0bfb8cdd371729d8bc321a6bd6"
 name = "TAURO Solutions"
-application_url = "https://taurosolutions.ar/shopify/install"
-embedded = false
-# La v1 no incluye App Home, Functions ni extensiones de checkout. Toda la
-# experiencia operativa vive en el backend externo de TAURO.
+application_url = "https://taurosolutions.ar/shopify/app"
+embedded = true
+# App Home la sirve el backend FastAPI. La v1 no incluye Functions ni
+# extensiones de checkout.
 extension_directories = []
 web_directories = []
 

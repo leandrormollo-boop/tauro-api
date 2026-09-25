@@ -168,9 +168,9 @@ async def headers_de_seguridad(request: Request, call_next):
       `/web`, y sólo si existe un `META_PIXEL_ID` válido, se habilitan los dos
       orígenes exactos que necesita el Pixel de Meta.
 
-    La app pública de Shopify es externa (`embedded = false`): sus páginas se
-    abren como navegación principal y declaran su propia CSP. Nunca deben poder
-    incrustarse en un iframe; por eso /shopify recibe X-Frame-Options: DENY.
+    Shopify App Home es la única superficie embebida. `/shopify/app` declara
+    una CSP dinámica con la tienda autenticable y `admin.shopify.com`; el resto
+    de `/shopify` conserva `frame-ancestors 'none'` y X-Frame-Options DENY.
     """
     import secrets as _secrets
     path = request.scope.get("path", "")
@@ -243,7 +243,12 @@ async def headers_de_seguridad(request: Request, call_next):
     response.headers.setdefault(
         "Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()")
 
-    if path.startswith("/shopify"):
+    if path in {"/shopify/app", "/shopify/app/"}:
+        # X-Frame-Options no permite expresar los dos ancestros válidos de
+        # Shopify. La defensa correcta para App Home es la CSP dinámica que
+        # escribe el endpoint; no se agrega SAMEORIGIN ni DENY acá.
+        response.headers.pop("X-Frame-Options", None)
+    elif path.startswith("/shopify"):
         response.headers.setdefault("X-Frame-Options", "DENY")
     else:
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")

@@ -16,9 +16,9 @@ const expectedScopes = [
   "write_merchant_managed_fulfillment_orders",
 ];
 
-test("declares the external TAURO application surface", () => {
-  assert.match(manifest, /^application_url = "https:\/\/taurosolutions\.ar\/shopify\/install"$/m);
-  assert.match(manifest, /^embedded = false$/m);
+test("declares the embedded TAURO App Home surface", () => {
+  assert.match(manifest, /^application_url = "https:\/\/taurosolutions\.ar\/shopify\/app"$/m);
+  assert.match(manifest, /^embedded = true$/m);
   assert.match(manifest, /^extension_directories = \[\]$/m);
   assert.match(manifest, /^web_directories = \[\]$/m);
   assert.match(
@@ -52,7 +52,9 @@ test("contains no embedded-template workspace", async () => {
 });
 
 test("documents the v1 product boundary", () => {
-  assert.match(readme, /externa[\s\S]*no embebida/i);
+  assert.match(readme, /App Home[\s\S]*embebida/i);
+  assert.match(readme, /session token|ID token/i);
+  assert.match(readme, /app-bridge\.js/i);
   assert.match(readme, /no cotiza en el checkout/i);
   for (const term of ["pedido", "portal", "fulfillment", "tracking"]) {
     assert.match(readme, new RegExp(term, "i"));

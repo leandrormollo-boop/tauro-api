@@ -1,11 +1,12 @@
 # Publicar TAURO Solutions en el Shopify App Store
 
-Guía para que la app aparezca en el App Store y cualquier comerciante la
-instale con un click. Actualizada 27/08/2026.
+Guía para preparar el futuro envío al App Store. Actualizada 25/09/2026. Este
+cambio deja un candidato local: no despliega, no modifica Dev Dashboard y no
+presenta la app a revisión.
 
 ---
 
-## Estado del código: LISTO PARA REVISIÓN Y REAUTORIZACIÓN
+## Estado del código: CANDIDATO LOCAL PARA UAT
 
 El flujo histórico de pedidos y tracking fue verificado e2e en producción el
 28/07 con Pesca Jacks. El espejo nuevo de catálogo y stock está validado por
@@ -40,10 +41,14 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
   al mismo dominio y no loguean datos personales. `data_request` se confirma
   sólo después de persistir la obligación; el admin permite exportarla y
   resolverla. Las redacciones alcanzan pedidos, guías, direcciones y labels.
-- App externa (`embedded = false`): OAuth vuelve al acceso TAURO en una
-  navegación principal. El dominio de la tienda sólo inicia OAuth; los datos
-  operativos se muestran exclusivamente con una sesión TAURO del cliente
-  vinculado. No usa App Bridge ni se ejecuta dentro de un iframe.
+- App embebida (`embedded = true`): App Home corre dentro de Shopify Admin y
+  carga primero App Bridge desde el CDN oficial. El HTML inicial no contiene
+  datos privados; cada lectura del backend exige un ID/session token de Shopify
+  con firma HS256 y claims `aud`, `iss`, `dest`, `exp` y `nbf` validados.
+- El dominio del JWT se mapea a la instalación pública exacta. App Home muestra
+  estado del vínculo y pedidos de esa tienda sin PII innecesaria; no usa cookies
+  de terceros. OAuth/reinstalación conserva `state` firmado y vuelve a la URL
+  embebida de Admin derivada del `shop` verificado.
 - Venta → solicitud de guía automática (la guía NO se emite sola).
 - Cierre del círculo: al emitir la guía en TAURO, el pedido queda "enviado" en
   Shopify con el tracking y se avisa al comprador.
@@ -61,7 +66,7 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 
 ## Configuración operativa
 
-### 1. Credenciales (Railway → Variables) — cargadas
+### 1. Credenciales requeridas (no verificadas ni modificadas en este cambio)
 - `SHOPIFY_PUBLIC_API_KEY` y `SHOPIFY_PUBLIC_API_SECRET` (app pública TAURO):
   toda instalación nueva usa este par.
 - Durante la migración de Pesca Jacks, conservar `SHOPIFY_API_KEY` y
@@ -77,8 +82,11 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
   exclusiva.
 - `BASE_URL=https://taurosolutions.ar` (o dejar el default).
 
-### 2. Dev Dashboard → Apps → TAURO → Configuration — desplegada por CLI
-- **App URL**: `https://taurosolutions.ar/shopify/install`
+### 2. Dev Dashboard → Apps → TAURO → Configuration — pendiente de confirmar
+
+Los valores siguientes son el contrato local esperado. No se publicaron con
+CLI ni se cambió configuración remota al preparar este candidato.
+- **App URL**: `https://taurosolutions.ar/shopify/app`
 - **Allowed redirection URL(s)**: `https://taurosolutions.ar/shopify/callback`
 - **Access scopes**:
   `read_orders,read_products,read_inventory,read_locations,write_merchant_managed_fulfillment_orders`
@@ -113,8 +121,9 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 envío prellenado desde un pedido · comparador de couriers en `/web`.
 
 ### 4. Probar en una development store limpia
-(Partner Dashboard → Stores → Add store) Instalar → venta de prueba → ver la
-solicitud automática → emitir guía → ver "enviado" con tracking en Shopify.
+(Partner Dashboard → Stores → Add store) Instalar → abrir App Home dentro de
+Admin → verificar estado y pedidos sin PII → venta de prueba → ver la solicitud
+automática → emitir guía → ver "enviado" con tracking en Shopify.
 Recién ahí, **Submit**.
 
 > El 27/08/2026 la development store usada por Pesca Jacks devolvió
