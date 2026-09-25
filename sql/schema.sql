@@ -683,6 +683,9 @@ CREATE TABLE IF NOT EXISTS tiendanube_instalaciones (
     estado               TEXT NOT NULL DEFAULT 'ACTIVA',
     install_generation   TEXT,
     webhooks_ready       BOOLEAN NOT NULL DEFAULT FALSE,
+    label_webhook_ready  BOOLEAN NOT NULL DEFAULT FALSE,
+    label_api_feature_ready BOOLEAN NOT NULL DEFAULT FALSE,
+    label_api_feature_checked_at TIMESTAMPTZ,
     webhooks_verified_at TIMESTAMPTZ,
     claim_token_hash     TEXT,
     claim_expires_at     TIMESTAMPTZ,
@@ -698,6 +701,12 @@ ALTER TABLE IF EXISTS tiendanube_instalaciones
     ADD COLUMN IF NOT EXISTS install_generation TEXT;
 ALTER TABLE IF EXISTS tiendanube_instalaciones
     ADD COLUMN IF NOT EXISTS webhooks_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS label_webhook_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS label_api_feature_ready BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS tiendanube_instalaciones
+    ADD COLUMN IF NOT EXISTS label_api_feature_checked_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS tiendanube_instalaciones
     ADD COLUMN IF NOT EXISTS webhooks_verified_at TIMESTAMPTZ;
 ALTER TABLE IF EXISTS tiendanube_instalaciones
@@ -795,6 +804,191 @@ CREATE TABLE IF NOT EXISTS tiendanube_shipping_config (
 ALTER TABLE IF EXISTS tiendanube_shipping_config
     ADD COLUMN IF NOT EXISTS label_callback_token_hash TEXT;
 
+-- Snapshot de checkout nacional. Se persiste antes de devolver la tarifa y
+-- contiene sólo ruta mínima (país/CP/location_id), bultos e importes. El
+-- domicilio y los datos del destinatario llegan recién con Fulfillment Orders.
+CREATE TABLE IF NOT EXISTS tiendanube_rate_quote_snapshots (
+    snapshot_id          TEXT PRIMARY KEY,
+    store_id             TEXT NOT NULL,
+    customer_id          TEXT NOT NULL,
+    request_id           TEXT NOT NULL,
+    cart_id              TEXT NOT NULL DEFAULT '',
+    carrier_id           TEXT NOT NULL,
+    carrier_quote_id     TEXT NOT NULL,
+    service_code         TEXT NOT NULL,
+    service_name         TEXT NOT NULL,
+    origin_route         JSONB NOT NULL,
+    destination_route    JSONB NOT NULL,
+    packages             JSONB NOT NULL,
+    declared_value       NUMERIC(18,4) NOT NULL,
+    declared_currency    CHAR(3) NOT NULL,
+    origin_mode          TEXT NOT NULL,
+    destination_mode     TEXT NOT NULL,
+    carrier_cost         NUMERIC(18,4) NOT NULL,
+    carrier_currency     CHAR(3) NOT NULL,
+    tauro_price          NUMERIC(18,4) NOT NULL,
+    buyer_price          NUMERIC(18,4) NOT NULL,
+    platform_additional_cost NUMERIC(18,4) NOT NULL DEFAULT 0,
+    expected_consumer_price NUMERIC(18,4) NOT NULL DEFAULT 0,
+    platform_option_id   TEXT NOT NULL DEFAULT '',
+    price_currency       CHAR(3) NOT NULL,
+    estimated_days       INTEGER NOT NULL,
+    carrier_expires_at   TIMESTAMPTZ,
+    pricing_mode         TEXT NOT NULL,
+    snapshot_sha256      CHAR(64) NOT NULL,
+    quoted_at            TIMESTAMPTZ NOT NULL,
+    UNIQUE (store_id, snapshot_id),
+    FOREIGN KEY (store_id)
+        REFERENCES tiendanube_shipping_config(store_id) ON DELETE CASCADE,
+    FOREIGN KEY (customer_id)
+        REFERENCES clientes(cliente_id) ON DELETE CASCADE,
+    CONSTRAINT ck_tn_rate_quote_snapshot_id CHECK (
+        snapshot_id ~ '^tnq_[0-9a-f]{64}$'
+    ),
+    CONSTRAINT ck_tn_rate_quote_carrier CHECK (
+        carrier_id ~ '^[a-z0-9_-]{2,32}$'
+    ),
+    CONSTRAINT ck_tn_rate_quote_json CHECK (
+        jsonb_typeof(origin_route) = 'object'
+        AND jsonb_typeof(destination_route) = 'object'
+        AND jsonb_typeof(packages) = 'array'
+    ),
+    CONSTRAINT ck_tn_rate_quote_amounts CHECK (
+        declared_value > 0 AND carrier_cost > 0
+        AND tauro_price > 0 AND buyer_price >= 0
+        AND platform_additional_cost >= 0
+        AND expected_consumer_price >= 0
+    ),
+    CONSTRAINT ck_tn_rate_quote_days CHECK (estimated_days > 0)
+);
+ALTER TABLE IF EXISTS tiendanube_rate_quote_snapshots
+    ADD COLUMN IF NOT EXISTS platform_additional_cost
+        NUMERIC(18,4) NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS tiendanube_rate_quote_snapshots
+    ADD COLUMN IF NOT EXISTS expected_consumer_price
+        NUMERIC(18,4) NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS tiendanube_rate_quote_snapshots
+    ADD COLUMN IF NOT EXISTS platform_option_id TEXT NOT NULL DEFAULT '';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'tiendanube_rate_quote_snapshots'::regclass
+           AND conname = 'ck_tn_rate_quote_platform_amounts'
+    ) THEN
+        ALTER TABLE tiendanube_rate_quote_snapshots
+            ADD CONSTRAINT ck_tn_rate_quote_platform_amounts CHECK (
+                platform_additional_cost >= 0
+                AND expected_consumer_price >= 0
+            );
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS ix_tn_rate_quote_store_cart
+    ON tiendanube_rate_quote_snapshots(store_id, cart_id, quoted_at DESC);
+
+CREATE OR REPLACE FUNCTION tauro_bloquear_tn_rate_quote_update()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Los snapshots de tarifa Tiendanube son inmutables';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_bloquear_tn_rate_quote_update
+    ON tiendanube_rate_quote_snapshots;
+CREATE TRIGGER trg_bloquear_tn_rate_quote_update
+BEFORE UPDATE ON tiendanube_rate_quote_snapshots
+FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_tn_rate_quote_update();
+
+-- Vínculo mínimo, sin PII, entre la orden y cada Fulfillment Order. Labels no
+-- guarda el payload completo hasta comprobar este vínculo y el tombstone.
+CREATE TABLE IF NOT EXISTS tiendanube_fulfillment_order_orders (
+    store_id             TEXT NOT NULL,
+    fulfillment_order_id TEXT NOT NULL,
+    order_id             TEXT NOT NULL,
+    creada_en            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (store_id, fulfillment_order_id),
+    FOREIGN KEY (store_id)
+        REFERENCES tiendanube_shipping_config(store_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_tn_ffo_order
+    ON tiendanube_fulfillment_order_orders(store_id, order_id);
+
+-- Una cotización cacheable puede respaldar varios FFO legítimos. Cada FFO se
+-- registra una sola vez para conservar auditoría sin duplicar sus reintentos.
+CREATE TABLE IF NOT EXISTS tiendanube_rate_quote_claims (
+    store_id             TEXT NOT NULL,
+    snapshot_id          TEXT NOT NULL,
+    fulfillment_order_id TEXT NOT NULL,
+    creada_en            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (store_id, snapshot_id, fulfillment_order_id),
+    FOREIGN KEY (store_id, snapshot_id)
+        REFERENCES tiendanube_rate_quote_snapshots(store_id, snapshot_id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (store_id, fulfillment_order_id)
+        REFERENCES tiendanube_fulfillment_order_orders(
+            store_id, fulfillment_order_id
+        )
+        ON DELETE CASCADE
+);
+
+-- CREATE TABLE IF NOT EXISTS no cambia la PK de instalaciones existentes.
+-- Migra únicamente la PK legacy exacta, cualquiera sea su nombre, y falla
+-- cerrado ante una PK inesperada en vez de eliminar una restricción ajena.
+DO $$
+DECLARE
+    restriccion RECORD;
+BEGIN
+    LOCK TABLE tiendanube_rate_quote_claims IN ACCESS EXCLUSIVE MODE;
+
+    FOR restriccion IN
+        SELECT c.conname
+          FROM pg_constraint c
+         WHERE c.conrelid = 'tiendanube_rate_quote_claims'::regclass
+           AND c.contype = 'p'
+           AND (
+               SELECT ARRAY_AGG(a.attname ORDER BY u.ord)
+                 FROM UNNEST(c.conkey) WITH ORDINALITY u(attnum, ord)
+                 JOIN pg_attribute a
+                   ON a.attrelid = c.conrelid AND a.attnum = u.attnum
+           ) = ARRAY['store_id', 'snapshot_id']::name[]
+    LOOP
+        EXECUTE FORMAT(
+            'ALTER TABLE tiendanube_rate_quote_claims DROP CONSTRAINT %I',
+            restriccion.conname
+        );
+    END LOOP;
+
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint c
+         WHERE c.conrelid = 'tiendanube_rate_quote_claims'::regclass
+           AND c.contype = 'p'
+           AND (
+               SELECT ARRAY_AGG(a.attname ORDER BY u.ord)
+                 FROM UNNEST(c.conkey) WITH ORDINALITY u(attnum, ord)
+                 JOIN pg_attribute a
+                   ON a.attrelid = c.conrelid AND a.attnum = u.attnum
+           ) = ARRAY[
+               'store_id', 'snapshot_id', 'fulfillment_order_id'
+           ]::name[]
+    ) THEN
+        IF EXISTS (
+            SELECT 1
+              FROM pg_constraint c
+             WHERE c.conrelid = 'tiendanube_rate_quote_claims'::regclass
+               AND c.contype = 'p'
+        ) THEN
+            RAISE EXCEPTION
+                'PK inesperada en tiendanube_rate_quote_claims';
+        END IF;
+        ALTER TABLE tiendanube_rate_quote_claims
+            ADD PRIMARY KEY (
+                store_id, snapshot_id, fulfillment_order_id
+            );
+    END IF;
+END $$;
+
 -- Labels API: registro canónico y outbox idempotente. Mientras el adapter
 -- nacional no esté homologado, generate_payload sólo conserva IDs y la huella
 -- del payload original; no conserva datos personales del destinatario.
@@ -802,6 +996,11 @@ CREATE TABLE IF NOT EXISTS tiendanube_labels (
     store_id                    TEXT NOT NULL,
     label_id                    TEXT NOT NULL,
     fulfillment_order_id        TEXT NOT NULL,
+    rate_quote_snapshot_id       TEXT,
+    order_id                     TEXT,
+    tiendanube_status            TEXT,
+    download_token_hash          TEXT,
+    download_token_revoked_at    TIMESTAMPTZ,
     generate_payload            JSONB,
     generate_fingerprint        CHAR(64),
     generate_payload_complete   BOOLEAN NOT NULL DEFAULT FALSE,
@@ -813,11 +1012,39 @@ CREATE TABLE IF NOT EXISTS tiendanube_labels (
     PRIMARY KEY (store_id, label_id),
     FOREIGN KEY (store_id)
         REFERENCES tiendanube_shipping_config(store_id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_tn_label_rate_quote_snapshot
+        FOREIGN KEY (store_id, rate_quote_snapshot_id)
+        REFERENCES tiendanube_rate_quote_snapshots(store_id, snapshot_id)
         ON DELETE CASCADE
 );
 ALTER TABLE IF EXISTS tiendanube_labels
     ADD COLUMN IF NOT EXISTS generate_payload_complete
         BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS rate_quote_snapshot_id TEXT;
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS order_id TEXT;
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS tiendanube_status TEXT;
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS download_token_hash TEXT;
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS download_token_revoked_at TIMESTAMPTZ;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'tiendanube_labels'::regclass
+           AND conname = 'fk_tn_label_rate_quote_snapshot'
+    ) THEN
+        ALTER TABLE tiendanube_labels
+            ADD CONSTRAINT fk_tn_label_rate_quote_snapshot
+            FOREIGN KEY (store_id, rate_quote_snapshot_id)
+            REFERENCES tiendanube_rate_quote_snapshots(store_id, snapshot_id)
+            ON DELETE CASCADE;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS tiendanube_label_outbox (
     id                      BIGSERIAL PRIMARY KEY,
@@ -832,6 +1059,8 @@ CREATE TABLE IF NOT EXISTS tiendanube_label_outbox (
     intentos                INTEGER NOT NULL DEFAULT 0,
     proximo_intento_en      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     ultimo_error_codigo     TEXT,
+    claim_id                TEXT,
+    claimed_at              TIMESTAMPTZ,
     creada_en               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizada_en          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     procesada_en            TIMESTAMPTZ,
@@ -843,8 +1072,64 @@ CREATE TABLE IF NOT EXISTS tiendanube_label_outbox (
 ALTER TABLE IF EXISTS tiendanube_label_outbox
     ADD COLUMN IF NOT EXISTS payload_complete
         BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS tiendanube_label_outbox
+    ADD COLUMN IF NOT EXISTS claim_id TEXT;
+ALTER TABLE IF EXISTS tiendanube_label_outbox
+    ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_tiendanube_label_outbox_pendiente
     ON tiendanube_label_outbox(estado, proximo_intento_en, id);
+CREATE INDEX IF NOT EXISTS idx_tiendanube_label_outbox_claim_vencido
+    ON tiendanube_label_outbox(claimed_at, id)
+    WHERE estado = 'PROCESANDO';
+
+-- Checkpoints durables del worker. El alta externa, la descarga del PDF y la
+-- publicación en Tiendanube avanzan de etapa sin repetir una escritura OCA.
+CREATE TABLE IF NOT EXISTS tiendanube_label_execution (
+    outbox_id              BIGINT PRIMARY KEY,
+    store_id               TEXT NOT NULL,
+    label_id               TEXT NOT NULL,
+    stage                  TEXT NOT NULL,
+    external_operation_id  TEXT,
+    tracking_number        TEXT,
+    document_key           TEXT,
+    document_url           TEXT,
+    document_size          INTEGER,
+    claim_id               TEXT,
+    claimed_at             TIMESTAMPTZ,
+    creada_en              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (outbox_id)
+        REFERENCES tiendanube_label_outbox(id) ON DELETE CASCADE,
+    FOREIGN KEY (store_id, label_id)
+        REFERENCES tiendanube_labels(store_id, label_id) ON DELETE CASCADE,
+    CONSTRAINT ck_tn_label_execution_stage CHECK (
+        stage IN ('CREATE_SHIPMENT', 'FETCH_LABEL', 'PUBLISH', 'DONE')
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_tiendanube_label_execution_label
+    ON tiendanube_label_execution(store_id, label_id);
+
+-- El documento se persiste antes de publicar READY_TO_DOWNLOAD. Sólo se
+-- entrega por el token hasheado y puede revocarse sin borrar evidencia.
+CREATE TABLE IF NOT EXISTS tiendanube_label_documents (
+    store_id       TEXT NOT NULL,
+    label_id       TEXT NOT NULL,
+    document_key   TEXT NOT NULL,
+    pdf_sha256     CHAR(64) NOT NULL,
+    pdf_size       INTEGER NOT NULL,
+    pdf_content    BYTEA NOT NULL,
+    token_hash     CHAR(64) NOT NULL,
+    activa         BOOLEAN NOT NULL DEFAULT TRUE,
+    creada_en      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revocada_en    TIMESTAMPTZ,
+    PRIMARY KEY (store_id, label_id),
+    UNIQUE (document_key),
+    FOREIGN KEY (store_id, label_id)
+        REFERENCES tiendanube_labels(store_id, label_id) ON DELETE CASCADE,
+    CONSTRAINT ck_tn_label_document_size CHECK (
+        pdf_size > 0 AND octet_length(pdf_content) = pdf_size
+    )
+);
 
 -- ── Pagos recibidos (ex PAGOS) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS pagos (

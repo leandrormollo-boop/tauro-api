@@ -76,7 +76,8 @@ Panel y preferencias: `https://taurosolutions.ar/portal/tienda`.
 - La emisión requiere una acción deliberada del comercio en TAURO.
 - Tracking: se informa a Tiendanube cuando el paquete está realmente
   despachado, mediante Fulfillment Orders.
-- Cancelación, etiqueta y códigos de tracking OCA: `[IMPLEMENTAR Y VALIDAR UAT]`.
+- Cancelación, etiqueta y códigos de tracking OCA: implementados localmente;
+  `[VALIDAR UAT Y CONTRATO]`.
 - Exportación CSV: `[DEFINIR]`.
 - Mercadería prohibida/restringida: `[CONFIRMAR CONTRATO OCA]`.
 
@@ -88,4 +89,5 @@ Panel y preferencias: `https://taurosolutions.ar/portal/tienda`.
 - Recolección: `[CONFIRMAR CONTRATO OCA]`.
 - Seguro y valor declarado: `[CONFIRMAR CONTRATO OCA]`.
 - Forma de pago del envío: `[DEFINIR]`.
-- Emisión y cancelación de etiquetas: `[IMPLEMENTAR Y VALIDAR UAT]`.
+- Emisión y cancelación de etiquetas: implementadas localmente;
+  `[VALIDAR UAT ANTES DE ACTIVAR]`.

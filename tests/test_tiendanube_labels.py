@@ -1,6 +1,9 @@
 import asyncio
 import inspect
 import json
+from contextlib import nullcontext
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +12,8 @@ from servicios.tiendanube_labels import (
     LabelsAuthenticationError,
     LabelsBlockedError,
     LabelsConflictError,
+    LabelsContractError,
+    LabelsUnavailableError,
     PersistResult,
     recibir_cancel,
     recibir_generate,
@@ -16,6 +21,20 @@ from servicios.tiendanube_labels import (
 
 
 TOKEN = "label-callback-super-secreto-123456"
+SNAPSHOT_ID = "tnq_" + "a" * 64
+REFERENCE = f"tauro:oca:{SNAPSHOT_ID}"
+
+
+@pytest.fixture(autouse=True)
+def _sin_postgres_para_lock_de_registro(monkeypatch):
+    """Los tests de contrato del carrier no necesitan una DB real."""
+    from servicios import tiendanube_shipping
+
+    monkeypatch.setattr(
+        tiendanube_shipping,
+        "_shipping_registration_lock",
+        lambda _store_id: nullcontext(),
+    )
 
 
 def _config(_token):
@@ -28,11 +47,89 @@ def _generate_payload(*, address="Calle 1"):
             "id": "label-1",
             "fulfillment_order_info": {
                 "id": "ffo-1",
+                "total_quantity": 1,
+                "total_weight": "1.5",
+                "total_price": {"value": "10000", "currency": "ARS"},
+                "assigned_location": {
+                    "location_id": "loc-1",
+                    "name": "Depósito TAURO",
+                    "address": {
+                        "zipcode": "1425",
+                        "street": "Origen 1",
+                        "country": {"code": "AR", "name": "Argentina"},
+                    },
+                },
+                "line_items": [
+                    {
+                        "quantity": 1,
+                        "unit_dimension": {
+                            "weight": "1.5",
+                            "depth": "20",
+                            "width": "15",
+                            "height": "10",
+                        },
+                    }
+                ],
                 "recipient": {"name": "Comprador", "address": address},
-                "shipping": {"option": "domicilio"},
+                "shipping": {
+                    "type": "ship",
+                    "carrier": {"carrier_id": "77", "code": "api"},
+                    "option": {
+                        "name": "TAURO nacional",
+                        "code": "tauro_nacional_domicilio",
+                        "reference": REFERENCE,
+                    },
+                    "merchant_cost": {"value": "7000", "currency": "ARS"},
+                    "consumer_cost": {"value": "7000", "currency": "ARS"},
+                },
+                "destination": {
+                    "zipcode": "2000",
+                    "street": address,
+                    "country": {"code": "AR", "name": "Argentina"},
+                },
             },
         }
     ]
+
+
+def _ready_kwargs():
+    return {
+        "execution_ready": lambda: True,
+        "installation_loader": lambda _store: {"cliente_id": "CLIENTE-1"},
+        "order_context_loader": lambda _store, _ffo: {
+            "order_id": "order-1",
+            "redacted": False,
+        },
+        "quote_resolver": lambda store, customer, reference: {
+            "snapshot_id": SNAPSHOT_ID,
+            "store_id": store,
+            "customer_id": customer,
+            "carrier_id": "oca",
+            "price_currency": "ARS",
+            "tauro_price": "7000",
+            "buyer_price": "7000",
+            "expected_consumer_price": "7000",
+            "declared_value": "10000",
+            "declared_currency": "ARS",
+            "origin_route": {
+                "country": "AR",
+                "postal_code": "1425",
+                "location_id": "loc-1",
+            },
+            "destination_route": {"country": "AR", "postal_code": "2000"},
+            "packages": [
+                {
+                    "quantity": 1,
+                    "weight_kg": "1.5",
+                    "length_cm": "20",
+                    "width_cm": "15",
+                    "height_cm": "10",
+                }
+            ],
+            "pricing_mode": "pagado",
+            "reference": reference,
+        },
+    }
 
 
 def _cancel_payload():
@@ -103,11 +200,317 @@ def test_generate_solo_acepta_despues_de_persistir_si_worker_fuera_habilitado():
         TOKEN,
         repository=repository,
         config_loader=_config,
-        execution_ready=lambda: True,
+        **_ready_kwargs(),
     )
 
     assert result == PersistResult(created=1, replayed=0, state="PENDIENTE")
     assert len(repository.operations) == 1
+    operation = next(iter(repository.operations.values()))
+    assert operation.rate_quote_snapshot_id == SNAPSHOT_ID
+    assert operation.order_id == "order-1"
+
+
+def test_generate_listo_rechaza_referencia_ausente_antes_de_persistir():
+    repository = MemoryRepository()
+    payload = _generate_payload()
+    payload[0]["fulfillment_order_info"]["shipping"]["option"]["reference"] = None
+
+    with pytest.raises(LabelsContractError, match="cotización aceptada"):
+        recibir_generate(
+            payload,
+            TOKEN,
+            repository=repository,
+            config_loader=_config,
+            **_ready_kwargs(),
+        )
+
+    assert repository.operations == {}
+
+
+def test_generate_listo_rechaza_precio_o_destino_distinto_del_snapshot():
+    repository = MemoryRepository()
+    payload = _generate_payload()
+    payload[0]["fulfillment_order_info"]["shipping"]["consumer_cost"]["value"] = "1"
+
+    with pytest.raises(LabelsContractError, match="importes"):
+        recibir_generate(
+            payload,
+            TOKEN,
+            repository=repository,
+            config_loader=_config,
+            **_ready_kwargs(),
+        )
+
+    assert repository.operations == {}
+
+
+def test_generate_no_guarda_pii_si_la_orden_fue_redactada():
+    repository = MemoryRepository()
+    kwargs = _ready_kwargs()
+    kwargs["order_context_loader"] = lambda *_: {
+        "order_id": "order-1",
+        "redacted": True,
+    }
+
+    with pytest.raises(LabelsContractError, match="privacidad"):
+        recibir_generate(
+            _generate_payload(),
+            TOKEN,
+            repository=repository,
+            config_loader=_config,
+            **kwargs,
+        )
+
+    assert repository.operations == {}
+
+
+def test_generate_no_guarda_pii_sin_vinculo_ffo_orden():
+    repository = MemoryRepository()
+    kwargs = _ready_kwargs()
+    kwargs["order_context_loader"] = lambda *_: None
+
+    with pytest.raises(LabelsUnavailableError, match="todavía no está vinculado"):
+        recibir_generate(
+            _generate_payload(),
+            TOKEN,
+            repository=repository,
+            config_loader=_config,
+            **kwargs,
+        )
+
+    assert repository.operations == {}
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda fulfillment: fulfillment["assigned_location"]["address"].update(
+                {"zipcode": "5000"}
+            ),
+            "origen",
+        ),
+        (
+            lambda fulfillment: fulfillment.update({"total_weight": "2.5"}),
+            "bultos",
+        ),
+        (
+            lambda fulfillment: fulfillment["line_items"][0]["unit_dimension"].update(
+                {"width": "99"}
+            ),
+            "peso o las medidas",
+        ),
+    ],
+)
+def test_generate_rechaza_geometria_u_origen_distinto(mutate, message):
+    repository = MemoryRepository()
+    payload = _generate_payload()
+    mutate(payload[0]["fulfillment_order_info"])
+
+    with pytest.raises(LabelsContractError, match=message):
+        recibir_generate(
+            payload,
+            TOKEN,
+            repository=repository,
+            config_loader=_config,
+            **_ready_kwargs(),
+        )
+
+    assert repository.operations == {}
+
+
+def test_repositorio_serializa_privacidad_y_audita_snapshot_por_ffo():
+    source = inspect.getsource(tiendanube_labels.PostgresLabelRepository.persist)
+    normalized = " ".join(source.split())
+
+    assert "pg_advisory_xact_lock" in normalized
+    assert "tiendanube_pedidos_redactados" in normalized
+    assert "tiendanube_rate_quote_claims" in normalized
+    assert (
+        "ON CONFLICT ( store_id, snapshot_id, fulfillment_order_id ) DO NOTHING"
+        in normalized
+    )
+    assert (
+        "AND snapshot_id = %s AND fulfillment_order_id = %s FOR UPDATE"
+        in normalized
+    )
+    assert "La cotización ya fue usada por otra orden" not in source
+
+
+def test_mismo_snapshot_respalda_varios_ffo_y_reintenta_por_label(monkeypatch):
+    class FakeCursor:
+        def __init__(self):
+            self.claims = set()
+            self.labels = {}
+            self.outbox = {}
+            self.result = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, query, params=None):
+            sql = " ".join(query.split())
+            params = params or ()
+            self.result = None
+            if "pg_advisory_xact_lock" in sql:
+                return
+            if "FROM tiendanube_fulfillment_order_orders m" in sql:
+                self.result = {
+                    "order_id": f"order-{params[2]}",
+                    "redacted": False,
+                }
+                return
+            if "INSERT INTO tiendanube_rate_quote_claims" in sql:
+                self.claims.add(tuple(params))
+                return
+            if "SELECT 1 AS claim_exists" in sql:
+                self.result = {"claim_exists": 1} if tuple(params) in self.claims else None
+                return
+            if "INSERT INTO tiendanube_labels" in sql:
+                key = (params[0], params[1])
+                if key not in self.labels:
+                    self.labels[key] = {
+                        "fulfillment_order_id": params[2],
+                        "rate_quote_snapshot_id": params[3],
+                        "order_id": params[4],
+                        "generate_fingerprint": params[6],
+                        "generate_payload_complete": params[7],
+                    }
+                    self.result = {"store_id": params[0]}
+                return
+            if "SELECT fulfillment_order_id, rate_quote_snapshot_id" in sql:
+                self.result = self.labels.get(tuple(params))
+                return
+            if "INSERT INTO tiendanube_label_outbox" in sql:
+                key = (params[0], params[1], params[2])
+                if key not in self.outbox:
+                    self.outbox[key] = {
+                        "payload_fingerprint": params[4],
+                        "payload_complete": params[5],
+                    }
+                    self.result = {"id": len(self.outbox)}
+                return
+            if "SELECT payload_fingerprint, payload_complete" in sql:
+                self.result = self.outbox.get(tuple(params))
+                return
+            raise AssertionError(f"SQL inesperado: {sql}")
+
+        def fetchone(self):
+            return self.result
+
+    class FakeConnection:
+        def __init__(self):
+            self.cursor_instance = FakeCursor()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    connection = FakeConnection()
+    monkeypatch.setattr(tiendanube_labels, "_ensure_tables", lambda: None)
+    monkeypatch.setattr(tiendanube_labels, "get_conn", lambda: connection)
+    operations = tuple(
+        tiendanube_labels.LabelOperation(
+            store_id="store-1",
+            label_id=f"label-{ffo}",
+            fulfillment_order_id=ffo,
+            operation="GENERATE",
+            payload={"fulfillment_order_info": {"id": ffo}},
+            fingerprint=ffo.ljust(64, "0"),
+            rate_quote_snapshot_id=SNAPSHOT_ID,
+            order_id=f"order-{ffo}",
+        )
+        for ffo in ("ffo-1", "ffo-2")
+    )
+    repository = tiendanube_labels.PostgresLabelRepository()
+
+    assert repository.persist(operations, state="PENDIENTE") == PersistResult(
+        created=2,
+        replayed=0,
+        state="PENDIENTE",
+    )
+    assert connection.cursor_instance.claims == {
+        ("store-1", SNAPSHOT_ID, "ffo-1"),
+        ("store-1", SNAPSHOT_ID, "ffo-2"),
+    }
+    assert repository.persist(operations, state="PENDIENTE") == PersistResult(
+        created=0,
+        replayed=2,
+        state="PENDIENTE",
+    )
+
+
+def test_claims_migran_pk_legacy_a_auditoria_por_ffo():
+    runtime_source = inspect.getsource(tiendanube_labels._ensure_tables)
+    schema_source = (
+        Path(tiendanube_labels.__file__).parents[1] / "sql" / "schema.sql"
+    ).read_text(encoding="utf-8")
+
+    for source in (runtime_source, schema_source):
+        normalized = " ".join(source.split())
+        assert "PRIMARY KEY" in normalized
+        assert "store_id, snapshot_id, fulfillment_order_id" in normalized
+        assert "ARRAY['store_id', 'snapshot_id']::name[]" in normalized
+        assert (
+            "'store_id', 'snapshot_id', 'fulfillment_order_id'" in normalized
+        )
+        assert "LOCK TABLE tiendanube_rate_quote_claims" in normalized
+
+
+def test_readiness_de_labels_exige_flags_secreto_y_oca(monkeypatch):
+    from servicios import oca_adapter
+
+    monkeypatch.setenv("TIENDANUBE_LABELS_WORKER_ENABLED", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
+    monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_LABEL_DOWNLOAD_SECRET", "x" * 32)
+    monkeypatch.setenv("OCA_ENVIRONMENT", "qa")
+    monkeypatch.setattr(
+        oca_adapter,
+        "registration_status",
+        lambda: {"fulfillment_ready": True},
+    )
+
+    assert tiendanube_labels.labels_execution_ready() is True
+    monkeypatch.setenv("TIENDANUBE_LABEL_DOWNLOAD_SECRET", "corto")
+    assert tiendanube_labels.labels_execution_ready() is False
+
+
+def test_readiness_productiva_exige_homologacion_tiendanube(monkeypatch):
+    from servicios import oca_adapter
+
+    for name in (
+        "TIENDANUBE_LABELS_WORKER_ENABLED",
+        "TIENDANUBE_SHIPPING_ENABLED",
+        "TAURO_NACIONAL_RATES_READY",
+    ):
+        monkeypatch.setenv(name, "true")
+    monkeypatch.setenv("TIENDANUBE_LABEL_DOWNLOAD_SECRET", "x" * 32)
+    monkeypatch.setenv("OCA_ENVIRONMENT", "production")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "false")
+    monkeypatch.setattr(
+        oca_adapter,
+        "registration_status",
+        lambda: {"fulfillment_ready": True},
+    )
+
+    assert tiendanube_labels.labels_execution_ready() is False
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
+    assert tiendanube_labels.labels_execution_ready() is True
 
 
 def test_mismo_store_y_label_con_payload_distinto_es_conflicto():
@@ -117,7 +520,7 @@ def test_mismo_store_y_label_con_payload_distinto_es_conflicto():
         TOKEN,
         repository=repository,
         config_loader=_config,
-        execution_ready=lambda: True,
+        **_ready_kwargs(),
     )
 
     with pytest.raises(LabelsConflictError):
@@ -126,24 +529,41 @@ def test_mismo_store_y_label_con_payload_distinto_es_conflicto():
             TOKEN,
             repository=repository,
             config_loader=_config,
-            execution_ready=lambda: True,
+            **_ready_kwargs(),
         )
 
 
-def test_cancel_persiste_pero_nunca_aprueba_sin_cancelacion_real():
-    repository = MemoryRepository()
+def test_cancel_no_toca_carrier_mientras_worker_esta_bloqueado():
+    calls = []
 
     with pytest.raises(LabelsBlockedError):
         recibir_cancel(
             _cancel_payload(),
             TOKEN,
-            repository=repository,
             config_loader=_config,
+            cancel_service=lambda *_args, **_kwargs: calls.append(True),
         )
 
-    key = ("123456", "label-1", "CANCEL")
-    assert key in repository.operations
-    assert repository.last_state == "BLOQUEADA_SIN_CANCELACION"
+    assert calls == []
+
+
+def test_cancel_listo_delega_lote_autenticado_al_servicio_confirmado():
+    calls = []
+    expected = SimpleNamespace(http_status=204, response_body=None)
+
+    result = recibir_cancel(
+        _cancel_payload(),
+        TOKEN,
+        config_loader=_config,
+        execution_ready=lambda: True,
+        cancel_service=lambda store, items: calls.append((store, items)) or expected,
+    )
+
+    assert result is expected
+    assert calls == [(
+        "123456",
+        [{"label_id": "label-1", "fulfillment_order_id": "ffo-1"}],
+    )]
 
 
 def test_token_invalido_no_persiste():
@@ -259,13 +679,59 @@ def test_endpoint_corta_stream_excesivo_aunque_header_mienta(monkeypatch):
     assert response.status_code == 413
 
 
-def test_endpoint_cancel_no_devuelve_2xx_aunque_servicio_retornara(monkeypatch):
+def test_endpoint_cancel_solo_devuelve_204_con_confirmacion_total(monkeypatch):
+    from endpoints import tiendanube_shipping as endpoint
+
+    monkeypatch.setattr(
+        endpoint,
+        "recibir_cancel",
+        lambda *_: SimpleNamespace(http_status=204, response_body=None),
+    )
+
+    response = asyncio.run(endpoint.cancel_labels(TOKEN, _Request(_cancel_payload())))
+    assert response.status_code == 204
+
+
+@pytest.mark.parametrize("status", [207, 409])
+def test_endpoint_cancel_con_resultados_devuelve_contrato_tiendanube(
+    monkeypatch, status
+):
+    from endpoints import tiendanube_shipping as endpoint
+
+    body = {"labels": [{"label_id": "label-1", "status": "FAILED"}]}
+    monkeypatch.setattr(
+        endpoint,
+        "recibir_cancel",
+        lambda *_: SimpleNamespace(http_status=status, response_body=body),
+    )
+
+    response = asyncio.run(endpoint.cancel_labels(TOKEN, _Request(_cancel_payload())))
+    assert response.status_code == status
+    assert json.loads(response.body) == body
+
+
+def test_endpoint_cancel_falla_cerrado_sin_resultado_interpretable(monkeypatch):
     from endpoints import tiendanube_shipping as endpoint
 
     monkeypatch.setattr(endpoint, "recibir_cancel", lambda *_: None)
 
     response = asyncio.run(endpoint.cancel_labels(TOKEN, _Request(_cancel_payload())))
     assert response.status_code == 503
+
+
+def test_endpoint_cancel_corta_antes_del_sla_aunque_el_servicio_no_responda(monkeypatch):
+    from endpoints import tiendanube_shipping as endpoint
+
+    monkeypatch.setattr(endpoint, "_LABEL_CANCEL_ENDPOINT_TIMEOUT_SECONDS", 0.01)
+
+    async def servicio_bloqueado(*_args, **_kwargs):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(endpoint.asyncio, "to_thread", servicio_bloqueado)
+    response = asyncio.run(endpoint.cancel_labels(TOKEN, _Request(_cancel_payload())))
+
+    assert response.status_code == 503
+    assert json.loads(response.body) == {"error": "operacion_no_disponible"}
 
 
 class _Response:
@@ -277,6 +743,93 @@ class _Response:
         return self._payload
 
 
+def test_lock_registro_shipping_usa_misma_sesion_y_libera_en_finally(monkeypatch):
+    from servicios import tiendanube_shipping
+
+    ejecutadas = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            ejecutadas.append((" ".join(str(sql).split()), params))
+
+    class Connection:
+        def __enter__(self):
+            ejecutadas.append(("CONNECTION_ENTER", None))
+            return self
+
+        def __exit__(self, *_args):
+            ejecutadas.append(("CONNECTION_EXIT", None))
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    conexiones = []
+
+    def connection_factory():
+        connection = Connection()
+        conexiones.append(connection)
+        return connection
+
+    monkeypatch.setattr(tiendanube_shipping, "get_conn", connection_factory)
+
+    with pytest.raises(RuntimeError, match="fallo remoto"):
+        with tiendanube_shipping._postgres_shipping_registration_lock("123"):
+            ejecutadas.append(("BODY", None))
+            raise RuntimeError("fallo remoto")
+
+    assert len(conexiones) == 1
+    sql = [statement for statement, _params in ejecutadas]
+    assert "pg_advisory_lock(hashtextextended(%s, 0))" in sql[1]
+    assert sql[2] == "BODY"
+    assert "pg_advisory_unlock(hashtextextended(%s, 0))" in sql[3]
+    assert ejecutadas[1][1] == ejecutadas[3][1] == (
+        "tauro:tiendanube:shipping-carrier:123",
+    )
+    assert sql[-1] == "CONNECTION_EXIT"
+
+
+def test_registro_shipping_envuelve_toda_la_operacion_con_lock(monkeypatch):
+    from contextlib import contextmanager
+    from servicios import tiendanube_shipping
+
+    orden = []
+
+    @contextmanager
+    def fake_lock(store_id):
+        orden.append(("lock", store_id))
+        try:
+            yield
+        finally:
+            orden.append(("unlock", store_id))
+
+    def fake_registration(store_id, access_token):
+        orden.append(("body", store_id, access_token))
+        return {"ready": True}
+
+    monkeypatch.setattr(tiendanube_shipping, "_shipping_registration_lock", fake_lock)
+    monkeypatch.setattr(
+        tiendanube_shipping,
+        "_registrar_shipping_carrier_locked",
+        fake_registration,
+    )
+
+    assert tiendanube_shipping.registrar_shipping_carrier("123", "access") == {
+        "ready": True,
+    }
+    assert orden == [
+        ("lock", "123"),
+        ("body", "123", "access"),
+        ("unlock", "123"),
+    ]
+
+
 def test_registro_nuevo_incluye_callback_labels_con_secreto_distinto(monkeypatch):
     from servicios import tiendanube_app, tiendanube_labels, tiendanube_shipping
 
@@ -284,6 +837,7 @@ def test_registro_nuevo_incluye_callback_labels_con_secreto_distinto(monkeypatch
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: True)
+    monkeypatch.setattr(tiendanube_app, "label_api_habilitada", lambda _store: True)
     monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda _store: None)
     tokens = iter(("rate-token", "labels-token"))
     monkeypatch.setattr(
@@ -329,6 +883,7 @@ def test_registro_existente_agrega_labels_sin_rotar_callback_rates(monkeypatch):
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: True)
+    monkeypatch.setattr(tiendanube_app, "label_api_habilitada", lambda _store: True)
     rate_token = "rate-token-existente-12345678901234567890"
     monkeypatch.setattr(
         tiendanube_shipping,

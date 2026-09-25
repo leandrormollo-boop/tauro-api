@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from servicios import tiendanube_rate_quotes, tiendanube_shipping
 from servicios.carrier_adapter import OperationState, QuoteResult
 from servicios.tiendanube_shipping import (
     ShippingAuthenticationError,
@@ -20,7 +21,25 @@ from servicios.tiendanube_shipping import (
 TOKEN = "callback-super-secreto"
 
 
-def _payload(*, mixed=False, dimensions=True):
+@pytest.fixture(autouse=True)
+def _freeze_quotes_without_database(monkeypatch):
+    """Las pruebas del callback verifican contrato; PostgreSQL tiene suite propia."""
+    monkeypatch.setattr(
+        tiendanube_shipping,
+        "guardar_snapshot",
+        tiendanube_rate_quotes.construir_snapshot,
+    )
+
+
+def _payload(
+    *,
+    mixed=False,
+    dimensions=True,
+    all_free=False,
+    additional_cost=0,
+    carrier_id="77",
+    option_id="88",
+):
     def item(name, price, free=False):
         value = {
             "id": name,
@@ -34,7 +53,7 @@ def _payload(*, mixed=False, dimensions=True):
             value["dimensions"] = {"width": 10, "height": 20, "depth": 30}
         return value
 
-    items = [item("pago", 10000)]
+    items = [item("pago", 10000, all_free)]
     if mixed:
         items.append(item("gratis", 20000, True))
     return {
@@ -45,6 +64,22 @@ def _payload(*, mixed=False, dimensions=True):
         "origin": {"country": "AR", "postal_code": "1425"},
         "destination": {"country": "AR", "postal_code": "2000"},
         "items": items,
+        "carrier": {
+            "id": carrier_id,
+            "name": "TAURO Solutions Ar",
+            "options": [
+                {
+                    "id": option_id,
+                    "code": "tauro_nacional_domicilio",
+                    "additional_cost": {
+                        "amount": additional_cost,
+                        "currency": "ARS",
+                    },
+                    "additional_days": 0,
+                    "allow_free_shipping": False,
+                }
+            ],
+        },
     }
 
 
@@ -56,6 +91,8 @@ def _config(_store_id):
     return {
         "activa": True,
         "callback_token_hash": hash_callback_token(TOKEN),
+        "carrier_id": "77",
+        "carrier_option_id": "88",
     }
 
 
@@ -234,9 +271,68 @@ def test_devuelve_solo_precio_final_sin_costo_ni_margen():
     assert rate["price_merchant"] == 7000.0
     assert rate["currency"] == "ARS"
     assert rate["accepts_cod"] is False
-    assert rate["reference"].startswith("tauro:oca:quote-")
+    assert rate["reference"].startswith("tauro:oca:tnq_")
     assert "carrier_cost" not in rate
     assert "margin" not in rate
+
+
+def test_envio_gratis_total_devuelve_el_precio_completo_a_tiendanube():
+    response = cotizar_callback(
+        _payload(all_free=True),
+        TOKEN,
+        installation_loader=_installation,
+        config_loader=_config,
+        adapters=[FakeAdapter()],
+    )
+
+    rate = response["rates"][0]
+    assert rate["price"] == 7000.0
+    assert rate["price_merchant"] == 7000.0
+
+
+def test_costo_adicional_se_congela_pero_no_se_suma_en_la_respuesta():
+    captured = {}
+
+    def save(*args, **kwargs):
+        snapshot = tiendanube_rate_quotes.construir_snapshot(*args, **kwargs)
+        captured.update(snapshot)
+        return snapshot
+
+    response = cotizar_callback(
+        _payload(additional_cost=1500),
+        TOKEN,
+        installation_loader=_installation,
+        config_loader=_config,
+        adapters=[FakeAdapter()],
+        snapshot_saver=save,
+    )
+
+    rate = response["rates"][0]
+    assert rate["price"] == 7000.0
+    assert rate["price_merchant"] == 7000.0
+    assert captured["platform_additional_cost"] == "1500"
+    assert captured["expected_consumer_price"] == "8500"
+    assert captured["platform_option_id"] == "88"
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (_payload(carrier_id="otro-carrier"), "otro carrier"),
+        (_payload(option_id="otra-opcion"), "otra opción"),
+    ],
+)
+def test_rechaza_carrier_u_opcion_que_no_coinciden_con_la_configuracion(
+    payload, message
+):
+    with pytest.raises(ShippingAuthenticationError, match=message):
+        cotizar_callback(
+            payload,
+            TOKEN,
+            installation_loader=_installation,
+            config_loader=_config,
+            adapters=[FakeAdapter()],
+        )
 
 
 def test_carrito_mixto_cotiza_total_al_merchant_y_solo_pago_al_comprador():
@@ -272,4 +368,19 @@ def test_deadline_global_descarta_cotizacion_tardia(monkeypatch):
             installation_loader=_installation,
             config_loader=_config,
             adapters=[FakeAdapter()],
+        )
+
+
+def test_fallo_al_congelar_tarifa_impide_publicar_referencia():
+    def fail(*_args, **_kwargs):
+        raise tiendanube_rate_quotes.RateQuoteSnapshotError("db caída")
+
+    with pytest.raises(ShippingUnavailableError, match="congelar"):
+        cotizar_callback(
+            _payload(),
+            TOKEN,
+            installation_loader=_installation,
+            config_loader=_config,
+            adapters=[FakeAdapter()],
+            snapshot_saver=fail,
         )
