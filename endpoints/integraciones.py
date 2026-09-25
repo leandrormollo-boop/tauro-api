@@ -308,6 +308,7 @@ def tiendanube_callback(request: Request, code: str = "", state: str = ""):
     from servicios.tiendanube_app import (
         app_configurada, canjear_token, guardar_instalacion,
         registrar_webhooks, confirmar_webhooks, datos_tienda,
+        labels_feature_enabled,
         validar_oauth_cookie, vincular_cliente, TiendanubeWebhookError,
     )
 
@@ -350,9 +351,16 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
         n = info.get("name")
         nombre = (n.get("es") or n.get("pt") or "") if isinstance(n, dict) else str(n or "")
 
-    claim_cookie = guardar_instalacion(store_id, token, nombre)
+    claim_cookie = guardar_instalacion(
+        store_id,
+        token,
+        nombre,
+        label_api_feature_ready=labels_feature_enabled(info),
+    )
     try:
         eventos = registrar_webhooks(store_id, token)
+        from servicios.tiendanube_app import exigir_privacidad_configurada
+        exigir_privacidad_configurada()
         from servicios.tiendanube_shipping import registrar_shipping_carrier
         shipping = registrar_shipping_carrier(store_id, token)
         if not shipping.get("ready"):
@@ -415,8 +423,49 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
     return resp
 
 
+def _contrato_privacidad_tiendanube(evento: str, datos: dict) -> bool:
+    """Valida el contrato LGPD sin reinterpretar cuerpos entre rutas."""
+    if datos.get("event") and datos["event"] != evento:
+        return False
+    if evento == "store/redact":
+        return set(datos).issubset({"store_id", "event"})
+    customer = datos.get("customer")
+    if not isinstance(customer, dict) or not str(customer.get("id") or "").strip():
+        return False
+    if evento == "customers/redact":
+        return (
+            isinstance(datos.get("orders_to_redact"), list)
+            and not any(k in datos for k in ("data_request", "orders_requested", "id"))
+        )
+    if evento == "customers/data_request":
+        solicitud = datos.get("data_request")
+        return (
+            isinstance(solicitud, dict)
+            and bool(solicitud.get("id"))
+            and isinstance(datos.get("orders_requested"), list)
+            and not any(k in datos for k in ("orders_to_redact", "id"))
+        )
+    return False
+
+
+@router.post("/tiendanube/privacidad/{tipo}")
+async def tiendanube_privacidad_webhook(request: Request, tipo: str):
+    eventos = {
+        "store-redact": "store/redact",
+        "customers-redact": "customers/redact",
+        "customers-data-request": "customers/data_request",
+    }
+    if tipo not in eventos:
+        return JSONResponse({"ok": False}, status_code=404)
+    return await _recibir_webhook_tiendanube(request, eventos[tipo])
+
+
 @router.post("/tiendanube/webhook")
 async def tiendanube_webhook(request: Request):
+    return await _recibir_webhook_tiendanube(request)
+
+
+async def _recibir_webhook_tiendanube(request: Request, evento_ruta: str = ""):
     """
     Ventas de Tiendanube. El webhook trae sólo el id del pedido, así que
     hay que ir a buscarlo a la API con el token de esa tienda.
@@ -430,7 +479,7 @@ async def tiendanube_webhook(request: Request):
     from servicios.integraciones_tienda import verificar_hmac_tiendanube
     from servicios.tiendanube_app import (
         app_configurada, encolar_webhook, lanzar_procesamiento_eventos,
-        webhook_evento_id, EVENTOS_ACEPTADOS,
+        webhook_evento_id, EVENTOS_ACEPTADOS, EVENTOS_PRIVACIDAD,
     )
 
     cuerpo = await request.body()
@@ -452,9 +501,15 @@ async def tiendanube_webhook(request: Request):
     if not isinstance(datos, dict):
         return JSONResponse({"ok": False}, status_code=400)
     store_id = str(datos.get("store_id") or "").strip()
-    evento = str(datos.get("event") or "").strip().lower()
+    evento = evento_ruta or str(datos.get("event") or "").strip().lower()
     if not store_id or evento not in EVENTOS_ACEPTADOS:
         return JSONResponse({"ok": False}, status_code=400)
+    if evento in EVENTOS_PRIVACIDAD:
+        if not _contrato_privacidad_tiendanube(evento, datos):
+            return JSONResponse({"ok": False}, status_code=400)
+        # El HMAC se validó contra el cuerpo original. Recién ahora se deriva
+        # el evento de la ruta para persistirlo en el contrato interno.
+        datos = {**datos, "event": evento}
 
     entrega_id = request.headers.get("x-linkedstore-event-id", "")
     evento_id = webhook_evento_id(datos, cuerpo, entrega_id)

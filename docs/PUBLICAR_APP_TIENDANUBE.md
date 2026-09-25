@@ -1,6 +1,7 @@
 # TAURO Solutions Ar en Tiendanube
 
-Estado de trabajo actualizado: 01/09/2026.
+Estado de trabajo actualizado: 25/09/2026. Pipeline de Shipping/Labels y rutas
+de privacidad preparados localmente para piloto; todavía sin desplegar.
 
 La integración ya no se considera lista por tener OAuth y webhooks de pedidos.
 Para publicarla como solución nacional debe completar también el contrato de
@@ -47,6 +48,7 @@ BASE_URL=https://taurosolutions.ar
 TIENDANUBE_CLIENT_ID=
 TIENDANUBE_CLIENT_SECRET=
 TIENDANUBE_TOKEN_ENCRYPTION_KEY=
+TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED=false
 TIENDANUBE_SHIPPING_ACCESS_APPROVED=false
 TIENDANUBE_DEMO_STORE_ID=
 TIENDANUBE_SHIPPING_ENABLED=false
@@ -64,6 +66,13 @@ habilita el medio de envío.
 
 ## Artefactos
 
+Los seis webhooks de pedidos/ciclo de vida se registran por tienda mediante la
+API. Los tres avisos de privacidad se configuran por aplicación en Partners y
+usan rutas específicas; no forman parte del POST `/webhooks`. Mantener
+`TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED=false` hasta publicar las rutas y probar
+su HMAC con datos ficticios. Los pasos y URLs están en
+[Campos del Portal](tiendanube/PARTNER_PORTAL_FIELDS.md).
+
 - [Checklist de homologación](tiendanube/HOMOLOGACION_CHECKLIST.md)
 - [Diagrama de secuencia](tiendanube/SEQUENCE_DIAGRAM.md)
 - [Guion de video demo](tiendanube/DEMO_SCRIPT.md)
@@ -72,6 +81,9 @@ habilita el medio de envío.
 - [FAQ de Shipping](tiendanube/FAQ_SHIPPING.md)
 
 ## Referencias oficiales
+
+- Registro por tienda y contratos de privacidad: <https://tiendanube.github.io/api-documentation/resources/webhook>
+- URLs de aplicación en Partners: <https://tiendanube.github.io/api-documentation/authentication#urls>
 
 - Shipping Provider: <https://tiendanube.github.io/api-documentation/guides/shipping-provider>
 - Shipping Carrier API: <https://tiendanube.github.io/api-documentation/resources/shipping-carrier>

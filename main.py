@@ -1777,6 +1777,9 @@ from servicios.tiendanube_app import (
     procesar_cola_eventos as procesar_webhooks_tiendanube,
     reconciliar_instalaciones_pendientes as reconciliar_tiendanube,
 )
+from servicios.tiendanube_label_worker import (
+    process_label_outbox as procesar_labels_tiendanube,
+)
 scheduler.add_job(
     procesar_webhooks_tiendanube,
     trigger="interval",
@@ -1790,6 +1793,15 @@ scheduler.add_job(
     minutes=5,
     max_instances=1,
     coalesce=True,
+)
+scheduler.add_job(
+    procesar_labels_tiendanube,
+    trigger="interval",
+    seconds=5,
+    max_instances=1,
+    coalesce=True,
+    id="tiendanube_label_outbox",
+    replace_existing=True,
 )
 
 

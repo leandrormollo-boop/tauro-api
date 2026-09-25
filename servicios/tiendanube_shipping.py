@@ -13,6 +13,7 @@ import json
 import os
 import secrets
 import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Iterable, Mapping
@@ -31,6 +32,11 @@ from servicios.carrier_adapter import (
     validate_quote_result,
 )
 from servicios.carrier_contract import Ambito, Capacidad
+from servicios.tiendanube_rate_quotes import (
+    RateQuoteSnapshotError,
+    guardar_snapshot,
+    referencia_publica,
+)
 
 
 RATE_CODE = "tauro_nacional_domicilio"
@@ -396,7 +402,46 @@ def _reconciliar_shipping_remoto(
     return match
 
 
+@contextmanager
+def _postgres_shipping_registration_lock(store_id: str):
+    """Serializa por tienda todo el read/reconcile/create remoto.
+
+    Es un advisory lock de *sesión*, no transaccional: la misma conexión
+    dedicada permanece reservada hasta terminar también las llamadas HTTP y
+    la persistencia local. Así dos procesos no pueden observar a la vez que no
+    existe configuración y crear carriers duplicados.
+    """
+    lock_name = f"tauro:tiendanube:shipping-carrier:{str(store_id).strip()}"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                (lock_name,),
+            )
+        try:
+            yield
+        finally:
+            # `finally` es esencial: los advisory locks de sesión sobreviven a
+            # rollback y, en un pool, contaminarían la siguiente operación.
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                    (lock_name,),
+                )
+
+
+# Punto de inyección intencional para tests; producción conserva siempre el
+# lock PostgreSQL anterior.
+_shipping_registration_lock = _postgres_shipping_registration_lock
+
+
 def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
+    """Serializa y registra/reconcilia el carrier completo por tienda."""
+    with _shipping_registration_lock(str(store_id)):
+        return _registrar_shipping_carrier_locked(store_id, access_token)
+
+
+def _registrar_shipping_carrier_locked(store_id: str, access_token: str) -> dict:
     """Crea el carrier y su opción fija después del OAuth.
 
     Los dos flags explícitos impiden que unas credenciales de Tiendanube
@@ -407,7 +452,7 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
     if not _enabled("TAURO_NACIONAL_RATES_READY"):
         return {"ready": False, "reason": "tarifas_nacionales_no_habilitadas"}
 
-    from servicios.tiendanube_app import _api
+    from servicios.tiendanube_app import _api, label_api_habilitada
     from servicios.tiendanube_labels import labels_execution_ready
 
     base = (os.getenv("BASE_URL") or "https://taurosolutions.ar").rstrip("/")
@@ -416,7 +461,9 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
         raise ShippingUnavailableError(
             "Los callbacks de Shipping requieren una BASE_URL HTTPS."
         )
-    labels_ready = bool(labels_execution_ready())
+    labels_ready = bool(
+        labels_execution_ready() and label_api_habilitada(str(store_id))
+    )
 
     actual = configuracion(store_id)
     if not actual:
@@ -845,6 +892,53 @@ def _request_id(payload: Mapping, suffix: str = "full") -> str:
     return f"tn-{suffix}-{digest}"
 
 
+def _carrier_option_context(payload: Mapping, config: Mapping) -> dict:
+    """Fija los ajustes que Tiendanube aplicará después de nuestra respuesta."""
+    carrier = payload.get("carrier")
+    if not isinstance(carrier, Mapping):
+        raise ShippingContractError("Falta el Shipping Carrier de la consulta.")
+    configured_carrier = str((config or {}).get("carrier_id") or "").strip()
+    received_carrier = str(carrier.get("id") or "").strip()
+    if configured_carrier and received_carrier != configured_carrier:
+        raise ShippingAuthenticationError("La consulta pertenece a otro carrier.")
+    options = carrier.get("options")
+    if not isinstance(options, list):
+        raise ShippingContractError("Faltan las opciones configuradas del carrier.")
+    matches = [
+        option
+        for option in options
+        if isinstance(option, Mapping)
+        and str(option.get("code") or "") == RATE_CODE
+    ]
+    if len(matches) != 1:
+        raise ShippingContractError("La opción nacional TAURO no es inequívoca.")
+    option = matches[0]
+    configured_option = str((config or {}).get("carrier_option_id") or "").strip()
+    option_id = str(option.get("id") or "").strip()
+    if configured_option and option_id != configured_option:
+        raise ShippingAuthenticationError("La consulta pertenece a otra opción.")
+
+    raw_cost = option.get("additional_cost")
+    if isinstance(raw_cost, Mapping):
+        currency = str(raw_cost.get("currency") or "").strip().upper()
+        if currency != "ARS":
+            raise ShippingContractError("El costo adicional debe estar expresado en ARS.")
+        raw_cost = raw_cost.get("amount")
+    elif raw_cost in (None, ""):
+        raw_cost = 0
+    additional_cost = _decimal(
+        raw_cost,
+        "El costo adicional configurado en Tiendanube",
+        positive=False,
+    )
+    if additional_cost < 0:
+        raise ShippingContractError("El costo adicional no puede ser negativo.")
+    return {
+        "option_id": option_id,
+        "additional_cost": additional_cost,
+    }
+
+
 def _quote_request(payload: Mapping, customer_id: str, *, paid_only=False, packaging=None) -> QuoteRequest:
     items = payload.get("items") or []
     if not isinstance(items, list) or not items:
@@ -925,6 +1019,7 @@ def cotizar_callback(
     installation_loader: Callable[[str], dict | None] | None = None,
     config_loader: Callable[[str], dict | None] | None = None,
     adapters: Iterable | None = None,
+    snapshot_saver: Callable[..., Mapping] | None = None,
 ) -> dict:
     """Cotiza el carrito con los adapters nacionales disponibles."""
     if not isinstance(payload, Mapping):
@@ -940,6 +1035,7 @@ def cotizar_callback(
         expected_hash, hash_callback_token(callback_token)
     ):
         raise ShippingAuthenticationError("Callback no autorizado.")
+    option_context = _carrier_option_context(payload, cfg)
 
     if installation_loader is None:
         from servicios.tiendanube_app import instalacion
@@ -1020,15 +1116,37 @@ def cotizar_callback(
     if packaging and packaging.get("usar_paquetes"):
         from servicios.paquetes import precio_comprador
         buyer_price = precio_comprador(buyer_price,packaging["nacional"],request.declared_value)
-    if has_free and not has_paid:
-        buyer_price = Decimal("0")
+    pricing_mode = (
+        "gratis_total"
+        if has_free and not has_paid
+        else "gratis_parcial"
+        if has_free and has_paid
+        else "pagado"
+    )
+    if packaging and packaging.get("usar_paquetes"):
+        pricing_mode += ":paquetes_tienda"
+
+    try:
+        snapshot = (snapshot_saver or guardar_snapshot)(
+            store_id,
+            request,
+            selected,
+            buyer_price,
+            pricing_mode,
+            platform_additional_cost=option_context["additional_cost"],
+            platform_option_id=option_context["option_id"],
+        )
+        reference = referencia_publica(snapshot)
+    except RateQuoteSnapshotError as exc:
+        raise ShippingUnavailableError(
+            "No se pudo congelar la tarifa para emitirla de forma segura."
+        ) from exc
 
     now = datetime.now(_ARGENTINA_TZ)
     days = max(int(selected.estimated_days or 1), 1)
     holidays = _holiday_calendar()
     min_date = _add_business_days(now, days, holidays)
     max_date = _add_business_days(min_date, 2, holidays)
-    reference = f"tauro:{selected.carrier_id}:{selected.quote_id}"
     return {
         "rates": [
             {
