@@ -67,8 +67,18 @@ class _Cursor:
         elif compacto.startswith("INSERT INTO solicitudes_guia"):
             self._next_id += 1
             self._one = {"id": self._next_id}
+        elif "FROM facturas_courier_items" in compacto and "FOR UPDATE" in compacto:
+            self._all = [
+                {"id": 901, "importe": 100, "importe_ars": 150000},
+                {"id": 902, "importe": 25, "importe_ars": 37500},
+            ]
         elif "COUNT(DISTINCT m.item_id) AS lineas" in compacto:
             self._one = {"lineas": 4}
+        elif "FROM factura_courier_item_matches" in compacto and "estado IN" in compacto:
+            self._all = []
+        elif compacto.startswith("INSERT INTO factura_courier_item_matches"):
+            self._next_id += 1
+            self._one = {"id": self._next_id}
 
     def fetchone(self):
         return self._one
@@ -94,10 +104,6 @@ class _Conn:
 def test_importacion_crea_solicitud_sin_movimiento_financiero(monkeypatch):
     conexion = _Conn()
     monkeypatch.setattr(servicio, "get_conn", lambda: conexion)
-    monkeypatch.setattr(
-        servicio, "matchear_items_exactos",
-        lambda factura_id, actor, _conn: {"propuestos": 1, "sin_match": 0},
-    )
     eventos = []
     monkeypatch.setattr(
         servicio, "registrar_evento_con_cursor",
@@ -118,6 +124,8 @@ def test_importacion_crea_solicitud_sin_movimiento_financiero(monkeypatch):
     }
     sql = "\n".join(consulta for consulta, _ in conexion.cur.queries)
     assert "INSERT INTO solicitudes_guia" in sql
+    assert "INSERT INTO factura_courier_item_matches" in sql
+    assert "EXACTO_TRACKING" in sql
     assert "INSERT INTO envios" not in sql
     assert "INSERT INTO pagos" not in sql
     assert "INSERT INTO ajustes_cliente" not in sql

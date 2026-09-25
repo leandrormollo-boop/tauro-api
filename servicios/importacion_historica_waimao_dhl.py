@@ -18,7 +18,6 @@ from psycopg2.extras import Json
 
 from core.database import get_conn
 from servicios.auditoria import registrar_evento_con_cursor
-from servicios.conciliacion_couriers import matchear_items_exactos
 
 
 CLIENTE_ID = "WAIMAO"
@@ -263,11 +262,91 @@ def _crear_solicitud(cur, registro: dict[str, Any], source_sha256: str) -> int:
     return int(cur.fetchone()["id"])
 
 
+def _asegurar_match_exacto(
+    cur,
+    *,
+    factura_id: int,
+    solicitud_id: int,
+    registro: dict[str, Any],
+    actor: str,
+) -> bool:
+    """Vincula todos los cargos de la guia validada sin usar aliases historicos."""
+    cur.execute(
+        """
+        SELECT id, importe, importe_ars
+          FROM facturas_courier_items
+         WHERE factura_id=%s
+           AND tracking_normalizado=%s
+           AND estado <> 'IGNORADO'
+         ORDER BY linea_numero
+         FOR UPDATE
+        """,
+        (factura_id, registro["tracking"]),
+    )
+    lineas = [dict(fila) for fila in cur.fetchall()]
+    if not lineas:
+        raise ImportacionHistoricaWaimaoError(
+            f"{registro['tracking']}: la factura no contiene cargos conciliables."
+        )
+    insertados = 0
+    evidencia = (
+        "admin://importacion-historica-waimao-dhl/"
+        + _hash(
+            f"{registro['factura']}:{registro['tracking']}:"
+            f"{registro.get('fuente') or ''}"
+        )
+    )
+    for linea in lineas:
+        cur.execute(
+            """
+            SELECT solicitud_id, estado
+              FROM factura_courier_item_matches
+             WHERE item_id=%s
+               AND estado IN ('PROPUESTO','CONFIRMADO')
+            """,
+            (int(linea["id"]),),
+        )
+        activos = [dict(fila) for fila in cur.fetchall()]
+        if any(int(fila["solicitud_id"]) != solicitud_id for fila in activos):
+            raise ImportacionHistoricaWaimaoError(
+                f"{registro['tracking']}: un cargo ya esta vinculado a otro envio."
+            )
+        if activos:
+            continue
+        cur.execute(
+            """
+            INSERT INTO factura_courier_item_matches (
+                item_id, solicitud_id, monto_asignado, monto_asignado_ars,
+                metodo, confianza, estado, evidencia_uri, creado_por
+            ) VALUES (%s, %s, %s, %s, 'EXACTO_TRACKING', 1,
+                      'PROPUESTO', %s, %s)
+            RETURNING id
+            """,
+            (
+                int(linea["id"]), solicitud_id,
+                linea["importe"], linea["importe_ars"],
+                evidencia, _texto(actor, maximo=120) or "admin",
+            ),
+        )
+        cur.fetchone()
+        insertados += 1
+    cur.execute(
+        """
+        UPDATE facturas_courier
+           SET estado='PARCIAL', updated_at=NOW()
+         WHERE id=%s AND estado NOT IN ('ANULADA','CERRADA')
+        """,
+        (factura_id,),
+    )
+    return bool(insertados)
+
+
 def importar_manifiesto(lote: dict[str, Any], *, actor: str = "admin") -> dict[str, Any]:
     registros = lote["registros"]
     facturas: dict[str, int] = {}
     creados = 0
     existentes = 0
+    propuestas = 0
     solicitudes: dict[str, int] = {}
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -285,13 +364,14 @@ def importar_manifiesto(lote: dict[str, Any], *, actor: str = "admin") -> dict[s
                         cur, registro, lote.get("source_sha256") or ""
                     )
                     creados += 1
-
-            propuestas = 0
-            for factura_id in sorted(set(facturas.values())):
-                resultado = matchear_items_exactos(
-                    factura_id, actor=actor, _conn=conn,
-                )
-                propuestas += int(resultado["propuestos"])
+                if _asegurar_match_exacto(
+                    cur,
+                    factura_id=factura_id,
+                    solicitud_id=solicitudes[registro["tracking"]],
+                    registro=registro,
+                    actor=actor,
+                ):
+                    propuestas += 1
 
             for registro in registros:
                 cur.execute(
