@@ -10,9 +10,8 @@
 #   3. El cliente ve sus pedidos pendientes en el portal y con un
 #      click los convierte en solicitud de guía (form prellenado).
 #
-# Las tablas se crean acá mismo (CREATE TABLE IF NOT EXISTS) para
-# no depender de migraciones manuales: el primer webhook o la
-# primera visita a la pantalla las materializa.
+# Las tablas se aplican con scripts/migrate_database.py antes del tráfico.
+# Los bordes HTTP sólo comprueban readiness: nunca ejecutan DDL.
 # ============================================================
 from __future__ import annotations
 
@@ -181,121 +180,52 @@ def validar_origen_tiendanube_con_cursor(
 
 
 def _ensure_tablas() -> None:
+    """Comprueba el contrato mínimo sin intentar repararlo en runtime."""
     global _tablas_listas
     if _tablas_listas:
         return
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS tiendas_conectadas (
-                    id          SERIAL PRIMARY KEY,
-                    cliente_id  TEXT NOT NULL,
-                    plataforma  TEXT NOT NULL,
-                    dominio     TEXT NOT NULL UNIQUE,
-                    secreto     TEXT NOT NULL,
-                    activa      BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
-                CREATE TABLE IF NOT EXISTS pedidos_tienda (
-                    id                 SERIAL PRIMARY KEY,
-                    cliente_id         TEXT NOT NULL,
-                    tienda_id          INTEGER REFERENCES tiendas_conectadas(id) ON DELETE CASCADE,
-                    plataforma         TEXT NOT NULL,
-                    pedido_externo_id  TEXT NOT NULL,
-                    numero             TEXT,
-                    estado             TEXT NOT NULL DEFAULT 'PENDIENTE',
-                    destinatario       JSONB,
-                    items              JSONB,
-                    valor_total        NUMERIC(14,2),
-                    moneda             TEXT,
-                    solicitud_id       INTEGER,
-                    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    UNIQUE (tienda_id, pedido_externo_id)
-                );
-                CREATE TABLE IF NOT EXISTS pedidos_huerfanos (
-                    id                SERIAL PRIMARY KEY,
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    payload           JSONB NOT NULL,
-                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (dominio, pedido_externo_id)
-                );
-                ALTER TABLE pedidos_huerfanos
-                    ADD COLUMN IF NOT EXISTS install_generation TEXT;
-                CREATE TABLE IF NOT EXISTS shopify_pedidos_redactados (
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (dominio, pedido_externo_id)
-                );
-                CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (dominio, pedido_externo_id)
-                );
-                CREATE TABLE IF NOT EXISTS shopify_webhook_recibidos (
-                    webhook_id        TEXT PRIMARY KEY,
-                    dominio           TEXT NOT NULL,
-                    topic             TEXT NOT NULL,
-                    install_generation TEXT NOT NULL,
-                    procesado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS ix_shopify_webhook_recibidos_fecha
-                    ON shopify_webhook_recibidos(procesado_at);
-                CREATE TABLE IF NOT EXISTS shopify_huerfanos_cancelados (
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    install_generation TEXT NOT NULL,
-                    cancelado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (
-                        dominio, pedido_externo_id, install_generation
+            cur.execute(
+                """
+                SELECT
+                    to_regclass('tiendas_conectadas') IS NOT NULL
+                    AND to_regclass('pedidos_tienda') IS NOT NULL
+                    AND to_regclass('pedidos_huerfanos') IS NOT NULL
+                    AND to_regclass('shopify_pedidos_redactados') IS NOT NULL
+                    AND to_regclass('tiendanube_pedidos_redactados') IS NOT NULL
+                    AND to_regclass('shopify_webhook_recibidos') IS NOT NULL
+                    AND to_regclass('shopify_huerfanos_cancelados') IS NOT NULL
+                    AND to_regclass('config_envio_tienda') IS NOT NULL
+                    AND (
+                        SELECT COUNT(*) = 6
+                          FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'pedidos_tienda'
+                           AND column_name IN (
+                               'flete_cobrado', 'flete_detalle',
+                               'motivo_pendiente', 'automatismos_bloqueados',
+                               'bloqueo_motivo', 'updated_at'
+                           )
                     )
-                );
-                CREATE INDEX IF NOT EXISTS ix_shopify_huerfanos_cancelados_fecha
-                    ON shopify_huerfanos_cancelados(cancelado_at);
-                -- También se materializa acá porque shop/redact debe poder
-                -- purgarla aunque el comercio nunca haya abierto la pantalla
-                -- que configura su política de envío.
-                CREATE TABLE IF NOT EXISTS config_envio_tienda (
-                    dominio          TEXT PRIMARY KEY,
-                    cliente_id       TEXT,
-                    politica         TEXT NOT NULL DEFAULT 'real',
-                    markup_pct       NUMERIC(6,2) NOT NULL DEFAULT 0,
-                    precio_fijo_ars  NUMERIC(14,2) NOT NULL DEFAULT 0,
-                    mostrar_tax      BOOLEAN NOT NULL DEFAULT FALSE,
-                    tax_pct_default  NUMERIC(6,2) NOT NULL DEFAULT 0,
-                    etiqueta         TEXT DEFAULT '',
-                    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
-                CREATE INDEX IF NOT EXISTS ix_pedidos_tienda_cliente
-                    ON pedidos_tienda (cliente_id, estado);
-                CREATE INDEX IF NOT EXISTS ix_pedidos_huerfanos_dominio_fecha
-                    ON pedidos_huerfanos (dominio, created_at);
-                -- Lo que el comprador REALMENTE pagó de envío en el checkout.
-                -- Sin esto no hay forma de comparar lo cobrado contra lo que
-                -- termina costando la guía: si el precio se calcula mal, se
-                -- pierde plata en cada venta y no queda rastro para notarlo.
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS flete_cobrado NUMERIC(14,2);
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS flete_detalle JSONB;
-                -- Por qué este pedido no se convirtió solo en solicitud de
-                -- guía (SKU sin catálogo, sin remitente, país sin ruta). Se le
-                -- muestra al comerciante: "no se armó" a secas no le dice
-                -- qué tiene que corregir.
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS motivo_pendiente TEXT;
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS automatismos_bloqueados
-                    BOOLEAN NOT NULL DEFAULT FALSE;
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT;
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS updated_at
-                    TIMESTAMPTZ NOT NULL DEFAULT NOW();
-            """)
-        conn.commit()
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'pedidos_huerfanos'
+                           AND column_name = 'install_generation'
+                    ) AS schema_ready
+                """
+            )
+            row = cur.fetchone()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise TiendaNoOperativaError(
+            "El esquema de tiendas requiere ejecutar la migración previa."
+        )
     _tablas_listas = True
 
 
@@ -1190,18 +1120,6 @@ def guardar_pedido_huerfano(
                 # misma generación nunca puede volver a introducir el PII.
                 return False
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS pedidos_huerfanos (
-                    id                SERIAL PRIMARY KEY,
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    payload           JSONB NOT NULL,
-                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (dominio, pedido_externo_id)
-                );
-                ALTER TABLE pedidos_huerfanos
-                    ADD COLUMN IF NOT EXISTS install_generation TEXT;
-            """)
-            cur.execute("""
                 INSERT INTO pedidos_huerfanos
                     (dominio, pedido_externo_id, payload, install_generation)
                 VALUES (%s, %s, %s, %s)
@@ -1430,6 +1348,7 @@ def cancelar_pedido_externo(
     cliente_id: str = "",
     dominio_verificado: str = "",
     install_generation_verificada: str = "",
+    plataforma_verificada: str = "",
     evento_at: str = "",
 ) -> bool:
     """
@@ -1452,17 +1371,25 @@ def cancelar_pedido_externo(
     install_generation_verificada = str(
         install_generation_verificada or ""
     ).strip()
-    es_shopify = bool(
+    plataforma_verificada = str(plataforma_verificada or "").strip().lower()
+    tiene_identidad = bool(
         cliente_id or dominio_verificado or install_generation_verificada
     )
-    if es_shopify and not all((
+    if not plataforma_verificada and tiene_identidad:
+        plataforma_verificada = (
+            "tiendanube" if dominio_verificado.endswith(".tiendanube")
+            else "shopify"
+        )
+    if plataforma_verificada not in {"", "shopify", "tiendanube"}:
+        raise TiendaNoOperativaError("Plataforma de tienda inválida.")
+    if plataforma_verificada and not all((
         cliente_id, dominio_verificado, install_generation_verificada,
     )):
-        raise TiendaNoOperativaError("Falta verificar la instalación Shopify.")
+        raise TiendaNoOperativaError("Falta verificar la instalación de tienda.")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if es_shopify:
+            if plataforma_verificada == "shopify":
                 _bloquear_dominio_shopify(cur, dominio_verificado)
                 cur.execute(
                     """
@@ -1501,6 +1428,40 @@ def cancelar_pedido_externo(
                     install_generation_verificada,
                     evento_at,
                 )
+            elif plataforma_verificada == "tiendanube":
+                _bloquear_dominio_tiendanube(cur, dominio_verificado)
+                cur.execute(
+                    """
+                    SELECT t.id
+                      FROM tiendas_conectadas t
+                      JOIN tiendanube_instalaciones i
+                        ON LOWER(t.dominio) = LOWER(i.store_id || '.tiendanube')
+                     WHERE t.id = %s
+                       AND UPPER(t.cliente_id) = %s
+                       AND t.plataforma = 'tiendanube'
+                       AND t.activa = TRUE
+                       AND LOWER(t.dominio) = %s
+                       AND t.secreto = %s
+                       AND UPPER(COALESCE(i.cliente_id, '')) = %s
+                       AND i.install_generation = %s
+                       AND i.estado = 'ACTIVA'
+                       AND i.webhooks_ready = TRUE
+                       AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+                     LIMIT 1
+                    """,
+                    (
+                        tienda_id,
+                        cliente_id,
+                        dominio_verificado,
+                        OAUTH_SECRET_MARKER,
+                        cliente_id,
+                        install_generation_verificada,
+                    ),
+                )
+                if cur.fetchone() is None:
+                    raise TiendaNoOperativaError(
+                        "La instalación Tiendanube ya no está operativa."
+                    )
             else:
                 cur.execute(
                     """

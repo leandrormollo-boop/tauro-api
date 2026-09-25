@@ -61,13 +61,17 @@ def _contrato_payload_shopify(topic: str, datos: dict) -> bool:
     return False
 
 
-def _webhook_id_shopify(request: Request, dominio: str, topic: str, cuerpo: bytes) -> str:
-    valor = request.headers.get("x-shopify-webhook-id", "").strip()
-    if valor:
-        return valor
+def _webhook_id_shopify(
+    _request: Request,
+    _dominio: str,
+    _topic: str,
+    cuerpo: bytes,
+    app_client_id: str = "",
+) -> str:
+    """Fingerprint estable del contenido firmado, no de headers mutables."""
     import hashlib
     return hashlib.sha256(
-        dominio.encode() + b"\0" + topic.encode() + b"\0" + cuerpo
+        str(app_client_id or "").encode() + b"\0" + cuerpo
     ).hexdigest()
 
 
@@ -82,6 +86,7 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
     from servicios.shopify_app import (
         clasificar_evento_instalacion, dominio_valido,
         firma_valida_webhook_app, instalacion,
+        timestamp_evento_firmado, validar_recurso_webhook_shopify,
     )
     if not dominio_valido(dominio):
         return JSONResponse({"ok": False}, status_code=400)
@@ -95,14 +100,6 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
     app_esperada = str((instalacion_oauth or {}).get("app_client_id") or "")
     if not app_esperada or not firma_valida_webhook_app(cuerpo, firma, app_esperada):
         return JSONResponse({"ok": False}, status_code=401)
-    estado_temporal = clasificar_evento_instalacion(
-        instalacion_oauth, request.headers.get("x-shopify-triggered-at", ""),
-    )
-    if estado_temporal == "ANTERIOR":
-        return {"ok": True, "ignorado": "generacion_anterior"}
-    if estado_temporal != "ACTUAL":
-        return JSONResponse({"ok": False}, status_code=400)
-
     try:
         datos = json.loads(cuerpo.decode("utf-8"))
     except Exception:
@@ -110,16 +107,45 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
     if not _contrato_payload_shopify(topic, datos):
         return JSONResponse({"ok": False}, status_code=400)
 
+    estado_temporal = clasificar_evento_instalacion(
+        instalacion_oauth, topic, datos,
+    )
+    if estado_temporal == "ANTERIOR":
+        return {"ok": True, "ignorado": "generacion_anterior"}
+    if estado_temporal != "ACTUAL":
+        return JSONResponse({"ok": False}, status_code=400)
+
+    validacion_recurso = validar_recurso_webhook_shopify(
+        dominio,
+        topic,
+        datos,
+        instalacion_oauth,
+    )
+    if isinstance(validacion_recurso, dict):
+        estado_recurso = str(validacion_recurso.get("estado") or "")
+        recurso_cancelado = bool(validacion_recurso.get("cancelado"))
+        recurso_evento_at = str(validacion_recurso.get("evento_at") or "")
+    else:
+        # Compatibilidad con dobles de prueba anteriores.
+        estado_recurso = str(validacion_recurso or "")
+        recurso_cancelado = False
+        recurso_evento_at = ""
+    if estado_recurso == "REINTENTAR":
+        return JSONResponse({"ok": False}, status_code=503)
+    if estado_recurso != "ACTUAL":
+        return {"ok": True, "ignorado": "recurso_no_actual"}
+
     generation = str((instalacion_oauth or {}).get("install_generation") or "")
-    webhook_id = _webhook_id_shopify(request, dominio, topic, cuerpo)
-    if topic in _TOPICS_ORDEN:
-        from servicios.integraciones_tienda import webhook_shopify_ya_procesado
-        try:
-            if webhook_shopify_ya_procesado(webhook_id):
-                return {"ok": True, "duplicado": True}
-        except Exception as exc:
-            print(f"[integraciones] no pude consultar dedupe: {type(exc).__name__}")
-            return JSONResponse({"ok": False}, status_code=503)
+    webhook_id = _webhook_id_shopify(
+        request, dominio, topic, cuerpo, app_esperada,
+    )
+    from servicios.integraciones_tienda import webhook_shopify_ya_procesado
+    try:
+        if webhook_shopify_ya_procesado(webhook_id):
+            return {"ok": True, "duplicado": True}
+    except Exception as exc:
+        print(f"[integraciones] no pude consultar dedupe: {type(exc).__name__}")
+        return JSONResponse({"ok": False}, status_code=503)
 
     owner_tienda = str((tienda or {}).get("cliente_id") or "").strip().upper()
     owner_inst = str((instalacion_oauth or {}).get("cliente_id") or "").strip().upper()
@@ -141,7 +167,19 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
 
     if not coherente:
         try:
-            if topic in {"orders/create", "orders/updated"}:
+            if recurso_cancelado or topic == "orders/cancelled":
+                from servicios.integraciones_tienda import cancelar_pedido_huerfano
+                cancelar_pedido_huerfano(
+                    dominio,
+                    str(datos.get("id") or ""),
+                    app_client_id_verificado=app_esperada,
+                    install_generation_verificada=generation,
+                    evento_at=(
+                        recurso_evento_at
+                        or timestamp_evento_firmado(topic, datos)
+                    ),
+                )
+            elif topic in {"orders/create", "orders/updated"}:
                 from servicios.integraciones_tienda import guardar_pedido_huerfano
                 guardar_pedido_huerfano(
                     dominio,
@@ -149,17 +187,7 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
                     app_client_id_verificado=app_esperada,
                     install_generation_verificada=generation,
                 )
-            elif topic == "orders/cancelled":
-                from servicios.integraciones_tienda import cancelar_pedido_huerfano
-                cancelar_pedido_huerfano(
-                    dominio,
-                    str(datos.get("id") or ""),
-                    app_client_id_verificado=app_esperada,
-                    install_generation_verificada=generation,
-                    evento_at=request.headers.get("x-shopify-triggered-at", ""),
-                )
-            if topic in _TOPICS_ORDEN:
-                _marcar_procesado()
+            _marcar_procesado()
         except Exception as exc:
             print(f"[integraciones] no pude persistir evento ownerless: {type(exc).__name__}")
             return JSONResponse({"ok": False}, status_code=503)
@@ -172,7 +200,7 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
         try:
             nuevo = encolar_evento(
                 webhook_id, dominio, topic, datos,
-                request.headers.get("x-shopify-triggered-at"), generation,
+                timestamp_evento_firmado(topic, datos), generation,
             )
         except ShopifyCatalogError as exc:
             if exc.codigo == "GENERACION_OBSOLETA":
@@ -181,12 +209,16 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
         except Exception as exc:
             print(f"[integraciones] no pude encolar catálogo: {type(exc).__name__}")
             return JSONResponse({"ok": False}, status_code=503)
+        try:
+            _marcar_procesado()
+        except Exception:
+            return JSONResponse({"ok": False}, status_code=503)
         if nuevo:
             lanzar_procesamiento_eventos()
         return {"ok": True, "encolado": nuevo, "duplicado": not nuevo}
 
     pedido_externo_id = str(datos.get("id") or "")
-    cancelado = topic == "orders/cancelled" or bool(datos.get("cancelled_at")) or str(
+    cancelado = recurso_cancelado or topic == "orders/cancelled" or bool(datos.get("cancelled_at")) or str(
         datos.get("financial_status") or ""
     ).lower() in {"refunded", "voided"}
     if cancelado:
@@ -198,7 +230,10 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
                 cliente_id=owner_tienda,
                 dominio_verificado=dominio,
                 install_generation_verificada=generation,
-                evento_at=request.headers.get("x-shopify-triggered-at", ""),
+                evento_at=(
+                    recurso_evento_at
+                    or timestamp_evento_firmado(topic, datos)
+                ),
             )
         except TiendaNoOperativaError:
             return {"ok": True, "ignorado": "generacion_anterior"}
@@ -308,8 +343,8 @@ def tiendanube_callback(request: Request, code: str = "", state: str = ""):
     """
     Tiendanube vuelve acá con el `code` después de que el comerciante
     aceptó los permisos. Lo canjeamos por el token permanente, damos de
-    alta los webhooks y, si tiene sesión del portal abierta, atamos la
-    tienda a su cuenta en el acto.
+    alta los webhooks y sólo atamos la tienda a una cuenta TAURO cuando el
+    flujo nació en el portal y conserva su prueba `state` + cookie.
     """
     from fastapi.responses import HTMLResponse
 
@@ -377,23 +412,29 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
         n = info.get("name")
         nombre = (n.get("es") or n.get("pt") or "") if isinstance(n, dict) else str(n or "")
 
-    claim_cookie = guardar_instalacion(
+    generation = guardar_instalacion(
         store_id,
         token,
         nombre,
         label_api_feature_ready=labels_feature_enabled(info),
     )
     try:
-        eventos = registrar_webhooks(store_id, token)
+        eventos = registrar_webhooks(
+            store_id, token, expected_generation=generation,
+        )
         from servicios.tiendanube_app import exigir_privacidad_configurada
         exigir_privacidad_configurada()
         from servicios.tiendanube_shipping import registrar_shipping_carrier
-        shipping = registrar_shipping_carrier(store_id, token)
+        shipping = registrar_shipping_carrier(
+            store_id, token, expected_generation=generation,
+        )
         if not shipping.get("ready"):
             raise TiendanubeWebhookError(
                 "El medio de envío nacional todavía no quedó operativo."
             )
-        if not confirmar_webhooks(store_id, eventos):
+        if not confirmar_webhooks(
+            store_id, eventos, expected_generation=generation,
+        ):
             raise TiendanubeWebhookError("No se pudo habilitar la instalación.")
     except Exception as exc:
         print(f"[tiendanube] instalación pendiente: {type(exc).__name__}")
@@ -405,11 +446,6 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
             '<a href="https://taurosolutions.ar/portal/tienda">Continuar en TAURO</a>',
             status=502,
         )
-        if claim_cookie:
-            resp.set_cookie(
-                key="tn_claim", value=claim_cookie, httponly=True,
-                max_age=86400, samesite="lax", secure=True,
-            )
         return resp
 
     # Vinculación anti-CSRF: sólo se ata la tienda a una cuenta si el navegador
@@ -420,30 +456,29 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
     dueno = None
     try:
         if cliente_cookie:
+            vincular_cliente(
+                store_id,
+                cliente_cookie,
+                expected_generation=generation,
+                reasignar_confirmado=True,
+            )
             dueno = cliente_cookie
-            vincular_cliente(store_id, dueno)
     except Exception as e:
         print(f"[tiendanube] no pude vincular la tienda: {type(e).__name__}")
 
     print(f"[tiendanube] instalación procesada · {len(eventos)} webhook(s) · "
-          f"{'con claim' if dueno else 'ownerless'}")
+          f"{'vinculada' if dueno else 'ownerless'}")
 
-    ya_vinculada = bool(dueno or not claim_cookie)
-    if ya_vinculada:
+    if dueno:
         texto = ("Listo: desde ahora cada venta con envío aparece en tu portal "
                  "lista para generar la guía con un click.")
     else:
-        texto = ("Tu tienda quedó instalada. Iniciá sesión o creá tu cuenta "
-                 "TAURO en este mismo navegador: la vincularemos de forma "
-                 "segura, sin pedirte que reinstales la app.")
+        texto = ("Tu tienda quedó instalada, pero todavía no está vinculada a "
+                 "una cuenta TAURO. Iniciá sesión y comenzá la conexión desde "
+                 "el portal para completar la vinculación segura.")
     resp = _pag("¡Tienda conectada!", texto,
                 '<a href="https://taurosolutions.ar/portal/tienda">Ver mis pedidos</a>')
     resp.delete_cookie("tn_oauth")   # de un solo uso
-    if claim_cookie and not dueno:
-        resp.set_cookie(
-            key="tn_claim", value=claim_cookie, httponly=True,
-            max_age=86400, samesite="lax", secure=True,
-        )
     return resp
 
 

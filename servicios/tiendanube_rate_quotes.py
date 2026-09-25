@@ -252,173 +252,114 @@ def construir_snapshot(
 
 
 def _ensure_table() -> None:
+    """Comprueba el esquema durable sin migrarlo durante el checkout.
+
+    ``sql/schema.sql`` se aplica antes de habilitar tráfico. Si la tabla quedó
+    ausente o incompleta, la cotización falla cerrada; el callback nunca toma
+    locks DDL ni intenta reparar producción mientras responde a Tiendanube.
+    """
     global _tabla_lista
     if _tabla_lista:
         return
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS tiendanube_rate_quote_snapshots (
-                    snapshot_id TEXT PRIMARY KEY,
-                    store_id TEXT NOT NULL,
-                    customer_id TEXT NOT NULL,
-                    request_id TEXT NOT NULL,
-                    cart_id TEXT NOT NULL DEFAULT '',
-                    carrier_id TEXT NOT NULL,
-                    carrier_quote_id TEXT NOT NULL,
-                    service_code TEXT NOT NULL,
-                    service_name TEXT NOT NULL,
-                    origin_route JSONB NOT NULL,
-                    destination_route JSONB NOT NULL,
-                    packages JSONB NOT NULL,
-                    declared_value NUMERIC(18,4) NOT NULL,
-                    declared_currency CHAR(3) NOT NULL,
-                    origin_mode TEXT NOT NULL,
-                    destination_mode TEXT NOT NULL,
-                    carrier_cost NUMERIC(18,4) NOT NULL,
-                    carrier_currency CHAR(3) NOT NULL,
-                    tauro_price NUMERIC(18,4) NOT NULL,
-                    buyer_price NUMERIC(18,4) NOT NULL,
-                    platform_additional_cost NUMERIC(18,4) NOT NULL DEFAULT 0,
-                    expected_consumer_price NUMERIC(18,4) NOT NULL DEFAULT 0,
-                    platform_option_id TEXT NOT NULL DEFAULT '',
-                    price_currency CHAR(3) NOT NULL,
-                    estimated_days INTEGER NOT NULL,
-                    carrier_expires_at TIMESTAMPTZ,
-                    pricing_mode TEXT NOT NULL,
-                    snapshot_sha256 CHAR(64) NOT NULL,
-                    quoted_at TIMESTAMPTZ NOT NULL,
-                    UNIQUE (store_id, snapshot_id),
-                    FOREIGN KEY (store_id)
-                        REFERENCES tiendanube_shipping_config(store_id)
-                        ON DELETE CASCADE,
-                    FOREIGN KEY (customer_id)
-                        REFERENCES clientes(cliente_id)
-                        ON DELETE CASCADE
+    required_columns = (
+        "snapshot_id", "store_id", "customer_id", "request_id", "cart_id",
+        "carrier_id", "carrier_quote_id", "service_code", "service_name",
+        "origin_route", "destination_route", "packages", "declared_value",
+        "declared_currency", "origin_mode", "destination_mode",
+        "carrier_cost", "carrier_currency", "tauro_price", "buyer_price",
+        "platform_additional_cost", "expected_consumer_price",
+        "platform_option_id", "price_currency", "estimated_days",
+        "carrier_expires_at", "pricing_mode", "snapshot_sha256", "quoted_at",
+    )
+    required_checks = (
+        "ck_tn_rate_quote_snapshot_id",
+        "ck_tn_rate_quote_amounts",
+        "ck_tn_rate_quote_carrier",
+        "ck_tn_rate_quote_json",
+        "ck_tn_rate_quote_days",
+        "ck_tn_rate_quote_platform_amounts",
+    )
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH relation AS (
+                        SELECT to_regclass(
+                            'tiendanube_rate_quote_snapshots'
+                        ) AS oid
+                    )
+                    SELECT
+                        r.oid IS NOT NULL
+                        AND (
+                            SELECT COUNT(*) = %s
+                              FROM information_schema.columns
+                             WHERE table_schema = CURRENT_SCHEMA()
+                               AND table_name =
+                                   'tiendanube_rate_quote_snapshots'
+                               AND column_name = ANY(%s::text[])
+                        )
+                        AND (
+                            SELECT COUNT(DISTINCT c.conname) = %s
+                              FROM pg_constraint c
+                             WHERE c.conrelid = r.oid
+                               AND c.contype = 'c'
+                               AND c.convalidated
+                               AND c.conname = ANY(%s::text[])
+                        )
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_constraint c
+                             WHERE c.conrelid = r.oid
+                               AND c.contype = 'p'
+                               AND c.convalidated
+                        )
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_constraint c
+                             WHERE c.conrelid = r.oid
+                               AND c.contype = 'u'
+                               AND c.convalidated
+                        )
+                        AND EXISTS (
+                            SELECT 1
+                              FROM pg_trigger t
+                             WHERE t.tgrelid = r.oid
+                               AND t.tgname =
+                                   'trg_bloquear_tn_rate_quote_update'
+                               AND NOT t.tgisinternal
+                               AND t.tgenabled IN ('O', 'A')
+                        ) AS schema_ready
+                      FROM relation r
+                    """,
+                    (
+                        len(required_columns),
+                        list(required_columns),
+                        len(required_checks),
+                        list(required_checks),
+                    ),
                 )
-                """
-            )
-            cur.execute(
-                """
-                ALTER TABLE tiendanube_rate_quote_snapshots
-                    ADD COLUMN IF NOT EXISTS platform_additional_cost
-                        NUMERIC(18,4) NOT NULL DEFAULT 0;
-                ALTER TABLE tiendanube_rate_quote_snapshots
-                    ADD COLUMN IF NOT EXISTS expected_consumer_price
-                        NUMERIC(18,4) NOT NULL DEFAULT 0;
-                ALTER TABLE tiendanube_rate_quote_snapshots
-                    ADD COLUMN IF NOT EXISTS platform_option_id
-                        TEXT NOT NULL DEFAULT ''
-                """
-            )
-            cur.execute(
-                """
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                         WHERE conrelid = 'tiendanube_rate_quote_snapshots'::regclass
-                           AND conname = 'ck_tn_rate_quote_snapshot_id'
-                    ) THEN
-                        ALTER TABLE tiendanube_rate_quote_snapshots
-                            ADD CONSTRAINT ck_tn_rate_quote_snapshot_id CHECK (
-                                snapshot_id ~ '^tnq_[0-9a-f]{64}$'
-                            );
-                    END IF;
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                         WHERE conrelid = 'tiendanube_rate_quote_snapshots'::regclass
-                           AND conname = 'ck_tn_rate_quote_amounts'
-                    ) THEN
-                        ALTER TABLE tiendanube_rate_quote_snapshots
-                            ADD CONSTRAINT ck_tn_rate_quote_amounts CHECK (
-                                declared_value > 0 AND carrier_cost > 0
-                                AND tauro_price > 0 AND buyer_price >= 0
-                                AND platform_additional_cost >= 0
-                                AND expected_consumer_price >= 0
-                            );
-                    END IF;
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                         WHERE conrelid = 'tiendanube_rate_quote_snapshots'::regclass
-                           AND conname = 'ck_tn_rate_quote_carrier'
-                    ) THEN
-                        ALTER TABLE tiendanube_rate_quote_snapshots
-                            ADD CONSTRAINT ck_tn_rate_quote_carrier CHECK (
-                                carrier_id ~ '^[a-z0-9_-]{2,32}$'
-                            );
-                    END IF;
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                         WHERE conrelid = 'tiendanube_rate_quote_snapshots'::regclass
-                           AND conname = 'ck_tn_rate_quote_json'
-                    ) THEN
-                        ALTER TABLE tiendanube_rate_quote_snapshots
-                            ADD CONSTRAINT ck_tn_rate_quote_json CHECK (
-                                jsonb_typeof(origin_route) = 'object'
-                                AND jsonb_typeof(destination_route) = 'object'
-                                AND jsonb_typeof(packages) = 'array'
-                            );
-                    END IF;
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                         WHERE conrelid = 'tiendanube_rate_quote_snapshots'::regclass
-                           AND conname = 'ck_tn_rate_quote_days'
-                    ) THEN
-                        ALTER TABLE tiendanube_rate_quote_snapshots
-                            ADD CONSTRAINT ck_tn_rate_quote_days CHECK (
-                                estimated_days > 0
-                            );
-                    END IF;
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_constraint
-                         WHERE conrelid = 'tiendanube_rate_quote_snapshots'::regclass
-                           AND conname = 'ck_tn_rate_quote_platform_amounts'
-                    ) THEN
-                        ALTER TABLE tiendanube_rate_quote_snapshots
-                            ADD CONSTRAINT ck_tn_rate_quote_platform_amounts CHECK (
-                                platform_additional_cost >= 0
-                                AND expected_consumer_price >= 0
-                            );
-                    END IF;
-                END $$
-                """
-            )
-            cur.execute(
-                """
-                CREATE OR REPLACE FUNCTION tauro_bloquear_tn_rate_quote_update()
-                RETURNS TRIGGER AS $$
-                BEGIN
-                    RAISE EXCEPTION 'Los snapshots de tarifa Tiendanube son inmutables';
-                END;
-                $$ LANGUAGE plpgsql
-                """
-            )
-            cur.execute(
-                """
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM pg_trigger
-                         WHERE tgrelid = 'tiendanube_rate_quote_snapshots'::regclass
-                           AND tgname = 'trg_bloquear_tn_rate_quote_update'
-                           AND NOT tgisinternal
-                    ) THEN
-                        CREATE TRIGGER trg_bloquear_tn_rate_quote_update
-                        BEFORE UPDATE ON tiendanube_rate_quote_snapshots
-                        FOR EACH ROW
-                        EXECUTE FUNCTION tauro_bloquear_tn_rate_quote_update();
-                    END IF;
-                END $$
-                """
-            )
-        conn.commit()
+                row = cur.fetchone()
+    except Exception as exc:
+        raise RateQuoteSnapshotError(
+            "No se pudo verificar el esquema de tarifas Tiendanube."
+        ) from exc
+
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise RateQuoteSnapshotError(
+            "El esquema de tarifas Tiendanube no está migrado; aplicá "
+            "sql/schema.sql antes de habilitar tráfico."
+        )
     _tabla_lista = True
 
 
 def ensure_rate_quote_storage() -> None:
-    """Punto público para migraciones runtime de servicios dependientes."""
+    """Punto público de readiness para servicios dependientes."""
     _ensure_table()
 
 

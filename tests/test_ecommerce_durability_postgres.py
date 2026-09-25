@@ -166,6 +166,171 @@ def test_claim_skip_locked_y_restart_stale(ecommerce_db):
     assert recuperado["intentos"] == 2
 
 
+def test_reconciliador_no_hambrea_pedido_faltante_despues_de_200_bloqueados(
+    ecommerce_db,
+):
+    from servicios import ecommerce_outbox
+
+    tienda_id, _dominio = _base(ecommerce_db)
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        for index in range(201):
+            cur.execute(
+                """
+                INSERT INTO pedidos_tienda
+                    (cliente_id, tienda_id, plataforma, pedido_externo_id,
+                     estado, destinatario, items, updated_at)
+                VALUES (
+                    'PILOTO', %s, 'shopify', %s, 'PENDIENTE',
+                    '{}'::jsonb, '[]'::jsonb,
+                    NOW() + (%s * INTERVAL '1 second')
+                )
+                RETURNING id
+                """,
+                (tienda_id, f"ORDER-{index:03d}", index),
+            )
+            pedido_id = int(cur.fetchone()["id"])
+            if index < 200:
+                assert ecommerce_outbox.encolar_pedido_con_cursor(cur, pedido_id)
+                cur.execute(
+                    """
+                    UPDATE solicitud_automatica_outbox
+                       SET estado='MANUAL_REVIEW'
+                     WHERE pedido_id=%s
+                    """,
+                    (pedido_id,),
+                )
+
+    assert ecommerce_outbox.reconciliar_pedidos_faltantes(limite=200) == 1
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT o.estado
+              FROM solicitud_automatica_outbox o
+              JOIN pedidos_tienda p ON p.id=o.pedido_id
+             WHERE p.pedido_externo_id='ORDER-200'
+            """
+        )
+        assert cur.fetchone()["estado"] == "PENDIENTE"
+
+
+def _label_pendiente_sin_emision(conexion, *, intentos=0):
+    with conexion() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO tiendanube_shipping_config
+                (store_id, callback_token_hash, carrier_id, carrier_option_id)
+            VALUES ('123', 'hash', 'carrier', 'option')
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO tiendanube_labels
+                (store_id, label_id, fulfillment_order_id, estado,
+                 generate_payload, generate_fingerprint,
+                 generate_payload_complete)
+            VALUES (
+                '123', 'label-before-create', 'ffo-1', 'PENDIENTE',
+                '{}'::jsonb, repeat('a', 64), TRUE
+            )
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO tiendanube_label_outbox
+                (store_id, label_id, operacion, payload,
+                 payload_fingerprint, payload_complete, estado, intentos)
+            VALUES (
+                '123', 'label-before-create', 'GENERATE', '{}'::jsonb,
+                repeat('a', 64), TRUE, 'PENDIENTE', %s
+            )
+            """,
+            (intentos,),
+        )
+
+
+def test_cancelacion_pre_emision_bloquea_generate_y_es_idempotente(
+    ecommerce_db, monkeypatch,
+):
+    from servicios import tiendanube_label_cancel as cancel_service
+
+    _label_pendiente_sin_emision(ecommerce_db)
+    monkeypatch.setattr(cancel_service, "get_conn", ecommerce_db)
+    adapter_calls = []
+
+    def no_adapter(carrier):
+        adapter_calls.append(carrier)
+        raise AssertionError("una cancelacion local no debe cargar adapter")
+
+    items = [{
+        "label_id": "label-before-create",
+        "fulfillment_order_id": "ffo-1",
+    }]
+    first = cancel_service.cancel_labels(
+        "123",
+        items,
+        adapter_loader=no_adapter,
+        repository=cancel_service.PostgresLabelCancelRepository(),
+    )
+    second = cancel_service.cancel_labels(
+        "123",
+        items,
+        adapter_loader=no_adapter,
+        repository=cancel_service.PostgresLabelCancelRepository(),
+    )
+
+    assert first.http_status == second.http_status == 204
+    assert adapter_calls == []
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT operacion, estado
+              FROM tiendanube_label_outbox
+             WHERE store_id='123' AND label_id='label-before-create'
+             ORDER BY operacion
+            """
+        )
+        assert [tuple(row.values()) for row in cur.fetchall()] == [
+            ("CANCEL", "CANCELACION_CONFIRMADA"),
+            ("GENERATE", "CANCELADO_LOCAL"),
+        ]
+
+
+def test_cancelacion_pre_emision_con_intento_previo_queda_manual_y_bloqueada(
+    ecommerce_db, monkeypatch,
+):
+    from servicios import tiendanube_label_cancel as cancel_service
+
+    _label_pendiente_sin_emision(ecommerce_db, intentos=1)
+    monkeypatch.setattr(cancel_service, "get_conn", ecommerce_db)
+    adapter_calls = []
+    result = cancel_service.cancel_labels(
+        "123",
+        [{
+            "label_id": "label-before-create",
+            "fulfillment_order_id": "ffo-1",
+        }],
+        adapter_loader=lambda carrier: adapter_calls.append(carrier),
+        repository=cancel_service.PostgresLabelCancelRepository(),
+    )
+
+    assert result.http_status == 409
+    assert result.manual_review_count == 1
+    assert adapter_calls == []
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT operacion, estado
+              FROM tiendanube_label_outbox
+             WHERE store_id='123' AND label_id='label-before-create'
+             ORDER BY operacion
+            """
+        )
+        assert [tuple(row.values()) for row in cur.fetchall()] == [
+            ("CANCEL", "CANCELACION_REVISION_MANUAL"),
+            ("GENERATE", "VERIFICAR_MANUAL"),
+        ]
+
+
 def test_fulfillment_outbox_comparte_commit_y_deduplica(ecommerce_db, monkeypatch):
     from servicios import ecommerce_outbox, shopify_app
 

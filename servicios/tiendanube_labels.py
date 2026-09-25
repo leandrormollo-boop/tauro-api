@@ -68,6 +68,8 @@ class LabelOperation:
     payload_complete: bool = True
     rate_quote_snapshot_id: str | None = None
     order_id: str | None = None
+    install_generation: str | None = None
+    customer_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,26 @@ def _ensure_tables() -> None:
                                        to_regclass('tiendanube_labels')
                                AND a.attname =
                                        'generate_payload_complete'
+                               AND NOT a.attisdropped
+                        )
+                        AND 2 = (
+                            SELECT COUNT(DISTINCT a.attname)
+                              FROM pg_attribute a
+                             WHERE a.attrelid =
+                                       to_regclass('tiendanube_labels')
+                               AND a.attname IN (
+                                   'install_generation', 'customer_id'
+                               )
+                               AND NOT a.attisdropped
+                        )
+                        AND 2 = (
+                            SELECT COUNT(DISTINCT a.attname)
+                              FROM pg_attribute a
+                             WHERE a.attrelid =
+                                       to_regclass('tiendanube_label_outbox')
+                               AND a.attname IN (
+                                   'install_generation', 'customer_id'
+                               )
                                AND NOT a.attisdropped
                         )
                         AND EXISTS (
@@ -330,6 +352,8 @@ def _minimize_blocked_generate(
             },
             fingerprint=operation.fingerprint,
             payload_complete=False,
+            install_generation=operation.install_generation,
+            customer_id=operation.customer_id,
         )
         for operation in operations
     )
@@ -758,6 +782,53 @@ class PostgresLabelRepository:
                             "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                             (f"tauro:tiendanube:{store_id}.tiendanube",),
                         )
+                        contexts = {
+                            (
+                                str(operation.install_generation or "").strip(),
+                                str(operation.customer_id or "").strip().upper(),
+                            )
+                            for operation in operations
+                            if operation.store_id == store_id
+                        }
+                        if len(contexts) != 1:
+                            raise LabelsAuthenticationError(
+                                "La etiqueta no identifica su instalación TAURO."
+                            )
+                        expected_generation, expected_customer = next(iter(contexts))
+                        if not expected_generation or not expected_customer:
+                            raise LabelsAuthenticationError(
+                                "La etiqueta no identifica su instalación TAURO."
+                            )
+                        cur.execute(
+                            """
+                            SELECT 1 AS vigente
+                              FROM tiendanube_instalaciones i
+                              JOIN tiendanube_shipping_config c
+                                ON c.store_id = i.store_id
+                               AND c.install_generation = i.install_generation
+                              JOIN tiendas_conectadas t
+                                ON t.dominio = i.store_id || '.tiendanube'
+                               AND t.plataforma = 'tiendanube'
+                               AND UPPER(t.cliente_id) = UPPER(i.cliente_id)
+                             WHERE i.store_id = %s
+                               AND i.install_generation = %s
+                               AND UPPER(i.cliente_id) = %s
+                               AND i.estado = 'ACTIVA'
+                               AND i.webhooks_ready = TRUE
+                               AND c.activa = TRUE
+                               AND t.activa = TRUE
+                             FOR SHARE OF i, c, t
+                            """,
+                            (
+                                store_id,
+                                expected_generation,
+                                expected_customer,
+                            ),
+                        )
+                        if cur.fetchone() is None:
+                            raise LabelsAuthenticationError(
+                                "La instalación cambió antes de guardar la etiqueta."
+                            )
                     for operation in operations:
                         if operation.operation == "GENERATE" and operation.payload_complete:
                             cur.execute(
@@ -844,17 +915,21 @@ class PostgresLabelRepository:
                         cur.execute(
                             """
                             INSERT INTO tiendanube_labels
-                                (store_id, label_id, fulfillment_order_id,
+                                (store_id, label_id, install_generation,
+                                 customer_id, fulfillment_order_id,
                                  rate_quote_snapshot_id, order_id,
                                  generate_payload, generate_fingerprint,
                                  generate_payload_complete, estado)
-                            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s,
+                                    %s::jsonb, %s, %s, %s)
                             ON CONFLICT (store_id, label_id) DO NOTHING
                             RETURNING store_id
                             """,
                             (
                                 operation.store_id,
                                 operation.label_id,
+                                operation.install_generation,
+                                operation.customer_id,
                                 operation.fulfillment_order_id,
                                 operation.rate_quote_snapshot_id,
                                 operation.order_id,
@@ -869,7 +944,8 @@ class PostgresLabelRepository:
                             """
                             SELECT fulfillment_order_id, rate_quote_snapshot_id,
                                    order_id, generate_fingerprint,
-                                   generate_payload_complete
+                                   generate_payload_complete,
+                                   install_generation, customer_id
                               FROM tiendanube_labels
                              WHERE store_id = %s AND label_id = %s
                              FOR UPDATE
@@ -882,6 +958,15 @@ class PostgresLabelRepository:
                                 "No se pudo fijar la etiqueta recibida."
                             )
                         current = dict(current)
+                        if (
+                            str(current.get("install_generation") or "")
+                            != str(operation.install_generation or "")
+                            or str(current.get("customer_id") or "").strip().upper()
+                            != str(operation.customer_id or "").strip().upper()
+                        ):
+                            raise LabelsConflictError(
+                                "El label_id pertenece a otra instalación."
+                            )
                         if str(current["fulfillment_order_id"]) != operation.fulfillment_order_id:
                             raise LabelsConflictError(
                                 "El label_id ya pertenece a otra fulfillment order."
@@ -957,15 +1042,18 @@ class PostgresLabelRepository:
                         cur.execute(
                             """
                             INSERT INTO tiendanube_label_outbox
-                                (store_id, label_id, operacion, payload,
+                                (store_id, label_id, install_generation,
+                                 customer_id, operacion, payload,
                                  payload_fingerprint, payload_complete, estado)
-                            VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s)
                             ON CONFLICT (store_id, label_id, operacion) DO NOTHING
                             RETURNING id
                             """,
                             (
                                 operation.store_id,
                                 operation.label_id,
+                                operation.install_generation,
+                                operation.customer_id,
                                 operation.operation,
                                 json.dumps(operation.payload, ensure_ascii=False),
                                 operation.fingerprint,
@@ -980,7 +1068,8 @@ class PostgresLabelRepository:
 
                         cur.execute(
                             """
-                            SELECT payload_fingerprint, payload_complete
+                            SELECT payload_fingerprint, payload_complete,
+                                   install_generation, customer_id
                               FROM tiendanube_label_outbox
                              WHERE store_id = %s AND label_id = %s
                                AND operacion = %s
@@ -1000,6 +1089,15 @@ class PostgresLabelRepository:
                         ):
                             raise LabelsConflictError(
                                 "La operación ya existe con otro payload."
+                            )
+                        if (
+                            str(existing.get("install_generation") or "")
+                            != str(operation.install_generation or "")
+                            or str(existing.get("customer_id") or "").strip().upper()
+                            != str(operation.customer_id or "").strip().upper()
+                        ):
+                            raise LabelsConflictError(
+                                "La operación pertenece a otra instalación."
                             )
                         if operation.payload_complete and not existing.get(
                             "payload_complete"
@@ -1064,18 +1162,38 @@ def labels_execution_ready() -> bool:
     return environment in {"qa", "production"}
 
 
+def _authenticated_config(
+    callback_token: str,
+    *,
+    config_loader: Callable[[str], dict | None],
+) -> dict:
+    try:
+        config = config_loader(callback_token)
+    except Exception as exc:
+        raise LabelsUnavailableError("No se pudo validar el callback.") from exc
+    if (
+        not config
+        or not config.get("activa")
+        or not config.get("store_id")
+        or not config.get("install_generation")
+        or not config.get("cliente_id")
+    ):
+        raise LabelsAuthenticationError("Callback no autorizado.")
+    return dict(config)
+
+
 def _authenticated_store(
     callback_token: str,
     *,
     config_loader: Callable[[str], dict | None],
 ) -> str:
-    try:
-        config = config_loader(callback_token)
-    except Exception as exc:
-        raise LabelsUnavailableError("No se pudo validar el callback.") from exc
-    if not config or not config.get("activa") or not config.get("store_id"):
-        raise LabelsAuthenticationError("Callback no autorizado.")
-    return str(config["store_id"])
+    """Compatibilidad interna para tests/consumidores antiguos."""
+    return str(
+        _authenticated_config(
+            callback_token,
+            config_loader=config_loader,
+        )["store_id"]
+    )
 
 
 def recibir_generate(
@@ -1089,8 +1207,19 @@ def recibir_generate(
     quote_resolver: Callable[..., Mapping] = resolver_referencia,
     order_context_loader: Callable[[str, str], Mapping | None] = _load_order_context,
 ) -> PersistResult:
-    store_id = _authenticated_store(callback_token, config_loader=config_loader)
+    config = _authenticated_config(callback_token, config_loader=config_loader)
+    store_id = str(config["store_id"])
+    install_generation = str(config["install_generation"])
+    customer_id = str(config["cliente_id"]).strip().upper()
     operations = _generate_operations(store_id, payload)
+    operations = tuple(
+        replace(
+            operation,
+            install_generation=install_generation,
+            customer_id=customer_id,
+        )
+        for operation in operations
+    )
     ready = bool(execution_ready())
     if ready:
         if installation_loader is None:
@@ -1101,8 +1230,17 @@ def recibir_generate(
             installation = installation_loader(store_id)
         except Exception as exc:
             raise LabelsUnavailableError("No se pudo validar la tienda.") from exc
-        customer_id = str((installation or {}).get("cliente_id") or "").strip()
-        if not customer_id:
+        installed_customer = str(
+            (installation or {}).get("cliente_id") or ""
+        ).strip().upper()
+        installed_generation = str(
+            (installation or {}).get("install_generation") or ""
+        )
+        if (
+            not installed_customer
+            or installed_customer != customer_id
+            or installed_generation != install_generation
+        ):
             raise LabelsUnavailableError("La tienda no está vinculada a TAURO.")
         operations = _bind_order_context(
             operations,
@@ -1132,7 +1270,10 @@ def recibir_cancel(
     execution_ready: Callable[[], bool] = labels_execution_ready,
     cancel_service: Callable[..., object] | None = None,
 ):
-    store_id = _authenticated_store(callback_token, config_loader=config_loader)
+    config = _authenticated_config(callback_token, config_loader=config_loader)
+    store_id = str(config["store_id"])
+    install_generation = str(config["install_generation"])
+    customer_id = str(config["cliente_id"]).strip().upper()
     operations = _cancel_operations(store_id, payload)
     if not execution_ready():
         # No se crea una intención CANCEL separada mientras la capacidad está
@@ -1147,6 +1288,8 @@ def recibir_cancel(
         return cancel_service(
             store_id,
             [dict(operation.payload) for operation in operations],
+            expected_generation=install_generation,
+            expected_customer_id=customer_id,
         )
     except LabelsContractError:
         raise

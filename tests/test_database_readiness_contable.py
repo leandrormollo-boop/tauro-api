@@ -9,9 +9,18 @@ def _resultado_listo():
     return {campo: True for campo in database._READINESS_CONTABLE_CAMPOS}
 
 
+def _resultado_ecommerce_listo():
+    return {campo: True for campo in database._READINESS_ECOMMERCE_CAMPOS}
+
+
 class _CursorReadiness:
-    def __init__(self, resultado=None):
+    def __init__(self, resultado=None, resultado_ecommerce=None):
         self.resultado = _resultado_listo() if resultado is None else resultado
+        self.resultado_ecommerce = (
+            _resultado_ecommerce_listo()
+            if resultado_ecommerce is None
+            else resultado_ecommerce
+        )
         self.consultas = []
 
     def __enter__(self):
@@ -24,6 +33,8 @@ class _CursorReadiness:
         self.consultas.append((sql, params))
 
     def fetchone(self):
+        if self.consultas and self.consultas[-1][0] == database._READINESS_ECOMMERCE_SQL:
+            return self.resultado_ecommerce
         return self.resultado
 
 
@@ -87,6 +98,26 @@ def test_readiness_contable_falla_si_catalogo_no_devuelve_fila():
         database._verificar_readiness_contable(cursor)
 
 
+@pytest.mark.parametrize("campo", database._READINESS_ECOMMERCE_CAMPOS)
+def test_readiness_ecommerce_falla_cerrado_por_cada_invariante(campo):
+    estado = _resultado_ecommerce_listo()
+    estado[campo] = False
+    cursor = _CursorReadiness(resultado_ecommerce=estado)
+
+    with pytest.raises(RuntimeError, match=campo):
+        database._verificar_readiness_ecommerce(cursor)
+
+    assert len(cursor.consultas) == 1
+
+
+def test_readiness_ecommerce_falla_si_catalogo_no_devuelve_fila():
+    cursor = _CursorReadiness(resultado_ecommerce=None)
+    cursor.resultado_ecommerce = None
+
+    with pytest.raises(RuntimeError, match="sin resultado"):
+        database._verificar_readiness_ecommerce(cursor)
+
+
 class _ConexionInit:
     def __init__(self, cursor):
         self.cursor_real = cursor
@@ -112,9 +143,22 @@ def test_init_db_ejecuta_schema_y_readiness_en_la_misma_transaccion(monkeypatch)
 
     database.init_db()
 
-    assert len(cursor.consultas) == 2
+    assert len(cursor.consultas) == 3
     assert "CREATE TABLE IF NOT EXISTS pagos" in cursor.consultas[0][0]
     assert cursor.consultas[1][0] == database._READINESS_CONTABLE_SQL
+    assert cursor.consultas[2][0] == database._READINESS_ECOMMERCE_SQL
+    assert conexion.exc_type is None
+
+
+def test_init_db_permite_schema_previo_a_backfills_de_predeploy(monkeypatch):
+    cursor = _CursorReadiness()
+    conexion = _ConexionInit(cursor)
+    monkeypatch.setattr(database, "get_conn", lambda: _conexion_init(conexion))
+
+    database.init_db(verificar=False)
+
+    assert len(cursor.consultas) == 1
+    assert "CREATE TABLE IF NOT EXISTS pagos" in cursor.consultas[0][0]
     assert conexion.exc_type is None
 
 

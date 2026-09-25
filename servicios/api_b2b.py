@@ -49,18 +49,11 @@ def hash_api_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 
 
-def _ensure_hash_migrado() -> None:
-    """
-    Migración perezosa y una sola vez por proceso: agrega la columna
-    api_key_hash, hashea las claves en claro que existan y las BORRA.
-    Idempotente: si no queda nada en claro, no hace nada.
-    """
+def migrar_api_keys_legacy() -> None:
+    """Migra claves heredadas; se ejecuta sólo en la etapa pre-deploy."""
     global _hash_migrado
-    if _hash_migrado:
-        return
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS api_key_hash TEXT")
             cur.execute("SELECT cliente_id, api_key FROM clientes WHERE api_key IS NOT NULL")
             filas = cur.fetchall()
             for f in filas:
@@ -70,6 +63,34 @@ def _ensure_hash_migrado() -> None:
                 )
             if filas:
                 print(f"[api_b2b] {len(filas)} api_key(s) hasheada(s) y borradas del claro")
+    _hash_migrado = True
+
+
+def _ensure_hash_migrado() -> None:
+    """Readiness runtime de API keys; nunca adquiere locks de migración."""
+    global _hash_migrado
+    if _hash_migrado:
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = CURRENT_SCHEMA()
+                       AND table_name = 'clientes'
+                       AND column_name = 'api_key_hash'
+                ) AS columna_lista,
+                NOT EXISTS (
+                    SELECT 1 FROM clientes WHERE api_key IS NOT NULL
+                ) AS sin_claves_en_claro
+                """
+            )
+            fila = cur.fetchone() or {}
+    if not fila.get("columna_lista") or not fila.get("sin_claves_en_claro"):
+        raise RuntimeError(
+            "Las API keys requieren ejecutar la migración pre-deploy."
+        )
     _hash_migrado = True
 
 

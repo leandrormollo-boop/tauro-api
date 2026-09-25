@@ -440,6 +440,226 @@ _READINESS_CONTABLE_CAMPOS = (
 )
 
 
+_READINESS_ECOMMERCE_SQL = """
+SELECT
+    EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'clientes' AND column_name = 'api_key_hash'
+    ) AS api_key_hash_existe,
+    TO_REGCLASS('tiendas_conectadas') IS NOT NULL
+        AS tiendas_conectadas_existe,
+    TO_REGCLASS('pedidos_tienda') IS NOT NULL
+        AS pedidos_tienda_existe,
+    TO_REGCLASS('pedidos_huerfanos') IS NOT NULL
+        AS pedidos_huerfanos_existe,
+    TO_REGCLASS('shopify_instalaciones') IS NOT NULL
+        AS shopify_instalaciones_existe,
+    TO_REGCLASS('shopify_desinstalaciones') IS NOT NULL
+        AS shopify_desinstalaciones_existe,
+    TO_REGCLASS('shopify_shop_redact_pendientes') IS NOT NULL
+        AS shopify_redact_pendientes_existe,
+    TO_REGCLASS('shopify_pedidos_redactados') IS NOT NULL
+        AS shopify_pedidos_redactados_existe,
+    TO_REGCLASS('shopify_webhook_recibidos') IS NOT NULL
+        AS shopify_webhook_recibidos_existe,
+    TO_REGCLASS('shopify_huerfanos_cancelados') IS NOT NULL
+        AS shopify_huerfanos_cancelados_existe,
+    TO_REGCLASS('tiendanube_instalaciones') IS NOT NULL
+        AS tiendanube_instalaciones_existe,
+    TO_REGCLASS('tiendanube_lifecycle_eventos') IS NOT NULL
+        AS tiendanube_lifecycle_existe,
+    TO_REGCLASS('tiendanube_webhook_eventos') IS NOT NULL
+        AS tiendanube_webhook_outbox_existe,
+    TO_REGCLASS('tiendanube_privacidad_solicitudes') IS NOT NULL
+        AS tiendanube_privacidad_existe,
+    TO_REGCLASS('tiendanube_pedidos_redactados') IS NOT NULL
+        AS tiendanube_pedidos_redactados_existe,
+    TO_REGCLASS('tiendanube_shipping_config') IS NOT NULL
+        AS tiendanube_shipping_config_existe,
+    TO_REGCLASS('config_envio_tienda') IS NOT NULL
+        AS config_envio_tienda_existe,
+    TO_REGCLASS('tarifas_cache') IS NOT NULL
+        AS tarifas_cache_existe,
+    TO_REGCLASS('solicitud_automatica_outbox') IS NOT NULL
+        AS solicitud_outbox_existe,
+    TO_REGCLASS('tienda_fulfillment_outbox') IS NOT NULL
+        AS fulfillment_outbox_existe,
+    TO_REGCLASS('tienda_cancelacion_obligaciones') IS NOT NULL
+        AS cancelaciones_outbox_existe,
+    TO_REGCLASS('tiendanube_rate_quote_snapshots') IS NOT NULL
+        AS rate_snapshots_existe,
+    TO_REGCLASS('tiendanube_label_outbox') IS NOT NULL
+        AS label_outbox_existe,
+    TO_REGCLASS('tiendanube_label_execution') IS NOT NULL
+        AS label_execution_existe,
+    TO_REGCLASS('tiendanube_label_documents') IS NOT NULL
+        AS label_documents_existe,
+    (
+        SELECT COUNT(*) = 6
+          FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'pedidos_tienda'
+           AND column_name IN (
+               'flete_cobrado', 'flete_detalle', 'motivo_pendiente',
+               'automatismos_bloqueados', 'bloqueo_motivo', 'updated_at'
+           )
+    ) AS pedidos_tienda_columnas_listas,
+    EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'pedidos_huerfanos'
+           AND column_name = 'install_generation'
+    ) AS pedidos_huerfanos_generacion_lista,
+    (
+        SELECT COUNT(*) = 9
+          FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'shopify_instalaciones'
+           AND column_name IN (
+               'app_client_id', 'install_generation', 'refresh_token',
+               'access_token_expires_at', 'refresh_token_expires_at',
+               'token_reauth_required', 'token_refresh_failed_at',
+               'webhooks_ready', 'webhooks_verified_at'
+           )
+    ) AS shopify_columnas_listas,
+    (
+        SELECT COUNT(*) = 13
+          FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'tiendanube_instalaciones'
+           AND column_name IN (
+               'estado', 'install_generation', 'webhooks_ready',
+               'label_webhook_ready', 'label_api_feature_ready',
+               'label_api_feature_checked_at', 'webhooks_verified_at',
+               'claim_token_hash', 'claim_expires_at', 'actualizada_en',
+               'suspendida_en', 'desinstalada_en', 'redactada_en'
+           )
+    ) AS tiendanube_columnas_listas,
+    (
+        SELECT COUNT(*) = 2
+          FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND is_nullable = 'NO'
+           AND (table_name, column_name) IN (
+               ('shopify_instalaciones', 'install_generation'),
+               ('tiendanube_instalaciones', 'install_generation')
+           )
+    ) AS instalaciones_generacion_no_nula,
+    NOT EXISTS (
+        SELECT 1
+          FROM shopify_instalaciones
+         WHERE (
+                NULLIF(BTRIM(access_token), '') IS NOT NULL
+                AND access_token NOT LIKE 'enc:v1:%'
+               )
+            OR (
+                NULLIF(BTRIM(COALESCE(refresh_token, '')), '') IS NOT NULL
+                AND refresh_token NOT LIKE 'enc:v1:%'
+               )
+    ) AS shopify_tokens_cifrados,
+    NOT EXISTS (
+        SELECT 1
+          FROM tiendanube_instalaciones
+         WHERE NULLIF(BTRIM(access_token), '') IS NOT NULL
+           AND access_token NOT LIKE 'enc:v1:%'
+    ) AS tiendanube_tokens_cifrados,
+    EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'tiendanube_privacidad_solicitudes'
+           AND column_name = 'resolucion'
+    ) AS tiendanube_privacidad_resolucion_lista,
+    EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'productos'
+           AND column_name = 'imagen_url'
+    ) AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'productos'
+           AND column_name = 'tax_estimado_usd'
+    ) AS catalogo_ecommerce_columnas_listas,
+    EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'tarifas_cache'
+           AND column_name = 'entorno'
+    ) AS tarifas_cache_entorno_listo,
+    (
+        SELECT COUNT(*) = 6
+          FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND (table_name, column_name) IN (
+               ('tiendanube_shipping_config', 'label_callback_token_hash'),
+               ('tiendanube_shipping_config', 'install_generation'),
+               ('tiendanube_labels', 'install_generation'),
+               ('tiendanube_labels', 'customer_id'),
+               ('tiendanube_label_outbox', 'install_generation'),
+               ('tiendanube_label_outbox', 'customer_id')
+           )
+    ) AS tiendanube_shipping_columnas_listas,
+    (
+        SELECT COUNT(*) = 3
+          FROM information_schema.columns
+         WHERE table_schema = CURRENT_SCHEMA()
+           AND table_name = 'tiendanube_rate_quote_snapshots'
+           AND column_name IN (
+               'platform_additional_cost', 'expected_consumer_price',
+               'platform_option_id'
+           )
+    ) AS rate_snapshot_columnas_listas,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+         WHERE t.tgrelid = TO_REGCLASS('tiendanube_rate_quote_snapshots')
+           AND t.tgname = 'trg_bloquear_tn_rate_quote_update'
+           AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS rate_snapshot_inmutable
+"""
+
+_READINESS_ECOMMERCE_CAMPOS = (
+    "api_key_hash_existe",
+    "tiendas_conectadas_existe",
+    "pedidos_tienda_existe",
+    "pedidos_huerfanos_existe",
+    "shopify_instalaciones_existe",
+    "shopify_desinstalaciones_existe",
+    "shopify_redact_pendientes_existe",
+    "shopify_pedidos_redactados_existe",
+    "shopify_webhook_recibidos_existe",
+    "shopify_huerfanos_cancelados_existe",
+    "tiendanube_instalaciones_existe",
+    "tiendanube_lifecycle_existe",
+    "tiendanube_webhook_outbox_existe",
+    "tiendanube_privacidad_existe",
+    "tiendanube_pedidos_redactados_existe",
+    "tiendanube_shipping_config_existe",
+    "config_envio_tienda_existe",
+    "tarifas_cache_existe",
+    "solicitud_outbox_existe",
+    "fulfillment_outbox_existe",
+    "cancelaciones_outbox_existe",
+    "rate_snapshots_existe",
+    "label_outbox_existe",
+    "label_execution_existe",
+    "label_documents_existe",
+    "pedidos_tienda_columnas_listas",
+    "pedidos_huerfanos_generacion_lista",
+    "shopify_columnas_listas",
+    "tiendanube_columnas_listas",
+    "instalaciones_generacion_no_nula",
+    "shopify_tokens_cifrados",
+    "tiendanube_tokens_cifrados",
+    "tiendanube_privacidad_resolucion_lista",
+    "catalogo_ecommerce_columnas_listas",
+    "tarifas_cache_entorno_listo",
+    "tiendanube_shipping_columnas_listas",
+    "rate_snapshot_columnas_listas",
+    "rate_snapshot_inmutable",
+)
+
+
 def _verificar_readiness_contable(cur) -> dict[str, bool]:
     """Audita contratos críticos con una consulta; nunca migra ni repara."""
     cur.execute(_READINESS_CONTABLE_SQL)
@@ -456,6 +676,24 @@ def _verificar_readiness_contable(cur) -> dict[str, bool]:
             "Schema crítico no listo: " + ", ".join(fallas)
         )
     return {campo: True for campo in _READINESS_CONTABLE_CAMPOS}
+
+
+def _verificar_readiness_ecommerce(cur) -> dict[str, bool]:
+    """Comprueba contratos de las tiendas sin ejecutar DDL ni reparaciones."""
+    cur.execute(_READINESS_ECOMMERCE_SQL)
+    fila = cur.fetchone()
+    if not fila:
+        raise RuntimeError("Readiness ecommerce sin resultado.")
+    resultado = dict(fila)
+    fallas = [
+        campo for campo in _READINESS_ECOMMERCE_CAMPOS
+        if not bool(resultado.get(campo, False))
+    ]
+    if fallas:
+        raise RuntimeError(
+            "Schema ecommerce no listo: " + ", ".join(fallas)
+        )
+    return {campo: True for campo in _READINESS_ECOMMERCE_CAMPOS}
 
 
 def _init_pool() -> pool.ThreadedConnectionPool:
@@ -547,9 +785,18 @@ def get_conn() -> _ConnContext:
     return _ConnContext()
 
 
-def init_db():
+def verificar_readiness_db() -> None:
+    """Readiness de arranque: sólo catálogo/SELECT, nunca migraciones."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            _verificar_readiness_contable(cur)
+            _verificar_readiness_ecommerce(cur)
+
+
+def init_db(*, verificar: bool = True):
     """
-    Crea las tablas si no existen. Llamar al startup de la app.
+    Aplica el esquema. Sólo debe llamarlo el proceso de migración predeploy;
+    el proceso web usa ``verificar_readiness_db`` y nunca ejecuta DDL.
     Lee el schema desde sql/schema.sql relativo a este archivo.
     """
     import pathlib
@@ -563,5 +810,7 @@ def init_db():
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(sql)
-            _verificar_readiness_contable(cur)
+            if verificar:
+                _verificar_readiness_contable(cur)
+                _verificar_readiness_ecommerce(cur)
     print("[db] Schema inicializado OK.")

@@ -74,7 +74,7 @@ def test_shopify_ciclo_reconciliacion_es_solo_lectura(monkeypatch):
     )
     assert shopify_app.marcar_enviado_resultado(
         "piloto.myshopify.com", "123", "TRACK-1", solo_reconciliar=True,
-    ) == "REINTENTAR"
+    ) == "RECONCILIAR"
     assert len(llamadas) == 1
 
 
@@ -161,5 +161,39 @@ def test_tiendanube_reconciliar_se_propaga_como_ciclo_solo_lectura(monkeypatch):
         "tracking": "TRACK-1",
     })
 
-    assert resultado == "REINTENTAR"
+    assert resultado == "RECONCILIAR"
     assert conciliaciones == [True]
+
+
+def test_resultado_ambiguo_nunca_regresa_al_camino_de_mutacion(monkeypatch):
+    from servicios import ecommerce_outbox
+
+    monkeypatch.setenv("ECOMMERCE_FULFILLMENT_WORKER_ENABLED", "true")
+    trabajos = iter([
+        {"id": 7, "claim_id": "c1", "intentos": 1},
+        {"id": 7, "claim_id": "c2", "intentos": 2},
+        {"id": 7, "claim_id": "c3", "intentos": 5},
+        None,
+    ])
+    monkeypatch.setattr(ecommerce_outbox, "_claim_fulfillment", lambda: next(trabajos))
+    monkeypatch.setattr(
+        ecommerce_outbox,
+        "_ejecutar_fulfillment_bajo_lock",
+        lambda _job: "RECONCILIAR",
+    )
+    finales = []
+    monkeypatch.setattr(
+        ecommerce_outbox,
+        "_finish_fulfillment",
+        lambda job, estado, codigo="", detalle="", remote_reference="":
+            finales.append((job["intentos"], estado, codigo)),
+    )
+
+    resultado = ecommerce_outbox.procesar_fulfillments(limite=10)
+
+    assert finales == [
+        (1, "RECONCILIAR", "RESULTADO_AMBIGUO"),
+        (2, "RECONCILIAR", "RESULTADO_AMBIGUO"),
+        (5, "MANUAL_REVIEW", "FULFILLMENT_NO_SEGURO"),
+    ]
+    assert resultado["manuales"] == 1

@@ -17,7 +17,7 @@ from typing import Optional
 
 from servicios.carriers import cotizar_carriers
 from core.email_sender import enviar_email_pedido
-from core.database import init_db
+from core.database import verificar_readiness_db
 from endpoints.portal_cliente import router as portal_router
 from endpoints.admin import router as admin_router
 from endpoints.integraciones import router as integraciones_router
@@ -281,10 +281,11 @@ async def headers_de_seguridad(request: Request, call_next):
 
     return response
 
-# Inicializar base de datos PostgreSQL al arrancar
+# Verificar PostgreSQL al arrancar. Las migraciones corren en el pre-deploy de
+# Railway: el proceso web no ejecuta CREATE/ALTER ni toma AccessExclusiveLock.
 _db_init_error = None
 try:
-    init_db()
+    verificar_readiness_db()
 except Exception as _db_err:
     _db_init_error = type(_db_err).__name__
     print(f"[startup] DB init error: {type(_db_err).__name__}")
@@ -299,19 +300,18 @@ except Exception as _db_err:
             "El schema de PostgreSQL no quedó listo; se aborta el arranque."
         ) from _db_err
 
-# Migrar api_key → api_key_hash UNA vez, en el arranque y no en el primer
-# request. La migración hace ALTER TABLE (lock exclusivo sobre `clientes`)
-# seguido de los UPDATE: hacerlo en el request-path serializaba cualquier
-# lectura de clientes detrás de ese lock. Sigue siendo idempotente, así que
-# queda como red si el arranque no llegó a correrla.
+# Verificación read-only de la migración api_key → api_key_hash. El UPDATE
+# irreversible de claves legacy pertenece también al pre-deploy.
 try:
     from servicios.api_b2b import _ensure_hash_migrado
     _ensure_hash_migrado()
 except Exception as _mig_err:
-    print(
-        "[startup] migración de api_key diferida al primer uso: "
-        f"{type(_mig_err).__name__}"
-    )
+    _db_init_error = _db_init_error or type(_mig_err).__name__
+    print(f"[startup] API keys no listas: {type(_mig_err).__name__}")
+    if os.getenv("DATABASE_URL"):
+        raise RuntimeError(
+            "La migración de API keys no quedó lista; se aborta el arranque."
+        ) from _mig_err
 
 # Static files (CSS, JS, imágenes), portal del cliente y admin
 app.mount("/static", StaticFiles(directory="static"), name="static")

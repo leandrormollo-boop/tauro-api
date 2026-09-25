@@ -37,27 +37,34 @@ _tabla_lista = False
 
 
 def _ensure_tabla() -> None:
+    """Verifica el schema aplicado por predeploy; nunca migra en runtime."""
     global _tabla_lista
     if _tabla_lista:
         return
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS config_envio_tienda (
-                    dominio          TEXT PRIMARY KEY,
-                    cliente_id       TEXT,
-                    politica         TEXT NOT NULL DEFAULT 'real',
-                    markup_pct       NUMERIC(6,2) NOT NULL DEFAULT 0,
-                    precio_fijo_ars  NUMERIC(14,2) NOT NULL DEFAULT 0,
-                    mostrar_tax      BOOLEAN NOT NULL DEFAULT FALSE,
-                    tax_pct_default  NUMERIC(6,2) NOT NULL DEFAULT 0,
-                    etiqueta         TEXT DEFAULT '',
-                    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
-                ALTER TABLE productos
-                    ADD COLUMN IF NOT EXISTS tax_estimado_usd NUMERIC(12,2) NOT NULL DEFAULT 0;
-            """)
-        conn.commit()
+            cur.execute(
+                """
+                SELECT
+                    to_regclass('config_envio_tienda') IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'productos'
+                           AND column_name = 'tax_estimado_usd'
+                    ) AS schema_ready
+                """
+            )
+            row = cur.fetchone()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise RuntimeError(
+            "El esquema de política de envío requiere la migración previa."
+        )
     _tabla_lista = True
 
 

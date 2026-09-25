@@ -14,17 +14,32 @@ _imagen_col_lista = False
 
 
 def _ensure_imagen_col() -> None:
-    """Agrega la columna `imagen_url` si la base es vieja. Idempotente."""
+    """Comprueba `imagen_url`; las migraciones ocurren antes del tráfico."""
     global _imagen_col_lista
     if _imagen_col_lista:
         return
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("ALTER TABLE productos ADD COLUMN IF NOT EXISTS imagen_url TEXT")
-            conn.commit()
-    except Exception as e:
-        print(f"[catalogo] no pude asegurar la columna imagen_url: {e}")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = CURRENT_SCHEMA()
+                       AND table_name = 'productos'
+                       AND column_name = 'imagen_url'
+                ) AS schema_ready
+                """
+            )
+            row = cur.fetchone()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise RuntimeError(
+            "El catálogo requiere ejecutar la migración previa."
+        )
     _imagen_col_lista = True
 
 

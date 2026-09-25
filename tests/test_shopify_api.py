@@ -39,6 +39,7 @@ class _CursorTienda:
         self.propietario = propietario_inicial
         self.params = None
         self.query = ""
+        self.rowcount = 2
 
     def __enter__(self):
         return self
@@ -56,6 +57,8 @@ class _CursorTienda:
             self.propietario = self.params["cliente"]
 
     def fetchone(self):
+        if "schema_ready" in self.query:
+            return {"schema_ready": True}
         return {"id": 7, "cliente_id": self.propietario}
 
 
@@ -384,7 +387,7 @@ def test_oauth_confirmado_reasigna_tienda_historica(monkeypatch):
     assert cursor.params["reasignar"] is True
 
 
-def test_migracion_base_crea_huerfanos_antes_de_leerlos(monkeypatch):
+def test_readiness_base_no_ejecuta_ddl_en_runtime(monkeypatch):
     from servicios import integraciones_tienda
 
     cursor = _CursorTienda()
@@ -394,10 +397,29 @@ def test_migracion_base_crea_huerfanos_antes_de_leerlos(monkeypatch):
 
     integraciones_tienda._ensure_tablas()
 
-    assert "CREATE TABLE IF NOT EXISTS pedidos_huerfanos" in cursor.query
-    assert "CREATE TABLE IF NOT EXISTS config_envio_tienda" in cursor.query
-    assert "ix_pedidos_huerfanos_dominio_fecha" in cursor.query
-    assert conn.commits == 1
+    normalized = " ".join(cursor.query.upper().split())
+    assert "SCHEMA_READY" in normalized
+    assert "CREATE TABLE" not in normalized
+    assert "ALTER TABLE" not in normalized
+    assert "CREATE INDEX" not in normalized
+    assert conn.commits == 0
+
+
+def test_backfill_shopify_legacy_solo_en_migracion(monkeypatch):
+    from servicios import shopify_app
+
+    cursor = _CursorTienda()
+    conn = _ConnTienda(cursor)
+    monkeypatch.setattr(shopify_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(shopify_app, "get_conn", lambda: conn)
+    monkeypatch.setenv("SHOPIFY_LEGACY_API_KEY", "app-legada")
+    monkeypatch.setenv("SHOPIFY_LEGACY_API_SECRET", "secret-legado")
+
+    actualizadas = shopify_app.migrar_instalaciones_legacy()
+
+    assert actualizadas == 2
+    assert "UPDATE shopify_instalaciones" in cursor.query
+    assert cursor.params == ("app-legada",)
 
 
 class _Respuesta:
@@ -565,7 +587,8 @@ def test_token_shopify_se_guarda_cifrado_y_se_puede_migrar(monkeypatch):
     assert cifrado.startswith("enc:v1:")
     assert "shpat_token-privado" not in cifrado
     assert shopify_app._descifrar_token(cifrado) == "shpat_token-privado"
-    assert shopify_app._descifrar_token("token-legacy-plaintext") == "token-legacy-plaintext"
+    with pytest.raises(RuntimeError, match="legacy sin migrar"):
+        shopify_app._descifrar_token("token-legacy-plaintext")
 
 
 def test_token_cifrado_falla_cerrado_con_otra_clave(monkeypatch):
@@ -703,7 +726,6 @@ def test_guardar_instalacion_persiste_par_cifrado_y_vencimientos(monkeypatch):
         "tauro-qa.myshopify.com",
         "access-inicial",
         "read_orders",
-        cliente_claim="",
         refresh_token="refresh-inicial",
         expires_in=3600,
         refresh_token_expires_in=7776000,
@@ -774,6 +796,7 @@ def test_refresh_expirado_se_rota_bajo_lock_y_se_persiste_atomicamente(monkeypat
         "tauro-qa.myshopify.com",
         "access-obsoleto",
         permitir_pendiente_webhooks=True,
+        request_timeout=1.5,
     ) == "access-rotado"
     assert [evento[0] for evento in eventos] == ["lock", "post"]
     assert pedido["data"] == {
@@ -782,6 +805,7 @@ def test_refresh_expirado_se_rota_bajo_lock_y_se_persiste_atomicamente(monkeypat
         "client_secret": "client-secret",
         "refresh_token": "refresh-viejo",
     }
+    assert pedido["timeout"] == 1.5
     update = next(
         params for sql, params in cursor.ejecutadas
         if "SET access_token = %s" in sql
@@ -1376,9 +1400,8 @@ def test_abrir_instalacion_pendiente_reinicia_oauth_con_state(monkeypatch):
     assert response == ("oauth", "tauro-qa.myshopify.com")
 
 
-def test_callback_con_state_verificado_puede_autovincular(monkeypatch):
+def test_callback_con_sesion_tauro_ajena_siempre_nace_ownerless(monkeypatch):
     from endpoints import shopify
-    from servicios import auth
 
     promociones = []
     confirmaciones = []
@@ -1402,10 +1425,6 @@ def test_callback_con_state_verificado_puede_autovincular(monkeypatch):
         shopify, "confirmar_webhooks_verificados",
         lambda *args: confirmaciones.append(args) or True,
     )
-    monkeypatch.setattr(
-        "servicios.shopify_catalogo.lanzar_sincronizacion", lambda *_args: None,
-    )
-    monkeypatch.setattr(auth, "validar_token", lambda _token: "MELCIOR")
 
     response = shopify.callback(_Request(
         query_params={
@@ -1419,7 +1438,7 @@ def test_callback_con_state_verificado_puede_autovincular(monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == "https://admin.shopify.com/store/tauro-qa/apps/client-publico"
-    assert promociones[0][1]["cliente_claim"] == "MELCIOR"
+    assert "cliente_claim" not in promociones[0][1]
     assert promociones[0][1]["refresh_token"] == "refresh-qa"
     assert promociones[0][1]["expires_in"] == 3600
     assert promociones[0][1]["refresh_token_expires_in"] == 7776000
@@ -1508,7 +1527,7 @@ def test_callback_no_declara_exito_si_falta_un_webhook(monkeypatch):
     })
     monkeypatch.setattr(
         shopify, "guardar_instalacion",
-        lambda *_args, **kwargs: guardadas.append(kwargs["cliente_claim"]) or "gen-qa",
+        lambda *_args, **_kwargs: guardadas.append("ownerless") or "gen-qa",
     )
     monkeypatch.setattr(shopify, "registrar_webhooks", lambda *_args: SHOPIFY_WEBHOOKS[:-1])
     monkeypatch.setattr(
@@ -1529,7 +1548,7 @@ def test_callback_no_declara_exito_si_falta_un_webhook(monkeypatch):
 
     assert response.status_code == 503
     assert desvinculadas == []
-    assert guardadas == [""]
+    assert guardadas == ["ownerless"]
 
 
 def test_callback_timeout_verificando_webhooks_no_borra_instalacion(monkeypatch):
@@ -1549,7 +1568,7 @@ def test_callback_timeout_verificando_webhooks_no_borra_instalacion(monkeypatch)
     })
     monkeypatch.setattr(
         shopify, "guardar_instalacion",
-        lambda *_args, **kwargs: guardadas.append(kwargs["cliente_claim"]) or "gen-qa",
+        lambda *_args, **_kwargs: guardadas.append("ownerless") or "gen-qa",
     )
 
     def falla_verificacion(*_args):
@@ -1574,7 +1593,7 @@ def test_callback_timeout_verificando_webhooks_no_borra_instalacion(monkeypatch)
 
     assert response.status_code == 503
     assert borradas == []
-    assert guardadas == [""]
+    assert guardadas == ["ownerless"]
 
 
 def test_callback_state_distinto_no_canjea_token(monkeypatch):
@@ -1629,6 +1648,11 @@ def test_webhook_nuevo_y_repetido_dispara_armado_una_sola_vez(monkeypatch):
     monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_args: True)
     monkeypatch.setattr(shopify_app, "clasificar_evento_instalacion", lambda *_args: "ACTUAL")
     monkeypatch.setattr(
+        shopify_app,
+        "validar_recurso_webhook_shopify",
+        lambda *_args: {"estado": "ACTUAL"},
+    )
+    monkeypatch.setattr(
         integraciones_tienda, "webhook_shopify_ya_procesado", lambda *_args: False,
     )
     monkeypatch.setattr(
@@ -1651,7 +1675,7 @@ def test_webhook_nuevo_y_repetido_dispara_armado_una_sola_vez(monkeypatch):
 
 def test_webhook_inventario_se_encola_idempotente_y_responde_rapido(monkeypatch):
     from endpoints import integraciones
-    from servicios import shopify_app, shopify_catalogo
+    from servicios import integraciones_tienda, shopify_app, shopify_catalogo
 
     cuerpo = json.dumps({
         "inventory_item_id": 300000000001,
@@ -1680,6 +1704,21 @@ def test_webhook_inventario_se_encola_idempotente_y_responde_rapido(monkeypatch)
     })
     monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_args: True)
     monkeypatch.setattr(shopify_app, "clasificar_evento_instalacion", lambda *_args: "ACTUAL")
+    monkeypatch.setattr(
+        shopify_app,
+        "validar_recurso_webhook_shopify",
+        lambda *_args: {"estado": "ACTUAL"},
+    )
+    monkeypatch.setattr(
+        integraciones_tienda,
+        "webhook_shopify_ya_procesado",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        integraciones_tienda,
+        "marcar_webhook_shopify_procesado",
+        lambda *_args: None,
+    )
 
     def encolar(*args):
         recibidos.append(args)
@@ -1694,7 +1733,12 @@ def test_webhook_inventario_se_encola_idempotente_y_responde_rapido(monkeypatch)
     assert primera == {"ok": True, "encolado": True, "duplicado": False}
     assert segunda == {"ok": True, "encolado": False, "duplicado": True}
     assert len(recibidos) == 2
-    assert recibidos[0][:3] == ("wh-stock-1", "tauro-qa.myshopify.com", "inventory_levels/update")
+    assert len(recibidos[0][0]) == 64
+    assert recibidos[0][0] == recibidos[1][0]
+    assert recibidos[0][1:3] == (
+        "tauro-qa.myshopify.com",
+        "inventory_levels/update",
+    )
     assert lanzados == [True]
 
 

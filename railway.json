@@ -1,6 +1,7 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
+    "preDeployCommand": ["python scripts/migrate_database.py"],
     "healthcheckPath": "/health",
     "healthcheckTimeout": 180,
     "restartPolicyType": "ON_FAILURE",

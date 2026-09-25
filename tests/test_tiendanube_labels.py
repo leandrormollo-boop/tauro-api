@@ -38,7 +38,12 @@ def _sin_postgres_para_lock_de_registro(monkeypatch):
 
 
 def _config(_token):
-    return {"store_id": "123456", "activa": True}
+    return {
+        "store_id": "123456",
+        "activa": True,
+        "install_generation": "gen-1",
+        "cliente_id": "CLIENTE-1",
+    }
 
 
 def _generate_payload(*, address="Calle 1"):
@@ -95,7 +100,10 @@ def _generate_payload(*, address="Calle 1"):
 def _ready_kwargs():
     return {
         "execution_ready": lambda: True,
-        "installation_loader": lambda _store: {"cliente_id": "CLIENTE-1"},
+        "installation_loader": lambda _store: {
+            "cliente_id": "CLIENTE-1",
+            "install_generation": "gen-1",
+        },
         "order_context_loader": lambda _store, _ffo: {
             "order_id": "order-1",
             "redacted": False,
@@ -357,6 +365,9 @@ def test_mismo_snapshot_respalda_varios_ffo_y_reintenta_por_label(monkeypatch):
             self.result = None
             if "pg_advisory_xact_lock" in sql:
                 return
+            if "SELECT 1 AS vigente" in sql:
+                self.result = {"vigente": 1}
+                return
             if "FROM tiendanube_fulfillment_order_orders m" in sql:
                 self.result = {
                     "order_id": f"order-{params[2]}",
@@ -373,11 +384,13 @@ def test_mismo_snapshot_respalda_varios_ffo_y_reintenta_por_label(monkeypatch):
                 key = (params[0], params[1])
                 if key not in self.labels:
                     self.labels[key] = {
-                        "fulfillment_order_id": params[2],
-                        "rate_quote_snapshot_id": params[3],
-                        "order_id": params[4],
-                        "generate_fingerprint": params[6],
-                        "generate_payload_complete": params[7],
+                        "install_generation": params[2],
+                        "customer_id": params[3],
+                        "fulfillment_order_id": params[4],
+                        "rate_quote_snapshot_id": params[5],
+                        "order_id": params[6],
+                        "generate_fingerprint": params[8],
+                        "generate_payload_complete": params[9],
                     }
                     self.result = {"store_id": params[0]}
                 return
@@ -385,11 +398,13 @@ def test_mismo_snapshot_respalda_varios_ffo_y_reintenta_por_label(monkeypatch):
                 self.result = self.labels.get(tuple(params))
                 return
             if "INSERT INTO tiendanube_label_outbox" in sql:
-                key = (params[0], params[1], params[2])
+                key = (params[0], params[1], params[4])
                 if key not in self.outbox:
                     self.outbox[key] = {
-                        "payload_fingerprint": params[4],
-                        "payload_complete": params[5],
+                        "install_generation": params[2],
+                        "customer_id": params[3],
+                        "payload_fingerprint": params[6],
+                        "payload_complete": params[7],
                     }
                     self.result = {"id": len(self.outbox)}
                 return
@@ -433,6 +448,8 @@ def test_mismo_snapshot_respalda_varios_ffo_y_reintenta_por_label(monkeypatch):
             fingerprint=ffo.ljust(64, "0"),
             rate_quote_snapshot_id=SNAPSHOT_ID,
             order_id=f"order-{ffo}",
+            install_generation="gen-1",
+            customer_id="CLIENTE-1",
         )
         for ffo in ("ffo-1", "ffo-2")
     )
@@ -560,13 +577,19 @@ def test_cancel_listo_delega_lote_autenticado_al_servicio_confirmado():
         TOKEN,
         config_loader=_config,
         execution_ready=lambda: True,
-        cancel_service=lambda store, items: calls.append((store, items)) or expected,
+        cancel_service=lambda store, items, **context: (
+            calls.append((store, items, context)) or expected
+        ),
     )
 
     assert result is expected
     assert calls == [(
         "123456",
         [{"label_id": "label-1", "fulfillment_order_id": "ffo-1"}],
+        {
+            "expected_generation": "gen-1",
+            "expected_customer_id": "CLIENTE-1",
+        },
     )]
 
 
@@ -581,6 +604,45 @@ def test_token_invalido_no_persiste():
             config_loader=lambda _token: None,
         )
     assert repository.operations == {}
+
+
+def test_generate_rechaza_si_cambio_la_generacion_antes_de_persistir():
+    repository = MemoryRepository()
+    kwargs = _ready_kwargs()
+    kwargs["installation_loader"] = lambda _store: {
+        "cliente_id": "CLIENTE-1",
+        "install_generation": "gen-2",
+    }
+
+    with pytest.raises(LabelsUnavailableError, match="vinculada"):
+        recibir_generate(
+            _generate_payload(),
+            TOKEN,
+            repository=repository,
+            config_loader=_config,
+            **kwargs,
+        )
+    assert repository.operations == {}
+
+
+def test_callbacks_labels_y_worker_exigen_generacion_y_owner_actuales():
+    from servicios import tiendanube_label_cancel, tiendanube_label_worker
+    from servicios import tiendanube_shipping
+
+    auth_source = inspect.getsource(
+        tiendanube_shipping.configuracion_por_label_token
+    )
+    cancel_source = inspect.getsource(
+        tiendanube_label_cancel.PostgresLabelCancelRepository.lookup
+    )
+    worker_source = inspect.getsource(
+        tiendanube_label_worker._postgres_execution_guard
+    )
+    assert "i.install_generation = c.install_generation" in auth_source
+    assert "i.webhooks_ready = TRUE" in auth_source
+    assert "UPPER(s.customer_id) = UPPER(l.customer_id)" in cancel_source
+    assert "l.install_generation = o.install_generation" in worker_source
+    assert "UPPER(i.cliente_id) = UPPER(l.customer_id)" in worker_source
 
 
 def test_outbox_tiene_clave_idempotente_y_fk_de_redaccion():
@@ -796,7 +858,7 @@ def test_lock_registro_shipping_usa_misma_sesion_y_libera_en_finally(monkeypatch
     assert sql[2] == "BODY"
     assert "pg_advisory_unlock(hashtextextended(%s, 0))" in sql[3]
     assert ejecutadas[1][1] == ejecutadas[3][1] == (
-        "tauro:tiendanube:shipping-carrier:123",
+        "tauro:tiendanube:123.tiendanube",
     )
     assert sql[-1] == "CONNECTION_EXIT"
 
@@ -815,7 +877,7 @@ def test_registro_shipping_envuelve_toda_la_operacion_con_lock(monkeypatch):
         finally:
             orden.append(("unlock", store_id))
 
-    def fake_registration(store_id, access_token):
+    def fake_registration(store_id, access_token, **_kwargs):
         orden.append(("body", store_id, access_token))
         return {"ready": True}
 
@@ -826,7 +888,13 @@ def test_registro_shipping_envuelve_toda_la_operacion_con_lock(monkeypatch):
         fake_registration,
     )
 
-    assert tiendanube_shipping.registrar_shipping_carrier("123", "access") == {
+    monkeypatch.setattr(
+        "servicios.tiendanube_app.exigir_generacion_oauth",
+        lambda *_a, **_k: None,
+    )
+    assert tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    ) == {
         "ready": True,
     }
     assert orden == [
@@ -867,7 +935,12 @@ def test_registro_nuevo_incluye_callback_labels_con_secreto_distinto(monkeypatch
         lambda *args, **kwargs: saved.append((args, kwargs)),
     )
 
-    result = tiendanube_shipping.registrar_shipping_carrier("123", "access")
+    monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    result = tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    )
 
     carrier_payload = next(
         call[3]
@@ -903,6 +976,7 @@ def test_registro_existente_agrega_labels_sin_rotar_callback_rates(monkeypatch):
             "label_callback_token_hash": None,
             "carrier_id": "77",
             "carrier_option_id": "88",
+            "install_generation": "gen-1",
         },
     )
     monkeypatch.setattr(
@@ -935,17 +1009,26 @@ def test_registro_existente_agrega_labels_sin_rotar_callback_rates(monkeypatch):
     monkeypatch.setattr(
         tiendanube_shipping,
         "_guardar_label_callback_token",
-        lambda store, token: saved.append((store, token)),
+        lambda store, token, **kwargs: saved.append((store, token, kwargs)),
     )
     monkeypatch.setattr(tiendanube_shipping, "reactivar", lambda _store: None)
 
-    result = tiendanube_shipping.registrar_shipping_carrier("123", "access")
+    monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    result = tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    )
 
     update = next(call for call in calls if call[2] == "PUT")
     assert update[3] == "shipping_carriers/77"
     assert set(update[4]) == {"callback_labels_url"}
     assert "/labels/labels-token" in update[4]["callback_labels_url"]
-    assert saved == [("123", "labels-token")]
+    assert saved == [(
+        "123",
+        "labels-token",
+        {"install_generation": "gen-1"},
+    )]
     assert result["existing"] is True
 
 
@@ -980,7 +1063,12 @@ def test_registro_omite_labels_mientras_worker_esta_bloqueado(monkeypatch):
         lambda *args, **kwargs: saved.append((args, kwargs)),
     )
 
-    result = tiendanube_shipping.registrar_shipping_carrier("123", "access")
+    monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    result = tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    )
 
     carrier_payload = next(
         call[3]
@@ -1014,6 +1102,7 @@ def test_registro_existente_elimina_callback_labels_si_worker_no_esta_listo(
             "label_callback_token_hash": "hash-labels",
             "carrier_id": "77",
             "carrier_option_id": "88",
+            "install_generation": "gen-1",
         },
     )
     calls = []
@@ -1053,7 +1142,12 @@ def test_registro_existente_elimina_callback_labels_si_worker_no_esta_listo(
         lambda store: cleaned.append(store),
     )
 
-    result = tiendanube_shipping.registrar_shipping_carrier("123", "access")
+    monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    result = tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    )
 
     update = next(call for call in calls if call[2] == "PUT")
     assert update[4] == {"callback_labels_url": None}
@@ -1079,6 +1173,7 @@ def test_reinstalacion_reactiva_carrier_inactivo_sin_crear_otro(monkeypatch):
             ),
             "carrier_id": "77",
             "carrier_option_id": "88",
+            "install_generation": "gen-1",
             "label_callback_token_hash": None,
         },
     )
@@ -1109,7 +1204,12 @@ def test_reinstalacion_reactiva_carrier_inactivo_sin_crear_otro(monkeypatch):
         tiendanube_shipping, "reactivar", lambda store: activated.append(store)
     )
 
-    result = tiendanube_shipping.registrar_shipping_carrier("123", "access")
+    monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    result = tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    )
 
     assert not [call for call in calls if call[2] == "POST"]
     update = next(call for call in calls if call[2] == "PUT")
@@ -1160,7 +1260,12 @@ def test_reconcilia_carrier_remoto_tras_fallo_db_sin_duplicar(monkeypatch):
     )
     monkeypatch.setattr(tiendanube_shipping, "reactivar", lambda _store: None)
 
-    result = tiendanube_shipping.registrar_shipping_carrier("123", "access")
+    monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    result = tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    )
 
     assert not [call for call in calls if call[2] == "POST"]
     assert saved[0][0][1] == rate_token
@@ -1186,6 +1291,7 @@ def test_config_local_repara_callback_y_opcion_remota_sin_duplicar_carrier(
             "label_callback_token_hash": None,
             "carrier_id": "77",
             "carrier_option_id": "88",
+            "install_generation": "gen-1",
         },
     )
     monkeypatch.setattr(
@@ -1226,7 +1332,12 @@ def test_config_local_repara_callback_y_opcion_remota_sin_duplicar_carrier(
         lambda *args, **kwargs: saved.append((args, kwargs)),
     )
 
-    result = tiendanube_shipping.registrar_shipping_carrier("123", "access")
+    monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    result = tiendanube_shipping.registrar_shipping_carrier(
+        "123", "access", expected_generation="gen-1",
+    )
 
     assert not [
         call

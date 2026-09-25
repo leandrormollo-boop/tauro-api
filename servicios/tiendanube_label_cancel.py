@@ -156,6 +156,12 @@ class LabelCancelRepository(Protocol):
         request: CancelLabelRequest,
     ) -> CancelClaimState: ...
 
+    def cancel_before_emission(
+        self,
+        target: CancelTarget,
+        request: CancelLabelRequest,
+    ) -> CancelClaimState: ...
+
     def mark_confirmed(self, target: CancelTarget) -> None: ...
 
     def mark_rejected(self, target: CancelTarget, error_code: str) -> None: ...
@@ -251,21 +257,69 @@ class PostgresLabelCancelRepository:
     manual en lugar de repetir la anulacion OCA.
     """
 
+    def __init__(
+        self,
+        *,
+        expected_generation: str = "",
+        expected_customer_id: str = "",
+    ) -> None:
+        self.expected_generation = str(expected_generation or "").strip()
+        self.expected_customer_id = str(expected_customer_id or "").strip().upper()
+
     def lookup(self, store_id: str, label_id: str) -> CancelTarget | None:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT l.store_id, l.label_id, l.fulfillment_order_id,
-                           l.external_operation_id, s.carrier_id
-                      FROM tiendanube_labels l
-                      LEFT JOIN tiendanube_rate_quote_snapshots s
-                        ON s.store_id = l.store_id
-                       AND s.snapshot_id = l.rate_quote_snapshot_id
-                     WHERE l.store_id = %s AND l.label_id = %s
-                    """,
-                    (store_id, label_id),
-                )
+                if self.expected_generation and self.expected_customer_id:
+                    cur.execute(
+                        """
+                        SELECT l.store_id, l.label_id,
+                               l.fulfillment_order_id,
+                               l.external_operation_id, s.carrier_id
+                          FROM tiendanube_labels l
+                          JOIN tiendanube_rate_quote_snapshots s
+                            ON s.store_id = l.store_id
+                           AND s.snapshot_id = l.rate_quote_snapshot_id
+                           AND UPPER(s.customer_id) = UPPER(l.customer_id)
+                          JOIN tiendanube_instalaciones i
+                            ON i.store_id = l.store_id
+                           AND i.install_generation = l.install_generation
+                           AND UPPER(i.cliente_id) = UPPER(l.customer_id)
+                          JOIN tiendanube_shipping_config c
+                            ON c.store_id = i.store_id
+                           AND c.install_generation = i.install_generation
+                          JOIN tiendas_conectadas t
+                            ON t.dominio = l.store_id || '.tiendanube'
+                           AND t.plataforma = 'tiendanube'
+                           AND UPPER(t.cliente_id) = UPPER(l.customer_id)
+                         WHERE l.store_id = %s AND l.label_id = %s
+                           AND l.install_generation = %s
+                           AND UPPER(l.customer_id) = %s
+                           AND i.estado = 'ACTIVA'
+                           AND i.webhooks_ready = TRUE
+                           AND c.activa = TRUE
+                           AND t.activa = TRUE
+                         FOR SHARE OF l, s, i, c, t
+                        """,
+                        (
+                            store_id,
+                            label_id,
+                            self.expected_generation,
+                            self.expected_customer_id,
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT l.store_id, l.label_id, l.fulfillment_order_id,
+                               l.external_operation_id, s.carrier_id
+                          FROM tiendanube_labels l
+                          LEFT JOIN tiendanube_rate_quote_snapshots s
+                            ON s.store_id = l.store_id
+                           AND s.snapshot_id = l.rate_quote_snapshot_id
+                         WHERE l.store_id = %s AND l.label_id = %s
+                        """,
+                        (store_id, label_id),
+                    )
                 row = cur.fetchone()
         if not row:
             return None
@@ -293,6 +347,7 @@ class PostgresLabelCancelRepository:
                     cur.execute(
                         """
                         SELECT l.fulfillment_order_id, l.external_operation_id,
+                               l.install_generation, l.customer_id,
                                s.carrier_id
                           FROM tiendanube_labels l
                           LEFT JOIN tiendanube_rate_quote_snapshots s
@@ -312,6 +367,16 @@ class PostgresLabelCancelRepository:
                         != target.external_operation_id
                         or str(data.get("carrier_id") or "").strip().lower()
                         != target.carrier_id
+                        or (
+                            self.expected_generation
+                            and str(data.get("install_generation") or "")
+                            != self.expected_generation
+                        )
+                        or (
+                            self.expected_customer_id
+                            and str(data.get("customer_id") or "").strip().upper()
+                            != self.expected_customer_id
+                        )
                     ):
                         conn.rollback()
                         return CancelClaimState.CONFLICT
@@ -319,15 +384,19 @@ class PostgresLabelCancelRepository:
                     cur.execute(
                         """
                         INSERT INTO tiendanube_label_outbox
-                            (store_id, label_id, operacion, payload,
+                            (store_id, label_id, install_generation,
+                             customer_id, operacion, payload,
                              payload_fingerprint, payload_complete, estado)
-                        VALUES (%s, %s, 'CANCEL', %s::jsonb, %s, TRUE, %s)
+                        VALUES (%s, %s, %s, %s, 'CANCEL', %s::jsonb,
+                                %s, TRUE, %s)
                         ON CONFLICT (store_id, label_id, operacion) DO NOTHING
                         RETURNING id
                         """,
                         (
                             target.store_id,
                             target.label_id,
+                            self.expected_generation or None,
+                            self.expected_customer_id or None,
                             json.dumps(payload, ensure_ascii=False),
                             fingerprint,
                             _SENT,
@@ -336,7 +405,8 @@ class PostgresLabelCancelRepository:
                     inserted = cur.fetchone()
                     cur.execute(
                         """
-                        SELECT payload_fingerprint, estado
+                        SELECT payload_fingerprint, estado,
+                               install_generation, customer_id
                           FROM tiendanube_label_outbox
                          WHERE store_id = %s AND label_id = %s
                            AND operacion = 'CANCEL'
@@ -347,6 +417,17 @@ class PostgresLabelCancelRepository:
                     outbox = cur.fetchone()
                     state = dict(outbox) if outbox else {}
                     if str(state.get("payload_fingerprint") or "").strip() != fingerprint:
+                        conn.rollback()
+                        return CancelClaimState.CONFLICT
+                    if (
+                        self.expected_generation
+                        and str(state.get("install_generation") or "")
+                        != self.expected_generation
+                    ) or (
+                        self.expected_customer_id
+                        and str(state.get("customer_id") or "").strip().upper()
+                        != self.expected_customer_id
+                    ):
                         conn.rollback()
                         return CancelClaimState.CONFLICT
                     if inserted:
@@ -379,6 +460,204 @@ class PostgresLabelCancelRepository:
                 conn.rollback()
                 raise
         return CancelClaimState.CLAIMED
+
+    def cancel_before_emission(
+        self,
+        target: CancelTarget,
+        request: CancelLabelRequest,
+    ) -> CancelClaimState:
+        """Cierra localmente un GENERATE que demostradamente nunca se ejecuto.
+
+        El advisory lock de ``cancel_labels`` excluye al worker durante toda
+        esta transaccion. Aun asi, ``external_operation_id`` vacio no alcanza:
+        un proceso pudo caer despues del POST al carrier y antes del checkpoint.
+        Solo ``PENDIENTE`` con cero intentos y sin claim prueba ausencia de red;
+        cualquier otra combinacion queda bloqueada para revision manual.
+        """
+        payload = _cancel_payload(request)
+        fingerprint = _cancel_fingerprint(request)
+        with get_conn() as conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT fulfillment_order_id, external_operation_id
+                          FROM tiendanube_labels
+                         WHERE store_id = %s AND label_id = %s
+                         FOR UPDATE
+                        """,
+                        (target.store_id, target.label_id),
+                    )
+                    label = cur.fetchone()
+                    label = dict(label) if label else {}
+                    if (
+                        str(label.get("fulfillment_order_id") or "")
+                        != target.fulfillment_order_id
+                        or str(label.get("external_operation_id") or "").strip()
+                    ):
+                        conn.rollback()
+                        return CancelClaimState.CONFLICT
+
+                    cur.execute(
+                        """
+                        SELECT id, estado, intentos, claim_id, claimed_at
+                          FROM tiendanube_label_outbox
+                         WHERE store_id = %s AND label_id = %s
+                           AND operacion = 'GENERATE'
+                         FOR UPDATE
+                        """,
+                        (target.store_id, target.label_id),
+                    )
+                    generate = cur.fetchone()
+                    generate = dict(generate) if generate else {}
+                    execution = {}
+                    if generate.get("id") is not None:
+                        cur.execute(
+                            """
+                            SELECT stage, external_operation_id, claim_id,
+                                   claimed_at
+                              FROM tiendanube_label_execution
+                             WHERE outbox_id = %s
+                             FOR UPDATE
+                            """,
+                            (generate["id"],),
+                        )
+                        row = cur.fetchone()
+                        execution = dict(row) if row else {}
+
+                    never_attempted = bool(
+                        generate
+                        and str(generate.get("estado") or "") == "PENDIENTE"
+                        and int(generate.get("intentos") or 0) == 0
+                        and not generate.get("claim_id")
+                        and not generate.get("claimed_at")
+                        and not str(
+                            execution.get("external_operation_id") or ""
+                        ).strip()
+                        and str(
+                            execution.get("stage") or "CREATE_SHIPMENT"
+                        ) == "CREATE_SHIPMENT"
+                        and not execution.get("claim_id")
+                        and not execution.get("claimed_at")
+                    )
+                    cancel_state = _CONFIRMED if never_attempted else _MANUAL
+                    error_code = (
+                        None
+                        if never_attempted
+                        else "CANCEL_BEFORE_EMISSION_UNCERTAIN"
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO tiendanube_label_outbox
+                            (store_id, label_id, operacion, payload,
+                             payload_fingerprint, payload_complete, estado,
+                             ultimo_error_codigo, procesada_en)
+                        VALUES (
+                            %s, %s, 'CANCEL', %s::jsonb, %s, TRUE, %s, %s,
+                            now()
+                        )
+                        ON CONFLICT (store_id, label_id, operacion) DO NOTHING
+                        RETURNING id
+                        """,
+                        (
+                            target.store_id,
+                            target.label_id,
+                            json.dumps(payload, ensure_ascii=False),
+                            fingerprint,
+                            cancel_state,
+                            error_code,
+                        ),
+                    )
+                    inserted = cur.fetchone()
+                    cur.execute(
+                        """
+                        SELECT payload_fingerprint, estado
+                          FROM tiendanube_label_outbox
+                         WHERE store_id = %s AND label_id = %s
+                           AND operacion = 'CANCEL'
+                         FOR UPDATE
+                        """,
+                        (target.store_id, target.label_id),
+                    )
+                    existing = cur.fetchone()
+                    existing = dict(existing) if existing else {}
+                    if str(existing.get("payload_fingerprint") or "") != fingerprint:
+                        conn.rollback()
+                        return CancelClaimState.CONFLICT
+
+                    persisted = str(existing.get("estado") or "")
+                    if not inserted:
+                        if persisted == _CONFIRMED:
+                            conn.commit()
+                            return CancelClaimState.ALREADY_APPROVED
+                        if persisted in {_SENT, _MANUAL}:
+                            conn.commit()
+                            return CancelClaimState.MANUAL_REVIEW
+                        if persisted == _REJECTED:
+                            conn.commit()
+                            return CancelClaimState.ALREADY_REJECTED
+                        conn.rollback()
+                        return CancelClaimState.CONFLICT
+
+                    generate_state = (
+                        "CANCELADO_LOCAL" if never_attempted else "VERIFICAR_MANUAL"
+                    )
+                    if generate.get("id") is not None:
+                        cur.execute(
+                            """
+                            UPDATE tiendanube_label_outbox
+                               SET estado = %s, claim_id = NULL,
+                                   claimed_at = NULL,
+                                   ultimo_error_codigo = %s,
+                                   procesada_en = now(), actualizada_en = now()
+                             WHERE id = %s AND operacion = 'GENERATE'
+                            """,
+                            (
+                                generate_state,
+                                "CANCELLED_BEFORE_EMISSION"
+                                if never_attempted else error_code,
+                                generate["id"],
+                            ),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE tiendanube_label_execution
+                               SET claim_id = NULL, claimed_at = NULL,
+                                   actualizada_en = now()
+                             WHERE outbox_id = %s
+                            """,
+                            (generate["id"],),
+                        )
+                    cur.execute(
+                        """
+                        UPDATE tiendanube_labels
+                           SET estado = %s, download_token_hash = NULL,
+                               download_token_revoked_at = COALESCE(
+                                   download_token_revoked_at, now()
+                               ),
+                               actualizada_en = now()
+                         WHERE store_id = %s AND label_id = %s
+                        """,
+                        (cancel_state, target.store_id, target.label_id),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE tiendanube_label_documents
+                           SET activa = FALSE,
+                               revocada_en = COALESCE(revocada_en, now())
+                         WHERE store_id = %s AND label_id = %s
+                        """,
+                        (target.store_id, target.label_id),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return (
+            CancelClaimState.ALREADY_APPROVED
+            if never_attempted
+            else CancelClaimState.MANUAL_REVIEW
+        )
 
     def mark_confirmed(self, target: CancelTarget) -> None:
         with get_conn() as conn:
@@ -663,7 +942,26 @@ def _cancel_labels_locked(
                 )
             )
             continue
-        if not target.external_operation_id or not target.carrier_id:
+        if not target.external_operation_id:
+            try:
+                early = repository.cancel_before_emission(target, request)
+            except Exception:
+                results.append(
+                    _rejected(
+                        request,
+                        code="CARRIER_SYSTEM_ERROR",
+                        message="No se pudo fijar la cancelacion previa a la emision.",
+                    )
+                )
+                continue
+            if early == CancelClaimState.ALREADY_APPROVED:
+                results.append(_approved(request))
+            elif early == CancelClaimState.MANUAL_REVIEW:
+                results.append(_manual(request))
+            else:
+                results.append(_rejected(request))
+            continue
+        if not target.carrier_id:
             results.append(
                 _rejected(
                     request,
@@ -781,6 +1079,8 @@ def cancel_labels(
     clock: Clock = time.monotonic,
     deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
     execution_guard: ExecutionGuard | None = None,
+    expected_generation: str = "",
+    expected_customer_id: str = "",
 ) -> CancelBatchResult:
     """Cancela un lote autenticado con un unico intento por etiqueta.
 
@@ -798,7 +1098,17 @@ def cancel_labels(
         raise LabelCancelContractError("El deadline no es valido.")
     total_budget = min(requested_deadline, DEFAULT_DEADLINE_SECONDS)
     deadline = clock() + total_budget
-    repository = repository or PostgresLabelCancelRepository()
+    if repository is None:
+        if not str(expected_generation or "").strip() or not str(
+            expected_customer_id or ""
+        ).strip():
+            raise LabelCancelContractError(
+                "La cancelacion no identifica la instalacion vigente."
+            )
+        repository = PostgresLabelCancelRepository(
+            expected_generation=expected_generation,
+            expected_customer_id=expected_customer_id,
+        )
     if execution_guard is None:
         execution_guard = (
             _postgres_execution_guard

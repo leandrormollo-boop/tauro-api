@@ -1221,6 +1221,23 @@ def _postgres_execution_guard(task: LabelTask) -> Iterator[None]:
                           JOIN tiendanube_labels l
                             ON l.store_id = o.store_id
                            AND l.label_id = o.label_id
+                           AND l.install_generation = o.install_generation
+                           AND UPPER(l.customer_id) = UPPER(o.customer_id)
+                          JOIN tiendanube_rate_quote_snapshots s
+                            ON s.store_id = l.store_id
+                           AND s.snapshot_id = l.rate_quote_snapshot_id
+                           AND UPPER(s.customer_id) = UPPER(l.customer_id)
+                          JOIN tiendanube_instalaciones i
+                            ON i.store_id = l.store_id
+                           AND i.install_generation = l.install_generation
+                           AND UPPER(i.cliente_id) = UPPER(l.customer_id)
+                          JOIN tiendanube_shipping_config c
+                            ON c.store_id = i.store_id
+                           AND c.install_generation = i.install_generation
+                          JOIN tiendas_conectadas t
+                            ON t.dominio = l.store_id || '.tiendanube'
+                           AND t.plataforma = 'tiendanube'
+                           AND UPPER(t.cliente_id) = UPPER(l.customer_id)
                           JOIN tiendanube_fulfillment_order_orders m
                             ON m.store_id = l.store_id
                            AND m.fulfillment_order_id = l.fulfillment_order_id
@@ -1234,6 +1251,10 @@ def _postgres_execution_guard(task: LabelTask) -> Iterator[None]:
                            AND o.payload_complete = TRUE
                            AND l.fulfillment_order_id = %s
                            AND l.generate_payload_complete = TRUE
+                           AND i.estado = 'ACTIVA'
+                           AND i.webhooks_ready = TRUE
+                           AND c.activa = TRUE
+                           AND t.activa = TRUE
                            AND NOT EXISTS (
                                SELECT 1
                                  FROM tiendanube_label_outbox cancellation
