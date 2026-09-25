@@ -1444,8 +1444,10 @@ def _procesar_pedido_evento(evento: dict) -> str:
             or owner_tienda != owner_inst):
         raise TiendanubeRetryableError("BINDING_NO_OPERATIVO")
     if evento["evento"] == "order/cancelled" or pedido.get("cancelado"):
-        cancelar_pedido_externo(tienda["id"], pedido["pedido_externo_id"])
-        return "CANCELADO"
+        cancelado_local = cancelar_pedido_externo(
+            tienda["id"], pedido["pedido_externo_id"],
+        )
+        return "CANCELADO" if cancelado_local else "CANCELACION_MANUAL"
     creado = guardar_pedido(
         owner_inst,
         tienda["id"],
@@ -1454,14 +1456,16 @@ def _procesar_pedido_evento(evento: dict) -> str:
         dominio_verificado=f"{store_id}.tiendanube",
         install_generation_verificada=str(inst.get("install_generation") or ""),
     )
-    if creado:
-        interno = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
-        if interno:
-            try:
-                from servicios.solicitud_automatica import intentar_en_segundo_plano
-                intentar_en_segundo_plano(interno)
-            except Exception as exc:
-                print(f"[tiendanube] armado automático no iniciado: {type(exc).__name__}")
+    interno = (
+        id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
+        if creado else None
+    )
+    if creado and interno:
+        try:
+            from servicios.solicitud_automatica import intentar_en_segundo_plano
+            intentar_en_segundo_plano(interno)
+        except Exception as exc:
+            print(f"[tiendanube] wake-up automático no iniciado: {type(exc).__name__}")
     return "CREADO" if creado else "ACTUALIZADO"
 
 
@@ -1473,6 +1477,7 @@ def _procesar_customers_redact(evento: dict) -> str:
     _ensure_tabla()
     from servicios.integraciones_tienda import (
         _anonimizar_solicitudes_con_cursor,
+        _borrar_outboxes_tienda_con_cursor,
         _bloquear_dominio_tiendanube,
         _ensure_tablas,
     )
@@ -1482,6 +1487,9 @@ def _procesar_customers_redact(evento: dict) -> str:
         with conn.cursor() as cur:
             _bloquear_dominio_tiendanube(cur, dominio)
             if ids:
+                _borrar_outboxes_tienda_con_cursor(
+                    cur, "tiendanube", dominio, ids,
+                )
                 cur.execute(
                     """
                     INSERT INTO tiendanube_pedidos_redactados
@@ -1602,6 +1610,7 @@ def _procesar_store_redact(evento: dict) -> str:
     _ensure_tabla()
     from servicios.integraciones_tienda import (
         _anonimizar_solicitudes_con_cursor,
+        _borrar_outboxes_tienda_con_cursor,
         _bloquear_dominio_tiendanube,
         _ensure_tablas,
     )
@@ -1699,6 +1708,7 @@ def _procesar_store_redact(evento: dict) -> str:
                 (dominio,),
             )
             solicitudes_ids.update(int(fila["id"]) for fila in cur.fetchall())
+            _borrar_outboxes_tienda_con_cursor(cur, "tiendanube", dominio)
             _anonimizar_solicitudes_con_cursor(
                 cur, sorted(solicitudes_ids), incluir_remitente=True,
             )

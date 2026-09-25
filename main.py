@@ -1804,6 +1804,52 @@ scheduler.add_job(
     replace_existing=True,
 )
 
+# Conversión de pedidos y publicación de tracking: ambos efectos viven en
+# PostgreSQL. Los hilos de webhook sólo despiertan estos mismos workers; un
+# restart recupera claims stale y la reconciliación repone filas ausentes.
+from servicios.ecommerce_outbox import (
+    procesar_solicitudes_automaticas,
+    reconciliar_pedidos_faltantes,
+    procesar_fulfillments,
+    reconciliar_fulfillments_faltantes,
+)
+scheduler.add_job(
+    procesar_solicitudes_automaticas,
+    trigger="interval",
+    seconds=15,
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    procesar_fulfillments,
+    trigger="interval",
+    seconds=20,
+    max_instances=1,
+    coalesce=True,
+)
+
+
+def job_reconciliar_ecommerce_outbox():
+    try:
+        pedidos = reconciliar_pedidos_faltantes()
+        fulfillments = reconciliar_fulfillments_faltantes()
+        if pedidos or fulfillments:
+            print(
+                "[scheduler] ecommerce outbox reconciliada: "
+                f"pedidos={pedidos}, fulfillments={fulfillments}"
+            )
+    except Exception as exc:
+        print(f"[scheduler] reconciliación ecommerce falló: {type(exc).__name__}")
+
+
+scheduler.add_job(
+    job_reconciliar_ecommerce_outbox,
+    trigger="interval",
+    minutes=5,
+    max_instances=1,
+    coalesce=True,
+)
+
 
 # La poda oportunista al recibir/vincular órdenes no alcanza para tiendas
 # dormidas. Este job garantiza la retención máxima de 90 días aun cuando no

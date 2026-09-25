@@ -1045,6 +1045,18 @@ def crear_solicitud_guia(
                         "El pedido de Shopify ya no está activo en esta cuenta "
                         "o fue eliminado por privacidad."
                     )
+            elif origen_plataforma_norm == "tiendanube":
+                from servicios.integraciones_tienda import validar_origen_tiendanube_con_cursor
+                if not validar_origen_tiendanube_con_cursor(
+                    cur,
+                    cliente_id=cliente_id,
+                    dominio=origen_dominio_norm or "",
+                    pedido_externo_id=origen_pedido_norm or "",
+                ):
+                    raise ValueError(
+                        "El pedido de Tiendanube ya no está activo en esta cuenta "
+                        "o fue eliminado por privacidad."
+                    )
             cur.execute(
                 """
                 INSERT INTO solicitudes_guia (
@@ -1960,6 +1972,7 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
     tracking = (tracking or "").strip()[:120]
     if not tracking:
         raise ValueError("El courier no devolvió un tracking válido.")
+    fulfillment_encolado = False
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1979,12 +1992,23 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                     courier_error=NULL, cargo_pendiente=TRUE, cargo_error=NULL,
                     guia_generada_at=NOW(), updated_at=NOW()
                 WHERE id=%s
+                RETURNING origen_plataforma
                 """,
                 (tracking, psycopg2.Binary(label_pdf) if label_pdf else None,
                  psycopg2.Binary(commercial_invoice_pdf)
-                 if commercial_invoice_pdf else None,
+                if commercial_invoice_pdf else None,
                  courier, _clean(message_reference), solicitud_id),
             )
+            guia = cur.fetchone()
+            if not guia:
+                raise ValueError("La solicitud no existe.")
+            if str(guia.get("origen_plataforma") or "").lower() in {
+                "shopify", "tiendanube",
+            }:
+                from servicios.ecommerce_outbox import encolar_fulfillment_con_cursor
+                fulfillment_encolado = encolar_fulfillment_con_cursor(
+                    cur, solicitud_id, tracking, courier,
+                )
     # DÉBITO AUTOMÁTICO (decisión de Leandro 28/07): la guía emitida carga
     # sola su costo a la cuenta corriente del cliente. Es idempotente (índice
     # único por solicitud) y un fallo acá NO tumba la emisión: la guía ya
@@ -2024,20 +2048,11 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
         print(f"[solicitudes] guía {tracking} emitida pero el cargo automático "
               f"falló ({e}): FACTURAR A MANO la solicitud {solicitud_id}")
 
-    # Si el envío nació de una venta de Shopify, avisamos a la tienda:
-    # el pedido queda "Enviado" con su tracking y el comprador recibe el
-    # mail solo. Nunca dejamos que un fallo acá tumbe la emisión de la
-    # guía — la guía ya está hecha y es lo que importa.
-    # En un hilo aparte: avisarle a la tienda puede tardar (API de un
-    # tercero, con timeout). El admin no puede quedarse colgado mirando
-    # una pantalla en blanco después de emitir — la guía ya está hecha.
-    if cargo_confirmado:
-        import threading
-        threading.Thread(
-            target=_avisar_tienda_origen,
-            args=(solicitud_id, tracking, courier),
-            daemon=True,
-        ).start()
+    # El tracking y su obligación de notificar se confirmaron juntos. El hilo
+    # sólo despierta al worker y el gate externo permanece apagado por defecto.
+    if fulfillment_encolado:
+        from servicios.ecommerce_outbox import lanzar_fulfillments
+        lanzar_fulfillments()
     return cargo_confirmado
 
 
@@ -2063,71 +2078,17 @@ def adjuntar_label_guia(solicitud_id: int, label_pdf: bytes) -> dict:
 
 def _avisar_tienda_origen(solicitud_id: int, tracking: str, courier: str) -> None:
     """
-    Marca el pedido como enviado en la tienda de origen (Shopify o
-    Tiendanube) para que el comprador reciba su seguimiento solo.
-
-    Reintenta: si se pierde, el comprador nunca se entera de que su
-    paquete salió y termina escribiéndole al comerciante. Si aun así
-    falla, queda anotado con el tracking para poder rehacerlo a mano.
+    Compatibilidad para callers antiguos: encola, nunca llama la API directo.
     """
-    import time as _t
-
-    try:
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT p.pedido_externo_id, t.dominio, t.plataforma
-                    FROM pedidos_tienda p
-                    JOIN tiendas_conectadas t ON t.id = p.tienda_id
-                    WHERE p.solicitud_id = %s
-                    ORDER BY p.id DESC
-                    LIMIT 1
-                """, (solicitud_id,))
-                row = cur.fetchone()
-    except Exception as e:
-        print(f"[integraciones] no pude buscar el pedido de la solicitud {solicitud_id}: {e}")
-        return
-
-    if not row:
-        return   # el envío no vino de una tienda: nada que avisar
-
-    plataforma = row["plataforma"]
-    dominio = row["dominio"]
-    pedido_ext = row["pedido_externo_id"]
-    from servicios.couriers_urls import nombre_courier
-    courier_nombre = nombre_courier(courier)
-
-    for intento in (1, 2, 3):
-        try:
-            if plataforma == "shopify":
-                from servicios.shopify_app import marcar_enviado, instalacion
-                if not instalacion(dominio):
-                    # Conectada en modo manual (sin app): no hay token para
-                    # escribirle. El comerciante marca el envío él mismo.
-                    return
-                ok = marcar_enviado(dominio, pedido_ext, tracking, courier_nombre)
-            elif plataforma == "tiendanube":
-                from servicios.tiendanube_app import marcar_enviado as tn_enviado
-                store_id = dominio.replace(".tiendanube", "")
-                ok = tn_enviado(store_id, pedido_ext, tracking)
-            else:
-                return
-
-            if ok:
-                print(f"[integraciones] pedido {pedido_ext} de {dominio} marcado "
-                      f"como enviado (tracking {tracking})")
-                return
-        except Exception as e:
-            print(f"[integraciones] intento {intento} avisando a {dominio}: {e}")
-
-        if intento < 3:
-            _t.sleep(intento * 3)
-
-    # Se agotaron los reintentos: que quede constancia con todo lo
-    # necesario para rehacerlo a mano desde el admin de la tienda.
-    print(f"[integraciones] ⚠️ NO PUDE avisar a {dominio} ({plataforma}) que el "
-          f"pedido {pedido_ext} salió con tracking {tracking}. El comprador NO "
-          f"recibió su seguimiento — cargalo a mano en la tienda.")
+    from servicios.ecommerce_outbox import (
+        encolar_fulfillment_con_cursor, lanzar_fulfillments,
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            encolar_fulfillment_con_cursor(
+                cur, solicitud_id, tracking, courier,
+            )
+    lanzar_fulfillments()
 
 
 def obtener_label_pdf(solicitud_id: int, cliente_id: Optional[str] = None) -> Optional[bytes]:

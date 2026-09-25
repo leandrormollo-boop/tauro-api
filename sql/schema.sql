@@ -438,6 +438,38 @@ CREATE TABLE IF NOT EXISTS producto_inventario_ubicaciones (
 CREATE INDEX IF NOT EXISTS ix_inventario_ubicaciones_cliente
     ON producto_inventario_ubicaciones (cliente_id, tienda_dominio, producto_id);
 
+-- Outbox pedido -> solicitud. El payload no duplica PII: la huella identifica
+-- la versión y el worker relee el pedido bajo los controles de tenant.
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS automatismos_bloqueados BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS pedidos_tienda ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT;
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE TABLE IF NOT EXISTS solicitud_automatica_outbox (
+    id                  BIGSERIAL PRIMARY KEY,
+    pedido_id           INTEGER NOT NULL,
+    payload_fingerprint CHAR(32) NOT NULL,
+    estado              TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos            INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_id            TEXT,
+    claimed_at          TIMESTAMPTZ,
+    ultimo_error_codigo TEXT,
+    ultimo_error        TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ,
+    UNIQUE (pedido_id, payload_fingerprint),
+    CHECK (intentos >= 0),
+    CHECK (estado IN (
+        'PENDIENTE', 'PROCESANDO', 'REINTENTAR', 'COMPLETADO',
+        'CANCELADO', 'MANUAL_REVIEW'
+    ))
+);
+CREATE INDEX IF NOT EXISTS ix_solicitud_automatica_outbox_claim
+    ON solicitud_automatica_outbox(estado, proximo_intento_at, created_at)
+    WHERE estado IN ('PENDIENTE', 'REINTENTAR', 'PROCESANDO');
+
 -- Instalación OAuth pública por tienda. `install_generation` cambia después
 -- de una desinstalación real y permite que el SHOP_REDACT tardío de la
 -- generación anterior jamás borre un token recién autorizado.
@@ -1853,6 +1885,64 @@ ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS label_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS commercial_invoice_pdf BYTEA;
 ALTER TABLE IF EXISTS solicitudes_guia ADD COLUMN IF NOT EXISTS guia_generada_at TIMESTAMPTZ;
+
+-- Outbox guía -> tienda. Se crea en la misma transacción que confirma el
+-- tracking. RECONCILIAR significa que pudo haber existido una escritura
+-- remota: el próximo intento debe consultar antes de volver a mutar.
+CREATE TABLE IF NOT EXISTS tienda_fulfillment_outbox (
+    id                  BIGSERIAL PRIMARY KEY,
+    solicitud_id        INTEGER NOT NULL REFERENCES solicitudes_guia(id) ON DELETE CASCADE,
+    pedido_id           INTEGER,
+    plataforma          TEXT NOT NULL,
+    dominio             TEXT NOT NULL,
+    pedido_externo_id   TEXT NOT NULL,
+    tracking            TEXT NOT NULL,
+    courier             TEXT NOT NULL,
+    estado              TEXT NOT NULL DEFAULT 'PENDIENTE',
+    intentos            INTEGER NOT NULL DEFAULT 0,
+    proximo_intento_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claim_id            TEXT,
+    claimed_at          TIMESTAMPTZ,
+    ultimo_error_codigo TEXT,
+    ultimo_error        TEXT,
+    remote_reference    TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ,
+    UNIQUE (solicitud_id, plataforma, tracking),
+    CHECK (intentos >= 0),
+    CHECK (estado IN (
+        'PENDIENTE', 'PROCESANDO', 'REINTENTAR', 'RECONCILIAR',
+        'COMPLETADO', 'CANCELADO', 'MANUAL_REVIEW'
+    ))
+);
+CREATE INDEX IF NOT EXISTS ix_tienda_fulfillment_outbox_claim
+    ON tienda_fulfillment_outbox(estado, proximo_intento_at, created_at)
+    WHERE estado IN ('PENDIENTE', 'REINTENTAR', 'RECONCILIAR', 'PROCESANDO');
+
+-- No ejecuta una anulación remota. Es una obligación operativa durable para
+-- todo pedido cuya solicitud ya fue emitida o cuyo estado no permite probar
+-- que la cancelación local sea segura.
+CREATE TABLE IF NOT EXISTS tienda_cancelacion_obligaciones (
+    id                  BIGSERIAL PRIMARY KEY,
+    pedido_id           INTEGER NOT NULL,
+    solicitud_id        INTEGER REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    plataforma          TEXT NOT NULL,
+    dominio             TEXT NOT NULL,
+    pedido_externo_id   TEXT NOT NULL,
+    estado              TEXT NOT NULL DEFAULT 'MANUAL_REVIEW',
+    motivo              TEXT NOT NULL,
+    solicitud_estado    TEXT,
+    tenia_tracking      BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at         TIMESTAMPTZ,
+    UNIQUE (pedido_id),
+    CHECK (estado IN ('MANUAL_REVIEW', 'RESUELTO'))
+);
+CREATE INDEX IF NOT EXISTS ix_tienda_cancelacion_manual
+    ON tienda_cancelacion_obligaciones(estado, created_at)
+    WHERE estado = 'MANUAL_REVIEW';
 -- Número interno TAURO para el archivo descargable. No es el tracking del
 -- courier ni el ID de la solicitud. Se asigna sólo a guías confirmadas;
 -- históricos sin número lo reciben en su primera descarga autorizada.
