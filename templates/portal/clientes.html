@@ -165,7 +165,10 @@
 
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
-    {% if flash_ok %}try {localStorage.setItem('tauro:agenda:'+document.body.dataset.draftScope, String(Date.now()));} catch (error) {}{% endif %}
+    if ({{ flash_ok|tojson }}) {
+        try { localStorage.setItem('tauro:agenda:' + document.body.dataset.draftScope, String(Date.now())); }
+        catch (error) {}
+    }
     var search = document.getElementById("client-search");
     var cards = Array.prototype.slice.call(document.querySelectorAll(".client-card"));
     var counter = document.getElementById("client-visible-count");
