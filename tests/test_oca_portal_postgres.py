@@ -62,7 +62,8 @@ class Adapter:
 
 @pytest.fixture
 def db(conciliacion_db, monkeypatch):
-    for module in (oca, sg, cc, permisos):
+    from servicios import direcciones
+    for module in (oca, sg, cc, permisos, direcciones):
         monkeypatch.setattr(module, "get_conn", conciliacion_db)
     monkeypatch.setattr(sg, "_avisar_tienda_origen", lambda *a: None)
     config = OCAConfig.from_env(
@@ -257,6 +258,7 @@ def test_http_portal_auth_propiedad_y_precio_privado(db, monkeypatch):
             transport=httpx.ASGITransport(app=app), base_url="http://testserver"
         ) as client:
             assert (await client.get("/portal/oca/nuevo")).status_code == 303
+            assert (await client.get("/portal/agenda")).status_code == 303
             client.cookies.set("token", token)
             r = await client.get("/portal/oca/nuevo")
             assert r.status_code == 200 and "Ver tarifa" in r.text

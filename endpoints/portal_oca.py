@@ -4,6 +4,8 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Request, HTTPException
 from servicios.rate_limit import check_rate
+from servicios.direcciones import listar_direcciones
+from servicios.agenda_nacional import proyectar
 from fastapi.responses import RedirectResponse
 from endpoints.portal_cliente import cliente_actual, templates
 from servicios import oca_portal as oca
@@ -14,12 +16,16 @@ router = APIRouter(prefix="/portal/oca", tags=["portal"])
 
 
 def pantalla(request, cliente, **context):
+    agenda = []
+    if context.get("disponible") and not context.get("tarifa"):
+        agenda = [item for row in listar_direcciones(cliente) if (item := proyectar(row))]
     return templates.TemplateResponse(
         request=request,
         name="portal/oca_nuevo.html",
         context={
             "cliente": cliente,
             "provincias": opciones(),
+            "agenda_nacional": agenda,
             "form": {},
             "tarifa": None,
             **context,
@@ -31,14 +37,27 @@ def pantalla(request, cliente, **context):
 def nuevo(request: Request, cliente: str = Depends(cliente_actual)):
     try:
         config, _ = oca.adapter_cliente(cliente)
-        return pantalla(
-            request, cliente, disponible=True, asegurada=config.insured_operation,
-            form={key: request.query_params[key][:100] for key in (
-                "origen_provincia", "origen_localidad", "origen_cp", "destino_provincia",
-                "destino_localidad", "destino_cp", "cantidad_bultos", "peso_kg",
-                "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_ars"
-            ) if key in request.query_params}
-        )
+        form = {key: request.query_params[key][:100] for key in (
+            "origen_provincia", "origen_localidad", "origen_cp", "destino_provincia",
+            "destino_localidad", "destino_cp", "cantidad_bultos", "peso_kg",
+            "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_ars"
+        ) if key in request.query_params}
+        error = None
+        from servicios.direcciones import obtener_direccion
+        for param, prefix, tipo in [("remitente_id", "origen", "REMITENTE"),
+                                    ("destinatario_id", "destino", "DESTINATARIO")]:
+            ident = request.query_params.get(param)
+            if not ident:
+                continue
+            row = obtener_direccion(cliente, int(ident), tipo) if ident.isdigit() else None
+            contact = proyectar(row) if row else None
+            if not contact:
+                error = "Ese contacto nacional no está disponible en tu cuenta."
+                continue
+            form.update({prefix + "_" + key: value for key, value in contact["fields"].items()})
+            form[prefix + "_agenda_id"] = contact["id"]
+        return pantalla(request, cliente, disponible=True, asegurada=config.insured_operation,
+                        form=form, error=error)
     except Exception:
         return pantalla(request, cliente, disponible=False)
 

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% block title %}Envío nacional · OCA{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-nacional.css?v=1"><script src="/static/js/portal-nacional.js?v=1" defer></script>{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-nacional.css?v=2"><script src="/static/js/portal-agenda.js?v=1" defer></script><script src="/static/js/portal-nacional.js?v=2" defer></script>{% endblock %}
 {% macro input(prefix,key,label,span=6,required=true,limit=30,kind='text') %}
 {% set name=prefix~'_'~key %}<div class="ns-field ns-span-{{span}}"><label for="ns_{{name}}">{{label}}{% if not required %}<small>Opcional</small>{% endif %}</label><input id="ns_{{name}}" name="{{name}}" value="{{form.get(name,'')}}" type="{{kind}}" maxlength="{{limit}}" {% if required %}required{% endif %}></div>
 {% endmacro %}
@@ -17,9 +17,10 @@
 <form method="post" action="/portal/oca/cotizacion/{{tarifa.id}}/confirmar"><div class="ns-actions"><a class="btn btn-ghost" href="/portal/oca/cotizacion/{{tarifa.id}}/editar">← Editar datos</a><button class="btn btn-primary">Guardar solicitud</button></div></form><p class="ns-disclaimer">Guardar no emite la guía ni genera un cargo.</p></section>
 {% else %}
 <form method="post" action="/portal/oca/cotizar" data-national-form data-draft-key="envio:oca" data-draft-server="{{1 if form else 0}}">
+<script type="application/json" data-national-agenda>{{agenda_nacional|tojson}}</script>
 <nav class="ns-steps" aria-label="Pasos del envío" hidden>{% for number,title in [(1,'Origen'),(2,'Destino'),(3,'Paquetes')] %}<button type="button" data-national-step="{{number}}"><span>{{number}}</span>{{title}}</button>{% endfor %}</nav>
 {% for prefix,label,step in [('origen','Dónde retiramos',1),('destino','A quién entregamos',2)] %}
-<section class="ns-card" data-national-panel="{{step}}"><div class="ns-section-heading"><h2>{{label}}</h2><span class="ns-step-caption">{{step}} de 3</span></div><div class="ns-fields">
+<section class="ns-card" data-national-panel="{{step}}"><div class="ns-section-heading"><h2>{{label}}</h2><div class="ns-agenda"><label class="sr-only" for="ns_{{prefix}}_agenda">{{'Remitente' if prefix=='origen' else 'Destinatario'}} guardado</label><select id="ns_{{prefix}}_agenda" name="{{prefix}}_agenda_id" data-national-contact="{{prefix}}" data-searchable data-search-placeholder="Buscar nombre o localidad"><option value="">{{'Cargar remitente nuevo' if prefix=='origen' else 'Cargar destinatario nuevo'}}</option>{% for d in agenda_nacional if d.tipo==('REMITENTE' if prefix=='origen' else 'DESTINATARIO') %}<option value="{{d.id}}" {% if form.get(prefix~'_agenda_id')|string==d.id|string %}selected{% endif %}>{{d.label}} · {{d.fields.localidad}}</option>{% endfor %}</select><a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="ns-agenda-link" title="Guardar o editar contactos">Mis clientes ↗</a></div></div><p class="ns-agenda-note" data-national-contact-note="{{prefix}}" role="status" hidden></p><div class="ns-fields">
 {{input(prefix,'nombre','Nombre / contacto',6 if prefix=='destino' else 12)}}
 {% if prefix=='destino' %}{{input(prefix,'apellido','Apellido')}}{% endif %}
 <div class="ns-field ns-span-6"><label for="ns_{{prefix}}_provincia">Provincia</label><select id="ns_{{prefix}}_provincia" name="{{prefix}}_provincia" required><option value="">Elegí provincia</option>{% for code,name in provincias %}<option value="{{code}}" {% if form.get(prefix~'_provincia')==code %}selected{% endif %}>{{'CABA' if code=='C' else name}}</option>{% endfor %}</select></div>
