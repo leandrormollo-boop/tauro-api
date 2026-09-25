@@ -337,6 +337,24 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
                     "Tiendanube no nos devolvió el código de autorización. "
                     "Probá instalar de nuevo desde tu panel.", status=400)
 
+    # Si el flujo nació dentro del portal, la cookie y el state forman una
+    # única prueba anti-CSRF. Validarla antes del canje evita que un callback
+    # adulterado provoque efectos externos (token, webhooks o Shipping). Una
+    # instalación iniciada directamente desde Tiendanube sigue siendo válida
+    # sin ambos valores y queda ownerless para reclamarla luego.
+    cookie_oauth = request.cookies.get("tn_oauth") or ""
+    cliente_cookie = ""
+    if cookie_oauth or state:
+        cliente_cookie = validar_oauth_cookie(cookie_oauth, state)
+        if not cliente_cookie:
+            return _pag(
+                "Instalación inválida",
+                "La autorización venció o no coincide con este navegador. "
+                "Reiniciá la conexión desde el portal TAURO.",
+                '<a href="https://taurosolutions.ar/portal/tienda">Volver al portal</a>',
+                status=400,
+            )
+
     data = canjear_token(code)
     if not data or not data.get("access_token") or not data.get("user_id"):
         return _pag("No pudimos conectar",
@@ -393,8 +411,6 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
     # devuelve el state en la query, se exige que coincida (defensa extra).
     dueno = None
     try:
-        cookie = request.cookies.get("tn_oauth") or ""
-        cliente_cookie = validar_oauth_cookie(cookie, state)
         if cliente_cookie:
             dueno = cliente_cookie
             vincular_cliente(store_id, dueno)

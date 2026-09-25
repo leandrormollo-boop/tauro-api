@@ -10,8 +10,8 @@ revisada el 1 de septiembre de 2026.
 - [ ] App creada como **Tienda de Aplicaciones**, categoría **Shipping**.
 - [ ] `app_id` y `client_secret` productivos entregados a TAURO.
 - [ ] Redirect URL exacta configurada.
-- [ ] Scopes mínimos validados con Tiendanube: `write_shipping`, `read_orders`,
-  `write_fulfillment_orders`, `read_customers`. No solicitar `read_products` ni
+- [ ] Scopes mínimos validados con Tiendanube: `write_shipping`, `read_orders`
+  y `write_fulfillment_orders`. No solicitar `read_customers`, `read_products` ni
   `read_locations` mientras el código no use esos recursos.
 - [ ] Shipping API habilitada por el Platform Team para cuenta y tienda demo.
 - [ ] Tienda demo en Argentina disponible para el revisor.

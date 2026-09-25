@@ -114,17 +114,15 @@
   }
   state.tiendas.forEach(t => {
     $('pkg-quote-store').append(new Option(t.dominio,String(t.id)));
-    const card=node('article',null,'card');const header=text(card,'div',null,'pkg-store-title');text(header,'h3',t.dominio);text(header,'span',t.plataforma==='tiendanube'?'Medio de envío en Tiendanube':(t.checkout_activo?'Servicio conectado':'Servicio sin activar'),'pkg-badge');
+    const card=node('article',null,'card');const header=text(card,'div',null,'pkg-store-title');text(header,'h3',t.dominio);text(header,'span',t.plataforma==='tiendanube'?'Medio de envío en Tiendanube':'Pedidos + tracking','pkg-badge');
     const form=node('form');form.append(check('Usar mis embalajes para las ventas de esta tienda','usar_paquetes',t.usar_paquetes));
     const columns=node('div',null,'pkg-columns');policy(columns,'nacional',t.nacional);policy(columns,'internacional',t.internacional);
     if(t.plataforma==='tiendanube') { const international=columns.querySelectorAll('fieldset')[1];international.disabled=true;international.querySelector('input[type=checkbox]').checked=false;text(international,'p','Disponible para cotizar en el portal. El medio de envío actual de Tiendanube admite nacional.','pkg-muted'); }
+    if(t.plataforma==='shopify') { columns.querySelectorAll('fieldset').forEach(fieldset => { fieldset.hidden=true; });text(columns,'p','Shopify conserva sus propias tarifas de checkout. Estas políticas no se publican en Shopify durante la v1.','pkg-muted'); }
     form.append(columns);const save=node('button','Guardar configuración','btn btn-primary');save.type='submit';form.append(save);
-    form.addEventListener('submit',e => { e.preventDefault();const fd=Object.fromEntries(new FormData(form)),d={usar_paquetes:form.elements.usar_paquetes.checked};['nacional','internacional'].forEach(k => { d[k]={habilitado:form.elements.namedItem(k+'_habilitado').checked};['politica','precio_fijo_ars','markup_pct','gratis_desde_ars'].forEach(f => d[k][f]=fd[k+'_'+f]); });busy(form,async () => { await post('tiendas/'+t.id,d);reload('Políticas de envío guardadas. Probá una cotización y verificá el checkout de tu tienda.'); }); });card.append(form);
+    form.addEventListener('submit',e => { e.preventDefault();const fd=Object.fromEntries(new FormData(form)),d={usar_paquetes:form.elements.usar_paquetes.checked};['nacional','internacional'].forEach(k => { d[k]={habilitado:form.elements.namedItem(k+'_habilitado').checked};['politica','precio_fijo_ars','markup_pct','gratis_desde_ars'].forEach(f => d[k][f]=fd[k+'_'+f]); });busy(form,async () => { await post('tiendas/'+t.id,d);reload('Configuración guardada. Probá el embalaje y la cotización dentro del portal.'); }); });card.append(form);
     if(t.plataforma==='shopify') {
-      const actions=text(card,'div',null,'pkg-store-actions');const authorize=node('form');authorize.method='POST';authorize.action=`/portal/paquetes/shopify/${t.id}/autorizar`;const button=node('button','1. Autorizar tarifas en Shopify','btn btn-ghost');button.type='submit';authorize.append(button);actions.append(authorize);
-      actions.append(action('2. Conectar servicio',async () => { await busy(actions,async () => { const r=await post(`shopify/${t.id}/activar`,{});reload(r.mensaje); }); }));
-      if(t.checkout_activo) actions.append(action('Pausar tarifas',async () => { await busy(actions,async () => { await post(`shopify/${t.id}/pausar`,{});reload('Tarifas pausadas. Verificá que tu tienda tenga otras opciones de envío.'); }); }));
-      text(card,'p','Después de conectar, agregá TAURO en Configuración → Envío y entrega de Shopify y probá una compra. Guardar esta pantalla no completa ese paso.','pkg-muted');
+      text(card,'p','TAURO usa estos embalajes al preparar la venta. La tarifa que ve el comprador se administra en Shopify; TAURO no solicita permisos de shipping ni instala un servicio calculado en esta versión.','pkg-muted');
     } else text(card,'p','Tiendanube usará esta configuración cuando su medio de envío TAURO esté activo. La integración actual de Tiendanube ofrece envíos nacionales; internacional requiere habilitar ese circuito en la plataforma.','pkg-muted');
     $('pkg-stores').append(card);
   });

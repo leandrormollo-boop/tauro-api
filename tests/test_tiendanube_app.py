@@ -534,6 +534,85 @@ def test_claim_invalido_no_vincula(monkeypatch):
         tiendanube_app.reclamar_con_token("123.falso", "MELCIOR")
 
 
+@pytest.mark.parametrize(
+    ("cookies", "state"),
+    [
+        ({"tn_oauth": "cookie-invalida"}, "state-1"),
+        ({}, "state-sin-cookie"),
+        ({"tn_oauth": "cookie-sin-state"}, ""),
+    ],
+)
+def test_callback_rechaza_state_invalido_antes_del_canje(
+    monkeypatch, cookies, state,
+):
+    from endpoints import integraciones
+    from servicios import tiendanube_app
+
+    monkeypatch.setattr(tiendanube_app, "app_configurada", lambda: True)
+    monkeypatch.setattr(
+        tiendanube_app,
+        "canjear_token",
+        lambda *_: pytest.fail("no debe canjear un callback anti-CSRF inválido"),
+    )
+
+    respuesta = integraciones.tiendanube_callback(
+        _Request(cookies=cookies), code="code", state=state,
+    )
+
+    assert respuesta.status_code == 400
+    assert "Instalación inválida" in respuesta.body.decode("utf-8")
+
+
+def test_callback_valida_state_antes_del_canje_y_vincula_owner(monkeypatch):
+    from endpoints import integraciones
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setenv("TIENDANUBE_CLIENT_SECRET", "secret-app")
+    monkeypatch.setenv("TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED", "true")
+    monkeypatch.setattr(tiendanube_app, "app_configurada", lambda: True)
+    orden = []
+    monkeypatch.setattr(
+        tiendanube_app,
+        "validar_oauth_cookie",
+        lambda cookie, state: orden.append(("validar", cookie, state)) or "MELCIOR",
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "canjear_token",
+        lambda _code: orden.append(("canjear",))
+        or {"access_token": "token", "user_id": 123},
+    )
+    monkeypatch.setattr(tiendanube_app, "datos_tienda", lambda *_: {})
+    monkeypatch.setattr(tiendanube_app, "guardar_instalacion", lambda *_, **__: "")
+    monkeypatch.setattr(
+        tiendanube_app, "registrar_webhooks",
+        lambda *_: list(tiendanube_app.WEBHOOKS_REQUERIDOS),
+    )
+    monkeypatch.setattr(tiendanube_app, "confirmar_webhooks", lambda *_: True)
+    monkeypatch.setattr(
+        tiendanube_shipping, "registrar_shipping_carrier",
+        lambda *_: {"ready": True},
+    )
+    vinculaciones = []
+    monkeypatch.setattr(
+        tiendanube_app, "vincular_cliente",
+        lambda store, cliente: vinculaciones.append((store, cliente)),
+    )
+
+    respuesta = integraciones.tiendanube_callback(
+        _Request(cookies={"tn_oauth": "cookie-firmada"}),
+        code="code",
+        state="state-1",
+    )
+
+    assert respuesta.status_code == 200
+    assert orden[:2] == [
+        ("validar", "cookie-firmada", "state-1"),
+        ("canjear",),
+    ]
+    assert vinculaciones == [("123", "MELCIOR")]
+
+
 def test_callback_ownerless_entrega_claim_y_no_pide_reinstalar(monkeypatch):
     from endpoints import integraciones
     from servicios import tiendanube_app, tiendanube_shipping

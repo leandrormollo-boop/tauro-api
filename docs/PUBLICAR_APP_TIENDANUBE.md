@@ -29,7 +29,8 @@ la homologación síncrona de Tiendanube.
 
 1. Crear o confirmar la app **TAURO Solutions Ar** en Partners, categoría Shipping.
 2. Confirmar con Partners los scopes mínimos candidatos: `write_shipping`,
-   `read_orders`, `write_fulfillment_orders` y `read_customers`.
+   `read_orders` y `write_fulfillment_orders`. No pedir `read_customers`: la
+   v1 no consulta el recurso Customer y los avisos de privacidad no lo exigen.
 3. Pedir al Platform Team de Tiendanube acceso a Shipping API para la cuenta y
    la tienda demo: <https://forms.gle/oqP1BrtwMzNb7xCM9>.
 4. Configurar la redirect URL:
