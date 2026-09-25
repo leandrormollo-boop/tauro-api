@@ -422,6 +422,8 @@ def test_base_html_versiona_el_css_nuevo():
     assert "tauro.css?v=49" in base
     assert "portal-cotizador.js?v=9" in base
     assert "portal-dock.css?v=1" in base
+    assert "portal-cotizador.css?v=5" in base
+    assert "quote-locations.js?v=2" in base
     # El manifest y el SW viven en el head compartido de TODO el portal
     # (login incluido); la tabbar queda adentro del bloque autenticado.
     assert base.index("{% if cliente %}") < base.index('class="tabbar"')
