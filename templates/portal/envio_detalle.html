@@ -108,7 +108,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         {% elif s.estado_cliente_ui.codigo == "PROCESO_ENTREGA" %}
             Tu envío está en tránsito. La entrega todavía no fue confirmada por el courier.
         {% elif s.estado == "SOLICITADO" %}
-            {% if ambito == 'nacional' %}La emisión nacional se habilitará cuando conectemos OCA y Andreani. No se emitió ni se generó ningún cargo.
+            {% if ambito == 'nacional' %}Tu solicitud está guardada. Emití la guía si tu cuenta está habilitada; todavía no se generó ningún cargo.
             {% elif ambito == 'sin_clasificar' %}El origen y el destino necesitan revisión antes de emitir. No se generó ningún cargo.
             {% elif request.query_params.get('error') %}La guía sigue pendiente. Revisá el aviso de arriba antes de volver a emitir.
             {% elif puede_emitir %}Tu solicitud está lista: emití la guía con el botón de abajo, o no hagas nada y la emite Tauro.{% else %}Recibimos tu solicitud. Tauro está generando la guía — te avisamos apenas esté lista.{% endif %}
@@ -188,6 +188,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 🚚 Programar recolección con {{ courier_nombre }}
             </a>
             {% endif %}
+        {% elif courier_codigo == 'OCA' and s.tracking and s.estado == 'GUIA_LISTA' %}
+            <p>Tu guía ya fue emitida. Falta recuperar la etiqueta.</p>
+            <form method="post" action="/portal/oca/envios/{{ s.id }}/etiqueta"><button class="btn btn-primary">Recuperar etiqueta</button></form>
         {% elif courier_codigo == 'ENVIA' %}
             <div class="empty" style="padding:14px;">
                 Esta solicitud nacional es histórica. La integración anterior fue retirada y no puede emitirse desde el portal.
@@ -206,7 +209,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             </p>
         {% else %}
             {% if ambito == 'nacional' %}
-            <div class="empty" style="padding:14px;">La guía nacional todavía no puede emitirse: se habilitará con las conexiones directas de OCA y Andreani.</div>
+            <div class="empty" style="padding:14px;">La emisión nacional requiere habilitación de TAURO para tu cuenta.</div>
             {% elif ambito == 'sin_clasificar' %}
             <div class="empty" style="padding:14px;">Antes de emitir necesitamos revisar el país de origen y de destino de esta solicitud.</div>
             {% else %}
@@ -222,6 +225,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 <p>Seguimiento oficial en la red de {{ courier_nombre }}.</p>
             </div>
         </div>
+        {% if courier_codigo == 'OCA' and s.tracking %}<a class="btn btn-ghost" href="/portal/oca/envios/{{ s.id }}/seguimiento">Consultar movimientos OCA</a>{% endif %}
         {% set track_url = url_tracking(s.courier, s.tracking) %}
         {% if s.tracking %}
             <div class="mono" style="font-size:17px;margin-bottom:12px;">
@@ -277,7 +281,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     <td class="mono">{{ b.largo_cm }}×{{ b.ancho_cm }}×{{ b.alto_cm }} cm</td>
                     <td class="mono">{{ b.peso_kg }} kg</td>
                     <td class="num">
-                        {% if b.valor_declarado_caja_usd %}
+                        {% if courier_codigo == "OCA" %}Incluido en el total declarado{% elif b.valor_declarado_caja_usd %}
                             USD {{ b.valor_declarado_caja_usd }} por caja
                         {% else %}
                             USD {{ b.valor_unitario_usd }} por unidad
@@ -311,7 +315,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     </div>
     <div class="mini-row">
         <span>Valor declarado total</span>
-        <strong>USD {{ s.valor_declarado_usd }}</strong>
+        <strong>{% if courier_codigo == "OCA" %}{{ dinero_ars(s.valor_declarado_ars) if s.valor_declarado_ars else "Pendiente de revisión" }}{% else %}USD {{ s.valor_declarado_usd }}{% endif %}</strong>
     </div>
     <div class="mini-row">
         <span>Protección de carga</span>

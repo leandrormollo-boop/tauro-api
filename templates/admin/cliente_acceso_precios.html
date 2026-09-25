@@ -121,7 +121,7 @@
         <div>
           <div class="pricing-cell">
             <select id="{{ c.id }}-markup-tipo" name="{{ c.id }}_markup_tipo" class="js-markup-tipo" data-target="{{ c.id }}-markup" data-api-ready="{{ '1' if c.integracion_implementada else '0' }}" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Tipo de ganancia">
-              <option value="" {% if not c.markup_tipo %}selected{% endif %}>Usar regla general</option>
+              <option value="" {% if not c.markup_tipo %}selected{% endif %}>{{ 'Elegir ganancia nacional' if c.id == 'oca' else 'Usar regla general' }}</option>
               <option value="FIJO_ARS" {% if c.markup_tipo == 'FIJO_ARS' %}selected{% endif %}>+ importe fijo (ARS)</option>
               <option value="PCT" {% if c.markup_tipo == 'PCT' %}selected{% endif %}>+ porcentaje</option>
               <option value="MULTIPLICADOR" {% if c.markup_tipo == 'MULTIPLICADOR' %}selected{% endif %}>× multiplicador</option>
@@ -131,7 +131,7 @@
                    placeholder="{% if c.id == 'dhl' %}14.000{% else %}Valor{% endif %}"
                    inputmode="decimal" data-numero="pricing" data-pricing-select="{{ c.id }}-markup-tipo" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
           </div>
-          {% if not c.markup_tipo %}<div class="inherit-note">{% if not matriz.pricing_general %}Sin regla general: este operador no cotiza ni emite hasta cargar una ganancia.{% elif matriz.pricing_general.tipo == 'RANGOS' %}<a href="/admin/clientes/{{ matriz.cliente_id }}/tarifas">Rangos generales del cliente</a>{% else %}Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}{% endif %}</div>{% endif %}
+          {% if c.id == "oca" %}<div class="inherit-note">Tarifa nacional en ARS; no hereda la regla internacional.</div>{% elif not c.markup_tipo %}<div class="inherit-note">{% if not matriz.pricing_general %}Sin regla general: este operador no cotiza ni emite hasta cargar una ganancia.{% elif matriz.pricing_general.tipo == 'RANGOS' %}<a href="/admin/clientes/{{ matriz.cliente_id }}/tarifas">Rangos generales del cliente</a>{% else %}Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}{% endif %}</div>{% endif %}
           {% if c.id == 'dhl' %}
           <details class="tier-pricing" {% if c.markup_low_max_usd is not none or c.markup_high_min_usd is not none %}open{% endif %}>
             <summary>Tramos opcionales por costo DHL</summary>
@@ -173,7 +173,7 @@
           <label for="courier-default">Courier preseleccionado</label>
           <select id="courier-default" name="courier_default">
             <option value="" {% if not matriz.courier_default_configurado %}selected{% endif %}>Elige en cada envío</option>
-            {% for c in matriz.couriers %}
+            {% for c in matriz.couriers if c.id != "oca" %}
             <option value="{{ c.id }}" {% if matriz.courier_default_configurado == c.id %}selected{% endif %} {% if not c.integracion_implementada %}disabled{% endif %}>{{ c.nombre }}{% if not c.integracion_disponible %} — {{ c.estado_integracion }}{% endif %}</option>
             {% endfor %}
           </select>

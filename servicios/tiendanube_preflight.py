@@ -152,6 +152,12 @@ def evaluate_preflight(
         "Producción OCA requiere una aprobación independiente y explícita.",
     )
 
+    add(
+        "oca_fulfillment_ready",
+        oca_status["fulfillment_ready"],
+        "La emisión OCA requiere centro de costo, seguro confirmado y habilitación/UAT propios.",
+    )
+
     bundle = root / "tiendanube_nube_app" / "dist" / "main.min.js"
     add(
         "nube_sdk_bundle",

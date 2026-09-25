@@ -36,6 +36,7 @@ def _congelar_cotizacion_aceptada_con_cursor(
     solicitud: dict,
     *,
     costo_estimado_manual_ars: Optional[float] = None,
+    origen_costo: str = "carga_manual_admin",
     base_interna: Optional[dict] = None,
 ) -> bool:
     """Congela costo estimado, precio aceptado y margen para conciliar luego.
@@ -110,7 +111,7 @@ def _congelar_cotizacion_aceptada_con_cursor(
         peso_real = solicitud.get("peso_kg")
         peso_volumetrico = None
         peso_facturable = solicitud.get("peso_kg")
-        fuente = "carga_manual_admin"
+        fuente = origen_costo
     else:
         return False
     margen = precio_aceptado - costo_ars if not base_interna else margen
@@ -246,6 +247,8 @@ def _error_ambito_no_emitible(solicitud: dict) -> Optional[str]:
     }
     ambito = ambito_envio(solicitud_normalizada)
     if ambito == "internacional":
+        return None
+    if ambito == "nacional" and str(solicitud.get("courier") or "").upper() == "OCA":
         return None
     if ambito == "nacional":
         return (
@@ -1715,13 +1718,15 @@ def editar_solicitud_pre_emision(solicitud_id: int, campos: dict) -> None:
                 SET {sets}, updated_at=NOW()
                 WHERE id=%s AND tracking IS NULL
                   AND estado NOT IN (%s, 'VERIFICAR_COURIER')
+                  AND COALESCE(courier, '') <> 'OCA'
                 RETURNING id
                 """,
                 (*limpios.values(), solicitud_id, ESTADO_EMITIENDO),
             )
             if cur.fetchone() is None:
                 raise ValueError(
-                    "Esa solicitud ya tiene guía emitida (o se está emitiendo "
+                    "Las solicitudes OCA requieren una nueva cotización para cambiar datos. "
+                    "Esa solicitud puede tener guía emitida (o se está emitiendo "
                     "ahora): no se puede editar. Si los datos están mal, hay "
                     "que anular con el courier y crear una solicitud nueva.")
 
@@ -2735,7 +2740,7 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                            WHERE fi.envio_id=e_anterior.id AND fc.estado='EMITIDA' LIMIT 1
                        )) AS cargo_reemplazado_fc,
                        CASE
-                         WHEN LOWER(COALESCE(s.courier, '')) = 'dhl'
+                         WHEN LOWER(COALESCE(s.courier, '')) IN ('dhl', 'oca')
                          THEN COALESCE(cc.puede_emitir, FALSE)
                          ELSE FALSE
                        END AS puede_emitir,
@@ -2773,11 +2778,11 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                 return {"ok": False, "error":
                         "Tu cuenta está desactivada. No se puede emitir ni "
                         "generar cargos hasta que Tauro la reactive."}
-            if (fila.get("courier") or "").strip().lower() == "dhl":
+            if (fila.get("courier") or "").strip().lower() in {"dhl", "oca"}:
                 from servicios.configuracion_couriers_cliente import estado_integracion
-                if not estado_integracion("dhl")["operativa"]:
+                if not estado_integracion((fila.get("courier") or "").lower())["operativa"]:
                     return {"ok": False, "error":
-                            "DHL no está habilitado en producción en este momento. "
+                            f"{fila.get('courier')} no está habilitado en producción en este momento. "
                             "No emitimos ni generamos ningún cargo; escribile a Tauro."}
             if not fila["puede_emitir"]:
                 return {"ok": False, "error":
@@ -2892,6 +2897,10 @@ def generar_guia(solicitud_id: int, ya_reservada: bool = False) -> dict:
     error_ambito = _error_ambito_no_emitible(sol)
     if error_ambito:
         return {"ok": False, "error": error_ambito}
+
+    if courier == "OCA":
+        from servicios.oca_portal import emitir
+        return emitir(sol, ya_reservada=ya_reservada)
 
     # El flujo cliente congela la base al recotizar. El admin puede llegar
     # directo al despachador: en una reemisión DHL recuperamos la tarifa acá,

@@ -116,8 +116,8 @@ CARRIER_SPECS: Tuple[CarrierSpec, ...] = (
         id="oca",
         nombre="OCA",
         ambitos=frozenset({Ambito.NACIONAL}),
-        logo="/static/img/carriers/oca.svg",
-        capacidades=CAPACIDADES_SOLO_COTIZACION,
+        logo="/static/img/carriers/oca.png",
+        capacidades=CAPACIDADES_SIN_PICKUP,
         implementacion="operativa",
         variables_requeridas=(
             "OCA_USUARIO",
@@ -125,6 +125,7 @@ CARRIER_SPECS: Tuple[CarrierSpec, ...] = (
             "OCA_CUIT",
             "OCA_CUENTA",
             "OCA_OPERATIVA",
+            "OCA_CENTRO_COSTO",
         ),
     ),
 )

@@ -2056,6 +2056,10 @@ def admin_cliente_acceso_precios_guardar(
     ups_pickup: str = Form(""),
     ups_markup_tipo: str = Form(""),
     ups_markup_valor: str = Form(""),
+    oca_cotizar: str = Form(""),
+    oca_emitir: str = Form(""),
+    oca_markup_tipo: str = Form(""),
+    oca_markup_valor: str = Form(""),
     courier_default: str = Form(""),
     tope_deuda_ars: str = Form(""),
     es_reseller: str = Form(""),
@@ -2095,6 +2099,12 @@ def admin_cliente_acceso_precios_guardar(
                 puede_recolectar=ups_pickup == "1",
                 markup_tipo=ups_markup_tipo,
                 markup_valor=ups_markup_valor,
+            ),
+            parsear_fila(
+                "oca", puede_cotizar=oca_cotizar == "1", puede_emitir=oca_emitir == "1",
+                puede_recolectar=False,
+                markup_tipo=oca_markup_tipo if isinstance(oca_markup_tipo, str) else "",
+                markup_valor=oca_markup_valor if isinstance(oca_markup_valor, str) else "",
             ),
         ]
         courier_default_db = _courier_valido(courier_default)

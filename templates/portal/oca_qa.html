@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Pruebas de envíos OCA{% endblock %}
+{% block content %}
+<style nonce="{{ request.state.csp_nonce }}">
+.oca-pilot{max-width:1000px;margin:30px auto;padding:24px}.qa-banner{padding:14px 18px;background:#51411c;border:1px solid #9a742a;border-radius:14px;color:#ffe2a5;margin-bottom:24px}.qa-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.qa-card{padding:24px;border:1px solid var(--border,#444);border-radius:20px;background:var(--surface,#171420)}.qa-fields{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}.qa-fields input{width:100%;padding:10px;border:1px solid #777;border-radius:10px}.qa-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}.qa-price{font-size:36px;font-weight:700}.qa-muted{opacity:.75}.qa-history{margin-top:24px}.qa-history li{padding:12px 0;list-style:none;border-bottom:1px solid #555}.qa-status{font-weight:700;color:#b994ff}.qa-details{word-break:break-word}.qa-card h2{margin-bottom:16px}.qa-errors{color:#ffb0a9} @media(max-width:700px){.qa-grid{grid-template-columns:1fr}.oca-pilot{padding:12px;margin:12px auto}.qa-fields{gap:10px}}
+</style>
+<main class="oca-pilot">
+<div class="qa-banner"><strong>ENTORNO DE PRUEBAS · OCA QA</strong><br>Datos ficticios y cuenta de prueba de OCA. Estas operaciones no pertenecen a clientes ni a la cuenta corriente de TAURO.</div>
+<header><span class="eyebrow">TAURO · Envíos nacionales</span><h1>Probá el circuito con OCA</h1><p>Cotizá, generá una guía de prueba, descargá su etiqueta y anulala.</p></header>
+{% if error %}<p class="qa-errors" role="alert">{{error}}</p>{% endif %}
+<div class="qa-grid">
+<section class="qa-card"><h2>1. Cotización de prueba</h2><p><strong>Puerta a puerta · Capital Federal</strong></p><p class="qa-muted">Origen: Venezuela 3446 · CP 1211<br>Destino ficticio: Balcarce 50 · CP 1214<br>Destinatario: PRUEBA TAURO QA</p>
+<form method="post" action="/portal/nacional/oca/cotizar"><input type="hidden" name="csrf" value="{{csrf}}"><div class="qa-fields">
+{% for name,label,value,maximum in [('weight','Peso (kg)','1','30'),('length','Largo (cm)','10','100'),('width','Ancho (cm)','10','100'),('height','Alto (cm)','10','100')] %}<label>{{label}}<input name="{{name}}" type="number" min="0.01" max="{{maximum}}" step="0.01" value="{{value}}" required></label>{% endfor %}
+</div><p class="qa-muted">Un bulto · operativa QA 64665 · sin seguro. Las tarifas de QA son de prueba.</p><button class="btn btn-primary">Cotizar con OCA QA</button></form></section>
+<section class="qa-card"><h2>2. Resultado y guía</h2>{% if row %}
+<p class="qa-status" role="status">{{row.state}}</p><div class="qa-price">$ {{row.price}} <small>ARS</small></div><p class="qa-muted">Importe de prueba. Cotización válida por 15 minutos.</p>
+{% if row.tracking %}<p class="qa-details"><strong>Guía QA:</strong> {{row.tracking}}<br><strong>Orden:</strong> {{row.external_id}}</p>{% endif %}
+{% if row.error %}<p class="qa-errors" role="alert">{{row.error}}</p>{% endif %}
+<div class="qa-actions">
+{% if row.state=='COTIZADO' %}<form method="post" action="/portal/nacional/oca/{{row.id}}/emitir"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-primary">Generar guía de prueba</button></form>{% endif %}
+{% if row.pdf %}<a class="btn btn-ghost" href="/portal/nacional/oca/{{row.id}}/etiqueta.pdf" target="_blank">Ver etiqueta{% if row.state=='CANCELADO' %} anulada{% endif %}</a>{% elif row.state=='EMITIDO' %}<form method="post" action="/portal/nacional/oca/{{row.id}}/etiqueta"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-ghost">Recuperar etiqueta</button></form>{% endif %}
+{% if row.state in ['EMITIDO','ETIQUETA_LISTA'] %}<form method="post" action="/portal/nacional/oca/{{row.id}}/anular"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-ghost">Anular guía de prueba</button></form>{% endif %}
+{% if row.tracking %}<form method="post" action="/portal/nacional/oca/{{row.id}}/tracking"><input type="hidden" name="csrf" value="{{csrf}}"><button class="btn btn-ghost">Consultar seguimiento</button></form>{% endif %}
+</div>
+{% if row.state=='CANCELADO' %}<p>OCA confirmó la anulación de esta orden de prueba.</p>{% endif %}
+{% for event in events %}<p>{{event.date}} · {{event.label}}</p>{% endfor %}
+{% else %}<p class="qa-muted">Completá la cotización para comenzar.</p>{% endif %}</section></div>
+<section class="qa-card qa-history"><h2>Pruebas guardadas</h2><ul>{% for item in rows %}<li><a href="/portal/nacional/oca?id={{item.id}}">{{item.tracking or 'Cotización pendiente de emisión'}}</a> · {{item.state}}</li>{% else %}<li>Todavía no hay pruebas.</li>{% endfor %}</ul></section>
+</main>{% endblock %}

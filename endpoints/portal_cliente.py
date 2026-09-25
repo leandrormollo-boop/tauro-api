@@ -1582,6 +1582,8 @@ def cotizar_form(
     cliente: str = Depends(cliente_actual),
 ):
     ambito = _ambito_portal(ambito)
+    if ambito == "nacional":
+        return RedirectResponse("/portal/oca/nuevo", status_code=303)
     from servicios.cotizaciones_reseller import cliente_es_reseller
     es_reseller = cliente_es_reseller(cliente)
     return templates.TemplateResponse(
@@ -2172,7 +2174,7 @@ def envios_view(
     puede_emitir = any(permisos_emision.values())
     for solicitud in vista["solicitudes"]:
         solicitud["puede_emitir_cliente"] = bool(
-            ambito_envio(solicitud) == "internacional"
+            (ambito_envio(solicitud) == "internacional" or (ambito_envio(solicitud) == "nacional" and solicitud.get("courier") == "OCA"))
             and permisos_emision.get(
                 (solicitud.get("courier") or "").lower(), False
             )
@@ -2468,7 +2470,9 @@ def envio_nuevo_form(
         "cajas": cajas,
         "valor_cotizado": valor_cotizado,
     }
-    if not ambito or ambito == "nacional":
+    if ambito == "nacional":
+        return RedirectResponse("/portal/oca/nuevo", status_code=303)
+    if not ambito:
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={
@@ -3529,9 +3533,16 @@ def envio_detalle(
     if not s:
         return RedirectResponse(url="/portal/envios", status_code=303)
 
+    if s.get("courier") == "OCA":
+        from servicios.oca_portal import cotizacion_solicitud, OCAPortalError
+        try:
+            s["valor_declarado_ars"] = Decimal(cotizacion_solicitud(solicitud_id, cliente)["payload"]["declared_value"])
+        except OCAPortalError:
+            s["valor_declarado_ars"] = None
+
     # ¿Este cliente puede emitir solo? Define si se muestra el botón.
     puede_emitir = bool(
-        ambito_envio(s) == "internacional"
+        (ambito_envio(s) == "internacional" or (ambito_envio(s) == "nacional" and s.get("courier") == "OCA"))
         and _cliente_puede_emitir_courier(cliente, s.get("courier") or "")
     )
     puede_corregir = False
