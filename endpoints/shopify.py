@@ -160,6 +160,7 @@ def _app_home_html(api_key: str, nonce: str, reconnect_url: str) -> str:
       const data = await response.json();
       if (response.status === 409 && data.code === "REAUTHORIZE") {{
         showReconnect("La instalación necesita autorización nuevamente.");
+        window.open(reconnectUrl, "_top");
         return;
       }}
       if (!response.ok) throw new Error(data.detail || "No pudimos validar la sesión.");
@@ -392,18 +393,6 @@ def _redirect_oauth(shop: str, host: str = "") -> RedirectResponse:
     return resp
 
 
-def _cliente_sesion_tauro(request: Request) -> str:
-    """Identidad TAURO autenticada; nunca se infiere de la URL de Shopify."""
-    token = str(request.cookies.get("token") or "")
-    if not token:
-        return ""
-    try:
-        from servicios.auth import validar_token
-        return str(validar_token(token) or "").strip().upper()
-    except Exception:
-        return ""
-
-
 @router.get("/callback", response_class=HTMLResponse)
 def callback(request: Request):
     """Shopify vuelve con el permiso: canjeamos el token y dejamos todo listo."""
@@ -471,23 +460,12 @@ def callback(request: Request):
     # ventana en la que una entrega nueva pueda caer sobre el owner anterior.
     oauth_activada_desde = datetime.now(timezone.utc)
 
-    # El claim se deriva antes de crear la generación pendiente. Token, owner y
-    # binding se escriben juntos; sin sesión TAURO el owner queda NULL y el
-    # binding anterior inactivo, sin una ventana donde las ventas vuelvan a A.
-    dueno = ""
-    try:
-        dueno = _cliente_sesion_tauro(request)
-    except Exception as exc:
-        print(f"[shopify] no pude validar sesión de claim: {type(exc).__name__}")
-        dueno = ""
-
     try:
         generation = guardar_instalacion(
             shop,
             data["access_token"],
             data.get("scope", ""),
             oauth_activada_desde,
-            cliente_claim=dueno,
             refresh_token=data.get("refresh_token", ""),
             expires_in=data.get("expires_in"),
             refresh_token_expires_in=data.get("refresh_token_expires_in"),
@@ -556,17 +534,12 @@ def callback(request: Request):
         respuesta.delete_cookie("shopify_state")
         return respuesta
 
-    # Importar catálogo + stock en segundo plano. El wrapper captura cualquier
-    # fallo y lo deja visible en shopify_sync_estado; nunca rompe el OAuth.
-    if dueno:
-        try:
-            from servicios.shopify_catalogo import lanzar_sincronizacion
-            lanzar_sincronizacion(shop, dueno)
-        except Exception as e:
-            print(f"[shopify] no pude lanzar sincronización: {type(e).__name__}")
-
-    print(f"[shopify] generación habilitada · {len(topics)} webhook(s) · "
-          f"{'con claim' if dueno else 'ownerless'}")
+    # OAuth prueba control de la tienda, no identidad dentro de TAURO. Incluso
+    # si el navegador trae una sesión TAURO, la instalación nace ownerless y
+    # sólo se vincula después mediante la verificación del mail del comercio.
+    print(
+        f"[shopify] generación habilitada · {len(topics)} webhook(s) · ownerless"
+    )
 
     # El destino se deriva del `shop` cubierto por el HMAC de Shopify y por el
     # state firmado; no se acepta una URL de retorno aportada por el navegador.
@@ -834,7 +807,10 @@ async def gdpr_shop_redact(request: Request):
 @router.post("/webhook/desinstalada")
 async def desinstalada(request: Request):
     """Purga la generación que Shopify identificó en el body firmado."""
-    from servicios.shopify_app import cliente_app_para_webhook
+    from servicios.shopify_app import (
+        cliente_app_para_webhook,
+        verificar_uninstall_remoto,
+    )
 
     if not _topic_exacto(request, "app/uninstalled"):
         return JSONResponse({"ok": False}, status_code=400)
@@ -873,11 +849,18 @@ async def desinstalada(request: Request):
         return JSONResponse({"ok": False}, status_code=400)
 
     try:
+        verificacion = verificar_uninstall_remoto(shop, app_client_id)
+        estado = str(verificacion.get("estado") or "")
+        if estado in {"VIGENTE", "IGNORAR", "YA_DESINSTALADA"}:
+            print("[shopify] app/uninstalled ignorado · token actual vigente o ausente")
+            return {"ok": True, "estado": estado}
+        if estado != "REVOCADO":
+            return JSONResponse({"ok": False}, status_code=503)
         borrada = desinstalar(
             shop,
             app_client_id,
             shop_id,
-            request.headers.get("x-shopify-triggered-at", ""),
+            str(verificacion.get("generation") or ""),
         )
     except Exception as exc:
         print(f"[shopify] error procesando uninstall: {type(exc).__name__}")

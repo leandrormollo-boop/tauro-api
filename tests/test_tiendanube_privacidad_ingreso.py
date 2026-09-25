@@ -106,6 +106,7 @@ def test_seis_eventos_api_no_prueban_configuracion_partners(monkeypatch):
     monkeypatch.setattr(tiendanube_app, "get_conn", lambda: pytest.fail("no habilitar DB"))
     assert tiendanube_app.confirmar_webhooks(
         "123", tiendanube_app.WEBHOOKS_API_REQUERIDOS,
+        expected_generation="gen-1",
     ) is False
     with pytest.raises(tiendanube_app.TiendanubeWebhookError, match="PRIVACY_PARTNERS"):
         tiendanube_app.reactivar("123")
@@ -131,10 +132,15 @@ def test_registro_api_nunca_intenta_crear_avisos_partners(monkeypatch):
     monkeypatch.setenv("BASE_URL", "https://taurosolutions.ar")
     monkeypatch.setattr(tiendanube_app, "_api", api)
     monkeypatch.setattr(
+        tiendanube_app, "exigir_generacion_oauth", lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
         "servicios.tiendanube_labels.labels_execution_ready",
         lambda: False,
     )
-    assert set(tiendanube_app.registrar_webhooks("123", "token")) == set(
+    assert set(tiendanube_app.registrar_webhooks(
+        "123", "token", expected_generation="gen-1",
+    )) == set(
         tiendanube_app.WEBHOOKS_API_REQUERIDOS
     )
     assert tiendanube_app.EVENTOS_PRIVACIDAD.isdisjoint(

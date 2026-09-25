@@ -78,12 +78,20 @@ def reconciliar_pedidos_faltantes(limite: int = 200) -> int:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                WITH candidatos AS (
-                    SELECT p.id, {_PEDIDO_FINGERPRINT_SQL} AS fingerprint
+                WITH versiones AS (
+                    SELECT p.id, p.updated_at,
+                           {_PEDIDO_FINGERPRINT_SQL} AS fingerprint
                       FROM pedidos_tienda p
                      WHERE p.estado='PENDIENTE'
                        AND p.automatismos_bloqueados=FALSE
-                     ORDER BY p.updated_at, p.id
+                ), candidatos AS (
+                    SELECT v.id, v.fingerprint
+                      FROM versiones v
+                      LEFT JOIN solicitud_automatica_outbox o
+                        ON o.pedido_id = v.id
+                       AND o.payload_fingerprint = v.fingerprint
+                     WHERE o.id IS NULL OR o.estado = 'COMPLETADO'
+                     ORDER BY v.updated_at, v.id
                      LIMIT %s
                 )
                 INSERT INTO solicitud_automatica_outbox
@@ -454,11 +462,10 @@ def _ejecutar_fulfillment_bajo_lock(job: dict) -> str:
                 solo_reconciliar=(previo in {"RECONCILIAR", "PROCESANDO"}),
             ):
                 return "COMPLETADO"
-            return (
-                "REINTENTAR"
-                if previo in {"RECONCILIAR", "PROCESANDO"}
-                else "RECONCILIAR"
-            )
+            # Una escritura previa sin ACK nunca vuelve al camino de mutación.
+            # Las lecturas negativas pueden ser sólo consistencia eventual: se
+            # mantienen en RECONCILIAR hasta confirmar o agotar el presupuesto.
+            return "RECONCILIAR"
 
 
 def procesar_fulfillments(limite: int = 20) -> dict:

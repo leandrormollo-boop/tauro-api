@@ -67,6 +67,22 @@ class MemoryRepository:
         self.states[target.label_id] = "sent"
         return CancelClaimState.CLAIMED
 
+    def cancel_before_emission(self, target, request):
+        self.events.append(("cancel_before_emission", target.label_id))
+        state = self.states.get(target.label_id)
+        if state == "confirmed":
+            return CancelClaimState.ALREADY_APPROVED
+        if state == "manual":
+            return CancelClaimState.MANUAL_REVIEW
+        if state in {"rejected", "conflict"}:
+            return (
+                CancelClaimState.ALREADY_REJECTED
+                if state == "rejected"
+                else CancelClaimState.CONFLICT
+            )
+        self.states[target.label_id] = "confirmed"
+        return CancelClaimState.ALREADY_APPROVED
+
     def mark_confirmed(self, target):
         self.events.append(("confirmed", target.label_id))
         if self.confirm_error:
@@ -292,7 +308,49 @@ def test_etiqueta_inexistente_o_sin_emision_no_llama_al_carrier(target):
     )
 
     assert adapter.calls == []
+    assert result.http_status == (204 if target and not target.external_operation_id else 409)
+
+
+def test_cancelacion_antes_de_emitir_cierra_local_y_replay_no_toca_carrier():
+    repository = MemoryRepository([_target(external_operation_id="")])
+    adapter = FakeAdapter()
+
+    first = cancel_labels(
+        STORE_ID,
+        [_request()],
+        repository=repository,
+        adapter_loader=lambda _carrier: adapter,
+    )
+    second = cancel_labels(
+        STORE_ID,
+        [_request()],
+        repository=repository,
+        adapter_loader=lambda _carrier: adapter,
+    )
+
+    assert first.http_status == second.http_status == 204
+    assert repository.states[LABEL_ID] == "confirmed"
+    assert adapter.calls == []
+    assert [event[0] for event in repository.events].count(
+        "cancel_before_emission"
+    ) == 2
+
+
+def test_cancelacion_temprana_ambigua_queda_manual_y_no_toca_carrier():
+    repository = MemoryRepository([_target(external_operation_id="")])
+    repository.states[LABEL_ID] = "manual"
+    adapter = FakeAdapter()
+
+    result = cancel_labels(
+        STORE_ID,
+        [_request()],
+        repository=repository,
+        adapter_loader=lambda _carrier: adapter,
+    )
+
     assert result.http_status == 409
+    assert result.manual_review_count == 1
+    assert adapter.calls == []
 
 
 def test_lote_parcial_devuelve_207_con_formato_tiendanube():

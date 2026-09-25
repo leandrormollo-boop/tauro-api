@@ -1,6 +1,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
+import inspect
 
 import pytest
 
@@ -16,6 +17,81 @@ from servicios.tiendanube_rate_quotes import (
     construir_snapshot,
     referencia_publica,
 )
+
+
+class _ReadinessCursor:
+    def __init__(self, ready):
+        self.ready = ready
+        self.executed = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, sql, params=None):
+        self.executed.append((" ".join(str(sql).split()), params))
+
+    def fetchone(self):
+        return {"schema_ready": self.ready}
+
+
+class _ReadinessConn:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def cursor(self):
+        return self._cursor
+
+
+def test_readiness_rate_quotes_es_solo_lectura(monkeypatch):
+    from servicios import tiendanube_rate_quotes
+
+    cursor = _ReadinessCursor(True)
+    monkeypatch.setattr(tiendanube_rate_quotes, "_tabla_lista", False)
+    monkeypatch.setattr(
+        tiendanube_rate_quotes,
+        "get_conn",
+        lambda: _ReadinessConn(cursor),
+    )
+
+    tiendanube_rate_quotes.ensure_rate_quote_storage()
+
+    assert tiendanube_rate_quotes._tabla_lista is True
+    assert len(cursor.executed) == 1
+    source = inspect.getsource(tiendanube_rate_quotes._ensure_table).upper()
+    for ddl in (
+        "CREATE TABLE", "ALTER TABLE", "CREATE TRIGGER", "DROP TRIGGER",
+        "LOCK TABLE",
+    ):
+        assert ddl not in source
+
+
+def test_readiness_rate_quotes_falla_cerrado_si_falta_esquema(monkeypatch):
+    from servicios import tiendanube_rate_quotes
+
+    cursor = _ReadinessCursor(False)
+    monkeypatch.setattr(tiendanube_rate_quotes, "_tabla_lista", False)
+    monkeypatch.setattr(
+        tiendanube_rate_quotes,
+        "get_conn",
+        lambda: _ReadinessConn(cursor),
+    )
+
+    with pytest.raises(
+        tiendanube_rate_quotes.RateQuoteSnapshotError,
+        match="no está migrado",
+    ):
+        tiendanube_rate_quotes.ensure_rate_quote_storage()
+
+    assert tiendanube_rate_quotes._tabla_lista is False
 
 
 def _request(**changes):

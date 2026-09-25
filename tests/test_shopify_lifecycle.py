@@ -105,7 +105,7 @@ def test_uninstall_atrasado_misma_app_no_purga_reinstalacion(monkeypatch):
         DOMINIO,
         "app-publica",
         "123",
-        "2026-08-27T14:59:00Z",
+        "gen-anterior",
     )
     assert purgas == []
     assert conn.commits == 0
@@ -140,7 +140,7 @@ def test_uninstall_actual_purga_tombstone_y_token_en_una_transaccion(monkeypatch
         DOMINIO,
         "app-publica",
         "123",
-        "2026-08-27T15:00:00Z",
+        "gen-1",
     )
     sql = "\n".join(q for q, _ in cursor.ejecutadas)
     assert purgas == [DOMINIO]
@@ -148,6 +148,37 @@ def test_uninstall_actual_purga_tombstone_y_token_en_una_transaccion(monkeypatch
     assert "DELETE FROM shopify_instalaciones" in sql
     assert "install_generation = %s" in sql
     assert conn.commits == 1
+
+
+def test_replay_uninstall_con_header_futuro_no_purga_token_vigente(monkeypatch):
+    from endpoints import shopify
+    from servicios import shopify_app
+
+    purgas = []
+    monkeypatch.setattr(
+        shopify_app, "cliente_app_para_webhook", lambda *_: "app-publica",
+    )
+    monkeypatch.setattr(
+        shopify_app,
+        "verificar_uninstall_remoto",
+        lambda *_: {"estado": "VIGENTE", "generation": "gen-2"},
+    )
+    monkeypatch.setattr(
+        shopify, "desinstalar", lambda *_args: purgas.append(True),
+    )
+
+    respuesta = asyncio.run(shopify.desinstalada(_Request(
+        b'{"id":123,"myshopify_domain":"pesca-jacks.myshopify.com"}',
+        {
+            "x-shopify-shop-domain": DOMINIO,
+            "x-shopify-hmac-sha256": "firma",
+            "x-shopify-topic": "app/uninstalled",
+            "x-shopify-triggered-at": "2099-01-01T00:00:00Z",
+        },
+    )))
+
+    assert respuesta == {"ok": True, "estado": "VIGENTE"}
+    assert purgas == []
 
 
 def test_shop_redact_tombstone_no_consulta_ni_borra_instalacion_nueva(monkeypatch):
@@ -180,6 +211,7 @@ def test_vincular_cliente_no_reasigna_owner_existente(monkeypatch):
 
     cursor = _Cursor([{
         "id": 1, "cliente_id": "MELCIOR", "webhooks_ready": True,
+        "install_generation": "gen-1",
     }])
     conn = _Conn(cursor)
     monkeypatch.setattr(shopify_app, "_ensure_tabla", lambda: None)
@@ -188,7 +220,11 @@ def test_vincular_cliente_no_reasigna_owner_existente(monkeypatch):
     monkeypatch.setattr(shopify_app, "get_conn", lambda: conn)
 
     try:
-        shopify_app.vincular_cliente(DOMINIO, "GUAIMAO")
+        shopify_app.vincular_cliente(
+            DOMINIO,
+            "GUAIMAO",
+            expected_generation="gen-1",
+        )
     except shopify_app.ShopifyOwnershipConflict:
         pass
     else:
@@ -212,6 +248,7 @@ def test_fallo_guardando_huerfano_devuelve_503(monkeypatch):
     })
     monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_: True)
     monkeypatch.setattr(shopify_app, "clasificar_evento_instalacion", lambda *_: "ACTUAL")
+    monkeypatch.setattr(shopify_app, "validar_recurso_webhook_shopify", lambda *_: {"estado": "ACTUAL"})
     monkeypatch.setattr(integraciones_tienda, "webhook_shopify_ya_procesado", lambda *_: False)
     monkeypatch.setattr(
         integraciones_tienda,
@@ -251,6 +288,7 @@ def test_webhook_pendiente_con_owner_no_ackea_y_shopify_lo_reintenta(monkeypatch
     })
     monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_: True)
     monkeypatch.setattr(shopify_app, "clasificar_evento_instalacion", lambda *_: "ACTUAL")
+    monkeypatch.setattr(shopify_app, "validar_recurso_webhook_shopify", lambda *_: {"estado": "ACTUAL"})
     monkeypatch.setattr(integraciones_tienda, "webhook_shopify_ya_procesado", lambda *_: False)
     monkeypatch.setattr(
         integraciones_tienda,
@@ -299,6 +337,7 @@ def test_owner_incoherente_nunca_escribe_pedido_del_tenant(monkeypatch):
     })
     monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_: True)
     monkeypatch.setattr(shopify_app, "clasificar_evento_instalacion", lambda *_: "ACTUAL")
+    monkeypatch.setattr(shopify_app, "validar_recurso_webhook_shopify", lambda *_: {"estado": "ACTUAL"})
     monkeypatch.setattr(integraciones_tienda, "webhook_shopify_ya_procesado", lambda *_: False)
     monkeypatch.setattr(integraciones_tienda, "marcar_webhook_shopify_procesado", lambda *_: None)
     monkeypatch.setattr(integraciones, "guardar_pedido", lambda *_a, **_k: pedidos.append(True))
@@ -406,27 +445,18 @@ def test_app_home_embebida_no_es_cacheable(monkeypatch):
 def test_oauth_sin_state_nace_ownerless_y_desactiva_binding_anterior(monkeypatch):
     from servicios import integraciones_tienda, shopify_app
 
-    cursor = _Cursor([
-        {"owner_instalacion": "CLIENTE_A"},
-        {"owner_mapping": "CLIENTE_A"},
-    ])
+    cursor = _Cursor()
     conn = _Conn(cursor)
-    purgas = []
     monkeypatch.setattr(shopify_app, "_ensure_tabla", lambda: None)
     monkeypatch.setattr(shopify_app, "_cifrar_token", lambda token: f"enc:{token}")
     monkeypatch.setattr(shopify_app, "_credenciales_publicas", lambda: ("app", "secret"))
     monkeypatch.setattr(shopify_app, "get_conn", lambda: conn)
     monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
     monkeypatch.setattr(integraciones_tienda, "_bloquear_dominio_shopify", lambda *_: None)
-    monkeypatch.setattr(
-        integraciones_tienda, "_borrar_datos_tienda_con_cursor",
-        lambda *_: purgas.append(True),
-    )
 
     shopify_app.guardar_instalacion(
         DOMINIO,
         "token-nuevo",
-        cliente_claim="",
         refresh_token="refresh-nuevo",
         expires_in=3600,
         refresh_token_expires_in=7776000,
@@ -440,55 +470,6 @@ def test_oauth_sin_state_nace_ownerless_y_desactiva_binding_anterior(monkeypatch
     assert instalacion[-1] == ""
     assert "cliente_id = EXCLUDED.cliente_id" in sql
     assert "UPDATE tiendas_conectadas SET activa = FALSE" in sql
-    assert purgas == []
-    assert conn.commits == 1
-
-
-def test_oauth_cliente_b_transfiere_y_purga_cliente_a_atomicamente(monkeypatch):
-    from servicios import integraciones_tienda, shopify_app
-
-    cursor = _Cursor([
-        {"owner_instalacion": "CLIENTE_A"},
-        {"owner_mapping": "CLIENTE_A"},
-        {"id": 7},
-    ])
-    conn = _Conn(cursor)
-    purgas = []
-    monkeypatch.setattr(shopify_app, "_ensure_tabla", lambda: None)
-    monkeypatch.setattr(shopify_app, "_cifrar_token", lambda token: f"enc:{token}")
-    monkeypatch.setattr(shopify_app, "_credenciales_publicas", lambda: ("app", "secret"))
-    monkeypatch.setattr(shopify_app, "get_conn", lambda: conn)
-    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
-    monkeypatch.setattr(integraciones_tienda, "_bloquear_dominio_shopify", lambda *_: None)
-    monkeypatch.setattr(
-        integraciones_tienda, "_borrar_datos_tienda_con_cursor",
-        lambda _cur, dominio: purgas.append(dominio) or 3,
-    )
-
-    shopify_app.guardar_instalacion(
-        DOMINIO,
-        "token-b",
-        cliente_claim="cliente_b",
-        refresh_token="refresh-b",
-        expires_in=3600,
-        refresh_token_expires_in=7776000,
-    )
-
-    instalacion = next(
-        params for sql, params in cursor.ejecutadas
-        if "INSERT INTO shopify_instalaciones" in sql
-    )
-    binding = next(
-        params for sql, params in cursor.ejecutadas
-        if "INSERT INTO tiendas_conectadas" in sql
-    )
-    assert purgas == [DOMINIO]
-    assert instalacion[-1] == "CLIENTE_B"
-    assert binding[0] == "CLIENTE_B"
-    assert "FALSE" in next(
-        sql for sql, _params in cursor.ejecutadas
-        if "INSERT INTO tiendas_conectadas" in sql
-    )
     assert conn.commits == 1
 
 
@@ -620,7 +601,7 @@ def test_cancelacion_shopify_revalida_tenant_generacion_bajo_lock(monkeypatch):
 
 def test_catalogo_obsoleto_se_ackea_sin_reintento_infinito(monkeypatch):
     from endpoints import integraciones
-    from servicios import shopify_app, shopify_catalogo
+    from servicios import integraciones_tienda, shopify_app, shopify_catalogo
 
     monkeypatch.setattr(integraciones, "tienda_por_dominio", lambda *_: {
         "id": 7,
@@ -638,6 +619,13 @@ def test_catalogo_obsoleto_se_ackea_sin_reintento_infinito(monkeypatch):
     monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_: True)
     monkeypatch.setattr(
         shopify_app, "clasificar_evento_instalacion", lambda *_: "ACTUAL",
+    )
+    monkeypatch.setattr(
+        shopify_app, "validar_recurso_webhook_shopify",
+        lambda *_: {"estado": "ACTUAL"},
+    )
+    monkeypatch.setattr(
+        integraciones_tienda, "webhook_shopify_ya_procesado", lambda *_: False,
     )
     monkeypatch.setattr(
         shopify_catalogo,
@@ -659,23 +647,143 @@ def test_catalogo_obsoleto_se_ackea_sin_reintento_infinito(monkeypatch):
     assert respuesta == {"ok": True, "ignorado": "generacion_anterior"}
 
 
-def test_fallback_dedupe_liga_dominio_topic_y_body():
+def test_fingerprint_dedupe_ignora_headers_y_liga_body_a_la_app():
     from endpoints import integraciones
 
     cuerpo = b'{"id":123}'
     request = _Request(cuerpo, {})
     primero = integraciones._webhook_id_shopify(
-        request, DOMINIO, "orders/create", cuerpo,
+        request, DOMINIO, "orders/create", cuerpo, "app-1",
     )
     segundo = integraciones._webhook_id_shopify(
-        request, DOMINIO, "orders/create", cuerpo,
+        request, DOMINIO, "orders/create", cuerpo, "app-1",
     )
     otro_topic = integraciones._webhook_id_shopify(
-        request, DOMINIO, "orders/updated", cuerpo,
+        request, "otra.myshopify.com", "orders/updated", cuerpo, "app-1",
+    )
+    otra_app = integraciones._webhook_id_shopify(
+        request, DOMINIO, "orders/create", cuerpo, "app-2",
     )
     assert primero == segundo
-    assert primero != otro_topic
+    assert primero == otro_topic
+    assert primero != otra_app
     assert len(primero) == 64
+
+
+def test_clasificador_usa_fecha_firmada_del_body_y_no_headers():
+    from servicios import shopify_app
+
+    inst = {
+        "install_generation": "gen-2",
+        "instalada_en": "2026-09-20T12:00:00Z",
+    }
+    assert shopify_app.clasificar_evento_instalacion(
+        inst,
+        "orders/updated",
+        {"id": 123, "updated_at": "2026-09-19T12:00:00Z"},
+    ) == "ANTERIOR"
+    assert shopify_app.clasificar_evento_instalacion(
+        inst,
+        "orders/updated",
+        {"id": 123, "updated_at": "2026-09-21T12:00:00Z"},
+    ) == "ACTUAL"
+
+
+def test_probe_order_cancelada_remota_no_revive_body_viejo(monkeypatch):
+    from servicios import shopify_app
+
+    timeouts = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "data": {
+                    "order": {
+                        "id": "gid://shopify/Order/123",
+                        "updatedAt": "2026-09-24T15:00:00Z",
+                        "cancelledAt": "2026-09-24T15:00:00Z",
+                        "displayFinancialStatus": "VOIDED",
+                    }
+                }
+            }
+
+    def post(*_args, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        return Response()
+
+    monkeypatch.setattr(shopify_app.requests, "post", post)
+    result = shopify_app.validar_recurso_webhook_shopify(
+        DOMINIO,
+        "orders/create",
+        {
+            "id": 123,
+            "updated_at": "2026-09-24T14:00:00Z",
+        },
+        {"access_token": "token", "install_generation": "gen-2"},
+    )
+    assert result == {
+        "estado": "ACTUAL",
+        "cancelado": True,
+        "evento_at": "2026-09-24T15:00:00Z",
+    }
+    assert timeouts == [2.0]
+
+
+def test_probe_producto_ajeno_se_ignora_antes_del_dedupe(monkeypatch):
+    from servicios import shopify_app
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"data": {"product": None}}
+
+    monkeypatch.setattr(shopify_app.requests, "post", lambda *_a, **_k: Response())
+    assert shopify_app.validar_recurso_webhook_shopify(
+        DOMINIO,
+        "products/update",
+        {"id": 456, "updated_at": "2026-09-24T15:00:00Z"},
+        {"access_token": "token", "install_generation": "gen-2"},
+    ) == {"estado": "IGNORAR"}
+
+
+def test_claim_shopify_revalida_generacion_bajo_lock(monkeypatch):
+    from servicios import integraciones_tienda, shopify_app
+
+    cursor = _Cursor([{
+        "id": 7,
+        "cliente_id": None,
+        "webhooks_ready": True,
+        "install_generation": "gen-nueva",
+    }])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(shopify_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(integraciones_tienda, "_ensure_tablas", lambda: None)
+    monkeypatch.setattr(
+        integraciones_tienda, "_bloquear_dominio_shopify", lambda *_: None,
+    )
+    monkeypatch.setattr(shopify_app, "get_conn", lambda: conn)
+
+    try:
+        shopify_app.vincular_cliente(
+            DOMINIO,
+            "MELCIOR",
+            expected_generation="gen-anterior",
+        )
+    except RuntimeError as exc:
+        assert "cambió" in str(exc)
+    else:
+        raise AssertionError("debía rechazar la generación reemplazada")
+
+    assert not any(
+        "UPDATE shopify_instalaciones" in sql
+        for sql, _params in cursor.ejecutadas
+    )
+    assert conn.commits == 0
 
 
 def test_huerfano_no_se_inserta_si_claim_gano_la_carrera(monkeypatch):
@@ -803,6 +911,10 @@ def test_replay_por_webhook_id_no_repite_efecto(monkeypatch):
     monkeypatch.setattr(shopify_app, "firma_valida_webhook_app", lambda *_: True)
     monkeypatch.setattr(
         shopify_app, "clasificar_evento_instalacion", lambda *_: "ACTUAL",
+    )
+    monkeypatch.setattr(
+        shopify_app, "validar_recurso_webhook_shopify",
+        lambda *_: {"estado": "ACTUAL"},
     )
     monkeypatch.setattr(
         integraciones_tienda, "webhook_shopify_ya_procesado",

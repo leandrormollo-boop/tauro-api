@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     cliente_id   TEXT PRIMARY KEY,        -- UPPERCASE, ej "MENDEZ"
     email        TEXT UNIQUE NOT NULL,
     api_key      TEXT,
+    api_key_hash TEXT,
     markup_pct   REAL    NOT NULL DEFAULT 25.0,
     markup_tipo  TEXT    NOT NULL DEFAULT 'PCT', -- PCT | FIJO_ARS | MULTIPLICADOR
     markup_valor REAL,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS clientes (
 );
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_tipo TEXT NOT NULL DEFAULT 'PCT';
 ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS markup_valor REAL;
+ALTER TABLE IF EXISTS clientes ADD COLUMN IF NOT EXISTS api_key_hash TEXT;
 -- Margen por ÁMBITO (decisión de Leandro 28/07): sumar el margen
 -- internacional (ej. +$14.500) a un envío nacional de $8.000 casi triplica
 -- el precio. Si estas columnas están vacías, el envío nacional usa la regla
@@ -357,6 +359,7 @@ CREATE TABLE IF NOT EXISTS productos (
     alto_cm          REAL NOT NULL,
     peso_kg          REAL NOT NULL,
     valor_usd_default NUMERIC(14,2) NOT NULL DEFAULT 0,
+    tax_estimado_usd NUMERIC(12,2) NOT NULL DEFAULT 0,
     imagen_url       TEXT,                            -- imagen de la tienda/CDN
     plataforma       TEXT,                            -- shopify / tiendanube / manual
     tienda_dominio   TEXT,
@@ -388,6 +391,8 @@ CREATE TABLE IF NOT EXISTS productos (
 CREATE INDEX IF NOT EXISTS idx_productos_cliente ON productos(cliente_id);
 -- Columnas de catálogo externo. Los ALTER mantienen upgrades idempotentes.
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS imagen_url TEXT;
+ALTER TABLE IF EXISTS productos
+    ADD COLUMN IF NOT EXISTS tax_estimado_usd NUMERIC(12,2) NOT NULL DEFAULT 0;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS plataforma TEXT;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS tienda_dominio TEXT;
 ALTER TABLE IF EXISTS productos ADD COLUMN IF NOT EXISTS external_product_id TEXT;
@@ -437,6 +442,72 @@ CREATE TABLE IF NOT EXISTS producto_inventario_ubicaciones (
 );
 CREATE INDEX IF NOT EXISTS ix_inventario_ubicaciones_cliente
     ON producto_inventario_ubicaciones (cliente_id, tienda_dominio, producto_id);
+
+-- Contrato común de tiendas y pedidos. Estas tablas deben existir antes de
+-- crear las outboxes y de aceptar OAuth/webhooks; el runtime sólo comprueba
+-- readiness y nunca intenta migrarlas durante una petición.
+CREATE TABLE IF NOT EXISTS tiendas_conectadas (
+    id          SERIAL PRIMARY KEY,
+    cliente_id  TEXT NOT NULL,
+    plataforma  TEXT NOT NULL,
+    dominio     TEXT NOT NULL UNIQUE,
+    secreto     TEXT NOT NULL,
+    activa      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS pedidos_tienda (
+    id                      SERIAL PRIMARY KEY,
+    cliente_id              TEXT NOT NULL,
+    tienda_id               INTEGER REFERENCES tiendas_conectadas(id) ON DELETE CASCADE,
+    plataforma              TEXT NOT NULL,
+    pedido_externo_id       TEXT NOT NULL,
+    numero                  TEXT,
+    estado                  TEXT NOT NULL DEFAULT 'PENDIENTE',
+    destinatario            JSONB,
+    items                   JSONB,
+    valor_total             NUMERIC(14,2),
+    moneda                  TEXT,
+    solicitud_id            INTEGER,
+    flete_cobrado           NUMERIC(14,2),
+    flete_detalle           JSONB,
+    motivo_pendiente        TEXT,
+    automatismos_bloqueados BOOLEAN NOT NULL DEFAULT FALSE,
+    bloqueo_motivo          TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tienda_id, pedido_externo_id)
+);
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS flete_cobrado NUMERIC(14,2);
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS flete_detalle JSONB;
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS motivo_pendiente TEXT;
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS automatismos_bloqueados BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS bloqueo_motivo TEXT;
+ALTER TABLE IF EXISTS pedidos_tienda
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+CREATE INDEX IF NOT EXISTS ix_pedidos_tienda_cliente
+    ON pedidos_tienda (cliente_id, estado);
+
+-- Pedidos recibidos por una instalación válida pero todavía no vinculada a
+-- un cliente TAURO. La generación impide volcarlos sobre una reinstalación.
+CREATE TABLE IF NOT EXISTS pedidos_huerfanos (
+    id                 SERIAL PRIMARY KEY,
+    dominio            TEXT NOT NULL,
+    pedido_externo_id  TEXT NOT NULL,
+    payload            JSONB NOT NULL,
+    install_generation TEXT,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (dominio, pedido_externo_id)
+);
+ALTER TABLE IF EXISTS pedidos_huerfanos
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+CREATE INDEX IF NOT EXISTS ix_pedidos_huerfanos_dominio_fecha
+    ON pedidos_huerfanos (dominio, created_at);
 
 -- Outbox pedido -> solicitud. El payload no duplica PII: la huella identifica
 -- la versión y el worker relee el pedido bajo los controles de tenant.
@@ -703,9 +774,32 @@ CREATE TABLE IF NOT EXISTS config_envio_tienda (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Tiendanube: OAuth, lifecycle y claim seguro posterior. Una instalación
--- iniciada desde la App Store puede existir sin cliente TAURO; el navegador
--- que completó OAuth recibe el secreto y acá sólo se conserva su hash.
+-- Cache legado de tarifas internacionales. La app pública Shopify actual no
+-- publica CarrierService, pero el refresco operativo y las instalaciones
+-- históricas todavía pueden consultarlo; también se migra antes del tráfico.
+CREATE TABLE IF NOT EXISTS tarifas_cache (
+    id             SERIAL PRIMARY KEY,
+    carrier        TEXT NOT NULL,
+    nombre         TEXT NOT NULL,
+    logo           TEXT,
+    pais           TEXT NOT NULL,
+    peso_hasta_kg  NUMERIC(6,2) NOT NULL,
+    precio_ars     NUMERIC(14,2) NOT NULL,
+    precio_usd     NUMERIC(14,2) NOT NULL,
+    dias_estimados TEXT,
+    servicio       TEXT,
+    actualizado    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    entorno        TEXT,
+    UNIQUE (carrier, pais, peso_hasta_kg)
+);
+ALTER TABLE IF EXISTS tarifas_cache ADD COLUMN IF NOT EXISTS entorno TEXT;
+CREATE INDEX IF NOT EXISTS ix_tarifas_cache_busqueda
+    ON tarifas_cache (pais, peso_hasta_kg);
+
+-- Tiendanube: OAuth y lifecycle. Toda generación nueva nace sin cliente TAURO
+-- y sólo puede vincularse mediante state + cookie firmada del portal. Las
+-- columnas claim_* se conservan para compatibilidad de migración, pero el
+-- runtime actual siempre las limpia y no emite claims al navegador.
 CREATE TABLE IF NOT EXISTS tiendanube_instalaciones (
     id                   SERIAL PRIMARY KEY,
     store_id             TEXT NOT NULL UNIQUE,
@@ -825,6 +919,7 @@ CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
 -- de labels por las FKs ON DELETE CASCADE definidas debajo.
 CREATE TABLE IF NOT EXISTS tiendanube_shipping_config (
     store_id                  TEXT PRIMARY KEY,
+    install_generation        TEXT,
     callback_token_hash       TEXT NOT NULL,
     label_callback_token_hash TEXT,
     carrier_id                TEXT NOT NULL,
@@ -835,6 +930,8 @@ CREATE TABLE IF NOT EXISTS tiendanube_shipping_config (
 );
 ALTER TABLE IF EXISTS tiendanube_shipping_config
     ADD COLUMN IF NOT EXISTS label_callback_token_hash TEXT;
+ALTER TABLE IF EXISTS tiendanube_shipping_config
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
 
 -- Snapshot de checkout nacional. Se persiste antes de devolver la tarifa y
 -- contiene sólo ruta mínima (país/CP/location_id), bultos e importes. El
@@ -1027,6 +1124,8 @@ END $$;
 CREATE TABLE IF NOT EXISTS tiendanube_labels (
     store_id                    TEXT NOT NULL,
     label_id                    TEXT NOT NULL,
+    install_generation          TEXT,
+    customer_id                 TEXT,
     fulfillment_order_id        TEXT NOT NULL,
     rate_quote_snapshot_id       TEXT,
     order_id                     TEXT,
@@ -1063,6 +1162,10 @@ ALTER TABLE IF EXISTS tiendanube_labels
     ADD COLUMN IF NOT EXISTS download_token_hash TEXT;
 ALTER TABLE IF EXISTS tiendanube_labels
     ADD COLUMN IF NOT EXISTS download_token_revoked_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+ALTER TABLE IF EXISTS tiendanube_labels
+    ADD COLUMN IF NOT EXISTS customer_id TEXT;
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -1082,6 +1185,8 @@ CREATE TABLE IF NOT EXISTS tiendanube_label_outbox (
     id                      BIGSERIAL PRIMARY KEY,
     store_id                TEXT NOT NULL,
     label_id                TEXT NOT NULL,
+    install_generation      TEXT,
+    customer_id             TEXT,
     operacion               TEXT NOT NULL
         CHECK (operacion IN ('GENERATE', 'CANCEL')),
     payload                 JSONB NOT NULL,
@@ -1108,6 +1213,10 @@ ALTER TABLE IF EXISTS tiendanube_label_outbox
     ADD COLUMN IF NOT EXISTS claim_id TEXT;
 ALTER TABLE IF EXISTS tiendanube_label_outbox
     ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS tiendanube_label_outbox
+    ADD COLUMN IF NOT EXISTS install_generation TEXT;
+ALTER TABLE IF EXISTS tiendanube_label_outbox
+    ADD COLUMN IF NOT EXISTS customer_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_tiendanube_label_outbox_pendiente
     ON tiendanube_label_outbox(estado, proximo_intento_en, id);
 CREATE INDEX IF NOT EXISTS idx_tiendanube_label_outbox_claim_vencido
