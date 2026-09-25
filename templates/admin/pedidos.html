@@ -60,7 +60,7 @@
             </div>
           </td>
           <td>
-            <strong>{{ s.cliente_id }}</strong>
+            <a class="business-primary" href="/admin/clientes/{{ s.cliente_id|urlencode }}">{{ s.cliente_id }}</a>
             <br><small style="color:var(--fg-4)">{{ s.cliente_nombre or s.cliente_email }}</small>
           </td>
           <td>

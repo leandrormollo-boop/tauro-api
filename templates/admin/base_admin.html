@@ -153,6 +153,7 @@
       .admin-main textarea { min-width: 0; max-width: 100%; }
     }
   </style>
+<link rel="stylesheet" href="/static/css/admin-negocio.css?v=1">
 </head>
 <body data-draft-scope="admin">
   <header class="admin-topbar">
@@ -164,39 +165,41 @@
   </header>
 
   <div class="admin-layout">
-    <nav class="sidebar">
-      <div class="sidebar-label">Principal</div>
-      <a href="/admin/home" {% if seccion == 'home' %}class="active"{% endif %}>Panel de control</a>
-      <a href="/admin/facturas-internacionales" {% if seccion in ('facturas_internacionales','conciliacion_couriers') %}class="active"{% endif %}>Facturas internacionales</a>
-      <a href="/admin/facturas-nacionales" {% if seccion == 'facturas_nacionales' %}class="active"{% endif %}>Facturas nacionales</a>
-      <a href="/admin/clientes" {% if seccion == 'clientes' %}class="active"{% endif %}>Lista de clientes</a>
-
-      <details class="sidebar-more" {% if seccion in ('comercial','envio_nuevo','pago_nuevo','pagos_pendientes','importaciones_historicas','operadores','envio_realizado','recolecciones','bandeja','pedidos','guias_reemplazadas','productos','rutas','referencia','config','seguridad','shopify_privacidad','tiendanube_privacidad') %}open{% endif %}>
-        <summary>Más herramientas</summary>
-        <div class="sidebar-more-links">
-          <a href="/admin/pedidos" {% if seccion == 'pedidos' %}class="active"{% endif %}>Envíos y guías</a>
-          <a href="/admin/pagos/pendientes" {% if seccion == 'pagos_pendientes' %}class="active"{% endif %}>Pagos</a>
-          <a href="/admin/operadores" {% if seccion == 'operadores' %}class="active"{% endif %}>Operadores</a>
-          <a href="/admin/bandeja" {% if seccion == 'bandeja' %}class="active"{% endif %} style="display:flex;align-items:center;gap:8px;">Bandeja{% if pendientes_admin() %}<span class="side-badge">{{ pendientes_admin() }}</span>{% endif %}</a>
-          <a href="/admin/recolecciones" {% if seccion == 'recolecciones' %}class="active"{% endif %}>Recolecciones</a>
-          <a href="/admin/guias-reemplazadas" {% if seccion == 'guias_reemplazadas' %}class="active"{% endif %} style="display:flex;align-items:center;gap:8px;">Guías descartadas{% if alertas_guias_reemplazadas() %}<span class="side-badge">{{ alertas_guias_reemplazadas() }}</span>{% endif %}</a>
-          <a href="/admin/envios-realizados/nuevo" {% if seccion == 'envio_realizado' %}class="active"{% endif %}>Cargar envío</a>
-          <a href="/admin/envios/nuevo" {% if seccion == 'envio_nuevo' %}class="active"{% endif %}>Cargar cargo</a>
-          <a href="/admin/pagos/nuevo" {% if seccion == 'pago_nuevo' %}class="active"{% endif %}>Registrar pago</a>
-          <a href="/admin/importaciones-historicas" {% if seccion == 'importaciones_historicas' %}class="active"{% endif %}>Importaciones históricas</a>
-          <a href="/admin/productos" {% if seccion == 'productos' %}class="active"{% endif %}>Catálogo</a>
-          <a href="/admin/rutas" {% if seccion == 'rutas' %}class="active"{% endif %}>Rutas</a>
-          <a href="/admin/comercial" {% if seccion == 'comercial' %}class="active"{% endif %}>Prospectos</a>
-          <a href="/admin/referencia" {% if seccion == 'referencia' %}class="active"{% endif %}>Referencia de mercado</a>
-          <a href="/admin/config" {% if seccion == 'config' %}class="active"{% endif %}>Configuración</a>
-          <a href="/admin/seguridad" {% if seccion == 'seguridad' %}class="active"{% endif %}>Seguridad</a>
-          <a href="/admin/shopify/privacidad" {% if seccion == 'shopify_privacidad' %}class="active"{% endif %}>Privacidad Shopify</a>
-          <a href="/admin/tiendanube/privacidad" {% if seccion == 'tiendanube_privacidad' %}class="active"{% endif %}>Privacidad Tiendanube</a>
+    <nav class="sidebar" aria-label="Administración">
+      <div class="sidebar-label">Negocio</div>
+      <a href="/admin/home" {% if seccion=='home' %}class="active"{% endif %}>Panel de control</a>
+      <a href="/admin/clientes" {% if seccion=='clientes' %}class="active"{% endif %}>Clientes</a>
+      <a href="/admin/operadores" {% if seccion=='operadores' and request.url.path!='/admin/control-envios' %}class="active"{% endif %}>Proveedores</a>
+      <div class="sidebar-label">Operación</div>
+      <a href="/admin/control-envios" {% if request.url.path=='/admin/control-envios' %}class="active"{% endif %}>Control de envíos</a>
+      <a href="/admin/pedidos" {% if seccion=='pedidos' %}class="active"{% endif %}>Solicitudes y emisión</a>
+      <a href="/admin/recolecciones" {% if seccion=='recolecciones' %}class="active"{% endif %}>Recolecciones</a>
+      <a href="/admin/bandeja" {% if seccion=='bandeja' %}class="active"{% endif %}>Pendientes de atención</a>
+      <a href="/admin/pagos/pendientes" {% if seccion=='pagos_pendientes' %}class="active"{% endif %}>Revisar pagos</a>
+      <details class="sidebar-more" {% if seccion in ('facturas_internacionales','facturas_nacionales','conciliacion_couriers','envio_nuevo','pago_nuevo','importaciones_historicas') %}open{% endif %}>
+        <summary>Facturación y conciliación</summary><div class="sidebar-more-links">
+        <a href="/admin/facturas-internacionales" {% if seccion in ('facturas_internacionales','conciliacion_couriers') %}class="active"{% endif %}>Facturas internacionales</a>
+        <a href="/admin/facturas-nacionales" {% if seccion=='facturas_nacionales' %}class="active"{% endif %}>Facturas nacionales</a>
+        <a href="/admin/envios/nuevo">Cargar cargo manual</a><a href="/admin/pagos/nuevo">Registrar pago de cliente</a>
+        <a href="/admin/importaciones-historicas">Importaciones históricas</a>
+        </div>
+      </details>
+      <details class="sidebar-more" {% if seccion in ('envio_realizado','guias_reemplazadas','productos','rutas','comercial','referencia') %}open{% endif %}>
+        <summary>Herramientas de operación</summary><div class="sidebar-more-links">
+        <a href="/admin/envios-realizados/nuevo">Cargar envío externo</a><a href="/admin/guias-reemplazadas">Guías descartadas</a>
+        <a href="/admin/productos">Catálogo</a><a href="/admin/rutas">Rutas</a><a href="/admin/comercial">Prospectos</a><a href="/admin/referencia">Referencia de mercado</a>
+        </div>
+      </details>
+      <details class="sidebar-more" {% if seccion in ('config','seguridad','shopify_privacidad','tiendanube_privacidad') %}open{% endif %}>
+        <summary>Configuración</summary><div class="sidebar-more-links">
+        <a href="/admin/config">Configuración general</a><a href="/admin/seguridad">Seguridad</a>
+        <a href="/admin/shopify/privacidad">Privacidad Shopify</a><a href="/admin/tiendanube/privacidad">Privacidad Tiendanube</a>
         </div>
       </details>
     </nav>
 
     <main class="admin-main">
+      {% if preview_label %}<div class="flash-msg ok">{{ preview_label }}</div>{% endif %}
       {% block flash_messages %}
       {% if flash_ok %}
         <div class="flash-msg ok">{{ flash_ok }}</div>

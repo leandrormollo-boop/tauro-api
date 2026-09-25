@@ -26,7 +26,7 @@ from core.database import get_conn
 CENTAVO_CONTROL = Decimal("0.02")
 CUATRO_DECIMALES = Decimal("0.0001")
 SEIS_DECIMALES = Decimal("0.000001")
-COURIERS = frozenset({"DHL", "FEDEX", "ANDREANI", "OCA"})
+COURIERS = frozenset({"DHL", "FEDEX", "ANDREANI", "OCA", "CORREO_ARGENTINO"})
 TIPOS_DOCUMENTO = frozenset({"FC", "NC", "ND"})
 CONCEPTOS = frozenset({
     "FLETE", "COMBUSTIBLE", "IMPUESTO", "ADUANA", "MANEJO",
@@ -2436,7 +2436,7 @@ def listar_control_envios(
     elif ambito_normalizado == "NACIONAL":
         condiciones.append(
             "(e.ambito = 'NACIONAL' OR "
-            "UPPER(BTRIM(s.courier)) IN ('ANDREANI','OCA'))"
+            "UPPER(BTRIM(s.courier)) IN ('ANDREANI','OCA','CORREO_ARGENTINO'))"
         )
     if buscar.strip():
         condiciones.append(

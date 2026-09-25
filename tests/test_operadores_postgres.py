@@ -13,6 +13,8 @@ pytestmark=pytest.mark.skipif(not DATABASE_URL,reason='requiere PostgreSQL aisla
 @pytest.fixture
 def db(conciliacion_db,monkeypatch):
     monkeypatch.setattr(op,'get_conn',conciliacion_db)
+    from servicios import admin_negocio
+    monkeypatch.setattr(admin_negocio,'get_conn',conciliacion_db)
     return conciliacion_db
 
 

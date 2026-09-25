@@ -1,0 +1,5 @@
+<nav class="business-tabs" aria-label="Secciones del proveedor">
+{% for key,label in [('envios','Envíos de clientes'),('cuenta','Cuenta corriente'),('pagos','Pagos al proveedor'),('configuracion','Configuración')] %}
+<a href="/admin/operadores/{{ courier }}?vista={{ key }}" {% if vista==key %}class="active" aria-current="page"{% endif %}>{{ label }}</a>
+{% endfor %}
+</nav>

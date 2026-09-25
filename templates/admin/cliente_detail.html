@@ -2,36 +2,12 @@
 {% block title %}{{ cliente.cliente_id }}{% endblock %}
 
 {% block content %}
-<div class="page-title" style="display:flex;align-items:flex-start;justify-content:space-between;">
-  <div>
-    <div class="eyebrow"><a href="/admin/clientes" style="color:var(--fg-4)">Clientes</a> / {{ cliente.cliente_id }}</div>
-    <h1>{{ cliente.nombre or cliente.cliente_id }}</h1>
-    <p style="color:var(--fg-3);font-size:13px;margin-top:4px;">{{ cliente.email }}</p>
-  </div>
-  <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;">
-    <a href="/admin/clientes/{{ cliente.cliente_id }}/acceso-precios" class="btn btn-primary btn-sm">Acceso y precios</a>
-    <a href="/admin/facturas-internacionales?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">Facturas internacionales</a>
-    <a href="/admin/facturas-nacionales?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">Facturas nacionales</a>
-    <a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/operadores" class="btn btn-ghost btn-sm">Costos de operadores</a>
-    <a href="/admin/clientes/{{ cliente.cliente_id }}/editar" class="btn btn-ghost btn-sm">Editar datos</a>
-  </div>
-</div>
-
-<nav class="tabs" style="margin-bottom:18px;overflow-x:auto;white-space:nowrap;">
-  <a class="tab active" href="#cuenta-corriente">Cuenta corriente</a>
-  <a class="tab" href="#envios-cliente">Envíos y cargos</a>
-  <a class="tab" href="/admin/clientes/{{ cliente.cliente_id }}/facturas">Facturas emitidas</a>
-  <a class="tab" href="/admin/clientes/{{ cliente.cliente_id }}/acceso-precios">Acceso y precios</a>
-</nav>
-
+{% include 'admin/cliente_header.html' %}
+{% if vista|default('cuenta') == 'cuenta' %}
 <!-- Cuenta corriente por ámbito -->
-<div id="cuenta-corriente" class="card-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom:16px;scroll-margin-top:20px;">
-  <div class="stat-card">
-    <div class="label">Pricing</div>
-    <div class="value" style="font-size:22px;">{{ cliente.pricing_desc }}</div>
-  </div>
+<div id="cuenta-corriente" class="card-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom:16px;scroll-margin-top:20px;">
   {% for nombre, ledger in [
-    ('Consolidado', cuenta_ambitos.consolidado),
+    ('Saldo total · ARS', cuenta_ambitos.consolidado),
     ('Nacional', cuenta_ambitos.nacional),
     ('Internacional', cuenta_ambitos.internacional)
   ] %}
@@ -41,14 +17,15 @@
       $ {{ "{:,.2f}".format(ledger.saldo_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
     </div>
     <small style="display:block;color:var(--fg-4);margin-top:8px;line-height:1.5;">
-      Debe $ {{ "{:,.2f}".format(ledger.debe_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
-      Haber $ {{ "{:,.2f}".format(ledger.haber_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
+      Cargos $ {{ "{:,.2f}".format(ledger.debe_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
+      Pagos y créditos $ {{ "{:,.2f}".format(ledger.haber_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
       Facturado $ {{ "{:,.2f}".format(ledger.facturado_ars).replace(",", "X").replace(".", ",").replace("X", ".") }} · pendiente de FC $ {{ "{:,.2f}".format(ledger.pendiente_facturacion_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
     </small>
   </div>
   {% endfor %}
 </div>
 
+{% if cuenta_ambitos.credito_sin_imputar_ars or cuenta_ambitos.cargos_sin_clasificar_ars %}
 <div class="card-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:24px;">
   <div class="stat-card">
     <div class="label">Crédito sin imputar</div>
@@ -58,37 +35,17 @@
   <div class="stat-card">
     <div class="label">Cargos sin clasificar</div>
     <div class="value {% if cuenta_ambitos.cargos_sin_clasificar_ars > 0 %}warn{% endif %}">$ {{ "{:,.2f}".format(cuenta_ambitos.cargos_sin_clasificar_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
-    <small style="color:var(--fg-4);">Quedan fuera de ambos subledgers hasta conciliarlos con evidencia.</small>
+    <small style="color:var(--fg-4);">Pendientes de asignar a Nacional o Internacional.</small>
   </div>
 </div>
 
+{% endif %}
 <!-- Acciones rápidas -->
 <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
   <a href="/admin/envios/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-primary btn-sm">+ Cargar cargo manual</a>
   <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/nueva" class="btn btn-primary btn-sm">+ Facturar por lote</a>
   <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas" class="btn btn-ghost btn-sm">Ver facturas</a>
   <a href="/admin/pagos/nuevo?cliente={{ cliente.cliente_id }}" class="btn btn-ghost btn-sm">+ Registrar pago</a>
-  <button type="button" id="btn-reset-pwd" data-muestra="#reset-pwd-form"
-          class="btn btn-ghost btn-sm">🔑 Resetear contraseña del portal</button>
-  <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/api-key" style="display:inline;"
-        data-confirm="¿Generar una API key nueva para {{ cliente.cliente_id }}? Si ya tenía una, la anterior DEJA DE FUNCIONAR y hay que actualizarla donde la use.">
-    <button type="submit" class="btn btn-ghost btn-sm">🗝️ Regenerar API key B2B</button>
-  </form>
-</div>
-
-<!-- Reset password form (oculto por defecto) -->
-<div id="reset-pwd-form" style="display:none;margin-bottom:28px;padding:16px;background:var(--bg-2,#1a1a1a);border-radius:8px;border:1px solid var(--border,#333);">
-  <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/password" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
-    <div class="form-group" style="flex:1;min-width:240px;margin-bottom:0;">
-      <label>Nueva contraseña para {{ cliente.email }}</label>
-      <input type="text" name="new_password" required minlength="6"
-             placeholder="Mínimo 6 caracteres" autocomplete="new-password">
-      <small style="color:var(--fg-4);">Pasásela al cliente por WhatsApp / llamada.</small>
-    </div>
-    <button type="submit" class="btn btn-primary btn-sm">Guardar contraseña</button>
-    <button type="button" data-oculta="#reset-pwd-form" data-reaparece="#btn-reset-pwd"
-            class="btn btn-ghost btn-sm">Cancelar</button>
-  </form>
 </div>
 
 {% if flash_ok %}
@@ -138,32 +95,12 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
 });
 </script>
 
-<div class="card-grid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:16px;">
-  <div class="stat-card">
-    <div class="label">Período</div>
-    <div class="value" style="font-size:20px;">{{ periodo.etiqueta }}</div>
-  </div>
-  <div class="stat-card">
-    <div class="label">Envíos vigentes</div>
-    <div class="value">{{ resumen_periodo.vigentes }}</div>
-    <small style="color:var(--fg-4);">N {{ resumen_periodo.nacionales }} · I {{ resumen_periodo.internacionales }}</small>
-  </div>
-  <div class="stat-card">
-    <div class="label">Facturación</div>
-    <div class="value" style="font-size:20px;">{{ resumen_periodo.facturados }} facturados</div>
-    <small style="color:var(--warn);">{{ resumen_periodo.pendientes_fc }} pendientes de FC</small>
-  </div>
-  <div class="stat-card">
-    <div class="label">Importe vigente</div>
-    <div class="value">$ {{ "{:,.2f}".format(resumen_periodo.total_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
-    {% if resumen_periodo.cancelados %}<small style="color:var(--fg-4);">{{ resumen_periodo.cancelados }} cancelados fuera del total</small>{% endif %}
-  </div>
-</div>
+<div class="business-filters business-account-summary"><span>{{ periodo.etiqueta }}</span><span>{{ resumen_periodo.vigentes }} cargos vigentes</span><a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas/nueva">{{ resumen_periodo.pendientes_fc }} pendientes de facturar</a><strong>ARS {{ "{:,.2f}".format(resumen_periodo.total_ars).replace(",", "_").replace(".", ",").replace("_", ".") }}</strong></div>
 
 <!-- Facturas y cargos -->
 <div id="envios-cliente" class="card" style="margin-bottom:16px;scroll-margin-top:20px;">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-    <h3 style="margin:0;">Envíos y cargos · {{ periodo.etiqueta }}</h3>
+    <h3 style="margin:0;">Movimientos · {{ periodo.etiqueta }}</h3>
     {% if pagination %}
     <small style="color:var(--fg-4);">
       {{ pagination.total_envios }} en el período · página {{ pagination.page }} de {{ pagination.total_pages }}
@@ -171,34 +108,32 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
     {% endif %}
   </div>
   <div class="table-wrap">
-    <table class="admin-shipments-table">
+    <table class="admin-shipments-table business-table">
       <thead>
         <tr>
           <th>Concepto</th>
-          <th>N.º de guía</th>
-          <th>Destinatario</th>
+          <th>Envío / destinatario</th>
           <th>Fecha</th>
-          <th>Remitente</th>
-          <th>Valor del envío</th>
+          <th>Cargo ARS</th>
           <th>Ámbito</th>
           <th>Estado</th>
-          <th></th>
+          <th>Gestión</th>
         </tr>
       </thead>
       <tbody>
         {% for e in envios %}
-        <tr>
+        <tr id="cargo-{{ e.id }}">
           <td class="admin-shipment-concept">
             <strong>{{ e.concepto or "Envío" }}</strong>
-            {% if e.factura_cliente_id %}<small>{{ e.factura_cliente_tipo }} {{ "%04d"|format(e.factura_cliente_punto_venta) }}-{{ "%08d"|format(e.factura_cliente_numero) }}</small>
+            {% if e.factura_cliente_id %}<small><a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas#factura-{{ e.factura_cliente_id }}">{{ e.factura_cliente_tipo }} {{ "%04d"|format(e.factura_cliente_punto_venta) }}-{{ "%08d"|format(e.factura_cliente_numero) }}</a></small>
             {% elif e.nro_fc %}<small>FC {{ e.nro_fc }}</small>{% endif %}
           </td>
-          <td class="mono admin-shipment-guide">{{ e.tracking or "—" }}</td>
-          <td class="admin-shipment-person">{{ e.destinatario or "—" }}</td>
+          <td class="mono admin-shipment-guide">{% if e.solicitud_id %}<a href="/admin/pedidos/{{ e.solicitud_id }}/editar">{{ e.tracking or "Abrir envío" }}</a>{% else %}{{ e.tracking or "—" }}{% endif %}<small>{{ e.destinatario or "—" }}</small>{% if e.remitente %}<small>De: {{ e.remitente }}</small>{% endif %}</td>
           <td class="mono">{{ e.fecha.strftime("%d/%m/%Y") if e.fecha else "—" }}</td>
-          <td class="admin-shipment-person">{{ e.remitente or "—" }}</td>
           <td class="mono admin-shipment-value">
-            {% if e.precio_final_ars != e.monto_ars %}
+            {% if e.estado == 'CANCELADO' or e.solicitud_estado in ('CANCELADO','REEMPLAZADO') %}
+            <strong>$ 0,00</strong>{% if e.estado=='ACTIVO' and e.monto_ars %}<small class="business-status error">Revisar: cargo activo de ARS {{ '{:,.2f}'.format(e.precio_final_ars).replace(',','_').replace('.',',').replace('_','.') }}</small>{% else %}<small>Sin cargo vigente</small>{% endif %}
+            {% elif e.precio_final_ars != e.monto_ars %}
             <small style="display:block;color:var(--fg-4);">Original $ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</small>
             <strong>$ {{ "{:,.2f}".format(e.precio_final_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</strong>
             {% if e.ajuste_comercial_ars %}
@@ -234,8 +169,9 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% endif %}
           </td>
           <td>
-            {% if e.estado == 'CANCELADO' %}
-              <span class="badge error">ANULADO</span>
+            {% if e.solicitud_estado == 'REEMPLAZADO' %}<span class="badge warn">MODIFICADO</span>
+            {% elif e.estado == 'CANCELADO' or e.solicitud_estado == 'CANCELADO' %}
+              <span class="badge error">CANCELADO</span>
               {% if e.solicitud_id %}
               <small style="display:block;color:var(--fg-4);margin-top:4px;">Oculto del portal</small>
               {% endif %}
@@ -255,7 +191,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
               {% endif %}
             {% endif %}
           </td>
-          <td>
+          <td><details class="business-row-actions"><summary>Gestionar</summary>
             {% if e.estado == 'ACTIVO' and not e.nro_fc and not e.factura_cliente_id %}
             <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/nueva?envio={{ e.id }}"
                class="btn btn-sm btn-primary">Facturar</a>
@@ -309,10 +245,10 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
               </form>
             </details>
             {% endif %}
-          </td>
+          </details></td>
         </tr>
         {% else %}
-        <tr><td colspan="9" style="color:var(--fg-4);text-align:center;padding:16px;">Sin cargos.</td></tr>
+        <tr><td colspan="7" style="color:var(--fg-4);text-align:center;padding:16px;">Sin cargos.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -335,9 +271,12 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
   {% endif %}
 </div>
 
+{% endif %}
+{% if vista|default('cuenta') == 'pagos' %}
+<div class="business-filters"><h2>Pagos recibidos</h2><a href="/admin/pagos/nuevo?cliente={{ cliente.cliente_id|urlencode }}" class="btn btn-primary btn-sm">Registrar pago</a></div>
 <!-- Pagos: historial separado; el filtro superior controla envíos/cargos. -->
 <div class="card">
-  <h3>Pagos recibidos · historial reciente</h3>
+  <p class="op-note">Últimos 200 registros.</p>
   <div class="table-wrap">
     <table>
       <thead>
@@ -354,11 +293,18 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
       <tbody>
         {% for p in pagos %}
         <tr>
-          <td class="mono">{{ p.fecha.strftime("%d/%m/%Y") if p.fecha else "—" }}</td>
+          <td class="mono" id="pago-{{ p.id }}">{{ p.fecha.strftime("%d/%m/%Y") if p.fecha else "—" }}</td>
           <td class="mono" style="color:var(--ok)">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>{{ p.metodo }}</td>
-          <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}</td>
+          <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}{% if p.tiene_comprobante %}<small><a href="/admin/pagos/{{ p.id }}/comprobante">Ver comprobante ↗</a></small>{% endif %}</td>
           <td>
+            {% for a in p.aplicaciones|default([]) %}
+            <div class="business-payment-application">
+            {% if a.factura_id %}<a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas#factura-{{ a.factura_id }}">FC {{ '%04d'|format(a.punto_venta) }}-{{ '%08d'|format(a.numero) }}</a>
+            {% elif a.solicitud_id %}<a href="/admin/pedidos/{{ a.solicitud_id }}/editar">{{ a.tracking or ('Envío #' ~ a.solicitud_id) }}</a>
+            {% elif a.envio_id %}<a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}#cargo-{{ a.envio_id }}">Cargo #{{ a.envio_id }}</a>{% else %}{{ a.ambito }} · sin documento{% endif %}
+            <small>ARS {{ '{:,.2f}'.format(a.monto_ars).replace(',','_').replace('.',',').replace('_','.') }}{% if a.estado=='SOLICITADA' %} · por aprobar{% endif %}</small></div>
+            {% endfor %}
             {% if p.estado == 'RECHAZADO' %}
               <span style="color:var(--fg-4);">No aplica</span>
             {% else %}
@@ -388,4 +334,5 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
     </table>
   </div>
 </div>
+{% endif %}
 {% endblock %}

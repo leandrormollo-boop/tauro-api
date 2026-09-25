@@ -2,7 +2,7 @@
 -- Este archivo se replica en schema.sql para instalaciones y upgrades existentes.
 CREATE TABLE IF NOT EXISTS condiciones_operador (
     id BIGSERIAL PRIMARY KEY,
-    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA')),
+    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO')),
     plazo_dias INTEGER CHECK (plazo_dias BETWEEN 0 AND 365),
     motivo TEXT NOT NULL CHECK (length(btrim(motivo)) BETWEEN 5 AND 1000),
     actor TEXT NOT NULL CHECK (btrim(actor) <> ''),
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS vencimientos_operador (
 );
 CREATE TABLE IF NOT EXISTS pagos_operador (
     id BIGSERIAL PRIMARY KEY,
-    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA')),
+    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO')),
     fecha DATE NOT NULL,
     moneda TEXT NOT NULL CHECK (moneda ~ '^[A-Z]{3}$'),
     importe NUMERIC(18,4) NOT NULL CHECK (importe > 0 AND importe < 'Infinity'::numeric),

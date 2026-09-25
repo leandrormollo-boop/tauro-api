@@ -1,0 +1,9 @@
+{% extends 'admin/base_admin.html' %}
+{% import 'admin/operador_macros.html' as op %}
+{% block title %}{{ op.nombre(courier) }} · Proveedor{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/operadores.css?v=3">
+<header class="business-heading"><div><div class="eyebrow"><a href="/admin/operadores">Proveedores</a></div><h1>{{ op.nombre(courier) }}</h1><p>Envíos, facturas y pagos de este proveedor.</p></div>{{ op.logo(courier) }}</header>
+{% include 'admin/proveedor_nav.html' %}
+{% include 'admin/negocio_envios.html' %}
+{% endblock %}

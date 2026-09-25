@@ -13,6 +13,7 @@
   {% endif %}
 </div>
 
+{% if cliente %}{% set vista='configuracion' %}{% include 'admin/cliente_nav.html' %}{% endif %}
 <div class="card" style="max-width:640px;">
   <form method="POST" action="{{ '/admin/clientes/' + cliente.cliente_id + '/editar' if cliente else '/admin/clientes/nuevo' }}">
 

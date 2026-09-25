@@ -1,21 +1,20 @@
-{% macro nombre(courier) -%}{{ {'DHL':'DHL','FEDEX':'FedEx','ANDREANI':'Andreani','OCA':'OCA'}.get(courier,courier) }}{%- endmacro %}
+{% macro nombre(courier) -%}{{ {'DHL':'DHL','FEDEX':'FedEx','ANDREANI':'Andreani','OCA':'OCA','CORREO_ARGENTINO':'Correo Argentino'}.get(courier,courier) }}{%- endmacro %}
 {% macro logo(courier) -%}
 {% set archivo={'DHL':'dhl.svg','FEDEX':'fedex.svg','ANDREANI':'andreani.svg','OCA':'oca.png'}.get(courier) %}
-{% if archivo %}<span class="op-logo op-logo-{{ courier|lower }}" aria-hidden="true"><img src="/static/img/carriers/{{ archivo }}" alt="" width="120" height="60" decoding="async"></span>{% endif %}
+{% if archivo %}<span class="op-logo op-logo-{{ courier|lower }}" aria-hidden="true"><img src="/static/img/carriers/{{ archivo }}" alt="" width="120" height="60" decoding="async"></span>{% elif courier=='CORREO_ARGENTINO' %}<span class="op-wordmark">{{ nombre(courier) }}</span>{% endif %}
 {%- endmacro %}
 {% macro dinero(v) -%}{% set d=v|default(0,true) %}{{ ('{:,.2f}' if (d*100)%1==0 else '{:,.4f}').format(d).replace(',','_').replace('.',',').replace('_','.') }}{%- endmacro %}
 {% macro fecha(v) -%}{{ v.strftime('%d/%m/%Y') if v else 'Sin informar' }}{%- endmacro %}
 {% macro estado(f) -%}
-<span class="op-badge {{ 'ok' if f.estado_pago in ('CANCELADA','CREDITO_DISPONIBLE') else 'danger' if f.dias_mora and f.saldo>0 else '' }}">{{ {'SIN_VERIFICAR':'Sin verificar','IMPAGA':'Impaga','PARCIAL':'Pago parcial','CANCELADA':'Cancelada','CREDITO_DISPONIBLE':'Crédito disponible','CREDITO_SIN_VERIFICAR':'Crédito sin verificar','CREDITO_AGOTADO':'Crédito aplicado','ANULADA':'Anulada'}[f.estado_pago] }}</span>
+<span class="op-badge {{ 'ok' if f.estado_pago in ('CANCELADA','CREDITO_DISPONIBLE') else 'danger' if f.dias_mora and f.saldo>0 else '' }}">{{ {'SIN_VERIFICAR':'Sin verificar','IMPAGA':'Impaga','PARCIAL':'Pago parcial','CANCELADA':'Saldada','CREDITO_DISPONIBLE':'Crédito disponible','CREDITO_SIN_VERIFICAR':'Crédito sin verificar','CREDITO_AGOTADO':'Crédito aplicado','ANULADA':'Anulada'}[f.estado_pago] }}</span>
 {% if f.estado_pago not in ('SIN_VERIFICAR','ANULADA') and f.tipo_documento!='NC' and f.saldo>0 and f.dias_mora %}<small class="op-danger">{{ f.dias_mora }} días vencida</small>{% endif %}
 {%- endmacro %}
 {% macro resumen(filas) -%}
 <div class="op-grid">
-{% for r in filas %}<div class="card op-summary"><div class="eyebrow">{{ r.moneda }}</div>
-  <h3>{% if r.sin_verificar %}Historial por verificar{% else %}{{ dinero(r.pendiente) }} pendiente verificado{% endif %}</h3>
-  {% if r.sin_verificar %}<p><strong>{{ dinero(r.pendiente) }}</strong> pendiente verificado · saldo total aún incompleto</p>{% endif %}
-  <p>Vencido: {{ dinero(r.vencido) }} · Crédito sin aplicar: {{ dinero(r.credito) }}</p>
-  <small>{{ r.sin_verificar }} documentos con historial sin verificar. No incluidos en deuda ni crédito verificados.</small>
+{% for r in filas %}<div class="card op-summary"><div class="eyebrow">{{ r.moneda }} · saldo verificado</div>
+  <h3>{{ dinero(r.pendiente) }} pendiente</h3>
+  <p>Vencido: {{ dinero(r.vencido) }} · Crédito disponible: {{ dinero(r.credito) }}</p>
+  {% if r.sin_verificar %}<small class="op-danger">{{ r.sin_verificar }} documentos por verificar</small><span data-help="Historial pendiente">Estos documentos quedan fuera de la deuda y del crédito verificados hasta revisar su historial de pagos.</span>{% endif %}
 </div>{% endfor %}
 </div>
 {%- endmacro %}
@@ -40,8 +39,8 @@
 <div class="op-table"><table><thead><tr><th>Documento / línea</th><th>Cliente / envío</th><th>Concepto</th><th>Asignado al cliente</th><th>Peso inicial → facturado</th><th>Diferencia del envío</th></tr></thead><tbody>
 {% set ns=namespace(vistos=[]) %}
 {% for i in items %}<tr>
-  <td><a href="/admin/operadores/{{ i.courier }}/facturas/{{ i.factura_id }}">{{ i.tipo_documento }} {{ i.numero }}</a><small>Línea {{ i.linea_numero }} · {{ i.courier }}</small></td>
-  <td>{% if i.cliente_id %}<a href="/admin/clientes/{{ i.cliente_id|urlencode }}/operadores">{{ i.cliente_id }}</a>{% else %}<strong>Sin asignar</strong>{% endif %}<small>{{ i.tracking_raw or 'Sin tracking' }}</small></td>
+  <td><a href="/admin/operadores/{{ i.courier }}/facturas/{{ i.factura_id }}">{{ i.tipo_documento }} {{ i.numero }}</a><small>Línea {{ i.linea_numero }} · <a href="/admin/operadores/{{ i.courier }}">{{ nombre(i.courier) }}</a></small></td>
+  <td>{% if i.cliente_id %}<a href="/admin/clientes/{{ i.cliente_id|urlencode }}">{{ i.cliente_id }}</a>{% else %}<strong>Sin asignar</strong>{% endif %}<small>{% if i.solicitud_id %}<a href="/admin/pedidos/{{ i.solicitud_id }}/editar">{{ i.tracking_raw or 'Ver envío' }}</a>{% else %}{{ i.tracking_raw or 'Sin tracking' }}{% endif %}</small></td>
   <td>{{ i.concepto_tipo }}</td>
   <td>{% if i.importe_asignado is not none %}{{ i.moneda }} {{ dinero(i.importe_asignado*i.signo) }}{% else %}Pendiente de match<small>Línea: {{ i.moneda }} {{ dinero(i.importe*i.signo) }}</small>{% endif %}</td>
   <td>{{ i.peso_kg if i.peso_kg is not none else '—' }} → {{ i.peso_facturado_kg if i.peso_facturado_kg is not none else '—' }} kg</td>

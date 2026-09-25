@@ -33,10 +33,10 @@
         {% for r in recolecciones %}
         <tr>
           <td class="mono"><strong>{{ r.fecha.strftime('%d/%m') if r.fecha else '—' }}</strong></td>
-          <td><strong>{{ r.cliente_id }}</strong>
+          <td><a class="business-primary" href="/admin/clientes/{{ r.cliente_id|urlencode }}">{{ r.cliente_id }}</a>
               {% if r.cliente_nombre %}<br><small style="color:var(--fg-3);">{{ r.cliente_nombre }}</small>{% endif %}</td>
           <td>
-            <strong>{{ (r.courier or 'FEDEX')|upper }}</strong><br>
+            {% set operador=(r.courier or 'FEDEX')|upper %}{% if operador in ('DHL','FEDEX','OCA','ANDREANI','CORREO_ARGENTINO') %}<a href="/admin/operadores/{{ operador }}">{{ operador }}</a>{% else %}<strong>{{ operador }}</strong>{% endif %}<br>
             {% if r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
             {% elif r.estado == 'AGENDANDO' %}<span class="badge warn">Confirmando</span>
             {% elif r.estado == 'CANCELANDO' %}<span class="badge warn">Cancelando</span>

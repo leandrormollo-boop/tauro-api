@@ -5,21 +5,14 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_sidebar_deja_solo_las_tres_areas_principales_visibles():
+def test_sidebar_prioriza_clientes_proveedores_y_operacion():
     html = (ROOT / "templates/admin/base_admin.html").read_text()
-    principal = html.split('<nav class="sidebar">', 1)[1].split(
-        '<details class="sidebar-more"', 1
-    )[0]
-
-    assert principal.count("<a href=") == 4
-    assert ">Panel de control</a>" in principal
-    assert ">Facturas internacionales</a>" in principal
-    assert ">Facturas nacionales</a>" in principal
-    assert ">Lista de clientes</a>" in principal
-    assert "/admin/clientes/nuevo" not in principal
-
-    clientes = (ROOT / "templates/admin/clientes.html").read_text()
-    assert "/admin/clientes/nuevo" in clientes
+    principal = html.split('<nav class="sidebar"', 1)[1].split('<details class="sidebar-more"', 1)[0]
+    for ruta in ('/admin/clientes','/admin/operadores','/admin/control-envios','/admin/recolecciones','/admin/pagos/pendientes'):
+        assert ruta in principal
+    assert principal.index('/admin/clientes') < principal.index('/admin/operadores')
+    assert 'Más herramientas' not in html
+    assert 'Facturación y conciliación' in html
 
 
 def test_facturas_internacionales_filtra_dhl_y_fedex(monkeypatch):
