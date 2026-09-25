@@ -10,7 +10,7 @@ from servicios.cotizador_nacional import preparar_cotizacion_nacional
 from servicios import oca_portal
 
 
-def cotizar_referencia_nacional(cliente: str, **datos) -> dict:
+def cotizar_referencia_nacional(cliente: str, origen_referencia=False, destino_referencia=False, **datos) -> dict:
     normal = preparar_cotizacion_nacional(**datos)
     if normal['modalidad'] != {'origen': 'domicilio', 'destino': 'domicilio'}:
         raise ValueError('Por ahora cotizamos retiro y entrega a domicilio.')
@@ -35,6 +35,10 @@ def cotizar_referencia_nacional(cliente: str, **datos) -> dict:
                    cantidad_bultos=b['cantidad'], peso_kg=b['peso_unitario_kg'],
                    largo_cm=b['largo_cm'], ancho_cm=b['ancho_cm'], alto_cm=b['alto_cm'],
                    valor_declarado_ars=payload['declared_value'])
+    for side, reference in [('origen', origen_referencia), ('destino', destino_referencia)]:
+        if reference:
+            prefill.pop(side + '_localidad', None)
+            prefill.pop(side + '_cp', None)
     for spec in carriers_for(Ambito.NACIONAL):
         if spec.id not in habilitados:
             continue

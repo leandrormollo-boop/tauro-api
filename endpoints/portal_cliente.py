@@ -1608,6 +1608,20 @@ def cotizar_form(
     )
 
 
+@router.get("/cotizar/ubicaciones")
+def ubicaciones_cotizador(pais: str = "", q: str = "", tipo: str = "city",
+                         provincia: str = "", cliente: str = Depends(cliente_actual)):
+    from servicios.rate_limit import check_rate
+    from servicios.ubicaciones_cotizador import buscar_ubicaciones
+    import sqlite3
+    if not check_rate("portal_places:" + cliente, max_attempts=90, window_seconds=60):
+        raise HTTPException(429, "Esperá un momento para buscar otra ubicación.")
+    try:
+        return buscar_ubicaciones(pais, q, tipo, provincia)
+    except (OSError, sqlite3.Error):
+        return {"suggestions": [], "automatic": None, "unavailable": True}
+
+
 @router.post("/cotizar", response_class=HTMLResponse)
 def cotizar_post(
     request: Request,
@@ -1621,6 +1635,8 @@ def cotizar_post(
     origen_cp_internacional: str = Form(""),
     destino_ciudad_internacional: str = Form(""),
     destino_cp_internacional: str = Form(""),
+    origen_referencia: str = Form(""),
+    destino_referencia: str = Form(""),
     peso_kg: str = Form(""),
     largo_cm: str = Form(""),
     ancho_cm: str = Form(""),
@@ -1677,7 +1693,9 @@ def cotizar_post(
                     "El cotizador nacional sólo admite origen y destino dentro de Argentina."
                 )
             from servicios.cotizador_portal_nacional import cotizar_referencia_nacional
-            resultado_nacional = cotizar_referencia_nacional(cliente, **form_nacional)
+            resultado_nacional = cotizar_referencia_nacional(
+                cliente, origen_referencia=origen_referencia == "1",
+                destino_referencia=destino_referencia == "1", **form_nacional)
             if not resultado_nacional["opciones"] and not resultado_nacional["no_disponibles"]:
                 error_nacional = "Tu cuenta todavía no tiene operadores nacionales habilitados para cotizar."
         except ValueError as exc:
@@ -1685,6 +1703,8 @@ def cotizar_post(
         except Exception:
             error_nacional = "No pudimos consultar las tarifas. Intentá nuevamente."
 
+        form_nacional.update(origen_referencia="1" if origen_referencia == "1" else "",
+                             destino_referencia="1" if destino_referencia == "1" else "")
         return templates.TemplateResponse(
             request=request,
             name=("portal/_quote_results.html" if getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow" else "portal/cotizar.html"),
@@ -1822,6 +1842,8 @@ def cotizar_post(
                 "origen_cp_internacional": origen_cp_internacional,
                 "destino_ciudad_internacional": destino_ciudad_internacional,
                 "destino_cp_internacional": destino_cp_internacional,
+                "origen_referencia": "1" if origen_referencia == "1" else "",
+                "destino_referencia": "1" if destino_referencia == "1" else "",
                 "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
                 "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
                 "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),

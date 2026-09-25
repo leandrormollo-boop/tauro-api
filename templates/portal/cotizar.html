@@ -26,22 +26,24 @@
             <input type="hidden" name="ambito" value="{{ scope }}">
             {% if scope == 'nacional' %}<input type="hidden" name="origen_pais" value="AR"><input type="hidden" name="destino_pais" value="AR">{% endif %}
             {% if scope == 'internacional' %}
-            <div class="uq-frequent" data-route-shortcuts hidden><div class="uq-frequent-head"><span>{{ 'Tus rutas frecuentes' if rutas_frecuentes else 'Ruta del envío' }}</span><button type="button" data-route-reverse disabled>⇄ Invertir</button></div>
-            {% if rutas_frecuentes %}<div class="quote-frequent-list">{% for ruta in rutas_frecuentes %}<button type="button" class="quote-frequent-route" data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}" aria-pressed="false">{{ ruta.origen_nombre }} <span aria-hidden="true">→</span> {{ ruta.destino_nombre }}</button>{% endfor %}</div>{% endif %}</div>
+            <details class="uq-frequent" data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-head"><span>Tus últimos destinos</span><button type="button" data-route-reverse disabled>⇄ Invertir</button></div>
+            {% if rutas_frecuentes %}<div class="quote-frequent-list">{% for ruta in rutas_frecuentes %}<button type="button" class="quote-frequent-route" data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}" aria-pressed="false">{{ ruta.origen_nombre }} <span aria-hidden="true">→</span> {{ ruta.destino_nombre }}</button>{% endfor %}</div>{% endif %}</details>
             {% endif %}
             <div class="uq-route-grid">
             {% for side,label,letter in [('origen','Origen','A'),('destino','Destino','B')] %}
-                <fieldset class="uq-route"><legend><b>{{ letter }}</b>{{ label }}</legend>
+                <fieldset class="uq-route" data-location-side="{{ side }}"><legend><b>{{ letter }}</b>{{ label }}</legend>
                 {% if scope == 'internacional' %}
                     {% set name = side ~ '_pais' %}
-                    <div class="uq-field"><label for="{{ name }}">País</label><select name="{{ name }}" id="{{ name }}" required><option value="">Elegí país</option>{% for iso,nom in paises_destino %}<option value="{{ iso }}" {% if iso == f.get(name, 'AR' if side == 'origen' else '') %}selected{% endif %}>{{ nom }} ({{ iso }})</option>{% endfor %}</select></div>
+                    <div class="uq-field"><label for="{{ name }}">País</label><select name="{{ name }}" id="{{ name }}" required data-country-flags data-search-placeholder="Buscar país o código"><option value="">Elegí país</option>{% for iso,nom in paises_destino %}<option value="{{ iso }}" {% if iso == f.get(name, 'AR' if side == 'origen' else '') %}selected{% endif %}>{{ nom }} ({{ iso }})</option>{% endfor %}</select></div>
                     {% set city = 'origen_ciudad' if side == 'origen' else 'destino_ciudad_internacional' %}{% set postal = side ~ '_cp_internacional' %}
                     {{ field(city,'Ciudad',f.get(city,'')) }}{{ field(postal,'Código postal',f.get(postal,'')) }}
                 {% else %}
                     {% set name = side ~ '_provincia' %}
-                    <div class="uq-field"><label for="{{ name }}">Provincia</label><select name="{{ name }}" id="{{ name }}" required><option value="">Elegí provincia</option>{% for code,nom in provincias %}<option value="{{ code }}" {% if code == f.get(name) %}selected{% endif %}>{{ nom }}</option>{% endfor %}</select></div>
+                    <div class="uq-field"><label for="{{ name }}">Provincia</label><select name="{{ name }}" id="{{ name }}" required><option value="">Elegí provincia</option>{% for code,nom in provincias %}<option value="{{ code }}" {% if code == f.get(name) %}selected{% endif %}>{{ 'CABA' if code == 'C' else nom }}</option>{% endfor %}</select></div>
                     {{ field(side ~ '_localidad','Localidad',f.get(side ~ '_localidad','')) }}{{ field(side ~ '_cp','Código postal',f.get(side ~ '_cp',''),placeholder='Ej. 5000') }}
                 {% endif %}
+                <input type="hidden" name="{{ side }}_referencia" value="{{ f.get(side ~ '_referencia','') }}" data-draft-persist>
+                <div class="uq-location-note" data-location-note hidden>Referencia para cotizar <span data-help="Ciudad y código postal">El código sugerido sirve para estimar la tarifa. Al emitir completás el domicilio y CP exactos. Datos: GeoNames, CC BY 4.0.</span><a href="https://www.geonames.org/" target="_blank" rel="noopener">GeoNames</a></div>
                 </fieldset>
             {% endfor %}
             </div>

@@ -58,7 +58,7 @@
   }
   function init(root) {
     if (initialized.has(root)) return initialized.get(root);
-    var controls = {}, active = root.dataset.quoteActive || 'internacional';
+    var controls = {}, locationControls = {}, active = root.dataset.quoteActive || 'internacional';
     root.querySelectorAll('[data-unified-form]').forEach(function (form) {
       var scope = form.dataset.unifiedForm, panel = form.closest('[data-quote-panel]');
       var result = panel.querySelector('[data-quote-results]');
@@ -86,6 +86,9 @@
         }
       } : {});
       renumber();
+      var locations = window.TauroQuoteLocations && window.TauroQuoteLocations.attach(form);
+      locationControls[scope] = locations;
+      if (locations && scope === active) locations.resume();
       function weights() {
         var summary = form.querySelector('[data-quote-weights]');
         if (!summary || !packageList) return;
@@ -104,6 +107,7 @@
       }
       function ready() {
         weights();
+        if (locations && locations.pending()) return false;
         return Array.from(form.querySelectorAll('[required]')).every(function (input) {
           if (!input.value.trim() || !input.checkValidity()) return false;
           if (!input.dataset.numero) return true;
@@ -185,14 +189,23 @@
         link.classList.toggle('is-active', selected);
         if (selected) link.setAttribute('aria-current', 'true'); else link.removeAttribute('aria-current');
       });
-      Object.keys(controls).forEach(function (scope) { if (scope === active) controls[scope].resume(); else controls[scope].pause(); });
+      Object.keys(controls).forEach(function (scope) {
+        if (locationControls[scope]) locationControls[scope].cancel();
+        if (scope === active) {
+          if (locationControls[scope]) locationControls[scope].resume();
+          controls[scope].resume();
+        } else controls[scope].pause();
+      });
       if (changeUrl && !root.closest('dialog')) history.replaceState(history.state, '', '/portal/cotizar?ambito=' + active);
     }
     root.addEventListener('click', function (event) {
       var link = event.target.closest('[data-quote-scope]');
       if (link && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.button) { event.preventDefault(); if (active !== link.dataset.quoteScope) select(link.dataset.quoteScope, true); }
     });
-    var api = {select: select, pause: function () { Object.values(controls).forEach(function (control) { control.pause(); }); }};
+    var api = {select: select, pause: function () {
+      Object.values(controls).forEach(function (control) { control.pause(); });
+      Object.values(locationControls).forEach(function (control) { if (control) control.cancel(); });
+    }};
     initialized.set(root, api);
     // Conservar el resultado de un POST sin JS hasta la primera edición.
     Object.keys(controls).forEach(function (scope) {
