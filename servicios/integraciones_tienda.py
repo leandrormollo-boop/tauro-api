@@ -1741,6 +1741,46 @@ def listar_pedidos(cliente_id: str, estado: str = "PENDIENTE", limite: int = 100
             return [dict(r) for r in cur.fetchall()]
 
 
+def listar_resumen_pedidos_shopify_embebido(
+    dominio: str,
+    cliente_id: str,
+    *,
+    limite: int = 25,
+) -> list[dict]:
+    """Pedidos mínimos de una instalación exacta para Shopify App Home.
+
+    No devuelve destinatario, dirección, email, teléfono ni detalle de ítems.
+    El filtro exige simultáneamente plataforma, dominio y owner en la tienda y
+    el pedido, para que un ID token jamás seleccione otro tenant.
+    """
+    _ensure_tablas()
+    dominio = str(dominio or "").strip().lower()
+    cliente_id = str(cliente_id or "").strip().upper()
+    if not dominio or not cliente_id:
+        return []
+    limite = max(1, min(int(limite), 50))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.numero, p.pedido_externo_id, p.estado,
+                       p.valor_total, p.moneda, p.created_at
+                  FROM pedidos_tienda p
+                  JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                 WHERE p.plataforma = 'shopify'
+                   AND t.plataforma = 'shopify'
+                   AND t.activa = TRUE
+                   AND LOWER(t.dominio) = %s
+                   AND UPPER(t.cliente_id) = %s
+                   AND UPPER(p.cliente_id) = %s
+                 ORDER BY p.id DESC
+                 LIMIT %s
+                """,
+                (dominio, cliente_id, cliente_id, limite),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
 def listar_pedidos_tiendanube_seleccionados(
     cliente_id: str,
     store_id: str,

@@ -1233,9 +1233,8 @@ def test_callback_sin_cookie_state_rechaza_antes_del_canje(monkeypatch):
 
 def test_abrir_app_instalada_no_consume_admin_api(monkeypatch):
     from endpoints import shopify
-    from servicios import auth, shopify_app
+    from servicios import shopify_app
 
-    panel = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
     monkeypatch.setattr(shopify_app, "instalacion", lambda _dominio: {
         "access_token": "token-qa",
@@ -1250,101 +1249,42 @@ def test_abrir_app_instalada_no_consume_admin_api(monkeypatch):
         shopify, "registrar_webhooks",
         lambda *_args: (_ for _ in ()).throw(AssertionError("no debe llamar Shopify")),
     )
-    monkeypatch.setattr(auth, "validar_token", lambda _token: "MELCIOR")
-    monkeypatch.setattr(
-        shopify, "_panel_tienda",
-        lambda dominio, instalacion, cliente: panel.append(
-            (dominio, instalacion, cliente),
-        ) or "panel-local",
-    )
+    monkeypatch.setattr(shopify, "url_admin_app", lambda _shop: "https://admin.shopify.com/store/tauro-qa/apps/client-publico")
 
     response = shopify.install(_Request(
         query_params={"shop": "tauro-qa.myshopify.com"},
-        cookies={"token": "sesion-tauro"},
     ), shop="tauro-qa.myshopify.com")
 
-    assert response == "panel-local"
-    assert panel[0][0] == "tauro-qa.myshopify.com"
-    assert panel[0][2] == "MELCIOR"
+    assert response.status_code == 303
+    assert response.headers["location"] == "https://admin.shopify.com/store/tauro-qa/apps/client-publico"
 
 
-@pytest.mark.parametrize("cliente_sesion", ["", "OTRO_CLIENTE"])
-def test_panel_shopify_no_expone_estadisticas_sin_sesion_tauro_coincidente(
-    monkeypatch, cliente_sesion,
-):
+def test_app_home_embebida_no_consulta_datos_sin_session_token(monkeypatch):
     from endpoints import shopify
-    from servicios import catalogo, integraciones_tienda
+    from servicios import integraciones_tienda
 
     consultas = []
     monkeypatch.setattr(
-        integraciones_tienda, "contar_pendientes",
-        lambda cliente: consultas.append(("pendientes", cliente)) or 987654,
-    )
-    monkeypatch.setattr(
-        catalogo, "estado_sincronizacion_cliente",
-        lambda cliente: consultas.append(("sync", cliente)) or {"estado": "OK"},
-    )
-    monkeypatch.setattr(
-        catalogo, "resumen_stock_cliente",
-        lambda cliente: consultas.append(("stock", cliente)) or {
-            "variantes": 876543,
-            "unidades_disponibles": 765432,
-        },
+        integraciones_tienda,
+        "listar_resumen_pedidos_shopify_embebido",
+        lambda *_args: consultas.append(True),
     )
 
-    response = shopify._panel_tienda(
-        "tienda-privada.myshopify.com",
-        {"cliente_id": "MELCIOR"},
-        cliente_sesion,
-    )
-    html = response.body.decode("utf-8")
+    response = shopify.app_home_data(_Request())
 
     assert consultas == []
-    assert "987654" not in html
-    assert "876543" not in html
-    assert "765432" not in html
-    assert "tienda-privada.myshopify.com" not in html
-    assert "MELCIOR" not in html
-    assert "Iniciar sesión" in html
-    assert "app-bridge" not in html.lower()
-    assert response.headers["content-security-policy"] == "frame-ancestors 'none';"
-    assert response.headers["x-frame-options"] == "DENY"
+    assert response.status_code == 401
 
 
-def test_panel_shopify_muestra_estadisticas_solo_a_su_cuenta_tauro(monkeypatch):
-    from endpoints import shopify
-    from servicios import catalogo, integraciones_tienda
-
-    monkeypatch.setattr(integraciones_tienda, "contar_pendientes", lambda _cliente: 7)
-    monkeypatch.setattr(
-        catalogo, "estado_sincronizacion_cliente", lambda _cliente: {"estado": "OK"},
-    )
-    monkeypatch.setattr(
-        catalogo, "resumen_stock_cliente",
-        lambda _cliente: {"variantes": 11, "unidades_disponibles": 29},
-    )
-
-    response = shopify._panel_tienda(
-        "tauro-qa.myshopify.com",
-        {"cliente_id": "MELCIOR"},
-        "melcior",
-    )
-    html = response.body.decode("utf-8")
-
-    assert "Tenés <b>7 ventas</b>" in html
-    assert "tauro-qa.myshopify.com" in html
-    assert "Iniciar sesión" not in html
-
-
-def test_app_externa_sin_shop_no_carga_app_bridge_ni_iframe(monkeypatch):
+def test_app_home_sin_contexto_shopify_rechaza_y_no_carga_app_bridge(monkeypatch):
     from endpoints import shopify
 
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
 
-    response = shopify.install(_Request(query_params={}), shop="")
+    response = shopify.app_home(_Request(query_params={}), shop="", host="")
     html = response.body.decode("utf-8")
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert "app-bridge" not in html.lower()
     assert response.headers["content-security-policy"] == "frame-ancestors 'none';"
     assert response.headers["x-frame-options"] == "DENY"
@@ -1362,7 +1302,7 @@ def test_abrir_instalacion_legada_fuerza_oauth_publico(monkeypatch):
         "cliente_id": "PESCAJACKS",
         "app_client_id": None,
     })
-    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio: ("oauth", dominio))
+    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio, host="": ("oauth", dominio))
 
     response = shopify.install(_Request(
         query_params={"shop": "pesca-jacks.myshopify.com"},
@@ -1380,7 +1320,7 @@ def test_reautorizar_inicia_oauth_sin_consultar_admin_api(monkeypatch):
         shopify_app, "instalacion",
         lambda *_args: (_ for _ in ()).throw(AssertionError("no debe leer instalación")),
     )
-    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio: ("oauth", dominio))
+    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio, host="": ("oauth", dominio))
 
     response = shopify.install(_Request(
         query_params={
@@ -1405,7 +1345,7 @@ def test_abrir_instalacion_publica_no_rotativa_fuerza_oauth(monkeypatch):
         "app_client_id": "client-publico",
         "token_rotativo": False,
     })
-    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio: ("oauth", dominio))
+    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio, host="": ("oauth", dominio))
 
     response = shopify.install(_Request(
         query_params={"shop": "tauro-qa.myshopify.com"},
@@ -1427,7 +1367,7 @@ def test_abrir_instalacion_pendiente_reinicia_oauth_con_state(monkeypatch):
         "token_rotativo": True,
         "webhooks_ready": False,
     })
-    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio: ("oauth", dominio))
+    monkeypatch.setattr(shopify, "_redirect_oauth", lambda dominio, host="": ("oauth", dominio))
 
     response = shopify.install(_Request(
         query_params={"shop": "tauro-qa.myshopify.com"},
@@ -1443,6 +1383,8 @@ def test_callback_con_state_verificado_puede_autovincular(monkeypatch):
     promociones = []
     confirmaciones = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "verificar_estado_oauth", lambda *_args: {"host": ""})
+    monkeypatch.setattr(shopify, "url_admin_app", lambda _shop: "https://admin.shopify.com/store/tauro-qa/apps/client-publico")
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
         "access_token": "token-qa",
@@ -1476,7 +1418,7 @@ def test_callback_con_state_verificado_puede_autovincular(monkeypatch):
     ))
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/shopify/install?shop=tauro-qa.myshopify.com"
+    assert response.headers["location"] == "https://admin.shopify.com/store/tauro-qa/apps/client-publico"
     assert promociones[0][1]["cliente_claim"] == "MELCIOR"
     assert promociones[0][1]["refresh_token"] == "refresh-qa"
     assert promociones[0][1]["expires_in"] == 3600
@@ -1492,6 +1434,7 @@ def test_callback_no_habilita_si_la_generacion_fue_reemplazada(monkeypatch):
 
     sincronizaciones = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "verificar_estado_oauth", lambda *_args: {"host": ""})
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
         "access_token": "token-qa",
@@ -1527,6 +1470,7 @@ def test_callback_rechaza_scopes_incompletos_sin_guardar(monkeypatch):
 
     guardadas = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "verificar_estado_oauth", lambda *_args: {"host": ""})
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
         "access_token": "token-qa", "scope": "read_orders",
@@ -1553,6 +1497,7 @@ def test_callback_no_declara_exito_si_falta_un_webhook(monkeypatch):
     desvinculadas = []
     guardadas = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "verificar_estado_oauth", lambda *_args: {"host": ""})
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
         "access_token": "token-qa",
@@ -1593,6 +1538,7 @@ def test_callback_timeout_verificando_webhooks_no_borra_instalacion(monkeypatch)
     borradas = []
     guardadas = []
     monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "verificar_estado_oauth", lambda *_args: {"host": ""})
     monkeypatch.setattr(shopify, "validar_hmac_query", lambda _params: True)
     monkeypatch.setattr(shopify, "canjear_token", lambda *_args: {
         "access_token": "token-qa",

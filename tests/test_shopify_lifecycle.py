@@ -391,17 +391,16 @@ def test_shopify_manual_se_rechaza_sin_escribir(monkeypatch):
     assert escrituras == []
 
 
-def test_panel_privado_no_es_cacheable():
+def test_app_home_embebida_no_es_cacheable(monkeypatch):
     from endpoints import shopify
 
-    respuesta = shopify._panel_tienda(
-        DOMINIO,
-        {"cliente_id": ""},
-        "",
-    )
+    monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "api_key_publica", lambda: "client-publico")
+    request = type("RequestStub", (), {"state": None})()
+    respuesta = shopify.app_home(request, shop=DOMINIO)
     assert respuesta.headers["cache-control"] == "private, no-store"
     assert respuesta.headers["pragma"] == "no-cache"
-    assert respuesta.headers["vary"] == "Cookie"
+    assert "x-frame-options" not in respuesta.headers
 
 
 def test_oauth_sin_state_nace_ownerless_y_desactiva_binding_anterior(monkeypatch):

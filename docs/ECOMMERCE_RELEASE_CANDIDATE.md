@@ -20,7 +20,13 @@ se modifica por preparar este candidato.
 
 ## Shopify v1
 
-- App pública externa y no embebida.
+- App pública embebida con App Home real en Shopify Admin.
+- App Bridge se carga desde el CDN oficial antes de cualquier otro script; las
+  lecturas del backend exigen ID/session token y no dependen de cookies de
+  terceros.
+- El backend valida firma HS256, `aud`, `iss`, `dest`, `exp` y `nbf`, y mapea
+  el dominio a la instalación pública exacta antes de mostrar estado o pedidos.
+- La UI embebida limita los pedidos a esa tienda y no expone PII innecesaria.
 - Importa pedidos y catálogo; el cliente prepara la guía en TAURO.
 - Publica fulfillment y tracking sólo cuando existe un único fulfillment order
   elegible. Multiubicación queda en revisión manual.
@@ -49,6 +55,8 @@ se modifica por preparar este candidato.
 
 - Confirmar manifiesto en Dev Dashboard.
 - Instalar en una development store limpia.
+- Verificar App Home embebida, CSP por tienda, rechazo de ID tokens inválidos y
+  retorno seguro a Admin después de OAuth/reinstalación.
 - UAT: OAuth → pedido → portal → solicitud → guía de prueba → fulfillment y
   tracking; repetir webhook y simular timeout sin duplicar fulfillment.
 - Confirmar que la app sea `Free to install` y que el flete se facture por
