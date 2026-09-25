@@ -102,7 +102,7 @@
 
     <form method="POST" action="/portal/clientes" class="form">
         <input type="hidden" name="direccion_id" id="client-id" value="">
-        <div class="form-grid-2"><div class="form-group"><label for="client-type">Tipo de contacto</label><select name="tipo" id="client-type"><option value="DESTINATARIO">Destinatario</option><option value="REMITENTE">Remitente</option></select></div><div class="form-group"><label for="client-country">País *</label><select name="pais" id="client-country" data-searchable data-search-placeholder="Buscar país" required>{% for iso,nombre in paises %}<option value="{{iso}}" {% if iso=='AR' %}selected{% endif %}>{{nombre}} ({{iso}})</option>{% endfor %}</select></div></div>
+        <div class="form-grid-2"><div class="form-group"><label for="client-type">Tipo de contacto</label><select name="tipo" id="client-type"><option value="DESTINATARIO">Destinatario</option><option value="REMITENTE">Remitente</option></select></div><div class="form-group"><label for="client-country">País *</label><select name="pais" id="client-country" data-searchable data-search-placeholder="Buscar país" required>{% for iso,nombre in paises %}<option value="{{iso}}" {% if iso=='AR' %}selected{% endif %}>{{nombre}}{% if iso != 'FK' %} ({{iso}}){% endif %}</option>{% endfor %}</select></div></div>
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="client-alias">Alias interno</label>

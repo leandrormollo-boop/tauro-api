@@ -207,7 +207,7 @@
                 <label for="dir-pais">País</label>
                 <select name="pais" id="dir-pais" data-searchable required>
                     {% for cod, nombre in paises %}
-                        <option value="{{ cod }}" {% if cod == 'AR' %}selected{% endif %}>{{ nombre }} ({{ cod }})</option>
+                        <option value="{{ cod }}" {% if cod == 'AR' %}selected{% endif %}>{{ nombre }}{% if cod != 'FK' %} ({{ cod }}){% endif %}</option>
                     {% endfor %}
                 </select>
             </div>
