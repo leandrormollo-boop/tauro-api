@@ -33,7 +33,7 @@ def test_preflight_no_expone_valores_de_secretos(monkeypatch, tmp_path):
     assert next(c for c in result["checks"] if c["code"] == "oauth_credentials")["ok"]
 
 
-def test_preflight_bloquea_oca_quote_only_aunque_qa_este_aprobado(tmp_path):
+def test_preflight_bloquea_oca_sin_habilitacion_emision_aunque_cotizacion_qa_aprobada(tmp_path):
     bundle = tmp_path / "tiendanube_nube_app" / "dist" / "main.min.js"
     bundle.parent.mkdir(parents=True)
     bundle.write_text("export{}", encoding="utf-8")
@@ -87,7 +87,8 @@ def test_preflight_bloquea_oca_quote_only_aunque_qa_este_aprobado(tmp_path):
 
     assert result["ready_for_release"] is False
     assert result["blockers"] == [
-        "national_fulfillment_capabilities",
+        "national_adapter_credentials",
+        "oca_fulfillment_ready",
         "labels_callback_contract",
         "labels_worker",
     ]
