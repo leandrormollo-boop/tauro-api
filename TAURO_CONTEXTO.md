@@ -1,6 +1,6 @@
 # TAURO — CONTEXTO COMPLETO DEL SISTEMA
 
-Última revisión documental: 18 de septiembre de 2026.
+Última revisión documental: 25 de septiembre de 2026.
 
 ## 0. Alcance y fuente de verdad de este documento
 
@@ -41,6 +41,7 @@ La definición estructural canónica es `sql/schema.sql`. Los servicios son la f
 - `web/`: fuentes React de la web pública y estilos.
 - `tests/`: pruebas unitarias, de integración y de contrato; incluye pruebas contra PostgreSQL temporal.
 - `docs/`: arquitectura, operación, seguridad, integraciones y procedimientos.
+- `shopify_app/`: manifiesto Shopify CLI, pruebas de configuración y gate del piloto.
 - `tiendanube_nube_app/`: paquete auxiliar de la aplicación Tiendanube.
 
 ### Superficies
@@ -291,7 +292,7 @@ Saldo consolidado = suma de cargos ACTIVO + suma de ajustes APLICADO − suma de
 - UPS: cliente y adapter parcial existen, con pruebas de emisión, pero el catálogo la declara pendiente. Faltan credenciales productivas, UAT y habilitación; no ofrece pickup en el contrato actual.
 - Andreani: contrato nacional previsto para cotizar, emitir, etiqueta y tracking, pero no hay adapter operativo. Faltan API key, contrato, sucursales/operativas, payloads reales y homologación.
 - OCA: el adapter e-Pak implementa localmente cotización, creación, descarga/validación de etiqueta PDF, cancelación, tracking y descubrimiento explícito de centros de costo. La operativa normal y la de devolución separan operativa, centro y confirmación de seguro. Cotización y ejecución tienen gates independientes y permanecen apagadas por defecto. Faltan credenciales y datos contractuales cargados por canal seguro, UAT QA y aprobación productiva; por eso no debe anunciarse como operativa todavía.
-- Shopify: app pública ampliamente implementada: OAuth, tokens cifrados/refresh, carrier rates, webhooks de pedidos/productos/inventario, espejo de catálogo/stock, lifecycle, desinstalación y GDPR. Hay pruebas y documentación de publicación. Para cada instalación real faltan credenciales/app listing, scopes, webhooks verificados y homologación/App Store; la disponibilidad productiva depende del entorno y configuración, no sólo del código.
+- Shopify: app pública externa implementada para OAuth, tokens cifrados/refresh, webhooks de pedidos/productos/inventario, espejo de catálogo/stock, lifecycle, desinstalación, GDPR y fulfillment/tracking. La v1 pública no pide `write_shipping`, no instala CarrierService y no cotiza en checkout: el comercio conserva sus tarifas Shopify y TAURO factura el flete por fuera. El módulo histórico de tarifas calculadas queda fuera del manifiesto y del piloto. Para cada instalación real faltan credenciales controladas, confirmación del Dev Dashboard, development store activa, UAT punta a punta y revisión del App Store.
 - Tiendanube: OAuth/lifecycle, webhooks, privacidad, carrier rates y Labels API están implementados localmente. Cada tarifa aceptada se congela sin PII; la generación usa outbox y checkpoints `CREATE_SHIPMENT → FETCH_LABEL → PUBLISH → DONE`; el PDF queda detrás de un token revocable; y la cancelación sólo aprueba si OCA confirma `CANCELADO`, dejando resultados inciertos en revisión manual. Todo falla cerrado y sigue apagado. El esquema completo y la migración de claims legacy fueron validados de forma repetible en PostgreSQL 18 aislado; falta aplicarlos en staging/base objetivo, además de credenciales, registro de app, UAT OCA y homologación punta a punta con tienda demo.
 
 ## 9. Rutas HTTP

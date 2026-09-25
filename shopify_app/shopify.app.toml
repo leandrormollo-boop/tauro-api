@@ -1,0 +1,35 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "c8357c0bfb8cdd371729d8bc321a6bd6"
+name = "TAURO Solutions"
+application_url = "https://taurosolutions.ar/shopify/install"
+embedded = false
+# La v1 no incluye App Home, Functions ni extensiones de checkout. Toda la
+# experiencia operativa vive en el backend externo de TAURO.
+extension_directories = []
+web_directories = []
+
+[build]
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-07"
+
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/data_request"]
+uri = "https://taurosolutions.ar/shopify/webhook/customers/data_request"
+
+[[webhooks.subscriptions]]
+compliance_topics = ["customers/redact"]
+uri = "https://taurosolutions.ar/shopify/webhook/customers/redact"
+
+[[webhooks.subscriptions]]
+compliance_topics = ["shop/redact"]
+uri = "https://taurosolutions.ar/shopify/webhook/shop/redact"
+
+[access_scopes]
+scopes = "read_orders,read_products,read_inventory,read_locations,write_merchant_managed_fulfillment_orders"
+use_legacy_install_flow = true
+
+[auth]
+redirect_urls = ["https://taurosolutions.ar/shopify/callback"]

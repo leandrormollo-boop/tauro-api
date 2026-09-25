@@ -1,0 +1,70 @@
+# Release candidate e-commerce: Shopify + Tiendanube
+
+Fecha de corte local: 2026-09-25.
+
+Este documento distingue **código listo para UAT** de **integración habilitada
+en producción**. Ningún flag productivo, cuenta externa, app listing o tienda
+se modifica por preparar este candidato.
+
+## Núcleo compartido
+
+- Pedidos normalizados e idempotentes por plataforma, tienda e ID externo.
+- Conversión durable pedido → solicitud TAURO, sin emitir una guía sola.
+- Salidas durables para fulfillment/tracking con reintentos, conciliación y
+  revisión manual ante resultados ambiguos.
+- Cancelaciones recibidas desde la tienda: sólo se resuelven localmente cuando
+  todavía no existe ejecución logística; luego de emitir o ante ambigüedad se
+  bloquea la automatización y se deriva a revisión manual.
+- Secretos fuera del repositorio, webhooks firmados, privacidad y aislamiento
+  por cliente.
+
+## Shopify v1
+
+- App pública externa y no embebida.
+- Importa pedidos y catálogo; el cliente prepara la guía en TAURO.
+- Publica fulfillment y tracking sólo cuando existe un único fulfillment order
+  elegible. Multiubicación queda en revisión manual.
+- No cotiza en checkout, no pide `write_shipping` y no usa CarrierService.
+- Manifiesto y checks locales: `shopify_app/`.
+
+## Tiendanube v1
+
+- OAuth y webhooks operativos registrados por API.
+- Webhooks de privacidad configurados por Partners en rutas separadas.
+- Shipping API nacional con snapshots de cotización sin PII.
+- Labels/OCA con claims, outbox, checkpoints, PDF protegido y cancelación
+  fail-closed.
+- Todos los gates permanecen apagados hasta tener credenciales y evidencia UAT.
+
+## Gates antes de activar
+
+### Comunes
+
+- Aplicar `sql/schema.sql` en staging con backup y verificar una segunda
+  aplicación idempotente.
+- Completar pruebas de reinicio, replay, timeout y conciliación manual.
+- Verificar métricas/alertas de outbox y procedimientos de soporte.
+
+### Shopify
+
+- Confirmar manifiesto en Dev Dashboard.
+- Instalar en una development store limpia.
+- UAT: OAuth → pedido → portal → solicitud → guía de prueba → fulfillment y
+  tracking; repetir webhook y simular timeout sin duplicar fulfillment.
+- Confirmar que la app sea `Free to install` y que el flete se facture por
+  fuera de Shopify antes de enviar a revisión.
+
+### Tiendanube + OCA
+
+- Configurar en secreto credenciales y datos contractuales OCA propios.
+- Aprobar Shipping/Labels y configurar las tres URLs de privacidad en Partners.
+- UAT: tarifa → pedido → aceptación → guía → PDF → tracking → cancelación.
+- Recién con evidencia habilitar, en orden, gates de privacidad, Shipping,
+  homologación, OCA QA/producción y worker de Labels.
+
+## Fuera de alcance de este candidato
+
+- Alta o publicación de las apps en los marketplaces.
+- Deploy de producción.
+- CarrierService/tarifas de checkout en Shopify.
+- Adapters neutrales completos de Andreani, Correo Argentino, DHL y FedEx.
