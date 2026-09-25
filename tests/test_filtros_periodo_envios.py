@@ -198,7 +198,7 @@ def test_portal_y_admin_comparten_los_tres_filtros_y_resumen():
     assert "requestSubmit()" in portal_js and "requestSubmit()" in admin_html
     assert "Todos los años" in portal_html and "Todos los meses" in portal_html
     assert "Guías emitidas" in portal_html
-    assert "Envíos vigentes" in admin_html
+    assert "cargos vigentes" in admin_html
     assert "fecha >= %s AND fecha < %s" in admin_py
     assert "idx_envios_cliente_fecha" in schema
     assert "fecha_operacion" in solicitudes
