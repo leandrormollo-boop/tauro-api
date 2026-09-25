@@ -61,13 +61,20 @@ se modifica por preparar este candidato.
   retorno seguro a Admin después de OAuth/reinstalación.
 - UAT: OAuth → pedido → portal → solicitud → guía de prueba → fulfillment y
   tracking; repetir webhook y simular timeout sin duplicar fulfillment.
-- Confirmar que la app sea `Free to install` y que el flete se facture por
-  fuera de Shopify antes de enviar a revisión.
+- Obtener aprobación Level 2 para protected customer data.
+- Obtener confirmación escrita de que el flete físico puede facturarse fuera
+  de Shopify; si no, implementar App Pricing/Billing antes de la revisión.
+- Preparar tienda demo activa, screencast en inglés/subtitulado, instrucciones
+  del revisor y evidencia de los webhooks de compliance.
 
 ### Tiendanube + OCA
 
 - Configurar en secreto credenciales y datos contractuales OCA propios.
-- Aprobar Shipping/Labels y configurar las tres URLs de privacidad en Partners.
+- Completar App Partner/formulario del Platform Team, aprobar Shipping/Labels y
+  confirmar que la tienda demo tenga un plan elegible para Labels.
+- Cargar el bundle NubeSDK marcando su uso y registrar DevTools, video y
+  evidencias de homologación.
+- Configurar las tres URLs de privacidad en Partners.
 - UAT: tarifa → pedido → aceptación → guía → PDF → tracking → cancelación.
 - Recién con evidencia habilitar, en orden, gates de privacidad, Shipping,
   homologación, OCA QA/producción y worker de Labels.

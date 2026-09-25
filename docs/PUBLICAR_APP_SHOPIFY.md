@@ -54,7 +54,8 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
   Shopify con el tracking y se avisa al comprador.
 - Admin API exclusivamente por GraphQL 2026-07 (identidad de la tienda,
   suscripción de webhooks, catálogo, inventario y fulfillment/tracking). El
-  helper REST y el CarrierService retirado fueron eliminados del código.
+  helper REST y CarrierService están retirados de la superficie pública: no
+  tienen ruta montada, scope ni declaración en el manifiesto v1.
 - Páginas legales YA servidas: taurosolutions.ar/privacidad y /terminos.
 
 > **Importante — NO es del checkout:** la app ya **no cotiza en el checkout**
@@ -95,6 +96,9 @@ CLI ni se cambió configuración remota al preparar este candidato.
   - customers/data_request → `https://taurosolutions.ar/shopify/webhook/customers/data_request`
   - customers/redact → `https://taurosolutions.ar/shopify/webhook/customers/redact`
   - shop/redact → `https://taurosolutions.ar/shopify/webhook/shop/redact`
+- **Protected customer data:** solicitar y obtener aprobación Level 2 para los
+  campos de pedidos que TAURO necesita operar (destinatario, domicilio, email y
+  teléfono). El código local no reemplaza esa aprobación del Dev Dashboard.
 
 ### 3. Distribution → Public distribution — ficha del listing
 
@@ -131,15 +135,18 @@ Recién ahí, **Submit**.
 > que Shopify reactive la tienda y se complete el consentimiento OAuth nuevo.
 
 ### 5. Facturación
-Free to install, flete cobrado por fuera de Shopify → no se usa la Billing API.
-En la ficha y en las notas de revisión debe quedar claro que la app es gratuita
-y que TAURO factura un servicio logístico real, no una función digital ni una
-suscripción de la app. Confirmar esta clasificación con Shopify durante la
-revisión; no presentar una excepción como aprobada antes de que la validen.
+La intención comercial es **Free to install** y cobrar por fuera un servicio
+logístico real. Antes de presentar la app hay que obtener confirmación escrita
+de Shopify de que ese flete no constituye un cargo de la app. Si Shopify no lo
+confirma, se debe implementar Shopify App Pricing/Billing para cualquier cargo
+alcanzado por su política. No enviar la ficha suponiendo que la excepción ya
+está aprobada.
 
 ### 6. Revisión
-Enviar la ficha sólo después de la prueba completa en una tienda activa y
-responder dentro del mismo hilo si Shopify pide evidencia o cambios.
+Enviar la ficha sólo después de la prueba completa en una tienda activa. Dejar
+preparados un screencast en inglés o subtitulado, credenciales/instrucciones del
+revisor y evidencia HTTPS de los tres webhooks de compliance. Responder dentro
+del mismo hilo si Shopify pide evidencia o cambios.
 
 ---
 
