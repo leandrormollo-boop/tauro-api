@@ -194,7 +194,7 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     assert 'data-step]:not([data-step="1"]) > details.card' in css
     assert ".main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 0; }" in css
     assert "shipment-step-recipient .form-grid-2" in css
-    assert '/portal/clientes?nuevo=1' in html
+    assert 'href="/portal/clientes" data-agenda-manage' in html
     assert '{% if not remitente %}disabled{% endif %}' not in html
     for campo in ("rem_nombre", "rem_direccion", "rem_ciudad", "rem_zip"):
         assert f'name="{campo}" id="{campo}" required' in html
