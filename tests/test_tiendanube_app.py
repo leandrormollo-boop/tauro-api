@@ -1126,7 +1126,8 @@ def test_marcar_enviado_actualiza_solo_fulfillment_tauro(monkeypatch):
     assert not [call for call in llamadas if call[1].endswith("/fulfill")]
 
 
-def test_marcar_enviado_legacy_usa_endpoint_fulfill(monkeypatch):
+@pytest.mark.parametrize("status", [404, 405])
+def test_marcar_enviado_no_recurre_al_post_legacy(monkeypatch, status):
     from servicios import tiendanube_app, tiendanube_shipping
 
     monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
@@ -1141,16 +1142,94 @@ def test_marcar_enviado_legacy_usa_endpoint_fulfill(monkeypatch):
 
     def api(_store, _token, method, path, payload=None, **_kwargs):
         llamadas.append((method, path, payload))
-        return _Response(404, {}) if method == "GET" else _Response(200, {})
+        return _Response(status, {})
 
     monkeypatch.setattr(tiendanube_app, "_api", api)
 
-    assert tiendanube_app.marcar_enviado("123", "pedido-1", "TRACK-1") is True
-    assert llamadas[-1] == (
-        "POST",
-        "orders/pedido-1/fulfill",
-        {"shipping_tracking_number": "TRACK-1", "notify_customer": True},
-    )
+    assert tiendanube_app.marcar_enviado("123", "pedido-1", "TRACK-1") is False
+    assert llamadas == [(
+        "GET", "orders/pedido-1/fulfillment-orders", None,
+    )]
+
+
+def test_timeout_patch_se_concilia_por_lectura_sin_segunda_escritura(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
+        "access_token": "token",
+        "estado": "ACTIVA",
+        "webhooks_ready": True,
+    })
+    monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda _store: {
+        "carrier_id": "carrier-tauro",
+    })
+    llamadas = []
+    lectura = {"conciliada": False}
+
+    def api(_store, _token, method, path, payload=None, **_kwargs):
+        llamadas.append((method, path, payload))
+        if method == "GET":
+            return _Response(200, [{
+                "id": "ffo-tauro",
+                "status": "DISPATCHED" if lectura["conciliada"] else "PACKED",
+                "tracking_info": (
+                    {"code": "TRACK-1"} if lectura["conciliada"] else {}
+                ),
+                "shipping": {
+                    "type": "ship",
+                    "carrier": {"carrier_id": "carrier-tauro"},
+                    "option": {"code": "tauro_nacional_domicilio"},
+                },
+            }])
+        lectura["conciliada"] = True
+        return None  # timeout ambiguo después de que Tiendanube aplicó PATCH
+
+    monkeypatch.setattr(tiendanube_app, "_api", api)
+
+    assert tiendanube_app.marcar_enviado(
+        "123", "pedido-1", "TRACK-1",
+    ) is False
+    assert tiendanube_app.marcar_enviado(
+        "123", "pedido-1", "TRACK-1", solo_reconciliar=True,
+    ) is True
+    assert len([call for call in llamadas if call[0] == "PATCH"]) == 1
+    assert not [call for call in llamadas if call[1].endswith("/fulfill")]
+
+
+def test_reconciliacion_no_confirmada_es_solo_lectura(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_shipping
+
+    monkeypatch.setattr(tiendanube_app, "instalacion", lambda _store: {
+        "access_token": "token",
+        "estado": "ACTIVA",
+        "webhooks_ready": True,
+    })
+    monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda _store: {
+        "carrier_id": "carrier-tauro",
+    })
+    llamadas = []
+
+    def api(_store, _token, method, path, payload=None, **_kwargs):
+        llamadas.append((method, path, payload))
+        return _Response(200, [{
+            "id": "ffo-tauro",
+            "status": "PACKED",
+            "tracking_info": {},
+            "shipping": {
+                "type": "ship",
+                "carrier": {"carrier_id": "carrier-tauro"},
+                "option": {"code": "tauro_nacional_domicilio"},
+            },
+        }])
+
+    monkeypatch.setattr(tiendanube_app, "_api", api)
+
+    assert tiendanube_app.marcar_enviado(
+        "123", "pedido-1", "TRACK-1", solo_reconciliar=True,
+    ) is False
+    assert llamadas == [(
+        "GET", "orders/pedido-1/fulfillment-orders", None,
+    )]
 
 
 def test_no_hace_fallback_legacy_si_fulfillment_es_de_otro_carrier(monkeypatch):

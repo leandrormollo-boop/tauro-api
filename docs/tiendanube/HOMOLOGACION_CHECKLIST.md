@@ -62,8 +62,8 @@ revisada el 1 de septiembre de 2026.
 - [ ] Redacción y exportación verificadas contra PostgreSQL aislado con fixtures
   de pedido, dirección, envío y recolección reales.
 - [ ] Política de privacidad y términos públicos responden 200 por HTTPS.
-- [x] Tracking usa Fulfillment Orders y sólo actualiza envíos TAURO; conserva
-  fallback V1 controlado.
+- [x] Tracking usa Fulfillment Orders y sólo actualiza envíos TAURO; nunca usa
+  `POST /orders/{id}/fulfill`, que no es reconciliable tras timeout.
 - [x] Existe destino autenticado para admin links individual y masivo:
   `https://taurosolutions.ar/portal/tienda/tiendanube/pedidos`.
 

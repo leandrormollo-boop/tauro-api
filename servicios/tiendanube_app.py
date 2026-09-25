@@ -947,7 +947,8 @@ def fulfillment_orders_tauro(order: dict, carrier_id: str = "") -> list[dict]:
 
 
 def marcar_enviado(store_id: str, pedido_externo_id: str, tracking: str,
-                   url_tracking: str = "") -> bool:
+                   url_tracking: str = "", *,
+                   solo_reconciliar: bool = False) -> bool:
     """
     Cierra el ciclo: el pedido pasa a enviado en Tiendanube y el comprador
     recibe su seguimiento sin que el comerciante toque nada.
@@ -1009,6 +1010,13 @@ def marcar_enviado(store_id: str, pedido_externo_id: str, tracking: str,
                         in {"DISPATCHED", "DELIVERED"}
                     ):
                         continue
+                    # Después de un timeout post-write este ciclo es sólo de
+                    # lectura. Si Tiendanube aún no confirma el tracking, el
+                    # outbox pasa a REINTENTAR y recién otro ciclo puede hacer
+                    # un PATCH nuevo; así se evita una repetición inmediata
+                    # sobre una lectura potencialmente no convergida.
+                    if solo_reconciliar:
+                        return False
                     payload = {
                         "status": "DISPATCHED",
                         "tracking_info": {
@@ -1041,32 +1049,13 @@ def marcar_enviado(store_id: str, pedido_externo_id: str, tracking: str,
         )
         return False
 
-    if listado is None or listado.status_code not in (404, 405):
-        return False
-
-    # Compatibilidad con tiendas que todavía exponen únicamente el contrato
-    # de Order V1. Nunca se usa PUT /orders: el endpoint de fulfill es el que
-    # dispara la notificación de tracking al comprador.
-    legacy_payload = {
-        "shipping_tracking_number": tracking,
-        "notify_customer": True,
-    }
-    if url_tracking:
-        legacy_payload["shipping_tracking_url"] = str(url_tracking).strip()
-    legacy = _api(
-        store_id,
-        inst["access_token"],
-        "POST",
-        f"orders/{pedido_externo_id}/fulfill",
-        legacy_payload,
-    )
-    ok = legacy is not None and legacy.status_code in (200, 201)
-    if not ok:
-        print(
-            f"[tiendanube] no pude marcar enviado {pedido_externo_id}: "
-            f"{legacy.status_code if legacy is not None else 'sin respuesta'}"
-        )
-    return ok
+    # El contrato público del piloto exige write_fulfillment_orders. El POST
+    # legacy /orders/{id}/fulfill no acepta una clave idempotente, actúa sobre
+    # la primera Fulfillment Order y, tras un timeout, no ofrece una lectura
+    # capaz de demostrar si la escritura se aplicó. Repetirlo desde el outbox
+    # podría duplicar la notificación o despachar la FO equivocada. Un 404/405
+    # del recurso moderno queda para retry/revisión manual, nunca para fallback.
+    return False
 
 
 def _registrar_lifecycle(

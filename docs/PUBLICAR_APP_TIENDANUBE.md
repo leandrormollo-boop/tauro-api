@@ -19,7 +19,8 @@ la homologación síncrona de Tiendanube.
 - Contrato fail-closed: sin adapter nacional operativo no se publica tarifa.
 - Soporte de carrito mixto con `price` y `price_merchant` separados.
 - Extensión NubeSDK aislada, sin DOM, en `tiendanube_nube_app/`.
-- Fulfillment Orders para despacho/tracking, con fallback legacy acotado.
+- Fulfillment Orders para despacho/tracking, sin fallback de escritura legacy:
+  un timeout se reconcilia leyendo la FO concreta antes de otro PATCH.
 - Labels API con secretos separados, validación, idempotencia y outbox; la
   ejecución OCA permanece bloqueada y no responde una aceptación falsa.
 - Webhooks de privacidad con tombstones anti-replay y bandeja admin de atención.

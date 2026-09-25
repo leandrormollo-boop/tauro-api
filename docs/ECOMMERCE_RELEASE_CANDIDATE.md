@@ -40,6 +40,8 @@ se modifica por preparar este candidato.
 - Shipping API nacional con snapshots de cotización sin PII.
 - Labels/OCA con claims, outbox, checkpoints, PDF protegido y cancelación
   fail-closed.
+- Tracking exclusivamente por Fulfillment Orders. Si una escritura queda
+  ambigua, el siguiente ciclo relee la FO; no existe fallback al POST legacy.
 - Todos los gates permanecen apagados hasta tener credenciales y evidencia UAT.
 
 ## Gates antes de activar

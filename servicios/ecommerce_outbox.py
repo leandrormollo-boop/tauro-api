@@ -451,6 +451,7 @@ def _ejecutar_fulfillment_bajo_lock(job: dict) -> str:
             store_id = str(job["dominio"]).replace(".tiendanube", "")
             if marcar_enviado(
                 store_id, job["pedido_externo_id"], job["tracking"],
+                solo_reconciliar=(previo in {"RECONCILIAR", "PROCESANDO"}),
             ):
                 return "COMPLETADO"
             return (
