@@ -26,6 +26,17 @@ def test_no_elige_una_localidad_arbitraria_ni_un_postal_parcial():
     assert buscar_ubicaciones('AR', 'La Plata', province='B')['automatic']['postal_code'] == '1900'
 
 
+def test_wilde_en_ambos_sentidos_y_prefijos_solo_sugieren():
+    for query, mode in [('Wilde', 'city'), ('1875', 'postal'), ('B1875ABC', 'postal')]:
+        option = buscar_ubicaciones('AR', query, mode)['automatic']
+        assert (option['city'], option['postal_code'], option['province']) == ('Wilde', '1875', 'B')
+    assert buscar_ubicaciones('AR', 'Wil')['automatic'] is None
+    assert buscar_ubicaciones('AR', '187', 'postal')['automatic'] is None
+    assert buscar_ubicaciones('AR', 'Wilde inexistente')['automatic'] is None
+    # The exact reference ranks above a different city with a shared prefix.
+    assert buscar_ubicaciones('AR', 'Wilde')['suggestions'][0]['city'] == 'Wilde'
+
+
 def test_normaliza_pais_acentos_y_cpa_sin_inventar():
     assert buscar_ubicaciones('Argentina','Córdoba',province='X')['automatic']['postal_code'] == '5000'
     assert buscar_ubicaciones('AR','C1000AAA','postal')['automatic']['city'] == 'Buenos Aires'

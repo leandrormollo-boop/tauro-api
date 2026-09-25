@@ -218,6 +218,8 @@ ALTER TABLE IF EXISTS direcciones
     ADD COLUMN IF NOT EXISTS origen_dominio TEXT;
 ALTER TABLE IF EXISTS direcciones
     ADD COLUMN IF NOT EXISTS origen_pedido_externo_id TEXT;
+ALTER TABLE IF EXISTS direcciones
+    ADD COLUMN IF NOT EXISTS datos_nacionales JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS idx_direcciones_cliente_tipo
     ON direcciones(cliente_id, tipo, predeterminada DESC, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_direcciones_origen_tienda

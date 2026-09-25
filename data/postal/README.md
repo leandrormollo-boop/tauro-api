@@ -17,3 +17,7 @@ python scripts/build_postal_index.py /ruta/allCountries.zip
 ```
 
 Revisar los cambios de cobertura y los tests antes de publicar. La aplicación no descarga datos en ejecución: descomprime el índice una vez por proceso en un directorio temporal privado y usa SQLite de solo lectura, con índices por país/ciudad y país/CP. El navegador recibe hasta ocho sugerencias, nunca esta base completa.
+
+## Referencias verificadas adicionales
+
+`ar-references.json` incorpora localidades ausentes del dump, con fuente y fecha de verificación. Participan en la misma regla de coincidencia exacta y no eliminan ambigüedades del índice. Wilde / Buenos Aires / 1875 se contrastó con la [tabla de localidades de UPS](https://www.ups.com/assets/resources/webcontent/nl_NL/ApprovedCountryListLimitedServiceAreaTable.pdf) y el ejemplo solicitado por TAURO. Una referencia postal no implica que UPS u otro operador cubra esa ruta. La base general sigue teniendo cobertura parcial; cuando no hay coincidencias puede completarse manualmente.

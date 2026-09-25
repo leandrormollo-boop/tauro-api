@@ -22,7 +22,7 @@ from decimal import Decimal
 from urllib.parse import quote, urlencode, urlparse
 
 from core.database import get_conn
-from typing import Optional
+from typing import Optional, Annotated
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
@@ -2457,6 +2457,7 @@ def envio_nuevo_form(
     request: Request,
     pedido_tienda: Optional[int] = None,
     destinatario_id: Optional[int] = None,
+    remitente_id: Optional[int] = None,
     origen: str = "",
     destino: str = "",
     ambito: str = "",
@@ -2491,7 +2492,7 @@ def envio_nuevo_form(
         "valor_cotizado": valor_cotizado,
     }
     if ambito == "nacional":
-        return RedirectResponse("/portal/oca/nuevo", status_code=303)
+        return RedirectResponse("/portal/oca/nuevo" + (f"?destinatario_id={destinatario_id}" if destinatario_id else ""), status_code=303)
     if not ambito:
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
@@ -2690,6 +2691,17 @@ def envio_nuevo_form(
     if courier in {"dhl", "fedex", "ups"}:
         form["intl_courier"] = courier
     remitente = obtener_remitente_para_envio(cliente)
+    if remitente_id and not (pedido_tienda or corregir or repetir or quote_id):
+        saved = obtener_direccion(cliente, remitente_id, TIPO_REMITENTE)
+        if saved:
+            remitente = saved
+            form["remitente_id"] = str(saved["id"])
+            for key, source in [("nombre","nombre"),("documento","documento"),("email","email"),
+                                ("telefono","telefono"),("direccion","direccion"),("ciudad","ciudad"),
+                                ("estado","estado"),("zip","cp"),("pais","pais")]:
+                form["rem_"+key] = saved.get(source) or ""
+        else:
+            error = "Ese remitente guardado no está disponible en tu cuenta."
     origen_elegido = str(form.get("rem_pais") or "").strip().upper()
     # El domicilio es una unidad: una ruta CN→AR no puede reutilizar sólo
     # calle/ciudad/CP del remitente AR. Se conserva el país cotizado y se
@@ -4116,7 +4128,20 @@ def tienda_sincronizar_catalogo(cliente: str = Depends(cliente_actual)):
     return RedirectResponse(url=f"/portal/tienda?ok={quote(msg)}", status_code=303)
 
 
-# ── Mis clientes (destinatarios frecuentes) ─────────────────
+# ── Mis clientes (agenda privada) ─────────────────
+@router.get("/agenda")
+def agenda_contactos(cliente: str = Depends(cliente_actual)):
+    from servicios.agenda_nacional import proyectar
+    rows = listar_direcciones(cliente)
+    keys = ("id", "label", "tipo", "nombre", "documento", "email", "telefono",
+            "direccion", "ciudad", "estado", "cp", "pais")
+    return JSONResponse({
+        "scope": "portal:" + cliente,
+        "contactos": [{key: row.get(key) or "" for key in keys} for row in rows],
+        "nacionales": [item for row in rows if (item := proyectar(row))],
+    }, headers={"Cache-Control": "private, no-store"})
+
+
 @router.get("/clientes", response_class=HTMLResponse)
 def clientes_view(
     request: Request,
@@ -4124,19 +4149,22 @@ def clientes_view(
     error: Optional[str] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    from servicios.provincias import opciones, nombre_provincia
     paises = _paises_con_nacional()
     flash_ok = None
     if ok == "1":
-        flash_ok = "Cliente guardado en tu base."
+        flash_ok = "Contacto guardado en tu agenda."
     elif ok == "2":
-        flash_ok = "Cliente eliminado de tu base."
+        flash_ok = "Contacto eliminado de tu agenda."
     return templates.TemplateResponse(
         request=request, name="portal/clientes.html",
         context={
             "cliente": cliente,
             # listar_direcciones siempre filtra por el cliente de la sesión.
-            "clientes_guardados": listar_direcciones(cliente, TIPO_DESTINATARIO),
+            "clientes_guardados": listar_direcciones(cliente),
             "paises": paises,
+            "provincias": opciones(),
+            "nombre_provincia": nombre_provincia,
             "paises_por_iso": dict(paises),
             "flash_ok": flash_ok,
             "error": error,
@@ -4151,17 +4179,24 @@ def clientes_add(
     documento: str = Form(""),
     email: str = Form(""),
     telefono: str = Form(""),
-    direccion: str = Form(...),
+    direccion: str = Form(""),
     ciudad: str = Form(...),
     estado: str = Form(""),
     cp: str = Form(...),
     pais: str = Form("AR"),
     notas: str = Form(""),
     direccion_id: str = Form(""),
+    tipo: Annotated[str, Form()] = "DESTINATARIO",
+    calle: Annotated[str, Form()] = "",
+    numero: Annotated[str, Form()] = "",
+    piso: Annotated[str, Form()] = "",
+    depto: Annotated[str, Form()] = "",
+    apellido: Annotated[str, Form()] = "",
     cliente: str = Depends(cliente_actual),
 ):
-    # El tipo y el dueño no llegan desde el navegador: esta ruta sólo crea
-    # destinatarios y los asigna a la cuenta autenticada.
+    # El rol se valida, pero el dueño siempre sale de la sesión.
+    if tipo not in {TIPO_REMITENTE, TIPO_DESTINATARIO}:
+        return RedirectResponse("/portal/clientes?error=Elegí+remitente+o+destinatario.", 303)
     pais = (pais or "").strip().upper()
     if pais not in {iso for iso, _nombre in _paises_con_nacional()}:
         return RedirectResponse(
@@ -4170,7 +4205,7 @@ def clientes_add(
         )
     campos = dict(
         cliente_id=cliente,
-        tipo=TIPO_DESTINATARIO,
+        tipo=tipo,
         alias=alias,
         nombre=nombre,
         documento=documento,
@@ -4185,13 +4220,23 @@ def clientes_add(
         notas=notas,
     )
     try:
+        from servicios.agenda_nacional import datos_guardados
+        national, full_address = datos_guardados(nombre=nombre, apellido=apellido, calle=calle,
+            numero=numero, piso=piso, depto=depto, pais=pais, estado=estado, cp=cp)
+        campos["datos_nacionales"] = national
+        if full_address:
+            campos["direccion"] = full_address
+            campos["nombre"] = " ".join(x for x in (nombre.strip(), apellido.strip()) if x)
+        if not all(str(campos[key] or "").strip() for key in ("nombre", "direccion", "ciudad", "cp")):
+            raise ValueError("Completá nombre, dirección, ciudad y código postal.")
         dir_id = _id_opt(direccion_id)
         if dir_id:
-            actual = obtener_direccion(cliente, dir_id, TIPO_DESTINATARIO)
+            actual = obtener_direccion(cliente, dir_id)
             if not actual:
                 raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
+            campos["predeterminada"] = bool(actual.get("predeterminada"))
             if not actualizar_direccion(
-                dir_id, tipo_actual=TIPO_DESTINATARIO, **campos
+                dir_id, tipo_actual=actual["tipo"], **campos
             ):
                 raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
         else:
@@ -4207,10 +4252,10 @@ def clientes_delete(
     cliente: str = Depends(cliente_actual),
 ):
     try:
-        actual = obtener_direccion(cliente, direccion_id, TIPO_DESTINATARIO)
+        actual = obtener_direccion(cliente, direccion_id)
         if not actual:
             raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
-        if not eliminar_direccion(cliente, direccion_id, TIPO_DESTINATARIO):
+        if not eliminar_direccion(cliente, direccion_id, actual["tipo"]):
             raise ValueError("Ese cliente no existe o no pertenece a tu cuenta.")
     except Exception as e:
         return RedirectResponse(url=f"/portal/clientes?error={quote(str(e))}", status_code=303)

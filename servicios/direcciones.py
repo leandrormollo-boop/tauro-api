@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
+from psycopg2.extras import Json
 
 from core.database import get_conn
 
@@ -156,6 +157,7 @@ def crear_direccion(
     pais: str = "AR",
     predeterminada: bool = False,
     notas: str = "",
+    datos_nacionales: Optional[dict] = None,
     origen_plataforma: str = "",
     origen_dominio: str = "",
     origen_pedido_externo_id: str = "",
@@ -199,11 +201,11 @@ def crear_direccion(
                 INSERT INTO direcciones (
                     cliente_id, tipo, alias, nombre, documento, email, telefono,
                     direccion, ciudad, estado, cp, pais, predeterminada, notas,
-                    origen_plataforma, origen_dominio, origen_pedido_externo_id
+                    origen_plataforma, origen_dominio, origen_pedido_externo_id, datos_nacionales
                 )
                 VALUES (
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s
+                    %s, %s, %s, %s
                 )
                 RETURNING *
                 """,
@@ -225,6 +227,7 @@ def crear_direccion(
                     origen_plataforma_norm,
                     origen_dominio_norm,
                     origen_pedido_norm,
+                    Json(datos_nacionales or {}),
                 ),
             )
             return _normalizar_row(cur.fetchone())
@@ -248,6 +251,7 @@ def actualizar_direccion(
     predeterminada: bool = False,
     notas: str = "",
     tipo_actual: Optional[str] = None,
+    datos_nacionales: Optional[dict] = None,
 ) -> Optional[dict]:
     """Actualiza una dirección del cliente. El WHERE por cliente_id garantiza
     que nadie edite direcciones ajenas. Devuelve la fila o None si no existe."""
@@ -264,7 +268,10 @@ def actualizar_direccion(
                 UPDATE direcciones
                 SET tipo=%s, alias=%s, nombre=%s, documento=%s, email=%s,
                     telefono=%s, direccion=%s, ciudad=%s, estado=%s, cp=%s,
-                    pais=%s, predeterminada=%s, notas=%s, updated_at=NOW()
+                    pais=%s, predeterminada=%s, notas=%s,
+                    datos_nacionales=CASE WHEN %s::jsonb IS NOT NULL THEN %s::jsonb
+                        WHEN direccion=%s AND nombre=%s AND pais=%s THEN datos_nacionales
+                        ELSE '{{}}'::jsonb END, updated_at=NOW()
                 WHERE id = %s AND cliente_id = %s{where_tipo_actual}
                 RETURNING *
                 """,
@@ -273,6 +280,9 @@ def actualizar_direccion(
                     _clean(email), _clean(telefono), direccion.strip(),
                     ciudad.strip(), _clean(estado), cp.strip(), pais,
                     bool(predeterminada), _clean(notas),
+                    Json(datos_nacionales) if datos_nacionales is not None else None,
+                    Json(datos_nacionales) if datos_nacionales is not None else None,
+                    direccion.strip(), nombre.strip(), pais,
                     direccion_id, cliente_id,
                 ] + ([tipo_actual] if tipo_actual else [])),
             )

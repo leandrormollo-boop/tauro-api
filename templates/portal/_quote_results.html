@@ -1,4 +1,4 @@
-<div data-quote-response data-scope="{{ ambito }}">
+<div data-quote-response data-scope="{{ ambito }}" data-option-count="{{ opciones|length if opciones else 0 }}">
 {% if error %}<p class="uq-error" role="alert">{{ error }}</p>{% endif %}
 {% if opciones %}
 <div class="uq-result-caption"><span>Tarifas para esta ruta</span><strong>{{ opciones|length }} {{ 'opciones' if opciones|length != 1 else 'opción' }}</strong></div>

@@ -5,6 +5,7 @@
 {% endblock %}
 
 {% block content %}
+<script src="/static/js/portal-agenda.js?v=1" defer></script>
 <link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
 <script src="/static/js/hs-assistant.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
 {% if not ambito %}
@@ -27,7 +28,7 @@
         {% endif %}
         <p>{% if reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
     </div>
-    <a href="/portal/direcciones" class="btn btn-ghost btn-sm">Administrar remitentes</a>
+    <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a>
 </div>
 
 {% if error %}
@@ -142,6 +143,28 @@
                vez, había que ir a la libreta, crearlo y volver. Y como el país
                de ORIGEN del envío sale de acá, tampoco se podía cotizar desde
                otro país sin pasar por la libreta. #}
+                <div class="form-group">
+                    <label for="remitente_id">Remitente guardado · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
+                    <select data-agenda-role="REMITENTE" name="remitente_id" id="remitente_id" data-searchable data-search-placeholder="Buscar nombre, ciudad o país">
+                        <option value="">Cargar remitente nuevo</option>
+                        {% for r in remitentes %}
+                            <option value="{{ r.id }}"
+                                    data-nombre="{{ r.nombre }}"
+                                    data-documento="{{ r.documento or '' }}"
+                                    data-email="{{ r.email or '' }}"
+                                    data-telefono="{{ r.telefono or '' }}"
+                                    data-direccion="{{ r.direccion }}"
+                                    data-ciudad="{{ r.ciudad }}"
+                                    data-estado="{{ r.estado or '' }}"
+                                    data-cp="{{ r.cp }}"
+                                    data-pais="{{ r.pais }}"
+                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada and remitente and not form.rem_nombre) %}selected{% endif %}>
+                                {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
             <details class="remitente-collapsible" {% if not remitente or error %}open{% endif %}>
                 <summary>
                     <span class="remitente-summary-copy">
@@ -161,30 +184,6 @@
             {% if remitente_por_completar|default(false) %}
                 <p class="msg warn" role="status">La ruta empieza en {{ nombre_pais(form.rem_pais) }}. Elegí un remitente de ese país o completá su dirección. Tu domicilio habitual no se copió porque pertenece a otro país.</p>
             {% endif %}
-            {% if remitentes %}
-                <div class="form-group">
-                    <label>Traer de la libreta</label>
-                    <select name="remitente_id" id="remitente_id">
-                        <option value="">Cargar remitente nuevo</option>
-                        {% for r in remitentes %}
-                            <option value="{{ r.id }}"
-                                    data-nombre="{{ r.nombre }}"
-                                    data-documento="{{ r.documento or '' }}"
-                                    data-email="{{ r.email or '' }}"
-                                    data-telefono="{{ r.telefono or '' }}"
-                                    data-direccion="{{ r.direccion }}"
-                                    data-ciudad="{{ r.ciudad }}"
-                                    data-estado="{{ r.estado or '' }}"
-                                    data-cp="{{ r.cp }}"
-                                    data-pais="{{ r.pais }}"
-                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada and remitente and not form.rem_nombre) %}selected{% endif %}>
-                                {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
-                            </option>
-                        {% endfor %}
-                    </select>
-                </div>
-            {% endif %}
-
             {# Empresa Y contacto separados (guía HAILU): los couriers piden
                companyName ("Yiwu Hailu Garment") y personName ("JEFF JANG"). #}
             <div class="form-grid-2">
@@ -252,10 +251,9 @@
         <div class="form-section shipment-step shipment-step-recipient">
             <h4><span class="n">2</span> Destinatario <span class="badge warn">Entrega</span></h4>
 
-            {% if destinatarios %}
                 <div class="form-group">
-                    <label>Elegir de Mis clientes</label>
-                    <select name="destinatario_id" id="destinatario_id" data-searchable
+                    <label for="destinatario_id">Elegir de Mis clientes · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Administrar ↗</a></label>
+                    <select data-agenda-role="DESTINATARIO" name="destinatario_id" id="destinatario_id" data-searchable
                             data-search-placeholder="Buscar cliente, ciudad o país">
                         <option value="">Cargar un destinatario nuevo</option>
                         {% for d in destinatarios %}
@@ -274,14 +272,7 @@
                             </option>
                         {% endfor %}
                     </select>
-                    <p class="field-help">Tu desplegable contiene sólo los clientes guardados en tu cuenta. <a href="/portal/clientes">Administrar Mis clientes →</a></p>
                 </div>
-            {% else %}
-                <div class="saved-client-empty">
-                    <span>No tenés clientes guardados todavía.</span>
-                    <a href="/portal/clientes?nuevo=1">Guardar un cliente habitual →</a>
-                </div>
-            {% endif %}
 
             <div class="form-grid-2">
                 <div class="form-group">
@@ -597,6 +588,7 @@
 <script nonce="{{ request.state.csp_nonce }}">
   const savedSelect = document.getElementById("destinatario_id");
   const fieldMap = {
+    contacto: "dest_contacto",
     nombre: "dest_nombre",
     documento: "dest_documento",
     email: "dest_email",
@@ -638,6 +630,7 @@
       // había forma de arrancar de cero sin recargar la página.
       if (!option || !option.value) {
         Object.values(fieldMap).forEach((inputId) => setField(inputId, ""));
+        setField("destino_pais", "");
         avisoLibreta(savedSelect, "");
         refreshLivePrice();
         return;
@@ -646,8 +639,7 @@
       Object.entries(fieldMap).forEach(([dataKey, inputId]) => setField(inputId, option.dataset[dataKey]));
       setField("destino_pais", option.dataset.pais);
       avisoLibreta(savedSelect,
-                   "✓ Cargado desde Mis clientes. Podés editar cualquier campo: " +
-                   "los cambios valen sólo para este envío.");
+                   "Contacto cargado. Podés editarlo para este envío.");
       // setear .value no dispara "change": recotizamos a mano para que
       // el precio en vivo refleje el nuevo destino al instante.
       refreshLivePrice();
@@ -655,8 +647,7 @@
     });
     if (savedSelect.value) {
       avisoLibreta(savedSelect,
-                   "✓ Cargado desde Mis clientes. Podés editar cualquier campo: " +
-                   "los cambios valen sólo para este envío.");
+                   "Contacto cargado. Podés editarlo para este envío.");
     }
   }
 
@@ -689,6 +680,7 @@
   // sale de acá, cambiarlo recotiza: importar desde China cambia el precio.
   const remSelect = document.getElementById("remitente_id");
   const remFieldMap = {
+    contacto: "rem_contacto",
     nombre: "rem_nombre",
     documento: "rem_documento",
     email: "rem_email",
@@ -723,14 +715,12 @@
       Object.entries(remFieldMap).forEach(([k, id]) => setField(id, option.dataset[k]));
       actualizarResumenRemitente();
       avisoLibreta(remSelect,
-                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
-                   "los cambios valen sólo para este envío.");
+                   "Contacto cargado. Podés editarlo para este envío.");
       if (typeof refreshLivePrice === "function") refreshLivePrice();
     });
     if (remSelect.value) {
       avisoLibreta(remSelect,
-                   "✓ Cargado desde tu libreta. Podés editar cualquier campo: " +
-                   "los cambios valen sólo para este envío.");
+                   "Contacto cargado. Podés editarlo para este envío.");
     }
   }
   Object.values(remFieldMap).concat(["rem_contacto"]).forEach((id) => {

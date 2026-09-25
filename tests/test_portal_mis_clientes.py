@@ -101,7 +101,7 @@ def test_edicion_de_mis_clientes_fuerza_tipo_y_propietario(monkeypatch):
     monkeypatch.setattr(
         pc, "obtener_direccion",
         lambda cliente, did, tipo=None: _destinatario()
-        if (cliente, did, tipo) == ("MELCIOR", 77, dd.TIPO_DESTINATARIO) else None,
+        if (cliente, did) == ("MELCIOR", 77) else None,
     )
 
     def actualizar(did, **campos):

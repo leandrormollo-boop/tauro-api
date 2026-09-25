@@ -1,0 +1,29 @@
+/* Crear envío comparte tipografía, radios y colores del cotizador TAURO. */
+.national-shipment{max-width:850px;margin:0 auto;color:var(--fg)}
+.national-shipment [hidden]{display:none!important}
+.ns-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}
+.ns-back{font:12px var(--font-body);color:var(--fg-3)}
+.ns-heading h1{font:500 27px/1.2 var(--font-body);letter-spacing:-.045em;margin:8px 0 0}
+.ns-operator{display:grid;justify-items:end;gap:6px;font-size:10px;color:var(--fg-3)}
+.ns-operator img{width:72px;height:32px;object-fit:contain;border-radius:7px}
+.ns-steps{display:flex;padding:5px;background:var(--bg-elev);border:1px solid var(--line);border-radius:999px;margin-bottom:16px;gap:5px}
+.ns-steps button{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;min-height:42px;border:1px solid transparent;border-radius:999px;background:none;color:var(--fg-3);font:500 13px var(--font-body);cursor:pointer}
+.ns-steps button span{font-size:10px;display:grid;place-items:center;width:21px;height:21px;border:1px solid var(--line);border-radius:50%}
+.ns-steps button[aria-current=step]{border-color:var(--accent-deep);background:var(--accent-glow);color:var(--fg)}
+.ns-card{background:var(--bg-elev);border:1px solid var(--line);border-radius:26px;padding:22px 26px;margin-bottom:16px}
+.ns-section-heading{display:flex;align-items:center;gap:8px;margin-bottom:18px}.ns-section-heading h2,.ns-review h2{font:500 18px/1.25 var(--font-body);letter-spacing:-.025em;margin:0}.ns-step-caption{font-size:11px;color:var(--fg-3);margin-left:auto}
+.ns-fields{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:13px 16px}.ns-field{min-width:0;display:flex;flex-direction:column;gap:6px}.ns-span-4{grid-column:span 4}.ns-span-6{grid-column:span 6}.ns-span-8{grid-column:span 8}.ns-span-12{grid-column:1/-1}
+.ns-field label{font:400 11px/1.4 var(--font-body);color:var(--fg-2);display:flex;justify-content:space-between;gap:5px}.ns-field label small{font-size:9px;color:var(--fg-3)}
+.national-shipment input:not([type=hidden]),.national-shipment select,.national-shipment .tselect-btn{box-sizing:border-box;width:100%;min-width:0;height:42px;padding:10px 13px;background:var(--bg);border:1px solid var(--line);border-radius:16px;color:var(--fg);font:400 14px var(--font-body);outline:none}
+.national-shipment input:focus,.national-shipment select:focus,.national-shipment .tselect-btn:focus-visible{border-color:var(--accent-deep);box-shadow:0 0 0 3px var(--accent-glow)}
+.national-shipment .tselect-panel{border-radius:18px}.national-shipment .tselect-option{border-radius:12px}.national-shipment .tselect-label{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.ns-actions{display:flex;align-items:center;gap:12px}.ns-actions [role=status]{margin-right:auto;color:var(--fg-3);font-size:11px}.ns-actions .btn{border-radius:999px;min-height:42px;padding:10px 22px;font:500 13px var(--font-body)}
+.national-shipment .draft-bar{font-size:10px;margin-bottom:10px}.national-shipment .draft-status{font-size:10px}.national-shipment .draft-reset{border-radius:999px;padding:3px 9px;min-height:27px;font-size:10px}
+.ns-coverage,.ns-review-note,.ns-disclaimer{font-size:11px;color:var(--fg-3);display:flex;align-items:center;gap:7px;margin:18px 0 0}.ns-disclaimer{justify-content:flex-end}.ns-review-note{margin:16px 0}
+.ns-review header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:20px}.ns-price{font:600 28px var(--font-body);letter-spacing:-.04em}.ns-price small{display:block;font:10px var(--font-body);letter-spacing:0;color:var(--fg-3);margin-top:4px}
+.ns-review-route{display:grid;grid-template-columns:1fr 1fr;gap:18px}.ns-review-route small{display:block;color:var(--accent);font-size:10px;margin-bottom:8px}.ns-review-route strong{font-size:14px}.ns-review-route p,.ns-review-package{font-size:12px;color:var(--fg-2);line-height:1.7}.ns-review-package{border-top:1px solid var(--line);padding-top:14px}
+@media(max-width:600px){.ns-heading{margin-bottom:14px;gap:12px}.ns-heading h1{font-size:22px}.ns-operator img{width:55px}.ns-operator span{font-size:9px}.ns-card{border-radius:23px;padding:18px 16px}.ns-fields{gap:12px 10px}.ns-field label small{display:none}.national-shipment input:not([type=hidden]),.national-shipment select,.national-shipment .tselect-btn{font-size:16px;height:44px}.ns-package-fields>.ns-field{grid-column:span 6}.ns-steps{margin-bottom:14px}.ns-steps button{font-size:12px;gap:6px}.ns-steps button span{width:18px;height:18px}.ns-actions{position:sticky;bottom:8px;background:var(--bg-elev);border:1px solid var(--line);border-radius:24px;padding:7px;z-index:5}.ns-actions .btn{padding:10px 16px}.ns-review-route{grid-template-columns:1fr}.ns-review header{align-items:flex-start}.ns-price{font-size:23px}}
+.ns-heading{margin-bottom:14px}.ns-card{padding-top:18px;padding-bottom:18px}.ns-section-heading{margin-bottom:12px}.national-shipment form>.draft-bar{margin:10px 0 0}.ns-fields{row-gap:10px}
+
+.ns-agenda{display:flex;align-items:center;gap:10px;margin-left:auto;max-width:65%;min-width:0}.ns-agenda>.tselect,.ns-agenda>select{width:280px;max-width:100%;min-width:0}.ns-agenda-link{white-space:nowrap;font-size:11px;color:var(--accent)}.ns-agenda-note{font-size:12px;color:var(--fg-2);margin:0 0 12px}.ns-agenda .tselect-btn{height:38px;font-size:12px}.ns-section-heading:has(.ns-agenda){min-height:38px}
+@media(max-width:600px){.ns-section-heading:has(.ns-agenda){flex-wrap:wrap}.ns-agenda{max-width:100%;width:100%;margin:4px 0 0}.ns-agenda>.tselect,.ns-agenda>select{flex:1;width:auto}.ns-agenda .tselect-btn{height:42px;font-size:14px}}

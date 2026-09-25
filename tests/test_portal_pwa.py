@@ -311,15 +311,16 @@ def _seccion_tabbar(html):
     return html[inicio:fin]
 
 
-def test_tabbar_del_shell_tiene_los_cinco_accesos_en_orden():
+def test_tabbar_del_shell_conserva_accesos_y_suma_agenda_en_pc():
     tabbar = _seccion_tabbar(_render_shell())
     assert 'aria-label="Accesos rápidos del portal"' in tabbar
     hrefs = re.findall(r'href="([^"]+)"', tabbar)
     assert hrefs == [
         "/portal/home", "/portal/cotizar", "/portal/envios/nuevo",
-        "/portal/envios", "/portal/cuenta",
+        "/portal/envios", "/portal/clientes", "/portal/cuenta",
     ]
-    for etiqueta in ("Inicio", "Cotizar", "Nuevo envío", "Mis envíos", "Cuenta"):
+    assert 'href="/portal/clientes" class="tabbar-item tabbar-desktop' in tabbar
+    for etiqueta in ("Inicio", "Cotizar", "Nuevo envío", "Mis envíos", "Mis clientes", "Cuenta"):
         assert etiqueta in tabbar, etiqueta
 
 
@@ -336,6 +337,9 @@ def test_tabbar_marca_la_pestana_activa_con_aria_current():
     en_nuevo = _seccion_tabbar(_render_shell(path="/portal/envios/nuevo"))
     assert 'href="/portal/envios/nuevo" class="tabbar-item tabbar-cta active"' in en_nuevo
     assert en_nuevo.count('aria-current="page"') == 1
+    en_nacional = _seccion_tabbar(_render_shell(path="/portal/oca/nuevo"))
+    assert 'href="/portal/envios/nuevo" class="tabbar-item tabbar-cta active"' in en_nacional
+    assert en_nacional.count('aria-current="page"') == 1
 
 
 def test_tabbar_muestra_el_globo_de_guias_listas():
@@ -416,7 +420,8 @@ def test_css_tabbar_respeta_safe_area_touch_print_y_escritorio():
 def test_base_html_versiona_el_css_nuevo():
     base = BASE_HTML_PATH.read_text(encoding="utf-8")
     assert "tauro.css?v=49" in base
-    assert "portal-cotizador.js?v=6" in base
+    assert "portal-cotizador.js?v=9" in base
+    assert "portal-dock.css?v=1" in base
     # El manifest y el SW viven en el head compartido de TODO el portal
     # (login incluido); la tabbar queda adentro del bloque autenticado.
     assert base.index("{% if cliente %}") < base.index('class="tabbar"')
