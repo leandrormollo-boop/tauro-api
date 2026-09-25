@@ -37,7 +37,7 @@
                 <fieldset class="uq-route" data-location-side="{{ side }}"><legend><b>{{ letter }}</b>{{ label }}</legend>
                 {% if scope == 'internacional' %}
                     {% set name = side ~ '_pais' %}
-                    <div class="uq-field"><label for="{{ name }}">País</label><select name="{{ name }}" id="{{ name }}" required data-country-flags data-search-placeholder="Buscar país o código"><option value="">Elegí país</option>{% for iso,nom in paises_destino %}<option value="{{ iso }}" {% if iso == f.get(name, 'AR' if side == 'origen' else '') %}selected{% endif %}>{{ nom }} ({{ iso }})</option>{% endfor %}</select></div>
+                    <div class="uq-field"><label for="{{ name }}">País</label><select name="{{ name }}" id="{{ name }}" required data-country-flags data-search-placeholder="Buscar país o código"><option value="">Elegí país</option>{% for iso,nom in paises_destino %}<option value="{{ iso }}" {% if iso == f.get(name, 'AR' if side == 'origen' else '') %}selected{% endif %}>{{ nom }}{% if iso != 'FK' %} ({{ iso }}){% endif %}</option>{% endfor %}</select></div>
                     {% set city = 'origen_ciudad' if side == 'origen' else 'destino_ciudad_internacional' %}{% set postal = side ~ '_cp_internacional' %}
                     {{ field(city,'Ciudad',f.get(city,'')) }}{{ field(postal,'Código postal',f.get(postal,'')) }}
                 {% else %}

@@ -49,7 +49,9 @@
   function countryFlag(select, value) {
     if (!select.hasAttribute('data-country-flags') || !/^[A-Z]{2}$/.test(value)) return null;
     var img = document.createElement('img');
-    img.src = '/static/img/flags/' + value.toLowerCase() + '.svg';
+    // Presentación del portal; el valor ISO del select se conserva para los operadores.
+    var flagCode = value === 'FK' ? 'AR' : value;
+    img.src = '/static/img/flags/' + flagCode.toLowerCase() + '.svg';
     img.className = 'tselect-flag'; img.alt = ''; img.loading = 'lazy';
     img.width = 24; img.height = 18;
     return img;

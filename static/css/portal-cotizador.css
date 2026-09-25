@@ -171,3 +171,8 @@ html[data-theme="dark"] :is(.unified-quote,.national-shipment,.client-dialog)
 @media(prefers-reduced-motion:reduce){
   html[data-theme="dark"] :is(.unified-quote,.national-shipment,.client-dialog) :is(input,select,textarea,.tselect-btn){transition:none!important}
 }
+
+/* Emblemas propios: Sol de Mayo y planeta del cotizador, sin trama de meridianos. */
+.uq-scopes a svg.scope-symbol{width:28px;height:28px;opacity:1;filter:none}
+.uq-scopes a.is-active .scope-symbol--nacional{filter:drop-shadow(0 0 4px rgba(246,180,14,.2))}
+.uq-scopes a.is-active .scope-symbol--internacional{filter:drop-shadow(0 0 4px rgba(139,107,247,.24))}

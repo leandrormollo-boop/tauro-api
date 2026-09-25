@@ -1,5 +1,5 @@
 {% macro scope_icon(scope) -%}
-<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-{% if scope == 'nacional' %}<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H16a4 4 0 0 1 0 8H8a4 4 0 0 0 0 8h4M6 10v5"/>{% else %}<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6.5c4 2 10 2 14 0M5 17.5c4-2 10-2 14 0"/>{% endif %}
+<svg class="scope-symbol scope-symbol--{{ scope }}" viewBox="0 0 96 96" width="28" height="28" aria-hidden="true" focusable="false">
+    <image href="/static/img/icons/{{ 'sol-de-mayo' if scope == 'nacional' else 'tauro-globe' }}.svg?v=1" width="96" height="96"/>
 </svg>
 {%- endmacro %}

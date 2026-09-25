@@ -227,7 +227,7 @@
                     <select name="rem_pais" id="rem_pais" data-searchable>
                         {% set pais_sel = form.rem_pais or (remitente.pais if remitente else 'AR') %}
                         {% for iso, nom in paises_destino %}
-                            <option value="{{ iso }}" {% if pais_sel == iso %}selected{% endif %}>{{ nom }} ({{ iso }})</option>
+                            <option value="{{ iso }}" {% if pais_sel == iso %}selected{% endif %}>{{ nom }}{% if iso != 'FK' %} ({{ iso }}){% endif %}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -317,7 +317,7 @@
                            compartido: el cliente elige cualquier país, no sólo
                            los que tengan ruta cargada. #}
                         {% for iso, nombre_pais in paises_destino %}
-                            <option value="{{ iso }}" {% if form.destino_pais == iso %}selected{% endif %}>{{ nombre_pais }} ({{ iso }})</option>
+                            <option value="{{ iso }}" {% if form.destino_pais == iso %}selected{% endif %}>{{ nombre_pais }}{% if iso != 'FK' %} ({{ iso }}){% endif %}</option>
                         {% endfor %}
                     </select>
                 </div>
