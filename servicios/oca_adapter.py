@@ -718,7 +718,8 @@ def _customer_price(cost: Decimal, pricing: Mapping[str, object]) -> Decimal:
         result = cost * (Decimal("1") + value / Decimal("100"))
     else:
         raise OCAUnavailableError("La tarifa no tiene pricing comercial válido.")
-    result = result.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    precision = Decimal("0.01") if pricing.get("oca_tarifa_neta_iva_21") is True else Decimal("1")
+    result = result.quantize(precision, rounding=ROUND_HALF_UP)
     if result <= 0:
         raise OCAUnavailableError("La tarifa no tiene pricing comercial válido.")
     return result
@@ -1545,6 +1546,12 @@ class OCAAdapter:
         except Exception:
             raise OCAUnavailableError("No se pudo aplicar el pricing comercial.") from None
         customer_price = _customer_price(cost, pricing)
+        # El contrato productivo del portal expresa la tarifa OCA sin IVA.
+        # El margen se aplica al neto; IVA se incorpora una sola vez a ambos
+        # importes para comparar costo y precio en la misma base.
+        if pricing.get("oca_tarifa_neta_iva_21") is True:
+            cost = (cost * Decimal("1.21")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            customer_price = (customer_price * Decimal("1.21")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         digest = hashlib.sha256(
             f"{request.request_id}|{self._config.operation}|{cost}".encode("utf-8")
         ).hexdigest()[:24]
