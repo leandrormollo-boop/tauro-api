@@ -1,0 +1,13 @@
+{
+  "name": "tauro-solutions-shopify-app",
+  "version": "1.0.0",
+  "description": "Shopify CLI manifest and pilot-readiness checks for the embedded TAURO Solutions app",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "shopify app build",
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "node --check tests/app-config.test.mjs",
+    "validate:config": "shopify app config validate --json"
+  },
+  "private": true
+}

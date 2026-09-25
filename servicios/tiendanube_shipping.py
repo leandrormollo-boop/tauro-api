@@ -13,6 +13,7 @@ import json
 import os
 import secrets
 import time
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Iterable, Mapping
@@ -31,6 +32,11 @@ from servicios.carrier_adapter import (
     validate_quote_result,
 )
 from servicios.carrier_contract import Ambito, Capacidad
+from servicios.tiendanube_rate_quotes import (
+    RateQuoteSnapshotError,
+    guardar_snapshot,
+    referencia_publica,
+)
 
 
 RATE_CODE = "tauro_nacional_domicilio"
@@ -70,6 +76,7 @@ def _enabled(name: str) -> bool:
 
 
 def _ensure_tabla() -> None:
+    """Verifica configuración Shipping; el callback nunca ejecuta DDL."""
     global _tabla_lista
     if _tabla_lista:
         return
@@ -77,25 +84,30 @@ def _ensure_tabla() -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS tiendanube_shipping_config (
-                    store_id            TEXT PRIMARY KEY,
-                    callback_token_hash TEXT NOT NULL,
-                    label_callback_token_hash TEXT,
-                    carrier_id          TEXT NOT NULL,
-                    carrier_option_id   TEXT NOT NULL,
-                    activa              BOOLEAN NOT NULL DEFAULT TRUE,
-                    creada_en           TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    actualizada_en      TIMESTAMPTZ NOT NULL DEFAULT now()
-                )
+                SELECT
+                    to_regclass('tiendanube_shipping_config') IS NOT NULL
+                    AND 2 = (
+                        SELECT COUNT(DISTINCT column_name)
+                          FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'tiendanube_shipping_config'
+                           AND column_name IN (
+                               'label_callback_token_hash',
+                               'install_generation'
+                           )
+                    ) AS schema_ready
                 """
             )
-            cur.execute(
-                """
-                ALTER TABLE tiendanube_shipping_config
-                    ADD COLUMN IF NOT EXISTS label_callback_token_hash TEXT
-                """
-            )
-        conn.commit()
+            row = cur.fetchone()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise ShippingUnavailableError(
+            "Shipping requiere ejecutar la migración antes del tráfico."
+        )
     _tabla_lista = True
 
 
@@ -126,7 +138,7 @@ def configuracion(store_id: str) -> dict | None:
 
 
 def configuracion_por_label_token(token: str) -> dict | None:
-    """Resuelve el store por un secreto exclusivo del callback de labels."""
+    """Resuelve sólo un callback de la generación actualmente operativa."""
     token = str(token or "")
     if len(token) < 24 or len(token) > 200:
         return None
@@ -136,10 +148,17 @@ def configuracion_por_label_token(token: str) -> dict | None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT *
-                  FROM tiendanube_shipping_config
-                 WHERE label_callback_token_hash = %s
-                   AND activa = TRUE
+                SELECT c.*, i.cliente_id,
+                       i.install_generation AS current_install_generation
+                  FROM tiendanube_shipping_config c
+                  JOIN tiendanube_instalaciones i
+                    ON i.store_id = c.store_id
+                   AND i.install_generation = c.install_generation
+                 WHERE c.label_callback_token_hash = %s
+                   AND c.activa = TRUE
+                   AND i.estado = 'ACTIVA'
+                   AND i.webhooks_ready = TRUE
+                   AND i.cliente_id IS NOT NULL
                  LIMIT 2
                 """,
                 (calculated,),
@@ -161,6 +180,7 @@ def _guardar_config(
     option_id: str,
     *,
     label_token: str | None = None,
+    install_generation: str,
 ) -> None:
     _ensure_tabla()
     with get_conn() as conn:
@@ -168,21 +188,22 @@ def _guardar_config(
             cur.execute(
                 """
                 INSERT INTO tiendanube_shipping_config
-                    (store_id, callback_token_hash, carrier_id,
+                    (store_id, install_generation, callback_token_hash, carrier_id,
                      carrier_option_id, label_callback_token_hash, activa)
-                VALUES (%s, %s, %s, %s, %s, TRUE)
+                VALUES (%s, %s, %s, %s, %s, %s, TRUE)
                 ON CONFLICT (store_id) DO UPDATE
-                    SET callback_token_hash = EXCLUDED.callback_token_hash,
+                    SET install_generation = EXCLUDED.install_generation,
+                        callback_token_hash = EXCLUDED.callback_token_hash,
                         carrier_id = EXCLUDED.carrier_id,
                         carrier_option_id = EXCLUDED.carrier_option_id,
                         label_callback_token_hash =
-                            COALESCE(EXCLUDED.label_callback_token_hash,
-                                     tiendanube_shipping_config.label_callback_token_hash),
+                            EXCLUDED.label_callback_token_hash,
                         activa = TRUE,
                         actualizada_en = now()
                 """,
                 (
                     str(store_id),
+                    str(install_generation),
                     hash_callback_token(token),
                     str(carrier_id),
                     str(option_id),
@@ -192,7 +213,12 @@ def _guardar_config(
         conn.commit()
 
 
-def _guardar_label_callback_token(store_id: str, token: str) -> None:
+def _guardar_label_callback_token(
+    store_id: str,
+    token: str,
+    *,
+    install_generation: str,
+) -> None:
     _ensure_tabla()
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -200,10 +226,15 @@ def _guardar_label_callback_token(store_id: str, token: str) -> None:
                 """
                 UPDATE tiendanube_shipping_config
                    SET label_callback_token_hash = %s,
+                       install_generation = %s,
                        actualizada_en = now()
                  WHERE store_id = %s
                 """,
-                (hash_callback_token(token), str(store_id)),
+                (
+                    hash_callback_token(token),
+                    str(install_generation),
+                    str(store_id),
+                ),
             )
             if cur.rowcount != 1:
                 raise ShippingUnavailableError(
@@ -251,9 +282,13 @@ def reactivar(store_id: str) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE tiendanube_shipping_config
+                UPDATE tiendanube_shipping_config c
                    SET activa = TRUE, actualizada_en = now()
-                 WHERE store_id = %s
+                  FROM tiendanube_instalaciones i
+                 WHERE c.store_id = %s
+                   AND i.store_id = c.store_id
+                   AND i.install_generation = c.install_generation
+                   AND i.estado = 'ACTIVA'
                 """,
                 (str(store_id),),
             )
@@ -286,6 +321,8 @@ def _reconciliar_shipping_remoto(
     access_token: str,
     base: str,
     api: Callable,
+    *,
+    install_generation: str,
 ) -> dict | None:
     """Adopta un carrier creado antes de un fallo local, sin duplicarlo."""
     response = api(str(store_id), access_token, "GET", "shipping_carriers")
@@ -392,11 +429,145 @@ def _reconciliar_shipping_remoto(
         match["carrier_id"],
         match["carrier_option_id"],
         label_token=match["label_token"] or None,
+        install_generation=install_generation,
     )
+    match["install_generation"] = str(install_generation)
     return match
 
 
-def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
+@contextmanager
+def _postgres_shipping_registration_lock(store_id: str):
+    """Serializa por tienda todo el read/reconcile/create remoto.
+
+    Es un advisory lock de *sesión*, no transaccional: la misma conexión
+    dedicada permanece reservada hasta terminar también las llamadas HTTP y
+    la persistencia local. Así dos procesos no pueden observar a la vez que no
+    existe configuración y crear carriers duplicados.
+    """
+    # Misma clave que OAuth/binding: el alta remota completa no puede
+    # intercalarse con una reinstalación de la misma tienda.
+    lock_name = (
+        f"tauro:tiendanube:{str(store_id).strip()}.tiendanube"
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                (lock_name,),
+            )
+        try:
+            yield
+        finally:
+            # `finally` es esencial: los advisory locks de sesión sobreviven a
+            # rollback y, en un pool, contaminarían la siguiente operación.
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                    (lock_name,),
+                )
+
+
+# Punto de inyección intencional para tests; producción conserva siempre el
+# lock PostgreSQL anterior.
+_shipping_registration_lock = _postgres_shipping_registration_lock
+
+
+@contextmanager
+def _postgres_shipping_callback_guard(
+    store_id: str,
+    callback_token_hash: str,
+    install_generation: str,
+    customer_id: str,
+):
+    """Revalida tenant y generación justo antes de congelar la tarifa.
+
+    El lock de sesión comparte clave con OAuth y binding. Se conserva durante
+    la escritura del snapshot, de modo que una reinstalación no puede cambiar
+    de owner entre la cotización externa y la persistencia/respuesta.
+    """
+    lock_name = f"tauro:tiendanube:{store_id}.tiendanube"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                (lock_name,),
+            )
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1 AS vigente
+                      FROM tiendanube_shipping_config c
+                      JOIN tiendanube_instalaciones i
+                        ON i.store_id = c.store_id
+                       AND i.install_generation = c.install_generation
+                      JOIN tiendas_conectadas t
+                        ON t.dominio = c.store_id || '.tiendanube'
+                       AND t.plataforma = 'tiendanube'
+                       AND UPPER(t.cliente_id) = UPPER(i.cliente_id)
+                     WHERE c.store_id = %s
+                       AND c.callback_token_hash = %s
+                       AND c.install_generation = %s
+                       AND c.activa = TRUE
+                       AND i.estado = 'ACTIVA'
+                       AND i.webhooks_ready = TRUE
+                       AND UPPER(i.cliente_id) = UPPER(%s)
+                       AND t.activa = TRUE
+                     LIMIT 1
+                    """,
+                    (
+                        str(store_id),
+                        str(callback_token_hash),
+                        str(install_generation),
+                        str(customer_id),
+                    ),
+                )
+                if cur.fetchone() is None:
+                    raise ShippingAuthenticationError(
+                        "La instalación cambió durante la cotización."
+                    )
+            yield
+        finally:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                    (lock_name,),
+                )
+
+
+_shipping_callback_guard = _postgres_shipping_callback_guard
+
+
+def registrar_shipping_carrier(
+    store_id: str,
+    access_token: str,
+    *,
+    expected_generation: str,
+) -> dict:
+    """Serializa y registra/reconcilia el carrier completo por tienda."""
+    with _shipping_registration_lock(str(store_id)):
+        from servicios.tiendanube_app import exigir_generacion_oauth
+
+        exigir_generacion_oauth(
+            str(store_id), expected_generation, access_token,
+        )
+        resultado = _registrar_shipping_carrier_locked(
+            store_id,
+            access_token,
+            expected_generation=expected_generation,
+        )
+        exigir_generacion_oauth(
+            str(store_id), expected_generation, access_token,
+        )
+        return resultado
+
+
+def _registrar_shipping_carrier_locked(
+    store_id: str,
+    access_token: str,
+    *,
+    expected_generation: str,
+) -> dict:
     """Crea el carrier y su opción fija después del OAuth.
 
     Los dos flags explícitos impiden que unas credenciales de Tiendanube
@@ -407,7 +578,7 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
     if not _enabled("TAURO_NACIONAL_RATES_READY"):
         return {"ready": False, "reason": "tarifas_nacionales_no_habilitadas"}
 
-    from servicios.tiendanube_app import _api
+    from servicios.tiendanube_app import _api, label_api_habilitada
     from servicios.tiendanube_labels import labels_execution_ready
 
     base = (os.getenv("BASE_URL") or "https://taurosolutions.ar").rstrip("/")
@@ -416,12 +587,18 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
         raise ShippingUnavailableError(
             "Los callbacks de Shipping requieren una BASE_URL HTTPS."
         )
-    labels_ready = bool(labels_execution_ready())
+    labels_ready = bool(
+        labels_execution_ready() and label_api_habilitada(str(store_id))
+    )
 
     actual = configuracion(store_id)
     if not actual:
         actual = _reconciliar_shipping_remoto(
-            str(store_id), access_token, base, _api
+            str(store_id),
+            access_token,
+            base,
+            _api,
+            install_generation=expected_generation,
         )
     if actual:
         remote_response = _api(
@@ -446,13 +623,20 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
             remote = remote if isinstance(remote, Mapping) else {}
             changes: dict[str, object] = {}
             config_needs_save = False
+            same_generation = str(
+                actual.get("install_generation") or ""
+            ) == str(expected_generation)
             if not actual.get("activa") or remote.get("active") is False:
                 changes["active"] = True
 
             remote_rate_token = _callback_token_from_url(
                 remote.get("callback_url"), base, "rates"
             )
-            expected_rate_hash = str(actual.get("callback_token_hash") or "")
+            expected_rate_hash = (
+                str(actual.get("callback_token_hash") or "")
+                if same_generation
+                else ""
+            )
             if (
                 not remote_rate_token
                 or not expected_rate_hash
@@ -544,8 +728,10 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
             remote_label_token = _callback_token_from_url(
                 remote_labels, base, "labels"
             )
-            expected_label_hash = str(
-                actual.get("label_callback_token_hash") or ""
+            expected_label_hash = (
+                str(actual.get("label_callback_token_hash") or "")
+                if same_generation
+                else ""
             )
             label_callback_valid = bool(
                 remote_label_token
@@ -585,10 +771,15 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
                     str(actual["carrier_id"]),
                     option_id,
                     label_token=new_label_token or None,
+                    install_generation=expected_generation,
                 )
             if new_label_token:
                 if not config_needs_save:
-                    _guardar_label_callback_token(store_id, new_label_token)
+                    _guardar_label_callback_token(
+                        store_id,
+                        new_label_token,
+                        install_generation=expected_generation,
+                    )
             elif not labels_ready and actual.get("label_callback_token_hash"):
                 _limpiar_label_callback_token(store_id)
             return {
@@ -656,6 +847,7 @@ def registrar_shipping_carrier(store_id: str, access_token: str) -> dict:
         carrier_id,
         option_id,
         label_token=label_token or None,
+        install_generation=expected_generation,
     )
     return {
         "ready": True,
@@ -845,6 +1037,53 @@ def _request_id(payload: Mapping, suffix: str = "full") -> str:
     return f"tn-{suffix}-{digest}"
 
 
+def _carrier_option_context(payload: Mapping, config: Mapping) -> dict:
+    """Fija los ajustes que Tiendanube aplicará después de nuestra respuesta."""
+    carrier = payload.get("carrier")
+    if not isinstance(carrier, Mapping):
+        raise ShippingContractError("Falta el Shipping Carrier de la consulta.")
+    configured_carrier = str((config or {}).get("carrier_id") or "").strip()
+    received_carrier = str(carrier.get("id") or "").strip()
+    if configured_carrier and received_carrier != configured_carrier:
+        raise ShippingAuthenticationError("La consulta pertenece a otro carrier.")
+    options = carrier.get("options")
+    if not isinstance(options, list):
+        raise ShippingContractError("Faltan las opciones configuradas del carrier.")
+    matches = [
+        option
+        for option in options
+        if isinstance(option, Mapping)
+        and str(option.get("code") or "") == RATE_CODE
+    ]
+    if len(matches) != 1:
+        raise ShippingContractError("La opción nacional TAURO no es inequívoca.")
+    option = matches[0]
+    configured_option = str((config or {}).get("carrier_option_id") or "").strip()
+    option_id = str(option.get("id") or "").strip()
+    if configured_option and option_id != configured_option:
+        raise ShippingAuthenticationError("La consulta pertenece a otra opción.")
+
+    raw_cost = option.get("additional_cost")
+    if isinstance(raw_cost, Mapping):
+        currency = str(raw_cost.get("currency") or "").strip().upper()
+        if currency != "ARS":
+            raise ShippingContractError("El costo adicional debe estar expresado en ARS.")
+        raw_cost = raw_cost.get("amount")
+    elif raw_cost in (None, ""):
+        raw_cost = 0
+    additional_cost = _decimal(
+        raw_cost,
+        "El costo adicional configurado en Tiendanube",
+        positive=False,
+    )
+    if additional_cost < 0:
+        raise ShippingContractError("El costo adicional no puede ser negativo.")
+    return {
+        "option_id": option_id,
+        "additional_cost": additional_cost,
+    }
+
+
 def _quote_request(payload: Mapping, customer_id: str, *, paid_only=False, packaging=None) -> QuoteRequest:
     items = payload.get("items") or []
     if not isinstance(items, list) or not items:
@@ -925,6 +1164,7 @@ def cotizar_callback(
     installation_loader: Callable[[str], dict | None] | None = None,
     config_loader: Callable[[str], dict | None] | None = None,
     adapters: Iterable | None = None,
+    snapshot_saver: Callable[..., Mapping] | None = None,
 ) -> dict:
     """Cotiza el carrito con los adapters nacionales disponibles."""
     if not isinstance(payload, Mapping):
@@ -933,6 +1173,7 @@ def cotizar_callback(
     if not store_id.isdigit():
         raise ShippingContractError("La tienda no es válida.")
 
+    production_context = config_loader is None and installation_loader is None
     cfg_loader = config_loader or configuracion
     cfg = cfg_loader(store_id)
     expected_hash = str((cfg or {}).get("callback_token_hash") or "")
@@ -940,6 +1181,7 @@ def cotizar_callback(
         expected_hash, hash_callback_token(callback_token)
     ):
         raise ShippingAuthenticationError("Callback no autorizado.")
+    option_context = _carrier_option_context(payload, cfg)
 
     if installation_loader is None:
         from servicios.tiendanube_app import instalacion
@@ -950,6 +1192,14 @@ def cotizar_callback(
         raise ShippingUnavailableError("La tienda no está vinculada a TAURO.")
     if str(installation.get("estado") or "active").lower() not in {"active", "activa"}:
         raise ShippingUnavailableError("La integración está suspendida.")
+    install_generation = str(installation.get("install_generation") or "")
+    config_generation = str(cfg.get("install_generation") or "")
+    if production_context and (
+        not install_generation
+        or not config_generation
+        or not hmac.compare_digest(config_generation, install_generation)
+    ):
+        raise ShippingAuthenticationError("Callback de una instalación anterior.")
 
     deadline = time.monotonic() + _CALLBACK_DEADLINE_SECONDS
     packaging = cfg.get("paquetes")
@@ -1020,15 +1270,49 @@ def cotizar_callback(
     if packaging and packaging.get("usar_paquetes"):
         from servicios.paquetes import precio_comprador
         buyer_price = precio_comprador(buyer_price,packaging["nacional"],request.declared_value)
-    if has_free and not has_paid:
-        buyer_price = Decimal("0")
+    pricing_mode = (
+        "gratis_total"
+        if has_free and not has_paid
+        else "gratis_parcial"
+        if has_free and has_paid
+        else "pagado"
+    )
+    if packaging and packaging.get("usar_paquetes"):
+        pricing_mode += ":paquetes_tienda"
+
+    try:
+        def _persist_snapshot():
+            frozen = (snapshot_saver or guardar_snapshot)(
+                store_id,
+                request,
+                selected,
+                buyer_price,
+                pricing_mode,
+                platform_additional_cost=option_context["additional_cost"],
+                platform_option_id=option_context["option_id"],
+            )
+            return frozen, referencia_publica(frozen)
+
+        if production_context and snapshot_saver is None:
+            with _shipping_callback_guard(
+                store_id,
+                expected_hash,
+                install_generation,
+                str(installation["cliente_id"]),
+            ):
+                snapshot, reference = _persist_snapshot()
+        else:
+            snapshot, reference = _persist_snapshot()
+    except RateQuoteSnapshotError as exc:
+        raise ShippingUnavailableError(
+            "No se pudo congelar la tarifa para emitirla de forma segura."
+        ) from exc
 
     now = datetime.now(_ARGENTINA_TZ)
     days = max(int(selected.estimated_days or 1), 1)
     holidays = _holiday_calendar()
     min_date = _add_business_days(now, days, holidays)
     max_date = _add_business_days(min_date, 2, holidays)
-    reference = f"tauro:{selected.carrier_id}:{selected.quote_id}"
     return {
         "rates": [
             {

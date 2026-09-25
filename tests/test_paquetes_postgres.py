@@ -89,8 +89,7 @@ def test_token_callback_ligado_a_owner_generacion_y_webhooks(db,monkeypatch):
     from servicios import integraciones_tienda
     monkeypatch.setattr(integraciones_tienda,"_ensure_tablas",lambda:None)
     with db() as conn,conn.cursor() as cur:
-        cur.execute("""CREATE TABLE tiendas_conectadas (id SERIAL PRIMARY KEY,cliente_id TEXT,plataforma TEXT,dominio TEXT,secreto TEXT,activa BOOL);
-            INSERT INTO tiendas_conectadas(cliente_id,plataforma,dominio,secreto,activa)
+        cur.execute("""INSERT INTO tiendas_conectadas(cliente_id,plataforma,dominio,secreto,activa)
             VALUES ('A','shopify','a.myshopify.com','oauth:shopify-app',true);
             INSERT INTO shopify_instalaciones(dominio,cliente_id,access_token,install_generation,webhooks_ready,scopes)
             VALUES ('a.myshopify.com','A','encrypted-test','g1',true,'read_orders,write_shipping')""")
@@ -118,8 +117,7 @@ def test_migracion_replicada_en_schema_base():
 def test_activar_reconcilia_servicio_sin_duplicarlo(db,monkeypatch):
     from servicios import shopify_app
     with db() as conn,conn.cursor() as cur:
-        cur.execute("""CREATE TABLE tiendas_conectadas(id SERIAL PRIMARY KEY,cliente_id TEXT,plataforma TEXT,dominio TEXT,secreto TEXT,activa BOOL);
-            INSERT INTO tiendas_conectadas(cliente_id,plataforma,dominio,secreto,activa)
+        cur.execute("""INSERT INTO tiendas_conectadas(cliente_id,plataforma,dominio,secreto,activa)
             VALUES ('A','shopify','a.myshopify.com','oauth:shopify-app',true);
             INSERT INTO shopify_instalaciones(dominio,cliente_id,access_token,install_generation,webhooks_ready,scopes)
             VALUES ('a.myshopify.com','A','test','g1',true,'write_shipping');

@@ -89,7 +89,7 @@ def test_cotizador_rapido_canoniza_nombres_antes_de_decidir_ambito(monkeypatch):
         raise AssertionError("AR→AR no debe consultar ningún courier")
 
     monkeypatch.setattr("servicios.carriers.cotizar_carriers_cliente", no_llamar)
-    with pytest.raises(ValueError, match="Andreani y OCA"):
+    with pytest.raises(ValueError, match="seleccioná Nacional"):
         cotizador.cotizar_referencia_couriers(
             "TEST", "Argentina", "argentina", 1, 10, 10, 10, 100,
         )

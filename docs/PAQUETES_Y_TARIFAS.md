@@ -49,21 +49,20 @@ de esa tienda o un producto manual del mismo cliente.
 
 ## Integraciones
 
-**Shopify.** El endpoint histórico `/shopify/tarifas` sigue vacío para no
-revivir CarrierServices retirados. El nuevo callback usa una URL con secreto
-aleatorio, hash en PostgreSQL y vínculo a cliente, tienda y generación OAuth.
-Comprueba instalación, webhooks y permiso `write_shipping` en cada pedido
-de tarifa. No confía en el header de dominio ni llama a Admin API al cotizar.
+**Shopify (módulo opcional, fuera de la v1 pública).** El endpoint histórico
+`/shopify/tarifas` sigue vacío. Existe un callback nuevo con URL secreta, hash en
+PostgreSQL y vínculo a cliente, tienda y generación OAuth; no confía en un
+header de dominio ni llama a Admin API al cotizar. Sin embargo, el manifiesto
+v1 de `shopify_app/` no pide `write_shipping`, no instala CarrierService y no
+expone tarifas TAURO en checkout. Este módulo permanece apagado y no forma
+parte del piloto ni de la ficha que se presentará al App Store.
 
-La activación es por tienda. El consentimiento adicional se inicia desde
-una tienda ya vinculada, usando el state/cookie existente. Los scopes base
-permanecen iguales para quienes no usan tarifas. Es necesario declarar el
-permiso adicional en la configuración de la app Shopify antes de su uso.
-La conexión registra o reconcilia el CarrierService por GraphQL y evita
-duplicarlo en un reintento. Luego el comerciante agrega TAURO en sus zonas
-de envío y configura tarifas de respaldo en Shopify.
+Si TAURO decide ofrecerlo en una versión posterior, requerirá una decisión de
+producto independiente, elegibilidad del plan, `write_shipping` declarado y
+consentido, pruebas de latencia y respaldo, revisión del listing y un UAT
+específico. El código no debe activarse sólo porque esté presente.
 
-CCS requiere Advanced, Plus o Grow con esa función habilitada. Se devuelven
+En esa eventual versión, CCS requiere Advanced, Plus o Grow con esa función habilitada. Se devuelven
 importes ARS en centavos y códigos estables por servicio. Un error de
 configuración, moneda no soportada o caída devuelve 503 para permitir el
 respaldo de Shopify; un ámbito deshabilitado devuelve una lista vacía.
@@ -132,13 +131,12 @@ arranque y las migraciones existentes creen las tablas de forma idempotente.
 No requiere paquetes Python adicionales. El alta no activa automáticamente
 tiendas anteriores. No modifica cuentas corrientes, tracking ni inventario.
 
-Después de autorizar la publicación: comprobar `/salud`, `/portal/paquetes`,
-guardar/editar/asociar con la cuenta real, habilitar los permisos y revisar
-CCS de Pesca Jacks. Cargar únicamente medidas, pesos y combinaciones
-confirmados por el comercio. Probar 1 reel, varias unidades, combinación
-mixta, varios bultos, envío gratis, destino internacional, servicio caído y
-venta recibida con su correspondiente plan. La tarifa del navegador local
-es simulada y no reemplaza esta prueba con cuentas reales.
+Después de autorizar la publicación v1: comprobar `/salud`, la instalación
+OAuth, el ingreso del pedido, la creación de una única solicitud y el regreso
+de fulfillment/tracking a Shopify. `/portal/paquetes` puede seguir usándose
+para preparar el despacho, pero no debe habilitarse CCS ni pedir
+`write_shipping` en este piloto. Cargar únicamente medidas, pesos y
+combinaciones confirmados por el comercio.
 
 Fuentes oficiales consultadas el 11/09/2026:
 

@@ -10,15 +10,16 @@ revisada el 1 de septiembre de 2026.
 - [ ] App creada como **Tienda de Aplicaciones**, categoría **Shipping**.
 - [ ] `app_id` y `client_secret` productivos entregados a TAURO.
 - [ ] Redirect URL exacta configurada.
-- [ ] Scopes mínimos validados con Tiendanube: `write_shipping`, `read_orders`,
-  `write_fulfillment_orders`, `read_customers`. No solicitar `read_products` ni
+- [ ] Scopes mínimos validados con Tiendanube: `write_shipping`, `read_orders`
+  y `write_fulfillment_orders`. No solicitar `read_customers`, `read_products` ni
   `read_locations` mientras el código no use esos recursos.
 - [ ] Shipping API habilitada por el Platform Team para cuenta y tienda demo.
 - [ ] Tienda demo en Argentina disponible para el revisor.
 
 ## Producto nacional
 
-- [ ] Adapter OCA o Andreani implementado contra QA oficial.
+- [x] Adapter OCA implementado localmente contra el contrato e-Pak; permanece
+  apagado hasta validar sus respuestas con la cuenta QA contractual.
 - [x] Cotización OCA implementada contra [`Tarifar_Envio_Corporativo`](https://developers.oca.com.ar/epak.html), apagada por defecto.
 - [ ] UAT OCA con CUIT/cuenta/operativa propios y evidencia de costo/SLA.
 - [ ] Contrato comercial y operativa/cuenta confirmados.
@@ -33,9 +34,12 @@ revisada el 1 de septiembre de 2026.
 - [x] Carrito mixto distingue `price` de `price_merchant`.
 - [ ] Emisión idempotente y nunca automática por el simple webhook de venta.
 - [x] Borde de Labels API (`generate`/`cancel`) autenticado y durable, con
-  idempotencia, outbox y rechazo fail-closed; mientras no exista worker, el
-  payload bloqueado conserva sólo IDs y huella, no datos del destinatario.
-- [ ] Emisión, etiqueta, tracking y cancelación OCA implementados y probados; no se anuncian hasta cerrar su contrato neutral e idempotencia.
+  snapshots inmutables, idempotencia, outbox, worker por checkpoints, PDF con
+  token revocable, cancelación fail-closed y protección ante redacción de PII.
+- [x] Emisión, etiqueta, tracking y cancelación OCA implementados y probados
+  localmente con dobles/fixtures.
+- [ ] Emisión, etiqueta, tracking y cancelación OCA validados en UAT real; no
+  se anuncian ni activan hasta cerrar esta evidencia.
 
 ## Instalación y seguridad
 
@@ -45,6 +49,9 @@ revisada el 1 de septiembre de 2026.
 - [ ] Reinstalación no duplica carrier, opciones ni webhooks.
 - [ ] Tokens de acceso no aparecen en logs, frontend ni respuestas.
 - [ ] Clave exclusiva `TIENDANUBE_TOKEN_ENCRYPTION_KEY` cargada y rotación ensayada.
+- [ ] Las tres URLs de privacidad están publicadas y verificadas en Partners
+  con cuerpos ficticios firmados; recién entonces activar
+  `TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED`.
 - [ ] Callback de tarifas usa un token aleatorio distinto por tienda.
 - [ ] Webhooks validan firma, contrato de payload e idempotencia durable.
 - [ ] `app/suspended` corta cotizaciones y llamadas a la API.
@@ -55,8 +62,8 @@ revisada el 1 de septiembre de 2026.
 - [ ] Redacción y exportación verificadas contra PostgreSQL aislado con fixtures
   de pedido, dirección, envío y recolección reales.
 - [ ] Política de privacidad y términos públicos responden 200 por HTTPS.
-- [x] Tracking usa Fulfillment Orders y sólo actualiza envíos TAURO; conserva
-  fallback V1 controlado.
+- [x] Tracking usa Fulfillment Orders y sólo actualiza envíos TAURO; nunca usa
+  `POST /orders/{id}/fulfill`, que no es reconciliable tras timeout.
 - [x] Existe destino autenticado para admin links individual y masivo:
   `https://taurosolutions.ar/portal/tienda/tiendanube/pedidos`.
 
@@ -86,6 +93,9 @@ revisada el 1 de septiembre de 2026.
 ## Release
 
 - [ ] Preflight determinístico sin bloqueadores.
+- [x] DDL validado en PostgreSQL 18 efímero: creación limpia, upgrade desde el
+  esquema base `a0fdf94` y segunda aplicación idempotente, sin tocar una base
+  real.
 - [ ] Backup y plan de rollback documentados.
 - [ ] Aprobación humana explícita del release productivo.
 - [ ] Deploy controlado con flags apagados.

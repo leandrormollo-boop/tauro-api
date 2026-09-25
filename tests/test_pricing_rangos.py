@@ -116,7 +116,10 @@ def test_template_render_y_nonce():
     env.globals.update(pendientes_admin=lambda:0, alertas_guias_reemplazadas=lambda:0)
     html = env.get_template("admin/cliente_tarifas.html").render(
         cliente={"cliente_id":"TEST", "perfil_comercial":"", "pricing_rangos_internacional":rangos()},
-        request=SimpleNamespace(state=SimpleNamespace(csp_nonce="test-nonce")))
+        request=SimpleNamespace(
+            state=SimpleNamespace(csp_nonce="test-nonce"),
+            url=SimpleNamespace(path="/admin/clientes/TEST/tarifas"),
+        ))
     assert 'data-ambito="nacional"' in html
     assert 'data-ambito="internacional"' in html
     assert '<script nonce="test-nonce">' in html

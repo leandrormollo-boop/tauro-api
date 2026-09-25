@@ -10,9 +10,8 @@
 #   3. El cliente ve sus pedidos pendientes en el portal y con un
 #      click los convierte en solicitud de guía (form prellenado).
 #
-# Las tablas se crean acá mismo (CREATE TABLE IF NOT EXISTS) para
-# no depender de migraciones manuales: el primer webhook o la
-# primera visita a la pantalla las materializa.
+# Las tablas se aplican con scripts/migrate_database.py antes del tráfico.
+# Los bordes HTTP sólo comprueban readiness: nunca ejecutan DDL.
 # ============================================================
 from __future__ import annotations
 
@@ -117,6 +116,8 @@ def validar_origen_shopify_con_cursor(
            AND t.secreto = %s
            AND LOWER(t.dominio) = %s
            AND p.pedido_externo_id = %s
+           AND p.estado = 'PENDIENTE'
+           AND p.automatismos_bloqueados = FALSE
            AND NOT EXISTS (
                SELECT 1
                  FROM shopify_pedidos_redactados r
@@ -135,114 +136,96 @@ def validar_origen_shopify_con_cursor(
     return cur.fetchone() is not None
 
 
+def validar_origen_tiendanube_con_cursor(
+    cur,
+    *,
+    cliente_id: str,
+    dominio: str,
+    pedido_externo_id: str,
+) -> bool:
+    """Barrera de tenant/cancelación para el INSERT derivado Tiendanube."""
+    cliente_id = (cliente_id or "").strip().upper()
+    dominio = (dominio or "").strip().lower()
+    pedido_externo_id = str(pedido_externo_id or "").strip()
+    if not (cliente_id and dominio and pedido_externo_id):
+        return False
+    _bloquear_dominio_tiendanube(cur, dominio)
+    cur.execute(
+        """
+        SELECT p.id
+          FROM pedidos_tienda p
+          JOIN tiendas_conectadas t ON t.id=p.tienda_id
+          JOIN tiendanube_instalaciones i
+            ON LOWER(t.dominio)=LOWER(i.store_id || '.tiendanube')
+         WHERE UPPER(p.cliente_id)=%s
+           AND UPPER(t.cliente_id)=UPPER(p.cliente_id)
+           AND t.plataforma='tiendanube' AND t.activa=TRUE
+           AND LOWER(t.dominio)=%s
+           AND p.pedido_externo_id=%s
+           AND p.estado='PENDIENTE'
+           AND p.automatismos_bloqueados=FALSE
+           AND i.estado='ACTIVA' AND i.webhooks_ready=TRUE
+           AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+           AND UPPER(COALESCE(i.cliente_id, ''))=UPPER(p.cliente_id)
+           AND NOT EXISTS (
+               SELECT 1 FROM tiendanube_pedidos_redactados r
+                WHERE LOWER(r.dominio)=%s
+                  AND r.pedido_externo_id=p.pedido_externo_id
+           )
+         LIMIT 1
+        """,
+        (cliente_id, dominio, pedido_externo_id, dominio),
+    )
+    return cur.fetchone() is not None
+
+
 def _ensure_tablas() -> None:
+    """Comprueba el contrato mínimo sin intentar repararlo en runtime."""
     global _tablas_listas
     if _tablas_listas:
         return
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS tiendas_conectadas (
-                    id          SERIAL PRIMARY KEY,
-                    cliente_id  TEXT NOT NULL,
-                    plataforma  TEXT NOT NULL,
-                    dominio     TEXT NOT NULL UNIQUE,
-                    secreto     TEXT NOT NULL,
-                    activa      BOOLEAN NOT NULL DEFAULT TRUE,
-                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
-                CREATE TABLE IF NOT EXISTS pedidos_tienda (
-                    id                 SERIAL PRIMARY KEY,
-                    cliente_id         TEXT NOT NULL,
-                    tienda_id          INTEGER REFERENCES tiendas_conectadas(id) ON DELETE CASCADE,
-                    plataforma         TEXT NOT NULL,
-                    pedido_externo_id  TEXT NOT NULL,
-                    numero             TEXT,
-                    estado             TEXT NOT NULL DEFAULT 'PENDIENTE',
-                    destinatario       JSONB,
-                    items              JSONB,
-                    valor_total        NUMERIC(14,2),
-                    moneda             TEXT,
-                    solicitud_id       INTEGER,
-                    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    UNIQUE (tienda_id, pedido_externo_id)
-                );
-                CREATE TABLE IF NOT EXISTS pedidos_huerfanos (
-                    id                SERIAL PRIMARY KEY,
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    payload           JSONB NOT NULL,
-                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (dominio, pedido_externo_id)
-                );
-                ALTER TABLE pedidos_huerfanos
-                    ADD COLUMN IF NOT EXISTS install_generation TEXT;
-                CREATE TABLE IF NOT EXISTS shopify_pedidos_redactados (
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (dominio, pedido_externo_id)
-                );
-                CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (dominio, pedido_externo_id)
-                );
-                CREATE TABLE IF NOT EXISTS shopify_webhook_recibidos (
-                    webhook_id        TEXT PRIMARY KEY,
-                    dominio           TEXT NOT NULL,
-                    topic             TEXT NOT NULL,
-                    install_generation TEXT NOT NULL,
-                    procesado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS ix_shopify_webhook_recibidos_fecha
-                    ON shopify_webhook_recibidos(procesado_at);
-                CREATE TABLE IF NOT EXISTS shopify_huerfanos_cancelados (
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    install_generation TEXT NOT NULL,
-                    cancelado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (
-                        dominio, pedido_externo_id, install_generation
+            cur.execute(
+                """
+                SELECT
+                    to_regclass('tiendas_conectadas') IS NOT NULL
+                    AND to_regclass('pedidos_tienda') IS NOT NULL
+                    AND to_regclass('pedidos_huerfanos') IS NOT NULL
+                    AND to_regclass('shopify_pedidos_redactados') IS NOT NULL
+                    AND to_regclass('tiendanube_pedidos_redactados') IS NOT NULL
+                    AND to_regclass('shopify_webhook_recibidos') IS NOT NULL
+                    AND to_regclass('shopify_huerfanos_cancelados') IS NOT NULL
+                    AND to_regclass('config_envio_tienda') IS NOT NULL
+                    AND (
+                        SELECT COUNT(*) = 6
+                          FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'pedidos_tienda'
+                           AND column_name IN (
+                               'flete_cobrado', 'flete_detalle',
+                               'motivo_pendiente', 'automatismos_bloqueados',
+                               'bloqueo_motivo', 'updated_at'
+                           )
                     )
-                );
-                CREATE INDEX IF NOT EXISTS ix_shopify_huerfanos_cancelados_fecha
-                    ON shopify_huerfanos_cancelados(cancelado_at);
-                -- También se materializa acá porque shop/redact debe poder
-                -- purgarla aunque el comercio nunca haya abierto la pantalla
-                -- que configura su política de envío.
-                CREATE TABLE IF NOT EXISTS config_envio_tienda (
-                    dominio          TEXT PRIMARY KEY,
-                    cliente_id       TEXT,
-                    politica         TEXT NOT NULL DEFAULT 'real',
-                    markup_pct       NUMERIC(6,2) NOT NULL DEFAULT 0,
-                    precio_fijo_ars  NUMERIC(14,2) NOT NULL DEFAULT 0,
-                    mostrar_tax      BOOLEAN NOT NULL DEFAULT FALSE,
-                    tax_pct_default  NUMERIC(6,2) NOT NULL DEFAULT 0,
-                    etiqueta         TEXT DEFAULT '',
-                    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-                );
-                CREATE INDEX IF NOT EXISTS ix_pedidos_tienda_cliente
-                    ON pedidos_tienda (cliente_id, estado);
-                CREATE INDEX IF NOT EXISTS ix_pedidos_huerfanos_dominio_fecha
-                    ON pedidos_huerfanos (dominio, created_at);
-                -- Lo que el comprador REALMENTE pagó de envío en el checkout.
-                -- Sin esto no hay forma de comparar lo cobrado contra lo que
-                -- termina costando la guía: si el precio se calcula mal, se
-                -- pierde plata en cada venta y no queda rastro para notarlo.
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS flete_cobrado NUMERIC(14,2);
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS flete_detalle JSONB;
-                -- Por qué este pedido no se convirtió solo en solicitud de
-                -- guía (SKU sin catálogo, sin remitente, país sin ruta). Se le
-                -- muestra al comerciante: "no se armó" a secas no le dice
-                -- qué tiene que corregir.
-                ALTER TABLE pedidos_tienda
-                    ADD COLUMN IF NOT EXISTS motivo_pendiente TEXT;
-            """)
-        conn.commit()
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'pedidos_huerfanos'
+                           AND column_name = 'install_generation'
+                    ) AS schema_ready
+                """
+            )
+            row = cur.fetchone()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise TiendaNoOperativaError(
+            "El esquema de tiendas requiere ejecutar la migración previa."
+        )
     _tablas_listas = True
 
 
@@ -1013,10 +996,12 @@ def guardar_pedido(
                     moneda        = EXCLUDED.moneda,
                     flete_cobrado = EXCLUDED.flete_cobrado,
                     flete_detalle = EXCLUDED.flete_detalle,
-                    numero        = EXCLUDED.numero
+                    numero        = EXCLUDED.numero,
+                    updated_at    = NOW()
                 WHERE pedidos_tienda.estado = 'PENDIENTE'
                   AND pedidos_tienda.cliente_id = EXCLUDED.cliente_id
-                RETURNING (xmax = 0) AS es_nuevo
+                  AND pedidos_tienda.automatismos_bloqueados = FALSE
+                RETURNING id, (xmax = 0) AS es_nuevo
             """, (
                 cliente_id, tienda_id, plataforma,
                 pedido["pedido_externo_id"], pedido.get("numero"),
@@ -1028,6 +1013,9 @@ def guardar_pedido(
             ))
             fila = cur.fetchone()
             creado = bool(fila and fila.get("es_nuevo"))
+            if fila and fila.get("id"):
+                from servicios.ecommerce_outbox import encolar_pedido_con_cursor
+                encolar_pedido_con_cursor(cur, int(fila["id"]))
         conn.commit()
     return creado
 
@@ -1131,18 +1119,6 @@ def guardar_pedido_huerfano(
                 # La cancelación es monotónica: un create/update tardío de la
                 # misma generación nunca puede volver a introducir el PII.
                 return False
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS pedidos_huerfanos (
-                    id                SERIAL PRIMARY KEY,
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    payload           JSONB NOT NULL,
-                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    UNIQUE (dominio, pedido_externo_id)
-                );
-                ALTER TABLE pedidos_huerfanos
-                    ADD COLUMN IF NOT EXISTS install_generation TEXT;
-            """)
             cur.execute("""
                 INSERT INTO pedidos_huerfanos
                     (dominio, pedido_externo_id, payload, install_generation)
@@ -1372,12 +1348,16 @@ def cancelar_pedido_externo(
     cliente_id: str = "",
     dominio_verificado: str = "",
     install_generation_verificada: str = "",
+    plataforma_verificada: str = "",
     evento_at: str = "",
 ) -> bool:
     """
-    El comprador canceló en la tienda: sacamos el pedido de los pendientes
-    para que nadie despache algo que ya no se vende. Sólo toca los que
-    todavía no se convirtieron en envío.
+    Cancela localmente sólo cuando se puede demostrar que no hubo emisión.
+
+    Si el pedido ya se convirtió y la solicitud fue emitida (o el estado es
+    ambiguo), no se finge una anulación del carrier: se bloquean automatismos
+    y se crea una obligación durable ``MANUAL_REVIEW``. Nunca se toca una
+    factura, deuda, cargo ni documento histórico.
 
     Para Shopify, el endpoint entrega tenant, dominio y generación ya
     verificados. Se vuelven a validar bajo el mismo advisory lock y la misma
@@ -1391,17 +1371,25 @@ def cancelar_pedido_externo(
     install_generation_verificada = str(
         install_generation_verificada or ""
     ).strip()
-    es_shopify = bool(
+    plataforma_verificada = str(plataforma_verificada or "").strip().lower()
+    tiene_identidad = bool(
         cliente_id or dominio_verificado or install_generation_verificada
     )
-    if es_shopify and not all((
+    if not plataforma_verificada and tiene_identidad:
+        plataforma_verificada = (
+            "tiendanube" if dominio_verificado.endswith(".tiendanube")
+            else "shopify"
+        )
+    if plataforma_verificada not in {"", "shopify", "tiendanube"}:
+        raise TiendaNoOperativaError("Plataforma de tienda inválida.")
+    if plataforma_verificada and not all((
         cliente_id, dominio_verificado, install_generation_verificada,
     )):
-        raise TiendaNoOperativaError("Falta verificar la instalación Shopify.")
+        raise TiendaNoOperativaError("Falta verificar la instalación de tienda.")
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            if es_shopify:
+            if plataforma_verificada == "shopify":
                 _bloquear_dominio_shopify(cur, dominio_verificado)
                 cur.execute(
                     """
@@ -1440,16 +1428,265 @@ def cancelar_pedido_externo(
                     install_generation_verificada,
                     evento_at,
                 )
+            elif plataforma_verificada == "tiendanube":
+                _bloquear_dominio_tiendanube(cur, dominio_verificado)
+                cur.execute(
+                    """
+                    SELECT t.id
+                      FROM tiendas_conectadas t
+                      JOIN tiendanube_instalaciones i
+                        ON LOWER(t.dominio) = LOWER(i.store_id || '.tiendanube')
+                     WHERE t.id = %s
+                       AND UPPER(t.cliente_id) = %s
+                       AND t.plataforma = 'tiendanube'
+                       AND t.activa = TRUE
+                       AND LOWER(t.dominio) = %s
+                       AND t.secreto = %s
+                       AND UPPER(COALESCE(i.cliente_id, '')) = %s
+                       AND i.install_generation = %s
+                       AND i.estado = 'ACTIVA'
+                       AND i.webhooks_ready = TRUE
+                       AND NULLIF(BTRIM(i.access_token), '') IS NOT NULL
+                     LIMIT 1
+                    """,
+                    (
+                        tienda_id,
+                        cliente_id,
+                        dominio_verificado,
+                        OAUTH_SECRET_MARKER,
+                        cliente_id,
+                        install_generation_verificada,
+                    ),
+                )
+                if cur.fetchone() is None:
+                    raise TiendaNoOperativaError(
+                        "La instalación Tiendanube ya no está operativa."
+                    )
+            else:
+                cur.execute(
+                    """
+                    SELECT plataforma, dominio
+                      FROM tiendas_conectadas
+                     WHERE id=%s
+                     FOR UPDATE
+                    """,
+                    (tienda_id,),
+                )
+                binding = cur.fetchone()
+                if binding and str(binding.get("plataforma") or "").lower() == "tiendanube":
+                    _bloquear_dominio_tiendanube(cur, binding.get("dominio") or "")
+
+            # Caso demostrablemente seguro: todavía no existe solicitud.
             cur.execute("""
-                UPDATE pedidos_tienda SET estado = 'CANCELADO'
-                WHERE tienda_id = %s AND pedido_externo_id = %s
-                  AND estado = 'PENDIENTE'
-                  AND (%s = '' OR UPPER(cliente_id) = %s)
-                RETURNING id
+                WITH candidato AS (
+                    SELECT p.id
+                      FROM pedidos_tienda p
+                      JOIN (
+                          SELECT id, dominio FROM tiendas_conectadas
+                      ) t ON t.id=p.tienda_id
+                     WHERE p.tienda_id = %s AND p.pedido_externo_id = %s
+                       AND p.estado = 'PENDIENTE'
+                       AND p.solicitud_id IS NULL
+                       AND (%s = '' OR UPPER(cliente_id) = %s)
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM solicitudes_guia s
+                            WHERE LOWER(COALESCE(s.origen_plataforma, '')) =
+                                  LOWER(p.plataforma)
+                              AND LOWER(COALESCE(s.origen_dominio, '')) =
+                                  LOWER(t.dominio)
+                              AND s.origen_pedido_externo_id=p.pedido_externo_id
+                       )
+                )
+                UPDATE pedidos_tienda p
+                   SET estado='CANCELADO', automatismos_bloqueados=TRUE,
+                       bloqueo_motivo='CANCELADO_EN_TIENDA', updated_at=NOW()
+                  FROM candidato c
+                 WHERE p.id=c.id
+                RETURNING p.id
             """, (tienda_id, pedido_externo_id, cliente_id, cliente_id))
-            cambio = cur.fetchone() is not None
+            pendiente = cur.fetchone()
+            if pendiente:
+                cur.execute(
+                    """
+                    UPDATE solicitud_automatica_outbox
+                       SET estado='CANCELADO', claim_id=NULL, claimed_at=NULL,
+                           completed_at=NOW(), updated_at=NOW(),
+                           ultimo_error_codigo='PEDIDO_CANCELADO'
+                     WHERE pedido_id=%s
+                       AND estado IN ('PENDIENTE','REINTENTAR','PROCESANDO','MANUAL_REVIEW')
+                    """,
+                    (pendiente["id"],),
+                )
+                conn.commit()
+                return True
+
+            cur.execute(
+                """
+                SELECT p.id, p.estado, p.solicitud_id, p.plataforma,
+                       t.dominio, p.pedido_externo_id, p.cliente_id
+                  FROM pedidos_tienda p
+                  JOIN tiendas_conectadas t ON t.id=p.tienda_id
+                 WHERE p.tienda_id=%s AND p.pedido_externo_id=%s
+                   AND (%s='' OR UPPER(p.cliente_id)=%s)
+                 FOR UPDATE OF p
+                """,
+                (tienda_id, pedido_externo_id, cliente_id, cliente_id),
+            )
+            pedido = cur.fetchone()
+            if not pedido:
+                conn.commit()
+                return False
+            if pedido.get("estado") == "CANCELADO":
+                conn.commit()
+                return True
+
+            # ``crear_solicitud_guia`` y ``marcar_convertido`` son pasos
+            # idempotentes pero históricamente vivían en dos transacciones.
+            # Buscar también por origen evita cancelar el pedido y dejar una
+            # solicitud activa en esa ventana intermedia.
+            cur.execute(
+                """
+                SELECT s.id, s.estado, s.tracking, s.guia_generada_at,
+                       s.courier_message_reference,
+                       EXISTS (
+                           SELECT 1 FROM envios e
+                            WHERE e.solicitud_id=s.id
+                       ) AS tiene_cargo
+                  FROM solicitudes_guia s
+                 WHERE UPPER(s.cliente_id)=UPPER(%s)
+                   AND (
+                       s.id=%s OR (
+                           LOWER(COALESCE(s.origen_plataforma, ''))=
+                               LOWER(%s)
+                           AND LOWER(COALESCE(s.origen_dominio, ''))=
+                               LOWER(%s)
+                           AND s.origen_pedido_externo_id=%s
+                       )
+                   )
+                 ORDER BY (s.id=%s) DESC, s.id DESC
+                 LIMIT 1
+                 FOR UPDATE
+                """,
+                (
+                    pedido["cliente_id"], pedido.get("solicitud_id"),
+                    pedido.get("plataforma"), pedido.get("dominio"),
+                    pedido["pedido_externo_id"], pedido.get("solicitud_id"),
+                ),
+            )
+            solicitud = cur.fetchone()
+
+            cancelacion_local_segura = bool(
+                solicitud
+                and solicitud.get("estado") in {"SOLICITADO", "EN_PROCESO"}
+                and not str(solicitud.get("tracking") or "").strip()
+                and not solicitud.get("guia_generada_at")
+                and not str(solicitud.get("courier_message_reference") or "").strip()
+                and not solicitud.get("tiene_cargo")
+            )
+            if cancelacion_local_segura:
+                cur.execute(
+                    """
+                    UPDATE solicitudes_guia
+                       SET estado='CANCELADO', updated_at=NOW()
+                     WHERE id=%s AND estado IN ('SOLICITADO','EN_PROCESO')
+                       AND NULLIF(BTRIM(tracking), '') IS NULL
+                       AND guia_generada_at IS NULL
+                    RETURNING id
+                    """,
+                    (solicitud["id"],),
+                )
+                if cur.fetchone() is None:
+                    raise RuntimeError("La solicitud cambió durante la cancelación.")
+                cur.execute(
+                    """
+                    UPDATE pedidos_tienda
+                       SET estado='CANCELADO', automatismos_bloqueados=TRUE,
+                           bloqueo_motivo='CANCELACION_LOCAL_PRE_EMISION',
+                           solicitud_id=COALESCE(solicitud_id, %s),
+                           updated_at=NOW()
+                     WHERE id=%s
+                    """,
+                    (solicitud["id"], pedido["id"]),
+                )
+                cur.execute(
+                    """
+                    UPDATE solicitud_automatica_outbox
+                       SET estado='CANCELADO', claim_id=NULL, claimed_at=NULL,
+                           completed_at=NOW(), updated_at=NOW(),
+                           ultimo_error_codigo='PEDIDO_CANCELADO'
+                     WHERE pedido_id=%s AND estado <> 'COMPLETADO'
+                    """,
+                    (pedido["id"],),
+                )
+                conn.commit()
+                return True
+
+            motivo = (
+                "SOLICITUD_EMITIDA"
+                if solicitud and (
+                    str(solicitud.get("tracking") or "").strip()
+                    or solicitud.get("guia_generada_at")
+                    or solicitud.get("tiene_cargo")
+                )
+                else "ESTADO_AMBIGUO"
+            )
+            cur.execute(
+                """
+                INSERT INTO tienda_cancelacion_obligaciones
+                    (pedido_id, solicitud_id, plataforma, dominio,
+                     pedido_externo_id, motivo, solicitud_estado, tenia_tracking)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (pedido_id) DO UPDATE SET
+                    solicitud_id=COALESCE(
+                        tienda_cancelacion_obligaciones.solicitud_id,
+                        EXCLUDED.solicitud_id
+                    ),
+                    motivo=EXCLUDED.motivo,
+                    solicitud_estado=EXCLUDED.solicitud_estado,
+                    tenia_tracking=EXCLUDED.tenia_tracking,
+                    estado='MANUAL_REVIEW', resolved_at=NULL, updated_at=NOW()
+                """,
+                (
+                    pedido["id"], (solicitud or {}).get("id"),
+                    str(pedido.get("plataforma") or "").lower(),
+                    str(pedido.get("dominio") or "").lower(),
+                    pedido["pedido_externo_id"], motivo,
+                    (solicitud or {}).get("estado"),
+                    bool(str((solicitud or {}).get("tracking") or "").strip()),
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE pedidos_tienda
+                   SET estado='CANCELACION_MANUAL', automatismos_bloqueados=TRUE,
+                       bloqueo_motivo=%s, updated_at=NOW()
+                 WHERE id=%s
+                """,
+                (motivo, pedido["id"]),
+            )
+            cur.execute(
+                """
+                UPDATE solicitud_automatica_outbox
+                   SET estado='CANCELADO', claim_id=NULL, claimed_at=NULL,
+                       completed_at=NOW(), updated_at=NOW(),
+                       ultimo_error_codigo='CANCELACION_MANUAL'
+                 WHERE pedido_id=%s
+                   AND estado IN ('PENDIENTE','REINTENTAR','PROCESANDO','MANUAL_REVIEW')
+                """,
+                (pedido["id"],),
+            )
+            cur.execute(
+                """
+                UPDATE tienda_fulfillment_outbox
+                   SET estado='MANUAL_REVIEW', claim_id=NULL, claimed_at=NULL,
+                       ultimo_error_codigo='CANCELACION_EN_TIENDA', updated_at=NOW()
+                 WHERE pedido_id=%s AND estado <> 'COMPLETADO'
+                """,
+                (pedido["id"],),
+            )
         conn.commit()
-    return cambio
+    return False
 
 
 def listar_pedidos(cliente_id: str, estado: str = "PENDIENTE", limite: int = 100) -> list[dict]:
@@ -1463,6 +1700,46 @@ def listar_pedidos(cliente_id: str, estado: str = "PENDIENTE", limite: int = 100
                 LIMIT %s
             """, (cliente_id, estado, limite))
             return [dict(r) for r in cur.fetchall()]
+
+
+def listar_resumen_pedidos_shopify_embebido(
+    dominio: str,
+    cliente_id: str,
+    *,
+    limite: int = 25,
+) -> list[dict]:
+    """Pedidos mínimos de una instalación exacta para Shopify App Home.
+
+    No devuelve destinatario, dirección, email, teléfono ni detalle de ítems.
+    El filtro exige simultáneamente plataforma, dominio y owner en la tienda y
+    el pedido, para que un ID token jamás seleccione otro tenant.
+    """
+    _ensure_tablas()
+    dominio = str(dominio or "").strip().lower()
+    cliente_id = str(cliente_id or "").strip().upper()
+    if not dominio or not cliente_id:
+        return []
+    limite = max(1, min(int(limite), 50))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.numero, p.pedido_externo_id, p.estado,
+                       p.valor_total, p.moneda, p.created_at
+                  FROM pedidos_tienda p
+                  JOIN tiendas_conectadas t ON t.id = p.tienda_id
+                 WHERE p.plataforma = 'shopify'
+                   AND t.plataforma = 'shopify'
+                   AND t.activa = TRUE
+                   AND LOWER(t.dominio) = %s
+                   AND UPPER(t.cliente_id) = %s
+                   AND UPPER(p.cliente_id) = %s
+                 ORDER BY p.id DESC
+                 LIMIT %s
+                """,
+                (dominio, cliente_id, cliente_id, limite),
+            )
+            return [dict(row) for row in cur.fetchall()]
 
 
 def listar_pedidos_tiendanube_seleccionados(
@@ -1548,6 +1825,7 @@ def marcar_convertido(cliente_id: str, pedido_id: int, solicitud_id: Optional[in
                 UPDATE pedidos_tienda
                 SET estado = 'CONVERTIDO', solicitud_id = COALESCE(%s, solicitud_id)
                 WHERE id = %s AND cliente_id = %s AND estado = 'PENDIENTE'
+                  AND automatismos_bloqueados=FALSE
             """, (solicitud_id, pedido_id, cliente_id))
         conn.commit()
 
@@ -1737,6 +2015,58 @@ def _borrar_direcciones_shopify_con_cursor(
     return max(int(cur.rowcount or 0), 0)
 
 
+def _borrar_outboxes_tienda_con_cursor(
+    cur,
+    plataforma: str,
+    dominio: str,
+    pedidos_externos: list[str] | None = None,
+) -> int:
+    """Retira identificadores operativos derivados durante privacy redact."""
+    plataforma = (plataforma or "").strip().lower()
+    dominio = (dominio or "").strip().lower()
+    if plataforma not in {"shopify", "tiendanube"}:
+        raise ValueError("plataforma de outbox no soportada")
+    # ``plataforma_sql`` sale de la lista cerrada anterior. Mantener el
+    # dominio como primer (y, en store/redact, unico) parametro preserva el
+    # contrato de las rutinas privacy existentes y evita SQL dinamico con
+    # datos externos.
+    plataforma_sql = "'shopify'" if plataforma == "shopify" else "'tiendanube'"
+    filtro_ids = "" if pedidos_externos is None else "AND p.pedido_externo_id=ANY(%s)"
+    params = (
+        (dominio,)
+        if pedidos_externos is None
+        else (dominio, pedidos_externos)
+    )
+    cur.execute(
+        f"""
+        DELETE FROM solicitud_automatica_outbox o
+         USING pedidos_tienda p, tiendas_conectadas t
+         WHERE o.pedido_id=p.id AND p.tienda_id=t.id
+           AND LOWER(p.plataforma)={plataforma_sql} AND LOWER(t.dominio)=%s
+           {filtro_ids}
+        """,
+        params,
+    )
+    total = max(int(cur.rowcount or 0), 0)
+    filtro_directo = "" if pedidos_externos is None else "AND pedido_externo_id=ANY(%s)"
+    params_directos = (
+        (dominio,)
+        if pedidos_externos is None
+        else (dominio, pedidos_externos)
+    )
+    for tabla in ("tienda_fulfillment_outbox", "tienda_cancelacion_obligaciones"):
+        cur.execute(
+            f"""
+            DELETE FROM {tabla}
+             WHERE LOWER(plataforma)={plataforma_sql} AND LOWER(dominio)=%s
+               {filtro_directo}
+            """,
+            params_directos,
+        )
+        total += max(int(cur.rowcount or 0), 0)
+    return total
+
+
 def anonimizar_pedidos(dominio: str, pedidos_externos: list[str]) -> int:
     """
     GDPR — "borrame mis datos" de un comprador: sacamos sus datos
@@ -1766,13 +2096,17 @@ def anonimizar_pedidos(dominio: str, pedidos_externos: list[str]) -> int:
             solicitudes_ids = _solicitudes_shopify_con_cursor(
                 cur, dominio, pedidos_externos,
             )
+            _borrar_outboxes_tienda_con_cursor(
+                cur, "shopify", dominio, pedidos_externos,
+            )
+            n = 0
             cur.execute("""
                 UPDATE pedidos_tienda p SET destinatario = %s::jsonb
                 FROM tiendas_conectadas t
                 WHERE p.tienda_id = t.id AND t.dominio = %s
                   AND p.pedido_externo_id = ANY(%s)
             """, (anonimo, dominio, pedidos_externos))
-            n = cur.rowcount
+            n += cur.rowcount
             n += _anonimizar_solicitudes_con_cursor(cur, solicitudes_ids)
             n += _borrar_direcciones_shopify_con_cursor(
                 cur, dominio, pedidos_externos,
@@ -1834,6 +2168,7 @@ def _borrar_datos_tienda_con_cursor(cur, dominio: str) -> int:
     # Las solicitudes/cargos se conservan como evidencia financiera, pero
     # pierden PII de destinatario Y remitente, además de etiqueta/errores.
     solicitudes_ids = _solicitudes_shopify_con_cursor(cur, dominio)
+    _borrar_outboxes_tienda_con_cursor(cur, "shopify", dominio)
     total += _anonimizar_solicitudes_con_cursor(
         cur, solicitudes_ids, incluir_remitente=True,
     )

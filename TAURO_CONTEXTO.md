@@ -1,12 +1,12 @@
 # TAURO — CONTEXTO COMPLETO DEL SISTEMA
 
-Última revisión documental: 3 de septiembre de 2026.
+Última revisión documental: 25 de septiembre de 2026.
 
 ## 0. Alcance y fuente de verdad de este documento
 
 TAURO es una plataforma B2B de logística para clientes y tiendas e-commerce. Reúne una web pública, un portal autenticado para clientes, un panel administrativo, una API B2B, conexiones con couriers, conexiones con Shopify y Tiendanube, y contabilidad operativa de envíos, facturas y pagos.
 
-Este documento se relevó contra el checkout `.tmp/admin-courier-invoice-control`, rama `codex/admin-courier-invoice-control`, después de ejecutar las once tareas de estabilización operativa, contable y visual del 2–3 de septiembre de 2026. La raíz `/Users/leanrmollo/Documents/TAURO` no es el checkout de la aplicación: es una carpeta de trabajo con auditorías, exportaciones y varios worktrees temporales. Por eso, para entender o modificar la aplicación debe usarse este checkout o el commit correspondiente de la rama, no el `git log` de la raíz.
+Este documento se relevó originalmente contra el corte de estabilización del 2–3 de septiembre y se actualizó con la rama `codex/oca-direct-integration-20260918`. La raíz `/Users/leanrmollo/Documents/TAURO` no es el checkout de la aplicación: es una carpeta de trabajo con auditorías, exportaciones y varios worktrees temporales. Por eso, para entender o modificar la aplicación debe usarse el checkout o commit de la rama indicada para cada entrega, no el `git log` de la raíz.
 
 La definición estructural canónica es `sql/schema.sql`. Los servicios son la fuente de verdad funcional. Los documentos antiguos, especialmente `docs/ARQUITECTURA_TAURO_API.md`, describen el MVP de Sheets/FedEx y no siempre representan producción.
 
@@ -41,6 +41,7 @@ La definición estructural canónica es `sql/schema.sql`. Los servicios son la f
 - `web/`: fuentes React de la web pública y estilos.
 - `tests/`: pruebas unitarias, de integración y de contrato; incluye pruebas contra PostgreSQL temporal.
 - `docs/`: arquitectura, operación, seguridad, integraciones y procedimientos.
+- `shopify_app/`: manifiesto Shopify CLI, pruebas de configuración y gate del piloto.
 - `tiendanube_nube_app/`: paquete auxiliar de la aplicación Tiendanube.
 
 ### Superficies
@@ -167,6 +168,12 @@ No existe una tabla independiente llamada `cajas`. Las cajas viven en `solicitud
 
 `tiendanube_label_outbox`: cola de generación/cancelación con payload, completitud, estado, reintentos y tiempos.
 
+`tiendanube_fulfillment_order_orders`: vínculo inmutable entre Fulfillment Order y pedido para validar propiedad y privacidad antes de persistir o ejecutar una etiqueta.
+
+`tiendanube_rate_quote_snapshots` y `tiendanube_rate_quote_claims`: tarifa aceptada inmutable, sin PII, y su uso único por Fulfillment Order.
+
+`tiendanube_label_execution` y `tiendanube_label_documents`: checkpoints de emisión OCA y PDF durable servido mediante token revocable.
+
 ### Configuración, salud, CRM y auditoría
 
 `config`: clave/valor de configuración dinámica. Guarda dólar, markups públicos y otros parámetros administrables.
@@ -284,9 +291,9 @@ Saldo consolidado = suma de cargos ACTIVO + suma de ajustes APLICADO − suma de
 - FedEx: cliente HTTP, cotización histórica y herramientas de tracking/auditoría existen, pero el catálogo multioperador la declara `pendiente`; no se habilita emisión/portal productivo desde `cliente_courier_config`. Faltan terminar/homologar emisión, cancelación, tracking y credenciales/UAT bajo el contrato nuevo.
 - UPS: cliente y adapter parcial existen, con pruebas de emisión, pero el catálogo la declara pendiente. Faltan credenciales productivas, UAT y habilitación; no ofrece pickup en el contrato actual.
 - Andreani: contrato nacional previsto para cotizar, emitir, etiqueta y tracking, pero no hay adapter operativo. Faltan API key, contrato, sucursales/operativas, payloads reales y homologación.
-- OCA: existe adapter de cotización y contrato declarativo “operativo” en código, pero el cotizador nacional visible todavía devuelve APIs pendientes porque faltan usuario/password/CUIT/cuenta/operativa, contrato y aprobación productiva independiente. Emisión, etiqueta, cancelación y tracking no están declarados como capacidades actuales.
-- Shopify: app pública ampliamente implementada: OAuth, tokens cifrados/refresh, carrier rates, webhooks de pedidos/productos/inventario, espejo de catálogo/stock, lifecycle, desinstalación y GDPR. Hay pruebas y documentación de publicación. Para cada instalación real faltan credenciales/app listing, scopes, webhooks verificados y homologación/App Store; la disponibilidad productiva depende del entorno y configuración, no sólo del código.
-- Tiendanube: OAuth/lifecycle, webhooks, privacidad, carrier rates y contratos de labels están implementados en gran parte. Rates nacionales fallan cerrado si falta pricing nacional u OCA; generación de labels se encola y cancelación pública devuelve 503 hasta confirmación de una implementación segura. Faltan credenciales/registro de app, OCA productiva, homologación con tienda demo, material de listing y SLA aprobados.
+- OCA: el adapter e-Pak implementa localmente cotización, creación, descarga/validación de etiqueta PDF, cancelación, tracking y descubrimiento explícito de centros de costo. La operativa normal y la de devolución separan operativa, centro y confirmación de seguro. Cotización y ejecución tienen gates independientes y permanecen apagadas por defecto. Faltan credenciales y datos contractuales cargados por canal seguro, UAT QA y aprobación productiva; por eso no debe anunciarse como operativa todavía.
+- Shopify: app pública embebida implementada para App Home en Admin, ID/session tokens sin cookies de terceros, OAuth con retorno seguro, tokens cifrados/refresh, webhooks de pedidos/productos/inventario, espejo de catálogo/stock, lifecycle, desinstalación, GDPR y fulfillment/tracking. La v1 pública no pide `write_shipping`, no instala CarrierService y no cotiza en checkout: el comercio conserva sus tarifas Shopify y TAURO factura el flete por fuera. El módulo histórico de tarifas calculadas queda fuera del manifiesto y del piloto. Para cada instalación real faltan credenciales controladas, confirmación del Dev Dashboard, development store activa, UAT punta a punta y revisión del App Store.
+- Tiendanube: OAuth/lifecycle, webhooks, privacidad, carrier rates y Labels API están implementados localmente. Cada tarifa aceptada se congela sin PII; la generación usa outbox y checkpoints `CREATE_SHIPMENT → FETCH_LABEL → PUBLISH → DONE`; el PDF queda detrás de un token revocable; y la cancelación sólo aprueba si OCA confirma `CANCELADO`, dejando resultados inciertos en revisión manual. Todo falla cerrado y sigue apagado. El esquema completo y la migración de claims legacy fueron validados de forma repetible en PostgreSQL 18 aislado; falta aplicarlos en staging/base objetivo, además de credenciales, registro de app, UAT OCA y homologación punta a punta con tienda demo.
 
 ## 9. Rutas HTTP
 
@@ -371,8 +378,8 @@ Toda URL GET inexistente devuelve una página 404 HTML coherente con su superfic
 - `api_key` legado coexiste con hash y el script de Sheets menciona `api_key_hash`, columna que debe verificarse en la base efectiva. Consolidar autenticación API y retirar texto claro.
 - Tracking genérico en `servicios/rastreo.py` conserva un TODO para llamar `courier.track()`; DHL tiene job real aparte, pero FedEx/UPS genéricos no están cerrados.
 - FedEx y UPS siguen marcados como integración pendiente en el catálogo actual, pese a existir clientes/adapters y tests parciales.
-- Cotización nacional visible todavía es preparatoria: OCA/Andreani muestran “APIs pendientes”; Andreani no tiene adapter y OCA necesita credenciales/contrato/UAT.
-- Cancelación de labels Tiendanube está deliberadamente bloqueada con 503; generación depende del outbox y del courier nacional.
+- Andreani no tiene adapter operativo. OCA está implementado localmente, pero sigue bloqueado hasta cargar credenciales/contrato por canal seguro, confirmar centros/seguro y completar UAT documentado.
+- La generación y cancelación de labels Tiendanube ya tienen ejecución segura detrás de flags. El DDL pasó creación limpia, migración legacy y segunda aplicación idempotente en PostgreSQL 18 temporal; falta aplicarlo en staging/base objetivo y ejecutar el flujo real Tiendanube→OCA. No hubo despliegue ni activación productiva.
 - Checklist Tiendanube mantiene pendientes homologación real, listing gráfico, SLA y publicación.
 - Privacidad de tiendas: la purga PostgreSQL está modelada, pero `docs/PRIVACIDAD_SHOPIFY_OPERACION.md` deja como decisión del responsable el tratamiento del Google Sheet histórico y advierte que copias/exports quedan fuera de la purga automática.
 - Shopify requiere completar/verificar publicación productiva por instalación y secretos; los documentos advierten que código listo no equivale a app aprobada.

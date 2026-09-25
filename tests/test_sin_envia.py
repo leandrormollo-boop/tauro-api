@@ -73,7 +73,7 @@ def test_domestico_se_bloquea_pero_importacion_a_argentina_sigue_internacional()
 
 def test_cotizador_rapido_domestico_falla_antes_de_consultar_carriers():
     with mock.patch("servicios.carriers.cotizar_carriers_cliente") as consultar:
-        with pytest.raises(ValueError, match="Andreani y OCA"):
+        with pytest.raises(ValueError, match="seleccioná Nacional"):
             cotizador.cotizar_referencia_couriers(
                 cliente="MELCIOR", origen_pais="AR", destino_pais="AR",
                 peso_kg=1, largo_cm=10, ancho_cm=10, alto_cm=10,

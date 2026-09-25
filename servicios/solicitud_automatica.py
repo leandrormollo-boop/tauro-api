@@ -80,6 +80,7 @@ def crear_desde_pedido(pedido_id: int) -> dict:
                   ON i.dominio = t.dominio
                  AND LOWER(t.plataforma) = 'shopify'
                 WHERE p.id = %s
+                  AND p.automatismos_bloqueados = FALSE
                   AND t.activa = TRUE
                   AND UPPER(t.cliente_id) = UPPER(p.cliente_id)
                   AND LOWER(t.plataforma) = LOWER(p.plataforma)
@@ -216,10 +217,12 @@ def crear_desde_pedido(pedido_id: int) -> dict:
     except Exception as e:
         print(f"[solicitud_auto] cotización falló para pedido {pedido_id}: "
               f"{type(e).__name__}")
-        return _motivo(
+        resultado = _motivo(
             pedido_id,
             "No se pudo cotizar el envío en este momento. Volvé a intentarlo desde el portal.",
         )
+        resultado["reintentar"] = True
+        return resultado
     if not precio.get("encontrado"):
         return _motivo(
             pedido_id,
@@ -280,10 +283,12 @@ def crear_desde_pedido(pedido_id: int) -> dict:
     except Exception as e:
         print(f"[solicitud_auto] creación falló para pedido {pedido_id}: "
               f"{type(e).__name__}")
-        return _motivo(
+        resultado = _motivo(
             pedido_id,
             "No se pudo preparar la solicitud en este momento. Volvé a intentarlo desde el portal.",
         )
+        resultado["reintentar"] = True
+        return resultado
 
     sid = creada.get("id")
     try:
@@ -299,17 +304,11 @@ def crear_desde_pedido(pedido_id: int) -> dict:
 
 def intentar_en_segundo_plano(pedido_id: int) -> None:
     """
-    Se dispara desde el webhook. Va en un hilo porque la tienda espera un
-    200 rápido: cotizar puede tardar segundos y demasiados timeouts hacen
-    que la plataforma dé de baja el webhook.
+    Confirma que exista el job durable y despierta al worker. El hilo no es
+    fuente de verdad: si el proceso cae, PostgreSQL conserva y recupera el job.
     """
-    import threading
-
-    def _run():
-        try:
-            crear_desde_pedido(pedido_id)
-        except Exception as e:
-            print(f"[solicitud_auto] falló armando el pedido {pedido_id}: "
-                  f"{type(e).__name__}")
-
-    threading.Thread(target=_run, daemon=True).start()
+    from servicios.ecommerce_outbox import (
+        encolar_pedido, lanzar_solicitudes_automaticas,
+    )
+    encolar_pedido(pedido_id)
+    lanzar_solicitudes_automaticas()

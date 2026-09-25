@@ -22,19 +22,24 @@ archivo ni a tickets de homologación.
 - Términos: `https://taurosolutions.ar/terminos`
 - Soporte: `https://taurosolutions.ar/ayuda/tiendanube`
 - Webhook general: `https://taurosolutions.ar/integraciones/tiendanube/webhook`
-- Store redact: `https://taurosolutions.ar/integraciones/tiendanube/webhook`
-- Customer redact: `https://taurosolutions.ar/integraciones/tiendanube/webhook`
-- Customers data request: `https://taurosolutions.ar/integraciones/tiendanube/webhook`
+- App/store redact: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/app-store-redact`
+- Customer redact: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/customer-redact`
+- Customers data request: `https://taurosolutions.ar/integraciones/tiendanube/privacidad/customers-data-request`
+
+Publicar y verificar estas tres rutas antes de cargarlas en Partners. Los
+cuerpos de privacidad pueden omitir `event`; cada ruta deriva el evento sólo
+después de verificar el HMAC del cuerpo original y validar su contrato. Probar
+con datos ficticios, nunca con solicitudes reales de borrado.
 
 ## Permisos mínimos candidatos
 
 - `write_shipping`
 - `read_orders`
 - `write_fulfillment_orders`
-- `read_customers`
 
 El Partner Team debe confirmar la disponibilidad de
 `write_fulfillment_orders`. Todo write scope implica su read equivalente. No
+pedir `read_customers`: la v1 no consulta ese recurso y privacidad no lo exige. No
 solicitar Products ni Locations mientras el producto no use esos endpoints.
 
 ## Admin links
@@ -68,7 +73,7 @@ No habilitar todavía suspensión ni reactivación opcionales.
 - Ayuda: `docs/tiendanube/assets/screenshot-ayuda-1600x800.png` (PNG 1600×800).
 - Faltan capturas reales de instalación, checkout y gestión en tienda demo.
 
-## Webhooks esperados
+## Webhooks registrados por API, por tienda
 
 - `order/created`
 - `order/updated`
@@ -76,9 +81,17 @@ No habilitar todavía suspensión ni reactivación opcionales.
 - `app/uninstalled`
 - `app/suspended`
 - `app/resumed`
-- `store/redact`
-- `customers/redact`
+
+## Avisos de privacidad configurados en Partners, por aplicación
+
+- `app/store_redact`
+- `customer/redact`
 - `customers/data_request`
+
+No intentar crearlos con POST `/webhooks` ni exigir que aparezcan en su
+listado. Después de verificar las tres URLs y su recepción firmada, establecer
+`TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED=true`. Sin esa confirmación, TAURO no
+completa una instalación ni reactiva la app.
 
 ## Datos que todavía requieren decisión humana
 

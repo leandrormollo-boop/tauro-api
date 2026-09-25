@@ -34,21 +34,43 @@ OAUTH_URL = "https://www.tiendanube.com/apps/authorize/token"
 USER_AGENT = "TAURO Solutions (cotizaciones@taurosolutions.ar)"
 OAUTH_SECRET_MARKER = "oauth:tiendanube-app"
 
-WEBHOOKS_REQUERIDOS = (
+# Sólo estos eventos se registran por tienda con POST /webhooks. Los avisos
+# de privacidad se configuran por aplicación en Partners, no por API.
+WEBHOOKS_API_REQUERIDOS = (
     "order/created",
     "order/updated",
     "order/cancelled",
     "app/uninstalled",
     "app/suspended",
     "app/resumed",
-    "store/redact",
-    "customers/redact",
-    "customers/data_request",
 )
+WEBHOOK_LABEL_STATUS = "fulfillment_order/label_status_updated"
 EVENTOS_PEDIDOS = {"order/created", "order/updated", "order/cancelled"}
-EVENTOS_PRIVACIDAD = {"store/redact", "customers/redact", "customers/data_request"}
+# Nombres oficiales del contrato LGPD de Tiendanube. Los dos aliases legacy se
+# aceptan sólo para drenar eventos guardados por versiones anteriores.
+EVENTOS_PRIVACIDAD = {"app/store_redact", "customer/redact", "customers/data_request"}
+EVENTOS_PRIVACIDAD_LEGACY = {"store/redact", "customers/redact"}
+_ALIASES_PRIVACIDAD = {
+    "store/redact": "app/store_redact",
+    "customers/redact": "customer/redact",
+}
 EVENTOS_LIFECYCLE = {"app/uninstalled", "app/suspended", "app/resumed"}
-EVENTOS_ACEPTADOS = set(WEBHOOKS_REQUERIDOS)
+WEBHOOKS_REQUERIDOS = (*WEBHOOKS_API_REQUERIDOS, *sorted(EVENTOS_PRIVACIDAD))
+EVENTOS_ACEPTADOS = (
+    set(WEBHOOKS_REQUERIDOS)
+    | EVENTOS_PRIVACIDAD_LEGACY
+    | {WEBHOOK_LABEL_STATUS}
+)
+_LABEL_STATUSES = {
+    "STARTED",
+    "IN_PROGRESS",
+    "READY_TO_DOWNLOAD",
+    "READY_TO_USE",
+    "DOWNLOADED",
+    "SUSPENDED",
+    "FAILED",
+    "CANCELED",
+}
 
 
 class TiendanubeError(RuntimeError):
@@ -57,6 +79,28 @@ class TiendanubeError(RuntimeError):
 
 class TiendanubeWebhookError(TiendanubeError):
     pass
+
+
+class TiendanubeLabelFeatureError(TiendanubeWebhookError):
+    """No fue posible determinar con certeza el feature oficial de Labels."""
+
+
+def evento_privacidad_canonico(evento: str) -> str:
+    """Normaliza aliases previos sin publicarlos como contrato nuevo."""
+    normalizado = str(evento or "").strip().lower()
+    return _ALIASES_PRIVACIDAD.get(normalizado, normalizado)
+
+
+def privacidad_configurada() -> bool:
+    """Confirmación operativa de Partners; no se infiere desde GET /webhooks."""
+    return (os.getenv("TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED") or "").strip().lower() in {
+        "1", "true", "yes", "si", "sí", "on",
+    }
+
+
+def exigir_privacidad_configurada() -> None:
+    if not privacidad_configurada():
+        raise TiendanubeWebhookError("PRIVACY_PARTNERS_CONFIGURATION_PENDING")
 
 
 class TiendanubeClaimError(TiendanubeError):
@@ -102,8 +146,10 @@ def _cifrar_token(token: str) -> str:
 
 def _descifrar_token(token_guardado: str) -> str:
     token_guardado = str(token_guardado or "")
+    if not token_guardado:
+        return ""
     if not token_guardado.startswith("enc:v1:"):
-        return token_guardado
+        raise TiendanubeError("Token Tiendanube legacy sin migrar.")
     ultimo_error = None
     for fernet in _fernets():
         try:
@@ -112,116 +158,98 @@ def _descifrar_token(token_guardado: str) -> str:
             ultimo_error = exc
     raise TiendanubeError("El token cifrado Tiendanube no se pudo abrir.") from ultimo_error
 
+
+def migrar_tokens_legacy() -> int:
+    """Cifra tokens históricos en predeploy; runtime queda sólo lectura."""
+    _ensure_tabla()
+    cambios = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT store_id, access_token
+                  FROM tiendanube_instalaciones
+                 WHERE NULLIF(BTRIM(access_token), '') IS NOT NULL
+                   AND access_token NOT LIKE 'enc:v1:%'
+                 FOR UPDATE
+                """
+            )
+            for fila in cur.fetchall():
+                anterior = str(fila.get("access_token") or "")
+                cur.execute(
+                    """
+                    UPDATE tiendanube_instalaciones
+                       SET access_token = %s, actualizada_en = NOW()
+                     WHERE store_id = %s AND access_token = %s
+                    """,
+                    (
+                        _cifrar_token(anterior),
+                        str(fila.get("store_id") or ""),
+                        anterior,
+                    ),
+                )
+                cambios += int(cur.rowcount or 0)
+        conn.commit()
+    return cambios
+
 _tabla_lista = False
 
 
 def _ensure_tabla() -> None:
+    """Comprueba el esquema Tiendanube; OAuth/webhooks nunca ejecutan DDL."""
     global _tabla_lista
     if _tabla_lista:
         return
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS tiendanube_instalaciones (
-                    id                   SERIAL PRIMARY KEY,
-                    store_id             TEXT NOT NULL UNIQUE,
-                    access_token         TEXT NOT NULL,
-                    cliente_id           TEXT,
-                    nombre               TEXT,
-                    estado               TEXT NOT NULL DEFAULT 'ACTIVA',
-                    install_generation   TEXT,
-                    webhooks_ready       BOOLEAN NOT NULL DEFAULT FALSE,
-                    webhooks_verified_at TIMESTAMPTZ,
-                    claim_token_hash     TEXT,
-                    claim_expires_at     TIMESTAMPTZ,
-                    instalada_en         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    actualizada_en       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    suspendida_en        TIMESTAMPTZ,
-                    desinstalada_en      TIMESTAMPTZ,
-                    redactada_en         TIMESTAMPTZ
-                );
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS estado TEXT NOT NULL DEFAULT 'ACTIVA';
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS install_generation TEXT;
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS webhooks_ready BOOLEAN NOT NULL DEFAULT FALSE;
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS webhooks_verified_at TIMESTAMPTZ;
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS claim_token_hash TEXT;
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS claim_expires_at TIMESTAMPTZ;
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS actualizada_en TIMESTAMPTZ NOT NULL DEFAULT NOW();
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS suspendida_en TIMESTAMPTZ;
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS desinstalada_en TIMESTAMPTZ;
-                ALTER TABLE tiendanube_instalaciones
-                    ADD COLUMN IF NOT EXISTS redactada_en TIMESTAMPTZ;
-                UPDATE tiendanube_instalaciones
-                   SET install_generation = md5(
-                       store_id || ':' || instalada_en::text || ':' || random()::text
-                   )
-                 WHERE install_generation IS NULL OR BTRIM(install_generation) = '';
-                ALTER TABLE tiendanube_instalaciones
-                    ALTER COLUMN install_generation SET NOT NULL;
-
-                CREATE TABLE IF NOT EXISTS tiendanube_lifecycle_eventos (
-                    id                 BIGSERIAL PRIMARY KEY,
-                    store_id           TEXT NOT NULL,
-                    evento             TEXT NOT NULL,
-                    install_generation TEXT NOT NULL,
-                    recibido_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS ix_tiendanube_lifecycle_store
-                    ON tiendanube_lifecycle_eventos(store_id, recibido_at DESC);
-
-                CREATE TABLE IF NOT EXISTS tiendanube_webhook_eventos (
-                    evento_id          TEXT PRIMARY KEY,
-                    store_id           TEXT NOT NULL,
-                    evento             TEXT NOT NULL,
-                    recurso_id         TEXT NOT NULL DEFAULT '',
-                    install_generation TEXT NOT NULL,
-                    payload            JSONB NOT NULL,
-                    estado             TEXT NOT NULL DEFAULT 'PENDIENTE',
-                    intentos           INTEGER NOT NULL DEFAULT 0,
-                    proximo_intento_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    ultimo_error       TEXT,
-                    recibido_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    started_at         TIMESTAMPTZ,
-                    procesado_at       TIMESTAMPTZ
-                );
-                CREATE INDEX IF NOT EXISTS ix_tiendanube_webhook_pendientes
-                    ON tiendanube_webhook_eventos(estado, proximo_intento_at, recibido_at);
-
-                CREATE TABLE IF NOT EXISTS tiendanube_privacidad_solicitudes (
-                    id                 BIGSERIAL PRIMARY KEY,
-                    request_id         TEXT NOT NULL,
-                    store_id           TEXT NOT NULL,
-                    tipo               TEXT NOT NULL,
-                    customer_id        TEXT NOT NULL DEFAULT '',
-                    recursos           JSONB NOT NULL DEFAULT '[]'::jsonb,
-                    estado             TEXT NOT NULL DEFAULT 'PENDIENTE',
-                    resolucion         TEXT,
-                    creado_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    resuelto_at        TIMESTAMPTZ,
-                    UNIQUE(store_id, tipo, request_id)
-                );
-                ALTER TABLE tiendanube_privacidad_solicitudes
-                    ADD COLUMN IF NOT EXISTS resolucion TEXT;
-                CREATE INDEX IF NOT EXISTS ix_tiendanube_privacidad_pendientes
-                    ON tiendanube_privacidad_solicitudes(estado, creado_at);
-
-                CREATE TABLE IF NOT EXISTS tiendanube_pedidos_redactados (
-                    dominio           TEXT NOT NULL,
-                    pedido_externo_id TEXT NOT NULL,
-                    redactado_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (dominio, pedido_externo_id)
-                );
-            """)
-        conn.commit()
+            cur.execute(
+                """
+                SELECT
+                    to_regclass('tiendanube_instalaciones') IS NOT NULL
+                    AND to_regclass('tiendanube_lifecycle_eventos') IS NOT NULL
+                    AND to_regclass('tiendanube_webhook_eventos') IS NOT NULL
+                    AND to_regclass('tiendanube_privacidad_solicitudes') IS NOT NULL
+                    AND to_regclass('tiendanube_pedidos_redactados') IS NOT NULL
+                    AND (
+                        SELECT COUNT(*) = 13
+                          FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'tiendanube_instalaciones'
+                           AND column_name IN (
+                               'estado', 'install_generation', 'webhooks_ready',
+                               'label_webhook_ready',
+                               'label_api_feature_ready',
+                               'label_api_feature_checked_at',
+                               'webhooks_verified_at', 'claim_token_hash',
+                               'claim_expires_at', 'actualizada_en',
+                               'suspendida_en', 'desinstalada_en', 'redactada_en'
+                           )
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'tiendanube_instalaciones'
+                           AND column_name = 'install_generation'
+                           AND is_nullable = 'NO'
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'tiendanube_privacidad_solicitudes'
+                           AND column_name = 'resolucion'
+                    ) AS schema_ready
+                """
+            )
+            row = cur.fetchone()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise TiendanubeError(
+            "Tiendanube requiere ejecutar la migración antes del tráfico."
+        )
     _tabla_lista = True
 
 
@@ -290,60 +318,131 @@ def canjear_token(code: str) -> Optional[dict]:
         return None
 
 
-def guardar_instalacion(store_id: str, access_token: str, nombre: str = "") -> str:
-    """Persiste una generación OAuth y devuelve un secreto de claim ownerless.
+def guardar_instalacion(
+    store_id: str,
+    access_token: str,
+    nombre: str = "",
+    *,
+    label_api_feature_ready: bool = False,
+) -> str:
+    """Persiste una generación OAuth nueva, siempre sin dueño.
 
-    El secreto sólo vuelve al navegador que completó OAuth. En PostgreSQL se
-    guarda su hash, de modo que una lectura de la tabla no permite reclamar la
-    tienda. Si la instalación ya tenía dueño, se preserva y no se emite claim.
+    Completar OAuth demuestra control de la tienda, no identidad dentro de
+    TAURO. Por eso una reautorización nunca hereda el ``cliente_id`` ni el
+    binding de la generación anterior. La única vinculación posterior válida
+    es la del callback que ya verificó ``state`` + cookie del portal.
     """
     _ensure_tabla()
     store_id = str(store_id or "").strip()
     if not store_id or not str(access_token or "").strip():
         raise TiendanubeError("Instalación Tiendanube inválida.")
     generation = secrets.token_urlsafe(18)
-    claim = secrets.token_urlsafe(32)
-    claim_hash = hashlib.sha256(claim.encode("utf-8")).hexdigest()
+    dominio = f"{store_id}.tiendanube"
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Serializa OAuth, redacciones y pedidos del mismo dominio. El
+            # token nuevo y la desactivación del binding previo se confirman
+            # juntos: nunca queda una generación nueva operando con el tenant
+            # heredado de una autorización anterior.
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"tauro:tiendanube:{dominio}",),
+            )
+            cur.execute(
+                """
+                UPDATE tiendas_conectadas
+                   SET activa = FALSE
+                 WHERE LOWER(dominio) = %s
+                   AND plataforma = 'tiendanube'
+                """,
+                (dominio,),
+            )
+            # Ningún secreto de callbacks Shipping/Labels sobrevive a una
+            # generación OAuth nueva. El reconciliador rota las URLs remotas
+            # y vuelve a enlazarlas a ``generation`` antes de reactivar.
+            cur.execute(
+                """
+                UPDATE tiendanube_shipping_config
+                   SET activa = FALSE,
+                       install_generation = NULL,
+                       label_callback_token_hash = NULL,
+                       actualizada_en = NOW()
+                 WHERE store_id = %s
+                """,
+                (store_id,),
+            )
             cur.execute("""
                 INSERT INTO tiendanube_instalaciones
-                    (store_id, access_token, nombre, estado, install_generation,
-                     webhooks_ready, claim_token_hash, claim_expires_at)
-                VALUES (%s, %s, %s, 'ACTIVA', %s, FALSE, %s,
-                        NOW() + INTERVAL '24 hours')
+                    (store_id, access_token, cliente_id, nombre, estado,
+                     install_generation,
+                     webhooks_ready, label_webhook_ready,
+                     label_api_feature_ready, label_api_feature_checked_at,
+                     claim_token_hash, claim_expires_at)
+                VALUES (%s, %s, NULL, %s, 'ACTIVA', %s, FALSE, FALSE, %s,
+                        NOW(), NULL, NULL)
                 ON CONFLICT (store_id) DO UPDATE
                     SET access_token = EXCLUDED.access_token,
+                        cliente_id = NULL,
                         nombre = COALESCE(NULLIF(EXCLUDED.nombre, ''),
                                           tiendanube_instalaciones.nombre),
                         estado = 'ACTIVA',
                         install_generation = EXCLUDED.install_generation,
                         webhooks_ready = FALSE,
+                        label_webhook_ready = FALSE,
+                        label_api_feature_ready = EXCLUDED.label_api_feature_ready,
+                        label_api_feature_checked_at = NOW(),
                         webhooks_verified_at = NULL,
-                        claim_token_hash = CASE
-                            WHEN tiendanube_instalaciones.cliente_id IS NULL
-                            THEN EXCLUDED.claim_token_hash ELSE NULL END,
-                        claim_expires_at = CASE
-                            WHEN tiendanube_instalaciones.cliente_id IS NULL
-                            THEN EXCLUDED.claim_expires_at ELSE NULL END,
+                        claim_token_hash = NULL,
+                        claim_expires_at = NULL,
                         instalada_en = NOW(),
                         actualizada_en = NOW(),
                         suspendida_en = NULL,
                         desinstalada_en = NULL,
                         redactada_en = NULL
-                RETURNING cliente_id
             """, (
                 store_id, _cifrar_token(access_token), nombre,
-                generation, claim_hash,
+                generation, bool(label_api_feature_ready),
             ))
-            fila = cur.fetchone() or {}
             cur.execute("""
                 INSERT INTO tiendanube_lifecycle_eventos
                     (store_id, evento, install_generation)
                 VALUES (%s, 'INSTALADA', %s)
             """, (store_id, generation))
         conn.commit()
-    return "" if str(fila.get("cliente_id") or "").strip() else f"{store_id}.{claim}"
+    return generation
+
+
+def exigir_generacion_oauth(
+    store_id: str,
+    expected_generation: str,
+    token: str = "",
+) -> None:
+    """Falla si un callback OAuth fue reemplazado por otra instalación."""
+    _ensure_tabla()
+    store_id = str(store_id or "").strip()
+    expected_generation = str(expected_generation or "").strip()
+    if not store_id or not expected_generation:
+        raise TiendanubeWebhookError("GENERACION_OAUTH_INVALIDA")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT install_generation, access_token
+                  FROM tiendanube_instalaciones
+                 WHERE store_id = %s
+                """,
+                (store_id,),
+            )
+            fila = cur.fetchone()
+    if not fila or str(fila.get("install_generation") or "") != expected_generation:
+        raise TiendanubeWebhookError("GENERACION_OAUTH_REEMPLAZADA")
+    if token:
+        try:
+            actual = _descifrar_token(str(fila.get("access_token") or ""))
+        except Exception as exc:
+            raise TiendanubeWebhookError("TOKEN_OAUTH_NO_DISPONIBLE") from exc
+        if not actual or not secrets.compare_digest(actual, str(token)):
+            raise TiendanubeWebhookError("TOKEN_OAUTH_REEMPLAZADO")
 
 
 def instalacion(store_id: str) -> Optional[dict]:
@@ -358,20 +457,86 @@ def instalacion(store_id: str) -> Optional[dict]:
     datos = dict(row)
     guardado = str(datos.get("access_token") or "")
     datos["access_token"] = _descifrar_token(guardado)
-    # Migración oportunista de filas legacy en texto plano.
-    if guardado and not guardado.startswith("enc:v1:"):
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE tiendanube_instalaciones
-                       SET access_token = %s, actualizada_en = NOW()
-                     WHERE store_id = %s AND access_token = %s
-                """, (_cifrar_token(guardado), str(store_id), guardado))
-            conn.commit()
     return datos
 
 
-def vincular_cliente(store_id: str, cliente_id: str) -> None:
+def labels_feature_enabled(store_data: dict | None) -> bool:
+    """Detecta el feature oficial sin inferirlo por plan o nombre comercial."""
+    features = (store_data or {}).get("features")
+    if not isinstance(features, list):
+        return False
+    for item in features:
+        if isinstance(item, str) and item == "fulfillment_order_label_api":
+            return True
+        if isinstance(item, dict) and str(
+            item.get("code") or item.get("name") or item.get("key") or ""
+        ) == "fulfillment_order_label_api":
+            return True
+    return False
+
+
+def label_api_habilitada(store_id: str) -> bool:
+    _ensure_tabla()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT label_api_feature_ready
+                  FROM tiendanube_instalaciones
+                 WHERE store_id = %s AND estado = 'ACTIVA'
+                """,
+                (str(store_id),),
+            )
+            row = cur.fetchone()
+    return bool(row and row.get("label_api_feature_ready"))
+
+
+def _label_api_habilitada_fail_closed(store_id: str) -> bool:
+    """Distingue un feature ausente de una consulta que no pudo completarse."""
+    try:
+        return bool(label_api_habilitada(store_id))
+    except TiendanubeLabelFeatureError:
+        raise
+    except Exception as exc:
+        raise TiendanubeLabelFeatureError(
+            f"No se pudo evaluar el feature de Labels: {exc}"
+        ) from exc
+
+
+def refrescar_label_api_feature(store_id: str, token: str) -> bool:
+    """Revalida el feature para instalaciones existentes o cambios de plan."""
+    response = _api(str(store_id), token, "GET", "store")
+    if response is None or response.status_code != 200:
+        raise TiendanubeWebhookError("No se pudo verificar el feature de Labels.")
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise TiendanubeWebhookError("Tiendanube devolvió un store inválido.") from exc
+    enabled = labels_feature_enabled(payload if isinstance(payload, dict) else {})
+    _ensure_tabla()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE tiendanube_instalaciones
+                   SET label_api_feature_ready = %s,
+                       label_api_feature_checked_at = NOW(),
+                       actualizada_en = NOW()
+                 WHERE store_id = %s AND estado = 'ACTIVA'
+                """,
+                (enabled, str(store_id)),
+            )
+        conn.commit()
+    return enabled
+
+
+def vincular_cliente(
+    store_id: str,
+    cliente_id: str,
+    *,
+    expected_generation: str,
+    reasignar_confirmado: bool = False,
+) -> None:
     """
     Ata la tienda a la cuenta TAURO y la registra en `tiendas_conectadas`,
     que es la tabla que lee todo el portal — así Tiendanube y Shopify
@@ -380,19 +545,32 @@ def vincular_cliente(store_id: str, cliente_id: str) -> None:
     _ensure_tabla()
     store_id = str(store_id or "").strip()
     cliente_id = str(cliente_id or "").strip().upper()
-    if not store_id or not cliente_id:
+    expected_generation = str(expected_generation or "").strip()
+    if not store_id or not cliente_id or not expected_generation:
         raise TiendanubeClaimError("Faltan datos para vincular la tienda.")
-    anterior = ""
+    from servicios.integraciones_tienda import (
+        _bloquear_dominio_tiendanube,
+        _ensure_tablas,
+    )
+
+    _ensure_tablas()
+    dominio = f"{store_id}.tiendanube"
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _bloquear_dominio_tiendanube(cur, dominio)
             cur.execute("""
-                SELECT cliente_id, estado, webhooks_ready
+                SELECT cliente_id, estado, webhooks_ready, install_generation
                   FROM tiendanube_instalaciones
                  WHERE store_id = %s
                  FOR UPDATE
             """, (store_id,))
             fila = cur.fetchone()
-            if not fila or fila.get("estado") != "ACTIVA":
+            if (
+                not fila
+                or fila.get("estado") != "ACTIVA"
+                or str(fila.get("install_generation") or "")
+                != expected_generation
+            ):
                 raise TiendanubeClaimError("La instalación ya no está activa.")
             anterior = str(fila.get("cliente_id") or "").strip().upper()
             if anterior and anterior != cliente_id:
@@ -400,59 +578,75 @@ def vincular_cliente(store_id: str, cliente_id: str) -> None:
             cur.execute("""
                 UPDATE tiendanube_instalaciones
                    SET cliente_id = %s, actualizada_en = NOW()
-                 WHERE store_id = %s
-            """, (cliente_id, store_id))
-        conn.commit()
+                 WHERE store_id = %s AND install_generation = %s
+                 RETURNING store_id
+            """, (cliente_id, store_id, expected_generation))
+            if cur.fetchone() is None:
+                raise TiendanubeClaimError(
+                    "La instalación cambió durante la vinculación."
+                )
 
-    # El owner puede quedar asociado mientras Operaciones repara suscripciones
-    # o Shipping, pero el binding que consume pedidos no se activa antes del
-    # readiness completo.
-    if not fila.get("webhooks_ready"):
-        with get_conn() as conn:
-            with conn.cursor() as cur:
+            # Owner y binding se escriben en la misma transacción y bajo el
+            # mismo lock que una reinstalación. Un callback viejo no puede
+            # activar el binding de la generación que lo reemplazó.
+            if fila.get("webhooks_ready"):
                 cur.execute("""
-                    UPDATE tiendanube_instalaciones
-                       SET claim_token_hash = NULL, claim_expires_at = NULL
-                     WHERE store_id = %s AND cliente_id = %s
-                """, (store_id, cliente_id))
-            conn.commit()
-        return
-
-    try:
-        from servicios.integraciones_tienda import conectar_tienda
-        resultado = conectar_tienda(
-            cliente_id, "tiendanube", f"{store_id}.tiendanube",
-            OAUTH_SECRET_MARKER,
-        )
-        if not resultado.get("ok"):
-            raise TiendanubeClaimError(resultado.get("error") or "No se pudo vincular.")
-    except Exception as e:
-        if not anterior:
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("""
-                        UPDATE tiendanube_instalaciones
-                           SET cliente_id = NULL
-                         WHERE store_id = %s AND cliente_id = %s
-                    """, (store_id, cliente_id))
-                conn.commit()
-        if isinstance(e, TiendanubeClaimError):
-            raise
-        raise TiendanubeClaimError("No se pudo vincular la tienda.") from e
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
+                    INSERT INTO tiendas_conectadas
+                        (cliente_id, plataforma, dominio, secreto, activa)
+                    VALUES (%(cliente)s, 'tiendanube', %(dominio)s,
+                            %(secreto)s, TRUE)
+                    ON CONFLICT (dominio) DO UPDATE SET
+                        cliente_id = CASE
+                            WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                                 OR %(reasignar)s
+                            THEN EXCLUDED.cliente_id
+                            ELSE tiendas_conectadas.cliente_id
+                        END,
+                        plataforma = CASE
+                            WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                                 OR %(reasignar)s
+                            THEN 'tiendanube'
+                            ELSE tiendas_conectadas.plataforma
+                        END,
+                        secreto = CASE
+                            WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                                 OR %(reasignar)s
+                            THEN EXCLUDED.secreto
+                            ELSE tiendas_conectadas.secreto
+                        END,
+                        activa = CASE
+                            WHEN tiendas_conectadas.cliente_id = EXCLUDED.cliente_id
+                                 OR %(reasignar)s
+                            THEN TRUE
+                            ELSE tiendas_conectadas.activa
+                        END
+                    RETURNING id, cliente_id
+                """, {
+                    "cliente": cliente_id,
+                    "dominio": dominio,
+                    "secreto": OAUTH_SECRET_MARKER,
+                    "reasignar": bool(reasignar_confirmado),
+                })
+                binding = cur.fetchone()
+                if (
+                    str((binding or {}).get("cliente_id") or "").strip().upper()
+                    != cliente_id
+                ):
+                    raise TiendanubeClaimError(
+                        "Ese dominio ya está conectado a otra cuenta."
+                    )
             cur.execute("""
                 UPDATE tiendanube_instalaciones
                    SET claim_token_hash = NULL, claim_expires_at = NULL,
                        actualizada_en = NOW()
                  WHERE store_id = %s AND cliente_id = %s
-            """, (store_id, cliente_id))
+                   AND install_generation = %s
+            """, (store_id, cliente_id, expected_generation))
         conn.commit()
 
 
 def reclamar_con_token(claim_cookie: str, cliente_id: str) -> str:
-    """Consume el claim emitido tras un OAuth iniciado en Tiendanube."""
+    """Compatibilidad con claims legacy; ningún flujo actual los emite."""
     valor = str(claim_cookie or "").strip()
     if "." not in valor:
         raise TiendanubeClaimError("El enlace de vinculación es inválido.")
@@ -464,6 +658,7 @@ def reclamar_con_token(claim_cookie: str, cliente_id: str) -> str:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT cliente_id, estado, claim_token_hash,
+                       install_generation,
                        claim_expires_at > NOW() AS claim_vigente
                   FROM tiendanube_instalaciones
                  WHERE store_id = %s
@@ -475,7 +670,11 @@ def reclamar_con_token(claim_cookie: str, cliente_id: str) -> str:
     recibido = hashlib.sha256(token.encode("utf-8")).hexdigest()
     if not esperado or not secrets.compare_digest(esperado, recibido):
         raise TiendanubeClaimError("El enlace de vinculación es inválido.")
-    vincular_cliente(store_id, cliente_id)
+    vincular_cliente(
+        store_id,
+        cliente_id,
+        expected_generation=str(fila.get("install_generation") or ""),
+    )
     return store_id
 
 
@@ -498,13 +697,19 @@ def _api(store_id: str, token: str, metodo: str, path: str,
         return None
 
 
-def registrar_webhooks(store_id: str, token: str) -> list[str]:
+def registrar_webhooks(
+    store_id: str,
+    token: str,
+    *,
+    expected_generation: str,
+) -> list[str]:
     """Asegura el conjunto requerido consultando antes y verificando después.
 
     Un 422 no se interpreta como éxito: también representa un evento/URL
     inválido. La única evidencia válida es que GET /webhooks devuelva cada par
     evento+URL requerido.
     """
+    exigir_generacion_oauth(store_id, expected_generation, token)
     base = (os.getenv("BASE_URL") or "https://taurosolutions.ar").rstrip("/")
     destino = f"{base}/integraciones/tiendanube/webhook"
 
@@ -523,8 +728,18 @@ def registrar_webhooks(store_id: str, token: str) -> list[str]:
             for f in filas if isinstance(f, dict)
         }
 
+    objetivos = list(WEBHOOKS_API_REQUERIDOS)
+    from servicios.tiendanube_labels import labels_execution_ready
+
+    # El feature de la tienda sólo se consulta cuando el runtime local puede
+    # ejecutar Labels. Si esa consulta falla no se degrada silenciosamente al
+    # set histórico: registrar una instalación como lista en ese estado dejaría
+    # etiquetas sin su webhook de revocación.
+    if labels_execution_ready() and _label_api_habilitada_fail_closed(store_id):
+        objetivos.append(WEBHOOK_LABEL_STATUS)
+
     existentes = _listar()
-    for evento in WEBHOOKS_REQUERIDOS:
+    for evento in objetivos:
         if (evento, destino) in existentes:
             continue
         r = _api(
@@ -538,66 +753,135 @@ def registrar_webhooks(store_id: str, token: str) -> list[str]:
 
     verificados = _listar()
     faltantes = [
-        evento for evento in WEBHOOKS_REQUERIDOS
+        evento for evento in objetivos
         if (evento, destino) not in verificados
     ]
     if faltantes:
         raise TiendanubeWebhookError(
             "No quedaron verificados todos los webhooks requeridos."
         )
-    return list(WEBHOOKS_REQUERIDOS)
+    exigir_generacion_oauth(store_id, expected_generation, token)
+    return objetivos
 
 
-def confirmar_webhooks(store_id: str, eventos: list[str]) -> bool:
-    if set(eventos or []) != set(WEBHOOKS_REQUERIDOS):
+def confirmar_webhooks(
+    store_id: str,
+    eventos: list[str],
+    *,
+    expected_generation: str,
+) -> bool:
+    verificados = set(eventos or [])
+    if (
+        not set(WEBHOOKS_API_REQUERIDOS).issubset(verificados)
+        or not privacidad_configurada()
+    ):
+        return False
+    from servicios.tiendanube_labels import labels_execution_ready
+
+    labels_requerido = bool(labels_execution_ready())
+    if labels_requerido:
+        # Falla cerrada: un error de DB al consultar el feature debe propagarse,
+        # no convertir una instalación incompleta en webhooks_ready=TRUE.
+        labels_requerido = _label_api_habilitada_fail_closed(store_id)
+    if labels_requerido and WEBHOOK_LABEL_STATUS not in verificados:
         return False
     _ensure_tabla()
+    from servicios.integraciones_tienda import _bloquear_dominio_tiendanube
+
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _bloquear_dominio_tiendanube(
+                cur, f"{str(store_id)}.tiendanube"
+            )
             cur.execute("""
                 UPDATE tiendanube_instalaciones
                    SET webhooks_ready = TRUE,
+                       label_webhook_ready = %s,
                        webhooks_verified_at = NOW(),
                        actualizada_en = NOW()
                  WHERE store_id = %s AND estado = 'ACTIVA'
-                 RETURNING cliente_id
-            """, (str(store_id),))
+                   AND install_generation = %s
+                 RETURNING store_id
+            """, (
+                WEBHOOK_LABEL_STATUS in verificados,
+                str(store_id),
+                str(expected_generation or ""),
+            ))
             fila = cur.fetchone()
         conn.commit()
     if not fila:
         return False
-    cliente_id = str(fila.get("cliente_id") or "").strip()
-    if cliente_id:
-        vincular_cliente(str(store_id), cliente_id)
+    # Readiness de webhooks no prueba identidad TAURO. La vinculación ocurre
+    # exclusivamente en el callback que validó state + cookie del portal.
     return True
 
 
 def reconciliar_instalaciones_pendientes(limite: int = 5) -> dict:
     """Completa instalaciones parciales sin exigir otro OAuth/reinstall."""
     _ensure_tabla()
+    from servicios.tiendanube_labels import labels_execution_ready
+
+    # Una falla evaluando readiness es una falla del reconciliador. Ocultarla
+    # como `False` puede confirmar instalaciones sin el webhook de Labels.
+    labels_requerido = bool(labels_execution_ready())
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT store_id, access_token
+                SELECT store_id, access_token, install_generation,
+                       label_api_feature_ready,
+                       label_api_feature_checked_at
                   FROM tiendanube_instalaciones
                  WHERE estado = 'ACTIVA'
-                   AND webhooks_ready = FALSE
+                   AND (
+                        webhooks_ready = FALSE
+                        OR (
+                            %s
+                            AND (
+                                label_api_feature_checked_at IS NULL
+                                OR label_api_feature_checked_at
+                                    < NOW() - INTERVAL '1 day'
+                                OR (
+                                    label_api_feature_ready = TRUE
+                                    AND label_webhook_ready = FALSE
+                                )
+                            )
+                        )
+                   )
                    AND NULLIF(BTRIM(access_token), '') IS NOT NULL
                  ORDER BY actualizada_en
                  LIMIT %s
-            """, (max(1, min(int(limite), 20)),))
+            """, (labels_requerido, max(1, min(int(limite), 20))))
             filas = [dict(f) for f in cur.fetchall()]
     completadas = errores = 0
     for fila in filas:
         store_id = str(fila.get("store_id") or "")
+        generation = str(fila.get("install_generation") or "")
         try:
             token = _descifrar_token(str(fila.get("access_token") or ""))
-            eventos = registrar_webhooks(store_id, token)
+            if labels_requerido:
+                try:
+                    refrescar_label_api_feature(store_id, token)
+                except Exception as exc:
+                    raise TiendanubeLabelFeatureError(
+                        f"No se pudo refrescar el feature de Labels: {exc}"
+                    ) from exc
+            eventos = registrar_webhooks(
+                store_id, token, expected_generation=generation,
+            )
+            exigir_privacidad_configurada()
             from servicios.tiendanube_shipping import registrar_shipping_carrier
-            shipping = registrar_shipping_carrier(store_id, token)
-            if not shipping.get("ready") or not confirmar_webhooks(store_id, eventos):
+            shipping = registrar_shipping_carrier(
+                store_id, token, expected_generation=generation,
+            )
+            if not shipping.get("ready") or not confirmar_webhooks(
+                store_id, eventos, expected_generation=generation,
+            ):
                 raise TiendanubeWebhookError("Readiness Tiendanube incompleto.")
             completadas += 1
+        except TiendanubeLabelFeatureError:
+            # No convertir un estado indeterminado de Labels en una simple
+            # instalación pendiente: el scheduler/operador debe verlo y cortar.
+            raise
         except Exception as exc:
             errores += 1
             print(
@@ -755,7 +1039,8 @@ def fulfillment_orders_tauro(order: dict, carrier_id: str = "") -> list[dict]:
 
 
 def marcar_enviado(store_id: str, pedido_externo_id: str, tracking: str,
-                   url_tracking: str = "") -> bool:
+                   url_tracking: str = "", *,
+                   solo_reconciliar: bool = False) -> bool:
     """
     Cierra el ciclo: el pedido pasa a enviado en Tiendanube y el comprador
     recibe su seguimiento sin que el comerciante toque nada.
@@ -817,6 +1102,12 @@ def marcar_enviado(store_id: str, pedido_externo_id: str, tracking: str,
                         in {"DISPATCHED", "DELIVERED"}
                     ):
                         continue
+                    # Después de un timeout post-write todos los ciclos son
+                    # sólo de lectura. El outbox mantiene RECONCILIAR hasta
+                    # confirmar o enviar a revisión manual: un PATCH sin clave
+                    # idempotente nunca se repite por una lectura negativa.
+                    if solo_reconciliar:
+                        return False
                     payload = {
                         "status": "DISPATCHED",
                         "tracking_info": {
@@ -849,32 +1140,13 @@ def marcar_enviado(store_id: str, pedido_externo_id: str, tracking: str,
         )
         return False
 
-    if listado is None or listado.status_code not in (404, 405):
-        return False
-
-    # Compatibilidad con tiendas que todavía exponen únicamente el contrato
-    # de Order V1. Nunca se usa PUT /orders: el endpoint de fulfill es el que
-    # dispara la notificación de tracking al comprador.
-    legacy_payload = {
-        "shipping_tracking_number": tracking,
-        "notify_customer": True,
-    }
-    if url_tracking:
-        legacy_payload["shipping_tracking_url"] = str(url_tracking).strip()
-    legacy = _api(
-        store_id,
-        inst["access_token"],
-        "POST",
-        f"orders/{pedido_externo_id}/fulfill",
-        legacy_payload,
-    )
-    ok = legacy is not None and legacy.status_code in (200, 201)
-    if not ok:
-        print(
-            f"[tiendanube] no pude marcar enviado {pedido_externo_id}: "
-            f"{legacy.status_code if legacy is not None else 'sin respuesta'}"
-        )
-    return ok
+    # El contrato público del piloto exige write_fulfillment_orders. El POST
+    # legacy /orders/{id}/fulfill no acepta una clave idempotente, actúa sobre
+    # la primera Fulfillment Order y, tras un timeout, no ofrece una lectura
+    # capaz de demostrar si la escritura se aplicó. Repetirlo desde el outbox
+    # podría duplicar la notificación o despachar la FO equivocada. Un 404/405
+    # del recurso moderno queda para retry/revisión manual, nunca para fallback.
+    return False
 
 
 def _registrar_lifecycle(
@@ -901,7 +1173,7 @@ def _desactivar_shipping(store_id: str) -> None:
 
 
 def desinstalar(store_id: str, install_generation: str = "") -> bool:
-    """Tombstone durable: no borra antes de recibir store/redact."""
+    """Tombstone durable: no borra antes de recibir app/store_redact."""
     _ensure_tabla()
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -909,6 +1181,7 @@ def desinstalar(store_id: str, install_generation: str = "") -> bool:
                 UPDATE tiendanube_instalaciones
                    SET estado = 'DESINSTALADA', access_token = '',
                        webhooks_ready = FALSE, webhooks_verified_at = NULL,
+                       label_webhook_ready = FALSE,
                        claim_token_hash = NULL, claim_expires_at = NULL,
                        desinstalada_en = NOW(), actualizada_en = NOW()
                  WHERE store_id = %s
@@ -935,6 +1208,7 @@ def suspender(store_id: str, install_generation: str = "") -> bool:
             cur.execute("""
                 UPDATE tiendanube_instalaciones
                    SET estado = 'SUSPENDIDA', webhooks_ready = FALSE,
+                       label_webhook_ready = FALSE,
                        suspendida_en = NOW(), actualizada_en = NOW()
                  WHERE store_id = %s
                    AND (%s = '' OR install_generation = %s)
@@ -955,6 +1229,7 @@ def suspender(store_id: str, install_generation: str = "") -> bool:
 
 def reactivar(store_id: str, install_generation: str = "") -> bool:
     """Reanuda una instalación suspendida sin duplicar carrier ni webhooks."""
+    exigir_privacidad_configurada()
     _ensure_tabla()
     store_id = str(store_id)
     with get_conn() as conn:
@@ -1002,14 +1277,25 @@ def _normalizar_ids(valores) -> list[str]:
 
 def sanitizar_payload_webhook(datos: dict) -> dict:
     """Elimina email/teléfono/identificación antes de escribir la cola."""
-    evento = str((datos or {}).get("event") or "").strip().lower()
+    evento = evento_privacidad_canonico((datos or {}).get("event") or "")
     base = {
         "store_id": str((datos or {}).get("store_id") or ""),
         "event": evento,
     }
     if evento in EVENTOS_PEDIDOS:
         base["id"] = str((datos or {}).get("id") or "")
-    elif evento == "customers/redact":
+    elif evento == WEBHOOK_LABEL_STATUS:
+        # Tracking, URL, reason y cualquier extensión quedan descartados. Para
+        # revocar el documento sólo hacen falta referencias opacas y estado.
+        base.update({
+            "order_id": str((datos or {}).get("order_id") or "")[:128],
+            "fulfillment_id": str(
+                (datos or {}).get("fulfillment_id") or ""
+            )[:128],
+            "label_id": str((datos or {}).get("label_id") or "")[:128],
+            "status": str((datos or {}).get("status") or "").strip().upper()[:40],
+        })
+    elif evento == "customer/redact":
         customer = (datos or {}).get("customer") or {}
         base["customer_id"] = str(customer.get("id") or "")[:80]
         base["orders_to_redact"] = _normalizar_ids(
@@ -1049,11 +1335,23 @@ def encolar_webhook(evento_id: str, datos: dict) -> bool:
     payload = sanitizar_payload_webhook(datos)
     store_id = str(payload.get("store_id") or "").strip()
     evento = str(payload.get("event") or "").strip().lower()
-    recurso_id = str(payload.get("id") or payload.get("request_id") or "")
+    recurso_id = str(
+        payload.get("id")
+        or payload.get("label_id")
+        or payload.get("request_id")
+        or ""
+    )
     if not store_id or evento not in EVENTOS_ACEPTADOS:
         raise TiendanubeWebhookError("Payload Tiendanube inválido.")
     if evento in EVENTOS_PEDIDOS and not recurso_id:
         raise TiendanubeWebhookError("El webhook de pedido no incluye id.")
+    if evento == WEBHOOK_LABEL_STATUS and (
+        not recurso_id
+        or not payload.get("order_id")
+        or not payload.get("fulfillment_id")
+        or payload.get("status") not in _LABEL_STATUSES
+    ):
+        raise TiendanubeWebhookError("El webhook de etiqueta es inválido.")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -1127,7 +1425,7 @@ def _validar_evento_destructivo_remoto(evento: dict) -> None:
     """Impide que un webhook atrasado destruya una reinstalación vigente.
 
     Tiendanube no incluye la generación OAuth en el webhook. Por eso, antes de
-    aplicar uninstall, suspend o store/redact sobre una instalación activa se
+    aplicar uninstall, suspend o app/store_redact sobre una instalación activa se
     comprueba el token actual. Un token todavía válido contradice el evento y
     se manda a cuarentena; una caída o respuesta ambigua se reintenta.
     """
@@ -1145,6 +1443,32 @@ def _validar_evento_destructivo_remoto(evento: dict) -> None:
     ):
         return
     raise TiendanubeRetryableError("LIFECYCLE_VALIDACION_REMOTA_PENDIENTE")
+
+
+def _estado_resumed_remoto(evento: dict) -> str:
+    """Confirma que el token actual volvió a estar operativo.
+
+    ``app/resumed`` tampoco trae generación. Un delivery viejo sólo puede
+    reactivar TAURO si la API actual de la tienda responde 200; un 402 conserva
+    la suspensión y cualquier otro resultado queda para retry/cuarentena.
+    """
+    store_id = str(evento.get("store_id") or "")
+    generation = str(evento.get("install_generation") or "")
+    inst = instalacion(store_id) or {}
+    if str(inst.get("install_generation") or "") != generation:
+        raise TiendanubeError("GENERACION_OBSOLETA")
+    token = str(inst.get("access_token") or "")
+    if not token:
+        raise TiendanubeQuarantineError("RESUMED_SIN_TOKEN_ACTUAL")
+    respuesta = _api(store_id, token, "GET", "store")
+    if respuesta is not None and respuesta.status_code == 200:
+        return "ACTIVA"
+    status = respuesta.status_code if respuesta is not None else None
+    if status == 402:
+        return "SUSPENDIDA"
+    if status in {401, 403, 404}:
+        raise TiendanubeQuarantineError("RESUMED_TOKEN_NO_VIGENTE")
+    raise TiendanubeRetryableError("RESUMED_VALIDACION_REMOTA_PENDIENTE")
 
 
 def _procesar_pedido_evento(evento: dict) -> str:
@@ -1175,6 +1499,25 @@ def _procesar_pedido_evento(evento: dict) -> str:
     fulfillments = fulfillment_orders_tauro(
         orden, str(shipping_cfg.get("carrier_id") or "")
     )
+    if fulfillments:
+        from servicios.tiendanube_labels import (
+            LabelsConflictError,
+            LabelsUnavailableError,
+            registrar_fulfillment_orders,
+        )
+
+        try:
+            registrar_fulfillment_orders(
+                store_id,
+                str(orden.get("id") or pedido_id),
+                [str(item.get("id") or "") for item in fulfillments],
+            )
+        except LabelsConflictError as exc:
+            raise TiendanubeQuarantineError("FULFILLMENT_ORDER_CONFLICTO") from exc
+        except LabelsUnavailableError as exc:
+            raise TiendanubeRetryableError("FULFILLMENT_ORDER_MAPPING_PENDIENTE") from exc
+        except Exception as exc:
+            raise TiendanubeRetryableError("FULFILLMENT_ORDER_MAPPING_PENDIENTE") from exc
     todos_fulfillments = [
         item
         for item in (orden.get("fulfillments") or [])
@@ -1207,8 +1550,17 @@ def _procesar_pedido_evento(evento: dict) -> str:
             or owner_tienda != owner_inst):
         raise TiendanubeRetryableError("BINDING_NO_OPERATIVO")
     if evento["evento"] == "order/cancelled" or pedido.get("cancelado"):
-        cancelar_pedido_externo(tienda["id"], pedido["pedido_externo_id"])
-        return "CANCELADO"
+        cancelado_local = cancelar_pedido_externo(
+            tienda["id"],
+            pedido["pedido_externo_id"],
+            cliente_id=owner_inst,
+            dominio_verificado=f"{store_id}.tiendanube",
+            install_generation_verificada=str(
+                inst.get("install_generation") or ""
+            ),
+            plataforma_verificada="tiendanube",
+        )
+        return "CANCELADO" if cancelado_local else "CANCELACION_MANUAL"
     creado = guardar_pedido(
         owner_inst,
         tienda["id"],
@@ -1217,14 +1569,16 @@ def _procesar_pedido_evento(evento: dict) -> str:
         dominio_verificado=f"{store_id}.tiendanube",
         install_generation_verificada=str(inst.get("install_generation") or ""),
     )
-    if creado:
-        interno = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
-        if interno:
-            try:
-                from servicios.solicitud_automatica import intentar_en_segundo_plano
-                intentar_en_segundo_plano(interno)
-            except Exception as exc:
-                print(f"[tiendanube] armado automático no iniciado: {type(exc).__name__}")
+    interno = (
+        id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
+        if creado else None
+    )
+    if creado and interno:
+        try:
+            from servicios.solicitud_automatica import intentar_en_segundo_plano
+            intentar_en_segundo_plano(interno)
+        except Exception as exc:
+            print(f"[tiendanube] wake-up automático no iniciado: {type(exc).__name__}")
     return "CREADO" if creado else "ACTUALIZADO"
 
 
@@ -1236,6 +1590,7 @@ def _procesar_customers_redact(evento: dict) -> str:
     _ensure_tabla()
     from servicios.integraciones_tienda import (
         _anonimizar_solicitudes_con_cursor,
+        _borrar_outboxes_tienda_con_cursor,
         _bloquear_dominio_tiendanube,
         _ensure_tablas,
     )
@@ -1245,6 +1600,9 @@ def _procesar_customers_redact(evento: dict) -> str:
         with conn.cursor() as cur:
             _bloquear_dominio_tiendanube(cur, dominio)
             if ids:
+                _borrar_outboxes_tienda_con_cursor(
+                    cur, "tiendanube", dominio, ids,
+                )
                 cur.execute(
                     """
                     INSERT INTO tiendanube_pedidos_redactados
@@ -1312,11 +1670,21 @@ def _procesar_customers_redact(evento: dict) -> str:
                     """,
                     (dominio, ids),
                 )
-            cur.execute("""
-                DELETE FROM pedidos_huerfanos
-                 WHERE dominio = %s
-                   AND (%s = '{}'::TEXT[] OR pedido_externo_id = ANY(%s))
-            """, (dominio, ids, ids))
+                # El DELETE de la etiqueta elimina también el outbox con el
+                # payload completo del Fulfillment Order por su FK CASCADE.
+                cur.execute(
+                    """
+                    DELETE FROM tiendanube_labels
+                     WHERE store_id = %s
+                       AND order_id = ANY(%s)
+                    """,
+                    (store_id, ids),
+                )
+                cur.execute("""
+                    DELETE FROM pedidos_huerfanos
+                     WHERE dominio = %s
+                       AND pedido_externo_id = ANY(%s)
+                """, (dominio, ids))
             _registrar_lifecycle(
                 cur, store_id, "CUSTOMERS_REDACT",
                 str(evento.get("install_generation") or "sin-instalacion"),
@@ -1355,6 +1723,7 @@ def _procesar_store_redact(evento: dict) -> str:
     _ensure_tabla()
     from servicios.integraciones_tienda import (
         _anonimizar_solicitudes_con_cursor,
+        _borrar_outboxes_tienda_con_cursor,
         _bloquear_dominio_tiendanube,
         _ensure_tablas,
     )
@@ -1378,7 +1747,7 @@ def _procesar_store_redact(evento: dict) -> str:
                 generacion_actual = str(
                     instalacion_actual.get("install_generation") or ""
                 )
-                # store/redact suele llegar después de uninstall. Si la tienda
+                # app/store_redact suele llegar después de uninstall. Si la tienda
                 # ya fue reinstalada, atribuir el evento tardío a la generación
                 # nueva borraría una instalación activa: se deja en ERROR para
                 # revisión humana, sin tocar datos ni carrier.
@@ -1452,6 +1821,7 @@ def _procesar_store_redact(evento: dict) -> str:
                 (dominio,),
             )
             solicitudes_ids.update(int(fila["id"]) for fila in cur.fetchall())
+            _borrar_outboxes_tienda_con_cursor(cur, "tiendanube", dominio)
             _anonimizar_solicitudes_con_cursor(
                 cur, sorted(solicitudes_ids), incluir_remitente=True,
             )
@@ -1485,6 +1855,7 @@ def _procesar_store_redact(evento: dict) -> str:
                 UPDATE tiendanube_instalaciones
                    SET access_token = '', cliente_id = NULL, nombre = NULL,
                        estado = 'REDACTADA', webhooks_ready = FALSE,
+                       label_webhook_ready = FALSE,
                        webhooks_verified_at = NULL, claim_token_hash = NULL,
                        claim_expires_at = NULL, redactada_en = NOW(),
                        actualizada_en = NOW()
@@ -1495,11 +1866,127 @@ def _procesar_store_redact(evento: dict) -> str:
     return "STORE_REDACTADA"
 
 
+def _procesar_label_status_updated(evento: dict) -> str:
+    """Actualiza una etiqueta existente y revoca su URL cuando TN terminó.
+
+    Nunca crea filas: un webhook atrasado después de una redacción no puede
+    reintroducir evidencia ni datos de una etiqueta eliminada.
+    """
+    payload = evento.get("payload") or {}
+    store_id = str(evento.get("store_id") or "")
+    order_id = str(payload.get("order_id") or "")
+    fulfillment_id = str(payload.get("fulfillment_id") or "")
+    label_id = str(payload.get("label_id") or "")
+    status = str(payload.get("status") or "").upper()
+    if (
+        not store_id
+        or not order_id
+        or not fulfillment_id
+        or not label_id
+        or status not in _LABEL_STATUSES
+    ):
+        raise TiendanubeError("LABEL_STATUS_INVALIDO")
+
+    from servicios.tiendanube_labels import _ensure_tables as ensure_labels
+    from servicios.tiendanube_label_worker import (
+        _ensure_worker_tables as ensure_label_worker,
+    )
+
+    ensure_labels()
+    ensure_label_worker()
+    terminales = {"FAILED", "CANCELED"}
+    rank = {
+        "STARTED": 0,
+        "IN_PROGRESS": 1,
+        "READY_TO_DOWNLOAD": 2,
+        "READY_TO_USE": 3,
+        "SUSPENDED": 4,
+        "DOWNLOADED": 5,
+        "FAILED": 5,
+        "CANCELED": 5,
+    }
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT fulfillment_order_id, order_id, tiendanube_status
+                  FROM tiendanube_labels
+                 WHERE store_id = %s AND label_id = %s
+                 FOR UPDATE
+                """,
+                (store_id, label_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return "LABEL_DESCONOCIDA"
+            row = dict(row)
+            if str(row.get("fulfillment_order_id") or "") != fulfillment_id:
+                raise TiendanubeQuarantineError("LABEL_FULFILLMENT_CONFLICTO")
+            current_order = str(row.get("order_id") or "")
+            if current_order and current_order != order_id:
+                raise TiendanubeQuarantineError("LABEL_ORDER_CONFLICTO")
+
+            current = str(row.get("tiendanube_status") or "").upper()
+            if current == "SUSPENDED" and status == "READY_TO_USE":
+                raise TiendanubeQuarantineError("LABEL_REACTIVACION_NO_CONFIRMADA")
+            allowed = (
+                not current
+                or current == status
+                or (current == "READY_TO_USE" and status in {"SUSPENDED", "DOWNLOADED"})
+                or (current == "DOWNLOADED" and status == "SUSPENDED")
+                or (
+                    current not in terminales | {"SUSPENDED", "DOWNLOADED"}
+                    and rank.get(status, -1) >= rank.get(current, -1)
+                )
+            )
+            if not allowed:
+                conn.commit()
+                return "LABEL_STATUS_OBSOLETO"
+
+            revoke = status in {
+                "READY_TO_USE",
+                "DOWNLOADED",
+                "SUSPENDED",
+                "FAILED",
+                "CANCELED",
+            }
+            cur.execute(
+                """
+                UPDATE tiendanube_labels
+                   SET order_id = %s,
+                       tiendanube_status = %s,
+                       download_token_hash = CASE
+                           WHEN %s THEN NULL ELSE download_token_hash END,
+                       download_token_revoked_at = CASE
+                           WHEN %s THEN COALESCE(download_token_revoked_at, NOW())
+                           ELSE download_token_revoked_at END,
+                       actualizada_en = NOW()
+                 WHERE store_id = %s AND label_id = %s
+                """,
+                (order_id, status, revoke, revoke, store_id, label_id),
+            )
+            if revoke:
+                cur.execute(
+                    """
+                    UPDATE tiendanube_label_documents
+                       SET activa = FALSE,
+                           revocada_en = COALESCE(revocada_en, NOW())
+                     WHERE store_id = %s AND label_id = %s
+                    """,
+                    (store_id, label_id),
+                )
+        conn.commit()
+    return f"LABEL_{status}"
+
+
 def _procesar_evento(evento: dict) -> str:
-    topic = str(evento.get("evento") or "")
+    topic = evento_privacidad_canonico(evento.get("evento") or "")
     try:
         if topic in EVENTOS_PEDIDOS:
             return _procesar_pedido_evento(evento)
+        if topic == WEBHOOK_LABEL_STATUS:
+            return _procesar_label_status_updated(evento)
         if topic == "app/uninstalled":
             _validar_evento_destructivo_remoto(evento)
             if not desinstalar(
@@ -1515,16 +2002,24 @@ def _procesar_evento(evento: dict) -> str:
                 raise TiendanubeError("GENERACION_OBSOLETA")
             return "SUSPENDIDA"
         if topic == "app/resumed":
+            estado_remoto = _estado_resumed_remoto(evento)
+            if estado_remoto == "SUSPENDIDA":
+                if not suspender(
+                    str(evento["store_id"]),
+                    str(evento["install_generation"]),
+                ):
+                    raise TiendanubeError("GENERACION_OBSOLETA")
+                return "SIGUE_SUSPENDIDA"
             if not reactivar(
                 str(evento["store_id"]), str(evento["install_generation"])
             ):
                 raise TiendanubeError("GENERACION_OBSOLETA")
             return "REACTIVADA"
-        if topic == "customers/redact":
+        if topic == "customer/redact":
             return _procesar_customers_redact(evento)
         if topic == "customers/data_request":
             return _procesar_data_request(evento)
-        if topic == "store/redact":
+        if topic == "app/store_redact":
             _validar_evento_destructivo_remoto(evento)
             return _procesar_store_redact(evento)
     except TiendanubeQuarantineError:

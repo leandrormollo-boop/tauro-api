@@ -33,10 +33,6 @@ def test_guardar_toma_cliente_de_sesion_no_de_body(web,monkeypatch):
     assert seen==["CLIENTE"]
 
 
-def test_checkout_no_expone_excepciones_internas(web,monkeypatch):
-    from servicios import paquetes_shopify as shop
-    async def fail(*a):raise RuntimeError("credential-secret")
-    monkeypatch.setattr(shop,"cotizar_callback",fail)
+def test_shopify_v1_no_expone_callback_de_tarifas(web):
     resp=web.post('/integraciones/paquetes/shopify/test',json={})
-    assert resp.status_code==503 and resp.json()=={"rates":[]}
-    assert "secret" not in resp.text
+    assert resp.status_code==404

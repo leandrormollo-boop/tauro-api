@@ -3715,26 +3715,9 @@ def tienda_view(
     error: Optional[str] = None,
     cliente: str = Depends(cliente_actual),
 ):
-    # Una instalación iniciada desde Tiendanube llega ownerless y deja un
-    # claim HttpOnly de un solo uso. Tras login/alta, esta vista lo consume:
-    # no se listan tiendas ajenas y el merchant no debe reinstalar la app.
-    claim_cookie = request.cookies.get("tn_claim") or ""
-    borrar_claim = bool(claim_cookie)
-    if claim_cookie:
-        try:
-            from servicios.tiendanube_app import instalacion, reclamar_con_token
-            store_claim = reclamar_con_token(claim_cookie, cliente)
-            vinculada = instalacion(store_claim) or {}
-            if vinculada.get("webhooks_ready"):
-                ok = ok or "tiendanube_conectada"
-            else:
-                error = error or (
-                    "La instalación quedó asociada a tu cuenta, pero todavía "
-                    "estamos verificando sus notificaciones y el medio de envío."
-                )
-        except Exception as exc:
-            print(f"[portal] claim Tiendanube rechazado: {type(exc).__name__}")
-            error = error or "No pudimos vincular la instalación de Tiendanube. Volvé a instalarla o contactá a soporte."
+    # Esta vista jamás reclama automáticamente una instalación ownerless.
+    # Tiendanube sólo se vincula en el callback de un OAuth iniciado acá, con
+    # `state` + cookie firmada válidos para la cuenta autenticada.
     # Detrás del proxy de Railway, request.base_url viene en http:// —
     # y una URL de webhook en http no sirve: Shopify exige https.
     base_url = (BASE_URL or str(request.base_url)).rstrip("/")
@@ -3807,8 +3790,6 @@ def tienda_view(
             "flash_error": error,
         },
     )
-    if borrar_claim:
-        respuesta.delete_cookie("tn_claim")
     return respuesta
 
 
@@ -3828,7 +3809,9 @@ def tienda_reclamar(
     Ahora se le pregunta a la propia tienda Shopify quién es su dueño.
     """
     from servicios.shopify_app import (
-        es_dueno_de_la_tienda, instalaciones_sin_dueno, vincular_cliente,
+        generacion_si_es_dueno_de_la_tienda,
+        instalaciones_sin_dueno,
+        vincular_cliente,
     )
 
     dominio = dominio.strip().lower()
@@ -3839,7 +3822,8 @@ def tienda_reclamar(
         )
 
     from servicios.auditoria import registrar_desde_request
-    if not es_dueno_de_la_tienda(dominio, cliente):
+    generation = generacion_si_es_dueno_de_la_tienda(dominio, cliente)
+    if not generation:
         print(f"[portal] {cliente} intentó reclamar {dominio} sin ser el dueño")
         # Un intento fallido de reclamar una tienda ajena es exactamente la
         # señal que este registro existe para capturar.
@@ -3854,7 +3838,11 @@ def tienda_reclamar(
             status_code=303,
         )
 
-    vincular_cliente(dominio, cliente)
+    vincular_cliente(
+        dominio,
+        cliente,
+        expected_generation=generation,
+    )
     try:
         from servicios.shopify_catalogo import lanzar_sincronizacion
         lanzar_sincronizacion(dominio, cliente)

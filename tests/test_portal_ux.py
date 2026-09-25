@@ -47,62 +47,60 @@ def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
 def test_paises_largos_tienen_busqueda():
     cotizar = _template("cotizar.html")
     nuevo = _template("envio_nuevo.html")
-    for select_id in ("origen_pais", "destino_pais"):
-        assert f'id="{select_id}" data-searchable' in cotizar
+    select_js = (RAIZ / "static" / "js" / "tauro-ui.js").read_text(encoding="utf-8")
+    assert "[('origen','Origen','A'),('destino','Destino','B')]" in cotizar
+    assert "side ~ '_pais'" in cotizar
+    assert 'data-country-flags data-search-placeholder="Buscar país o código"' in cotizar
+    assert "select.options.length >= 8" in select_js
     assert 'id="rem_pais" data-searchable' in nuevo
     assert 'id="destino_pais" data-searchable' in nuevo
     assert 'class="bulto-pais-fab" data-searchable' in nuevo
 
 
 def test_cotizador_no_promete_precio_cerrado_ni_conversion_completa():
-    html = _template("cotizar.html")
+    html = _template("cotizar.html") + _template("_quote_results.html")
     assert "Precio cerrado" not in html
     assert "lo convertís en envío" not in html
     assert "Precio estimado" in html
-    assert "Se confirma con la dirección completa antes de emitir" in html
+    assert "Se confirma con la dirección y el contenido completos antes de emitir" in html
     assert "Recomendado" not in html
 
 
-def test_cotizador_no_apila_formulario_y_resultados_en_la_misma_vista():
+def test_cotizador_actualiza_solo_resultados_en_una_misma_vista():
     html = _template("cotizar.html")
-    assert 'quote-form-card {% if opciones %}is-hidden{% endif %}' in html
-    assert 'class="quote-result-panel fade-up"' in html
+    resultados = _template("_quote_results.html")
+    javascript = (RAIZ / "static" / "js" / "portal-cotizador.js").read_text(encoding="utf-8")
+
+    assert 'class="uq-layout"' in html
+    assert 'data-unified-form="{{ scope }}"' in html
+    assert 'data-quote-results' in html
+    assert "fetch(form.action" in javascript
+    assert "result.replaceChildren(block)" in javascript
+    assert "event.preventDefault()" in javascript
     assert "result-box" not in html
-    assert "Elegir →" not in html
-    assert "Continuar →" not in html
-    assert "Elegir {{ op.carrier_nombre }}" in html
-    assert "courier={{ op.carrier_id }}" in html
+    assert "Elegir envío" in resultados
+    assert "courier={{ op.carrier_id }}" in resultados
     # Una opción compacta por courier. No truncar en dos: si UPS también
     # cotiza, DHL no puede quedar escondido dentro de otro desplegable.
-    assert "{% for op in opciones %}" in html
-    assert "opciones[:2]" not in html
-    assert "opciones[2:]" not in html
-    assert "Modificar datos" in html
-    assert "result.focus({ preventScroll: true })" in html
+    assert "{% for op in opciones %}" in resultados
+    assert "opciones[:2]" not in resultados
+    assert "opciones[2:]" not in resultados
 
 
-def test_cotizador_destaca_dhl_y_da_profundidad_al_formulario():
+def test_cotizador_muestra_logo_y_tarifa_de_cada_operador():
     html = _template("cotizar.html")
-    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
+    resultados = _template("_quote_results.html")
+    css = (RAIZ / "static" / "css" / "portal-cotizador.css").read_text(encoding="utf-8")
 
-    assert 'class="quote-operator-logo" src="{{ operador.logo }}"' in html
-    assert 'class="quote-operator-layout"' in html
-    assert 'class="quote-operator-state"><i aria-hidden="true"></i>{{ operador.estado_label }}' in html
-    assert 'data-carrier="{{ op.carrier_id }}"' in html
-    assert 'class="quote-form-overview"' in html
-    assert 'id="quote-route-summary"' in html
-    assert 'id="quote-step-title"' in html
-    assert 'data-quote-step="route"' in html
-    assert 'data-quote-step="packages"' in html
-    assert 'id="quote-route-confirmation"' in html
-    assert 'id="quote-submit-row"' in html
-    assert 'data-quote-section="route"' in html
-    assert 'data-quote-section="packages"' in html
-    assert '.quote-operator-chip.ready .quote-operator-logo-shell' in css
-    assert 'width: 92px;' in css
-    assert '.quote-carrier-logo {' in css
-    assert 'width: 88px;' in css
-    assert 'box-shadow:\n    0 26px 70px rgba(0,0,0,.32)' in css
+    assert 'class="uq-layout"' in html
+    assert 'class="uq-results"' in html
+    assert 'data-carrier="{{ op.carrier_id }}"' in resultados
+    assert 'class="quote-carrier-logo" src="{{ op.carrier_logo }}"' in resultados
+    assert '{{ dinero_ars(op.precio_final_ars) }}' in resultados
+    assert '.uq-price .quote-carrier-logo' in css
+    assert 'max-width:98px' in css
+    assert 'max-height:34px' in css
+    assert 'position:sticky' in css
 
 
 def test_logos_de_courier_no_se_recortan_y_el_strip_refluye_antes_de_colisionar():
@@ -130,37 +128,43 @@ def test_logos_de_courier_no_se_recortan_y_el_strip_refluye_antes_de_colisionar(
 
 def test_cotizador_actualiza_resumen_progreso_y_cajas_en_vivo():
     html = _template("cotizar.html")
+    javascript = (RAIZ / "static" / "js" / "portal-cotizador.js").read_text(encoding="utf-8")
 
-    assert "function syncQuotePreview()" in html
-    assert 'form.addEventListener("input", syncQuotePreview)' in html
-    assert 'form.addEventListener("change", function (event)' in html
-    assert 'value.toLocaleString("es-AR"' in html
-    assert "function showQuoteStep(routeReady, quoteReady)" in html
-    assert 'submit.disabled = !quoteReady' in html
-    assert 'destination.value = ""' not in html
-    assert 'last.classList.add("is-entering")' in html
-    assert 'row.classList.add("is-removing")' in html
+    assert 'data-quote-weights' in html
+    assert "function weights()" in javascript
+    assert "toLocaleString('es-AR'" in javascript
+    assert "form.addEventListener('input', control.changed)" in javascript
+    assert "form.addEventListener('change', function (event)" in javascript
+    assert "setTimeout(run, io.delay === undefined ? 900 : io.delay)" in javascript
+    assert "controller.abort()" in javascript
+    assert "packageList.appendChild(template.content.cloneNode(true))" in javascript
+    assert "remove.closest('[data-package-row]').remove()" in javascript
 
 
-def test_cotizar_y_nuevo_envio_exigen_elegir_ambito_primero():
+def test_cotizador_unifica_ambitos_y_nuevo_envio_mantiene_selector_inicial():
     cotizar = _template("cotizar.html")
     nuevo = _template("envio_nuevo.html")
     selector = _template("_ambito_selector.html")
+    iconos = _template("_scope_icons.html")
 
-    assert "{% if not ambito %}" in cotizar
+    assert "{% if not ambito %}" not in cotizar
+    assert 'data-quote-scope="{{ scope }}"' in cotizar
+    assert 'data-quote-panel="{{ scope }}"' in cotizar
+    assert "['internacional','nacional']" in cotizar
     assert "{% if not ambito %}" in nuevo
-    assert "🇦🇷" in selector
-    assert "🌐" in selector
+    assert "scope_icon('nacional')" in selector
+    assert "scope_icon('internacional')" in selector
+    assert "<svg" in iconos
     assert "Envío nacional" in selector
     assert "Envío internacional" in selector
-    assert 'name="ambito" value="internacional"' in cotizar
+    assert 'name="ambito" value="{{ scope }}"' in cotizar
     assert 'name="ambito" value="internacional"' in nuevo
 
 
 def test_cotizador_exige_elegir_destino_en_vez_de_tomar_el_primero():
     html = _template("cotizar.html")
-    assert '<option value="" disabled' in html
-    assert ">Elegí destino</option>" in html
+    assert 'name="{{ name }}" id="{{ name }}" required' in html
+    assert '<option value="">Elegí país</option>' in html
 
 
 def test_remitente_precargado_se_resume_sin_perder_campos_editables():
@@ -190,7 +194,7 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     assert 'data-step]:not([data-step="1"]) > details.card' in css
     assert ".main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 0; }" in css
     assert "shipment-step-recipient .form-grid-2" in css
-    assert '/portal/clientes?nuevo=1' in html
+    assert 'href="/portal/clientes" data-agenda-manage' in html
     assert '{% if not remitente %}disabled{% endif %}' not in html
     for campo in ("rem_nombre", "rem_direccion", "rem_ciudad", "rem_zip"):
         assert f'name="{campo}" id="{campo}" required' in html

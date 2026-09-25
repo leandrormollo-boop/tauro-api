@@ -1,15 +1,19 @@
 # ============================================================
 # Endpoints públicos de la app de Shopify
 # ============================================================
+#   GET  /shopify/app        → App Home embebida (shell sin PII)
+#   GET  /shopify/app/data   → estado/pedidos autenticados por ID token
 #   GET  /shopify/install    → arranca la instalación (OAuth)
 #   GET  /shopify/callback   → Shopify vuelve acá con el permiso dado
-#   POST /shopify/tarifas    → tarifas en vivo para el checkout
 #   POST /shopify/webhook/desinstalada → limpieza al desinstalar
 # ============================================================
 from __future__ import annotations
 
+import html
+import json
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -17,9 +21,22 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from servicios.shopify_app import (
     app_configurada, url_instalacion, validar_hmac_query, dominio_valido,
     canjear_token, guardar_instalacion, registrar_webhooks,
-    desinstalar, nuevo_state, ShopifyWebhookVerificationError,
+    desinstalar, ShopifyWebhookVerificationError,
     confirmar_shop_redact, confirmar_webhooks_verificados,
     webhooks_requeridos, api_key_publica,
+)
+from servicios.shopify_embedded import (
+    APP_BRIDGE_CDN,
+    POLARIS_CDN,
+    ShopifyEmbeddedAuthError,
+    bearer_token,
+    crear_estado_oauth,
+    host_embebido_para_shop,
+    instalacion_para_session,
+    shop_desde_host_embebido,
+    url_admin_app,
+    validar_session_token,
+    verificar_estado_oauth,
 )
 
 router = APIRouter(prefix="/shopify", tags=["shopify"])
@@ -46,8 +63,7 @@ small{{display:block;margin-top:26px;color:#7a828c;font-size:13px}}
 
 
 def _pagina(titulo: str, texto: str, boton: str = "", status: int = 200) -> HTMLResponse:
-    # La app pública está declarada como externa (`embedded = false`). Ninguna
-    # pantalla Shopify de TAURO debe poder cargarse dentro de un iframe.
+    # Pantallas de error/compatibilidad fuera de App Home no son embebibles.
     return HTMLResponse(
         _PAGINA.format(titulo=titulo, texto=texto, boton=boton),
         status_code=status,
@@ -60,11 +76,224 @@ def _pagina(titulo: str, texto: str, boton: str = "", status: int = 200) -> HTML
     )
 
 
+def _app_home_html(api_key: str, nonce: str, reconnect_url: str) -> str:
+    """Shell sin datos privados; App Bridge autentica la lectura posterior."""
+    api_key = html.escape(api_key, quote=True)
+    reconnect_js = json.dumps(reconnect_url)
+    return f"""<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="shopify-api-key" content="{api_key}">
+<title>TAURO Solutions</title>
+<style nonce="{nonce}">
+  :root {{ color-scheme: light; }}
+  body {{ margin:0; background:#f6f6f7; color:#202223;
+          font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
+  main {{ max-width:980px; margin:0 auto; padding:24px; }}
+  .grid {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.55fr);
+           gap:16px; align-items:start; }}
+  .card {{ background:#fff; border:1px solid #e1e3e5; border-radius:12px;
+           padding:20px; box-shadow:0 1px 2px rgba(0,0,0,.04); }}
+  h1,h2 {{ margin:0 0 8px; }} h1 {{ font-size:24px; }} h2 {{ font-size:16px; }}
+  p {{ margin:6px 0; color:#616161; }}
+  .status {{ display:inline-flex; align-items:center; gap:7px; font-weight:650; }}
+  .dot {{ width:9px; height:9px; border-radius:50%; background:#8c9196; }}
+  .dot.ok {{ background:#29845a; }} .dot.warn {{ background:#b98900; }}
+  table {{ width:100%; border-collapse:collapse; margin-top:14px; }}
+  th,td {{ padding:11px 8px; border-top:1px solid #e1e3e5; text-align:left; }}
+  th {{ color:#616161; font-size:12px; }}
+  .mono {{ font-variant-numeric:tabular-nums; }}
+  .button {{ display:inline-block; margin-top:14px; padding:10px 14px;
+             border-radius:8px; border:0; background:#303030; color:#fff;
+             font-weight:650; cursor:pointer; text-decoration:none; }}
+  .hidden {{ display:none; }}
+  #message {{ min-height:22px; }}
+  @media (max-width:720px) {{ .grid {{ grid-template-columns:1fr; }} }}
+</style>
+<script nonce="{nonce}" src="{APP_BRIDGE_CDN}"></script>
+<script nonce="{nonce}" src="{POLARIS_CDN}"></script>
+<script nonce="{nonce}">
+  const reconnectUrl = {reconnect_js};
+  const byId = (id) => document.getElementById(id);
+  const text = (id, value) => {{ byId(id).textContent = String(value ?? ""); }};
+
+  function showReconnect(message) {{
+    text("message", message);
+    byId("state-dot").className = "dot warn";
+    byId("reconnect").classList.remove("hidden");
+  }}
+
+  function render(data) {{
+    byId("state-dot").className = data.linked ? "dot ok" : "dot warn";
+    text("state", data.linked ? "Instalada y vinculada" : "Instalada · falta vincular a TAURO");
+    text("shop", data.shop);
+    text("message", data.linked
+      ? "Los pedidos se sincronizan con el portal TAURO."
+      : "Iniciá sesión en el portal TAURO para completar el vínculo.");
+    const tbody = byId("orders");
+    tbody.replaceChildren();
+    for (const order of data.orders) {{
+      const row = document.createElement("tr");
+      for (const value of [
+        order.number,
+        order.status,
+        order.total ? `${{order.currency || ""}} ${{order.total}}`.trim() : "—",
+        order.created_at || "—",
+      ]) {{
+        const cell = document.createElement("td");
+        cell.textContent = value || "—";
+        row.appendChild(cell);
+      }}
+      tbody.appendChild(row);
+    }}
+    byId("empty").classList.toggle("hidden", data.orders.length > 0);
+  }}
+
+  async function load() {{
+    try {{
+      const token = await shopify.idToken();
+      const response = await fetch("/shopify/app/data", {{
+        cache: "no-store",
+        headers: {{Authorization: `Bearer ${{token}}`}},
+      }});
+      const data = await response.json();
+      if (response.status === 409 && data.code === "REAUTHORIZE") {{
+        showReconnect("La instalación necesita autorización nuevamente.");
+        window.open(reconnectUrl, "_top");
+        return;
+      }}
+      if (!response.ok) throw new Error(data.detail || "No pudimos validar la sesión.");
+      render(data);
+    }} catch (_error) {{
+      showReconnect("No pudimos validar esta sesión de Shopify. Volvé a abrir la app.");
+    }}
+  }}
+
+  window.addEventListener("DOMContentLoaded", () => {{
+    byId("reconnect").addEventListener("click", () => window.open(reconnectUrl, "_top"));
+    load();
+  }});
+</script>
+</head><body>
+<ui-title-bar title="TAURO Solutions"></ui-title-bar>
+<main>
+  <div class="grid">
+    <section class="card" aria-labelledby="orders-title">
+      <h1 id="orders-title">Pedidos de Shopify</h1>
+      <p>Resumen operativo sin datos personales del comprador.</p>
+      <p id="empty">No hay pedidos sincronizados para mostrar.</p>
+      <table aria-label="Pedidos Shopify">
+        <thead><tr><th>Pedido</th><th>Estado</th><th>Total</th><th>Recibido</th></tr></thead>
+        <tbody id="orders"></tbody>
+      </table>
+    </section>
+    <aside class="card" aria-labelledby="state-title">
+      <h2 id="state-title">Estado de la integración</h2>
+      <div class="status"><span id="state-dot" class="dot"></span><span id="state">Validando sesión…</span></div>
+      <p id="shop"></p><p id="message">Cargando estado seguro…</p>
+      <button id="reconnect" class="button hidden" type="button">Reconectar con Shopify</button>
+      <a class="button" href="https://taurosolutions.ar/portal/tienda" target="_blank" rel="noopener noreferrer">Abrir portal TAURO</a>
+    </aside>
+  </div>
+</main>
+</body></html>"""
+
+
+@router.get("/app", response_class=HTMLResponse)
+def app_home(request: Request, shop: str = "", host: str = ""):
+    """App Home embebida: shell público, datos sólo detrás de ID token."""
+    if not app_configurada():
+        return _pagina(
+            "App en preparación",
+            "TAURO todavía no tiene configuradas sus credenciales Shopify.",
+            status=503,
+        )
+    shop = str(shop or "").strip().lower()
+    shop_host = shop_desde_host_embebido(host)
+    if not dominio_valido(shop):
+        shop = shop_host
+    elif shop_host and shop_host != shop:
+        return _pagina("Contexto inválido", "El host no corresponde a la tienda.", status=400)
+    if not dominio_valido(shop):
+        return _pagina("Contexto inválido", "Shopify no identificó una tienda válida.", status=400)
+    try:
+        host = host_embebido_para_shop(shop, host)
+    except ValueError:
+        return _pagina("Contexto inválido", "El host no corresponde a la tienda.", status=400)
+    request_state = getattr(request, "state", None)
+    nonce = str(getattr(request_state, "csp_nonce", "") or secrets.token_urlsafe(16))
+    reconnect_url = f"/shopify/install?shop={quote(shop)}&host={quote(host)}"
+    response = HTMLResponse(_app_home_html(api_key_publica(), nonce, reconnect_url))
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        f"script-src 'nonce-{nonce}' https://cdn.shopify.com; "
+        f"style-src 'nonce-{nonce}'; "
+        "connect-src 'self'; img-src 'self' data:; object-src 'none'; "
+        "base-uri 'none'; form-action 'none'; "
+        f"frame-ancestors https://{shop} https://admin.shopify.com;"
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@router.get("/app/data")
+def app_home_data(request: Request):
+    """Estado y pedidos mínimos, seleccionados exclusivamente por el JWT."""
+    payload = None
+    try:
+        payload = validar_session_token(
+            bearer_token(request.headers.get("authorization", "")),
+        )
+        inst = instalacion_para_session(payload)
+    except ShopifyEmbeddedAuthError as exc:
+        if exc.code == "REAUTHORIZE" and payload:
+            shop = str(payload["shop"])
+            return JSONResponse(
+                {"detail": "La instalación requiere autorización.", "code": exc.code},
+                status_code=409,
+            )
+        return JSONResponse(
+            {"detail": "Sesión Shopify inválida.", "code": exc.code},
+            status_code=401,
+            headers={"X-Shopify-Retry-Invalid-Session-Request": "1"},
+        )
+
+    shop = str(payload["shop"])
+    cliente_id = str(inst.get("cliente_id") or "").strip().upper()
+    pedidos = []
+    if cliente_id:
+        try:
+            from servicios.integraciones_tienda import listar_resumen_pedidos_shopify_embebido
+
+            filas = listar_resumen_pedidos_shopify_embebido(shop, cliente_id)
+            for fila in filas:
+                creado = fila.get("created_at")
+                pedidos.append({
+                    "number": str(fila.get("numero") or fila.get("pedido_externo_id") or ""),
+                    "status": str(fila.get("estado") or ""),
+                    "total": str(fila["valor_total"]) if fila.get("valor_total") is not None else "",
+                    "currency": str(fila.get("moneda") or ""),
+                    "created_at": creado.isoformat() if hasattr(creado, "isoformat") else str(creado or ""),
+                })
+        except Exception as exc:
+            print(f"[shopify] app home no pudo leer pedidos: {type(exc).__name__}")
+            return JSONResponse(
+                {"detail": "No pudimos cargar los pedidos."}, status_code=503,
+            )
+    return {
+        "shop": shop,
+        "installed": True,
+        "linked": bool(cliente_id),
+        "orders": pedidos,
+    }
+
+
 @router.get("/install", response_class=HTMLResponse)
-def install(request: Request, shop: str = ""):
+def install(request: Request, shop: str = "", host: str = ""):
     """
-    Shopify abre esta URL desde su superficie de instalación o desde Apps.
-    TAURO no ofrece un formulario ni un link propio para escribir el dominio.
+    Inicia OAuth en navegación principal y devuelve a App Home embebida.
     """
     if not app_configurada():
         return _pagina(
@@ -74,16 +303,13 @@ def install(request: Request, shop: str = ""):
             '<a href="https://admin.shopify.com">Volver a Shopify</a>',
         )
     shop = (shop or "").strip().lower()
+    host = str(host or request.query_params.get("host", "") or "").strip()
 
-    # Shopify puede abrir una app externa con el contexto en `host`. Se decodifica
-    # sólo en el servidor; no se carga App Bridge ni se confía en este dato para
-    # mostrar estadísticas (eso exige además una sesión TAURO coincidente).
+    # `host` sólo puede seleccionar la misma tienda codificada por Shopify.
     if not dominio_valido(shop):
-        shop = _shop_desde_host(request.query_params.get("host", "")) or shop
+        shop = shop_desde_host_embebido(host) or shop
 
     if not dominio_valido(shop):
-        # Una app externa recibe `shop` desde Shopify. No se intenta reconstruir
-        # el comercio en el navegador con App Bridge ni se pide que lo escriban.
         return _pagina(
             "Abrí TAURO desde tu tienda",
             "Shopify no incluyó una tienda válida. Volvé al panel "
@@ -95,7 +321,7 @@ def install(request: Request, shop: str = ""):
     # llamadas al Admin API desde cada apertura del panel: este link inicia
     # nuevamente OAuth y sólo Shopify puede completar el callback firmado.
     if request.query_params.get("reautorizar") == "1":
-        return _redirect_oauth(shop)
+        return _redirect_oauth(shop, host)
 
     # Si la tienda YA instaló la app, Shopify abre esta misma URL cada vez
     # que el comerciante hace click en TAURO desde su admin. Mandarlo de
@@ -109,7 +335,7 @@ def install(request: Request, shop: str = ""):
 
     if inst and not inst.get("webhooks_ready"):
         print("[shopify] instalación pendiente de verificar webhooks → nuevo consentimiento")
-        return _redirect_oauth(shop)
+        return _redirect_oauth(shop, host)
 
     if inst and inst.get("access_token"):
         # Una fila histórica puede tener todos los scopes correctos y aun así
@@ -119,10 +345,10 @@ def install(request: Request, shop: str = ""):
         app_instalada = str(inst.get("app_client_id") or "").strip()
         if app_instalada != api_key_publica():
             print("[shopify] instalación histórica → nuevo consentimiento")
-            return _redirect_oauth(shop)
+            return _redirect_oauth(shop, host)
         if not inst.get("token_rotativo"):
             print("[shopify] instalación pública sin refresh → nuevo consentimiento")
-            return _redirect_oauth(shop)
+            return _redirect_oauth(shop, host)
         # PERMISOS DESACTUALIZADOS: el token guardado sirve sólo para los
         # scopes con los que se autorizó. Si desde entonces la app pide más
         # (pasó al arreglar los de fulfillment orders), el token viejo sigue
@@ -135,22 +361,25 @@ def install(request: Request, shop: str = ""):
         faltantes = pedidos - guardados
         if faltantes:
             print(f"[shopify] permisos desactualizados: {len(faltantes)} faltante(s)")
-            return _redirect_oauth(shop)
-        return _panel_tienda(shop, inst, _cliente_sesion_tauro(request))
+            return _redirect_oauth(shop, host)
+        return RedirectResponse(
+            url=url_admin_app(shop),
+            status_code=303,
+            headers={"Cache-Control": "private, no-store", "Pragma": "no-cache"},
+        )
 
-    return _redirect_oauth(shop)
+    return _redirect_oauth(shop, host)
 
 
-def _redirect_oauth(shop: str, *, cotizar_checkout: bool = False) -> RedirectResponse:
+def _redirect_oauth(shop: str, host: str = "") -> RedirectResponse:
     """
     Manda al consentimiento de Shopify guardando el `state` en una cookie
     corta. Hasta ahora el state se generaba, viajaba... y nadie lo comparaba
     a la vuelta — o sea, teatro. El callback ahora exige que coincida
     (anti-CSRF del flujo OAuth, y Shopify lo revisa para el App Store).
     """
-    state = nuevo_state()
-    url = (url_instalacion(shop, state, cotizar_checkout=True)
-           if cotizar_checkout else url_instalacion(shop, state))
+    state = crear_estado_oauth(shop, host)
+    url = url_instalacion(shop, state)
     resp = RedirectResponse(url=url, status_code=303)
     resp.headers["Cache-Control"] = "private, no-store"
     resp.headers["Pragma"] = "no-cache"
@@ -162,138 +391,6 @@ def _redirect_oauth(shop: str, *, cotizar_checkout: bool = False) -> RedirectRes
         samesite="lax",
     )
     return resp
-
-
-def _cliente_sesion_tauro(request: Request) -> str:
-    """Identidad TAURO autenticada; nunca se infiere de la URL de Shopify."""
-    token = str(request.cookies.get("token") or "")
-    if not token:
-        return ""
-    try:
-        from servicios.auth import validar_token
-        return str(validar_token(token) or "").strip().upper()
-    except Exception:
-        return ""
-
-
-def _shop_desde_host(host_b64: str) -> str:
-    """Obtiene el dominio del contexto externo que Shopify agrega a la URL."""
-    if not host_b64:
-        return ""
-    try:
-        import base64
-        faltante = "=" * (-len(host_b64) % 4)
-        crudo = base64.urlsafe_b64decode(host_b64 + faltante).decode("utf-8", "ignore")
-    except Exception:
-        return ""
-    marca = "/store/"
-    if marca not in crudo:
-        return ""
-    tienda = crudo.split(marca, 1)[1].split("/", 1)[0].split("?", 1)[0].strip().lower()
-    dominio = f"{tienda}.myshopify.com" if tienda else ""
-    return dominio if dominio_valido(dominio) else ""
-
-
-def _panel_tienda(shop: str, inst: dict, cliente_sesion: str = "") -> HTMLResponse:
-    """
-    Lo que el comerciante ve al abrir TAURO desde su admin de Shopify:
-    su estado de un vistazo y el acceso al portal donde opera.
-    """
-    cliente = str((inst or {}).get("cliente_id") or "").strip().upper()
-    cliente_sesion = str(cliente_sesion or "").strip().upper()
-    sesion_coincide = bool(cliente and cliente_sesion == cliente)
-    pendientes = 0
-    sync_estado = None
-    stock = None
-    if sesion_coincide:
-        try:
-            from servicios.integraciones_tienda import contar_pendientes
-            pendientes = contar_pendientes(cliente)
-            from servicios.catalogo import estado_sincronizacion_cliente, resumen_stock_cliente
-            sync_estado = estado_sincronizacion_cliente(cliente)
-            stock = resumen_stock_cliente(cliente)
-        except Exception as e:
-            print(f"[shopify] no pude armar panel: {type(e).__name__}")
-
-    if not cliente:
-        estado = ("Tu tienda está conectada, pero todavía no la vinculaste a tu cuenta "
-                  "de TAURO. Entrá al portal, sección <b>Mi tienda</b>, y tocá "
-                  "«Es mi tienda — vincular».")
-        cta = "Vincular mi tienda"
-        cta_url = "https://taurosolutions.ar/portal/tienda"
-    elif not sesion_coincide:
-        # `shop` es un parámetro público del OAuth. Nunca alcanza para revelar
-        # pedidos, stock ni la identidad del cliente dueño de la instalación.
-        estado = ("TAURO está instalada. Para ver pedidos, catálogo y stock, "
-                  "iniciá sesión con la cuenta TAURO vinculada a esta tienda.")
-        cta = "Iniciar sesión"
-        cta_url = "https://taurosolutions.ar/portal/login"
-    elif sync_estado and sync_estado.get("estado") == "REAUTORIZAR":
-        estado = ("Tu tienda está conectada, pero necesita que autorices una vez "
-                  "el catálogo y el inventario para mostrar el stock en TAURO.")
-        cta = "Autorizar catálogo y stock"
-        cta_url = f"/shopify/install?shop={shop}&reautorizar=1"
-    elif pendientes:
-        estado = (f"Tenés <b>{pendientes} venta{'s' if pendientes != 1 else ''}</b> "
-                  f"esperando que generes el envío.")
-        cta = "Ver mis pedidos"
-        cta_url = "https://taurosolutions.ar/portal/tienda"
-    else:
-        variantes = int((stock or {}).get("variantes") or 0)
-        unidades = int((stock or {}).get("unidades_disponibles") or 0)
-        estado = ("Todo al día: no hay ventas pendientes de envío. "
-                  f"TAURO está siguiendo <b>{variantes} variantes</b> y "
-                  f"<b>{unidades} unidades disponibles</b> en Shopify.")
-        cta = "Abrir mi portal"
-        cta_url = "https://taurosolutions.ar/portal/catalogo"
-
-    # Arquitectura inequívocamente externa: coincide con `embedded = false`.
-    headers = {
-        "Content-Security-Policy": "frame-ancestors 'none';",
-        "X-Frame-Options": "DENY",
-        "Cache-Control": "private, no-store",
-        "Pragma": "no-cache",
-        "Vary": "Cookie",
-    }
-    pie = (
-        f"Tienda conectada: <b>{shop}</b><br>"
-        "Cada venta con envío al exterior aparece en tu portal lista para generar la guía."
-        if sesion_coincide
-        else "La información operativa se muestra únicamente después de iniciar sesión."
-    )
-
-    return HTMLResponse(headers=headers, content=f"""<!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TAURO Solutions</title>
-<style>
-  body {{ margin:0; padding:40px 24px; background:#0c0a14; color:#f4f5f7;
-         font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; }}
-  .box {{ max-width:560px; margin:0 auto; text-align:center; }}
-  .marca {{ font-size:22px; font-weight:700; letter-spacing:.08em; margin-bottom:6px; }}
-  .marca span {{ color:#a78bfa; }}
-  .sub {{ font-size:11px; letter-spacing:.14em; color:#8b86a0;
-          text-transform:uppercase; margin-bottom:34px; }}
-  .card {{ background:#151221; border:1px solid #2a2540; border-radius:16px;
-           padding:30px 26px; }}
-  .num {{ font-size:52px; font-weight:700; line-height:1;
-          color:#a78bfa; margin-bottom:10px; }}
-  p {{ color:#b9bfc7; line-height:1.7; margin:0 0 26px; font-size:15px; }}
-  a.btn {{ display:inline-block; background:#7c5cf6; color:#fff; padding:14px 32px;
-           border-radius:999px; text-decoration:none; font-weight:600; }}
-  .pie {{ margin-top:26px; font-size:12.5px; color:#6f6a85; line-height:1.7; }}
-  .pie b {{ color:#9a94b0; }}
-</style></head><body>
-<div class="box">
-  <div class="marca">TAURO <span>SOLUTIONS</span></div>
-  <div class="sub">Logística internacional</div>
-  <div class="card">
-    {f'<div class="num">{pendientes}</div>' if pendientes else ''}
-    <p>{estado}</p>
-    <a class="btn" href="{cta_url}">{cta} →</a>
-  </div>
-  <div class="pie">{pie}</div>
-</div></body></html>""")
 
 
 @router.get("/callback", response_class=HTMLResponse)
@@ -322,6 +419,11 @@ def callback(request: Request):
         and state_query
         and secrets.compare_digest(state_query, state_cookie)
     )
+    if state_verificado:
+        try:
+            verificar_estado_oauth(state_query, shop)
+        except (ValueError, ShopifyEmbeddedAuthError):
+            state_verificado = False
     if not state_verificado:
         respuesta = _pagina("La instalación expiró",
                             "Por seguridad, empezá de nuevo desde el link de instalación.",
@@ -358,23 +460,12 @@ def callback(request: Request):
     # ventana en la que una entrega nueva pueda caer sobre el owner anterior.
     oauth_activada_desde = datetime.now(timezone.utc)
 
-    # El claim se deriva antes de crear la generación pendiente. Token, owner y
-    # binding se escriben juntos; sin sesión TAURO el owner queda NULL y el
-    # binding anterior inactivo, sin una ventana donde las ventas vuelvan a A.
-    dueno = ""
-    try:
-        dueno = _cliente_sesion_tauro(request)
-    except Exception as exc:
-        print(f"[shopify] no pude validar sesión de claim: {type(exc).__name__}")
-        dueno = ""
-
     try:
         generation = guardar_instalacion(
             shop,
             data["access_token"],
             data.get("scope", ""),
             oauth_activada_desde,
-            cliente_claim=dueno,
             refresh_token=data.get("refresh_token", ""),
             expires_in=data.get("expires_in"),
             refresh_token_expires_in=data.get("refresh_token_expires_in"),
@@ -443,23 +534,17 @@ def callback(request: Request):
         respuesta.delete_cookie("shopify_state")
         return respuesta
 
-    # Importar catálogo + stock en segundo plano. El wrapper captura cualquier
-    # fallo y lo deja visible en shopify_sync_estado; nunca rompe el OAuth.
-    if dueno:
-        try:
-            from servicios.shopify_catalogo import lanzar_sincronizacion
-            lanzar_sincronizacion(shop, dueno)
-        except Exception as e:
-            print(f"[shopify] no pude lanzar sincronización: {type(e).__name__}")
+    # OAuth prueba control de la tienda, no identidad dentro de TAURO. Incluso
+    # si el navegador trae una sesión TAURO, la instalación nace ownerless y
+    # sólo se vincula después mediante la verificación del mail del comercio.
+    print(
+        f"[shopify] generación habilitada · {len(topics)} webhook(s) · ownerless"
+    )
 
-    print(f"[shopify] generación habilitada · {len(topics)} webhook(s) · "
-          f"{'con claim' if dueno else 'ownerless'}")
-
-    # Shopify exige que el OAuth termine dentro de la interfaz de la app. La
-    # siguiente apertura ya reconoce la instalación y muestra su panel; no se
-    # deja al comercio en una pantalla intermedia de éxito.
+    # El destino se deriva del `shop` cubierto por el HMAC de Shopify y por el
+    # state firmado; no se acepta una URL de retorno aportada por el navegador.
     respuesta = RedirectResponse(
-        url=f"/shopify/install?shop={shop}",
+        url=url_admin_app(shop),
         status_code=303,
         headers={
             "Cache-Control": "private, no-store",
@@ -722,7 +807,10 @@ async def gdpr_shop_redact(request: Request):
 @router.post("/webhook/desinstalada")
 async def desinstalada(request: Request):
     """Purga la generación que Shopify identificó en el body firmado."""
-    from servicios.shopify_app import cliente_app_para_webhook
+    from servicios.shopify_app import (
+        cliente_app_para_webhook,
+        verificar_uninstall_remoto,
+    )
 
     if not _topic_exacto(request, "app/uninstalled"):
         return JSONResponse({"ok": False}, status_code=400)
@@ -761,11 +849,18 @@ async def desinstalada(request: Request):
         return JSONResponse({"ok": False}, status_code=400)
 
     try:
+        verificacion = verificar_uninstall_remoto(shop, app_client_id)
+        estado = str(verificacion.get("estado") or "")
+        if estado in {"VIGENTE", "IGNORAR", "YA_DESINSTALADA"}:
+            print("[shopify] app/uninstalled ignorado · token actual vigente o ausente")
+            return {"ok": True, "estado": estado}
+        if estado != "REVOCADO":
+            return JSONResponse({"ok": False}, status_code=503)
         borrada = desinstalar(
             shop,
             app_client_id,
             shop_id,
-            request.headers.get("x-shopify-triggered-at", ""),
+            str(verificacion.get("generation") or ""),
         )
     except Exception as exc:
         print(f"[shopify] error procesando uninstall: {type(exc).__name__}")
