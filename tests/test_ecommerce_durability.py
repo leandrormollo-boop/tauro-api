@@ -111,3 +111,55 @@ def test_fulfillment_excepcion_final_va_a_revision_manual(monkeypatch):
     resultado = ecommerce_outbox.procesar_fulfillments()
     assert finales == [("MANUAL_REVIEW", "TimeoutError", "ambiguo")]
     assert resultado["manuales"] == 1
+
+
+def test_tiendanube_reconciliar_se_propaga_como_ciclo_solo_lectura(monkeypatch):
+    from servicios import ecommerce_outbox, integraciones_tienda, tiendanube_app
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+        def fetchone(self):
+            return {"estado": "CONVERTIDO", "automatismos_bloqueados": False}
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    monkeypatch.setattr(ecommerce_outbox, "get_conn", lambda: Conn())
+    monkeypatch.setattr(
+        integraciones_tienda, "_bloquear_dominio_tiendanube", lambda *_args: None,
+    )
+    conciliaciones = []
+    monkeypatch.setattr(
+        tiendanube_app,
+        "marcar_enviado",
+        lambda *_args, **kwargs: (
+            conciliaciones.append(kwargs.get("solo_reconciliar")) or False
+        ),
+    )
+
+    resultado = ecommerce_outbox._ejecutar_fulfillment_bajo_lock({
+        "plataforma": "tiendanube",
+        "estado_anterior": "RECONCILIAR",
+        "dominio": "123.tiendanube",
+        "pedido_id": 7,
+        "pedido_externo_id": "pedido-1",
+        "tracking": "TRACK-1",
+    })
+
+    assert resultado == "REINTENTAR"
+    assert conciliaciones == [True]
