@@ -1,0 +1,6 @@
+<header class="business-heading">
+<div><div class="eyebrow"><a href="/admin/clientes">Clientes</a> / {{ cliente.cliente_id }}</div>
+<h1>{{ cliente.cliente_id }}</h1><p>{% if cliente.nombre and cliente.nombre != cliente.cliente_id %}{{ cliente.nombre }} · {% endif %}{{ cliente.email }}</p></div>
+<span class="badge {{ 'ok' if cliente.activo else 'error' }}">{{ 'Cuenta habilitada' if cliente.activo else 'Cuenta suspendida' }}</span>
+</header>
+{% include 'admin/cliente_nav.html' %}

@@ -1,0 +1,12 @@
+{% set cid = cliente.cliente_id if cliente is defined else cliente_id if cliente_id is defined else matriz.cliente_id %}
+<nav class="business-tabs" aria-label="Secciones del cliente">
+{% for key,label,url in [
+ ('cuenta','Cuenta corriente',''),('envios','Envíos','?vista=envios'),
+ ('pagos','Pagos','?vista=pagos'),('facturas','Facturas','/facturas'),
+ ('conciliacion','Facturas proveedor','/operadores'),
+ ('destinatarios','Sus clientes','?vista=destinatarios'),
+ ('recolecciones','Recolecciones','?vista=recolecciones'),
+ ('configuracion','Configuración','?vista=configuracion')] %}
+<a href="/admin/clientes/{{ cid|urlencode }}{{ url }}" {% if vista|default('cuenta') == key %}class="active" aria-current="page"{% endif %}>{{ label }}</a>
+{% endfor %}
+</nav>

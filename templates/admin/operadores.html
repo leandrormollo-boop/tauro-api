@@ -1,18 +1,22 @@
-{% extends "admin/base_admin.html" %}
-{% import "admin/operador_macros.html" as op %}
-{% block title %}Operadores logísticos{% endblock %}
+{% extends 'admin/base_admin.html' %}
+{% import 'admin/operador_macros.html' as op %}
+{% block title %}Proveedores{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="/static/css/operadores.css?v=3">
-<div class="operadores">
-<div class="page-title"><div class="eyebrow">Administración · proveedores</div><h1>Operadores logísticos</h1>
-<p>Facturas, pagos y saldos por operador.</p></div>
-<div class="op-grid">
-{% for m in mundos %}<section class="card op-world"><h2><a class="op-logo-button" href="/admin/operadores/{{ m.courier }}" aria-label="Abrir {{ op.nombre(m.courier) }}" title="Abrir {{ op.nombre(m.courier) }}">{{ op.logo(m.courier) }}</a></h2>
-<p>{{ m.cantidad }} documentos registrados</p>{{ op.resumen(m.resumen) }}
-{% if not m.resumen %}<p class="op-note">Sin documentos cargados todavía.</p>{% endif %}
+<header class="business-heading"><div><div class="eyebrow">Control del negocio</div><h1>Proveedores</h1><p>Cada envío aparece en el operador que lo realiza.</p></div><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Cargar facturas</a></header>
+<div class="business-card-grid operadores">
+{% for m in mundos %}<section class="card business-provider-card">
+<header><h2><a href="/admin/operadores/{{ m.courier }}">{{ op.nombre(m.courier) }}</a></h2><a class="op-logo-button" href="/admin/operadores/{{ m.courier }}" aria-label="Abrir {{ op.nombre(m.courier) }}">{% if m.courier!='CORREO_ARGENTINO' %}{{ op.logo(m.courier) }}{% else %}<span class="business-lettermark">CA</span>{% endif %}</a></header>
+<div class="business-metrics"><a href="/admin/operadores/{{ m.courier }}"><strong>{{ m.operacion.envios|default(0) }}</strong>envíos vigentes</a><span><strong>{{ m.operacion.clientes|default(0) }}</strong>clientes</span></div>
+<p><a href="/admin/operadores/{{ m.courier }}?vista=envios&estado=retenidos">{{ m.operacion.retenidos|default(0) }} retenidos</a> · {{ m.operacion.sin_factura|default(0) }} sin factura confirmada</p>
+<div class="business-provider-balance">
+{% for r in m.resumen %}<a href="/admin/operadores/{{ m.courier }}?vista=cuenta"><small>{{ r.moneda }} · deuda verificada</small><strong>{{ op.dinero(r.pendiente) }}</strong></a>
+{% if r.vencido %}<span class="business-status warn">{{ r.moneda }} {{ op.dinero(r.vencido) }} vencidos</span>{% endif %}
+{% if r.credito %}<small>Crédito disponible: {{ r.moneda }} {{ op.dinero(r.credito) }}</small>{% endif %}
+{% if r.sin_verificar %}<a href="/admin/operadores/{{ m.courier }}?vista=cuenta&estado=SIN_VERIFICAR" class="business-status warn">{{ r.sin_verificar }} documentos por verificar</a><span data-help="Saldo por verificar">Estos documentos no se incluyen en la deuda verificada hasta revisar su historial de pagos.</span>{% endif %}
+{% endfor %}</div>
+{% if not m.resumen %}<p class="op-note">Sin documentos registrados.</p>{% endif %}
+<div class="business-filters"><a class="business-cta" href="/admin/operadores/{{ m.courier }}">Ver envíos →</a><a class="business-cta" href="/admin/operadores/{{ m.courier }}?vista=cuenta">Cuenta corriente →</a></div>
 </section>{% endfor %}
-</div>
-<div class="op-actions"><a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer factura DHL</a><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Carga manual y conciliación</a></div>
-<p class="op-note">El pago no se deduce del estado de conciliación. Los documentos históricos quedan “Sin verificar” hasta revisar sus pagos. Las NC son crédito, no facturas a pagar. No se descuentan reclamos pendientes.</p>
 </div>
 {% endblock %}

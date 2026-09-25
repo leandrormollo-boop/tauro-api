@@ -467,7 +467,7 @@ def documentos_cliente(cliente_id, pagina=1):
     cliente_id=str(cliente_id or '').strip().upper()
     pagina=max(1,int(pagina))
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute('SELECT cliente_id,nombre FROM clientes WHERE cliente_id=%s',(cliente_id,))
+        cur.execute('SELECT cliente_id,nombre,email,activo FROM clientes WHERE cliente_id=%s',(cliente_id,))
         cliente=cur.fetchone()
         if not cliente:
             return None

@@ -1,0 +1,6 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Control de envíos{% endblock %}
+{% block content %}
+<div class="business-heading"><div><div class="eyebrow">Operación</div><h1>Control de envíos</h1><p>Cliente, proveedor y documentos conectados en una misma fila.</p></div><a href="/admin/pedidos" class="btn btn-ghost">Solicitudes y emisión</a></div>
+{% include 'admin/negocio_envios.html' %}
+{% endblock %}

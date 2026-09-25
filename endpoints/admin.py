@@ -1595,6 +1595,26 @@ def admin_cliente_detail(
         return _redirect_login()
 
     cliente_id = cliente_id.strip().upper()
+    vista = getattr(request, "query_params", {}).get("vista", "cuenta")
+    if vista in ("envios", "destinatarios", "recolecciones", "configuracion"):
+        from servicios import admin_negocio as negocio
+        cliente = negocio.obtener_cliente(cliente_id)
+        if not cliente:
+            return RedirectResponse(url="/admin/clientes", status_code=303)
+        try:
+            pagina = max(1, int(request.query_params.get("pagina", "1")))
+        except ValueError:
+            pagina = 1
+        datos = {}
+        if vista == "envios":
+            datos["operacion"] = negocio.listar_envios(cliente_id=cliente_id, pagina=pagina,
+                q=request.query_params.get("q", ""), estado=request.query_params.get("estado", "vigentes"))
+        elif vista in ("destinatarios", "recolecciones"):
+            datos["agenda"] = negocio.agenda_cliente(cliente_id, vista, pagina)
+        return templates.TemplateResponse(request=request, name="admin/cliente_workspace.html",
+            context={"seccion": "clientes", "cliente": cliente, "vista": vista, **datos},
+            headers={"Cache-Control": "private, no-store"})
+    vista = "pagos" if vista == "pagos" else "cuenta"
     # Paginación: 50 cargos por página, dentro del período seleccionado.
     PAGE_SIZE = 50
     page = max(1, page)
@@ -1802,7 +1822,8 @@ def admin_cliente_detail(
             cur.execute(
                 """
                 SELECT
-                    p.*,
+                    p.id,p.fecha,p.monto_ars,p.metodo,p.referencia,p.estado,p.nota,
+                    (p.comprobante IS NOT NULL) AS tiene_comprobante,
                     COALESCE(SUM(pa.monto_ars) FILTER (
                         WHERE pa.ambito = 'NACIONAL'
                           AND pa.estado = CASE
@@ -1827,6 +1848,11 @@ def admin_cliente_detail(
                 (cliente_id,),
             )
             pagos = [dict(r) for r in cur.fetchall()]
+    if vista == "pagos":
+        from servicios.admin_negocio import aplicaciones_pagos
+        aplicaciones = aplicaciones_pagos(cliente_id, [p["id"] for p in pagos])
+        for pago in pagos:
+            pago["aplicaciones"] = aplicaciones.get(pago["id"], [])
 
     cliente = dict(row)
     cliente["pricing_desc"] = describir_pricing(cliente)
@@ -1895,6 +1921,7 @@ def admin_cliente_detail(
             "seccion": "clientes",
             "cliente": cliente,
             "cuenta_ambitos": cuenta_ambitos,
+            "vista": vista,
             "envios": envios,
             "periodo": periodo,
             "resumen_periodo": resumen_periodo,
@@ -1904,6 +1931,7 @@ def admin_cliente_detail(
             "flash_ok": flash_ok,
             "flash_error": error or None,
         },
+        headers={"Cache-Control": "private, no-store"},
     )
 
 
@@ -3994,16 +4022,16 @@ def _render_facturas_admin(
         seccion = "facturas_internacionales"
         ruta_facturas = "/admin/facturas-internacionales"
     elif ambito_normalizado == "NACIONAL":
-        couriers_disponibles = ("ANDREANI", "OCA")
+        couriers_disponibles = ("ANDREANI", "OCA", "CORREO_ARGENTINO")
         titulo = "Facturas nacionales"
         descripcion = (
-            "Andreani y OCA: facturas y control de los envíos dentro "
+            "Andreani, OCA y Correo Argentino: facturas y envíos dentro "
             "de Argentina."
         )
         seccion = "facturas_nacionales"
         ruta_facturas = "/admin/facturas-nacionales"
     else:
-        couriers_disponibles = ("DHL", "FEDEX", "ANDREANI", "OCA")
+        couriers_disponibles = ("DHL", "FEDEX", "ANDREANI", "OCA", "CORREO_ARGENTINO")
         titulo = "Control de envíos y facturas"
         descripcion = (
             "Control interno de facturas y envíos de todos los operadores."
@@ -4139,7 +4167,7 @@ def admin_factura_courier_form(
         return _redirect_login()
     ambito_normalizado = str(ambito or "").strip().upper()
     if ambito_normalizado == "NACIONAL":
-        couriers_disponibles = ("ANDREANI", "OCA")
+        couriers_disponibles = ("ANDREANI", "OCA", "CORREO_ARGENTINO")
         titulo = "Cargar factura nacional"
         ruta_retorno = "/admin/facturas-nacionales"
     else:
@@ -4269,7 +4297,7 @@ def admin_factura_courier_detalle(
     if not factura:
         return Response(content="Factura courier no encontrada.", status_code=404)
     courier = str(factura.get("courier") or "").strip().upper()
-    if courier in {"ANDREANI", "OCA"}:
+    if courier in {"ANDREANI", "OCA", "CORREO_ARGENTINO"}:
         seccion = "facturas_nacionales"
         ruta_retorno = "/admin/facturas-nacionales"
     else:

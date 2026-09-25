@@ -2031,7 +2031,7 @@ CREATE TABLE IF NOT EXISTS envio_cotizacion_snapshots (
     aceptado_at                  TIMESTAMPTZ NOT NULL,
     created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT ck_snapshot_courier CHECK (
-        courier IN ('DHL','FEDEX','ANDREANI','OCA')
+        courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO')
     ),
     CONSTRAINT ck_snapshot_moneda CHECK (
         moneda_courier ~ '^[A-Z]{3}$'
@@ -2133,7 +2133,7 @@ CREATE TABLE IF NOT EXISTS facturas_courier (
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT ck_factura_courier CHECK (
-        courier IN ('DHL','FEDEX','ANDREANI','OCA')
+        courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO')
     ),
     CONSTRAINT ck_factura_tipo CHECK (
         tipo_documento IN ('FC','NC','ND')
@@ -3395,7 +3395,7 @@ ALTER TABLE clientes ADD COLUMN IF NOT EXISTS perfil_comercial TEXT NOT NULL DEF
 -- Este archivo se replica en schema.sql para instalaciones y upgrades existentes.
 CREATE TABLE IF NOT EXISTS condiciones_operador (
     id BIGSERIAL PRIMARY KEY,
-    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA')),
+    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO')),
     plazo_dias INTEGER CHECK (plazo_dias BETWEEN 0 AND 365),
     motivo TEXT NOT NULL CHECK (length(btrim(motivo)) BETWEEN 5 AND 1000),
     actor TEXT NOT NULL CHECK (btrim(actor) <> ''),
@@ -3410,7 +3410,7 @@ CREATE TABLE IF NOT EXISTS vencimientos_operador (
 );
 CREATE TABLE IF NOT EXISTS pagos_operador (
     id BIGSERIAL PRIMARY KEY,
-    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA')),
+    courier TEXT NOT NULL CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO')),
     fecha DATE NOT NULL,
     moneda TEXT NOT NULL CHECK (moneda ~ '^[A-Z]{3}$'),
     importe NUMERIC(18,4) NOT NULL CHECK (importe > 0 AND importe < 'Infinity'::numeric),
@@ -4108,3 +4108,18 @@ CREATE TABLE IF NOT EXISTS oca_portal_cotizaciones (
     tracking TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_oca_portal_cliente ON oca_portal_cotizaciones(cliente_id, created_at);
+
+-- Libro de Correo Argentino: soporte documental, sin habilitar una API de envíos.
+-- También amplía las restricciones de instalaciones existentes.
+ALTER TABLE envio_cotizacion_snapshots DROP CONSTRAINT IF EXISTS ck_snapshot_courier;
+ALTER TABLE envio_cotizacion_snapshots ADD CONSTRAINT ck_snapshot_courier
+    CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO'));
+ALTER TABLE facturas_courier DROP CONSTRAINT IF EXISTS ck_factura_courier;
+ALTER TABLE facturas_courier ADD CONSTRAINT ck_factura_courier
+    CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO'));
+ALTER TABLE condiciones_operador DROP CONSTRAINT IF EXISTS condiciones_operador_courier_check;
+ALTER TABLE condiciones_operador ADD CONSTRAINT condiciones_operador_courier_check
+    CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO'));
+ALTER TABLE pagos_operador DROP CONSTRAINT IF EXISTS pagos_operador_courier_check;
+ALTER TABLE pagos_operador ADD CONSTRAINT pagos_operador_courier_check
+    CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO'));

@@ -110,3 +110,11 @@ def test_logo_desconocido_no_construye_rutas_ni_html(courier):
     macros=admin.templates.get_template('admin/operador_macros.html').module
     assert str(macros.logo(courier)).strip()==''
     assert '<script>' not in str(macros.nombre(courier))
+
+
+@pytest.fixture(autouse=True)
+def operacion_vacia(monkeypatch):
+    from servicios import admin_negocio
+    monkeypatch.setattr(admin_negocio,'resumen_proveedores',lambda: {})
+    monkeypatch.setattr(admin_negocio,'listar_envios',lambda **kwargs: dict(
+        items=[],total=0,pagina=1,paginas=1,q='',estado='vigentes',conteos={},filtros=[]))

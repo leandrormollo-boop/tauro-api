@@ -6,15 +6,16 @@
 <div class="operadores">
 <div class="page-title op-heading"><a class="op-logo-button" href="/admin/operadores/{{ courier }}" aria-label="Volver a {{ op.nombre(courier) }}" title="Volver a {{ op.nombre(courier) }}">{{ op.logo(courier) }}</a><div><div class="eyebrow">Proveedor · Sólo ADMIN</div><h1>{{ factura.tipo_documento }} {{ factura.numero }}</h1>
 <p>{{ factura.moneda }} {{ op.dinero(factura.total) }} · {{ op.estado(factura) }}</p></div></div>
+{% set vista='cuenta' %}{% include 'admin/proveedor_nav.html' %}
 {% include 'admin/operador_mensajes.html' %}
 <div class="op-actions"><a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}" class="btn btn-primary">PDF, matches y revisión financiera</a></div>
 <div class="op-grid"><div class="card"><h3>Fechas</h3><p>Emisión: {{ op.fecha(factura.fecha_emision) }}</p><p>{% if factura.dias_emision is not none %}{{ factura.dias_emision }} días desde emisión{% else %}Antigüedad sin definir{% endif %}</p>
 {% if factura.tipo_documento!='NC' %}<p>Vencimiento: {{ op.fecha(factura.vencimiento) if factura.vencimiento else 'Sin definir' }}</p><small>{{ 'Según documento' if factura.fecha_vencimiento else 'Rectificación manual auditada' if factura.rectificacion_id else 'Plazo acordado, conservado para esta factura' if factura.vencimiento else 'Falta fecha documental o plazo confirmado' }}</small>
-{% if factura.fecha_cancelacion %}<p>Cancelada al {{ op.fecha(factura.fecha_cancelacion) }}{% if factura.dias_mora %} · {{ factura.dias_mora }} días después del vencimiento{% endif %}</p>{% endif %}{% endif %}</div>
+{% if factura.fecha_cancelacion %}<p>Saldada al {{ op.fecha(factura.fecha_cancelacion) }}{% if factura.dias_mora %} · {{ factura.dias_mora }} días después del vencimiento{% endif %}</p>{% endif %}{% endif %}</div>
 <div class="card"><h3>{{ 'Crédito según registros' if factura.tipo_documento=='NC' else 'Saldo según registros' }}</h3><p class="op-amount">{{ factura.moneda }} {{ op.dinero(factura.saldo) }}</p><p>Aplicado: {{ op.dinero(factura.aplicado) }}</p>{% if factura.estado_pago in ('SIN_VERIFICAR','CREDITO_SIN_VERIFICAR') %}<p class="op-note">No se considera deuda ni crédito confirmado: pueden faltar pagos o aplicaciones históricas.</p>{% endif %}<p>Conciliación: {{ factura.estado }}. Este estado no indica que esté pagada.</p></div></div>
 
-<section class="card"><h2>Clientes de este documento</h2><p>Cada cliente se vincula por sus líneas confirmadas.</p>
-<div class="op-grid">{% for c in factura.por_cliente %}<div class="op-summary"><a href="/admin/clientes/{{ c.cliente_id|urlencode }}/operadores">{{ c.cliente_id }}</a><p>{{ c.moneda }} {{ op.dinero(c.asignado) }} asignados · {{ c.envios }} envíos</p></div>{% else %}<p>Sin clientes confirmados todavía.</p>{% endfor %}</div>
+<section class="card" id="clientes-documento"><h2>Clientes de este documento</h2><p>Cada cliente se vincula por sus líneas confirmadas.</p>
+<div class="op-grid">{% for c in factura.por_cliente %}<div class="op-summary"><a href="/admin/clientes/{{ c.cliente_id|urlencode }}">{{ c.cliente_id }}</a><p>{{ c.moneda }} {{ op.dinero(c.asignado) }} asignados · {{ c.envios }} envíos</p></div>{% else %}<p>Sin clientes confirmados todavía.</p>{% endfor %}</div>
 {{ op.lineas(factura['items']) }}
 {% if factura.pendientes_asignacion %}<h3>Importes todavía sin asignar</h3><ul>{% for i in factura.pendientes_asignacion %}<li>Línea {{ i.linea_numero }} · {{ i.tracking_raw or 'Sin tracking' }}: {{ i.moneda }} {{ op.dinero(i.pendiente*i.signo) }} pendientes de distribución confirmada.</li>{% endfor %}</ul>{% endif %}
 {% if factura.sin_desglosar|default(0)>0 %}<p>Falta desglosar {{ factura.moneda }} {{ op.dinero(factura.sin_desglosar) }} del total del documento.</p>{% elif factura.sin_desglosar|default(0)<0 %}<p class="op-danger">Revisar: las líneas exceden el total en {{ factura.moneda }} {{ op.dinero(-factura.sin_desglosar) }}.</p>{% endif %}

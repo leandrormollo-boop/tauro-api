@@ -1,0 +1,33 @@
+{% import 'admin/operador_macros.html' as op %}
+<div class="business-filters">
+<nav class="business-pills" aria-label="Estado de los envíos">
+{% for f in operacion.filtros %}<a href="{{ f.url }}" {% if f.clave==operacion.estado %}aria-current="page" class="active"{% endif %}>{{ f.nombre }} <span>{{ f.total }}</span></a>{% endfor %}
+</nav>
+<form method="GET" class="business-search"><input type="hidden" name="vista" value="envios"><input type="hidden" name="estado" value="{{ operacion.estado }}">
+<label class="sr-only" for="buscar-envio">Buscar guía, cliente o destinatario</label><input id="buscar-envio" type="search" name="q" value="{{ operacion.q }}" maxlength="100" placeholder="Guía, cliente o destinatario"><button class="btn btn-ghost btn-sm">Buscar</button>{% if operacion.q %}<a href="?vista=envios&estado={{ operacion.estado }}">Limpiar</a>{% endif %}</form>
+</div>
+<div class="card business-ledger">
+<div class="business-section-title"><h2>{{ operacion.total }} envíos</h2><span data-help="Lectura de los pagos">Cobro cliente: requiere un pago aprobado e imputado. Pago proveedor: muestra la situación de la factura vinculada, sin distribuir pagos parciales entre sus envíos. Abrí cada documento para ver su respaldo.</span></div>
+<div class="table-wrap"><table class="business-table business-shipments-table"><thead><tr>
+<th>Envío</th><th>Cliente / proveedor</th><th>Destino</th><th>Cobro al cliente</th><th>Factura del proveedor</th><th>Estado</th>
+</tr></thead><tbody>
+{% for s in operacion['items'] %}<tr>
+<td data-label="Envío"><a class="business-primary" href="/admin/pedidos/{{ s.id }}/editar">{{ s.tracking or ('TAURO ' ~ s.numero_guia_tauro if s.numero_guia_tauro else 'Envío #' ~ s.id) }}</a>
+{% if s.numero_guia_tauro %}<small>TAURO {{ s.numero_guia_tauro }}</small>{% endif %}<small>{{ op.fecha(s.created_at) }}</small></td>
+<td data-label="Cliente / proveedor"><a class="business-primary" href="{{ s.cliente_url }}">{{ s.cliente_id }}</a><small>{% if s.proveedor_url %}<a class="business-chip" href="{{ s.proveedor_url }}">{{ s.proveedor_nombre }} ↗</a>{% else %}{{ s.proveedor_nombre }}{% endif %}</small></td>
+<td data-label="Destino"><strong>{{ s.dest_nombre }}</strong><small>{{ s.dest_ciudad }} · {{ s.destino_pais }}</small><small>{{ s.remitente_pais or 'Origen sin informar' }} → {{ s.destino_pais }}</small></td>
+<td data-label="Cobro al cliente">{% if s.cobro.importe is not none %}<strong class="business-money">ARS {{ op.dinero(s.cobro.importe) }}</strong>{% endif %}
+<a href="{{ s.cliente_url }}?vista=pagos" class="business-status {{ s.cobro.tono }}">{{ s.cobro.label }}</a>
+{% if s.cobro.inconsistencia %}<a class="business-status error" href="{{ s.cliente_url }}#envios-cliente">Revisar: existe un cargo activo</a>{% endif %}
+{% for f in s.facturas_cliente %}<small><a href="{{ s.cliente_url }}/facturas#factura-{{ f.id }}">FC {{ '%04d'|format(f.punto_venta) }}-{{ '%08d'|format(f.numero) }}</a>{% if f.fecha_vencimiento %} · Vence {{ op.fecha(f.fecha_vencimiento) }}{% endif %}</small>{% endfor %}
+</td>
+<td data-label="Factura del proveedor">{% for f in s.documentos %}<div class="business-document">
+<a href="/admin/operadores/{{ f.courier }}/facturas/{{ f.id }}">{{ f.tipo_documento }} {{ f.numero }}</a>
+{% if f.match_estado!='CONFIRMADO' %}<small><a class="business-status warn" href="/admin/conciliacion-couriers/envios/{{ s.id }}">Vínculo propuesto · revisar</a></small>{% else %}
+<small>{{ op.estado(f) }}</small>{% if f.tipo_documento!='NC' %}<small>Vence: {{ op.fecha(f.vencimiento) }}</small>{% else %}<small>Crédito · no pagable</small>{% endif %}{% endif %}</div>
+{% else %}<span class="business-status muted">Sin factura vinculada</span><small><a href="/admin/conciliacion-couriers/envios/{{ s.id }}">Conciliar envío ↗</a></small>{% endfor %}</td>
+<td data-label="Estado"><span class="badge {{ 'error' if s.estado=='CANCELADO' else 'warn' if s.estado=='REEMPLAZADO' or s.tracking_estado=='RETENIDO' else '' }}">{{ 'MODIFICADO' if s.estado=='REEMPLAZADO' else 'CANCELADO' if s.estado=='CANCELADO' else {'GUIA_LISTA':'GUÍA EMITIDA','GUIA_CARGADA':'GUÍA EMITIDA','PROCESO_ENTREGA':'EN CAMINO','SOLICITADO':'SOLICITADO','EN_PROCESO':'EN PREPARACIÓN'}.get(s.tracking_estado or s.estado,s.tracking_estado or s.estado) }}</span><small><a href="/admin/pedidos/{{ s.id }}/editar">Abrir envío ↗</a></small></td>
+</tr>{% else %}<tr><td colspan="6" class="business-empty">No hay envíos en esta selección.</td></tr>{% endfor %}
+</tbody></table></div>
+<div class="business-pagination"><span>Página {{ operacion.pagina }} de {{ operacion.paginas }}</span><div>{% if operacion.pagina>1 %}<a class="btn btn-sm btn-ghost" href="{{ operacion.prev_url }}">Anterior</a>{% endif %}{% if operacion.pagina<operacion.paginas %}<a class="btn btn-sm btn-ghost" href="{{ operacion.next_url }}">Siguiente</a>{% endif %}</div></div>
+</div>

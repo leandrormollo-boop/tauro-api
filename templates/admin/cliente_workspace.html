@@ -1,0 +1,27 @@
+{% extends 'admin/base_admin.html' %}
+{% import 'admin/operador_macros.html' as op %}
+{% block title %}{{ cliente.nombre or cliente.cliente_id }}{% endblock %}
+{% block content %}
+{% include 'admin/cliente_header.html' %}
+{% if vista=='envios' %}
+{% include 'admin/negocio_envios.html' %}
+{% elif vista=='configuracion' %}
+<div class="business-card-grid">
+<a class="card business-destination" href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/acceso-precios"><span class="eyebrow">Condiciones comerciales</span><h2>Margen y permisos</h2><p>Ganancia por operador, límite de cuenta corriente, emisión y recolecciones.</p><span class="business-cta">Configurar →</span></a>
+<a class="card business-destination" href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/editar"><span class="eyebrow">Cuenta del cliente</span><h2>Datos y habilitación</h2><p>Contacto, domicilio, suspensión y reactivación de la cuenta.</p><span class="business-cta">Editar cuenta →</span></a>
+</div>
+<div class="card"><h2>Acceso al portal</h2>{% include 'admin/cliente_credenciales.html' %}</div>
+{% else %}
+<div class="card business-ledger"><div class="business-section-title"><h2>{{ 'Sus clientes y destinatarios' if vista=='destinatarios' else 'Recolecciones del cliente' }}</h2><span>{{ agenda.total }} registros</span></div>
+<div class="table-wrap"><table class="business-table"><thead><tr>
+{% if vista=='destinatarios' %}<th>Nombre / alias</th><th>Domicilio</th><th>Contacto</th>{% else %}<th>Fecha / horario</th><th>Proveedor / envío</th><th>Domicilio</th><th>Confirmación</th>{% endif %}
+</tr></thead><tbody>
+{% for item in agenda['items'] %}<tr>
+{% if vista=='destinatarios' %}<td><strong>{{ item.nombre }}</strong><small>{{ item.alias }}</small></td><td>{{ item.direccion }}<small>{{ item.ciudad }} · {{ item.pais }} · {{ item.cp }}</small></td><td>{{ item.email or 'Sin email' }}<small>{{ item.telefono or 'Sin teléfono' }}</small></td>
+{% else %}<td>{{ op.fecha(item.fecha) }}<small>{{ item.ready_time }} – {{ item.close_time }}</small></td><td><a href="/admin/operadores/{{ item.courier }}">{{ op.nombre(item.courier) }}</a>{% if item.solicitud_id %}<small><a href="/admin/pedidos/{{ item.solicitud_id }}/editar">Envío #{{ item.solicitud_id }} ↗</a></small>{% endif %}</td><td>{{ item.direccion or 'Sin informar' }}<small>{{ item.ubicacion or '' }}</small></td><td><span class="badge">{{ item.estado }}</span><small>{{ item.confirmation_code or 'Sin número confirmado' }}</small></td>{% endif %}
+</tr>{% else %}<tr><td colspan="4" class="business-empty">Todavía no hay registros.</td></tr>{% endfor %}
+</tbody></table></div>
+<div class="business-pagination"><span>Página {{ agenda.pagina }} de {{ agenda.paginas }}</span><div>{% if agenda.pagina>1 %}<a href="?vista={{ vista }}&pagina={{ agenda.pagina-1 }}">Anterior</a>{% endif %}{% if agenda.pagina<agenda.paginas %}<a href="?vista={{ vista }}&pagina={{ agenda.pagina+1 }}">Siguiente</a>{% endif %}</div></div>
+</div>
+{% endif %}
+{% endblock %}

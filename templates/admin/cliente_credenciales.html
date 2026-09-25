@@ -1,0 +1,21 @@
+  <button type="button" id="btn-reset-pwd" data-muestra="#reset-pwd-form"
+          class="btn btn-ghost btn-sm">🔑 Resetear contraseña del portal</button>
+  <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/api-key" style="display:inline;"
+        data-confirm="¿Generar una API key nueva para {{ cliente.cliente_id }}? Si ya tenía una, la anterior DEJA DE FUNCIONAR y hay que actualizarla donde la use.">
+    <button type="submit" class="btn btn-ghost btn-sm">🗝️ Regenerar API key B2B</button>
+  </form>
+
+<!-- Reset password form (oculto por defecto) -->
+<div id="reset-pwd-form" style="display:none;margin-bottom:28px;padding:16px;background:var(--bg-2,#1a1a1a);border-radius:8px;border:1px solid var(--border,#333);">
+  <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/password" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;">
+    <div class="form-group" style="flex:1;min-width:240px;margin-bottom:0;">
+      <label>Nueva contraseña para {{ cliente.email }}</label>
+      <input type="text" name="new_password" required minlength="6"
+             placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+      <small style="color:var(--fg-4);">Pasásela al cliente por WhatsApp / llamada.</small>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm">Guardar contraseña</button>
+    <button type="button" data-oculta="#reset-pwd-form" data-reaparece="#btn-reset-pwd"
+            class="btn btn-ghost btn-sm">Cancelar</button>
+  </form>
+</div>

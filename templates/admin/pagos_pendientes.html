@@ -27,7 +27,7 @@
         {% for p in pagos %}
         <tr>
           <td class="mono">{{ p.created_at.strftime('%d/%m/%Y %H:%M') if p.created_at else '—' }}</td>
-          <td><strong>{{ p.cliente_id }}</strong></td>
+          <td><a class="business-primary" href="/admin/clientes/{{ p.cliente_id|urlencode }}">{{ p.cliente_id }}</a></td>
           <td class="num mono">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>{{ p.metodo }}</td>
           <td class="mono">{{ p.referencia or '—' }}</td>
