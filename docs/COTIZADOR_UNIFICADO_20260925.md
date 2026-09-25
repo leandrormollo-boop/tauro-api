@@ -1,6 +1,6 @@
 # Cotizador del portal en una sola ventana
 
-Estado: implementación local sobre `a0fdf94`, pendiente de revisión visual y publicación. No se cambiaron permisos, precios configurados ni datos de producción.
+Estado: implementación sobre `a0fdf94`, revisada por el usuario y con publicación autorizada el 25/09/2026. No se cambiaron permisos, precios configurados ni datos operativos. El resultado del despliegue se registra en el historial de release y en el log de ejecución.
 
 ## Problema confirmado
 
