@@ -35,3 +35,7 @@ Pruebas del adapter, integración HTTP con sesión, PostgreSQL real aislado (sol
 La revisión visual local recorrió formulario, cotización, guardado y detalle en la sesión OCA-DEMO. La Mac se bloqueó durante la confirmación visual de emisión; la emisión y su cargo se validaron automáticamente sobre PostgreSQL aislado con transporte simulado. La API real de OCA QA fue validada en el piloto previo (orden 20908665 anulada, seguimiento código 54).
 
 El preflight de Tiendanube exige ahora fulfillment_ready de OCA además de capacidades declaradas, para que el código de emisión no sustituya sus controles de configuración y UAT.
+
+
+## IVA de la tarifa contractual
+El usuario confirmó que el tarifario OCA es neto. El portal agrega 21% de IVA una sola vez al costo y al precio de venta, después del margen neto. WAIMAO: neto OCA × 1,20 × 1,21. El costo persistido incluye IVA para compararlo con el importe final cobrado. La huella de configuración invalida cotizaciones previas sin IVA; no se reescriben cargos históricos. Las integraciones ajenas al portal conservan su política actual.

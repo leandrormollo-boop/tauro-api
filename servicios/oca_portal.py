@@ -51,7 +51,7 @@ def huella_config(config):
         "time_slot",
     )
     return hashlib.sha256(
-        json.dumps({k: getattr(config, k) for k in fields}, sort_keys=True).encode()
+        json.dumps({**{k: getattr(config, k) for k in fields}, "tarifa_neta_iva": "21-v1"}, sort_keys=True).encode()
     ).hexdigest()
 
 
@@ -68,6 +68,7 @@ def adapter_cliente(cliente, permiso="cotizar"):
         raise OCAPortalError(
             "TAURO debe configurar una tarifa nacional para tu cuenta."
         )
+    pricing = {**pricing, "oca_tarifa_neta_iva_21": True}
     return config, OCAAdapter(config, pricing_loader=lambda *_: pricing)
 
 

@@ -1140,3 +1140,19 @@ def test_registration_requires_all_gates_and_registers_complete_protocol():
             _shipment(),
             idempotency_key="label-1",
         )
+
+
+@pytest.mark.parametrize("net,mode,value,cost,price", [
+    ("10000", "MULTIPLICADOR", "1.20", "12100.00", "14520.00"),
+    ("10000.50", "MULTIPLICADOR", "1.20", "12100.61", "14520.73"),
+    ("10000", "FIJO_ARS", "2000", "12100.00", "14520.00"),
+    ("10000", "PCT", "20", "12100.00", "14520.00"),
+])
+def test_portal_net_tariff_adds_iva_once_to_cost_and_sale(net, mode, value, cost, price):
+    adapter, _ = _adapter(
+        FakeResponse(f"<root><Total>{net}</Total></root>".encode()),
+        pricing={"tipo": mode, "valor": value, "oca_tarifa_neta_iva_21": True},
+    )
+    result = adapter.quote(_request())[0]
+    assert result.carrier_cost == Decimal(cost)
+    assert result.customer_price == Decimal(price)

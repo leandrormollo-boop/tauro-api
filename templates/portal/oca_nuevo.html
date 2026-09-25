@@ -8,7 +8,7 @@
 {% if error or request.query_params.get('error') %}<p class="msg error" role="alert">{{error or request.query_params.get('error')}}</p>{% endif %}
 {% if not disponible %}<section class="oca-box"><h2>OCA requiere habilitación</h2><p>TAURO debe confirmar la configuración del servicio, los permisos y la tarifa de tu cuenta antes de cotizar o emitir.</p></section>
 {% elif tarifa %}
-<section class="oca-box"><h2>Revisá tu cotización</h2><p class="oca-price">{{dinero_ars(tarifa.precio_ars)}}</p><p>Precio de TAURO en pesos. Válido hasta {{tarifa.expires_at.strftime('%H:%M')}} (Argentina); se confirma nuevamente antes de emitir.</p>
+<section class="oca-box"><h2>Revisá tu cotización</h2><p class="oca-price">{{dinero_ars(tarifa.precio_ars)}}</p><p>Precio final de TAURO en pesos, IVA incluido. Válido hasta {{tarifa.expires_at.strftime('%H:%M')}} (Argentina); se confirma nuevamente antes de emitir.</p>
 {% for key,label in [('origin','Origen'),('destination','Destino')] %}{% set a=tarifa.payload[key] %}<p><strong>{{label}}:</strong> {{a.calle}} {{a.nro}} {{a.piso}} {{a.depto}}, {{a.localidad}}, {{a.provincia}} · CP {{a.cp}}</p>{% endfor %}
 {% set b=tarifa.payload.packages[0] %}<p>{{b.quantity}} bulto(s) de {{b.weight_kg}} kg · {{b.length_cm}} × {{b.width_cm}} × {{b.height_cm}} cm por bulto.</p><p>Valor declarado: ARS {{tarifa.payload.declared_value}}.</p>
 <form method="post" action="/portal/oca/cotizacion/{{tarifa.id}}/confirmar"><button class="btn btn-primary">Guardar solicitud</button></form><p>Al guardar todavía no se emite la guía ni se genera un cargo. Podrás emitir desde el detalle si tu cuenta está habilitada.</p><a href="/portal/oca/nuevo">Volver a cotizar</a></section>
