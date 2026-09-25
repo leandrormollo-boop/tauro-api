@@ -5136,6 +5136,7 @@ def admin_importaciones_historicas(
             "periodos": PERIODOS,
             "periodo_seleccionado": "ENERO",
             "resultado": None,
+            "resultado_waimao": None,
             "flash_ok": None,
             "flash_error": None,
         },
@@ -5167,6 +5168,7 @@ async def admin_importar_melcior_2026(
         "periodos": PERIODOS,
         "periodo_seleccionado": periodo_normalizado or "ENERO",
         "resultado": None,
+        "resultado_waimao": None,
         "flash_ok": None,
         "flash_error": None,
     }
@@ -5217,6 +5219,75 @@ async def admin_importar_melcior_2026(
     contexto["resultado"] = {"esperado": previo_json, "obtenido": resultado}
     contexto["flash_ok"] = (
         f"{periodo_normalizado}: importación verificada y confirmada en una sola transacción."
+    )
+    return templates.TemplateResponse(
+        request=request, name="admin/importaciones_historicas.html", context=contexto,
+    )
+
+
+@router.post("/importaciones-historicas/waimao-dhl", response_class=HTMLResponse)
+async def admin_importar_waimao_dhl_historico(
+    request: Request,
+    confirmacion: str = Form(""),
+    manifiesto: UploadFile = File(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.importacion_historica_melcior import PERIODOS
+    from servicios.importacion_historica_waimao_dhl import (
+        MAX_MANIFEST_BYTES,
+        ImportacionHistoricaWaimaoError,
+        importar_manifiesto,
+        leer_manifiesto,
+    )
+
+    contexto = {
+        "seccion": "importaciones_historicas",
+        "periodos": PERIODOS,
+        "periodo_seleccionado": "ENERO",
+        "resultado": None,
+        "resultado_waimao": None,
+        "flash_ok": None,
+        "flash_error": None,
+    }
+    if confirmacion.strip().upper() != "IMPORTAR WAIMAO DHL":
+        contexto["flash_error"] = 'Escribi "IMPORTAR WAIMAO DHL" para ejecutar.'
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=422,
+        )
+    nombre = str(manifiesto.filename or "")
+    if not nombre.lower().endswith(".json"):
+        contexto["flash_error"] = "El manifiesto debe ser un archivo .json."
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=422,
+        )
+    contenido = await manifiesto.read(MAX_MANIFEST_BYTES + 1)
+    try:
+        lote = leer_manifiesto(contenido)
+        resultado = importar_manifiesto(lote, actor="admin")
+    except (ImportacionHistoricaWaimaoError, ValueError) as exc:
+        contexto["flash_error"] = str(exc)
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=422,
+        )
+    except Exception as exc:
+        print(f"[admin] importacion historica WAIMAO DHL: {type(exc).__name__}: {exc}")
+        contexto["flash_error"] = (
+            "La importacion se revirtio completa. Revisa los logs antes de reintentar."
+        )
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=500,
+        )
+
+    contexto["resultado_waimao"] = resultado
+    contexto["flash_ok"] = (
+        f"WAIMAO DHL: {resultado['guias_con_match']} guias quedaron vinculadas "
+        "sin generar cargos al cliente."
     )
     return templates.TemplateResponse(
         request=request, name="admin/importaciones_historicas.html", context=contexto,

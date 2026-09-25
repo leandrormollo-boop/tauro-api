@@ -5,10 +5,38 @@
 <div class="page-title">
   <div class="eyebrow">Cuenta corriente</div>
   <h1>Importación histórica controlada</h1>
-  <p>Carga MELCIOR 2026 por mes y verifica cada lote antes de confirmarlo.</p>
+  <p>Reconstruye operaciones documentadas y verifica cada lote antes de confirmarlo.</p>
+</div>
+
+<div class="card" style="max-width:940px;margin-bottom:20px;">
+  <h2 style="font-size:18px;margin-top:0;">WAIMAO · envíos históricos DHL</h2>
+  <p style="color:var(--fg-3);line-height:1.55;">
+    Crea únicamente los envíos respaldados por una factura DHL y propone el match exacto
+    por tracking. No genera cargos, pagos, diferencias ni deuda para el cliente.
+  </p>
+  <form method="POST" action="/admin/importaciones-historicas/waimao-dhl"
+        enctype="multipart/form-data"
+        data-confirm="¿Importar estos envíos históricos de WAIMAO y vincularlos con sus facturas DHL? No se crearán cargos al cliente.">
+    <div style="display:grid;grid-template-columns:minmax(280px,1.3fr) minmax(220px,.7fr);gap:16px;">
+      <div class="form-group">
+        <label>Manifiesto auditado (.json)</label>
+        <input type="file" name="manifiesto" accept="application/json,.json" required>
+      </div>
+      <div class="form-group">
+        <label>Confirmación</label>
+        <input type="text" name="confirmacion" autocomplete="off"
+               placeholder="IMPORTAR WAIMAO DHL" required>
+      </div>
+    </div>
+    <button type="submit" class="btn btn-primary">Importar y proponer matches</button>
+  </form>
+  {% if resultado_waimao %}
+  <pre style="white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.18);padding:14px;border-radius:var(--radius-sm);font-size:12px;margin-top:18px;">{{ resultado_waimao | tojson(indent=2) }}</pre>
+  {% endif %}
 </div>
 
 <div class="card" style="max-width:940px;">
+  <h2 style="font-size:18px;margin-top:0;">MELCIOR · cuenta histórica 2026</h2>
   <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:22px;">
     <div class="stat-card">
       <div class="stat-label">Filas finales</div>
