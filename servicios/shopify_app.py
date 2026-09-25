@@ -1555,8 +1555,14 @@ def confirmar_webhooks_verificados(
     return True
 
 
-def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
-                   courier: str = "FedEx") -> bool:
+def marcar_enviado_resultado(
+    dominio: str,
+    pedido_externo_id: str,
+    tracking: str,
+    courier: str = "FedEx",
+    *,
+    solo_reconciliar: bool = False,
+) -> str:
     """
     Cierra el círculo: cuando TAURO emite la guía, el pedido queda
     "Enviado" en Shopify con su número de seguimiento, y Shopify le
@@ -1564,17 +1570,17 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
     """
     inst = instalacion(dominio)
     if not inst:
-        return False
+        return "MANUAL_REVIEW"
     token = inst["access_token"]
 
     pedido_gid = str(pedido_externo_id or "").strip()
     if pedido_gid.startswith("gid://shopify/Order/"):
         if not re.fullmatch(r"gid://shopify/Order/\d+", pedido_gid):
-            return False
+            return "MANUAL_REVIEW"
     elif re.fullmatch(r"\d+", pedido_gid):
         pedido_gid = f"gid://shopify/Order/{pedido_gid}"
     else:
-        return False
+        return "MANUAL_REVIEW"
 
     # 1) Qué se puede despachar de ese pedido
     data = _graphql(dominio, token, """
@@ -1591,11 +1597,11 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
     """, {"orderId": pedido_gid})
     if data is None:
         print("[shopify] no pude leer fulfillment_orders")
-        return False
+        return "RECONCILIAR" if solo_reconciliar else "REINTENTAR"
     order = data.get("order") or {}
     tracking_limpio = str(tracking or "").strip()
     if not tracking_limpio:
-        return False
+        return "MANUAL_REVIEW"
     for fulfillment in order.get("fulfillments") or []:
         numeros = {
             str(info.get("number") or "").strip()
@@ -1605,12 +1611,20 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
         if (tracking_limpio in numeros
                 and estado_fulfillment not in ("CANCELLED", "FAILURE", "ERROR")):
             print("[shopify] pedido ya tenía tracking")
-            return True
+            return "COMPLETADO"
 
     fos = [fo for fo in ((order.get("fulfillmentOrders") or {}).get("nodes") or [])
            if str(fo.get("status") or "").upper() in ("OPEN", "IN_PROGRESS")]
-    if not fos:
-        return False
+    # Alcance explícito del piloto: una sola fulfillment order elegible. No se
+    # adivina una ubicación ni se despachan juntas órdenes partidas.
+    if len(fos) != 1:
+        print(f"[shopify] fulfillment requiere revisión: elegibles={len(fos)}")
+        return "MANUAL_REVIEW"
+    # Después de un timeout post-write, este ciclo es exclusivamente de
+    # conciliación. Si la lectura todavía no confirma el tracking, recién el
+    # próximo ciclo puede intentar una mutación nueva.
+    if solo_reconciliar:
+        return "REINTENTAR"
 
     courier_crudo = str(courier or "").strip()
     courier_mayus = courier_crudo.upper()
@@ -1646,7 +1660,7 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
     """, {
         "fulfillment": {
             "lineItemsByFulfillmentOrder": [
-                {"fulfillmentOrderId": fo["id"]} for fo in fos
+                {"fulfillmentOrderId": fos[0]["id"]}
             ],
             "trackingInfo": {
                 "number": tracking_limpio,
@@ -1656,12 +1670,24 @@ def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
             "notifyCustomer": True,
         }
     })
+    if resultado is None:
+        # La conexión pudo cortarse después de que Shopify aplicara la
+        # mutación. Un retry ciego duplicaría el fulfillment.
+        return "RECONCILIAR"
     creado = (resultado or {}).get("fulfillmentCreate") or {}
     if creado.get("fulfillment") and not (creado.get("userErrors") or []):
         print("[shopify] pedido marcado enviado")
-        return True
+        return "COMPLETADO"
     print("[shopify] no pude marcar pedido enviado por GraphQL")
-    return False
+    return "MANUAL_REVIEW"
+
+
+def marcar_enviado(dominio: str, pedido_externo_id: str, tracking: str,
+                   courier: str = "FedEx") -> bool:
+    """Compatibilidad booleana; el worker durable usa el resultado detallado."""
+    return marcar_enviado_resultado(
+        dominio, pedido_externo_id, tracking, courier,
+    ) == "COMPLETADO"
 
 
 # ── Tarifas para el checkout ────────────────────────────────

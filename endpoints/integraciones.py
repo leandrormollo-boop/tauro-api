@@ -192,7 +192,7 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
     if cancelado:
         from servicios.integraciones_tienda import cancelar_pedido_externo
         try:
-            cancelar_pedido_externo(
+            cancelado_local = cancelar_pedido_externo(
                 tienda["id"],
                 pedido_externo_id,
                 cliente_id=owner_tienda,
@@ -209,7 +209,11 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
             _marcar_procesado()
         except Exception:
             return JSONResponse({"ok": False}, status_code=503)
-        return {"ok": True, "cancelado": True}
+        return {
+            "ok": True,
+            "cancelado": bool(cancelado_local),
+            "revision_manual": not bool(cancelado_local),
+        }
 
     pedido = parsear_pedido_shopify(datos)
     if not pedido:
@@ -237,15 +241,19 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
         print(f"[integraciones] no pude procesar orden: {type(exc).__name__}")
         return JSONResponse({"ok": False}, status_code=503)
 
-    if creado:
-        try:
-            from servicios.integraciones_tienda import id_de_pedido
+    try:
+        from servicios.integraciones_tienda import id_de_pedido
+        pedido_id = (
+            id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
+            if creado else None
+        )
+        if creado and pedido_id:
             from servicios.solicitud_automatica import intentar_en_segundo_plano
-            pedido_id = id_de_pedido(tienda["id"], pedido["pedido_externo_id"])
-            if pedido_id:
-                intentar_en_segundo_plano(pedido_id)
-        except Exception as exc:
-            print(f"[integraciones] armado automático no iniciado: {type(exc).__name__}")
+            intentar_en_segundo_plano(pedido_id)
+    except Exception as exc:
+        # El job ya se insertó atómicamente con guardar_pedido. Este wake-up
+        # puede fallar sin perder trabajo: el scheduler lo recupera.
+        print(f"[integraciones] wake-up automático no iniciado: {type(exc).__name__}")
     return {"ok": True, "nuevo": creado}
 
 
