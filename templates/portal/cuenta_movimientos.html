@@ -43,13 +43,35 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             </select>
         </label>
         {% endif %}
-        <label><span>Desde</span><input type="date" name="desde" value="{{ desde_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label>
-        <label><span>Hasta</span><input type="date" name="hasta" value="{{ hasta_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label>
+        <label class="account-month-filter"><span>Mes</span><input type="month" name="periodo" value="{{ periodo_filtro|default('') }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.strftime('%Y-%m') }}"{% endif %}></label>
         <button type="submit" class="btn btn-ghost">Filtrar</button>
-        {% if ambito_filtro != 'consolidado' or tipo_filtro != 'todos' or q_filtro or desde_filtro or hasta_filtro %}
+        <details class="account-date-range"{% if not periodo_filtro|default('') and (desde_filtro or hasta_filtro) %} open{% endif %}>
+            <summary>Usar un rango personalizado</summary>
+            <div><label><span>Desde</span><input type="date" name="desde" value="{{ '' if periodo_filtro|default('') else desde_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label><label><span>Hasta</span><input type="date" name="hasta" value="{{ '' if periodo_filtro|default('') else hasta_filtro }}"{% if inicio_cuenta|default(none) %} min="{{ inicio_cuenta.isoformat() }}"{% endif %}></label></div>
+        </details>
+        {% if ambito_filtro != 'consolidado' or tipo_filtro != 'todos' or q_filtro or periodo_filtro|default('') or desde_filtro or hasta_filtro %}
         <a href="/portal/cuenta" class="account-clear-filters">{% if inicio_cuenta|default(none) %}Todo desde septiembre{% else %}Ver todo{% endif %}</a>
         {% endif %}
     </form>
+
+{% if resumen_mensual_error|default('') %}<div class="msg warn" role="status">{{ resumen_mensual_error }}</div>{% endif %}
+{% if resumen_mensual|default(none) %}
+{% set rm = resumen_mensual %}
+<section class="account-month-summary" aria-labelledby="account-month-summary-title">
+    <div class="account-month-summary-head">
+        <div><span class="account-kicker">Resumen mensual · {{ (rm.ambito or 'consolidado')|replace('_', ' ')|title }}</span><h3 id="account-month-summary-title">{{ rm.label }}</h3></div>
+        <div><strong>{{ dinero(rm.total_mes_ars|abs) }}</strong><span>{% if rm.total_mes_ars < 0 %}Crédito neto del mes{% else %}Total del mes · antes de pagos{% endif %}</span></div>
+    </div>
+    <dl class="account-month-metrics">
+        <div class="is-primary"><dt>Envíos realizados</dt><dd>{{ rm.envios_realizados }}</dd><small>Fletes {{ dinero(rm.fletes_ars) }}</small></div>
+        {% if rm.tax_cantidad or rm.tax_ars %}<div><dt>TAX</dt><dd>{% if rm.tax_ars < 0 %}− {% endif %}{{ dinero(rm.tax_ars|abs) }}</dd><small>{{ rm.tax_cantidad }} {{ 'cargo' if rm.tax_cantidad == 1 else 'cargos' }}</small></div>{% endif %}
+        {% if rm.retornos or rm.retornos_ars %}<div><dt>Retornos</dt><dd>{{ dinero(rm.retornos_ars) }}</dd><small>{{ rm.retornos }} {{ 'retorno' if rm.retornos == 1 else 'retornos' }}</small></div>{% endif %}
+        {% if rm.diferencias or rm.diferencias_ars %}<div><dt>Diferencias</dt><dd>{% if rm.diferencias_ars < 0 %}− {% endif %}{{ dinero(rm.diferencias_ars|abs) }}</dd><small>{{ rm.diferencias }} {{ 'ajuste' if rm.diferencias == 1 else 'ajustes' }} aplicado{% if rm.diferencias != 1 %}s{% endif %}</small></div>{% endif %}
+        {% if rm.otros or rm.otros_ars %}<div><dt>Otros cargos</dt><dd>{{ dinero(rm.otros_ars) }}</dd><small>{{ rm.otros }} movimientos</small></div>{% endif %}
+    </dl>
+    <p>El total mensual suma fletes, TAX, retornos y diferencias aplicadas. Los pagos se muestran aparte porque reducen el saldo, no el costo logístico.</p>
+</section>
+{% endif %}
 
 <p class="account-load-status" data-account-status role="status" aria-live="polite" hidden></p>
 {% set filas = movimientos["items"] %}

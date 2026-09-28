@@ -151,11 +151,14 @@
       // El gráfico muestra ambos ámbitos; su detalle debe sumar el mismo total.
       chartUrl.searchParams.set("ambito", "consolidado");
       link.href = chartUrl.href;
+      var selectedPeriod = url.searchParams.get("periodo");
+      var chartPeriod = chartUrl.searchParams.get("periodo");
       link.classList.toggle("is-selected", (url.searchParams.get("ambito") || "consolidado") === "consolidado"
         && url.searchParams.get("tipo") === "costos" && !url.searchParams.get("q")
-        && Boolean(url.searchParams.get("desde"))
-        && url.searchParams.get("desde") === chartUrl.searchParams.get("desde")
-        && url.searchParams.get("hasta") === chartUrl.searchParams.get("hasta"));
+        && ((selectedPeriod && selectedPeriod === chartPeriod)
+          || (!selectedPeriod && Boolean(url.searchParams.get("desde"))
+            && url.searchParams.get("desde") === chartUrl.searchParams.get("desde")
+            && url.searchParams.get("hasta") === chartUrl.searchParams.get("hasta"))));
     });
     document.querySelectorAll(".account-scope-summary").forEach(function (link) {
       var scope = new URL(link.href).searchParams.get("ambito");

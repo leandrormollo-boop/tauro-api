@@ -159,6 +159,62 @@ def test_navegacion_preserva_periodo_y_escapa_busqueda(
     }
 
 
+def test_filtro_mensual_resume_el_mes_y_exporta_el_mismo_rango(
+    cuenta_servicios, capturar_template, monkeypatch,
+):
+    resumen_mes = {
+        "clave": "2026-05", "desde": "2026-05-01", "hasta": "2026-05-31",
+        "label": "Mayo 2026", "ambito": "internacional",
+        "envios_realizados": 47, "fletes_ars": Decimal("1000"),
+        "tax_cantidad": 8, "tax_ars": Decimal("100"),
+        "retornos": 0, "retornos_ars": Decimal("0"),
+        "diferencias": 2, "diferencias_ars": Decimal("50"),
+        "otros": 0, "otros_ars": Decimal("0"),
+        "total_mes_ars": Decimal("1150"),
+    }
+    llamadas = []
+    monkeypatch.setattr(portal, "resumen_mensual_cuenta", lambda *args: (
+        llamadas.append(args) or resumen_mes
+    ))
+
+    respuesta = portal.cuenta_corriente(
+        SimpleNamespace(), cliente=CLIENTE, ambito="internacional", periodo="2026-05",
+    )
+    contexto = respuesta["context"]
+    consulta = next(c for c in cuenta_servicios if c[0] == "movimientos")
+
+    assert consulta[2] == {"q": "", "desde": "2026-05-01", "hasta": "2026-05-31"}
+    assert llamadas == [(CLIENTE, "2026-05", "internacional")]
+    assert contexto["periodo_filtro"] == "2026-05"
+    assert contexto["periodo_filtro_label"] == "Mayo 2026"
+    assert contexto["resumen_mensual"] == resumen_mes
+    assert parse_qs(urlsplit(contexto["cuenta_url"](pagina=2)).query) == {
+        "ambito": ["internacional"], "tipo": ["todos"],
+        "periodo": ["2026-05"], "pagina": ["2"],
+    }
+    assert parse_qs(urlsplit(contexto["cuenta_url"](exportar=True)).query) == {
+        "ambito": ["internacional"], "tipo": ["todos"],
+        "desde": ["2026-05-01"], "hasta": ["2026-05-31"],
+    }
+
+
+def test_exportacion_acepta_el_mismo_periodo_mensual_del_portal(
+    cuenta_servicios, monkeypatch,
+):
+    recibidos = []
+    monkeypatch.setattr(portal, "generar_excel_cuenta", lambda *args, **kwargs: (
+        recibidos.append((args, kwargs)) or b"xlsx"
+    ))
+    respuesta = portal.exportar_cuenta(
+        cliente=CLIENTE, ambito="internacional", periodo="2026-05",
+    )
+
+    assert respuesta.body == b"xlsx"
+    assert recibidos == [((CLIENTE, "internacional", "todos"), {
+        "q": "", "desde": "2026-05-01", "hasta": "2026-05-31",
+    })]
+
+
 def test_panel_no_disponible_no_simula_saldo_cero(
     cuenta_servicios, capturar_template, monkeypatch,
 ):

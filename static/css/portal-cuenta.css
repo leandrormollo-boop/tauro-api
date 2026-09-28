@@ -190,13 +190,30 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
 .account-client .account-history-head h2 { font-size: 23px; font-weight: 500; letter-spacing: -.03em; }
 .account-client .account-history-head p { color: var(--account-muted); font-size: 12px; margin-top: 6px; }
 .account-client .account-history-head .account-results-count { font: 10px var(--font-mono); }
-.account-client .account-unified-filters { display: grid; grid-template-columns: minmax(165px, 1.65fr) minmax(100px, .85fr) minmax(125px, 1.1fr) minmax(125px, 1fr) minmax(125px, 1fr) auto; gap: 10px; margin-bottom: 18px; align-items: end; }
+.account-client .account-unified-filters { display: grid; grid-template-columns: minmax(165px, 1.65fr) minmax(100px, .85fr) minmax(125px, 1.1fr) minmax(145px, 1fr) auto; gap: 10px; margin-bottom: 18px; align-items: end; }
 .account-client .account-unified-filters label { min-width: 0; gap: 7px; }
 .account-client .account-unified-filters label > span { color: var(--account-muted); font-size: 10px; text-transform: none; letter-spacing: 0; }
 .account-client .account-unified-filters input, .account-client .account-unified-filters select, .account-client .account-unified-filters label:nth-child(2) select { width: 100%; min-width: 0; height: 42px; padding: 9px 11px; border: 1px solid var(--line); background: var(--bg-elev); color: var(--fg-2); font-size: 12px; border-radius: 8px; }
 .account-client .account-unified-filters select { padding-right: 25px; }
 .account-client .account-unified-filters input::placeholder { color: var(--account-muted); }
+.account-client .account-date-range { grid-column: 1 / -1; font-size: 11px; color: var(--account-muted); }
+.account-client .account-date-range > summary { width: fit-content; cursor: pointer; color: var(--accent); padding: 4px 0; }
+.account-client .account-date-range > div { display: grid; grid-template-columns: repeat(2, minmax(150px, 220px)); gap: 10px; padding-top: 9px; }
 .account-client .account-clear-filters { grid-column: 1 / -1; padding: 0; min-height: 24px; color: var(--accent); font-size: 11px; justify-self: start; }
+.account-client .account-month-summary { margin: 2px 0 22px; padding: 20px 22px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--bg-elev)), var(--bg-elev) 55%); }
+.account-client .account-month-summary-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding-bottom: 17px; border-bottom: 1px solid var(--line-soft); }
+.account-client .account-month-summary-head h3 { margin-top: 5px; font: 500 22px/1.25 var(--font-display); letter-spacing: -.025em; }
+.account-client .account-month-summary-head > div:last-child { text-align: right; }
+.account-client .account-month-summary-head > div:last-child strong { display: block; font: 500 clamp(24px, 2.7vw, 36px)/1.2 var(--font-display); letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.account-client .account-month-summary-head > div:last-child span { display: block; margin-top: 4px; color: var(--account-muted); font-size: 10px; }
+.account-client .account-month-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 0; }
+.account-client .account-month-metrics > div { min-width: 0; padding: 17px 18px 4px; border-left: 1px solid var(--line-soft); }
+.account-client .account-month-metrics > div:first-child { padding-left: 0; border-left: 0; }
+.account-client .account-month-metrics dt { color: var(--account-muted); font-size: 10px; }
+.account-client .account-month-metrics dd { margin-top: 6px; font: 500 19px/1.3 var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.account-client .account-month-metrics .is-primary dd { color: var(--accent); font-size: 25px; }
+.account-client .account-month-metrics small { display: block; margin-top: 4px; color: var(--account-muted); font-size: 10px; }
+.account-client .account-month-summary > p { margin-top: 15px; color: var(--account-muted); font-size: 10px; line-height: 1.55; }
 .account-client .account-history-card { padding: 0 19px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 12px; box-shadow: none; overflow: hidden; }
 .account-client .account-table .account-col-date { width: 11%; }
 .account-client .account-table .account-col-concept { width: 43%; }
@@ -302,7 +319,13 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
   .account-client .account-unified-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .account-client .account-unified-filters .account-search { grid-column: 1 / -1; }
   .account-client .account-unified-filters .btn { grid-column: 1 / -1; }
+  .account-client .account-date-range > div { grid-template-columns: 1fr; }
   .account-client .account-unified-filters .account-clear-filters { justify-self: center; }
+  .account-client .account-month-summary { padding: 17px 16px; }
+  .account-client .account-month-summary-head { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .account-client .account-month-summary-head > div:last-child { text-align: left; }
+  .account-client .account-month-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .account-client .account-month-metrics > div, .account-client .account-month-metrics > div:first-child { padding: 14px 10px 4px; border-left: 0; }
   .account-client .account-history-card { padding: 0 15px; }
   .account-client .account-table tbody tr { gap: 11px 15px; padding: 18px 0; }
   .account-client .account-table td { padding: 0; }

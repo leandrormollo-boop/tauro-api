@@ -5,7 +5,7 @@
 # El admin carga los datos desde el panel.
 # ============================================================
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import functools
 import re
@@ -23,6 +23,10 @@ from servicios.filtros_cuenta import normalizar_filtros_cuenta, patron_busqueda_
 _CENTAVO = Decimal("0.01")
 _AMBITOS_CONTABLES = ("NACIONAL", "INTERNACIONAL")
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+_MESES_CUENTA = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+)
 
 
 class ConflictoContableError(ValueError):
@@ -67,6 +71,42 @@ def _decimal_monto(valor: Any, *, permitir_cero: bool = True) -> Decimal:
     if monto < 0 or (not permitir_cero and monto == 0):
         raise ValueError("El monto debe ser mayor que cero.")
     return monto
+
+
+def normalizar_periodo_mensual_cuenta(valor: Any) -> Dict[str, Any]:
+    """Convierte ``AAAA-MM`` en un rango mensual cerrado y legible.
+
+    El portal conserva los filtros históricos por fecha, pero usa esta clave
+    única para que el cliente no tenga que completar dos calendarios.
+    """
+    periodo = str(valor or "").strip()
+    if not periodo:
+        return {"clave": "", "desde": "", "hasta": "", "label": ""}
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", periodo):
+        raise ValueError("El mes seleccionado no es válido.")
+    inicio = date.fromisoformat(f"{periodo}-01")
+    siguiente = (
+        date(inicio.year + 1, 1, 1)
+        if inicio.month == 12
+        else date(inicio.year, inicio.month + 1, 1)
+    )
+    fin = siguiente - timedelta(days=1)
+    return {
+        "clave": periodo,
+        "desde": inicio.isoformat(),
+        "hasta": fin.isoformat(),
+        "label": f"{_MESES_CUENTA[inicio.month - 1].capitalize()} {inicio.year}",
+    }
+
+
+def _decimal_firmado(valor: Any) -> Decimal:
+    try:
+        monto = Decimal(str(valor or 0))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError("El monto no es válido.") from exc
+    if not monto.is_finite():
+        raise ValueError("El monto no es válido.")
+    return monto.quantize(_CENTAVO, rounding=ROUND_HALF_UP)
 
 
 def _ambito_contable(valor: Any, *, requerido: bool = True) -> Optional[str]:
@@ -655,6 +695,123 @@ def resumen_cuenta_por_ambito(cliente: str) -> Dict[str, Any]:
             )
             fila = cur.fetchone()
     return _armar_resumen_ambitos(fila or {})
+
+
+def resumen_mensual_cuenta(
+    cliente: str,
+    periodo: str,
+    ambito: str = "consolidado",
+) -> Dict[str, Any]:
+    """Resume la operación logística de un mes sin mezclar conceptos.
+
+    El total mensual representa cargos y ajustes aplicados; los pagos no se
+    suman porque reducen el saldo, no el costo de los envíos. Los componentes
+    TAX estructurados de una conciliación se separan de la diferencia de flete
+    sin duplicar el ajuste contable.
+    """
+    cliente = str(cliente or "").strip().upper()
+    if not cliente or len(cliente) > 80:
+        raise ValueError("El cliente no es válido.")
+    rango = normalizar_periodo_mensual_cuenta(periodo)
+    if not rango["clave"]:
+        raise ValueError("Seleccioná un mes para ver su resumen.")
+    ambito_normalizado = str(ambito or "consolidado").strip().lower()
+    if ambito_normalizado not in {"consolidado", "nacional", "internacional"}:
+        raise ValueError("El filtro de ámbito no es válido.")
+    ambito_sql = None if ambito_normalizado == "consolidado" else ambito_normalizado.upper()
+
+    consulta = """
+        WITH cargos_clasificados AS (
+            SELECT e.id, e.solicitud_id, e.monto_ars,
+                   CASE
+                     WHEN UPPER(COALESCE(NULLIF(BTRIM(e.descripcion), ''),
+                                         NULLIF(BTRIM(s.producto_alias), ''), ''))
+                          ~ '(TAX|IMPUEST|DUTY|ARANCEL)' THEN 'TAX'
+                     WHEN UPPER(COALESCE(NULLIF(BTRIM(e.descripcion), ''),
+                                         NULLIF(BTRIM(s.producto_alias), ''), ''))
+                          ~ '(RETORNO|DEVOLUCI|RETURN)' THEN 'RETORNO'
+                     ELSE 'FLETE'
+                   END AS categoria
+              FROM envios e
+              LEFT JOIN solicitudes_guia s
+                ON s.id=e.solicitud_id AND s.cliente_id=e.cliente_id
+             WHERE e.cliente_id=%s
+               AND e.estado NOT IN ('CANCELADO','NC')
+               AND e.monto_ars>0
+               AND e.fecha BETWEEN %s::date AND %s::date
+               AND (%s::text IS NULL OR e.ambito=%s)
+        ), ajustes_desglosados AS (
+            SELECT a.id,
+                   CASE WHEN a.tipo='CREDITO' THEN -ABS(a.monto_ars)
+                        ELSE ABS(a.monto_ars) END AS ajuste_total_ars,
+                   CASE WHEN a.tipo='CREDITO' THEN -ABS(COALESCE(c.tax_cliente_ars,0))
+                        ELSE ABS(COALESCE(c.tax_cliente_ars,0)) END AS tax_ars
+              FROM ajustes_cliente a
+              LEFT JOIN conciliaciones_envio c ON c.id=a.conciliacion_id
+              JOIN envios e ON e.solicitud_id=a.solicitud_id
+             WHERE e.cliente_id=%s AND e.estado='ACTIVO'
+               AND a.estado='APLICADO'
+               AND (
+                    (a.origen='CONCILIACION_COURIER' AND c.id IS NOT NULL)
+                    OR a.origen='AJUSTE_COMERCIAL_ADMIN'
+               )
+               AND (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                   BETWEEN %s::date AND %s::date
+               AND (%s::text IS NULL OR e.ambito=%s)
+        ), cargos AS (
+            SELECT
+                COUNT(*) FILTER (WHERE categoria='FLETE') AS envios_realizados,
+                COALESCE(SUM(monto_ars) FILTER (WHERE categoria='FLETE'),0) AS fletes_ars,
+                COUNT(*) FILTER (WHERE categoria='TAX') AS tax_cargos,
+                COALESCE(SUM(monto_ars) FILTER (WHERE categoria='TAX'),0) AS tax_cargos_ars,
+                COUNT(*) FILTER (WHERE categoria='RETORNO') AS retornos,
+                COALESCE(SUM(monto_ars) FILTER (WHERE categoria='RETORNO'),0) AS retornos_ars,
+                COUNT(*) FILTER (WHERE categoria NOT IN ('FLETE','TAX','RETORNO')) AS otros,
+                COALESCE(SUM(monto_ars) FILTER (
+                    WHERE categoria NOT IN ('FLETE','TAX','RETORNO')
+                ),0) AS otros_ars,
+                COALESCE(SUM(monto_ars),0) AS cargos_ars
+            FROM cargos_clasificados
+        ), ajustes AS (
+            SELECT
+                COUNT(*) FILTER (WHERE tax_ars<>0) AS tax_ajustes,
+                COALESCE(SUM(tax_ars),0) AS tax_ajustes_ars,
+                COUNT(*) FILTER (WHERE ajuste_total_ars-tax_ars<>0) AS diferencias,
+                COALESCE(SUM(ajuste_total_ars-tax_ars),0) AS diferencias_ars,
+                COALESCE(SUM(ajuste_total_ars),0) AS ajustes_ars
+            FROM ajustes_desglosados
+        )
+        SELECT cargos.*, ajustes.*,
+               cargos.tax_cargos + ajustes.tax_ajustes AS tax_cantidad,
+               cargos.tax_cargos_ars + ajustes.tax_ajustes_ars AS tax_ars,
+               cargos.cargos_ars + ajustes.ajustes_ars AS total_mes_ars
+          FROM cargos CROSS JOIN ajustes
+    """
+    parametros = (
+        cliente, rango["desde"], rango["hasta"], ambito_sql, ambito_sql,
+        cliente, rango["desde"], rango["hasta"], ambito_sql, ambito_sql,
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+            cur.execute(consulta, parametros)
+            fila = dict(cur.fetchone() or {})
+
+    enteros = (
+        "envios_realizados", "tax_cargos", "retornos", "otros",
+        "tax_ajustes", "diferencias", "tax_cantidad",
+    )
+    importes = (
+        "fletes_ars", "tax_cargos_ars", "retornos_ars", "otros_ars",
+        "cargos_ars", "tax_ajustes_ars", "diferencias_ars", "ajustes_ars",
+        "tax_ars", "total_mes_ars",
+    )
+    return {
+        **rango,
+        "ambito": ambito_normalizado,
+        **{campo: int(fila.get(campo) or 0) for campo in enteros},
+        **{campo: _decimal_firmado(fila.get(campo)) for campo in importes},
+    }
 
 
 def _paginas_visibles(actual: int, total: int) -> List[Optional[int]]:

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Mi cuenta corriente{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=6">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=7">{% endblock %}
 
 {% macro dinero(valor) -%}
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
@@ -113,7 +113,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         <div class="account-chart{% if maxnegativo %} is-diverging{% endif %}" style="--account-months:{{ exp.costos.meses|length or 1 }}" role="group" aria-label="Cargos y ajustes por mes. Seleccioná un mes para ver sus movimientos.">
             {% if maxnegativo %}<span class="account-chart-zero" style="top:{{ (maxpositivo / escala * 120)|float }}px" aria-hidden="true">0</span>{% endif %}
             {% for mes in exp.costos.meses %}
-            <a href="{{ cuenta_url(ambito='consolidado', desde=mes.desde, hasta=mes.hasta, tipo='costos', q='', pagina=None) }}#movimientos" class="account-chart-month{% if ambito_filtro == 'consolidado' and tipo_filtro == 'costos' and not q_filtro and desde_filtro == mes.desde and hasta_filtro == mes.hasta %} is-selected{% endif %}" aria-label="{{ mes.label_completo }}: {{ dinero(mes.total_ars) }}. Ver cargos y ajustes del mes" title="{{ mes.label_completo }} · Nacional {{ dinero(mes.nacional_ars) }} · Internacional {{ dinero(mes.internacional_ars) }}{% if mes.sin_clasificar_ars %} · Sin clasificar {{ dinero(mes.sin_clasificar_ars) }}{% endif %}">
+            <a href="{{ cuenta_url(ambito='consolidado', periodo=mes.clave, tipo='costos', q='', pagina=None) }}#movimientos" class="account-chart-month{% if ambito_filtro == 'consolidado' and tipo_filtro == 'costos' and not q_filtro and periodo_filtro == mes.clave %} is-selected{% endif %}" aria-label="{{ mes.label_completo }}: {{ dinero(mes.total_ars) }}. Ver cargos y ajustes del mes" title="{{ mes.label_completo }} · Nacional {{ dinero(mes.nacional_ars) }} · Internacional {{ dinero(mes.internacional_ars) }}{% if mes.sin_clasificar_ars %} · Sin clasificar {{ dinero(mes.sin_clasificar_ars) }}{% endif %}">
                 <span class="account-chart-bars" aria-hidden="true">
                     <span class="account-chart-positive" style="height:{{ (maxpositivo / escala * 100)|float if maxpositivo else 0 }}%">
                         {% for clase, valor in (('is-international', mes.internacional_ars), ('is-national', mes.nacional_ars), ('is-unclassified', mes.sin_clasificar_ars)) %}{% if valor > 0 %}<span class="account-chart-bar {{ clase }}" style="height:{{ (valor / maxpositivo * 100)|float }}%"></span>{% endif %}{% endfor %}
@@ -207,5 +207,5 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% include "portal/cuenta_movimientos.html" %}
 </section>
 
-<script src="/static/js/portal-cuenta.js?v=3" defer nonce="{{ request.state.csp_nonce }}"></script>
+<script src="/static/js/portal-cuenta.js?v=4" defer nonce="{{ request.state.csp_nonce }}"></script>
 {% endblock %}

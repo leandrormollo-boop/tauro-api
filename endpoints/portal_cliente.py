@@ -50,6 +50,7 @@ from servicios.cuenta_corriente import (
     saldo, total_pagado, get_facturado_real, get_facturas_recientes,
     movimientos, resumir_facturacion, resumen_cuenta_por_ambito,
     movimientos_cuenta_paginados, listar_destinos_pago,
+    normalizar_periodo_mensual_cuenta, resumen_mensual_cuenta,
 )
 from servicios.facturacion_clientes import (
     get_factura_cliente_pdf,
@@ -1121,6 +1122,7 @@ def cuenta_corriente(
     q: str = "",
     desde: str = "",
     hasta: str = "",
+    periodo: str = "",
     pagar: str = "",
 ):
     """
@@ -1133,7 +1135,13 @@ def cuenta_corriente(
     pagina_numero = _pagina_cuenta(pagina)
     inicio_cuenta = inicio_cuenta_cliente(cliente)
     filtros_error = ""
+    periodo_filtro = ""
+    periodo_info = None
     try:
+        periodo_info = normalizar_periodo_mensual_cuenta(periodo)
+        if periodo_info["clave"]:
+            periodo_filtro = periodo_info["clave"]
+            desde, hasta = periodo_info["desde"], periodo_info["hasta"]
         filtros = normalizar_filtros_cuenta(q, desde, hasta, inicio=inicio_cuenta)
     except ValueError as exc:
         filtros = normalizar_filtros_cuenta(inicio=inicio_cuenta)
@@ -1143,14 +1151,27 @@ def cuenta_corriente(
 
     def cuenta_url(**cambios):
         exportar = cambios.pop("exportar", False)
-        parametros = {"ambito": ambito, "tipo": tipo, **filtros}
+        parametros = {"ambito": ambito, "tipo": tipo, "q": filtros["q"]}
+        if periodo_filtro:
+            parametros["periodo"] = periodo_filtro
+        else:
+            parametros.update({"desde": filtros["desde"], "hasta": filtros["hasta"]})
         parametros.update({k: v for k, v in cambios.items() if k in {
-            "ambito", "tipo", "q", "desde", "hasta", "pagina", "pagar",
+            "ambito", "tipo", "q", "desde", "hasta", "periodo", "pagina", "pagar",
         }})
+        if "periodo" in cambios:
+            parametros.pop("desde", None)
+            parametros.pop("hasta", None)
         parametros = {k: v for k, v in parametros.items() if v is not None and v != ""}
         if exportar:
             parametros.pop("pagina", None)
             parametros.pop("pagar", None)
+            # El exportador conserva el contrato por rango de fechas. El mes
+            # visible se traduce acá para que el Excel coincida con la pantalla.
+            if periodo_info and periodo_info["clave"]:
+                parametros.pop("periodo", None)
+                parametros["desde"] = periodo_info["desde"]
+                parametros["hasta"] = periodo_info["hasta"]
         path = "/portal/cuenta/exportar.xlsx" if exportar else "/portal/cuenta"
         return path + ("?" + urlencode(parametros) if parametros else "")
     # `vista` queda en la firma por compatibilidad con enlaces anteriores.
@@ -1171,11 +1192,23 @@ def cuenta_corriente(
         cliente, ambito, tipo, pagina_numero, movimientos_por_pagina,
         **argumentos_busqueda,
     )
+    resumen_mensual = None
+    resumen_mensual_error = ""
+    if periodo_filtro:
+        try:
+            resumen_mensual = resumen_mensual_cuenta(cliente, periodo_filtro, ambito)
+        except Exception as exc:
+            print(f"[portal-cuenta] resumen mensual no disponible: {type(exc).__name__}")
+            resumen_mensual_error = "No pudimos calcular el resumen de este mes. Los movimientos siguen disponibles."
     contexto_historial = {
         "cliente": cliente, "movimientos": movs,
         "ambito_filtro": ambito, "tipo_filtro": tipo,
         "q_filtro": filtros["q"], "desde_filtro": filtros["desde"],
         "hasta_filtro": filtros["hasta"], "filtros_error": filtros_error,
+        "periodo_filtro": periodo_filtro,
+        "periodo_filtro_label": periodo_info["label"] if periodo_info and periodo_filtro else "",
+        "resumen_mensual": resumen_mensual,
+        "resumen_mensual_error": resumen_mensual_error,
         "cuenta_url": cuenta_url,
         "inicio_cuenta": inicio_cuenta,
     }
@@ -1240,6 +1273,10 @@ def cuenta_corriente(
             "desde_filtro": filtros["desde"],
             "hasta_filtro": filtros["hasta"],
             "filtros_error": filtros_error,
+            "periodo_filtro": periodo_filtro,
+            "periodo_filtro_label": periodo_info["label"] if periodo_info and periodo_filtro else "",
+            "resumen_mensual": resumen_mensual,
+            "resumen_mensual_error": resumen_mensual_error,
             "cuenta_url": cuenta_url,
             "experiencia": experiencia,
             "experiencia_error": experiencia_error,
@@ -1261,9 +1298,13 @@ def exportar_cuenta(
     q: str = "",
     desde: str = "",
     hasta: str = "",
+    periodo: str = "",
     cliente: str = Depends(cliente_actual),
 ):
     try:
+        periodo_info = normalizar_periodo_mensual_cuenta(periodo)
+        if periodo_info["clave"]:
+            desde, hasta = periodo_info["desde"], periodo_info["hasta"]
         filtros = normalizar_filtros_cuenta(q, desde, hasta, inicio=inicio_cuenta_cliente(cliente))
         contenido = generar_excel_cuenta(
             cliente, _ambito_cuenta(ambito), _tipo_movimiento_cuenta(tipo), **filtros
