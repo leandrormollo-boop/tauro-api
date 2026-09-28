@@ -50,7 +50,7 @@
       La corrida inicial empieza desde la fecha más antigua. Continuar usa el checkpoint de fecha y fila, sin releer lo anterior.
     </p>
     {% if summary and summary.fedex_environment == 'sandbox' %}
-      <p class="subtitle" style="color:#fbbf24;">
+      <p class="subtitle" style="color:var(--warn);">
         Aviso: FedEx está en sandbox. Sirve para probar el flujo, pero no confirma estados reales históricos; la hoja madre queda protegida hasta pasar `FEDEX_ENVIRONMENT` a production/prod.
       </p>
     {% endif %}

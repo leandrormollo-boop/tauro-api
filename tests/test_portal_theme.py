@@ -49,4 +49,6 @@ def test_web_publica_y_admin_no_activan_el_tema_del_portal():
     web_html = (RAIZ / "web/Tauro Solutions.html").read_text(encoding="utf-8")
     assert "portal-theme.js" not in web_html
     assert "portal-theme.js" not in ADMIN
-    assert "data-theme=" not in ADMIN
+    assert 'data-theme-scope="admin"' in ADMIN
+    assert 'src="/static/js/admin-theme.js?v=1"' in ADMIN
+    assert 'tauro.admin.theme' in (RAIZ / "static/js/admin-theme.js").read_text()
