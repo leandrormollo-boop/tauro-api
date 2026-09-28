@@ -62,6 +62,31 @@ def test_formato_ars_es_argentino_y_con_centavos():
         assert "{:,.0f}" not in contenido
 
 
+def test_solicitudes_admin_entra_en_una_vista_sin_scroll_horizontal():
+    plantilla = (ROOT / "templates/admin/pedidos.html").read_text()
+    estilos = (ROOT / "static/css/tauro.css").read_text()
+
+    assert 'class="admin-pedidos-table"' in plantilla
+    assert plantilla.count("<th>") == 5
+    assert "Cliente y envío" in plantilla
+    assert "Destinatario y ruta" in plantilla
+    assert "Guía y acciones" in plantilla
+    assert 'class="admin-pedido-note"' in plantilla
+    assert "<summary>Nota interna</summary>" in plantilla
+    assert 'class="admin-pedido-actions"' in plantilla
+    assert "<summary>Gestionar" in plantilla
+    assert 'style="min-width:170px;"' not in plantilla
+    assert 'style="min-width:250px;"' not in plantilla
+
+    bloque = estilos.split("/* Solicitudes y emisión:", 1)[1].split(
+        '/* ── Anchos de "Mis envíos"', 1
+    )[0]
+    assert ".admin-pedidos-card .table-wrap" in bloque
+    assert "overflow: visible" in bloque
+    assert "table-layout: fixed" in bloque
+    assert "@media (max-width: 1180px)" in bloque
+
+
 def test_lista_clientes_muestra_pricing_efectivo_por_courier(monkeypatch):
     class Cursor:
         def __enter__(self): return self

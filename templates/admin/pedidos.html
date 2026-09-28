@@ -27,19 +27,23 @@
     {% with mensaje_error = flash_error %}{% include '_error_operacion.html' %}{% endwith %}
 {% endif %}
 
-<div class="card">
+<div class="card admin-pedidos-card">
   <div class="table-wrap">
-    <table>
+    <table class="admin-pedidos-table">
+      <colgroup>
+        <col class="admin-pedidos-col-request">
+        <col class="admin-pedidos-col-shipment">
+        <col class="admin-pedidos-col-destination">
+        <col class="admin-pedidos-col-price">
+        <col class="admin-pedidos-col-management">
+      </colgroup>
       <thead>
         <tr>
-          <th>Pedido</th>
-          <th>Cliente</th>
-          <th>Producto</th>
-          <th>Destinatario</th>
-          <th>Dirección</th>
+          <th>Solicitud</th>
+          <th>Cliente y envío</th>
+          <th>Destinatario y ruta</th>
           <th>Precio</th>
-          <th>Guía</th>
-          <th>Operación</th>
+          <th>Guía y acciones</th>
         </tr>
       </thead>
       <tbody>
@@ -48,10 +52,10 @@
         {% set liberar_reserva = s.puede_liberar_reserva %}
         {% set ambito_sol = ambito_envio(s) %}
         <tr>
-          <td class="mono">
+          <td class="mono" data-label="Solicitud">
             #{{ s.id }}<br>
             <small style="color:var(--fg-4)">{{ s.created_at.strftime("%d/%m %H:%M") if s.created_at else "—" }}</small>
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px;">
+            <div class="admin-pedido-statuses">
               <span class="badge {{ s.estado_operacion_ui.clase }}" title="Estado de la operación">{{ s.estado_operacion_ui.label }}</span>
               <span class="badge {{ s.estado_tracking_ui.clase }}" title="Estado del tracking">{{ s.estado_tracking_ui.label }}</span>
               {% if not s.visible_cliente %}
@@ -59,102 +63,109 @@
               {% endif %}
             </div>
           </td>
-          <td>
+          <td data-label="Cliente y envío">
             <a class="business-primary" href="/admin/clientes/{{ s.cliente_id|urlencode }}">{{ s.cliente_id }}</a>
-            <br><small style="color:var(--fg-4)">{{ s.cliente_nombre or s.cliente_email }}</small>
-          </td>
-          <td>
+            <small class="admin-pedido-secondary">{{ s.cliente_nombre or s.cliente_email }}</small>
+            <div class="admin-pedido-product">
             {% if s.bultos and s.bultos|length > 1 %}
               {# multi-bulto: composición REAL del envío, no "primer producto × total" #}
               {% for b in s.bultos %}
                 <strong>{{ b.producto_alias }}</strong> <small style="color:var(--fg-3)">x{{ b.cantidad }}</small>{% if not loop.last %}<br>{% endif %}
               {% endfor %}
-              <br><small style="color:var(--fg-3)">{{ s.cantidad }} cajas · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+              <small class="admin-pedido-secondary">{{ s.cantidad }} cajas · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
             {% else %}
               <strong>{{ s.producto_alias }}</strong>
-              <br><small style="color:var(--fg-3)">x{{ s.cantidad }} · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+              <small class="admin-pedido-secondary">x{{ s.cantidad }} · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
             {% endif %}
-            {% if s.coti_id %}<br><small class="mono" style="color:var(--fg-4)">{{ s.coti_id }}</small>{% endif %}
+            {% if s.coti_id %}<small class="mono admin-pedido-secondary">{{ s.coti_id }}</small>{% endif %}
+            </div>
           </td>
-          <td>
-            {{ s.dest_nombre }}
-            <br><small style="color:var(--fg-4)">{{ s.dest_documento or "Sin doc." }}</small>
-            <br><small style="color:var(--fg-4)">{{ s.dest_email or s.dest_telefono or "Sin contacto" }}</small>
+          <td data-label="Destinatario y ruta">
+            <strong>{{ s.dest_nombre }}</strong>
+            <small class="admin-pedido-secondary">{{ s.dest_ciudad }}{% if s.dest_estado %}, {{ s.dest_estado }}{% endif %} · {{ s.destino_pais }}</small>
+            <small class="admin-pedido-secondary">{{ s.dest_direccion }} · CP {{ s.dest_zip }}</small>
+            <small class="admin-pedido-secondary">{{ s.dest_documento or "Sin doc." }} · {{ s.dest_email or s.dest_telefono or "Sin contacto" }}</small>
+            {% if s.observaciones %}
+            <details class="admin-pedido-note">
+              <summary>Nota interna</summary>
+              <div>{{ s.observaciones }}</div>
+            </details>
+            {% endif %}
           </td>
-          <td>
-            {{ s.dest_direccion }}
-            <br><small style="color:var(--fg-4)">{{ s.dest_ciudad }}{% if s.dest_estado %}, {{ s.dest_estado }}{% endif %} · {{ s.dest_zip }} · {{ s.destino_pais }}</small>
-            {% if s.observaciones %}<br><small style="color:var(--warn)">Obs: {{ s.observaciones }}</small>{% endif %}
-          </td>
-          <td class="mono">
-            Tauro<br>
-            <strong>{{ dinero_ars(s.precio_tauro_ars) }}</strong>
+          <td class="mono" data-label="Precio">
+            <small class="admin-pedido-secondary">TAURO</small>
+            <strong class="admin-pedido-price">{{ dinero_ars(s.precio_tauro_ars) }}</strong>
             {% if s.precio_cliente_final_ars %}
-              <br><small style="color:var(--fg-4)">Cliente {{ dinero_ars(s.precio_cliente_final_ars) }}</small>
+              <small class="admin-pedido-secondary">Cliente {{ dinero_ars(s.precio_cliente_final_ars) }}</small>
             {% endif %}
             {% if s.cargo_pendiente %}
-              <div class="msg warn" style="font-size:11px;margin-top:8px;padding:7px;">Cargo pendiente de conciliar</div>
+              <span class="badge warn admin-pedido-charge">Cargo pendiente</span>
             {% endif %}
           </td>
-          <td style="min-width:170px;">
+          <td class="admin-pedido-management" data-label="Guía y acciones">
+            <div class="admin-pedido-guide">
             {% if s.tracking and s.tiene_label %}
               <span class="badge ok">Guía lista</span>
-              <div class="mono" style="font-size:11px;margin:6px 0;">{{ s.tracking }}</div>
-              <a href="/admin/pedidos/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-sm btn-primary">⬇ Descargar PDF</a>
+              <strong class="mono">{{ s.tracking }}</strong>
+              <a href="/admin/pedidos/{{ s.id }}/guia.pdf" target="_blank" class="admin-pedido-link">Descargar PDF ↗</a>
             {% elif s.tracking %}
               <span class="badge warn">Etiqueta pendiente</span>
-              <div class="mono" style="font-size:11px;margin-top:6px;">{{ s.tracking }}</div>
-              <form method="POST" action="/admin/pedidos/{{ s.id }}/etiqueta"
-                    enctype="multipart/form-data" style="display:grid;gap:6px;margin-top:8px;">
-                <input type="file" name="label_pdf" accept="application/pdf,.pdf" required>
-                <button type="submit" class="btn btn-sm btn-primary">Adjuntar PDF recuperado</button>
-              </form>
+              <strong class="mono">{{ s.tracking }}</strong>
             {% elif conciliar_courier %}
               <span class="badge warn">Verificar en {{ (s.courier or 'courier')|upper }}</span>
               {% if s.courier_message_reference %}
-                <div class="mono" style="font-size:10px;margin-top:6px;">{{ s.courier_message_reference }}</div>
+                <small class="mono admin-pedido-secondary">{{ s.courier_message_reference }}</small>
               {% endif %}
-              <small style="display:block;color:var(--warn);margin-top:6px;">No reemitir hasta conciliar.</small>
+              <small class="admin-pedido-secondary">No reemitir hasta conciliar.</small>
             {% elif liberar_reserva %}
               <span class="badge warn">Reserva detenida</span>
-              <small style="display:block;color:var(--warn);margin-top:6px;">
-                No llegó a llamar al courier. Liberala desde Operación.
-              </small>
+              <small class="admin-pedido-secondary">No llegó a llamar al courier.</small>
             {% elif s.estado == 'EMITIENDO' %}
               <span class="badge warn">Emitiendo ahora</span>
-              <small style="display:block;color:var(--warn);margin-top:6px;">No cambiar ni reemitir.</small>
+              <small class="admin-pedido-secondary">No cambiar ni reemitir.</small>
             {% elif (s.courier or '')|upper == 'ENVIA' %}
               <span class="badge warn">Integración retirada</span>
-              <small style="display:block;color:var(--warn);margin-top:6px;">
-                Solicitud nacional histórica. No se puede emitir ni generar cargos desde TAURO.
-              </small>
+              <small class="admin-pedido-secondary">No se puede emitir ni generar cargos.</small>
             {% elif ambito_sol != 'internacional' %}
               <span class="badge warn">Ámbito en revisión</span>
-              <small style="display:block;color:var(--warn);margin-top:6px;">
+              <small class="admin-pedido-secondary">
                 {% if ambito_sol == 'nacional' %}
-                  La emisión nacional espera las APIs directas de Andreani y OCA.
+                  Emisión nacional pendiente.
                 {% else %}
                   Revisá origen y destino antes de habilitar una emisión.
                 {% endif %}
               </small>
             {% else %}
-              {# El courier sale de la SOLICITUD, no cableado: el cliente elige
-                 en el portal y el admin tiene que ver por dónde va a salir de
-                 verdad antes de apretar. Decía "FedEx" incluso cuando el
-                 cliente había elegido DHL. #}
+              {% set courier_sol = (s.courier or '')|upper or 'el courier del envío' %}
+              <span class="badge">Lista para emitir</span>
+              <small class="admin-pedido-secondary">{{ courier_sol }}</small>
+            {% endif %}
+            </div>
+
+            <details class="admin-pedido-actions">
+              <summary>Gestionar <span aria-hidden="true">⌄</span></summary>
+              <div class="admin-pedido-actions-panel">
+            {% if s.tracking and not s.tiene_label %}
+            <form method="POST" action="/admin/pedidos/{{ s.id }}/etiqueta"
+                  enctype="multipart/form-data" class="admin-pedido-form">
+              <label class="admin-pedido-form-label" for="label-pdf-{{ s.id }}">PDF recuperado</label>
+              <input id="label-pdf-{{ s.id }}" class="admin-pedido-file-input" type="file" name="label_pdf" accept="application/pdf,.pdf" required>
+              <button type="submit" class="btn btn-sm btn-primary">Adjuntar etiqueta</button>
+            </form>
+            {% endif %}
+
+            {% if not s.tracking and not conciliar_courier and not liberar_reserva and s.estado != 'EMITIENDO' and (s.courier or '')|upper != 'ENVIA' and ambito_sol == 'internacional' %}
               {% set courier_sol = (s.courier or '')|upper or 'el courier del envío' %}
               <form method="POST" action="/admin/pedidos/{{ s.id }}/generar-guia"
+                    class="admin-pedido-form"
                     data-confirm="¿Generar la guía real en {{ courier_sol }} para el pedido #{{ s.id }}? Esto emite una guía y consume la cuenta.">
                 <button type="submit" class="btn btn-sm btn-primary">Generar guía en {{ courier_sol }}</button>
               </form>
-              {# Editable sólo pre-emisión: después los datos ya viajaron. #}
-              <a href="/admin/pedidos/{{ s.id }}/editar" class="btn btn-sm btn-ghost"
-                 style="margin-top:6px;">✎ Editar datos</a>
+              <a href="/admin/pedidos/{{ s.id }}/editar" class="btn btn-sm btn-ghost">✎ Editar datos</a>
             {% endif %}
-          </td>
-          <td style="min-width:250px;">
+
             <form method="POST" action="/admin/pedidos/{{ s.id }}/visibilidad"
-                  style="margin-bottom:8px;"
+                  class="admin-pedido-form"
                   data-confirm="{% if s.visible_cliente %}¿Ocultar este envío del portal? No se borrará ni cambiará el saldo, la factura o el estado operativo.{% else %}¿Volver a mostrar este envío en el portal del cliente?{% endif %}">
               <input type="hidden" name="visible_cliente" value="{{ '0' if s.visible_cliente else '1' }}">
               <button type="submit" class="btn btn-sm btn-ghost">
@@ -162,39 +173,41 @@
               </button>
             </form>
             {% if conciliar_courier %}
-            <div class="msg warn" style="font-size:11px;padding:7px;margin-bottom:8px;">
+            <div class="admin-pedido-warning">
               {% if s.estado == 'EMITIENDO' %}La emisión quedó sin respuesta hace más de 10 minutos. {% endif %}
               Revisá la referencia en {{ (s.courier or 'el courier')|upper }}. No cambies el estado a mano.
             </div>
             <form method="POST" action="/admin/pedidos/{{ s.id }}/resolver-courier"
-                  enctype="multipart/form-data" style="display:grid;gap:6px;margin-bottom:8px;"
+                  enctype="multipart/form-data" class="admin-pedido-form"
                   data-confirm="Confirmá sólo si encontraste la guía real en el courier. Se registrará el tracking y el cargo del cliente.">
               <input type="hidden" name="resultado" value="CREADA">
               <input type="text" name="tracking" placeholder="Tracking confirmado" required>
-              <label style="font-size:10px;color:var(--fg-3);">Etiqueta PDF recuperada</label>
-              <input type="file" name="label_pdf" accept="application/pdf,.pdf" required>
+              <label class="admin-pedido-form-label" for="courier-pdf-{{ s.id }}">Etiqueta PDF recuperada</label>
+              <input id="courier-pdf-{{ s.id }}" class="admin-pedido-file-input" type="file" name="label_pdf" accept="application/pdf,.pdf" required>
               <button type="submit" class="btn btn-sm btn-primary">
                 La guía existe
               </button>
             </form>
             <form method="POST" action="/admin/pedidos/{{ s.id }}/resolver-courier"
+                  class="admin-pedido-form"
                   data-confirm="Confirmá sólo después de comprobar que el courier NO creó la guía. Esto volverá a habilitar la emisión.">
               <input type="hidden" name="resultado" value="NO_CREADA">
               <button type="submit" class="btn btn-sm btn-ghost">No fue creada</button>
             </form>
             {% elif liberar_reserva %}
-            <div class="msg warn" style="font-size:11px;padding:7px;margin-bottom:8px;">
+            <div class="admin-pedido-warning">
               La reserva lleva más de 10 minutos y no tiene referencia del courier.
               Es seguro volverla a Solicitud.
             </div>
             <form method="POST" action="/admin/pedidos/{{ s.id }}/liberar-reserva"
+                  class="admin-pedido-form"
                   data-confirm="Esta fila no llegó a llamar al courier. ¿Liberar la reserva y volver a habilitar la emisión?">
               <button type="submit" class="btn btn-sm btn-primary">Liberar reserva</button>
             </form>
             {% else %}
-            <form method="POST" action="/admin/pedidos/{{ s.id }}/estado" class="form" style="display:grid;gap:8px;">
+            <form method="POST" action="/admin/pedidos/{{ s.id }}/estado" class="admin-pedido-form">
               {% if s.estado == 'EMITIENDO' %}
-              <div class="msg warn" style="font-size:11px;padding:7px;">Esperá la respuesta del courier antes de editar.</div>
+              <div class="admin-pedido-warning">Esperá la respuesta del courier antes de editar.</div>
               {% endif %}
               <select name="estado">
                 {% for e in estados %}
@@ -205,7 +218,7 @@
               <input type="text" name="guia_url" placeholder="URL guía / PDF" value="{{ s.guia_url or '' }}">
               {# Sin esto, un campo vacío no borra nada (protección anti-pisada).
                  Tildarlo = lo que escribas (o dejes vacío) MANDA. #}
-              <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg-3);cursor:pointer;">
+              <label class="admin-pedido-overwrite">
                 <input type="checkbox" name="pisar" value="1"
                        data-confirm-check="Con esto, lo que quede en los campos PISA lo guardado. Un tracking vacío vuelve a habilitar la emisión de otra guía. ¿Seguro?">
                 Pisar valores (corregir tracking mal cargado)
@@ -213,11 +226,13 @@
               <button type="submit" class="btn btn-sm btn-primary" {% if s.estado == 'EMITIENDO' %}disabled{% endif %}>Guardar</button>
             </form>
             {% endif %}
+              </div>
+            </details>
           </td>
         </tr>
       {% else %}
         <tr>
-          <td colspan="8" style="color:var(--fg-4);text-align:center;padding:24px;">
+          <td colspan="5" style="color:var(--fg-4);text-align:center;padding:24px;">
             Sin solicitudes para este filtro.
           </td>
         </tr>
