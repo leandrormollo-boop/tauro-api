@@ -64,14 +64,16 @@ def test_saldo_metalico_conserva_valor_y_estado(balance, state):
 
 def test_costos_verdes_conservan_adicionales_separados():
     html = (ROOT / "templates/portal/envios.html").read_text()
-    for name in ("initial", "final"):
-        assert f'class="envio-price-{name} portal-money-green"' in html
+    assert 'class="shipment-price portal-money-green"' in html
+    assert 'class="envio-price-initial portal-money-green"' not in html
     for name in ("diferencia", "tax"):
-        assert f'class="envio-price-extra {name}"' in html
+        assert f'class="envio-price-extra {name}"' not in html
         assert f'class="envio-price-extra {name} portal-money-green"' not in html
     detail = (ROOT / "templates/portal/envio_detalle.html").read_text()
     assert 'class="portal-money-green">{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}' in detail
     assert 'class="portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}' in detail
+    for name in ("diferencia", "tax"):
+        assert f'class="mini-row envio-account-extra {name}"' in detail
 
 
 def test_diferencia_muestra_una_sola_ecuacion_y_no_duplica_el_cargo():
