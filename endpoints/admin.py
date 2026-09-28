@@ -82,7 +82,7 @@ from servicios.solicitudes_guia import (
     generar_guia,
     obtener_label_pdf,
 )
-from servicios.estados_envio import ESTADOS_OPERACION_UI
+from servicios.estados_envio import ESTADOS_OPERACION_UI, presentar_estados_envio
 from servicios.tracking_fedex_tauro import (
     fedex_environment,
     get_tracking_summary,
@@ -1751,7 +1751,12 @@ def admin_cliente_detail(
                        e.factura_nombre, e.solicitud_id, e.ambito,
                        NULLIF(BTRIM(s.dest_nombre), '') AS destinatario,
                        NULLIF(BTRIM(s.remitente_nombre), '') AS remitente,
-                       s.estado AS solicitud_estado,
+                       s.estado AS solicitud_estado, s.courier,
+                       s.tracking_estado, s.tracking_descripcion,
+                       s.tracking_actualizado_at,
+                       (s.label_pdf IS NOT NULL) AS tiene_label,
+                       s.guia_url,
+                       retiro.estado AS recoleccion_estado,
                        COALESCE(s.visible_cliente, TRUE) AS visible_cliente,
                        COALESCE(s.test, FALSE) AS solicitud_test,
                        (e.estado = 'CANCELADO' OR s.estado = 'CANCELADO'
@@ -1802,6 +1807,13 @@ def admin_cliente_detail(
                     FROM ajustes_cliente a
                     WHERE a.solicitud_id=e.solicitud_id
                 ) aju ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT r.estado
+                    FROM recolecciones r
+                    WHERE r.solicitud_id=s.id
+                    ORDER BY r.created_at DESC, r.id DESC
+                    LIMIT 1
+                ) retiro ON TRUE
                 WHERE e.cliente_id = %s
                 """ + filtro_fecha_envio_sql + """
                 ORDER BY e.fecha DESC, e.id DESC
@@ -1813,6 +1825,42 @@ def admin_cliente_detail(
             )
             envios = [dict(r) for r in cur.fetchall()]
             for envio in envios:
+                if not envio.get("solicitud_id") and envio.get("estado") != "CANCELADO":
+                    estado_operativo = {
+                        "codigo": "SIN_SEGUIMIENTO",
+                        "label": "Sin seguimiento",
+                        "clase": "muted",
+                    }
+                else:
+                    estado_operativo = presentar_estados_envio({
+                        "estado": envio.get("solicitud_estado")
+                            or "CANCELADO",
+                        "tracking_estado": envio.get("tracking_estado"),
+                        "tracking_descripcion": envio.get("tracking_descripcion"),
+                    })["estado_cliente_ui"]
+                if (estado_operativo.get("codigo") == "GUIA_LISTA"
+                        and not envio.get("tracking_estado")):
+                    estado_operativo = {
+                        "codigo": "ESPERA_RECOLECCION",
+                        "label": "Espera de recolección",
+                        "clase": "accent",
+                    }
+                elif estado_operativo.get("codigo") in {
+                    "PROCESO_ENTREGA", "DESPACHADO",
+                }:
+                    estado_operativo = {
+                        "codigo": estado_operativo["codigo"],
+                        "label": "Proceso de entrega",
+                        "clase": "warn",
+                    }
+                envio["estado_operativo_ui"] = estado_operativo
+                envio["puede_editar_admin"] = bool(
+                    envio.get("solicitud_id")
+                    and not envio.get("tracking")
+                    and envio.get("solicitud_estado") not in (
+                        "CANCELADO", "REEMPLAZADO", "ENTREGADO",
+                    )
+                )
                 if envio.get("solicitud_id"):
                     alcance = f"precio:{cliente_id}:{envio['id']}"
                     envio["precio_csrf"] = _csrf_dhl(alcance)
@@ -3657,12 +3705,39 @@ def admin_recoleccion_resolver(
 # ── Cargar un envío ya realizado (canal externo) ────────────
 
 @router.get("/envios-realizados/nuevo", response_class=HTMLResponse)
-def admin_envio_realizado_form(request: Request, admin_token: Optional[str] = Cookie(None)):
+def admin_envio_realizado_form(
+    request: Request,
+    repetir: Optional[int] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
     if not _is_auth(admin_token):
         return _redirect_login()
+    form = {}
+    if repetir:
+        from servicios.solicitudes_guia import obtener_solicitud
+        anterior = obtener_solicitud(repetir)
+        if anterior:
+            form = {
+                "cliente_id": anterior.get("cliente_id") or "",
+                "remitente_nombre": anterior.get("remitente_nombre") or "",
+                "dest_nombre": anterior.get("dest_nombre") or "",
+                "dest_ciudad": anterior.get("dest_ciudad") or "",
+                "destino_pais": anterior.get("destino_pais") or "",
+                "dest_direccion": anterior.get("dest_direccion") or "",
+                "producto": anterior.get("producto_alias") or "",
+                "cantidad": anterior.get("cantidad") or 1,
+                "peso_kg": anterior.get("peso_kg") or 1,
+                "courier": anterior.get("courier") or "DHL",
+                "origen_pais": anterior.get("remitente_pais") or "AR",
+                "observaciones": anterior.get("observaciones") or "",
+                "repetir_id": anterior.get("id"),
+            }
     return templates.TemplateResponse(
         request=request, name="admin/envio_realizado_form.html",
-        context={"seccion": "envio_realizado", "clientes": _get_clientes_lista()},
+        context={
+            "seccion": "envio_realizado", "clientes": _get_clientes_lista(),
+            "form": form,
+        },
     )
 
 
@@ -3682,6 +3757,7 @@ async def admin_envio_realizado_post(
     costo_courier_estimado_ars: str = Form(...),
     courier: str = Form("FEDEX"),
     origen_pais: str = Form("AR"),
+    remitente_nombre: str = Form(""),
     borrador_token: str = Form(""),
     observaciones: str = Form(""),
     guia_pdf: Optional[UploadFile] = File(None),
@@ -3728,6 +3804,7 @@ async def admin_envio_realizado_post(
             observaciones=observaciones,
             courier=courier,
             origen_pais=origen_pais,
+            remitente_nombre=remitente_nombre,
             costo_courier_estimado_ars=costo_estimado_num,
         )
     except Exception as e:

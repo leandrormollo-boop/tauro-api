@@ -284,9 +284,13 @@ def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
     html = _template("envios.html")
     detalle = _template("envio_detalle.html")
     assert "Monto activo del período" in html
-    assert "Destinatario y destino" in html
+    for encabezado in (
+        "Fecha", "Concepto", "Remitente", "Destinatario", "Tracking",
+        "Saldo inicial / final", "Estado", "Guía", "Acciones",
+    ):
+        assert f">{encabezado}<" in html
     assert "ARS · costo final" in html
-    assert "Ver ajuste" in html
+    assert "Ver desglose" in html
     assert "Precio inicial aceptado" in detalle
     assert "Diferencia" in detalle
     assert "TAX" in detalle

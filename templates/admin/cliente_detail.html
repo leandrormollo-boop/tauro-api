@@ -111,38 +111,47 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
     <table class="admin-shipments-table business-table">
       <thead>
         <tr>
-          <th>Concepto</th>
-          <th>Envío / destinatario</th>
           <th>Fecha</th>
-          <th>Cargo ARS</th>
+          <th>Concepto</th>
+          <th>Remitente</th>
+          <th>Destinatario</th>
+          <th>Tracking</th>
+          <th>Saldo inicial / final</th>
           <th>Ámbito</th>
           <th>Estado</th>
-          <th>Gestión</th>
+          <th>Guía</th>
+          <th>Acciones</th>
         </tr>
       </thead>
       <tbody>
         {% for e in envios %}
         <tr id="cargo-{{ e.id }}">
+          <td class="mono admin-shipment-date" data-label="Fecha">{{ e.fecha.strftime("%d/%m/%Y") if e.fecha else "—" }}</td>
           <td class="admin-shipment-concept">
             <strong>{{ e.concepto or "Envío" }}</strong>
             {% if e.factura_cliente_id %}<small><a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas#factura-{{ e.factura_cliente_id }}">{{ e.factura_cliente_tipo }} {{ "%04d"|format(e.factura_cliente_punto_venta) }}-{{ "%08d"|format(e.factura_cliente_numero) }}</a></small>
             {% elif e.nro_fc %}<small>FC {{ e.nro_fc }}</small>{% endif %}
           </td>
-          <td class="mono admin-shipment-guide">{% if e.solicitud_id %}<a href="/admin/pedidos/{{ e.solicitud_id }}/editar">{{ e.tracking or "Abrir envío" }}</a>{% else %}{{ e.tracking or "—" }}{% endif %}<small>{{ e.destinatario or "—" }}</small>{% if e.remitente %}<small>De: {{ e.remitente }}</small>{% endif %}</td>
-          <td class="mono">{{ e.fecha.strftime("%d/%m/%Y") if e.fecha else "—" }}</td>
-          <td class="mono admin-shipment-value">
+          <td class="admin-shipment-person" data-label="Remitente">{{ e.remitente or "—" }}</td>
+          <td class="admin-shipment-person" data-label="Destinatario">{{ e.destinatario or "—" }}</td>
+          <td class="mono admin-shipment-guide" data-label="Tracking">
+            {% if e.solicitud_id %}<a href="/admin/pedidos/{{ e.solicitud_id }}/editar">{{ e.tracking or "Abrir envío" }}</a>{% else %}{{ e.tracking or "—" }}{% endif %}
+            {% if e.courier %}<small>{{ e.courier|upper }}</small>{% endif %}
+          </td>
+          <td class="mono admin-shipment-value" data-label="Saldo inicial / final">
             {% if e.estado == 'CANCELADO' or e.solicitud_estado in ('CANCELADO','REEMPLAZADO') %}
-            <strong>$ 0,00</strong>{% if e.estado=='ACTIVO' and e.monto_ars %}<small class="business-status error">Revisar: cargo activo de ARS {{ '{:,.2f}'.format(e.precio_final_ars).replace(',','_').replace('.',',').replace('_','.') }}</small>{% else %}<small>Sin cargo vigente</small>{% endif %}
-            {% elif e.precio_final_ars != e.monto_ars %}
-            <small style="display:block;color:var(--fg-4);">Original $ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</small>
-            <strong>$ {{ "{:,.2f}".format(e.precio_final_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</strong>
+            <span class="admin-shipment-amount"><small>Inicial</small>$ {{ "{:,.2f}".format(e.monto_ars or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+            <span class="admin-shipment-amount is-final"><small>Final</small>$ 0,00</span>
+            {% if e.estado=='ACTIVO' and e.monto_ars %}<small class="business-status error">Revisar cargo activo</small>{% else %}<small>Sin cargo vigente</small>{% endif %}
+            {% else %}
+            <span class="admin-shipment-amount"><small>Inicial</small>$ {{ "{:,.2f}".format(e.monto_ars or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+            <span class="admin-shipment-amount is-final"><small>Final</small>$ {{ "{:,.2f}".format(e.precio_final_ars or e.monto_ars or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
             {% if e.ajuste_comercial_ars %}
             <small style="display:block;color:{% if e.ajuste_comercial_ars < 0 %}var(--ok){% else %}var(--warn){% endif %};">
               Ajuste ADMIN {{ "+" if e.ajuste_comercial_ars > 0 else "−" }} $ {{ "{:,.2f}".format(e.ajuste_comercial_ars|abs).replace(",", "X").replace(".", ",").replace("X", ".") }}
             </small>
             {% endif %}
-            {% else %}
-            $ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
+            {% if e.factura_cliente_id or e.nro_fc %}<small class="business-status ok">Facturado</small>{% else %}<small class="business-status warn">A facturar</small>{% endif %}
             {% endif %}
           </td>
           <td>
@@ -169,20 +178,10 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% endif %}
           </td>
           <td>
-            {% if e.solicitud_estado == 'REEMPLAZADO' %}<span class="badge warn">MODIFICADO</span>
-            {% elif e.estado == 'CANCELADO' or e.solicitud_estado == 'CANCELADO' %}
-              <span class="badge error">CANCELADO</span>
-              {% if e.solicitud_id %}
-              <small style="display:block;color:var(--fg-4);margin-top:4px;">Oculto del portal</small>
-              {% endif %}
-            {% elif e.solicitud_test %}
-              <span class="badge warn">PRUEBA · OCULTO</span>
-              <small style="display:block;color:var(--fg-4);margin-top:4px;">No aparece en el portal</small>
-            {% elif e.factura_cliente_id or e.nro_fc %}
-              <span class="badge ok">FACTURADO</span>
-            {% else %}
-              <span class="badge warn">A FACTURAR</span>
-            {% endif %}
+            <span class="badge {{ e.estado_operativo_ui.clase }}">{{ e.estado_operativo_ui.label }}</span>
+            {% if e.tracking_descripcion and e.estado_operativo_ui.codigo not in ('CANCELADO','REEMPLAZADO') %}<small class="admin-shipment-status-note">{{ e.tracking_descripcion }}</small>{% endif %}
+            {% if e.recoleccion_estado == 'AGENDADA' and e.estado_operativo_ui.codigo == 'ESPERA_RECOLECCION' %}<small class="business-status ok">Recolección programada</small>{% endif %}
+            {% if e.solicitud_test %}<small class="business-status warn">Prueba · oculto</small>{% endif %}
             {% if e.solicitud_id and not e.solicitud_test and e.estado != 'CANCELADO' and e.solicitud_estado != 'CANCELADO' %}
               {% if e.visible_cliente %}
               <small style="display:block;color:var(--ok);margin-top:4px;">Visible en el portal</small>
@@ -191,7 +190,20 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
               {% endif %}
             {% endif %}
           </td>
-          <td><details class="business-row-actions"><summary>Gestionar</summary>
+          <td class="admin-shipment-document" data-label="Guía">
+            {% if e.tiene_label and e.solicitud_estado not in ('CANCELADO','REEMPLAZADO') %}
+            <a href="/admin/pedidos/{{ e.solicitud_id }}/guia.pdf" class="btn btn-sm btn-ghost" target="_blank">Ver guía</a>
+            {% elif e.guia_url and e.solicitud_estado not in ('CANCELADO','REEMPLAZADO') %}
+            <a href="{{ e.guia_url }}" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">Ver guía</a>
+            {% else %}<span class="admin-shipment-empty">—</span>{% endif %}
+          </td>
+          <td><details class="business-row-actions"><summary>Acciones</summary>
+            {% if e.solicitud_id %}
+            <a href="/admin/pedidos/{{ e.solicitud_id }}/editar" class="btn btn-sm btn-ghost">Ver envío</a>
+            <a href="/admin/envios-realizados/nuevo?repetir={{ e.solicitud_id }}" class="btn btn-sm btn-ghost">Repetir envío</a>
+            {% if e.puede_editar_admin %}<a href="/admin/pedidos/{{ e.solicitud_id }}/editar" class="btn btn-sm btn-ghost">Editar datos</a>
+            {% elif e.tracking %}<small class="admin-action-note">Edición cerrada: la guía ya fue emitida.</small>{% endif %}
+            {% endif %}
             {% if e.estado == 'ACTIVO' and not e.nro_fc and not e.factura_cliente_id %}
             <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/nueva?envio={{ e.id }}"
                class="btn btn-sm btn-primary">Facturar</a>
@@ -248,7 +260,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
           </details></td>
         </tr>
         {% else %}
-        <tr><td colspan="7" style="color:var(--fg-4);text-align:center;padding:16px;">Sin cargos.</td></tr>
+        <tr><td colspan="10" style="color:var(--fg-4);text-align:center;padding:16px;">Sin cargos.</td></tr>
         {% endfor %}
       </tbody>
     </table>

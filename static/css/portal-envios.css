@@ -44,141 +44,121 @@
   .envios-async-spinner { animation-duration: 1.4s; }
 }
 
-/* Bandeja operativa: una sola línea de lectura por envío. La lista responde
-   tres preguntas de inmediato (cuál, adónde y en qué estado) y lleva el
-   resto al detalle. Así se mantiene la densidad de Boxfly con identidad TAURO. */
-.envios-card,
-.envios-card .table-wrap { overflow: visible; }
-.envios-card { padding: 8px 18px 9px; }
+/* Libro operativo: una fila baja, un dato por columna. Conserva la bandeja
+   compacta publicada en #29 y suma el control contable pedido por TAURO. */
+.envios-card { padding: 8px 12px 9px; overflow: visible; }
+.envios-card .table-wrap { overflow-x: auto; overflow-y: visible; }
 .envios-table {
   width: 100%;
+  min-width: 1240px;
   table-layout: fixed;
   border-collapse: collapse;
   border-spacing: 0;
 }
-.envios-table th:nth-child(1) { width: 10%; }
-.envios-table th:nth-child(2) { width: 19%; }
-.envios-table th:nth-child(3) { width: 27%; }
-.envios-table th:nth-child(4) { width: 15%; }
-.envios-table th:nth-child(5) { width: 15%; }
-.envios-table th:nth-child(6) { width: 14%; }
+.envios-table th:nth-child(1) { width: 88px; }
+.envios-table th:nth-child(2) { width: 72px; }
+.envios-table th:nth-child(3),
+.envios-table th:nth-child(4) { width: 150px; }
+.envios-table th:nth-child(5) { width: 142px; }
+.envios-table th:nth-child(6) { width: 202px; }
+.envios-table th:nth-child(7) { width: 172px; }
+.envios-table th:nth-child(8) { width: 82px; }
+.envios-table th:nth-child(9) { width: 102px; }
 .envios-table thead th {
-  padding: 12px 10px;
+  padding: 12px 9px;
   border-bottom: 1px solid var(--line);
   color: var(--fg-4);
   font-size: 9px;
-  letter-spacing: .09em;
+  letter-spacing: .08em;
+  text-align: left;
 }
-.envios-table .shipment-row {
-  border: 0;
-  transition: background-color .14s ease;
-}
-.envios-table .shipment-row:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.envios-table .shipment-row { min-height: 0; transition: background-color .14s ease; }
+.envios-table .shipment-row:hover td { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.envios-table .shipment-row.is-cancelled { opacity: .68; }
 .envios-table .shipment-row td,
 .envios-table .shipment-row td:first-child,
 .envios-table .shipment-row td:last-child {
   min-width: 0;
-  padding: 17px 10px;
+  padding: 13px 9px;
   border: 0;
   border-bottom: 1px solid var(--line-soft);
   border-radius: 0;
-  vertical-align: middle;
   background: transparent;
+  font-size: 11px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
+  vertical-align: middle;
 }
 .envios-table tbody tr:last-child td { border-bottom: 0; }
-.envios-table .shipment-row.is-cancelled { opacity: .72; }
-
-.shipment-date-cell time,
-.shipment-date-cell small,
-.shipment-number,
-.shipment-reference,
-.shipment-replacement,
-.shipment-destination,
-.shipment-package,
-.shipment-price-cell small,
-.shipment-status-cell small,
-.shipment-attention { display: block; }
-.shipment-date-cell time {
-  color: var(--fg-2);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.shipment-date-cell small,
-.shipment-number,
-.shipment-package,
-.shipment-price-cell small,
-.shipment-status-cell small {
-  margin-top: 5px;
-  color: var(--fg-4);
-  font-size: 9px;
-  line-height: 1.35;
-}
-.shipment-tracking {
-  display: block;
-  overflow: hidden;
-  color: var(--accent-soft);
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.35;
-  text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-a.shipment-tracking:hover { color: var(--fg-1); text-decoration: underline; text-underline-offset: 3px; }
-.shipment-tracking-pending { color: var(--fg-3); font-family: var(--font-sans); font-weight: 550; }
-.shipment-reference {
-  width: fit-content;
-  max-width: 100%;
-  overflow: hidden;
-  margin-top: 6px;
-  padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--accent) 23%, var(--line));
-  border-radius: 999px;
-  color: var(--fg-2);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  font-size: 9px;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.shipment-replacement { margin-top: 5px; color: var(--warn); font-size: 9px; }
-.shipment-recipient {
+.envios-table .shipment-date-cell { color: var(--fg-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.envios-table .shipment-concept-cell strong,
+.envios-table .shipment-person-cell strong {
   display: block;
   color: var(--fg-1);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.envios-table td small {
+  display: block;
+  margin-top: 4px;
+  color: var(--fg-4);
+  font-size: 9.5px;
   line-height: 1.35;
 }
-.shipment-destination { margin-top: 4px; color: var(--fg-2); font-size: 11px; line-height: 1.4; }
-.shipment-package { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shipment-price-cell { font-variant-numeric: tabular-nums; }
-.shipment-price { display: block; color: var(--fg-1); font-size: 12px; font-weight: 700; white-space: nowrap; }
-.shipment-no-charge { color: var(--fg-2); font-size: 12px; font-weight: 600; }
-.shipment-price-detail { display: inline-block; margin-top: 5px; color: var(--accent-soft); font-family: var(--font-sans); font-size: 9px; text-decoration: none; }
-.shipment-price-detail:hover { text-decoration: underline; }
-.shipment-status-cell .badge { max-width: 100%; font-size: 8.5px; white-space: normal; }
-.shipment-status-cell small { font-family: var(--font-mono); letter-spacing: .05em; }
-.shipment-attention { margin-top: 5px; color: var(--warn); font-size: 9px; font-weight: 600; }
+.envios-table .shipment-tracking-cell .shipment-tracking {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent-soft);
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.envios-table .shipment-tracking-cell .shipment-tracking:hover { color: var(--fg-1); text-decoration: underline; text-underline-offset: 3px; }
 .shipment-cancelled-badge { border: 1px solid rgba(247, 189, 97, .34); color: var(--warn); background: rgba(245, 158, 11, .09); }
+.shipment-empty { color: var(--fg-4); }
+.shipment-no-charge { color: var(--fg-2); font-size: 11px; font-weight: 600; }
 
-/* Un único control por fila evita el bloque de botones que hacía imposible
-   escanear la tabla. Las acciones secundarias siguen disponibles sin ruido. */
+.envio-price-ledger,
+.envio-price-initial,
+.envio-price-final {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.envio-price-ledger + .envio-price-final,
+.envio-price-initial + .envio-price-final { margin-top: 5px; }
+.envio-price-ledger small,
+.envio-price-initial small,
+.envio-price-final small { display: inline; margin: 0; font-size: 8px; letter-spacing: .055em; text-transform: uppercase; }
+.envio-price-final { color: var(--ok); font-weight: 700; }
+.envio-price-breakdown { margin-top: 7px; }
+.envio-price-breakdown summary { color: var(--accent-soft); font-size: 9.5px; cursor: pointer; }
+.envio-price-breakdown[open] { min-width: 205px; }
+.envio-status-cell .badge { max-width: 100%; font-size: 8.5px; white-space: normal; text-align: left; }
+.shipment-guide-cell .btn { width: 100%; padding-inline: 7px; }
+
+/* Un único control por fila conserva disponibles las acciones sin convertir
+   la tabla en un bloque de botones. */
 .shipment-actions { position: relative; width: 100%; }
 .shipment-actions > summary {
   display: flex;
-  min-height: 36px;
+  min-height: 34px;
   align-items: center;
   justify-content: space-between;
-  gap: 9px;
-  padding: 7px 10px;
+  gap: 8px;
+  padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 9px;
   color: var(--fg-2);
   background: color-mix(in srgb, var(--bg-elev) 84%, transparent);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   list-style: none;
   cursor: pointer;
@@ -227,54 +207,45 @@ a.shipment-tracking:hover { color: var(--fg-1); text-decoration: underline; text
 .shipment-action:focus-visible { color: var(--fg-1); background: color-mix(in srgb, var(--accent) 10%, transparent); outline: 0; }
 .shipment-action-primary { color: var(--accent-soft); font-weight: 650; }
 .shipment-action-emphasized { color: var(--ok); }
+.shipment-action-danger { color: var(--error); }
 
-@media (max-width: 920px) {
-  .envios-table th:nth-child(1) { width: 11%; }
-  .envios-table th:nth-child(2) { width: 19%; }
-  .envios-table th:nth-child(3) { width: 25%; }
-  .envios-table th:nth-child(4) { width: 16%; }
-  .envios-table th:nth-child(5) { width: 15%; }
-  .envios-table th:nth-child(6) { width: 14%; }
-  .envios-table .shipment-row td { padding-inline: 7px; }
-}
-
-@media (max-width: 640px) {
+@media (max-width: 720px) {
   .envios-card { padding: 2px 10px 8px; border: 0; background: transparent; }
-  .envios-table { display: block; }
+  .envios-card .table-wrap { overflow: visible; }
+  .envios-table { display: block; min-width: 0; }
   .envios-table thead { display: none; }
   .envios-table tbody { display: grid; gap: 10px; }
   .envios-table .shipment-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px 14px;
     margin: 0;
-    padding: 14px;
+    padding: 15px;
     border: 1px solid var(--line);
     border-left: 3px solid var(--accent);
-    border-radius: 13px;
+    border-radius: 12px;
     background: var(--bg-elev-2);
   }
   .envios-table .shipment-row.is-cancelled { border-left-color: var(--warn); }
   .envios-table .shipment-row td,
   .envios-table .shipment-row td:first-child,
-  .envios-table .shipment-row td:last-child {
-    min-width: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
+  .envios-table .shipment-row td:last-child { display: block; min-width: 0; padding: 0; border: 0; background: transparent; }
+  .envios-table .shipment-row td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 5px;
+    color: var(--fg-4);
+    font-size: 8px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
   }
-  .envios-table .shipment-row td[data-label]::before { display: none; }
-  .shipment-date-cell { grid-column: 1; grid-row: 1; }
-  .shipment-status-cell { grid-column: 2; grid-row: 1; justify-self: end; text-align: right; }
-  .shipment-tracking-cell,
-  .shipment-recipient-cell { grid-column: 1 / -1; }
-  .shipment-tracking-cell { grid-row: 2; }
-  .shipment-recipient-cell { grid-row: 3; padding-top: 11px !important; border-top: 1px solid var(--line-soft) !important; }
-  .shipment-price-cell { grid-column: 1 / -1; grid-row: 4; padding-top: 10px !important; border-top: 1px solid var(--line-soft) !important; }
-  .shipment-actions-cell { grid-column: 1 / -1; grid-row: 5; width: 100%; }
-  .shipment-tracking { font-size: 13px; }
-  .shipment-recipient { font-size: 14px; }
-  .shipment-status-cell small { display: none; }
+  .envios-table .shipment-person-cell,
+  .envios-table .shipment-tracking-cell,
+  .envios-table .envio-price-cell,
+  .envios-table .envio-status-cell,
+  .envios-table .shipment-guide-cell,
+  .envios-table .shipment-actions-cell { grid-column: 1 / -1; }
+  .envios-table .shipment-guide-cell .btn { width: auto; }
   .shipment-actions > summary { min-height: 44px; }
   .shipment-action { min-height: 42px; font-size: 11px; }
 }

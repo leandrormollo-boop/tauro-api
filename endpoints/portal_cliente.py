@@ -2184,6 +2184,47 @@ def envios_view(
     for solicitud in vista["solicitudes"]:
         solicitud["recoleccion"] = retiros.get(solicitud["id"])
         solicitud["recoleccion_error"] = retiros_error
+        retiro = solicitud.get("recoleccion") or {}
+        retiro_activo = retiro.get("estado") in {
+            "AGENDANDO", "AGENDADA", "CANCELANDO", "VERIFICAR_COURIER",
+        }
+        if (solicitud.get("estado_cliente_ui", {}).get("codigo") == "GUIA_LISTA"
+                and not solicitud.get("tracking_estado")):
+            solicitud["estado_cliente_ui"] = {
+                "codigo": "ESPERA_RECOLECCION",
+                "label": "Espera de recolección",
+                "clase": "accent",
+            }
+        elif solicitud.get("estado_cliente_ui", {}).get("codigo") in {
+            "PROCESO_ENTREGA", "DESPACHADO",
+        }:
+            solicitud["estado_cliente_ui"] = {
+                "codigo": solicitud["estado_cliente_ui"]["codigo"],
+                "label": "Proceso de entrega",
+                "clase": "warn",
+            }
+        solicitud["puede_corregir_lista"] = bool(
+            (solicitud.get("courier") or "").upper() == "DHL"
+            and solicitud.get("estado") == "GUIA_LISTA"
+            and solicitud.get("tracking")
+            and not solicitud.get("tracking_estado")
+            and not solicitud.get("reemplazada_por_solicitud_id")
+            and not retiro_activo
+        )
+        solicitud["puede_cancelar_lista"] = bool(
+            (
+                solicitud.get("estado") == "SOLICITADO"
+                and not solicitud.get("tracking")
+            )
+            or (
+                (solicitud.get("courier") or "").upper() == "DHL"
+                and solicitud.get("estado") == "GUIA_LISTA"
+                and solicitud.get("tracking")
+                and not solicitud.get("tracking_estado")
+                and not solicitud.get("reemplazada_por_solicitud_id")
+                and not retiro_activo
+            )
+        )
 
     from servicios.configuracion_couriers_cliente import mapa_permisos
     permisos_emision = mapa_permisos(cliente, "emitir")

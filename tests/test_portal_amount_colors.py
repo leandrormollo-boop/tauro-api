@@ -67,7 +67,7 @@ def test_costos_verdes_conservan_adicionales_separados():
     assert 'class="shipment-price portal-money-green"' in html
     assert 'class="envio-price-initial portal-money-green"' not in html
     for name in ("diferencia", "tax"):
-        assert f'class="envio-price-extra {name}"' not in html
+        assert f'class="envio-price-extra {name}"' in html
         assert f'class="envio-price-extra {name} portal-money-green"' not in html
     detail = (ROOT / "templates/portal/envio_detalle.html").read_text()
     assert 'class="portal-money-green">{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}' in detail
