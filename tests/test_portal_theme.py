@@ -10,10 +10,11 @@ JS = (RAIZ / "static/js/portal-theme.js").read_text(encoding="utf-8")
 
 
 def test_tema_se_aplica_antes_del_css_sin_destello():
-    assert '<html lang="es" data-theme="dark">' in BASE
+    assert '<html lang="es" data-theme="light">' in BASE
     assert 'id="portal-theme-color"' in BASE
     assert 'localStorage.getItem("tauro.portal.theme")' in BASE
-    assert 'prefers-color-scheme: light' in BASE
+    assert 'if (tema !== "light" && tema !== "dark")' in BASE
+    assert 'tema = "light";' in BASE
     assert BASE.index('localStorage.getItem("tauro.portal.theme")') < BASE.index("tauro.css?v=49")
 
 
@@ -22,13 +23,12 @@ def test_portal_ofrece_controles_en_shell_mobile_y_login():
     assert "theme-toggle-sidebar" in BASE
     assert "theme-toggle-compact" in BASE
     assert "theme-toggle-floating" in BASE
-    assert 'src="/static/js/portal-theme.js?v=1"' in BASE
+    assert 'src="/static/js/portal-theme.js?v=2"' in BASE
 
 
-def test_preferencia_persiste_y_sigue_al_sistema_si_no_hay_eleccion():
+def test_preferencia_persiste_con_claro_predeterminado():
     assert 'localStorage.setItem(STORAGE_KEY, theme)' in JS
-    assert 'media.addEventListener("change"' in JS
-    assert 'if (!savedTheme())' in JS
+    assert 'prefers-color-scheme' not in JS
     assert 'aria-pressed' in JS
     assert 'metaColor.content' in JS
 
