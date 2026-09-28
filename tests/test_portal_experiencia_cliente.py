@@ -124,7 +124,10 @@ def test_listado_prioriza_datos_concretos_y_deja_el_visor_en_el_detalle():
     listado = _render(parcial=True)
     detalle = _render(template="portal/envio_detalle.html")
 
-    for encabezado in ("Fecha", "Seguimiento", "Destinatario y destino", "Precio", "Estado", "Acciones"):
+    for encabezado in (
+        "Fecha", "Concepto", "Remitente", "Destinatario", "Tracking",
+        "Saldo inicial / final", "Estado", "Guía", "Acciones",
+    ):
         assert f">{encabezado}<" in listado
     assert 'class="document-card' not in listado
     assert 'id="guia-del-envio"' in detalle

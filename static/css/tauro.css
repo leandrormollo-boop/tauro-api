@@ -3392,16 +3392,17 @@ html[data-theme="light"] .account-total-card {
   .shipment-label-form .btn { width: 100%; min-height: 42px; }
 }
 
-.admin-shipments-table { min-width: 1360px; table-layout: fixed; }
-.admin-shipments-table th:nth-child(1) { width: 210px; }
-.admin-shipments-table th:nth-child(2) { width: 135px; }
+.admin-shipments-table { min-width: 1580px; table-layout: fixed; }
+.admin-shipments-table th:nth-child(1) { width: 105px; }
+.admin-shipments-table th:nth-child(2) { width: 82px; }
 .admin-shipments-table th:nth-child(3),
-.admin-shipments-table th:nth-child(5) { width: 175px; }
-.admin-shipments-table th:nth-child(4) { width: 105px; }
-.admin-shipments-table th:nth-child(6) { width: 145px; }
-.admin-shipments-table th:nth-child(7) { width: 155px; }
-.admin-shipments-table th:nth-child(8) { width: 125px; }
-.admin-shipments-table th:nth-child(9) { width: 235px; }
+.admin-shipments-table th:nth-child(4) { width: 175px; }
+.admin-shipments-table th:nth-child(5) { width: 150px; }
+.admin-shipments-table th:nth-child(6) { width: 210px; }
+.admin-shipments-table th:nth-child(7) { width: 135px; }
+.admin-shipments-table th:nth-child(8) { width: 190px; }
+.admin-shipments-table th:nth-child(9) { width: 105px; }
+.admin-shipments-table th:nth-child(10) { width: 230px; }
 .admin-shipments-table td { vertical-align: middle; }
 .admin-shipment-concept strong,
 .admin-shipment-concept small { display: block; }
@@ -3410,6 +3411,14 @@ html[data-theme="light"] .account-total-card {
 .admin-shipment-guide { overflow-wrap: anywhere; font-size: 11px; }
 .admin-shipment-person { color: var(--fg-2); font-weight: 600; overflow-wrap: anywhere; }
 .admin-shipment-value { color: var(--fg); white-space: nowrap; }
+.admin-shipment-amount { display:flex;justify-content:space-between;gap:8px;color:var(--fg-3); }
+.admin-shipment-amount + .admin-shipment-amount { margin-top:4px; }
+.admin-shipment-amount small { display:inline;margin:0;text-transform:uppercase;letter-spacing:.05em;font-size:8px; }
+.admin-shipment-amount.is-final { color:var(--ok);font-weight:700; }
+.admin-shipment-date { white-space:nowrap;color:var(--fg-2); }
+.admin-shipment-status-note { display:block;max-width:180px;margin-top:5px;color:var(--fg-4);font-size:9px;line-height:1.35; }
+.admin-shipment-document .btn { width:100%;padding-inline:7px; }
+.admin-shipment-empty,.admin-action-note { color:var(--fg-4);font-size:10px; }
 @media (min-width: 641px) and (max-width: 1050px) {
   .account-overview { grid-template-columns: minmax(230px, .8fr) minmax(0, 1.7fr); }
   .account-scope-list { grid-column: 1 / -1; }

@@ -1232,7 +1232,8 @@ def listar_solicitudes_cliente(
             # para dibujar un tilde en cada fila.
             query = """
                 SELECT s.id, s.cliente_id, s.estado, s.producto_alias, s.cantidad,
-                       s.etiqueta_cliente, s.numero_guia_tauro, s.remitente_ciudad,
+                       s.etiqueta_cliente, s.numero_guia_tauro,
+                       s.remitente_nombre, s.remitente_ciudad,
                        s.remitente_pais, s.ambito, s.destino_pais, s.dest_nombre,
                        s.dest_ciudad, s.observaciones, s.peso_kg,
                        s.valor_declarado_usd, s.precio_tauro_ars,
@@ -2361,6 +2362,7 @@ def cargar_envio_externo(
     observaciones: str = "",
     courier: str = "FEDEX",
     origen_pais: str = "AR",
+    remitente_nombre: str = "",
     costo_courier_estimado_ars: Optional[float] = None,
 ) -> dict:
     """
@@ -2416,11 +2418,15 @@ def cargar_envio_externo(
             peso_kg=max(float(peso_kg or 0.5), 0.1),
             largo_cm=0, ancho_cm=0, alto_cm=0,
             valor_declarado_usd=0,
-            ruta_id=f"AR-{(destino_pais or 'XX').strip().upper()[:2]}",
+            ruta_id=(
+                f"{(origen_pais or 'AR').strip().upper()[:2]}-"
+                f"{(destino_pais or 'XX').strip().upper()[:2]}"
+            ),
             coti_id=f"EXT-{uuid.uuid4().hex[:10]}",
             precio_tauro_ars=float(precio_tauro_ars),
             precio_tauro_usd=round(float(precio_tauro_ars) / dolar, 2) if dolar else 0,
             remitente_pais=(origen_pais or "AR").strip().upper(),
+            remitente_nombre=(remitente_nombre or "").strip()[:160],
             courier=(courier or "FEDEX").strip().upper(),
             costo_courier_estimado_ars=costo_courier_estimado_ars,
         )

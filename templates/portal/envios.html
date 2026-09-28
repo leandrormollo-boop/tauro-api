@@ -6,7 +6,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 
 {% block content %}
 <section class="envios-page">
-<link rel="stylesheet" href="/static/css/portal-envios.css?v=3">
+<link rel="stylesheet" href="/static/css/portal-envios.css?v=4">
 <div class="envios-async-region" data-envios-region aria-busy="false">
 <div class="envios-async-status" data-envios-status role="status" aria-live="polite" hidden>
     <span class="envios-async-spinner" aria-hidden="true"></span>
@@ -194,10 +194,13 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <thead>
                 <tr>
                     <th>Fecha</th>
-                    <th>Seguimiento</th>
-                    <th>Destinatario y destino</th>
-                    <th>Precio</th>
+                    <th>Concepto</th>
+                    <th>Remitente</th>
+                    <th>Destinatario</th>
+                    <th>Tracking</th>
+                    <th aria-label="Precio del envío">Saldo inicial / final</th>
                     <th>Estado</th>
+                    <th>Guía</th>
                     <th>Acciones</th>
                 </tr>
             </thead>
@@ -205,52 +208,77 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             {% for s in solicitudes %}
                 {% set es_baja = s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                 <tr class="shipment-row{% if es_baja %} is-cancelled{% endif %}">
-                    <td data-label="Fecha" class="shipment-date-cell">
-                        <time datetime="{{ s.created_at.strftime('%Y-%m-%d') if s.created_at else '' }}">{{ s.created_at.strftime("%d/%m/%Y") if s.created_at else "—" }}</time>
-                        <small>{% if s._ambito_portal == 'nacional' %}🇦🇷 Nacional{% elif s._ambito_portal == 'internacional' %}🌐 Internacional{% else %}Sin clasificar{% endif %}</small>
+                    <td data-label="Fecha" class="shipment-date-cell mono">
+                        {{ (s.fecha_operacion or s.created_at).strftime("%d/%m/%Y") if (s.fecha_operacion or s.created_at) else "—" }}
                     </td>
-                    <td data-label="Seguimiento" class="shipment-tracking-cell">
+                    <td data-label="Concepto" class="shipment-concept-cell">
+                        <strong>Flete</strong>
+                        <small>{{ (s.courier or '—')|upper }}</small>
+                        {% if s.etiqueta_cliente %}<small>{{ s.etiqueta_cliente }}</small>{% endif %}
+                    </td>
+                    <td data-label="Remitente" class="shipment-person-cell">
+                        <strong>{{ s.remitente_nombre or '—' }}</strong>
+                        <small>{{ s.remitente_ciudad or '' }}{% if s.remitente_ciudad and s.remitente_pais %}, {% endif %}{{ nombre_pais(s.remitente_pais) if s.remitente_pais else '' }}</small>
+                    </td>
+                    <td data-label="Destinatario" class="shipment-person-cell">
+                        <strong class="shipment-recipient">{{ s.dest_nombre or '—' }}</strong>
+                        <small>{{ s.dest_ciudad or '' }}{% if s.dest_ciudad and s.destino_pais %}, {% endif %}{{ nombre_pais(s.destino_pais) if s.destino_pais else '' }}</small>
+                    </td>
+                    <td data-label="Tracking" class="shipment-tracking-cell">
                         {% if s.tracking %}
                             {% set turl = url_tracking(s.courier, s.tracking) %}
                             <a href="{{ turl }}" target="_blank" rel="noopener" class="shipment-tracking mono">{{ s.tracking }}</a>
-                        {% else %}
-                            <strong class="shipment-tracking shipment-tracking-pending">Pendiente</strong>
-                        {% endif %}
-                        <small class="shipment-number mono">{% if s.numero_guia_tauro %}TAURO {{ s.numero_guia_tauro }}{% else %}Envío #{{ s.id }}{% endif %}</small>
-                        {% if s.etiqueta_cliente %}<span class="shipment-reference">{{ s.etiqueta_cliente }}</span>{% endif %}
-                        {% if s.estado == 'REEMPLAZADO' and s.tracking_vigente %}<small class="shipment-replacement">Nueva guía: {{ s.tracking_vigente }}</small>{% endif %}
+                        {% else %}<span class="shipment-empty">—</span>{% endif %}
+                        {% if s.numero_guia_tauro %}<small class="mono">TAURO {{ s.numero_guia_tauro }}</small>{% endif %}
+                        {% if s.estado == 'REEMPLAZADO' and s.tracking_vigente %}<small>Reemplazado por {{ s.tracking_vigente }}</small>{% elif s.reemplaza_solicitud_id and s.tracking_anterior %}<small>Corrige {{ s.tracking_anterior }}</small>{% endif %}
                     </td>
-                    <td data-label="Destinatario y destino" class="shipment-recipient-cell">
-                        <strong class="shipment-recipient">{{ s.dest_nombre or 'Destinatario sin informar' }}</strong>
-                        <span class="shipment-destination">{{ s.dest_ciudad or 'Destino sin ciudad' }}{% if s.destino_pais %}, {{ nombre_pais(s.destino_pais) }}{% endif %}</span>
-                        <small class="shipment-package">{{ s.cantidad or 1 }} {{ 'bulto' if (s.cantidad or 1) == 1 else 'bultos' }}{% if s.producto_alias %} · {{ s.producto_alias }}{% endif %}</small>
-                    </td>
-                    <td class="mono shipment-price-cell" data-label="Precio">
+                    <td class="mono envio-price-cell" data-label="Saldo inicial / final">
                         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                             <strong class="shipment-no-charge">Sin cargo</strong>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
-                            <strong class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
-                            <small>ARS · costo final</small>
-                            {% if s.diferencia_flete_ars or s.tax_cliente_ars or s.ajuste_comercial_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}<a href="/portal/envios/{{ s.id }}#costo-del-envio" class="shipment-price-detail">Ver ajuste</a>{% endif %}
+                            {% set tiene_ajuste = s.diferencia_flete_ars or s.tax_cliente_ars or s.ajuste_comercial_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}
+                            {% if tiene_ajuste %}
+                            <span class="envio-price-initial"><small>Inicial · saldo cotizado</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
+                            <span class="envio-price-final"><small>Final · Total registrado · ARS · costo final</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
+                            <details class="envio-price-breakdown">
+                            <summary>Ver desglose</summary>
+                            {% if s.diferencia_flete_ars %}
+                                <span class="envio-price-extra diferencia"><b>Diferencia</b><span>{{ "+" if s.diferencia_flete_ars > 0 else "−" }} {{ dinero_ars(s.diferencia_flete_ars|abs) }}</span></span>
+                            {% endif %}
+                            {% if s.tax_cliente_ars %}
+                                <span class="envio-price-extra tax"><b>TAX</b><span>{{ "+" if s.tax_cliente_ars > 0 else "−" }} {{ dinero_ars(s.tax_cliente_ars|abs) }}</span></span>
+                            {% endif %}
+                            {% if s.ajuste_comercial_ars %}
+                                <span class="envio-price-extra ajuste-comercial"><b>{{ "Descuento TAURO" if s.ajuste_comercial_ars < 0 else "Ajuste de precio" }}</b><span>{{ "+" if s.ajuste_comercial_ars > 0 else "−" }} {{ dinero_ars(s.ajuste_comercial_ars|abs) }}</span></span>
+                            {% endif %}
+                            </details>
+                            {% else %}
+                            <span class="envio-price-final"><small>Inicial / final · ARS · costo final</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
+                            {% endif %}
                         {% else %}—{% endif %}
                     </td>
-                    <td data-label="Estado" class="shipment-status-cell">
+                    <td data-label="Estado" class="envio-status-cell">
                         <span class="badge {{ 'shipment-cancelled-badge' if es_baja else s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado if es_baja else s.estado_cliente_ui.label }}</span>
-                        <small>{{ (s.courier or 'Courier pendiente')|upper }}</small>
-                        {% if s.seguimiento_sin_actualizaciones and not es_baja %}<span class="shipment-attention">Revisar seguimiento</span>{% endif %}
+                        {% if s.recoleccion and s.recoleccion.estado == 'AGENDADA' and s.estado_cliente_ui.codigo == 'ESPERA_RECOLECCION' %}<small class="tracking-updated">Recolección programada</small>{% endif %}
+                        {% if s.seguimiento_sin_actualizaciones and not es_baja %}<small class="tracking-alert">Entrega aún no confirmada.</small>{% endif %}
+                    </td>
+                    <td data-label="Guía" class="shipment-guide-cell">
+                        {% if s.tiene_label and not es_baja %}<a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-ghost btn-sm" aria-label="{{ 'Descargar guía + invoice' if s.tiene_factura_comercial else 'Descargar guía' }}">Ver guía</a>
+                        {% elif s.guia_url and not es_baja %}<a href="{{ s.guia_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Ver guía</a>
+                        {% else %}<span class="shipment-empty">—</span>{% endif %}
                     </td>
                     <td data-label="Acciones" class="shipment-actions-cell">
                         <details class="shipment-actions">
                             <summary>Opciones <span aria-hidden="true">⌄</span></summary>
                             <div class="shipment-actions-menu">
-                                <a href="/portal/envios/{{ s.id }}" class="shipment-action shipment-action-primary">Ver información completa <span aria-hidden="true">→</span></a>
-                                {% if s.tiene_label and not es_baja %}
-                                <a href="/portal/envios/{{ s.id }}#guia-del-envio" class="shipment-action">Ver guía en pantalla</a>
-                                <a href="/portal/envios/{{ s.id }}/guia.pdf" download class="shipment-action">Descargar guía{% if s.tiene_factura_comercial %} + invoice{% endif %}</a>
-                                {% elif s.guia_url and not es_baja %}
-                                <a href="{{ s.guia_url }}" target="_blank" rel="noopener" class="shipment-action">Ver guía</a>
-                                {% endif %}
-                                {% if s.tracking or s.tiene_label or s.guia_url %}
+                            <a href="/portal/envios/{{ s.id }}" class="shipment-action shipment-action-primary">Ver información completa <span aria-hidden="true">→</span></a>
+                            {% if s.tiene_label and not es_baja %}
+                            <a href="/portal/envios/{{ s.id }}#guia-del-envio" class="shipment-action">Ver guía en pantalla</a>
+                            <a href="/portal/envios/{{ s.id }}/guia.pdf" download class="shipment-action">Descargar guía{% if s.tiene_factura_comercial %} + invoice{% endif %}</a>
+                            {% elif s.guia_url and not es_baja %}
+                            <a href="{{ s.guia_url }}" target="_blank" rel="noopener" class="shipment-action">Ver guía</a>
+                            {% endif %}
+                            {% if s.tracking or s.tiene_label or s.guia_url %}
                                 <button type="button" class="shipment-action"
                                         data-verificar-envio
                                         data-verificar-url="/portal/envios/{{ s.id }}/verificacion"
@@ -258,8 +286,15 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                         data-verificar-ref="{{ s.tracking or ('Envío #' ~ s.id) }}">
                                     Verificar datos
                                 </button>
-                                {% endif %}
-                                {% if s.tiene_label and not es_baja and s._ambito_portal == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
+                            {% endif %}
+                            {% if s._ambito_portal == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="shipment-action">Repetir envío</a>{% endif %}
+                            {% if s.puede_corregir_lista %}<a href="/portal/envios/nuevo?corregir={{ s.id }}" class="shipment-action">Editar / reemplazar</a>{% endif %}
+                            {% if s.puede_cancelar_lista %}
+                            <form method="POST" action="/portal/envios/{{ s.id }}/cancelar" data-confirm="¿Cancelar este envío? El sistema volverá a validar con el courier antes de modificarlo.">
+                                <button type="submit" class="shipment-action shipment-action-danger">Cancelar envío</button>
+                            </form>
+                            {% endif %}
+                            {% if s.tiene_label and s._ambito_portal == 'internacional' and ((s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA') or (s.estado_cliente_ui.codigo == 'ESPERA_RECOLECCION' and (s.courier or '')|upper != 'ENVIA')) %}
                                 {% if s.recoleccion_error %}
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="shipment-action">Consultar recolección</a>
                                 {% elif s.recoleccion and s.recoleccion.estado != 'CANCELADA' %}
@@ -267,14 +302,12 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                 {% else %}
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="shipment-action">Programar recolección</a>
                                 {% endif %}
-                                {% endif %}
-                                {% if s._ambito_portal == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="shipment-action">Repetir envío</a>{% endif %}
-                                {% if (s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente and not s.tracking and not es_baja and s.estado not in ('EMITIENDO', 'VERIFICAR_COURIER') %}
+                            {% elif (s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente and not s.tracking and s.estado not in ('CANCELADO', 'REEMPLAZADO', 'EMITIENDO', 'VERIFICAR_COURIER') %}
                                 <form method="POST" action="/portal/envios/{{ s.id }}/emitir"
                                       data-confirm="¿Emitir la guía de {{ (s.courier or 'el courier')|upper }} ahora? Se genera la guía real y el cargo entra a tu cuenta corriente. No se puede deshacer.">
                                     <button type="submit" class="shipment-action shipment-action-emphasized">Emitir guía</button>
                                 </form>
-                                {% endif %}
+                            {% endif %}
                             </div>
                         </details>
                     </td>

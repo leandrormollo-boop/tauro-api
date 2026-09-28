@@ -5,7 +5,7 @@
 <div class="page-title">
   <div class="eyebrow">Operaciones</div>
   <h1>Cargar envío realizado</h1>
-  <p>Registrá un envío ya realizado. Quedarán disponibles su guía y tracking, y se generará el cargo al cliente.</p>
+  <p>{% if form.repetir_id %}Repetí los datos operativos del envío #{{ form.repetir_id }}. Completá un tracking y precios nuevos antes de cargarlo.{% else %}Registrá un envío ya realizado. Quedarán disponibles su guía y tracking, y se generará el cargo al cliente.{% endif %}</p>
 </div>
 
 {% if request.query_params.get('error') %}
@@ -21,7 +21,7 @@
         <select name="cliente_id" required>
           <option value="">— Seleccioná —</option>
           {% for c in clientes %}
-          <option value="{{ c.cliente_id }}">{{ c.cliente_id }} — {{ c.nombre or c.email }}</option>
+          <option value="{{ c.cliente_id }}"{% if form.cliente_id == c.cliente_id %} selected{% endif %}>{{ c.cliente_id }} — {{ c.nombre or c.email }}</option>
           {% endfor %}
         </select>
       </div>
@@ -31,50 +31,55 @@
       </div>
     </div>
 
-    <h3 style="margin:6px 0 12px;">Destinatario</h3>
+    <h3 style="margin:6px 0 12px;">Remitente y destinatario</h3>
+    <div class="form-group">
+      <label>Nombre del remitente</label>
+      <input type="text" name="remitente_nombre" value="{{ form.remitente_nombre or '' }}"
+             placeholder="Nombre que figura en la guía">
+    </div>
     <div class="form-grid-3">
       <div class="form-group">
         <label>Nombre *</label>
-        <input type="text" name="dest_nombre" required placeholder="Michelle Bordelon">
+        <input type="text" name="dest_nombre" required value="{{ form.dest_nombre or '' }}" placeholder="Michelle Bordelon">
       </div>
       <div class="form-group">
         <label>Ciudad</label>
-        <input type="text" name="dest_ciudad" placeholder="Seattle">
+        <input type="text" name="dest_ciudad" value="{{ form.dest_ciudad or '' }}" placeholder="Seattle">
       </div>
       <div class="form-group">
         <label>País (código) *</label>
-        <input type="text" name="destino_pais" required maxlength="2"
+        <input type="text" name="destino_pais" required maxlength="2" value="{{ form.destino_pais or '' }}"
                placeholder="US" style="text-transform:uppercase;">
       </div>
     </div>
     <div class="form-grid-2">
       <div class="form-group">
         <label>Courier *</label>
-        <select name="courier" required><option>DHL</option><option>FEDEX</option><option>ANDREANI</option><option>OCA</option></select>
+        <select name="courier" required>{% for opcion in ('DHL','FEDEX','ANDREANI','OCA') %}<option{% if (form.courier or 'DHL')|upper == opcion %} selected{% endif %}>{{ opcion }}</option>{% endfor %}</select>
       </div>
       <div class="form-group">
         <label>País de origen *</label>
-        <input type="text" name="origen_pais" value="AR" maxlength="2" required style="text-transform:uppercase;">
+        <input type="text" name="origen_pais" value="{{ form.origen_pais or 'AR' }}" maxlength="2" required style="text-transform:uppercase;">
       </div>
     </div>
     <div class="form-group">
       <label>Dirección (opcional)</label>
-      <input type="text" name="dest_direccion" placeholder="5223 42nd Ave SW">
+      <input type="text" name="dest_direccion" value="{{ form.dest_direccion or '' }}" placeholder="5223 42nd Ave SW">
     </div>
 
     <h3 style="margin:6px 0 12px;">Carga y precio</h3>
     <div class="form-grid-3">
       <div class="form-group">
         <label>Producto *</label>
-        <input type="text" name="producto" required placeholder="Cartera 1">
+        <input type="text" name="producto" required value="{{ form.producto or '' }}" placeholder="Cartera 1">
       </div>
       <div class="form-group">
         <label>Cajas</label>
-        <input type="text" name="cantidad" inputmode="numeric" data-numero="entero" value="1">
+        <input type="text" name="cantidad" inputmode="numeric" data-numero="entero" value="{{ form.cantidad or 1 }}">
       </div>
       <div class="form-group">
         <label>Peso (kg)</label>
-        <input type="text" name="peso_kg" inputmode="decimal" data-numero="decimal" value="1">
+        <input type="text" name="peso_kg" inputmode="decimal" data-numero="decimal" value="{{ form.peso_kg or 1 }}">
       </div>
     </div>
     <div class="form-grid-3">
@@ -99,7 +104,7 @@
 
     <div class="form-group">
       <label>Observaciones</label>
-      <input type="text" name="observaciones"
+      <input type="text" name="observaciones" value="{{ form.observaciones or '' }}"
              placeholder="⚠️ Este texto lo VE el cliente en su portal">
     </div>
 
