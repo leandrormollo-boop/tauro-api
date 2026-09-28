@@ -22,7 +22,7 @@
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;">
     <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
       <div style="font-size:11px;color:var(--fg-4);">VARIABLES SMTP</div>
-      <b style="display:block;margin-top:5px;color:{{ '#46d69b' if email_status.configured else '#ff7474' }};">
+      <b style="display:block;margin-top:5px;color:{{ 'var(--ok)' if email_status.configured else 'var(--error)' }};">
         {{ 'Presentes' if email_status.configured else 'Falta configurar' }}
       </b>
     </div>
@@ -32,7 +32,7 @@
     </div>
     <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
       <div style="font-size:11px;color:var(--fg-4);">FALLIDOS · 24 H</div>
-      <b style="display:block;margin-top:5px;color:{{ '#ff7474' if email_status.fallidos_24h else 'inherit' }};">{{ email_status.fallidos_24h }}</b>
+      <b style="display:block;margin-top:5px;color:{{ 'var(--error)' if email_status.fallidos_24h else 'inherit' }};">{{ email_status.fallidos_24h }}</b>
     </div>
     <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
       <div style="font-size:11px;color:var(--fg-4);">EN PROCESO</div>
@@ -40,13 +40,13 @@
     </div>
     <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
       <div style="font-size:11px;color:var(--fg-4);">COTIZACIONES A REVISAR</div>
-      <b style="display:block;margin-top:5px;color:{{ '#ffb45e' if email_status.requieren_verificacion else 'inherit' }};">
+      <b style="display:block;margin-top:5px;color:{{ 'var(--warn)' if email_status.requieren_verificacion else 'inherit' }};">
         {{ email_status.requieren_verificacion }}
       </b>
     </div>
     <div style="padding:12px;border:1px solid var(--border,#2a2440);border-radius:10px;">
       <div style="font-size:11px;color:var(--fg-4);">RECUPEROS A REVISAR</div>
-      <b style="display:block;margin-top:5px;color:{{ '#ffb45e' if email_status.reset_requieren_verificacion else 'inherit' }};">
+      <b style="display:block;margin-top:5px;color:{{ 'var(--warn)' if email_status.reset_requieren_verificacion else 'inherit' }};">
         {{ email_status.reset_requieren_verificacion }}
       </b>
     </div>

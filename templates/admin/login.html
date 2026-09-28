@@ -1,14 +1,18 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark" data-theme-scope="admin">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Login · Tauro</title>
+  <meta name="theme-color" content="#0c0a14">
+  <script src="/static/js/admin-theme.js?v=1"></script>
   <link rel="icon" type="image/png" href="/static/img/favicon.png?v=2">
   <link rel="apple-touch-icon" href="/static/img/favicon-180.png">
-  <link rel="stylesheet" href="/static/css/tauro.css?v=17">
+  <link rel="stylesheet" href="/static/css/tauro.css?v=49">
+  <link rel="stylesheet" href="/static/css/admin-theme.css?v=1">
 </head>
 <body>
+<div class="admin-theme-login">{% include 'admin/_theme_selector.html' %}</div>
 <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px 24px;">
   <div class="login-card fade-up">
     <div class="login-back-row">
