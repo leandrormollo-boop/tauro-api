@@ -369,6 +369,27 @@ def test_waimao_inicia_en_septiembre_y_conserva_saldo_anterior(
     assert periodo["saldo_anterior_ars"] + periodo["neto_desde_ars"] == periodo["saldo_total_ars"]
 
 
+def test_mes_anterior_al_inicio_no_mezcla_resumen_con_movimientos(
+    cuenta_servicios, capturar_template, monkeypatch,
+):
+    resumenes = []
+    monkeypatch.setattr(portal, "resumen_mensual_cuenta", lambda *args: resumenes.append(args))
+
+    respuesta = portal.cuenta_corriente(
+        SimpleNamespace(), cliente="WAIMAO", periodo="2026-08",
+    )
+    contexto = respuesta["context"]
+    consulta = next(c for c in cuenta_servicios if c[0] == "movimientos")
+
+    assert consulta[2] == {"q": "", "desde": "2026-09-01", "hasta": ""}
+    assert contexto["periodo_filtro"] == ""
+    assert contexto["periodo_filtro_label"] == ""
+    assert contexto["resumen_mensual"] is None
+    assert contexto["filtros_error"]
+    assert resumenes == []
+    assert "periodo" not in parse_qs(urlsplit(contexto["cuenta_url"](pagina=2)).query)
+
+
 @pytest.mark.parametrize("cliente_sesion", [CLIENTE, "OTRO_CLIENTE", "WAIMAO_2"])
 def test_corte_waimao_no_recorta_otros_clientes(
     cuenta_servicios, capturar_template, cliente_sesion,

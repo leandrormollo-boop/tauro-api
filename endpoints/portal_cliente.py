@@ -1145,8 +1145,14 @@ def cuenta_corriente(
         filtros = normalizar_filtros_cuenta(q, desde, hasta, inicio=inicio_cuenta)
     except ValueError as exc:
         filtros = normalizar_filtros_cuenta(inicio=inicio_cuenta)
+        # Si el mes pedido queda fuera del período visible (por ejemplo,
+        # anterior al corte de una cuenta), no conservarlo para el resumen ni
+        # para los enlaces. El historial ya volvió al rango permitido y ambos
+        # bloques deben describir exactamente la misma consulta.
+        periodo_filtro = ""
+        periodo_info = None
         filtros_error = (f"{exc} Se muestra la cuenta desde su fecha de inicio."
-                         if inicio_cuenta else f"{exc} Se muestran los movimientos sin búsqueda ni filtro de fechas.")
+                          if inicio_cuenta else f"{exc} Se muestran los movimientos sin búsqueda ni filtro de fechas.")
         pagina_numero = 1
 
     def cuenta_url(**cambios):
