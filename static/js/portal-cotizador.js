@@ -277,6 +277,7 @@
           controls[scope].resume();
         } else controls[scope].pause();
       });
+      if (window.TauroQuoteGlobe) window.TauroQuoteGlobe.sync(root);
       if (changeUrl && !root.closest('dialog')) history.replaceState(history.state, '', '/portal/cotizar?ambito=' + active);
     }
     root.addEventListener('click', function (event) {
@@ -288,6 +289,7 @@
       Object.values(locationControls).forEach(function (control) { if (control) control.cancel(); });
     }};
     initialized.set(root, api);
+    if (window.TauroQuoteGlobe) window.TauroQuoteGlobe.attach(root);
     // Conservar el resultado de un POST sin JS hasta la primera edición.
     Object.keys(controls).forEach(function (scope) {
       if (scope !== active) controls[scope].pause();

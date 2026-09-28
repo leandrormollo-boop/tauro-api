@@ -3,17 +3,7 @@
 
   var STORAGE_KEY = "tauro.portal.theme";
   var root = document.documentElement;
-  var media = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
   var metaColor = document.getElementById("portal-theme-color");
-
-  function savedTheme() {
-    try {
-      var value = localStorage.getItem(STORAGE_KEY);
-      return value === "light" || value === "dark" ? value : "";
-    } catch (_) {
-      return "";
-    }
-  }
 
   function updateControls(theme) {
     var nextLabel = theme === "light" ? "Modo oscuro" : "Modo claro";
@@ -32,7 +22,7 @@
     root.classList.add("theme-switching");
     root.dataset.theme = theme;
     root.style.colorScheme = theme;
-    if (metaColor) metaColor.content = theme === "light" ? "#f5f3f8" : "#0c0a14";
+    if (metaColor) metaColor.content = theme === "light" ? "#f8f7fc" : "#0c0a14";
     if (persist) {
       try { localStorage.setItem(STORAGE_KEY, theme); } catch (_) {}
     }
@@ -46,11 +36,6 @@
     });
   });
 
-  updateControls(root.dataset.theme || "dark");
+  updateControls(root.dataset.theme || "light");
 
-  if (media && media.addEventListener) {
-    media.addEventListener("change", function (event) {
-      if (!savedTheme()) applyTheme(event.matches ? "light" : "dark", false);
-    });
-  }
 })();

@@ -1,0 +1,80 @@
+.quote-route-map { --map-route-accent:#8b6bf7; --map-origin-accent:#9b7af7; --map-country-deep:#7045de; position:absolute; right:-12px; top:20px; width:46%; min-width:0; padding:8px 0 16px; }
+.quote-map-heading { display:flex; align-items:center; justify-content:center; gap:8px; color:var(--fg-3); font:9px var(--font-mono); letter-spacing:.15em; }
+.quote-map-live-dot { width:5px; height:5px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent-glow); }
+.quote-map-art { width:100%; aspect-ratio:1/1; max-height:430px; position:relative; }
+.quote-map-art canvas { display:block; width:100%; height:100%; }
+.quote-map-itinerary { display:grid; grid-template-columns:minmax(0,1fr) 22px minmax(0,1fr); align-items:start; gap:8px; max-width:400px; margin:-6px auto 0; padding:18px 14px; border-top:1px solid var(--line); }
+.quote-map-endpoint { display:flex; gap:8px; min-width:0; }
+.quote-map-endpoint > div { min-width:0; }
+.quote-map-endpoint small { display:block; color:var(--fg-4); font:8px var(--font-mono); letter-spacing:.12em; margin-bottom:7px; }
+.quote-map-endpoint strong { display:block; color:var(--fg); font:500 clamp(14px,1.55vw,20px)/1.2 var(--font-display); overflow-wrap:anywhere; }
+.quote-map-endpoint div > span { display:block; color:var(--fg-3); font-size:10px; margin-top:5px; }
+.quote-map-pin { flex:0 0 6px; width:6px; height:6px; margin-top:3px; background:var(--map-route-accent); border-radius:50%; }
+.quote-map-pin.is-origin { background:var(--map-origin-accent); }
+.quote-map-connector { color:var(--map-route-accent); font-size:22px; padding-top:15px; }
+.quote-map-footer { display:flex; align-items:center; justify-content:center; gap:10px; padding:0 14px; margin:2px auto; }
+.quote-map-footer > span { color:var(--fg-4); font-size:9px; line-height:1.5; max-width:210px; }
+.quote-map-toggle { border:0; background:transparent; color:var(--fg-3); font:10px var(--font-body); padding:7px 0; white-space:nowrap; text-decoration:underline; text-underline-offset:3px; cursor:pointer; min-height:32px; }
+.quote-map-toggle:hover { color:var(--accent); }
+.quote-map-credit { display:block; text-align:center; color:var(--fg-4); font:7px var(--font-mono); margin-top:15px; opacity:.75; }
+
+.quote-map-art { border:1px solid rgba(147,126,177,.07); border-radius:30px; background:radial-gradient(ellipse at 55% 35%,rgba(140,115,181,.035),transparent 72%); overflow:hidden; }
+.quote-map-art canvas { cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none; border-radius:inherit; }
+.quote-map-art canvas:focus-visible { outline:2px solid var(--accent); outline-offset:-3px; }
+.quote-map-art.is-dragging canvas { cursor:grabbing; }
+.quote-map-art.is-pointer-view canvas:focus-visible { outline:none; }
+.quote-map-glint { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; border-radius:inherit; overflow:hidden; }
+.quote-map-glint-layer { filter:drop-shadow(0 0 3px #8b6bf7); }
+.quote-map-glint-band { transform-box:view-box; transform-origin:50% 50%; animation:quote-map-metal-pass 3.8s ease-in-out infinite; animation-play-state:paused; opacity:1; }
+.quote-map-glint[data-running="true"] .quote-map-glint-band,
+.quote-map-glint[data-running="true"] .quote-map-current { animation-play-state:running; }
+.quote-map-current-glow { filter:drop-shadow(0 0 3px #8b6bf7) drop-shadow(0 0 6px #7045de); }
+.quote-map-current { fill:none; stroke-linecap:round; animation:quote-map-electric-travel 2.8s linear infinite; animation-play-state:paused; }
+.quote-map-current.is-trail { stroke:#8b6bf7; stroke-width:3; stroke-dasharray:10 90; opacity:.85; }
+.quote-map-current.is-core { stroke:#f6f0ff; stroke-width:1.8; stroke-dasharray:2 98; animation-name:quote-map-electric-head; }
+@keyframes quote-map-electric-travel { from { stroke-dashoffset:0; } to { stroke-dashoffset:-100; } }
+@keyframes quote-map-electric-head { from { stroke-dashoffset:-8; } to { stroke-dashoffset:-108; } }
+@keyframes quote-map-metal-pass {
+  0% { transform:translateX(0) skewX(-14deg); }
+  65%,100% { transform:translateX(165%) skewX(-14deg); }
+}
+html[data-theme="light"] .quote-map-glint-band { opacity:.55; }
+html[data-theme="light"] .quote-map-current-glow { opacity:.75; }
+@media(prefers-reduced-motion:reduce) {
+ .quote-map-glint-band { animation:none; transform:translateX(76%) skewX(-14deg); opacity:.24; }
+ .quote-map-current { display:none; animation:none; }
+}
+.quote-map-brand { display:inline-flex; align-items:center; gap:7px; position:absolute; top:16px; left:17px; z-index:2; pointer-events:none; color:var(--fg); user-select:none; }
+.quote-map-brand img { width:23px; height:auto; object-fit:contain; }
+.quote-map-brand > span { font:600 10px var(--font-body); letter-spacing:.06em; }
+.quote-map-brand small { color:var(--accent); font:400 9px var(--font-body); letter-spacing:.06em; }
+.quote-map-brand-dark { display:none; }
+html[data-theme="light"] .quote-map-brand-dark { display:block; }
+html[data-theme="light"] .quote-map-brand-white { display:none; }
+.quote-map-explore-bar { position:absolute; bottom:13px; left:17px; right:14px; display:flex; align-items:center; justify-content:space-between; gap:8px; pointer-events:none; }
+.quote-map-drag-hint { color:var(--fg-3); font-size:9px; letter-spacing:.02em; }
+.quote-map-controls { display:flex; align-items:center; gap:1px; padding:3px; border:1px solid var(--line); border-radius:30px; background:var(--bg-elev); box-shadow:0 4px 18px rgba(0,0,0,.13); pointer-events:auto; }
+.quote-map-controls button { display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:transparent; color:var(--fg-2); font:18px var(--font-body); cursor:pointer; }
+.quote-map-controls button:hover,.quote-map-controls button:focus-visible { background:var(--accent-soft); color:var(--accent); outline:1px solid var(--accent); }
+.quote-map-controls button:disabled { opacity:.35; cursor:default; outline:none; }
+.quote-map-controls button[data-map-reset] { color:var(--accent); }
+.quote-route-map .quote-map-heading { margin-bottom:12px; }
+.quote-map-itinerary { margin-top:8px; border-top:0; }
+/* The globe occupies the quote's existing results column, never a second form. */
+.unified-quote .quote-route-map{position:relative;inset:auto;width:100%;padding:0}
+.unified-quote .quote-map-art{position:relative;inset:auto;width:100%;height:auto;max-height:none;aspect-ratio:1;max-width:340px;margin:auto;border-radius:22px}
+.unified-quote .quote-map-heading{display:none}
+.unified-quote .quote-map-itinerary{position:static;width:100%;max-width:none;margin:4px 0 0;padding:10px 0;grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr);gap:6px}
+.unified-quote .quote-map-endpoint{max-width:none;gap:6px}.unified-quote .quote-map-endpoint strong{font-size:13px}.unified-quote .quote-map-endpoint small{font-size:8px;margin-bottom:4px}.unified-quote .quote-map-endpoint div>span{font-size:9px}
+.unified-quote .quote-map-connector{font-size:18px;padding-top:13px}
+.unified-quote .quote-map-footer{position:static;transform:none;padding:0;margin:0;justify-content:flex-start}.unified-quote .quote-map-footer>span{font-size:9px;max-width:none}.unified-quote .quote-map-toggle{display:none}
+.unified-quote .quote-map-credit{font-size:7px;margin:7px 0 3px}
+.unified-quote .quote-map-brand{top:10px;left:10px;gap:4px}.unified-quote .quote-map-brand img{width:19px}.unified-quote .quote-map-brand>span{font-size:8px}.unified-quote .quote-map-brand small{font-size:7px}
+.unified-quote .quote-map-explore-bar{left:10px;right:8px;bottom:8px}.unified-quote .quote-map-controls button{width:28px;height:28px}.unified-quote .quote-map-drag-hint{font-size:8px}
+.has-quote-globe .uq-empty{display:none}.has-quote-globe .uq-idle{padding:10px 0 0;font-size:10px}
+.uq-map-switch{display:block;margin:0 0 12px auto;border:1px solid var(--line);border-radius:99px;background:var(--bg);color:var(--accent);font:500 11px var(--font-body);padding:6px 12px;cursor:pointer}
+.uq-map-switch:focus-visible,.uq-mobile-map summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.uq-mobile-map{display:none;border:1px solid var(--line);border-radius:18px;margin:0 0 12px;padding:0 12px;background:var(--bg-elev)}
+.uq-mobile-map summary{font:500 11px var(--font-body);color:var(--accent);cursor:pointer;padding:10px 0}
+html[data-theme="light"] .unified-quote .quote-map-art{background:radial-gradient(ellipse at 55% 40%,#eee5ff60,transparent 73%);border-color:#e5dcef}
+@media(max-width:779px){.has-quote-globe .uq-mobile-map{display:block}.unified-quote .uq-mobile-map .quote-map-art{max-width:280px}.unified-quote .uq-mobile-map .quote-map-credit{margin-bottom:10px}}

@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
   <defs>
     <radialGradient id="atmosphere"><stop offset=".72" stop-color="#8b6bf7" stop-opacity=".35"/><stop offset="1" stop-color="#7045de" stop-opacity="0"/></radialGradient>
-    <radialGradient id="ocean" cx="30%" cy="23%" r="80%"><stop stop-color="#282236"/><stop offset="1" stop-color="#090b13"/></radialGradient>
-    <linearGradient id="land" x2=".65" y2="1"><stop stop-color="#b2a2cf"/><stop offset="1" stop-color="#625574"/></linearGradient>
-    <radialGradient id="shade" cx="30%" cy="24%" r="80%"><stop offset=".35" stop-color="#090b13" stop-opacity="0"/><stop offset="1" stop-color="#090b13" stop-opacity=".62"/></radialGradient>
+    <radialGradient id="ocean" cx="28%" cy="20%" r="85%"><stop stop-color="#a583ff"/><stop offset=".45" stop-color="#7045de"/><stop offset="1" stop-color="#321768"/></radialGradient>
+    <linearGradient id="land" x2=".65" y2="1"><stop stop-color="#faf7ff"/><stop offset="1" stop-color="#c0ace5"/></linearGradient>
+    <radialGradient id="shade" cx="27%" cy="20%" r="85%"><stop stop-color="#ffffff" stop-opacity=".32"/><stop offset=".38" stop-color="#321768" stop-opacity="0"/><stop offset="1" stop-color="#20103f" stop-opacity=".55"/></radialGradient>
     <linearGradient id="rim" x2=".7" y2="1"><stop stop-color="#bda2ff"/><stop offset=".45" stop-color="#8b6bf7"/><stop offset="1" stop-color="#7045de" stop-opacity=".45"/></linearGradient>
   </defs>
   <circle cx="48" cy="48" r="48" fill="url(#atmosphere)"/>
@@ -13,6 +13,6 @@
   <path d="M35.9,78.9L36.1,79L36.5,79.3L37.1,79.5L37.6,79.6L37.6,79.7L37.3,79.7L37,79.6L36.9,79.6L36.5,79.6ZM36,69.9L36,70.3L36,70.8L36.1,71.3L36.1,71.4L36.1,71.7L36.2,71.9L36.9,72.4L36.9,72.7L37.3,72.9L37.3,73.1L37.1,73.7L36.5,73.9L35.6,73.9L35.1,73.8L35.3,74.1L35.4,74.4L35.5,74.6L35.4,74.7L35,74.8L34.5,74.6L34.4,74.7L34.6,75.1L35,75.2L35.1,75.1L35.4,75.4L35.1,75.5L34.9,75.7L35,76.1L35.1,76.3L34.7,76.2L34.5,76.4L34.6,76.7L35.1,77L35.5,77.1L35.6,77.4L35.4,77.6L35.4,78L35.2,78.1L35.2,78.2L35.6,78.6L36,78.8L35.8,78.8L35.5,78.7L34.7,78.6L34.4,78.4L34.2,78.1L34,78.1L33.8,78L33.4,77.6L33.5,77.5L33.5,77.2L33.3,77.1L33.2,76.8L33,76.3L32.8,76L32.9,76L32.8,75.8L32.5,75.7L32.6,75.6L32.3,75.4L31.9,74.9L32,74.9L31.6,74.3L31.5,73.9L31.4,73.5L31.5,73.4L31.2,72.9L31,72.5L31.1,72.3L31,71.9L31,71.4L30.8,71L30.7,70.9L30.1,70L30.2,69.6L30,69.1L30,68.6L30.1,68.2L30.4,67.9L30.2,67.6L30.2,67.5L30,66.6L30.4,66.4L30.4,65.8L30.4,65.7L30.7,65.2L31.3,65.4L31.7,65.8L31.8,65.4L32.4,65.5L32.5,65.6L33.6,66.6L34.1,66.7L34.8,67.1L35.4,67.3L35.5,67.6L35.2,68.3L35.7,68.5L36.3,68.6L36.7,68.6L37.1,68.2L37.1,67.7L37.4,67.6L37.7,68L37.7,68.4L37.3,68.6L37,68.8L36.6,69.3Z" fill="#8b6bf7"/>
   <circle cx="48" cy="48" r="36" fill="none" stroke="url(#rim)" stroke-width="1.4"/>
   <path d="M36.2,72L42.6,62.6L49.8,51L56.7,38.9L62.2,28.2" fill="none" stroke="#8b6bf7" stroke-width="5" stroke-opacity=".25" stroke-linecap="round"/>
-  <path d="M36.2,72L42.6,62.6L49.8,51L56.7,38.9L62.2,28.2" fill="none" stroke="#bda2ff" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M36.2,72L42.6,62.6L49.8,51L56.7,38.9L62.2,28.2" fill="none" stroke="#ede4ff" stroke-width="1.8" stroke-linecap="round"/>
   <g fill="#eee6ff"><circle cx="36.2" cy="72.0" r="2"/><circle cx="62.2" cy="28.2" r="2"/></g>
 </svg>

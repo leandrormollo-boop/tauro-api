@@ -1,0 +1,12 @@
+/* White and violet TAURO palette. Explicit dark preferences stay available. */
+html[data-theme="light"] {
+  --bg:#f8f7fc;--bg-elev:#fff;--line:#e0d9ec;--fg:#251d34;
+  --fg-2:#51455f;--fg-3:#685d78;--fg-4:#746781;
+  --accent:#7045ce;--accent-glow:rgba(139,107,247,.10);
+}
+html[data-theme="light"] .unified-quote .uq-scopes{background:#efebf5;border-color:#dfd5ed}
+html[data-theme="light"] .unified-quote .uq-scopes a.is-active{background:#fff;border-color:#c7b6e7;color:#653db9;box-shadow:0 2px 8px #4115790d}
+html[data-theme="light"] .unified-quote :is(.uq-route,.uq-packages,.uq-results){background:#fff;border-color:#dfd5ed;box-shadow:0 5px 20px #39185f04}
+html[data-theme="light"] .unified-quote :is(input:not([type=hidden]),select,.tselect-btn){background:#faf8fe;border-color:#9e8bb9;color:#251d34}
+html[data-theme="light"] .unified-quote :is(input,select,.tselect-btn):focus{background:#fff;border-color:#7950de}
+.scope-symbol{filter:drop-shadow(0 1px 1px #4b24762e)}
