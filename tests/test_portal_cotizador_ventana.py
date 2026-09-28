@@ -36,5 +36,6 @@ def test_pide_ubicacion_real_y_mantiene_cajas_visibles():
 def test_recoleccion_se_presenta_como_accion_explicita_del_envio():
     envios=(ROOT/'templates/portal/envios.html').read_text()
     recolecciones=(ROOT/'templates/portal/recolecciones.html').read_text()
-    assert 'Programar retiro' in envios
+    assert 'Programar recolección' in envios
+    assert 'class="shipment-actions-menu"' in envios
     assert 'Programar recolección con {{ envio_pre.courier }}' in recolecciones

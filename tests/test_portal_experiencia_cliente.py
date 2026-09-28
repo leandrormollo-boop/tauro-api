@@ -85,17 +85,19 @@ def test_error_de_emision_se_muestra_una_vez_y_no_promete_solicitud_lista():
     assert "La guía sigue pendiente" in html
 
 
-def test_respuesta_parcial_conserva_estado_y_acciones_sin_repetir_navegacion():
+def test_respuesta_parcial_conserva_estado_y_menu_sin_repetir_navegacion():
     full, partial = _render(), _render(parcial=True)
     for html in (full, partial):
         assert 'data-envios-region' in html
         assert html.count('title="Estado actual del envío">Entregado</span>') == 1
         assert 'title="Estado de la operación"' not in html
         assert '/portal/envios/1/guia.pdf' in html
+        assert 'Ver guía en pantalla' in html
+        assert 'class="shipment-actions"' in html
         assert '/portal/envios/nuevo?repetir=1' in html
         assert 'no ejecutar</script>' not in html
-        assert '&lt;script&gt;no ejecutar&lt;/script&gt;' in html
-        assert 'Sincronizado 14/09/2026 08:20 UTC' in html
+        assert '&lt;script&gt;no ejecutar&lt;/script&gt;' not in html
+        assert 'Sincronizado 14/09/2026 08:20 UTC' not in html
     assert '<aside class="sidebar">' in full
     assert '<aside class="sidebar">' not in partial
     assert '<script' not in partial
@@ -110,11 +112,23 @@ def test_cancelado_no_ofrece_etiqueta_ni_suma_su_precio_en_la_pagina():
     assert 'Sin cargo' in html
 
 
-def test_importe_sin_ajustes_no_repite_precio_inicial_y_final():
+def test_listado_sin_ajustes_muestra_un_solo_costo_final():
     html = _render(parcial=True, precio=125)
     assert 'Ver desglose' not in html
     assert 'envio-price-initial' not in html
-    assert 'Total registrado · ARS' in html
+    assert 'ARS · costo final' in html
+    assert html.count('$ 125,00') == 2  # fila + total de la página
+
+
+def test_listado_prioriza_datos_concretos_y_deja_el_visor_en_el_detalle():
+    listado = _render(parcial=True)
+    detalle = _render(template="portal/envio_detalle.html")
+
+    for encabezado in ("Fecha", "Seguimiento", "Destinatario y destino", "Precio", "Estado", "Acciones"):
+        assert f">{encabezado}<" in listado
+    assert 'class="document-card' not in listado
+    assert 'id="guia-del-envio"' in detalle
+    assert 'data-document-thumb="/portal/documentos/guia/1/miniatura"' in detalle
 
 
 def test_los_retenciones_no_caen_en_el_filtro_de_entregados():

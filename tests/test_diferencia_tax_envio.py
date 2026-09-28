@@ -21,7 +21,7 @@ def test_schema_separa_diferencia_de_flete_y_tax_sin_cambiar_el_total():
     assert "ajuste_cliente_ars\n            - diferencia_flete_ars\n            - tax_cliente_ars" in schema
 
 
-def test_portal_muestra_inicial_diferencia_tax_y_total_en_el_mismo_envio():
+def test_portal_resume_el_total_y_mantiene_el_desglose_en_el_detalle():
     listado = (ROOT / "templates" / "portal" / "envios.html").read_text(
         encoding="utf-8"
     )
@@ -32,12 +32,15 @@ def test_portal_muestra_inicial_diferencia_tax_y_total_en_el_mismo_envio():
         encoding="utf-8"
     )
 
-    assert "Precio del envío" in listado
-    assert "envio-price-extra diferencia" in listado
-    assert "envio-price-extra tax" in listado
-    assert "Total registrado · ARS" in listado
+    assert "ARS · costo final" in listado
+    assert "Ver ajuste" in listado
+    assert "envio-price-extra diferencia" not in listado
+    assert "envio-price-extra tax" not in listado
+    assert 'id="costo-del-envio"' in detalle
+    assert "Precio inicial aceptado" in detalle
     assert "Costo adicional de flete" in detalle
     assert "Impuesto adicional del envío" in detalle
+    assert "Precio final del envío" in detalle
     assert consultas.count("AS diferencia_flete_ars") == 3
     assert consultas.count("AS tax_cliente_ars") == 3
 

@@ -149,7 +149,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="msg warn" role="status">No pudimos consultar la recolección de esta guía. Revisá <a href="/portal/recolecciones?envio={{ s.id }}">su estado</a> antes de programar otro retiro.</div>
 {% endif %}
 <div class="grid-2" style="margin-bottom:16px;">
-    <div class="card">
+    <div class="card" id="guia-del-envio">
         <div class="card-head">
             <div>
                 <h3>Guía {{ courier_nombre }}<span data-help="Archivo de la guía">El PDF incluye una etiqueta por caja.{% if s.tiene_factura_comercial %} La factura comercial está al final del archivo.{% endif %}</span></h3>
@@ -344,7 +344,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="costo-del-envio">
         <div class="card-head">
             <div>
                 <h3>Cuenta del envío</h3>

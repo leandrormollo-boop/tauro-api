@@ -202,7 +202,7 @@ def test_template_preserva_filtros_en_paginacion_y_reinicia_al_filtrar():
     assert "envios-search-icon" not in html
     assert "{{ con_busqueda }}" in html
     assert 'class="shipment-recipient"' in html
-    assert 'class="track-link mono"' in html
+    assert 'class="shipment-tracking mono"' in html
     # Los links de tipo y de paso no incluyen `pagina`: cambiar un filtro
     # siempre vuelve a la primera hoja.
     assert '/portal/envios?tipo=internacional{{ con_paso }}{{ con_periodo }}' in html

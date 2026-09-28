@@ -280,20 +280,32 @@ def test_alta_y_edicion_de_clientes_abren_un_dialogo_sin_bajar_al_formulario():
     assert 'dialog.dataset.openOnLoad === "true"' in html
 
 
-def test_envios_distingue_precio_inicial_diferencias_y_cuenta_corriente():
+def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
     html = _template("envios.html")
+    detalle = _template("envio_detalle.html")
     assert "Monto activo del período" in html
-    assert "Precio del envío" in html
-    assert "Inicial" in html
-    assert "Diferencia" in html
-    assert "TAX" in html
-    assert "Total registrado" in html
+    assert "Destinatario y destino" in html
+    assert "ARS · costo final" in html
+    assert "Ver ajuste" in html
+    assert "Precio inicial aceptado" in detalle
+    assert "Diferencia" in detalle
+    assert "TAX" in detalle
+    assert "Precio final del envío" in detalle
     assert "registrado en esta página" in html
     assert "Cargos y facturas:" in html
     assert "No suma guías canceladas o reemplazadas" in html
     assert "?ambito={{ tipo_filtro }}{% endif %}" in html
     assert "Ver cuenta corriente" in html
     assert "Tu costo" not in html
+
+
+def test_envios_concentra_acciones_y_no_renderiza_documentos_en_cada_fila():
+    html = _template("envios.html")
+    assert '<details class="shipment-actions">' in html
+    assert "Ver información completa" in html
+    assert "Ver guía en pantalla" in html
+    assert "Descargar guía" in html
+    assert "tarjeta_documento(" not in html
 
 
 def test_historial_de_envios_no_queda_truncado_en_cien():
