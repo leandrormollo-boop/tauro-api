@@ -1918,7 +1918,7 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
                        fin.peso_cotizado_kg, fin.peso_final_facturado_kg,
                        fin.peso_base_facturado, fin.motivo_diferencia
                 FROM solicitudes_guia s
-                JOIN clientes c ON c.cliente_id = s.cliente_id
+                LEFT JOIN clientes c ON c.cliente_id = s.cliente_id
                 LEFT JOIN solicitudes_guia_reemisiones re_prev
                   ON re_prev.solicitud_nueva_id=s.id
                 LEFT JOIN solicitudes_guia_reemisiones re_next

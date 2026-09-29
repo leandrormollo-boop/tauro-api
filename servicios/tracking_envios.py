@@ -201,9 +201,9 @@ def _candidato_dhl(solicitud_id: int) -> Optional[dict]:
                   AND estado <> 'REEMPLAZADO'
                   AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                   AND test=FALSE
-                  AND EXISTS (SELECT 1 FROM clientes c
+                  AND (cliente_id IS NULL OR EXISTS (SELECT 1 FROM clientes c
                               WHERE c.cliente_id=solicitudes_guia.cliente_id
-                                AND c.test=FALSE)
+                                AND c.test=FALSE))
                 """,
                 (int(solicitud_id),),
             )
@@ -354,9 +354,9 @@ def actualizar_trackings_diarios_dhl(limite: Optional[int] = None, *,
                       AND estado <> 'REEMPLAZADO'
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                       AND test=FALSE
-                      AND EXISTS (SELECT 1 FROM clientes c
+                      AND (cliente_id IS NULL OR EXISTS (SELECT 1 FROM clientes c
                                   WHERE c.cliente_id=solicitudes_guia.cliente_id
-                                    AND c.test=FALSE)
+                                    AND c.test=FALSE))
                       AND (NOT %s OR tracking_vigilancia_desde IS NOT NULL
                            OR tracking_estado='RETENIDO')
                       AND (

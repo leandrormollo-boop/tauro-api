@@ -3313,14 +3313,42 @@ def admin_pedido_editar_form(
     if not _is_auth(admin_token):
         return _redirect_login()
     from servicios.solicitudes_guia import obtener_solicitud
+    from servicios.asignacion_envios import panel_asignacion
     sol = obtener_solicitud(solicitud_id)
     if not sol:
         return RedirectResponse(url="/admin/pedidos", status_code=303)
     return templates.TemplateResponse(
         request=request, name="admin/pedido_editar.html",
         context={"seccion": "pedidos", "s": sol,
+                 "asignacion": panel_asignacion(solicitud_id),
                  "emitida": bool(sol.get("tracking"))},
     )
+
+
+@router.post("/pedidos/{solicitud_id}/asignacion")
+def admin_pedido_asignacion(
+    solicitud_id: int,
+    cliente_esperado: str = Form(""),
+    cliente_nuevo: str = Form(""),
+    cliente_indicado: str = Form(""),
+    motivo: str = Form(...),
+    accion: str = Form(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.asignacion_envios import cambiar_asignacion
+    try:
+        if accion not in ('pendiente', 'asignar'):
+            raise ValueError('Elegí dejar pendiente o asignar un perfil.')
+        if accion == 'asignar' and not cliente_nuevo.strip():
+            raise ValueError('Elegí el perfil al que corresponde el envío.')
+        cambiar_asignacion(solicitud_id, cliente_esperado=cliente_esperado,
+            cliente_nuevo=cliente_nuevo if accion == 'asignar' else None,
+            cliente_indicado=cliente_indicado, motivo=motivo)
+    except ValueError as exc:
+        return RedirectResponse(url=f'/admin/pedidos/{solicitud_id}/editar?error={quote(str(exc))}', status_code=303)
+    return RedirectResponse(url=f'/admin/pedidos/{solicitud_id}/editar?asignacion=ok', status_code=303)
 
 
 @router.post("/pedidos/{solicitud_id}/editar")
