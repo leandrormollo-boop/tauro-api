@@ -1393,18 +1393,22 @@ def test_registro_exige_acceso_shipping_y_homologacion_como_gates_de_runtime(mon
     assert result == {"ready": False, "reason": "homologacion_no_aprobada"}
 
     monkeypatch.setenv("ENV", "DEV")
+    from servicios import tiendanube_app, tiendanube_labels
+
+    class _PasoElGate(Exception):
+        pass
+
+    monkeypatch.setattr(tiendanube_app, "label_api_habilitada", lambda *_: False)
+    monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: False)
+    monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda *_: None)
     monkeypatch.setattr(
-        tiendanube_shipping, "configuracion", lambda *_: {"activa": True, "ready": True}
+        tiendanube_shipping,
+        "_reconciliar_shipping_remoto",
+        lambda *a, **k: (_ for _ in ()).throw(_PasoElGate()),
     )
-    monkeypatch.setattr(
-        tiendanube_shipping, "_reconciliar_shipping_remoto", lambda *a, **k: None
-    )
-    # En DEV la homologación no bloquea; el resto del registro sigue su curso
-    # normal (acá sólo importa que ya no devuelva el motivo de homologación).
-    try:
-        result = tiendanube_shipping._registrar_shipping_carrier_locked(
+    # En DEV la homologación no bloquea: llegar al reconciliador demuestra
+    # que el gate dejó continuar sin esconder errores ni aserciones.
+    with pytest.raises(_PasoElGate):
+        tiendanube_shipping._registrar_shipping_carrier_locked(
             "123", "token", expected_generation="gen-1"
         )
-        assert result.get("reason") != "homologacion_no_aprobada"
-    except Exception:
-        pass

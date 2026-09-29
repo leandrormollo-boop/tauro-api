@@ -870,6 +870,10 @@ def test_repository_claim_usa_skip_locked_y_recovery_distingue_create():
     recovery_source = inspect.getsource(PostgresLabelWorkerRepository.recover_stale_claims)
 
     assert "FOR UPDATE OF o SKIP LOCKED" in claim_source
+    assert "c.install_generation" in claim_source
+    assert "c.customer_id" in claim_source
+    assert "l.install_generation = c.install_generation" in claim_source
+    assert "UPPER(l.customer_id) = UPPER(c.customer_id)" in claim_source
     assert "CREATE_SHIPMENT" in recovery_source
     assert "VERIFICAR_MANUAL" in recovery_source
     assert "PENDIENTE" in recovery_source
@@ -947,6 +951,8 @@ def _publish_task():
         id=1,
         store_id="123456",
         label_id="label-1",
+        install_generation="gen-1",
+        customer_id="CLIENTE-1",
         fulfillment_order_id="ffo-1",
         payload=_payload(),
         attempts=1,
@@ -1031,10 +1037,8 @@ class _FinishWithCancellationCursor:
                 "CANCELACION_CONFIRMADA",
                 "CANCELACION_REVISION_MANUAL",
             }
-            if active and "NOT EXISTS" in normalized:
-                self.rowcount = 0
-                return
-            self.label_state = params[0]
+            if not active:
+                self.label_state = params[0]
             self.rowcount = 1
             return
         raise AssertionError(f"SQL inesperado: {normalized}")
@@ -1071,6 +1075,9 @@ def test_finish_falla_generate_sin_pisar_cancelacion_activa(
     assert "CANCELACION_ENVIADA" in label_sql
     assert "CANCELACION_CONFIRMADA" in label_sql
     assert "CANCELACION_REVISION_MANUAL" in label_sql
+    assert "label.install_generation = %s" in label_sql
+    assert "UPPER(label.customer_id) = UPPER(%s)" in label_sql
+    assert cursor.commands[-1][1][-2:] == ("gen-1", "CLIENTE-1")
 
 
 def test_finish_actualiza_label_si_cancelacion_fue_rechazada(monkeypatch):

@@ -573,3 +573,104 @@ def test_cancelacion_reconcilia_solicitud_creada_aun_no_vinculada(ecommerce_db):
         assert pedido["solicitud_id"] == solicitud_id
         cur.execute("SELECT estado FROM solicitudes_guia WHERE id=%s", (solicitud_id,))
         assert cur.fetchone()["estado"] == "CANCELADO"
+
+
+def test_label_worker_reclama_y_cierra_con_lineage_real(ecommerce_db, monkeypatch):
+    from servicios import tiendanube_label_worker as worker
+
+    _base(ecommerce_db, plataforma="tiendanube")
+    monkeypatch.setattr(worker, "get_conn", ecommerce_db)
+    monkeypatch.setattr(worker, "_worker_tables_ready", True)
+
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO tiendanube_shipping_config
+                (store_id,install_generation,callback_token_hash,
+                 carrier_id,carrier_option_id)
+            VALUES ('123','gen-1','hash','carrier-1','option-1')
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO tiendanube_labels
+                (store_id,label_id,install_generation,customer_id,
+                 fulfillment_order_id,generate_payload,
+                 generate_payload_complete,estado)
+            VALUES ('123','label-1','gen-1','PILOTO','ffo-1','{}'::jsonb,
+                    TRUE,'PENDIENTE')
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO tiendanube_label_outbox
+                (store_id,label_id,install_generation,customer_id,operacion,
+                 payload,payload_fingerprint,payload_complete,estado)
+            VALUES ('123','label-1','gen-1','PILOTO','GENERATE','{}'::jsonb,
+                    %s,TRUE,'PENDIENTE')
+            """,
+            ("a" * 64,),
+        )
+
+    repository = worker.PostgresLabelWorkerRepository()
+    claimed = repository.claim_next()
+
+    assert claimed is not None
+    assert claimed["install_generation"] == "gen-1"
+    assert claimed["customer_id"] == "PILOTO"
+
+    task = worker.LabelTask(
+        id=int(claimed["id"]),
+        store_id=str(claimed["store_id"]),
+        label_id=str(claimed["label_id"]),
+        install_generation=str(claimed["install_generation"]),
+        customer_id=str(claimed["customer_id"]),
+        fulfillment_order_id=str(claimed["fulfillment_order_id"]),
+        payload=dict(claimed["payload"]),
+        attempts=int(claimed["intentos"]),
+        claim_id=str(claimed["claim_id"]),
+        carrier_id="",
+        rate_quote_snapshot_id="",
+        stage=worker.LabelStage(str(claimed["stage"])),
+    )
+
+    # Una reinstalación concurrente no puede recibir el resultado del claim
+    # anterior. El cierre debe fallar y revertir también el outbox reclamado.
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE tiendanube_labels "
+            "SET install_generation='gen-2',customer_id='OTRO' "
+            "WHERE store_id='123' AND label_id='label-1'"
+        )
+    with pytest.raises(worker.LabelRetryableError, match="esta instalación"):
+        repository.fail(task, "LINEAGE_OBSOLETA")
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT estado,claim_id FROM tiendanube_label_outbox "
+            "WHERE store_id='123' AND label_id='label-1'"
+        )
+        stale = cur.fetchone()
+        assert stale["estado"] == "PROCESANDO"
+        assert stale["claim_id"] == claimed["claim_id"]
+        cur.execute(
+            "UPDATE tiendanube_labels "
+            "SET install_generation='gen-1',customer_id='PILOTO' "
+            "WHERE store_id='123' AND label_id='label-1'"
+        )
+
+    assert repository.fail(task, "TEST_LINEAGE") is True
+
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT estado FROM tiendanube_labels "
+            "WHERE store_id='123' AND label_id='label-1'"
+        )
+        assert cur.fetchone()["estado"] == "FALLIDO"
+        cur.execute(
+            "SELECT estado,intentos,claim_id FROM tiendanube_label_outbox "
+            "WHERE store_id='123' AND label_id='label-1'"
+        )
+        outbox = cur.fetchone()
+        assert outbox["estado"] == "FALLIDO"
+        assert outbox["intentos"] == 1
+        assert outbox["claim_id"] is None

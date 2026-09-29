@@ -419,7 +419,8 @@ class PostgresLabelWorkerRepository:
                          WHERE e.outbox_id = c.id
                         RETURNING e.*
                     )
-                    SELECT c.id, c.store_id, c.label_id, c.intentos,
+                    SELECT c.id, c.store_id, c.label_id,
+                           c.install_generation, c.customer_id, c.intentos,
                            c.claim_id, l.fulfillment_order_id,
                            l.rate_quote_snapshot_id, l.order_id,
                            l.generate_payload AS payload,
@@ -430,6 +431,8 @@ class PostgresLabelWorkerRepository:
                       JOIN execution_claimed e ON e.outbox_id = c.id
                       JOIN tiendanube_labels l
                         ON l.store_id = c.store_id AND l.label_id = c.label_id
+                       AND l.install_generation = c.install_generation
+                       AND UPPER(l.customer_id) = UPPER(c.customer_id)
                     """,
                     (MAX_ATTEMPTS, claim_id, claim_id),
                 )
@@ -774,23 +777,40 @@ class PostgresLabelWorkerRepository:
                     cur.execute(
                         """
                         UPDATE tiendanube_labels label
-                           SET estado = %s, actualizada_en = now()
+                           SET estado = CASE
+                                   WHEN NOT EXISTS (
+                                       SELECT 1
+                                         FROM tiendanube_label_outbox cancellation
+                                        WHERE cancellation.store_id = label.store_id
+                                          AND cancellation.label_id = label.label_id
+                                          AND cancellation.install_generation = label.install_generation
+                                          AND UPPER(cancellation.customer_id) = UPPER(label.customer_id)
+                                          AND cancellation.operacion = 'CANCEL'
+                                          AND cancellation.estado IN (
+                                              'CANCELACION_ENVIADA',
+                                              'CANCELACION_CONFIRMADA',
+                                              'CANCELACION_REVISION_MANUAL'
+                                          )
+                                   ) THEN %s
+                                   ELSE label.estado
+                               END,
+                               actualizada_en = now()
                          WHERE label.store_id = %s AND label.label_id = %s
-                           AND NOT EXISTS (
-                               SELECT 1
-                                 FROM tiendanube_label_outbox cancellation
-                                WHERE cancellation.store_id = label.store_id
-                                  AND cancellation.label_id = label.label_id
-                                  AND cancellation.operacion = 'CANCEL'
-                                  AND cancellation.estado IN (
-                                      'CANCELACION_ENVIADA',
-                                      'CANCELACION_CONFIRMADA',
-                                      'CANCELACION_REVISION_MANUAL'
-                                  )
-                           )
+                           AND label.install_generation = %s
+                           AND UPPER(label.customer_id) = UPPER(%s)
                         """,
-                        (state, task.store_id, task.label_id),
+                        (
+                            state,
+                            task.store_id,
+                            task.label_id,
+                            task.install_generation,
+                            task.customer_id,
+                        ),
                     )
+                    if cur.rowcount != 1:
+                        raise LabelRetryableError(
+                            "La etiqueta ya no pertenece a esta instalación."
+                        )
             conn.commit()
         return updated
 
