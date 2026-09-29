@@ -36,7 +36,26 @@
     "response_bodies_persisted": false,
     "secret_persisted": false
   },
-  "schema_version": 1,
+  "runner": {
+    "deployed_ref": "6682061",
+    "deployment_id": "8a71e3de-64b8-40d7-bccc-d60d34117fba",
+    "execution_source": "railway_ssh_active_staging_instance",
+    "python_version": "3.11.16",
+    "railway_environment": "staging"
+  },
+  "schema_version": 2,
+  "isolation": {
+    "payload_resource_ids_are_non_shopify": true,
+    "shopify_production_touched": false,
+    "synthetic_shop_only": true
+  },
+  "post_run_verification": {
+    "installation_count_after_cleanup": 0,
+    "installation_count_before_burst": 1,
+    "installation_generation": "staging-burst-v1",
+    "source": "read_only_database_and_railway_log_verification",
+    "synthetic_shop_domain": "tauro-qa.myshopify.com"
+  },
   "target": {
     "base_origin": "https://tauro-api-staging.up.railway.app",
     "shop_domain": "tauro-qa.myshopify.com"

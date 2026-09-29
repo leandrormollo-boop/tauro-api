@@ -93,11 +93,13 @@ durante tráfico.
 - Tarifas, generación de etiqueta, cancelación y worker exigen el mismo
   `store_id`, dueño TAURO y generación actual. Un contexto nulo/legacy falla
   cerrado hasta completar OAuth/reconciliación.
-- Los tokens viajan en el **path** porque así los define el callback registrado.
-  Uvicorn ya corre con `--no-access-log`, pero eso no controla los logs del
-  balanceador o edge de Railway. Antes de activar hay que verificar allí que el
-  path se omita o se redacte; luego se deben rotar todos los callbacks que hayan
-  existido antes de esa protección.
+- Rates lleva el token en la **query** y Railway registró sólo el path fijo,
+  sin la query sensible. La UAT debe confirmar que Tiendanube conserva esa
+  query al invocar el `callback_url`.
+- Labels conserva un token en el **path** base porque Tiendanube agrega
+  `/generate` y `/cancel`. Uvicorn ya corre con `--no-access-log`, pero eso no
+  controla los logs del balanceador o edge de Railway. Labels no se activa
+  hasta omitir o redactar ese path y rotar los callbacks legacy.
 
 Esta rotación no sustituye la homologación: sólo deja preparado el código para
 una prueba UAT aislada. Los flags productivos siguen en `false` hasta contar con

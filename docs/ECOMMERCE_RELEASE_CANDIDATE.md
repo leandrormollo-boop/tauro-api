@@ -100,11 +100,14 @@ se modifica por preparar este candidato.
 - Cargar el bundle NubeSDK marcando su uso y registrar DevTools, video y
   evidencias de homologación.
 - Configurar las tres URLs de privacidad en Partners.
-- Los secretos de Shipping/Labels viajan en el path de sus callbacks. Uvicorn
-  ya inicia con `--no-access-log`, pero antes de activarlos también se debe
-  deshabilitar o redactar el request-path logging del edge/proxy de Railway.
-  Luego hay que rotar por OAuth/reconciliación cualquier callback legacy que
-  haya podido quedar registrado en logs.
+- Shipping Rates entrega su token en la query y Railway registró sólo el path
+  fijo, sin el valor sensible. Antes de activarlo se debe confirmar en la UAT
+  que Tiendanube conserva la query del `callback_url` al invocar el carrier.
+- Labels todavía necesita un token en el path base porque Tiendanube agrega
+  `/generate` y `/cancel`. Aunque Uvicorn inicia con `--no-access-log`, Labels
+  queda bloqueado hasta deshabilitar o redactar el request-path logging del
+  edge/proxy de Railway y rotar por OAuth/reconciliación cualquier callback
+  legacy que haya podido quedar registrado.
 - UAT: tarifa → pedido → aceptación → guía → PDF → tracking → cancelación.
 - Recién con evidencia habilitar, en orden, gates de privacidad, Shipping,
   homologación, OCA QA/producción y worker de Labels.

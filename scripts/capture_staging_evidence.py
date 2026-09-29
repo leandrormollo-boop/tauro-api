@@ -8,10 +8,10 @@ sanitized Railway edge-log audit. Chrome uses an isolated, temporary profile.
 Raw response bodies, request credentials, browser profiles, cookies, and
 environment variables are never persisted.
 
-Run only after Railway reports commit 6682061 as SUCCESS::
+Run only after Railway reports commit 803c496 as SUCCESS::
 
     python scripts/capture_staging_evidence.py \
-      --confirm-success 6682061 \
+      --confirm-success 803c496 \
       --base-url https://tauro-api-staging.up.railway.app
 """
 
@@ -26,7 +26,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -37,8 +36,10 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-EXPECTED_DEPLOYMENT_REF = "6682061"
+EXPECTED_DEPLOYMENT_REF = "803c496"
 DEFAULT_STAGING_URL = "https://tauro-api-staging.up.railway.app"
+EXPECTED_STAGING_HOST = "tauro-api-staging.up.railway.app"
+APP_BRIDGE_URL = "https://cdn.shopify.com/shopifycloud/app-bridge.js"
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_PREVIEW_CHARS = 500
 USER_AGENT = "Tauro-Staging-Evidence/1.0"
@@ -103,6 +104,22 @@ class VisibleTextParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._hidden_depth == 0 and data.strip():
             self.parts.append(data.strip())
+
+
+class ScriptSrcParser(HTMLParser):
+    """Collect script sources without executing or retaining page state."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.sources: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "script":
+            return
+        attributes = {key.lower(): value for key, value in attrs}
+        source = str(attributes.get("src") or "").strip()
+        if source:
+            self.sources.append(source)
 
 
 @dataclass(frozen=True)
@@ -212,14 +229,29 @@ def sanitized_preview(body: bytes, content_type: str) -> str:
     return normalized
 
 
-def app_bridge_detected(body: bytes) -> bool:
-    lowered = body.lower()
-    markers = (
-        b"shopifycloud/app-bridge",
-        b"@shopify/app-bridge",
-        b"shopify-app-bridge",
+def app_bridge_script_source(body: bytes) -> str:
+    parser = ScriptSrcParser()
+    try:
+        parser.feed(body.decode("utf-8", errors="replace"))
+    except Exception:
+        return ""
+    return next((source for source in parser.sources if source == APP_BRIDGE_URL), "")
+
+
+def app_bridge_asset_available(source: str, timeout: float) -> bool:
+    if source != APP_BRIDGE_URL:
+        return False
+    request = Request(
+        source,
+        headers={"Accept": "application/javascript", "User-Agent": USER_AGENT},
+        method="GET",
     )
-    return any(marker in lowered for marker in markers)
+    try:
+        with build_opener(NoRedirectHandler()).open(request, timeout=timeout) as response:
+            response.read(1)
+            return int(response.status) == 200
+    except (HTTPError, URLError, TimeoutError, OSError):
+        return False
 
 
 def safe_content_type(headers: Any) -> str:
@@ -274,7 +306,11 @@ def perform_request(base_url: str, case: SmokeCase, timeout: float) -> dict[str,
 
     checks: dict[str, bool] = {"status_matches": status == case.expected_status}
     if case.require_app_bridge:
-        checks["app_bridge_detected"] = app_bridge_detected(body)
+        app_bridge_source = app_bridge_script_source(body)
+        checks["app_bridge_script_tag_exact"] = app_bridge_source == APP_BRIDGE_URL
+        checks["app_bridge_asset_http_200"] = app_bridge_asset_available(
+            app_bridge_source, timeout
+        )
 
     return {
         "slug": case.slug,
@@ -297,20 +333,36 @@ def load_edge_audit() -> dict[str, Any]:
     audit = json.loads(EDGE_AUDIT_PATH.read_text(encoding="utf-8"))
     request = audit.get("request", {})
     probe = audit.get("probe", {})
-    checks = audit.get("log_checks", {})
+    log_inspection = audit.get("log_inspection", {})
+    discrimination = audit.get("discrimination", {})
     fingerprint = str(probe.get("token_sha256", ""))
 
     invariants = {
         "environment_is_staging": audit.get("environment") == "staging",
         "deployment_matches": audit.get("deployment_ref") == EXPECTED_DEPLOYMENT_REF,
+        "probe_discriminates_token_presence": (
+            discrimination.get("passed") is True
+            and discrimination.get("without_callback_token_status") == 422
+            and discrimination.get("with_fictitious_callback_token_status") == 401
+        ),
+        "token_was_sent_in_query": probe.get("callback_token_sent_in_query") is True,
         "fixed_path_without_query": (
             request.get("path_recorded_by_edge")
             == "/integraciones/tiendanube/shipping/rates"
-            and checks.get("query_string_present_in_recorded_path") is False
+            and log_inspection.get("query_string_present_in_recorded_path") is False
         ),
-        "no_token_in_edge_logs": checks.get("exact_token_occurrences_in_http_edge") == 0,
+        "one_edge_record_matched": (
+            log_inspection.get("matching_http_edge_records_by_unique_user_agent") == 1
+            and bool(str(request.get("request_id") or ""))
+        ),
+        "no_token_in_edge_logs": (
+            log_inspection.get("exact_token_occurrences_in_http_edge_output") == 0
+        ),
         "no_token_in_app_logs": (
-            checks.get("exact_token_occurrences_in_application_or_deploy") == 0
+            log_inspection.get(
+                "exact_token_occurrences_in_application_or_deploy_output"
+            )
+            == 0
         ),
         "raw_token_not_persisted": probe.get("raw_token_persisted") is False,
         "fingerprint_is_sha256": bool(re.fullmatch(r"[0-9a-f]{64}", fingerprint)),
@@ -320,26 +372,30 @@ def load_edge_audit() -> dict[str, Any]:
         raise RuntimeError(f"La evidencia edge no supera sus invariantes: {failed}")
 
     duration = int(request.get("railway_total_duration_ms", 0))
-    records = int(checks.get("railway_http_edge_records", 0))
+    request_id = str(request.get("request_id") or "")
     return {
         "slug": "05-tiendanube-rates-token-redaction",
         "title": "Token de rates fuera de logs",
         "method": str(request.get("method", "POST")),
         "path": str(request["path_recorded_by_edge"]),
-        "expected_status": 422,
+        "expected_status": 401,
         "status": int(request.get("http_status", 0)),
-        "received_at": str(audit["observed_at"]),
+        "received_at": str(audit["probe_started_at"]),
         "sha256": fingerprint,
         "bytes": 0,
         "content_type": "Railway HTTP/edge",
         "hash_label": "SHA-256 del token ficticio del probe (sin guardar el valor)",
-        "metadata": f"Railway HTTP/edge · {records} registro · totalDuration {duration} ms",
+        "metadata": (
+            f"Railway HTTP/edge · request {request_id} "
+            f"· totalDuration {duration} ms"
+        ),
         "preview": (
+            "Control sin token: 422 · probe con token ficticio: 401. "
             "Railway registró sólo el path fijo, sin query. "
             "Ocurrencias exactas del token: edge 0 · aplicación/deploy 0."
         ),
         "checks": invariants,
-        "passed": int(request.get("http_status", 0)) == 422 and all(invariants.values()),
+        "passed": int(request.get("http_status", 0)) == 401 and all(invariants.values()),
         "source": "sanitized_railway_edge_audit",
         "deployment_id": str(audit["deployment_id"]),
     }
@@ -362,7 +418,44 @@ def locate_chrome(explicit_path: str | None) -> Path:
     raise RuntimeError("No se encontró Chrome/Chromium; use --chrome con su ejecutable.")
 
 
+def playwright_command() -> list[str] | None:
+    """Find a project/runtime Playwright CLI before an unrelated global CLI."""
+
+    node = shutil.which("node")
+    if node:
+        probe = subprocess.run(
+            [
+                node,
+                "-e",
+                (
+                    "const p=require('path');"
+                    "const f=require.resolve('playwright/package.json');"
+                    "process.stdout.write(p.join(p.dirname(f),'cli.js'))"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        candidate = Path(probe.stdout.strip()) if probe.returncode == 0 else None
+        if candidate and candidate.is_file():
+            return [node, str(candidate.resolve())]
+    executable = shutil.which("playwright")
+    return [executable] if executable else None
+
+
 def browser_version(chrome: Path) -> str:
+    playwright = playwright_command()
+    if playwright:
+        completed = subprocess.run(
+            [*playwright, "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return redact_text(completed.stdout.strip())[:120] + " · bundled Chromium"
     completed = subprocess.run(
         [str(chrome), "--version"],
         check=True,
@@ -405,8 +498,8 @@ def evidence_html(result: dict[str, Any], base_origin: str, deployment_ref: str)
 <style>
   :root {{ color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }}
   * {{ box-sizing: border-box; }}
-  body {{ margin: 0; min-height: 100vh; padding: 56px; background: #0b0912; color: #f8f6ff; }}
-  main {{ max-width: 1260px; margin: 0 auto; padding: 44px; border: 1px solid #35294c;
+  body {{ margin: 0; min-height: 100vh; padding: 48px; background: #0b0912; color: #f8f6ff; }}
+  main {{ max-width: 1420px; margin: 0 auto; padding: 44px; border: 1px solid #35294c;
           border-radius: 28px; background: linear-gradient(145deg, #15101f, #0f0c17); box-shadow: 0 28px 90px #0008; }}
   header {{ display: flex; justify-content: space-between; gap: 28px; align-items: flex-start; margin-bottom: 38px; }}
   .eyebrow {{ color: #bca7e8; font-size: 16px; letter-spacing: .16em; text-transform: uppercase; font-weight: 700; }}
@@ -417,9 +510,10 @@ def evidence_html(result: dict[str, Any], base_origin: str, deployment_ref: str)
   .grid {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }}
   .card {{ min-width: 0; padding: 22px; border: 1px solid #302640; border-radius: 18px; background: #0c0a12cc; }}
   .label {{ color: #978ca8; font-size: 13px; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 9px; }}
-  .value {{ font-size: 20px; overflow-wrap: anywhere; }}
-  .mono {{ min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-all; }}
-  .status {{ font-size: 34px; font-weight: 800; color: #d6c4ff; overflow-wrap: anywhere; }}
+  .value {{ min-width: 0; font-size: 18px; line-height: 1.45; overflow-wrap: anywhere; word-break: break-word; }}
+  .mono {{ min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; word-break: break-word; }}
+  .status {{ min-width: 0; font-size: 30px; line-height: 1.25; font-weight: 800; color: #d6c4ff; overflow-wrap: anywhere; word-break: break-word; }}
+  .status small {{ font-size: 20px; }}
   .wide {{ grid-column: 1 / -1; }}
   ul {{ list-style: none; padding: 0; margin: 0; }}
   li {{ display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #292132; }}
@@ -453,79 +547,96 @@ def evidence_html(result: dict[str, Any], base_origin: str, deployment_ref: str)
 def render_png(chrome: Path, source_html: Path, output_png: Path, profile_dir: Path) -> None:
     if output_png.exists():
         output_png.unlink()
-    command = [
-        str(chrome),
-        "--headless=new",
-        "--disable-gpu",
-        "--disable-background-networking",
-        "--disable-component-update",
-        "--disable-default-apps",
-        "--disable-dev-shm-usage",
-        "--hide-scrollbars",
-        "--no-first-run",
-        "--no-default-browser-check",
-        f"--user-data-dir={profile_dir}",
-        "--window-size=1440,1100",
-        f"--screenshot={output_png}",
-        source_html.resolve().as_uri(),
-    ]
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    deadline = time.monotonic() + 20
-    last_size = -1
-    stable_checks = 0
-    while time.monotonic() < deadline:
-        if output_png.is_file():
-            size = output_png.stat().st_size
-            stable_checks = stable_checks + 1 if size > 0 and size == last_size else 0
-            last_size = size
-            if stable_checks >= 10:
-                break
-        if process.poll() is not None:
-            break
-        time.sleep(0.2)
+    playwright = playwright_command()
+    if playwright:
+        # Playwright waits for a complete paint before capturing. This avoids
+        # the partially painted compositor tiles that Chrome's bare
+        # --screenshot mode can emit intermittently on macOS.
+        command = [
+            *playwright,
+            "screenshot",
+            "--browser",
+            "chromium",
+            "--color-scheme",
+            "dark",
+            "--viewport-size",
+            "1600,1400",
+            "--wait-for-timeout",
+            "750",
+            "--timeout",
+            "20000",
+            source_html.resolve().as_uri(),
+            str(output_png),
+        ]
+    else:
+        command = [
+            str(chrome),
+            "--headless=new",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-default-apps",
+            "--disable-dev-shm-usage",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-default-browser-check",
+            f"--user-data-dir={profile_dir}",
+            "--window-size=1600,1400",
+            "--timeout=1000",
+            f"--screenshot={output_png}",
+            source_html.resolve().as_uri(),
+        ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Chrome agotó el timeout al generar {output_png.name}") from exc
 
-    if process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-    stdout, stderr = process.communicate(timeout=5)
-
-    if not output_png.is_file() or output_png.stat().st_size == 0:
-        diagnostic = redact_text((stderr or stdout or "sin diagnóstico").strip())
+    if (
+        completed.returncode != 0
+        or not output_png.is_file()
+        or output_png.stat().st_size == 0
+    ):
+        diagnostic = redact_text(
+            (completed.stderr or completed.stdout or "sin diagnóstico").strip()
+        )
         raise RuntimeError(f"Chrome no pudo generar {output_png.name}: {diagnostic[:500]}")
 
 
 def validate_staging_url(value: str) -> str:
     parsed = urlsplit(value.rstrip("/"))
-    if parsed.scheme != "https" or not parsed.hostname:
-        raise argparse.ArgumentTypeError("--base-url debe ser un origen HTTPS válido")
-    if "staging" not in parsed.hostname.lower():
+    if parsed.scheme != "https" or parsed.hostname != EXPECTED_STAGING_HOST:
         raise argparse.ArgumentTypeError(
-            "--base-url debe apuntar inequívocamente a staging (hostname con 'staging')"
+            f"--base-url debe ser exactamente https://{EXPECTED_STAGING_HOST}"
         )
-    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-        raise argparse.ArgumentTypeError("--base-url debe contener sólo esquema y host")
-    return f"{parsed.scheme}://{parsed.netloc}"
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.port is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise argparse.ArgumentTypeError(
+            "--base-url no admite credenciales, puerto, path, query ni fragment"
+        )
+    return DEFAULT_STAGING_URL
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Captura evidencias sanitizadas de los cuatro smoke tests de staging."
+        description="Captura cinco evidencias sanitizadas de staging."
     )
     parser.add_argument(
         "--confirm-success",
         required=True,
         choices=[EXPECTED_DEPLOYMENT_REF],
         help=(
-            "Confirmación manual del ref desplegado. Use 6682061 únicamente después "
+            "Confirmación manual del ref desplegado. Use 803c496 únicamente después "
             "de comprobar estado SUCCESS en Railway."
         ),
     )

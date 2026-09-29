@@ -1997,7 +1997,10 @@ if _sheet_conf():
     scheduler.add_job(sincronizar_seguro, trigger="interval", minutes=30)
     print("[scheduler] Espejo en Google Sheet: cada 30 min (PLATAFORMA_SIN_PII)")
 else:
-    print("[scheduler] Espejo en Google Sheet APAGADO (falta GOOGLE_CREDENTIALS_JSON)")
+    print(
+        "[scheduler] Espejo en Google Sheet APAGADO "
+        "(sin credenciales o bloqueado por entorno)"
+    )
 
 # Cola comercial: apagada por default. El panel puede preparar trabajos sin
 # que ningun agente se ejecute; para procesarlos hacen falta la key y el flag

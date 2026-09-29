@@ -7,6 +7,12 @@ API sin sumar la latencia geográfica de una conexión externa. No se usó una
 tienda real: `tauro-qa.myshopify.com` fue una instalación sintética y aislada,
 creada sólo para validar HMAC y eliminada al finalizar.
 
+La ejecución corresponde al deployment Railway
+`8a71e3de-64b8-40d7-bccc-d60d34117fba` (ref `6682061`), con Python `3.11.16`.
+Una verificación posterior de sólo lectura registró que había una sola
+instalación sintética antes de la ráfaga y cero después de limpiarla. La ráfaga
+no tocó recursos Shopify de producción.
+
 | Metric | Value |
 | --- | ---: |
 | Webhooks attempted | 200 |
@@ -43,4 +49,5 @@ Health errors: `{}`
 - Los identificadores firmados fueron exclusivos de staging y no representan
   recursos Shopify válidos, por lo que no hubo lecturas ni escrituras en una
   tienda externa.
-- Evidencia estructurada: `webhook-burst.json`.
+- `webhook-burst.json` separa las métricas emitidas por el script de la
+  verificación posterior de creación/limpieza de la instalación sintética.

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Exercise the Shopify webhook path and health endpoint in staging only.
+"""Exercise the Shopify webhook path and health endpoint in TAURO staging.
 
-The webhook secret can be supplied with ``--webhook-secret`` or, preferably,
-through ``TAURO_STAGING_SHOPIFY_WEBHOOK_SECRET``.  The secret, request bodies,
-signatures, and response bodies are never included in output.
+The webhook secret is accepted only through
+``TAURO_STAGING_SHOPIFY_WEBHOOK_SECRET``.  Inside the Railway staging runtime,
+``SHOPIFY_PUBLIC_API_SECRET`` is also accepted so the secret never needs to be
+copied into argv.  Secrets, request bodies, signatures, and response bodies are
+never included in output.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ import hmac
 import json
 import math
 import os
-import re
+import platform
 import sys
 import threading
 import time
@@ -40,11 +42,9 @@ HEALTH_INTERVAL_SECONDS = 0.1
 MINIMUM_HEALTH_SECONDS = 10.0
 REQUEST_TIMEOUT_SECONDS = 5.0
 MAX_COUNT = 1_000
-STAGING_HOST_RE = re.compile(r"(?:^|[.-])staging(?:[.-]|$)", re.IGNORECASE)
-SHOP_DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$")
-NON_PRODUCTION_SHOP_RE = re.compile(
-    r"(?:^|-)(?:staging|stage|qa|dev|test|sandbox)(?:-|$)"
-)
+EXPECTED_STAGING_HOST = "tauro-api-staging.up.railway.app"
+EXPECTED_STAGING_URL = f"https://{EXPECTED_STAGING_HOST}"
+EXPECTED_SYNTHETIC_SHOP = "tauro-qa.myshopify.com"
 
 
 _thread_state = threading.local()
@@ -96,35 +96,35 @@ def positive_float(value: str) -> float:
 
 
 def staging_base_url(value: str) -> str:
-    """Validate and normalize a base URL without ever probing it."""
+    """Accept only the known TAURO staging origin, without probing it."""
 
     parsed = urlsplit(value.strip())
     hostname = (parsed.hostname or "").lower()
-    if parsed.scheme.lower() != "https":
-        raise argparse.ArgumentTypeError("base URL must use HTTPS")
-    if not hostname or not STAGING_HOST_RE.search(hostname):
-        raise argparse.ArgumentTypeError("base URL host must be an explicit staging host")
-    if parsed.username is not None or parsed.password is not None:
-        raise argparse.ArgumentTypeError("base URL must not contain credentials")
-    if parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
-        raise argparse.ArgumentTypeError("base URL must not contain a path, query, or fragment")
     try:
         port = parsed.port
     except ValueError as exc:
         raise argparse.ArgumentTypeError("base URL has an invalid port") from exc
-    netloc = hostname if port is None else f"{hostname}:{port}"
-    return urlunsplit(("https", netloc, "", "", ""))
+    if (
+        parsed.scheme.lower() != "https"
+        or hostname != EXPECTED_STAGING_HOST
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        raise argparse.ArgumentTypeError(
+            f"base URL must be exactly {EXPECTED_STAGING_URL}"
+        )
+    return urlunsplit(("https", EXPECTED_STAGING_HOST, "", "", ""))
 
 
 def shop_domain(value: str) -> str:
     normalized = value.strip().lower().rstrip(".")
-    if not SHOP_DOMAIN_RE.fullmatch(normalized):
-        raise argparse.ArgumentTypeError("shop domain must be a *.myshopify.com hostname")
-    shop_name = normalized.removesuffix(".myshopify.com")
-    if not NON_PRODUCTION_SHOP_RE.search(shop_name):
+    if normalized != EXPECTED_SYNTHETIC_SHOP:
         raise argparse.ArgumentTypeError(
-            "shop domain must contain an explicit non-production marker "
-            "(staging, stage, qa, dev, test, or sandbox)"
+            f"shop domain must be exactly {EXPECTED_SYNTHETIC_SHOP}"
         )
     return normalized
 
@@ -133,15 +133,12 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description=(
             "Send a signed inventory webhook burst while sampling /health. "
-            "Only explicit HTTPS staging hosts are accepted; redirects are never followed."
+            "Only TAURO's exact staging origin and synthetic shop are accepted; "
+            "redirects are never followed."
         )
     )
     result.add_argument("--base-url", required=True, type=staging_base_url)
     result.add_argument("--shop-domain", required=True, type=shop_domain)
-    result.add_argument(
-        "--webhook-secret",
-        help=f"Shopify app secret (prefer environment variable {SECRET_ENV_VAR})",
-    )
     result.add_argument("--count", type=positive_int, default=200)
     result.add_argument(
         "--concurrency",
@@ -324,7 +321,7 @@ def summarize(
         "no_redirect_responses": webhook_redirects + health_redirects == 0,
     }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "configuration": {
             "health_interval_ms": int(HEALTH_INTERVAL_SECONDS * 1_000),
             "health_monitor_seconds": round(health_monitor_seconds, 3),
@@ -469,6 +466,27 @@ def run(args: argparse.Namespace, secret: str) -> dict[str, Any]:
                 "base_origin": args.base_url,
                 "shop_domain": args.shop_domain,
             },
+            "runner": {
+                "execution_source": (
+                    "railway_ssh_active_staging_instance"
+                    if os.getenv("RAILWAY_ENVIRONMENT_NAME", "").strip().lower()
+                    == "staging"
+                    else "external_staging_client"
+                ),
+                "python_version": platform.python_version(),
+                "railway_environment": os.getenv(
+                    "RAILWAY_ENVIRONMENT_NAME", ""
+                ).strip(),
+                "deployment_id": os.getenv(
+                    "RAILWAY_DEPLOYMENT_ID", ""
+                ).strip(),
+                "deployed_ref": os.getenv("RAILWAY_GIT_COMMIT_SHA", "").strip()[:7],
+            },
+            "isolation": {
+                "synthetic_shop_only": True,
+                "payload_resource_ids_are_non_shopify": True,
+                "shopify_production_touched": False,
+            },
             "privacy": {
                 "secret_persisted": False,
                 "request_bodies_persisted": False,
@@ -489,14 +507,14 @@ def write_evidence(path: Path, contents: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    secret = args.webhook_secret or os.getenv(SECRET_ENV_VAR, "")
+    secret = os.getenv(SECRET_ENV_VAR, "")
     if not secret and os.getenv("ENV", "").strip().upper() == "STAGING":
         # Allows a Railway staging instance to run the saved script in-region
         # without copying the secret into a command line or evidence file.
         secret = os.getenv(APP_SECRET_ENV_VAR, "")
     if not secret:
         parser().error(
-            f"provide --webhook-secret or set {SECRET_ENV_VAR}; "
+            f"set {SECRET_ENV_VAR}; "
             f"{APP_SECRET_ENV_VAR} is accepted only when ENV=STAGING"
         )
     result = run(args, secret)

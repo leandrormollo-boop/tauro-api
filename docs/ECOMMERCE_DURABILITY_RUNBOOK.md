@@ -6,6 +6,17 @@ publicación automática de tracking queda cerrada por defecto con
 `ECOMMERCE_FULFILLMENT_ALLOWLIST` es fail-closed: vacía o ausente procesa cero
 tiendas aunque el worker esté encendido.
 
+## Aislamiento de staging
+
+- `OCA_ENVIRONMENT=qa`; ninguna credencial o endpoint productivo del carrier.
+- `GOOGLE_CREDENTIALS_JSON` debe quedar ausente. Aunque alguien la copiara por
+  error, `ENV=STAGING` mantiene apagado el espejo de Sheets salvo un opt-in
+  separado con `TAURO_STAGING_SHEET_SYNC_ENABLED=true`.
+- Ese opt-in permanece `false` durante las pruebas e-commerce. Antes de usarlo
+  se exige una credencial y un `TAURO_SHEET_ID` exclusivos de staging.
+- El incidente que originó este control y su restauración están documentados
+  en `docs/evidence/staging/google-sheet-staging-incident.md`.
+
 ## Antes del piloto
 
 1. Aplicar `sql/schema.sql` dos veces sobre una copia reciente y comprobar que
