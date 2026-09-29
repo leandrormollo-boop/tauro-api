@@ -22,7 +22,7 @@ def test_portal_y_admin_cargan_la_ui_compartida_con_cache_independiente():
     assert '/static/js/tauro-ui.js?v=11' in PORTAL_BASE
     assert '/static/js/tauro-ui.js?v=9' in ADMIN_BASE
     assert '/static/css/tauro.css?v=49' in PORTAL_BASE
-    assert '/static/css/tauro.css?v=30' in ADMIN_BASE
+    assert '/static/css/tauro.css?v=49' in ADMIN_BASE
 
 
 def test_smart_select_busca_por_atributo_o_por_cantidad_y_prioriza_prefijo():
