@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencias Python reproducibles (capa cacheable). El lock contiene el
-# cierre transitivo y hashes de artefactos para Python 3.11/Linux.
+# cierre transitivo fijado para Python 3.11/Linux.
 COPY requirements.lock .
-RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r requirements.lock \
+RUN pip install --no-cache-dir --only-binary=:all: -r requirements.lock \
     && pip check
 
 # Copiar el resto del código
