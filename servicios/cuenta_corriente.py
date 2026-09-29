@@ -8,8 +8,10 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import functools
+import hashlib
 import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional
+from zoneinfo import ZoneInfo
 
 import psycopg2
 
@@ -23,6 +25,7 @@ from servicios.filtros_cuenta import normalizar_filtros_cuenta, patron_busqueda_
 _CENTAVO = Decimal("0.01")
 _AMBITOS_CONTABLES = ("NACIONAL", "INTERNACIONAL")
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
+_ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 _MESES_CUENTA = (
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
@@ -175,6 +178,22 @@ def _fecha_comparable(valor: Any) -> str:
     return valor.isoformat() if hasattr(valor, "isoformat") else str(valor)
 
 
+def _fecha_pago(valor: Any) -> date:
+    try:
+        return valor if type(valor) is date else date.fromisoformat(str(valor))
+    except (TypeError, ValueError):
+        raise ValueError("La fecha del pago no es válida.") from None
+
+
+def _hoy_argentina() -> date:
+    return datetime.now(_ARGENTINA_TZ).date()
+
+
+def _referencia_pago_normalizada(valor: Any) -> str:
+    """Espeja la identidad documental calculada por PostgreSQL."""
+    return re.sub(r"[^A-Z0-9]", "", str(valor or "").strip().upper())
+
+
 def _fc_normalizada(valor: Any) -> str:
     """Espeja exactamente la expresión del índice PostgreSQL de FC."""
     return re.sub(r"[^A-Z0-9]", "", str(valor or "").strip().upper())
@@ -306,7 +325,9 @@ def get_pagos(cliente: str) -> List[Dict[str, Any]]:
             cur.execute(
                 """
                 SELECT id, fecha, monto_ars, metodo, referencia, nota, estado,
-                       (comprobante IS NOT NULL) AS tiene_comprobante
+                       (comprobante IS NOT NULL) AS tiene_comprobante,
+                       fecha_original_conocida, fecha_revision_requerida,
+                       created_at AS fecha_registro
                 FROM pagos
                 WHERE cliente_id = %s
                   AND COALESCE(estado, 'APROBADO') <> 'RECHAZADO'
@@ -329,8 +350,60 @@ def get_pagos(cliente: str) -> List[Dict[str, Any]]:
             # el estado: cuenta como aprobado.
             "estado": str(r["estado"] or "APROBADO"),
             "tiene_comprobante": bool(r["tiene_comprobante"]),
+            "fecha_original_conocida": bool(r["fecha_original_conocida"]),
+            "fecha_revision_requerida": bool(r["fecha_revision_requerida"]),
+            "fecha_registro": r["fecha_registro"],
         })
     return pagos
+
+
+def listar_anomalias_pagos_documentales(limite: int = 50) -> List[Dict[str, Any]]:
+    """Expone alertas legacy para revisión humana sin modificar el libro."""
+    limite = max(1, min(int(limite), 200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH alertas AS (
+                    SELECT a.*,
+                           CASE WHEN a.tipo IN (
+                               'REFERENCIA_DUPLICADA','COMPROBANTE_DUPLICADO'
+                           ) THEN ARRAY(
+                               SELECT pago_id
+                                 FROM UNNEST(a.pagos_ids) AS pago_id
+                                 JOIN pagos p ON p.id=pago_id
+                                WHERE p.duplicado_autorizado_motivo IS NULL
+                                ORDER BY pago_id
+                           ) ELSE a.pagos_ids END AS pagos_pendientes
+                      FROM pagos_anomalias_documentales a
+                )
+                SELECT tipo,cliente_id,identidad,
+                       CARDINALITY(pagos_pendientes)::bigint AS cantidad,
+                       pagos_pendientes AS pagos_ids
+                  FROM alertas
+                 WHERE tipo='PAGO_FECHA_PENDIENTE_REVISION'
+                    OR CARDINALITY(pagos_pendientes)>1
+                 ORDER BY CASE tipo
+                            WHEN 'PAGO_FECHA_PENDIENTE_REVISION' THEN 0
+                            WHEN 'COMPROBANTE_DUPLICADO' THEN 1
+                            ELSE 2
+                          END,
+                          cliente_id NULLS LAST, pagos_ids
+                 LIMIT %s
+                """,
+                (limite,),
+            )
+            filas = [dict(fila) for fila in cur.fetchall()]
+    for fila in filas:
+        identidad = str(fila.get("identidad") or "")
+        fila["identidad_visible"] = (
+            identidad[:12] + "…"
+            if fila.get("tipo") == "COMPROBANTE_DUPLICADO" and len(identidad) > 12
+            else identidad
+        )
+        fila["pagos_ids"] = [int(pago_id) for pago_id in fila.get("pagos_ids") or []]
+        fila["cantidad"] = int(fila.get("cantidad") or 0)
+    return filas
 
 
 def total_pagado(cliente: str) -> float:
@@ -348,6 +421,8 @@ def total_pagado(cliente: str) -> float:
                 SELECT COALESCE(SUM(monto_ars), 0) AS total FROM pagos
                 WHERE cliente_id = %s
                   AND COALESCE(estado, 'APROBADO') = 'APROBADO'
+                  AND fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                  AND NOT fecha_revision_requerida
                 """,
                 (cliente,),
             )
@@ -378,6 +453,8 @@ def get_resumen_clientes_bulk(solo_activos: bool = True) -> List[Dict[str, Any]]
             SELECT cliente_id, COALESCE(SUM(monto_ars), 0) AS pagado
             FROM pagos
             WHERE COALESCE(estado, 'APROBADO') = 'APROBADO'
+              AND fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+              AND NOT fecha_revision_requerida
             GROUP BY cliente_id
         ),
         aju AS (
@@ -622,6 +699,8 @@ def resumen_cuenta_por_ambito(cliente: str) -> Dict[str, Any]:
                     JOIN pagos p ON p.id = pa.pago_id
                     WHERE p.cliente_id = %s
                       AND COALESCE(p.estado, 'APROBADO') = 'APROBADO'
+                      AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                       AND pa.estado = 'APLICADA'
                 ),
                 ajustes AS (
@@ -680,6 +759,8 @@ def resumen_cuenta_por_ambito(cliente: str) -> Dict[str, Any]:
                     SELECT
                         COALESCE(SUM(monto_ars) FILTER (
                             WHERE COALESCE(estado, 'APROBADO') = 'APROBADO'
+                              AND fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                              AND NOT fecha_revision_requerida
                         ), 0) AS pagos_aprobados,
                         COALESCE(SUM(monto_ars) FILTER (
                             WHERE estado = 'PENDIENTE'
@@ -724,6 +805,7 @@ def resumen_mensual_cuenta(
         WITH cargos_clasificados AS (
             SELECT e.id, e.solicitud_id, e.monto_ars,
                    CASE
+                     WHEN s.id IS NULL THEN 'OTRO'
                      WHEN UPPER(COALESCE(NULLIF(BTRIM(e.descripcion), ''),
                                          NULLIF(BTRIM(s.producto_alias), ''), ''))
                           ~ '(TAX|IMPUEST|DUTY|ARANCEL)' THEN 'TAX'
@@ -950,6 +1032,8 @@ def movimientos_cuenta_paginados(
             JOIN pagos p ON p.id = pa.pago_id
             WHERE p.cliente_id = %s
               AND COALESCE(p.estado, 'APROBADO') = 'APROBADO'
+              AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
               AND pa.estado = 'APLICADA'
 
             UNION ALL
@@ -970,6 +1054,8 @@ def movimientos_cuenta_paginados(
             LEFT JOIN aplicaciones_pago ap ON ap.pago_id = p.id
             WHERE p.cliente_id = %s
               AND COALESCE(p.estado, 'APROBADO') = 'APROBADO'
+              AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
               AND p.monto_ars > COALESCE(ap.aplicado, 0)
 
             UNION ALL
@@ -1282,14 +1368,17 @@ def movimientos(cliente: str, facturas: List[Dict[str, Any]]) -> List[Dict[str, 
         })
     for p in get_pagos(cliente):
         pendiente = p.get("estado") == "PENDIENTE"
+        fecha_pendiente = bool(p.get("fecha_revision_requerida"))
         items.append({
             "fecha": p["fecha"],
             # Un pago informado y sin verificar se MUESTRA (el cliente tiene
             # que ver que su aviso llegó) pero rotulado: no está en el saldo
             # hasta que el admin lo apruebe.
-            "tipo": "PAGO_PENDIENTE" if pendiente else "PAGO",
+            "tipo": ("PAGO_FECHA_PENDIENTE" if fecha_pendiente else
+                     "PAGO_PENDIENTE" if pendiente else "PAGO"),
             "concepto": f"{p['metodo']} {p['referencia']}".strip()
-                        + (" · en verificación" if pendiente else ""),
+                        + (" · fecha pendiente de revisión" if fecha_pendiente else
+                           " · en verificación" if pendiente else ""),
             "monto_ars": -p["monto_ars"],
         })
 
@@ -1357,11 +1446,19 @@ def listar_destinos_pago(cliente_id: str) -> List[Dict[str, Any]]:
                     SELECT pa.factura_id,
                            COALESCE(SUM(pa.monto_ars) FILTER (
                                WHERE pa.estado='APLICADA'
+                                 AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0) AS pagado,
                            COALESCE(SUM(pa.monto_ars) FILTER (
-                               WHERE pa.estado='SOLICITADA'
+                               WHERE pa.estado='SOLICITADA' AND p.estado='PENDIENTE'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0) AS solicitado
                       FROM pagos_aplicaciones pa
+                      JOIN pagos p ON p.id=pa.pago_id
+                      JOIN facturas_cliente f_ap
+                        ON f_ap.id=pa.factura_id AND f_ap.cliente_id=p.cliente_id
                      WHERE pa.factura_id IS NOT NULL
                      GROUP BY pa.factura_id
                 ),
@@ -1369,11 +1466,19 @@ def listar_destinos_pago(cliente_id: str) -> List[Dict[str, Any]]:
                     SELECT pa.envio_id,
                            COALESCE(SUM(pa.monto_ars) FILTER (
                                WHERE pa.estado='APLICADA'
+                                 AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0) AS pagado,
                            COALESCE(SUM(pa.monto_ars) FILTER (
-                               WHERE pa.estado='SOLICITADA'
+                               WHERE pa.estado='SOLICITADA' AND p.estado='PENDIENTE'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0) AS solicitado
                       FROM pagos_aplicaciones pa
+                      JOIN pagos p ON p.id=pa.pago_id
+                      JOIN envios e_ap
+                        ON e_ap.id=pa.envio_id AND e_ap.cliente_id=p.cliente_id
                      WHERE pa.envio_id IS NOT NULL
                      GROUP BY pa.envio_id
                 ),
@@ -1502,13 +1607,18 @@ def _armar_aplicaciones_documentales(
             # en el JOIN anterior. Se calcula aparte para evitar multiplicarla.
             cur.execute(
                 """
-                SELECT COALESCE(SUM(monto_ars), 0) AS directo
-                  FROM pagos_aplicaciones
-                 WHERE factura_id=%s
-                   AND estado IN ('SOLICITADA','APLICADA')
-                   AND (%s::integer IS NULL OR pago_id<>%s::integer)
+                SELECT COALESCE(SUM(pa.monto_ars), 0) AS directo
+                  FROM pagos_aplicaciones pa
+                  JOIN pagos p ON p.id=pa.pago_id AND p.cliente_id=%s
+                 WHERE pa.factura_id=%s
+                   AND ((pa.estado='APLICADA'
+                         AND COALESCE(p.estado,'APROBADO')='APROBADO')
+                        OR (pa.estado='SOLICITADA' AND p.estado='PENDIENTE'))
+                   AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
+                   AND (%s::integer IS NULL OR pa.pago_id<>%s::integer)
                 """,
-                (origen_id, pago_excluir, pago_excluir),
+                (cliente_id, origen_id, pago_excluir, pago_excluir),
             )
             directo = _decimal_monto(cur.fetchone()["directo"])
             # cubierto sólo debe conservar las aplicaciones heredadas por
@@ -1517,14 +1627,19 @@ def _armar_aplicaciones_documentales(
                 """
                 SELECT COALESCE(SUM(pa.monto_ars), 0) AS heredado
                   FROM pagos_aplicaciones pa
+                  JOIN pagos p ON p.id=pa.pago_id AND p.cliente_id=%s
                  WHERE pa.envio_id IN (
                        SELECT envio_id FROM facturas_cliente_items
                         WHERE factura_id=%s AND envio_id IS NOT NULL
                  )
-                   AND pa.estado IN ('SOLICITADA','APLICADA')
+                   AND ((pa.estado='APLICADA'
+                         AND COALESCE(p.estado,'APROBADO')='APROBADO')
+                        OR (pa.estado='SOLICITADA' AND p.estado='PENDIENTE'))
+                   AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                    AND (%s::integer IS NULL OR pa.pago_id<>%s::integer)
                 """,
-                (origen_id, pago_excluir, pago_excluir),
+                (cliente_id, origen_id, pago_excluir, pago_excluir),
             )
             cubierto = directo + _decimal_monto(cur.fetchone()["heredado"])
             total = _decimal_monto(documento["total"])
@@ -1559,12 +1674,17 @@ def _armar_aplicaciones_documentales(
                 ) AS facturado,
                 COALESCE((
                     SELECT SUM(pa.monto_ars) FROM pagos_aplicaciones pa
+                    JOIN pagos p ON p.id=pa.pago_id AND p.cliente_id=%s
                     WHERE pa.envio_id=%s
-                      AND pa.estado IN ('SOLICITADA','APLICADA')
+                      AND ((pa.estado='APLICADA'
+                            AND COALESCE(p.estado,'APROBADO')='APROBADO')
+                           OR (pa.estado='SOLICITADA' AND p.estado='PENDIENTE'))
+                      AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                       AND (%s::integer IS NULL OR pa.pago_id<>%s::integer)
                 ), 0) AS cubierto
                 """,
-                (origen_id, origen_id, pago_excluir, pago_excluir),
+                (origen_id, cliente_id, origen_id, pago_excluir, pago_excluir),
             )
             estado_doc = cur.fetchone()
             if estado_doc["facturado"] and pago_excluir is None:
@@ -1598,6 +1718,8 @@ def registrar_pago(
     actor_tipo: Optional[str] = None,
     actor_ref: Optional[str] = None,
     idempotency_key: Optional[str] = None,
+    duplicado_autorizado_motivo: str = "",
+    fecha_original_conocida: bool = True,
 ) -> int:
     """
     Alta de pago. El admin carga APROBADO (impacta el saldo al instante);
@@ -1608,10 +1730,33 @@ def registrar_pago(
     if estado_normalizado not in {"PENDIENTE", "APROBADO", "RECHAZADO"}:
         raise ValueError("El estado del pago no es válido.")
     monto_decimal = _decimal_monto(monto_ars, permitir_cero=False)
-    cliente_normalizado = cliente_id.upper()
+    cliente_normalizado = str(cliente_id or "").strip().upper()
+    fecha_normalizada = _fecha_pago(fecha)
+    if estado_normalizado == "APROBADO" and fecha_normalizada > _hoy_argentina():
+        raise ValueError("La fecha debe corresponder a un pago ya realizado, no futuro.")
+    if type(fecha_original_conocida) is not bool:
+        raise ValueError("La condición de la fecha original no es válida.")
+    referencia = str(referencia or "").strip()
+    referencia_normalizada = _referencia_pago_normalizada(referencia)
+    hash_comprobante = hashlib.sha256(comprobante).hexdigest() if comprobante else None
+    motivo_duplicado = str(duplicado_autorizado_motivo or "").strip()
+    if motivo_duplicado:
+        if len(motivo_duplicado) < 10 or len(motivo_duplicado) > 1000:
+            raise ValueError("El motivo de excepción debe tener entre 10 y 1000 caracteres.")
+        if str(actor_tipo or "").strip().lower() != "admin":
+            raise ValueError("Sólo un administrador puede autorizar un pago documental repetido.")
+    if (
+        estado_normalizado == "APROBADO"
+        and str(actor_tipo or "").strip().lower() == "admin"
+        and not referencia_normalizada
+        and hash_comprobante is None
+    ):
+        raise ValueError("Indicá una referencia o adjuntá el comprobante del pago.")
     clave_idempotencia = _idempotency_key(idempotency_key)
     normalizadas = _normalizar_aplicaciones(aplicaciones) or {}
     destinos_normalizados = _normalizar_destinos_documentales(destinos)
+    if (normalizadas or destinos_normalizados) and fecha_normalizada > _hoy_argentina():
+        raise ValueError("Un pago con fecha futura no admite imputaciones.")
     if normalizadas and destinos_normalizados:
         raise ValueError("No mezcles imputación por ámbito y por documento.")
     if sum(normalizadas.values(), Decimal("0")) > monto_decimal:
@@ -1624,18 +1769,24 @@ def registrar_pago(
                 """
                 INSERT INTO pagos (cliente_id, fecha, monto_ars, metodo, referencia,
                                    nota, estado, comprobante, comprobante_tipo,
-                                   comprobante_nombre, idempotency_key)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                   comprobante_nombre, idempotency_key,
+                                   duplicado_autorizado_motivo,
+                                   duplicado_autorizado_por,
+                                   fecha_original_conocida)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s)
                 ON CONFLICT (cliente_id, idempotency_key)
                     WHERE idempotency_key IS NOT NULL
                 DO NOTHING
                 RETURNING id
                 """,
-                (cliente_normalizado, fecha, monto_decimal, metodo, referencia, nota,
+                (cliente_normalizado, fecha_normalizada.isoformat(), monto_decimal, metodo, referencia, nota,
                  estado_normalizado,
                  psycopg2.Binary(comprobante) if comprobante else None,
                  tipo, comprobante_nombre[:160] if comprobante_nombre else None,
-                 clave_idempotencia),
+                 clave_idempotencia, motivo_duplicado or None,
+                 (actor_ref or "admin") if motivo_duplicado else None,
+                 fecha_original_conocida),
             )
             insertado = cur.fetchone()
             if not insertado:
@@ -1644,7 +1795,9 @@ def registrar_pago(
                 # sido reutilizada para otra operación financiera.
                 cur.execute(
                     """
-                    SELECT id, fecha, monto_ars, metodo, referencia, estado
+                    SELECT id, fecha, monto_ars, metodo, referencia, estado,
+                           comprobante_sha256, duplicado_autorizado_motivo,
+                           duplicado_autorizado_por, fecha_original_conocida
                     FROM pagos
                     WHERE cliente_id = %s AND idempotency_key = %s
                     FOR UPDATE
@@ -1655,7 +1808,7 @@ def registrar_pago(
                 if not existente:
                     raise RuntimeError("No se pudo recuperar el pago idempotente.")
                 misma_operacion = (
-                    _fecha_comparable(existente["fecha"]) == _fecha_comparable(fecha)
+                    _fecha_comparable(existente["fecha"]) == _fecha_comparable(fecha_normalizada)
                     and _decimal_monto(existente["monto_ars"], permitir_cero=False)
                     == monto_decimal
                     and str(existente.get("metodo") or "") == str(metodo or "")
@@ -1663,6 +1816,11 @@ def registrar_pago(
                     == str(referencia or "")
                     and str(existente.get("estado") or "APROBADO").upper()
                     == estado_normalizado
+                    and existente.get("comprobante_sha256") == hash_comprobante
+                    and str(existente.get("duplicado_autorizado_motivo") or "")
+                    == motivo_duplicado
+                    and bool(existente.get("fecha_original_conocida", True))
+                    == fecha_original_conocida
                 )
                 if not misma_operacion:
                     raise ValueError(
@@ -1784,6 +1942,8 @@ def registrar_pago(
                     "cliente_id": cliente_normalizado,
                     "monto_ars": str(monto_decimal),
                     "estado": estado_normalizado,
+                    "fecha_original_conocida": fecha_original_conocida,
+                    "excepcion_duplicado": bool(motivo_duplicado),
                     "aplicaciones": {
                         clave: str(valor) for clave, valor in normalizadas.items()
                     },
@@ -1809,7 +1969,7 @@ def pagos_pendientes() -> List[Dict[str, Any]]:
                     p.id, p.cliente_id, p.fecha, p.monto_ars, p.metodo,
                     p.referencia, p.nota, p.comprobante_nombre,
                     (p.comprobante IS NOT NULL) AS tiene_comprobante,
-                    p.created_at,
+                    p.created_at, p.fecha_original_conocida,
                     COALESCE(SUM(pa.monto_ars) FILTER (
                         WHERE pa.estado = 'SOLICITADA'
                           AND pa.ambito = 'NACIONAL'
@@ -1880,7 +2040,8 @@ def resolver_pago(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, cliente_id, monto_ars,
+                SELECT id, cliente_id, monto_ars, fecha,
+                       fecha_revision_requerida,
                        COALESCE(estado, 'APROBADO') AS estado
                 FROM pagos
                 WHERE id = %s
@@ -1927,6 +2088,13 @@ def resolver_pago(
 
             if estado_actual != "PENDIENTE":
                 return False
+            if pago["fecha"] > _hoy_argentina():
+                raise ValueError("La fecha debe corresponder a un pago ya realizado, no futuro.")
+
+            if pago.get("fecha_revision_requerida"):
+                raise ValueError(
+                    "La fecha del pago requiere revisión administrativa con evidencia."
+                )
 
             monto_pago = _decimal_monto(pago["monto_ars"], permitir_cero=False)
             if normalizadas is not None and sum(
@@ -2019,6 +2187,85 @@ def resolver_pago(
                     },
                 )
             return cambio
+
+
+@_conflictos_como_valueerror
+def confirmar_fecha_pago(
+    pago_id: int,
+    *,
+    actor_tipo: str = "admin",
+    actor_ref: Optional[str] = None,
+    motivo: str,
+    evidencia_ref: str,
+) -> bool:
+    """Libera una cuarentena de fecha tras revisión admin auditable.
+
+    PostgreSQL vuelve a validar las aplicaciones documentales antes de hacer
+    efectivo el pago. Si otro crédito ya consumió el documento, la operación
+    falla y la marca persiste sin reescribir el historial.
+    """
+    if str(actor_tipo or "").strip().lower() != "admin":
+        raise ValueError("La fecha del pago requiere revisión administrativa.")
+    responsable = str(actor_ref or "admin").strip()[:160]
+    if not responsable:
+        raise ValueError("Falta identificar al responsable de la revisión.")
+    motivo_limpio = " ".join(str(motivo or "").strip().split())[:1000]
+    evidencia_limpia = " ".join(str(evidencia_ref or "").strip().split())[:1000]
+    if len(motivo_limpio) < 10:
+        raise ValueError("Explicá el motivo de la fecha confirmada (mínimo 10 caracteres).")
+    if len(evidencia_limpia) < 5:
+        raise ValueError("Identificá la evidencia revisada (mínimo 5 caracteres).")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id,fecha,COALESCE(estado,'APROBADO') AS estado,
+                       fecha_revision_requerida
+                  FROM pagos WHERE id=%s FOR UPDATE
+                """,
+                (pago_id,),
+            )
+            pago = cur.fetchone()
+            if not pago or pago["estado"] == "RECHAZADO":
+                return False
+            if not pago["fecha_revision_requerida"]:
+                return False
+            if pago["fecha"] > _hoy_argentina():
+                raise ValueError("La fecha informada todavía no ocurrió.")
+            cur.execute(
+                """
+                UPDATE pagos
+                   SET fecha_revision_requerida=FALSE,
+                       fecha_revision_confirmada_at=NOW(),
+                       fecha_revision_confirmada_por=%s,
+                       fecha_revision_motivo=%s,
+                       fecha_revision_evidencia=%s
+                 WHERE id=%s AND fecha_revision_requerida
+                 RETURNING id
+                """,
+                (responsable, motivo_limpio, evidencia_limpia, pago_id),
+            )
+            if cur.fetchone() is None:
+                return False
+            registrar_evento_con_cursor(
+                cur,
+                event="cuenta.confirmar_fecha_pago",
+                actor_type="admin",
+                actor_ref=responsable,
+                ip=None,
+                method="POST",
+                path="/admin/pagos/{id}/confirmar-fecha",
+                status_code=200,
+                success=True,
+                request_id=None,
+                metadata={
+                    "pago_id": pago_id,
+                    "decision": "FECHA_CONFIRMADA",
+                    "motivo": motivo_limpio,
+                    "evidencia_ref": evidencia_limpia,
+                },
+            )
+            return True
 
 
 def get_comprobante(pago_id: int, cliente_id: Optional[str] = None):

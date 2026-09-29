@@ -113,22 +113,24 @@
     const update=() => { fixed.hidden=select.value!=='fijo';markup.hidden=select.value!=='markup';threshold.hidden=select.value==='gratis'; };select.addEventListener('change',update);update();form.append(fs);
   }
   state.tiendas.forEach(t => {
+    const card=node('article',null,'card');const header=text(card,'div',null,'pkg-store-title');text(header,'h3',t.dominio);
+    if(t.plataforma==='shopify') {
+      text(header,'span','Pedidos y tracking','pkg-badge');
+      text(card,'p','Shopify importa pedidos al portal y recibe el tracking cuando el envío se despacha. Las cotizaciones se hacen en TAURO; esta integración no publica tarifas en checkout.','pkg-muted');
+      $('pkg-stores').append(card);
+      return;
+    }
     $('pkg-quote-store').append(new Option(t.dominio,String(t.id)));
-    const card=node('article',null,'card');const header=text(card,'div',null,'pkg-store-title');text(header,'h3',t.dominio);text(header,'span',t.plataforma==='tiendanube'?'Medio de envío en Tiendanube':(t.checkout_activo?'Servicio conectado':'Servicio sin activar'),'pkg-badge');
+    text(header,'span','Medio de envío en Tiendanube','pkg-badge');
     const form=node('form');form.append(check('Usar mis embalajes para las ventas de esta tienda','usar_paquetes',t.usar_paquetes));
     const columns=node('div',null,'pkg-columns');policy(columns,'nacional',t.nacional);policy(columns,'internacional',t.internacional);
-    if(t.plataforma==='tiendanube') { const international=columns.querySelectorAll('fieldset')[1];international.disabled=true;international.querySelector('input[type=checkbox]').checked=false;text(international,'p','Disponible para cotizar en el portal. El medio de envío actual de Tiendanube admite nacional.','pkg-muted'); }
+    const international=columns.querySelectorAll('fieldset')[1];international.disabled=true;international.querySelector('input[type=checkbox]').checked=false;text(international,'p','Disponible para cotizar en el portal. El piloto de Tiendanube contempla solamente envíos nacionales.','pkg-muted');
     form.append(columns);const save=node('button','Guardar configuración','btn btn-primary');save.type='submit';form.append(save);
-    form.addEventListener('submit',e => { e.preventDefault();const fd=Object.fromEntries(new FormData(form)),d={usar_paquetes:form.elements.usar_paquetes.checked};['nacional','internacional'].forEach(k => { d[k]={habilitado:form.elements.namedItem(k+'_habilitado').checked};['politica','precio_fijo_ars','markup_pct','gratis_desde_ars'].forEach(f => d[k][f]=fd[k+'_'+f]); });busy(form,async () => { await post('tiendas/'+t.id,d);reload('Políticas de envío guardadas. Probá una cotización y verificá el checkout de tu tienda.'); }); });card.append(form);
-    if(t.plataforma==='shopify') {
-      const actions=text(card,'div',null,'pkg-store-actions');const authorize=node('form');authorize.method='POST';authorize.action=`/portal/paquetes/shopify/${t.id}/autorizar`;const button=node('button','1. Autorizar tarifas en Shopify','btn btn-ghost');button.type='submit';authorize.append(button);actions.append(authorize);
-      actions.append(action('2. Conectar servicio',async () => { await busy(actions,async () => { const r=await post(`shopify/${t.id}/activar`,{});reload(r.mensaje); }); }));
-      if(t.checkout_activo) actions.append(action('Pausar tarifas',async () => { await busy(actions,async () => { await post(`shopify/${t.id}/pausar`,{});reload('Tarifas pausadas. Verificá que tu tienda tenga otras opciones de envío.'); }); }));
-      text(card,'p','Después de conectar, agregá TAURO en Configuración → Envío y entrega de Shopify y probá una compra. Guardar esta pantalla no completa ese paso.','pkg-muted');
-    } else text(card,'p','Tiendanube usará esta configuración cuando su medio de envío TAURO esté activo. La integración actual de Tiendanube ofrece envíos nacionales; internacional requiere habilitar ese circuito en la plataforma.','pkg-muted');
+    form.addEventListener('submit',e => { e.preventDefault();const fd=Object.fromEntries(new FormData(form)),d={usar_paquetes:form.elements.usar_paquetes.checked};['nacional','internacional'].forEach(k => { d[k]={habilitado:form.elements.namedItem(k+'_habilitado').checked};['politica','precio_fijo_ars','markup_pct','gratis_desde_ars'].forEach(f => d[k][f]=fd[k+'_'+f]); });busy(form,async () => { await post('tiendas/'+t.id,d);reload('Política del piloto guardada. Probá una cotización antes de solicitar la activación.'); }); });card.append(form);
+    text(card,'p','Tiendanube usará esta configuración únicamente cuando el piloto complete readiness y el medio de envío TAURO esté habilitado para la tienda.','pkg-muted');
     $('pkg-stores').append(card);
   });
-  if(!state.tiendas.length) { const e=text($('pkg-stores'),'div',null,'card');text(e,'h3','Vinculá una tienda para ofrecer tarifas');text(e,'p','Podés guardar tus cajas y probar cotizaciones mientras conectás Shopify o Tiendanube.','pkg-muted');const a=text(e,'a','Ir a integraciones','btn btn-primary');a.href='/portal/tienda'; }
+  if(!state.tiendas.length) { const e=text($('pkg-stores'),'div',null,'card');text(e,'h3','Vinculá una tienda');text(e,'p','Podés guardar tus cajas y probar cotizaciones mientras solicitás una integración.','pkg-muted');const a=text(e,'a','Ir a integraciones','btn btn-primary');a.href='/portal/tienda'; }
   Object.entries(state.origen).forEach(([k,v]) => { const el=$('pkg-quote').elements.namedItem('origen_'+k);if(el)el.value=v||''; });
   $('pkg-quote').elements.destino_pais.value='AR';
   $('pkg-quote').addEventListener('submit',e => {
@@ -140,7 +142,7 @@
       r.plan.bultos.forEach((b,i) => {const row=text(target,'div',null,'pkg-plan-box');text(row,'strong',`${i+1}. ${b.nombre} · ${num(b.largo_cm)} × ${num(b.ancho_cm)} × ${num(b.alto_cm)} cm`);text(row,'span',b.contenido.map(c => `${c.cantidad} × ${c.alias}`).join(' + ')+` · ${num(b.peso_kg)} kg`);});
       if(!r.encontrado) text(target,'p',r.motivo,'pkg-note');
       r.opciones.forEach(o => { const row=text(target,'div',null,'pkg-price');const info=text(row,'div');text(info,'b',o.servicio);text(info,'small','Tu tarifa TAURO: '+money(o.precio_tauro_ars));const amount=text(row,'div');text(amount,'strong',Number(o.precio_comprador_ars)===0?'Gratis':money(o.precio_comprador_ars));text(amount,'small','Precio para el comprador'); });
-      text(target,'p',r.checkout_habilitado?'La tarifa se devuelve a la tienda cuando el carrito y la zona usan TAURO. Verificá el resultado también desde el checkout.':'Esta prueba no activa tarifas en la tienda. Completá la conexión y sus zonas de envío.','pkg-note');
+      text(target,'p',r.checkout_habilitado?'El piloto de Tiendanube tiene el medio nacional habilitado para esta tienda. Verificá el resultado también en la tienda demo.':'Esta prueba no activa tarifas en una tienda. Sirve para validar cajas y precios dentro del portal TAURO.','pkg-note');
       text(target,'p','La tarifa puede cambiar si cambia el destino, el contenido, las cajas o el precio del transportista. Revisá el embalaje antes de generar la guía.','pkg-muted');
     });
   });

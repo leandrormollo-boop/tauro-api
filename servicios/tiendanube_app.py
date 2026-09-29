@@ -229,6 +229,43 @@ def app_configurada() -> bool:
     return bool(os.getenv("TIENDANUBE_CLIENT_ID") and os.getenv("TIENDANUBE_CLIENT_SECRET"))
 
 
+def estado_publicacion() -> dict:
+    """Readiness fail-closed para decidir si se ofrece una instalación nueva.
+
+    Los webhooks de tiendas ya instaladas siguen dependiendo de
+    ``app_configurada``. Este control sólo evita que OAuth se ofrezca como una
+    integración lista cuando todavía faltan Shipping, UAT u homologación.
+    """
+    configurada = app_configurada()
+    if not configurada:
+        return {
+            "configurada": False,
+            "publicable": False,
+            "piloto": False,
+            "blockers": ("oauth_credentials",),
+        }
+    try:
+        from servicios.tiendanube_preflight import evaluate_preflight
+
+        resultado = evaluate_preflight()
+        blockers = tuple(str(item) for item in resultado.get("blockers", ()))
+        publicable = bool(resultado.get("ready_for_release"))
+    except Exception as exc:
+        print(f"[tiendanube] no pude evaluar readiness: {type(exc).__name__}")
+        blockers = ("preflight_unavailable",)
+        publicable = False
+    return {
+        "configurada": True,
+        "publicable": publicable,
+        "piloto": not publicable,
+        "blockers": blockers,
+    }
+
+
+def app_publicable() -> bool:
+    return bool(estado_publicacion()["publicable"])
+
+
 def url_instalacion(state: str = "") -> str:
     """
     Link para que un comerciante instale la app desde su Tiendanube. El `state`
@@ -1036,11 +1073,18 @@ def sanitizar_payload_webhook(datos: dict) -> dict:
 def webhook_evento_id(datos: dict, cuerpo: bytes, header_id: str = "") -> str:
     if str(header_id or "").strip():
         return str(header_id).strip()[:200]
-    # Tiendanube no garantiza un identificador de entrega. Hashear sólo
-    # store/event/order convertía todas las actualizaciones futuras del mismo
-    # pedido en un único evento. Sin un ID explícito se persiste cada entrega;
-    # la idempotencia de negocio vive en el upsert del pedido.
-    return f"generated-{secrets.token_hex(20)}"
+    # La documentación de Tiendanube no garantiza un ID de entrega. La huella
+    # estable deduplica el reintento mientras la primera copia sigue activa.
+    # ``encolar_webhook`` abre una ocurrencia nueva después de completar la
+    # anterior, para no comerse dos eventos válidos con el mismo payload.
+    payload = sanitizar_payload_webhook(datos)
+    canonico = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return "fallback-" + hashlib.sha256(canonico).hexdigest()
 
 
 def encolar_webhook(evento_id: str, datos: dict) -> bool:
@@ -1063,6 +1107,33 @@ def encolar_webhook(evento_id: str, datos: dict) -> bool:
             """, (store_id,))
             inst = cur.fetchone() or {}
             generation = str(inst.get("install_generation") or "sin-instalacion")
+            evento_persistido_id = str(evento_id)
+            if evento_persistido_id.startswith("fallback-"):
+                base_id = evento_persistido_id
+                cur.execute(
+                    """
+                    SELECT evento_id, estado
+                      FROM tiendanube_webhook_eventos
+                     WHERE evento_id = %s OR evento_id LIKE %s
+                     ORDER BY recibido_at DESC
+                     LIMIT 1
+                     FOR UPDATE
+                    """,
+                    (base_id, f"{base_id}:occurrence:%"),
+                )
+                anterior = cur.fetchone()
+                if anterior and str(anterior.get("estado") or "") in {
+                    "PENDIENTE", "PROCESANDO",
+                }:
+                    conn.commit()
+                    return False
+                if anterior:
+                    # Tiendanube indica que dos mensajes con el mismo cuerpo
+                    # pueden ser eventos distintos. Una vez resuelta la copia
+                    # anterior se conserva la nueva como otra ocurrencia.
+                    evento_persistido_id = (
+                        f"{base_id}:occurrence:{secrets.token_hex(12)}"
+                    )
             cur.execute("""
                 INSERT INTO tiendanube_webhook_eventos
                     (evento_id, store_id, evento, recurso_id,
@@ -1071,7 +1142,7 @@ def encolar_webhook(evento_id: str, datos: dict) -> bool:
                 ON CONFLICT (evento_id) DO NOTHING
                 RETURNING evento_id
             """, (
-                str(evento_id), store_id, evento, recurso_id,
+                evento_persistido_id, store_id, evento, recurso_id,
                 generation, Json(payload),
             ))
             nuevo = cur.fetchone() is not None

@@ -868,9 +868,9 @@ def _insertar_pago(cur, pago: dict[str, Any]) -> str:
             """
             INSERT INTO pagos (
                 cliente_id, fecha, monto_ars, metodo, referencia, nota,
-                estado, idempotency_key, created_at
+                estado, idempotency_key, created_at, fecha_original_conocida
             ) VALUES (
-                %s, %s, %s, 'Transferencia', '', %s, 'APROBADO', %s, NOW()
+                %s, %s, %s, 'Transferencia', '', %s, 'APROBADO', %s, NOW(), FALSE
             ) RETURNING id
             """,
             (

@@ -19,6 +19,7 @@ def test_conciliada_no_equivale_a_pagada_ni_impaga():
     assert f['saldo']==100 and f['dias_emision']==34
     r=op.resumen_documentos([f])[0]
     assert r['sin_verificar']==1 and r['pendiente']==0 and r['vencido']==0
+    assert r['importe_bruto_sin_verificar']==Decimal('100')
 
 
 @pytest.mark.parametrize('hoy,mora,dias',[(date(2026,8,30),0,1),(date(2026,8,31),0,0),(date(2026,9,4),4,-4)])
@@ -54,6 +55,7 @@ def test_nc_historica_no_se_supone_disponible():
     f=op.estado_documento(documento(tipo_documento='NC'))
     r=op.resumen_documentos([f])[0]
     assert f['estado_pago']=='CREDITO_SIN_VERIFICAR' and r['credito']==0 and r['sin_verificar']==1
+    assert r['importe_bruto_sin_verificar']==Decimal('100')
 
 
 @pytest.mark.parametrize('v',['NaN','Infinity','-1','0',True,'1.00001','1e80',None])

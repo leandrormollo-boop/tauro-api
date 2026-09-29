@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="page-head">
-    <a href="/portal/paquetes#tiendas" class="btn btn-ghost">Configurar embalajes y tarifas</a>
+    <a href="/portal/paquetes" class="btn btn-ghost">Configurar embalajes</a>
     <div>
         <div class="eyebrow">Integraciones</div>
         <h1>Mi tienda</h1>
@@ -126,13 +126,12 @@
     {% endif %}
 </div>
 
-{# ── Qué paga el comprador ──────────────────────────── #}
+{# ── Preparación de envíos ──────────────────────────── #}
 {% if dominio_cfg %}
 <div class="card" style="margin-bottom:24px;">
-    <h3 style="margin:0 0 4px;">Envío en tu checkout<span data-help="Tarifas en tu tienda">La función se activa por tienda y requiere autorización y zonas de envío configuradas.</span></h3>
-    <p class="sub" style="margin:0 0 14px;">Configurá embalajes y tarifas por tienda. Revisá cada pedido antes de emitir su guía.</p>
-    <a href="https://admin.shopify.com/" target="_blank" rel="noopener noreferrer"
-       class="btn btn-ghost btn-sm">Configurar envíos en Shopify →</a>
+    <h3 style="margin:0 0 4px;">Preparación del envío</h3>
+    <p class="sub" style="margin:0 0 14px;">Configurá embalajes, cotizá en TAURO y revisá cada pedido antes de emitir su guía. Shopify importa pedidos y recibe tracking; no publica tarifas TAURO en checkout.</p>
+    <a href="/portal/paquetes" class="btn btn-ghost btn-sm">Configurar embalajes →</a>
 </div>
 {% endif %}
 
@@ -217,9 +216,12 @@
 {# ── Conectar Tiendanube (OAuth, un botón) ───────────── #}
 <div class="card">
     <h3 style="margin:0 0 4px;">Conectar Tiendanube</h3>
-    {% if tiendanube_activa %}
+    {% if tiendanube_publicable %}
         <p class="sub" style="margin:0 0 18px;">Autorizá la conexión en Tiendanube para vincular tu tienda.</p>
         <a href="/portal/tienda/tiendanube/instalar" class="btn btn-primary">Instalar app de Tiendanube</a>
+    {% elif tiendanube_piloto %}
+        <p class="sub" style="margin:0 0 18px;">La app está en piloto. Falta completar Shipping, tarifas, UAT y homologación antes de ofrecer la instalación.</p>
+        <a href="mailto:integraciones@taurosolutions.ar?subject=Piloto%20Tiendanube%20TAURO" class="btn btn-ghost">Consultar por el piloto</a>
     {% else %}
         <p class="sub" style="margin:0;">La conexión con Tiendanube está pendiente de aprobación.</p>
     {% endif %}

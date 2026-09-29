@@ -78,6 +78,32 @@ def test_agendada_sin_numero_no_se_presenta_confirmada(page):
     assert 'action="/portal/recolecciones/nueva"' not in body
 
 
+def test_fecha_pasada_es_historial_sin_preparar_ni_inventar_retiro(page):
+    page.update(rec.presentar_recoleccion(page, hoy=date(2026, 9, 29)))
+
+    body = html(envio=81, recoleccion=71)
+
+    assert 'Fecha de recolección pasada' in body
+    assert 'esta vista no confirma que el courier haya retirado' in body
+    assert 'Prepará los paquetes' not in body
+    assert 'Cancelar recolección' not in body
+    assert 'Recolección completada' not in body
+
+
+def test_envio_entregado_deriva_historial_sin_confirmar_visita_fisica(page):
+    page.update(rec.presentar_recoleccion(
+        dict(page, fecha=date(2026, 10, 2), envio_tracking_estado='ENTREGADO'),
+        hoy=date(2026, 9, 29),
+    ))
+
+    body = html(envio=81, recoleccion=71)
+
+    assert 'Envío entregado' in body
+    assert 'no confirma por sí solo la visita física del chofer' in body
+    assert 'Prepará los paquetes' not in body
+    assert 'Cancelar recolección' not in body
+
+
 def test_cancelada_permite_nuevo_form_sin_confundir_reserva_anterior(page):
     page['estado']='CANCELADA'
     body=html('ok=1',envio=81,recoleccion=71)

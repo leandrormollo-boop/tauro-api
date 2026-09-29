@@ -65,7 +65,7 @@ def test_copy_no_promete_capacidades_no_demostradas():
 
 
 def test_ctas_principales_siguen_el_sistema_parise():
-    assert HERO.count("Conectá tu tienda") >= 3
+    assert HERO.count("Solicitar integración") >= 3
     assert HERO.count("Cotizá un envío") >= 3
     assert 'href="/portal/login"' in HERO
     assert "¿No tenés tienda? Cargá tus envíos manualmente." in HERO
@@ -83,7 +83,7 @@ def test_seo_social_y_datos_estructurados_quedan_alineados():
     assert 'property="og:title" content="Conectá. Centralizá. Expandí. | Tauro Solutions"' in HTML
     assert 'name="twitter:card" content="summary_large_image"' in HTML
     assert 'styles.css?v=12' in HTML
-    assert '/static/js/app.js?v=17' in HTML
+    assert '/static/js/app.js?v=18' in HTML
 
     structured = re.search(
         r'<script type="application/ld\+json">\s*(\{.*?\})\s*</script>',

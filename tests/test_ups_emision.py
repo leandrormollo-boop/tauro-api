@@ -104,14 +104,30 @@ def test_error_de_ups_se_reporta_sin_inventar_tracking():
                    status=400)
     assert not r["encontrado"] and "Invalid postal code" in r["error"]
     assert "tracking" not in r
+    assert r["rechazo_confirmado"] is True
+    assert r["incierto"] is False
 
 
 def test_respuesta_sin_tracking_no_se_da_por_buena():
     _, r = _emitir(respuesta={"ShipmentResponse": {"ShipmentResults": {}}})
-    assert not r["encontrado"]
+    assert not r["encontrado"] and r["incierto"] is True
 
 
 def test_excepcion_de_red_avisa_que_hay_que_verificar():
     with mock.patch("core.ups_client.requests.post", side_effect=OSError("timeout")):
         r = _cliente().create_shipment(ENVIO)
     assert not r["encontrado"] and "Verificá en UPS" in r["error"]
+    assert r["incierto"] is True
+
+
+def test_error_5xx_de_ups_es_incierto():
+    _, r = _emitir(respuesta={}, status=503)
+    assert not r["encontrado"] and r["incierto"] is True
+    assert r["rechazo_confirmado"] is False
+
+
+def test_timeout_http_y_conflicto_no_liberan_reserva():
+    for status in (408,409,500,502):
+        _,resultado=_emitir(status=status,respuesta={'response':{'errors':[{'message':'Ambiguo'}]}})
+        assert resultado['incierto'] is True
+        assert resultado['rechazo_confirmado'] is False

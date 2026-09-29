@@ -147,5 +147,5 @@ def test_consulta_de_recoleccion_filtra_cliente_y_solicitud(monkeypatch):
     resultado = recolecciones.obtener_de_solicitud("waimao", 81)
 
     assert resultado["id"] == 9
-    assert "cliente_id = %s AND solicitud_id = %s" in ejecutado["sql"]
+    assert "r.cliente_id = %s AND r.solicitud_id = %s" in ejecutado["sql"]
     assert ejecutado["params"] == ("WAIMAO", 81)

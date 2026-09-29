@@ -37,7 +37,7 @@ def test_capacidades_son_declarativas_y_no_dependen_de_credenciales():
 
 
 def test_catalogo_publico_no_expone_variables_ni_promete_credenciales():
-    catalogo = public_catalog()
+    catalogo = public_catalog(canal="publico")
     assert {item["id"] for item in catalogo} == {
         "dhl", "fedex", "ups", "andreani", "oca",
     }
@@ -47,7 +47,21 @@ def test_catalogo_publico_no_expone_variables_ni_promete_credenciales():
     assert next(item for item in catalogo if item["id"] == "oca")["capacidades"] == (
         "cancelar", "cotizar", "emitir", "etiqueta", "tracking",
     )
+    fedex = next(item for item in catalogo if item["id"] == "fedex")
+    assert fedex["estado"] == "tarifario_publico"
+    assert fedex["capacidades"] == ("cotizar",)
+    assert "emisión no habilitada" in fedex["estado_label"]
+    assert next(item for item in catalogo if item["id"] == "ups")["capacidades"] == ()
     assert all("variables_requeridas" not in item for item in catalogo)
+
+
+def test_catalogo_de_cuenta_no_convierte_tarifario_fedex_en_integracion():
+    fedex = next(
+        item for item in public_catalog(Ambito.INTERNACIONAL, canal="cuenta")
+        if item["id"] == "fedex"
+    )
+    assert fedex["estado"] == "integracion_pendiente"
+    assert fedex["capacidades"] == ()
 
 
 def test_matriz_operativa_deriva_estado_y_capacidades_del_contrato():

@@ -211,9 +211,11 @@ class UPSClient(CarrierBase):
         NO es idempotente: dos llamadas emiten dos guías facturadas.
         """
         if not (self.client_id and self.client_secret):
-            return {"encontrado": False, "error": "Credenciales UPS no configuradas"}
+            return {"encontrado": False, "rechazo_confirmado": True,
+                    "error": "Credenciales UPS no configuradas"}
         if not self.account_number:
-            return {"encontrado": False, "error": "Falta UPS_ACCOUNT_NUMBER."}
+            return {"encontrado": False, "rechazo_confirmado": True,
+                    "error": "Falta UPS_ACCOUNT_NUMBER."}
 
         shipper = datos.get("shipper") or {}
         recipient = datos.get("recipient") or {}
@@ -341,6 +343,7 @@ class UPSClient(CarrierBase):
             print(f"[ups] EXCEPCIÓN emitiendo: {e}. VERIFICAR en UPS si la guía "
                   f"salió antes de reintentar.")
             return {"encontrado": False,
+                    "incierto": True,
                     "error": "Error de comunicación con UPS. Verificá en UPS "
                              "antes de reintentar."}
 
@@ -350,13 +353,16 @@ class UPSClient(CarrierBase):
             return {
                 "encontrado": False,
                 "error": detalle or f"UPS rechazó la emisión (HTTP {resp.status_code}).",
+                "incierto": resp.status_code not in {400, 401, 403, 404, 422, 429},
+                "rechazo_confirmado": resp.status_code in {400, 401, 403, 404, 422, 429},
             }
 
         try:
             res = resp.json()["ShipmentResponse"]["ShipmentResults"]
             tracking = str(res.get("ShipmentIdentificationNumber") or "")
             if not tracking:
-                return {"encontrado": False, "error": "UPS no devolvió tracking."}
+                return {"encontrado": False, "incierto": True,
+                        "error": "UPS no devolvió tracking."}
 
             # El label viene en base64 por paquete. UPS lo da en GIF: se
             # guarda tal cual — el sistema muestra el archivo, no exige PDF.
@@ -385,6 +391,7 @@ class UPSClient(CarrierBase):
         except Exception as e:
             print(f"[ups] respuesta ilegible tras emitir: {e}")
             return {"encontrado": False,
+                    "incierto": True,
                     "error": "UPS respondió algo inesperado. Verificá en UPS si "
                              "la guía se emitió."}
 

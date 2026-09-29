@@ -85,7 +85,11 @@ WITH ajustes AS (
     WHERE e.estado='ACTIVO' GROUP BY e.cliente_id
 ), pagos_cliente AS (
     SELECT cliente_id,
-      SUM(monto_ars) FILTER (WHERE COALESCE(estado,'APROBADO')='APROBADO') AS aprobado,
+      SUM(monto_ars) FILTER (
+        WHERE COALESCE(estado,'APROBADO')='APROBADO'
+          AND fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+          AND NOT fecha_revision_requerida
+      ) AS aprobado,
       SUM(monto_ars) FILTER (WHERE estado='PENDIENTE') AS pendiente
     FROM pagos GROUP BY cliente_id
 )

@@ -98,7 +98,7 @@ const PAISES_FALLBACK = [
 ];
 
 const MENSAJE_COTIZACION_NACIONAL =
-  "Envíos nacionales aún no disponibles. Se habilitarán con OCA y Andreani.";
+  "Este formulario todavía no cotiza envíos nacionales. OCA está preparada para cuentas habilitadas; solicitá la activación desde el portal. Andreani continúa pendiente.";
 
 function normalizeCountry(value) {
   return String(value ?? "").trim().toUpperCase();
@@ -770,7 +770,7 @@ function CarrierCard({ carrier, recomendado }) {
           letterSpacing: "0.06em", textTransform: "uppercase",
           padding: "2px 8px", borderRadius: 99,
         }}>
-          Precio más bajo
+          Menor tarifa disponible
         </div>
       )}
 
@@ -793,8 +793,8 @@ function CarrierCard({ carrier, recomendado }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {carrier.nombre}
-          {/* "Operativo" + luz verde: solo cuando el sistema confirmó que el
-              carrier devolvió tarifa en vivo (estado "cotizado"). */}
+          {/* Una respuesta de tarifa no demuestra emisión ni retiro. El rótulo
+              comercial viene del contrato publicado por el backend. */}
           {cotizado && (
             <span style={{
               display: "inline-flex", alignItems: "center", gap: 5,
@@ -805,12 +805,16 @@ function CarrierCard({ carrier, recomendado }) {
                 width: 6, height: 6, borderRadius: 99, background: "#2ec27e",
                 boxShadow: "0 0 8px rgba(46,194,126,.8)", flexShrink: 0,
               }}/>
-              Operativo
+              {carrier.estado_publicacion === "tarifario_publico"
+                ? "Tarifario público"
+                : "Tarifa disponible"}
             </span>
           )}
         </div>
         <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {cotizado ? `${carrier.servicio} · ${carrier.dias_estimados} días` : carrier.servicio}
+          {cotizado
+            ? `${carrier.servicio} · ${carrier.dias_estimados ? `${carrier.dias_estimados} días` : "Plazo a confirmar"}`
+            : carrier.servicio}
         </div>
       </div>
 
@@ -838,7 +842,7 @@ function CarrierCard({ carrier, recomendado }) {
             </div>
             {carrier.descuento_pct > 0 && (
               <div style={{ fontSize: 10, color: "var(--accent-soft)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
-                −{carrier.descuento_pct}% de mejora en tu precio
+                vs. tarifa de lista
               </div>
             )}
           </>

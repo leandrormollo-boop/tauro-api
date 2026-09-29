@@ -223,7 +223,7 @@ def test_payload_privacidad_no_persiste_pii():
     assert limpio["request_id"] == "77"
 
 
-def test_idempotencia_usa_header_y_sin_id_no_suprime_actualizaciones_futuras():
+def test_idempotencia_usa_header_y_huella_estable_sin_id():
     from servicios.tiendanube_app import webhook_evento_id
 
     datos_a = {"event": "order/created", "store_id": 123, "id": 88}
@@ -231,9 +231,51 @@ def test_idempotencia_usa_header_y_sin_id_no_suprime_actualizaciones_futuras():
     assert webhook_evento_id(datos_a, b"a", "delivery-1") == "delivery-1"
     primero = webhook_evento_id(datos_a, b"a")
     segundo = webhook_evento_id(datos_b, b"b")
-    assert primero.startswith("generated-")
-    assert segundo.startswith("generated-")
-    assert primero != segundo
+    assert primero.startswith("fallback-")
+    assert primero == segundo
+    assert webhook_evento_id({**datos_a, "event": "order/updated"}, b"a") != primero
+
+
+def test_fallback_deduplica_solo_mientras_la_ocurrencia_esta_activa(monkeypatch):
+    from servicios import tiendanube_app
+
+    evento_id = "fallback-" + "a" * 64
+    cursor = _Cursor([
+        {"install_generation": "gen-1"},
+        {"evento_id": evento_id, "estado": "PENDIENTE"},
+    ])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(tiendanube_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(tiendanube_app, "get_conn", lambda: conn)
+
+    assert tiendanube_app.encolar_webhook(evento_id, {
+        "store_id": 123, "event": "order/updated", "id": 88,
+    }) is False
+    assert not any("INSERT INTO tiendanube_webhook_eventos" in sql for sql, _ in cursor.ejecutadas)
+
+
+def test_fallback_abre_otra_ocurrencia_para_mismo_payload_ya_resuelto(monkeypatch):
+    from servicios import tiendanube_app
+
+    evento_id = "fallback-" + "b" * 64
+    cursor = _Cursor([
+        {"install_generation": "gen-1"},
+        {"evento_id": evento_id, "estado": "COMPLETADO"},
+        {"evento_id": f"{evento_id}:occurrence:123"},
+    ])
+    conn = _Conn(cursor)
+    monkeypatch.setattr(tiendanube_app, "_ensure_tabla", lambda: None)
+    monkeypatch.setattr(tiendanube_app, "get_conn", lambda: conn)
+    monkeypatch.setattr(tiendanube_app.secrets, "token_hex", lambda _n: "123")
+
+    assert tiendanube_app.encolar_webhook(evento_id, {
+        "store_id": 123, "event": "order/updated", "id": 88,
+    }) is True
+    insert = next(
+        params for sql, params in cursor.ejecutadas
+        if "INSERT INTO tiendanube_webhook_eventos" in sql
+    )
+    assert insert[0] == f"{evento_id}:occurrence:123"
 
 
 def test_claim_valido_vincula_sin_reinstalar(monkeypatch):
@@ -285,6 +327,7 @@ def test_callback_ownerless_entrega_claim_y_no_pide_reinstalar(monkeypatch):
     from servicios import tiendanube_app, tiendanube_shipping
 
     monkeypatch.setattr(tiendanube_app, "app_configurada", lambda: True)
+    monkeypatch.setattr(tiendanube_app, "app_publicable", lambda: True)
     monkeypatch.setattr(
         tiendanube_app, "canjear_token",
         lambda _code: {"access_token": "token", "user_id": 123},
@@ -321,6 +364,7 @@ def test_callback_no_declara_exito_si_fallan_webhooks(monkeypatch):
     from servicios import tiendanube_app
 
     monkeypatch.setattr(tiendanube_app, "app_configurada", lambda: True)
+    monkeypatch.setattr(tiendanube_app, "app_publicable", lambda: True)
     monkeypatch.setattr(
         tiendanube_app, "canjear_token",
         lambda _code: {"access_token": "token", "user_id": 123},
@@ -342,6 +386,7 @@ def test_callback_no_declara_exito_si_shipping_no_esta_listo(monkeypatch):
     from servicios import tiendanube_app, tiendanube_shipping
 
     monkeypatch.setattr(tiendanube_app, "app_configurada", lambda: True)
+    monkeypatch.setattr(tiendanube_app, "app_publicable", lambda: True)
     monkeypatch.setattr(
         tiendanube_app, "canjear_token",
         lambda _code: {"access_token": "token", "user_id": 123},

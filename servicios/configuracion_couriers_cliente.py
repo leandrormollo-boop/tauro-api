@@ -335,7 +335,7 @@ def catalogo_cliente(cliente_id: str, ambito: Ambito | str) -> tuple[dict, ...]:
     configurada y el permiso explícito de cotización está activo. Nunca expone
     credenciales, pricing ni el motivo técnico interno.
     """
-    catalogo = [dict(item) for item in public_catalog(ambito)]
+    catalogo = [dict(item) for item in public_catalog(ambito, canal="cuenta")]
     matriz = obtener_matriz(cliente_id)
     filas = {
         fila["id"]: fila for fila in (matriz or {}).get("couriers", ())

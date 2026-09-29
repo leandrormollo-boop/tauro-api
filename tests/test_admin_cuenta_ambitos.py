@@ -225,6 +225,46 @@ def test_pago_admin_envia_aplicaciones_decimal(monkeypatch, admin_autenticado):
     assert guardado[0]["idempotency_key"] == IDEMPOTENCY_KEY
 
 
+def test_pago_admin_solo_envia_excepcion_duplicado_con_checkbox_explicito(
+    monkeypatch, admin_autenticado,
+):
+    guardados = []
+    monkeypatch.setattr(admin, "registrar_pago", lambda **datos: guardados.append(datos))
+
+    respuesta = asyncio.run(admin.admin_pago_nuevo(
+        request=admin_autenticado,
+        cliente_id="melcior",
+        fecha="2026-08-17",
+        monto_ars="100",
+        idempotency_key=IDEMPOTENCY_KEY,
+        referencia="TRX-REPETIDA",
+        autorizar_duplicado="1",
+        duplicado_motivo="Otra transferencia verificada contra el comprobante bancario",
+        comprobante=None,
+        admin_token="token",
+    ))
+
+    assert respuesta.status_code == 303
+    assert guardados[0]["actor_tipo"] == "admin"
+    assert guardados[0]["actor_ref"] == "admin"
+    assert guardados[0]["duplicado_autorizado_motivo"].startswith("Otra transferencia")
+
+    guardados.clear()
+    asyncio.run(admin.admin_pago_nuevo(
+        request=admin_autenticado,
+        cliente_id="melcior",
+        fecha="2026-08-17",
+        monto_ars="100",
+        idempotency_key=IDEMPOTENCY_KEY,
+        referencia="TRX-NORMAL",
+        autorizar_duplicado="",
+        duplicado_motivo="Este texto no autoriza nada sin el checkbox",
+        comprobante=None,
+        admin_token="token",
+    ))
+    assert guardados[0]["duplicado_autorizado_motivo"] == ""
+
+
 def test_admin_exige_clave_idempotencia_y_regenera_si_es_invalida(
     monkeypatch, admin_autenticado,
 ):
@@ -303,6 +343,87 @@ def test_gets_admin_generan_claves_opacas_distintas(monkeypatch, admin_autentica
     assert clave_cargo != clave_pago
     assert admin._idempotency_key_form(clave_cargo) == clave_cargo
     assert admin._idempotency_key_form(clave_pago) == clave_pago
+
+
+def test_confirmar_fecha_admin_exige_csrf_confirmacion_motivo_y_evidencia(
+    monkeypatch, admin_autenticado,
+):
+    llamadas = []
+    monkeypatch.setattr(
+        admin,
+        "confirmar_fecha_pago",
+        lambda *args, **kwargs: llamadas.append((args, kwargs)) or True,
+    )
+    token = admin._csrf_dhl("pago-fecha:17")
+
+    invalida = admin.admin_confirmar_fecha_pago(
+        17,
+        csrf_fecha="manipulado",
+        confirmacion="1",
+        motivo="Fecha verificada contra el banco",
+        evidencia_ref="Extracto línea 4",
+        admin_token="token",
+    )
+    assert invalida.status_code == 303
+    assert "confirmaci%C3%B3n" in invalida.headers["location"]
+    assert llamadas == []
+
+    sin_checkbox = admin.admin_confirmar_fecha_pago(
+        17,
+        csrf_fecha=token,
+        confirmacion="",
+        motivo="Fecha verificada contra el banco",
+        evidencia_ref="Extracto línea 4",
+        admin_token="token",
+    )
+    assert sin_checkbox.status_code == 303
+    assert llamadas == []
+
+    respuesta = admin.admin_confirmar_fecha_pago(
+        17,
+        csrf_fecha=token,
+        confirmacion="1",
+        motivo="Fecha verificada contra el banco",
+        evidencia_ref="Extracto línea 4",
+        admin_token="token",
+    )
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"] == "/admin/pagos/nuevo"
+    assert llamadas == [((17,), {
+        "actor_tipo": "admin",
+        "actor_ref": "admin",
+        "motivo": "Fecha verificada contra el banco",
+        "evidencia_ref": "Extracto línea 4",
+    })]
+
+
+def test_form_confirmacion_fecha_renderiza_controles_documentales():
+    html = admin.templates.env.get_template("admin/pago_form.html").render(
+        anomalias_pago=[{
+            "tipo": "PAGO_FECHA_PENDIENTE_REVISION",
+            "cliente_id": "PAGOS_A",
+            "identidad_visible": "2026-09-30",
+            "pagos_ids": [17],
+            "cantidad": 1,
+            "csrf_fecha": "token-opaco",
+        }],
+        clientes=[],
+        preselect_cliente="",
+        destinos_pago=[],
+        idempotency_key=IDEMPOTENCY_KEY,
+        today="2026-09-29",
+        form_data={},
+        flash_error="",
+        request=SimpleNamespace(
+            url=SimpleNamespace(path="/admin/pagos/nuevo"),
+            state=SimpleNamespace(csp_nonce="nonce-prueba"),
+        ),
+    )
+    assert 'action="/admin/pagos/17/confirmar-fecha"' in html
+    assert 'name="csrf_fecha" value="token-opaco"' in html
+    assert 'name="motivo" minlength="10"' in html
+    assert 'name="evidencia_ref" minlength="5"' in html
+    assert 'name="confirmacion" value="1" required' in html
 
 
 @contextmanager
@@ -496,5 +617,8 @@ def test_templates_exponen_ambitos_y_no_mutan_cargos_sin_api():
     assert "Nota de crédito (NC)" not in cargo
     assert 'name="imputacion" required' in pago
     assert 'name="idempotency_key" value="{{ idempotency_key }}"' in pago
+    assert 'name="autorizar_duplicado"' in pago
+    assert 'name="duplicado_motivo"' in pago
+    assert "Revisión documental" in pago
     assert "Sin imputar" in pago
     assert "Aprobar e imputar" in pendientes

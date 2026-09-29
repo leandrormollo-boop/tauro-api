@@ -454,34 +454,50 @@ def listar_facturas_cliente(cliente_id: str) -> list[dict[str, Any]]:
                            COALESCE((
                                SELECT SUM(pa.monto_ars)
                                FROM pagos_aplicaciones pa
+                               JOIN pagos p ON p.id=pa.pago_id
                                WHERE pa.factura_id=f.id
                                  AND pa.estado='APLICADA'
+                                 AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0) + COALESCE((
                                SELECT SUM(pa.monto_ars)
                                FROM pagos_aplicaciones pa
+                               JOIN pagos p ON p.id=pa.pago_id
                                WHERE pa.envio_id IN (
                                    SELECT ii.envio_id
                                    FROM facturas_cliente_items ii
                                    WHERE ii.factura_id=f.id
                                      AND ii.envio_id IS NOT NULL
                                ) AND pa.estado='APLICADA'
+                                 AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0)
                        ) ELSE 0 END AS pagado,
                        CASE WHEN f.tipo='FC' THEN GREATEST(
                            f.total - COALESCE((
                                SELECT SUM(pa.monto_ars)
                                FROM pagos_aplicaciones pa
+                               JOIN pagos p ON p.id=pa.pago_id
                                WHERE pa.factura_id=f.id
                                  AND pa.estado='APLICADA'
+                                 AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0) - COALESCE((
                                SELECT SUM(pa.monto_ars)
                                FROM pagos_aplicaciones pa
+                               JOIN pagos p ON p.id=pa.pago_id
                                WHERE pa.envio_id IN (
                                    SELECT ii.envio_id
                                    FROM facturas_cliente_items ii
                                    WHERE ii.factura_id=f.id
                                      AND ii.envio_id IS NOT NULL
                                ) AND pa.estado='APLICADA'
+                                 AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                                 AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                            ), 0), 0
                        ) ELSE 0 END AS saldo
                   FROM facturas_cliente f
@@ -524,24 +540,40 @@ def obtener_factura_cliente(
                        CASE WHEN f.tipo='FC' THEN LEAST(f.total,
                            COALESCE((SELECT SUM(pa.monto_ars)
                              FROM pagos_aplicaciones pa
-                             WHERE pa.factura_id=f.id AND pa.estado='APLICADA'),0)
+                             JOIN pagos p ON p.id=pa.pago_id
+                             WHERE pa.factura_id=f.id AND pa.estado='APLICADA'
+                               AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                               AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida),0)
                            + COALESCE((SELECT SUM(pa.monto_ars)
                              FROM pagos_aplicaciones pa
+                             JOIN pagos p ON p.id=pa.pago_id
                              WHERE pa.envio_id IN (
                                  SELECT i.envio_id FROM facturas_cliente_items i
                                  WHERE i.factura_id=f.id AND i.envio_id IS NOT NULL
-                             ) AND pa.estado='APLICADA'),0)
+                             ) AND pa.estado='APLICADA'
+                               AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                               AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida),0)
                        ) ELSE 0 END AS pagado,
                        CASE WHEN f.tipo='FC' THEN GREATEST(f.total
                            - COALESCE((SELECT SUM(pa.monto_ars)
                              FROM pagos_aplicaciones pa
-                             WHERE pa.factura_id=f.id AND pa.estado='APLICADA'),0)
+                             JOIN pagos p ON p.id=pa.pago_id
+                             WHERE pa.factura_id=f.id AND pa.estado='APLICADA'
+                               AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                               AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida),0)
                            - COALESCE((SELECT SUM(pa.monto_ars)
                              FROM pagos_aplicaciones pa
+                             JOIN pagos p ON p.id=pa.pago_id
                              WHERE pa.envio_id IN (
                                  SELECT i.envio_id FROM facturas_cliente_items i
                                  WHERE i.factura_id=f.id AND i.envio_id IS NOT NULL
-                             ) AND pa.estado='APLICADA'),0), 0
+                             ) AND pa.estado='APLICADA'
+                               AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                               AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida),0), 0
                        ) ELSE 0 END AS saldo
                   FROM facturas_cliente f
                  WHERE f.id=%s

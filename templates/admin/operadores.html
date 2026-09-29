@@ -13,7 +13,7 @@
 {% for r in m.resumen %}<a href="/admin/operadores/{{ m.courier }}?vista=cuenta"><small>{{ r.moneda }} · deuda verificada</small><strong>{{ op.dinero(r.pendiente) }}</strong></a>
 {% if r.vencido %}<span class="business-status warn">{{ r.moneda }} {{ op.dinero(r.vencido) }} vencidos</span>{% endif %}
 {% if r.credito %}<small>Crédito disponible: {{ r.moneda }} {{ op.dinero(r.credito) }}</small>{% endif %}
-{% if r.sin_verificar %}<a href="/admin/operadores/{{ m.courier }}?vista=cuenta&estado=SIN_VERIFICAR" class="business-status warn">{{ r.sin_verificar }} documentos por verificar</a><span data-help="Saldo por verificar">Estos documentos no se incluyen en la deuda verificada hasta revisar su historial de pagos.</span>{% endif %}
+{% if r.sin_verificar %}<a href="/admin/operadores/{{ m.courier }}?vista=cuenta&estado=SIN_VERIFICAR" class="business-status warn">{{ r.sin_verificar }} documentos por verificar · {{ r.moneda }} {{ op.dinero(r.importe_bruto_sin_verificar) }} brutos</a><span data-help="Saldo por verificar">Importe nominal de documentos sin revisar: puede incluir pagos y notas de crédito pendientes de identificar. No es deuda confirmada.</span>{% endif %}
 {% endfor %}</div>
 {% if not m.resumen %}<p class="op-note">Sin documentos registrados.</p>{% endif %}
 <div class="business-filters"><a class="business-cta" href="/admin/operadores/{{ m.courier }}">Ver envíos →</a><a class="business-cta" href="/admin/operadores/{{ m.courier }}?vista=cuenta">Cuenta corriente →</a></div>

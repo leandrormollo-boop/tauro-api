@@ -306,7 +306,7 @@ def tiendanube_callback(request: Request, code: str = "", state: str = ""):
     from fastapi.responses import HTMLResponse
 
     from servicios.tiendanube_app import (
-        app_configurada, canjear_token, guardar_instalacion,
+        app_configurada, app_publicable, canjear_token, guardar_instalacion,
         registrar_webhooks, confirmar_webhooks, datos_tienda,
         validar_oauth_cookie, vincular_cliente, TiendanubeWebhookError,
     )
@@ -331,6 +331,14 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
                     "La integración con Tiendanube todavía no está habilitada.",
                     '<a href="https://taurosolutions.ar/portal/tienda">Ir al portal</a>',
                     status=503)
+    if not app_publicable():
+        return _pag(
+            "Piloto en preparación",
+            "La app todavía no completó Shipping, tarifas, UAT y homologación. "
+            "No iniciamos instalaciones nuevas hasta cerrar esos controles.",
+            '<a href="https://taurosolutions.ar/portal/tienda">Ir al portal</a>',
+            status=503,
+        )
     if not code:
         return _pag("Instalación incompleta",
                     "Tiendanube no nos devolvió el código de autorización. "

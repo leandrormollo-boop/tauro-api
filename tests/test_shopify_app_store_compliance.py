@@ -25,11 +25,21 @@ def test_portal_no_pide_dominio_para_instalar_shopify():
     assert "https://admin.shopify.com/" in plantilla
 
 
-def test_portal_explica_activacion_opcional_del_checkout():
+def test_portal_acota_shopify_a_pedidos_y_tracking():
     plantilla = (ROOT / "templates" / "portal" / "tienda.html").read_text(
+        encoding="utf-8"
+    )
+    paquetes = (ROOT / "templates" / "portal" / "paquetes.html").read_text(
+        encoding="utf-8"
+    )
+    javascript = (ROOT / "static" / "js" / "portal-paquetes.js").read_text(
         encoding="utf-8"
     )
 
     assert 'action="/portal/tienda/politica"' not in plantilla
-    assert "La función se activa por tienda" in plantilla
-    assert "autorización y zonas de envío configuradas" in plantilla
+    assert "Shopify importa pedidos y recibe tracking" in plantilla
+    assert "no publica tarifas TAURO en checkout" in plantilla
+    assert "Las cotizaciones se hacen en el portal TAURO" in paquetes
+    assert "Autorizar tarifas en Shopify" not in javascript
+    assert "Conectar servicio" not in javascript
+    assert "esta integración no publica tarifas en checkout" in javascript

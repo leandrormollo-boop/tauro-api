@@ -6,14 +6,15 @@
   <div>
     <div class="eyebrow">Control de riesgo DHL</div>
     <h1>Guías reemplazadas y canceladas</h1>
-    <p>Cada etiqueta descartada se controla una sola vez, siete días después de la operación.</p>
+    <p>Cada etiqueta descartada se vigila desde el día 7 con controles repetidos.</p>
   </div>
   <a href="/admin/guias-reemplazadas" class="btn btn-ghost btn-sm">Actualizar pantalla</a>
 </div>
 
 <div class="msg warn" style="margin-bottom:18px;">
   <strong>Importante:</strong> reemplazar o cancelar una guía en TAURO no anula físicamente la etiqueta en DHL.
-  A los 7 días, si el tracking anterior sigue sin recolección ni movimientos, la cancelación queda confirmada.
+  La ausencia de eventos o un 404 sólo significan <strong>sin movimientos observados</strong>; no prueban que DHL anuló la etiqueta.
+  El control es semanal durante los primeros 30 días y mensual a partir de entonces.
   Si registra un evento, este panel alerta pero <strong>no reactiva el cargo viejo</strong>:
   primero hay que comprobar la factura del courier y conciliar el caso.
 </div>
@@ -27,7 +28,7 @@
   <a href="/admin/guias-reemplazadas?riesgo=VIGILAR" class="card" style="padding:18px;{% if riesgo_filtro == 'VIGILAR' %}border-color:var(--warn);{% endif %}">
     <div class="eyebrow" style="color:var(--warn);">Pendientes de control</div>
     <div style="font-size:30px;font-weight:700;margin-top:5px;">{{ resumen.vigilar }}</div>
-    <small style="color:var(--fg-3);">Esperando el control único a 7 días</small>
+    <small style="color:var(--fg-3);">Vigilancia semanal y luego mensual</small>
   </a>
   <a href="/admin/guias-reemplazadas?riesgo=CERRADA" class="card" style="padding:18px;{% if riesgo_filtro == 'CERRADA' %}border-color:var(--line);{% endif %}">
     <div class="eyebrow">Controles cerrados</div>
@@ -101,7 +102,7 @@
               {% if r.alerta_movimiento_at %}
                 <span class="badge muted">Alerta resuelta</span>
               {% else %}
-                <span class="badge ok">Cancelación confirmada</span>
+                <span class="badge muted">Control cerrado manualmente</span>
               {% endif %}
               {% if r.riesgo_resuelto_nota %}<div style="font-size:12px;margin-top:8px;">{{ r.riesgo_resuelto_nota }}</div>{% endif %}
               {% if r.riesgo_resuelto_at %}<small style="color:var(--fg-4);">{{ r.riesgo_resuelto_at.strftime("%d/%m/%Y %H:%M") }}</small>{% endif %}
@@ -109,13 +110,13 @@
               <span class="badge warn">Consulta con error</span>
               <div style="font-size:12px;color:var(--warn);margin-top:8px;">{{ r.tracking_anterior_error }}</div>
             {% elif r.tracking_anterior_consultado_at %}
-              <span class="badge ok">Sin movimientos por ahora</span>
-              <div style="font-size:12px;color:var(--fg-3);margin-top:8px;">La confirmación definitiva se hace al cumplir 7 días.</div>
+              <span class="badge muted">Sin movimientos observados</span>
+              <div style="font-size:12px;color:var(--fg-3);margin-top:8px;">La etiqueta sigue bajo vigilancia; esto no confirma una anulación en DHL.</div>
             {% else %}
               <span class="badge warn">Control programado</span>
             {% endif %}
             {% if r.riesgo_estado == 'VIGILAR' and r.control_programado_at %}
-              <br><small style="color:var(--fg-4);">Se controla: {{ r.control_programado_at.strftime("%d/%m/%Y %H:%M") }}</small>
+              <br><small style="color:var(--fg-4);">Primer control desde: {{ r.control_programado_at.strftime("%d/%m/%Y %H:%M") }}</small>
             {% endif %}
             {% if r.tracking_anterior_consultado_at %}
               <br><small style="color:var(--fg-4);">Última consulta: {{ r.tracking_anterior_consultado_at.strftime("%d/%m/%Y %H:%M") }}</small>
@@ -135,8 +136,8 @@
           </td>
           <td style="min-width:220px;">
             {% if r.riesgo_estado == 'VIGILAR' %}
-              <span class="badge muted">Sin acción necesaria</span>
-              <div style="font-size:12px;color:var(--fg-4);margin-top:8px;">TAURO hará el único control en la fecha programada.</div>
+              <span class="badge muted">Vigilancia automática</span>
+              <div style="font-size:12px;color:var(--fg-4);margin-top:8px;">TAURO repetirá el control según la ventana programada.</div>
             {% elif r.riesgo_estado == 'ALERTA_MOVIMIENTO' %}
               <form method="POST" action="/admin/guias-reemplazadas/{{ r.id }}/consultar" style="margin-bottom:8px;">
                 <button class="btn btn-sm btn-primary" type="submit">Actualizar alerta en DHL</button>

@@ -14,7 +14,7 @@
 {% for r in filas %}<div class="card op-summary"><div class="eyebrow">{{ r.moneda }} · saldo verificado</div>
   <h3>{{ dinero(r.pendiente) }} pendiente</h3>
   <p>Vencido: {{ dinero(r.vencido) }} · Crédito disponible: {{ dinero(r.credito) }}</p>
-  {% if r.sin_verificar %}<small class="op-danger">{{ r.sin_verificar }} documentos por verificar</small><span data-help="Historial pendiente">Estos documentos quedan fuera de la deuda y del crédito verificados hasta revisar su historial de pagos.</span>{% endif %}
+  {% if r.sin_verificar %}<small class="op-danger">{{ r.sin_verificar }} documentos por verificar · {{ r.moneda }} {{ dinero(r.importe_bruto_sin_verificar) }} brutos</small><span data-help="Historial pendiente">Importe nominal de documentos sin revisar: puede incluir pagos y notas de crédito pendientes de identificar. No es deuda confirmada.</span>{% endif %}
 </div>{% endfor %}
 </div>
 {%- endmacro %}

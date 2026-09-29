@@ -971,6 +971,187 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_pagos_cliente_idempotency
     ON pagos(cliente_id, idempotency_key)
     WHERE idempotency_key IS NOT NULL;
 
+-- Identidad documental del cobro. Estos campos son metadatos derivados: el
+-- backfill no cambia fecha, estado, monto ni aplicaciones históricas.
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS referencia_normalizada TEXT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS comprobante_sha256 TEXT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS duplicado_autorizado_motivo TEXT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS duplicado_autorizado_por TEXT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS fecha_original_conocida BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS fecha_revision_requerida BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS fecha_revision_confirmada_at TIMESTAMPTZ;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS fecha_revision_confirmada_por TEXT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS fecha_revision_motivo TEXT;
+ALTER TABLE pagos ADD COLUMN IF NOT EXISTS fecha_revision_evidencia TEXT;
+UPDATE pagos
+   SET referencia_normalizada = REGEXP_REPLACE(
+           UPPER(BTRIM(COALESCE(referencia, ''))), '[^A-Z0-9]', '', 'g'
+       ),
+       comprobante_sha256 = CASE
+           WHEN comprobante IS NULL THEN NULL
+           ELSE ENCODE(SHA256(comprobante), 'hex')
+       END
+ WHERE referencia_normalizada IS DISTINCT FROM REGEXP_REPLACE(
+           UPPER(BTRIM(COALESCE(referencia, ''))), '[^A-Z0-9]', '', 'g'
+       )
+    OR comprobante_sha256 IS DISTINCT FROM CASE
+           WHEN comprobante IS NULL THEN NULL
+           ELSE ENCODE(SHA256(comprobante), 'hex')
+       END;
+-- Sólo la importación MELCIOR ya documentada prueba que la fecha original no
+-- fue informada. No se infiere esa condición para otros pagos históricos.
+UPDATE pagos
+   SET fecha_original_conocida = FALSE
+ WHERE fecha_original_conocida
+   AND nota LIKE 'Importación histórica MELCIOR 2026 · fecha original no informada · %';
+-- Una fecha futura ya existente queda en cuarentena persistente. El paso del
+-- tiempo no la convierte por sí solo en pago efectivo ni reactiva reservas.
+UPDATE pagos
+   SET fecha_revision_requerida = TRUE,
+       fecha_revision_confirmada_at = NULL,
+       fecha_revision_confirmada_por = NULL,
+       fecha_revision_motivo = NULL,
+       fecha_revision_evidencia = NULL
+ WHERE fecha > (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+   AND COALESCE(estado, 'APROBADO') <> 'RECHAZADO'
+   AND NOT fecha_revision_requerida;
+CREATE INDEX IF NOT EXISTS ix_pagos_referencia_documental
+    ON pagos(cliente_id, referencia_normalizada)
+    WHERE referencia_normalizada <> '' AND estado IS DISTINCT FROM 'RECHAZADO';
+CREATE INDEX IF NOT EXISTS ix_pagos_comprobante_documental
+    ON pagos(comprobante_sha256)
+    WHERE comprobante_sha256 IS NOT NULL AND estado IS DISTINCT FROM 'RECHAZADO';
+
+CREATE OR REPLACE FUNCTION tauro_validar_identidad_pago_cliente()
+RETURNS TRIGGER AS $$
+DECLARE
+    referencia_nueva TEXT;
+    hash_nuevo TEXT;
+BEGIN
+    -- Un único lock cierra la carrera incluso si dos formularios usan clientes
+    -- distintos con el mismo comprobante. El volumen de altas es bajo y la
+    -- serialización dura sólo esta transacción.
+    PERFORM pg_advisory_xact_lock(hashtextextended('tauro:pagos-clientes', 0));
+    referencia_nueva := REGEXP_REPLACE(
+        UPPER(BTRIM(COALESCE(NEW.referencia, ''))), '[^A-Z0-9]', '', 'g'
+    );
+    hash_nuevo := CASE WHEN NEW.comprobante IS NULL THEN NULL
+                       ELSE ENCODE(SHA256(NEW.comprobante), 'hex') END;
+    NEW.referencia_normalizada := referencia_nueva;
+    NEW.comprobante_sha256 := hash_nuevo;
+
+    IF NEW.fecha > (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+       AND COALESCE(NEW.estado, 'APROBADO') <> 'RECHAZADO' THEN
+        NEW.fecha_revision_requerida := TRUE;
+        NEW.fecha_revision_confirmada_at := NULL;
+        NEW.fecha_revision_confirmada_por := NULL;
+        NEW.fecha_revision_motivo := NULL;
+        NEW.fecha_revision_evidencia := NULL;
+    END IF;
+    IF NEW.fecha_revision_requerida THEN
+        IF TG_OP='INSERT' THEN
+            NEW.fecha_revision_confirmada_at := NULL;
+            NEW.fecha_revision_confirmada_por := NULL;
+            NEW.fecha_revision_motivo := NULL;
+            NEW.fecha_revision_evidencia := NULL;
+        ELSIF NOT OLD.fecha_revision_requerida THEN
+            NEW.fecha_revision_confirmada_at := NULL;
+            NEW.fecha_revision_confirmada_por := NULL;
+            NEW.fecha_revision_motivo := NULL;
+            NEW.fecha_revision_evidencia := NULL;
+        END IF;
+    END IF;
+    IF TG_OP='UPDATE' AND OLD.fecha_revision_requerida
+       AND NOT NEW.fecha_revision_requerida THEN
+        IF NEW.fecha > (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+           OR NEW.fecha_revision_confirmada_at IS NULL
+           OR LENGTH(BTRIM(COALESCE(NEW.fecha_revision_confirmada_por, '')))
+              NOT BETWEEN 1 AND 160
+           OR LENGTH(BTRIM(COALESCE(NEW.fecha_revision_motivo, '')))
+              NOT BETWEEN 10 AND 1000
+           OR LENGTH(BTRIM(COALESCE(NEW.fecha_revision_evidencia, '')))
+              NOT BETWEEN 5 AND 1000 THEN
+            RAISE EXCEPTION 'La fecha del pago requiere revisión administrativa explícita';
+        END IF;
+    END IF;
+
+    IF COALESCE(NEW.estado, 'APROBADO') = 'APROBADO'
+       AND NEW.fecha > (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date THEN
+        RAISE EXCEPTION 'Un pago futuro no puede acreditarse';
+    END IF;
+    IF NUM_NONNULLS(NEW.duplicado_autorizado_motivo,
+                    NEW.duplicado_autorizado_por) = 1
+       OR (NEW.duplicado_autorizado_motivo IS NOT NULL AND
+           LENGTH(BTRIM(NEW.duplicado_autorizado_motivo)) NOT BETWEEN 10 AND 1000)
+       OR (NEW.duplicado_autorizado_por IS NOT NULL AND
+           BTRIM(NEW.duplicado_autorizado_por) = '') THEN
+        RAISE EXCEPTION 'La excepción documental requiere motivo y responsable';
+    END IF;
+    IF COALESCE(NEW.estado, 'APROBADO') <> 'RECHAZADO'
+       AND NEW.duplicado_autorizado_motivo IS NULL
+       AND EXISTS (
+           SELECT 1
+             FROM pagos p
+            WHERE p.id IS DISTINCT FROM NEW.id
+              AND COALESCE(p.estado, 'APROBADO') <> 'RECHAZADO'
+              AND NOT (
+                  NEW.idempotency_key IS NOT NULL
+                  AND p.cliente_id=NEW.cliente_id
+                  AND p.idempotency_key=NEW.idempotency_key
+              )
+              AND (
+                  (referencia_nueva <> ''
+                   AND p.cliente_id=NEW.cliente_id
+                   AND p.referencia_normalizada=referencia_nueva)
+                  OR (hash_nuevo IS NOT NULL AND p.comprobante_sha256=hash_nuevo)
+              )
+       ) THEN
+        RAISE EXCEPTION 'Pago duplicado: la referencia o el comprobante ya fue registrado';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_validar_identidad_pago_cliente ON pagos;
+CREATE TRIGGER trg_validar_identidad_pago_cliente
+BEFORE INSERT OR UPDATE OF cliente_id, fecha, estado, referencia, comprobante,
+    idempotency_key, duplicado_autorizado_motivo, duplicado_autorizado_por,
+    fecha_revision_requerida, fecha_revision_confirmada_at,
+    fecha_revision_confirmada_por, fecha_revision_motivo,
+    fecha_revision_evidencia
+ON pagos FOR EACH ROW EXECUTE FUNCTION tauro_validar_identidad_pago_cliente();
+
+-- Visibilidad de anomalías preexistentes. No bloquea la migración ni modifica
+-- saldo: permite revisar evidencia antes de decidir cualquier corrección.
+CREATE OR REPLACE VIEW pagos_anomalias_documentales AS
+WITH referencias AS (
+    SELECT cliente_id, referencia_normalizada, COUNT(*) AS cantidad,
+           ARRAY_AGG(id ORDER BY id) AS pagos_ids
+      FROM pagos
+     WHERE referencia_normalizada <> ''
+       AND COALESCE(estado, 'APROBADO') <> 'RECHAZADO'
+     GROUP BY cliente_id, referencia_normalizada HAVING COUNT(*) > 1
+), comprobantes AS (
+    SELECT comprobante_sha256, COUNT(*) AS cantidad,
+           ARRAY_AGG(id ORDER BY id) AS pagos_ids
+      FROM pagos
+     WHERE comprobante_sha256 IS NOT NULL
+       AND COALESCE(estado, 'APROBADO') <> 'RECHAZADO'
+     GROUP BY comprobante_sha256 HAVING COUNT(*) > 1
+)
+SELECT 'REFERENCIA_DUPLICADA'::TEXT AS tipo, cliente_id,
+       referencia_normalizada AS identidad, cantidad, pagos_ids
+  FROM referencias
+UNION ALL
+SELECT 'COMPROBANTE_DUPLICADO', NULL::TEXT, comprobante_sha256,
+       cantidad, pagos_ids
+  FROM comprobantes
+UNION ALL
+SELECT 'PAGO_FECHA_PENDIENTE_REVISION', cliente_id, fecha::TEXT, 1::BIGINT,
+       ARRAY[id]::INTEGER[]
+  FROM pagos
+ WHERE COALESCE(estado, 'APROBADO') <> 'RECHAZADO'
+   AND fecha_revision_requerida;
+
 -- Aplicación contable explícita del pago por ÁMBITO. Un pago APROBADO puede
 -- distribuirse entre NACIONAL e INTERNACIONAL y conservar el resto como
 -- crédito sin imputar. Deliberadamente no hay backfill: los pagos históricos
@@ -3192,7 +3373,7 @@ BEGIN
         RAISE EXCEPTION 'Una aplicación sólo puede confirmarse; no se reescribe';
     END IF;
 
-    SELECT id, cliente_id, monto_ars,
+    SELECT id, cliente_id, monto_ars, fecha, fecha_revision_requerida,
            COALESCE(estado, 'APROBADO') AS estado
       INTO pago_actual
       FROM pagos
@@ -3206,6 +3387,10 @@ BEGIN
     END IF;
     IF NEW.estado='SOLICITADA' AND pago_actual.estado <> 'PENDIENTE' THEN
         RAISE EXCEPTION 'Sólo un pago pendiente admite una imputación solicitada';
+    END IF;
+    IF pago_actual.fecha_revision_requerida
+       OR pago_actual.fecha > (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date THEN
+        RAISE EXCEPTION 'El pago requiere revisar su fecha antes de imputarlo';
     END IF;
 
     IF NEW.factura_id IS NOT NULL THEN
@@ -3233,8 +3418,12 @@ BEGIN
         SELECT COALESCE(SUM(pa.monto_ars), 0)
           INTO aplicado_documento
           FROM pagos_aplicaciones pa
+          JOIN pagos p ON p.id=pa.pago_id
          WHERE pa.id <> COALESCE(NEW.id, -1)
-           AND pa.estado IN ('SOLICITADA','APLICADA')
+           AND NOT p.fecha_revision_requerida
+           AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+           AND ((pa.estado='APLICADA' AND COALESCE(p.estado,'APROBADO')='APROBADO')
+                OR (pa.estado='SOLICITADA' AND p.estado='PENDIENTE'))
            AND (
                pa.factura_id=NEW.factura_id
                OR pa.envio_id IN (
@@ -3265,9 +3454,13 @@ BEGIN
         SELECT COALESCE(SUM(pa.monto_ars), 0)
           INTO aplicado_documento
           FROM pagos_aplicaciones pa
+          JOIN pagos p ON p.id=pa.pago_id
          WHERE pa.id <> COALESCE(NEW.id, -1)
            AND pa.envio_id=NEW.envio_id
-           AND pa.estado IN ('SOLICITADA','APLICADA');
+           AND NOT p.fecha_revision_requerida
+           AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+           AND ((pa.estado='APLICADA' AND COALESCE(p.estado,'APROBADO')='APROBADO')
+                OR (pa.estado='SOLICITADA' AND p.estado='PENDIENTE'));
     ELSE
         -- Compatibilidad: las aplicaciones anteriores a esta migración no
         -- tienen documento y conservan el ámbito que ya tenían.
@@ -3301,6 +3494,127 @@ DROP TRIGGER IF EXISTS trg_validar_pago_aplicacion ON pagos_aplicaciones;
 CREATE TRIGGER trg_validar_pago_aplicacion
 BEFORE INSERT OR UPDATE ON pagos_aplicaciones
 FOR EACH ROW EXECUTE FUNCTION validar_pago_aplicacion();
+
+-- Una revisión de fecha puede volver efectivo un pago que llevaba tiempo en
+-- cuarentena. Antes de permitirla, recalcula cada documento con la nueva fila
+-- simulada; nunca deja que la mera llegada de la fecha sobreaplique un saldo.
+CREATE OR REPLACE FUNCTION validar_pago_con_aplicaciones()
+RETURNS TRIGGER AS $$
+DECLARE
+    aplicado NUMERIC(14,2);
+    documento RECORD;
+    cubierto NUMERIC(14,2);
+BEGIN
+    SELECT COALESCE(SUM(monto_ars), 0)
+      INTO aplicado
+      FROM pagos_aplicaciones
+     WHERE pago_id = OLD.id
+       AND estado = 'APLICADA';
+
+    IF aplicado > NEW.monto_ars::numeric THEN
+        RAISE EXCEPTION 'El pago % tiene % aplicado y no puede reducirse a %',
+            OLD.id, aplicado, NEW.monto_ars;
+    END IF;
+    IF aplicado > 0 AND COALESCE(NEW.estado, 'APROBADO') <> 'APROBADO' THEN
+        RAISE EXCEPTION 'El pago % tiene aplicaciones y debe seguir aprobado', OLD.id;
+    END IF;
+
+    IF OLD.fecha_revision_requerida AND NOT NEW.fecha_revision_requerida
+       AND COALESCE(NEW.estado, 'APROBADO') <> 'RECHAZADO' THEN
+        IF NEW.fecha > (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+           OR NEW.fecha_revision_confirmada_at IS NULL
+           OR LENGTH(BTRIM(COALESCE(NEW.fecha_revision_confirmada_por, '')))
+              NOT BETWEEN 1 AND 160
+           OR LENGTH(BTRIM(COALESCE(NEW.fecha_revision_motivo, '')))
+              NOT BETWEEN 10 AND 1000
+           OR LENGTH(BTRIM(COALESCE(NEW.fecha_revision_evidencia, '')))
+              NOT BETWEEN 5 AND 1000 THEN
+            RAISE EXCEPTION 'La fecha del pago requiere revisión administrativa explícita';
+        END IF;
+
+        FOR documento IN
+            SELECT f.id, f.total
+              FROM facturas_cliente f
+             WHERE f.estado='EMITIDA' AND f.tipo='FC'
+               AND f.id IN (
+                   SELECT pa.factura_id FROM pagos_aplicaciones pa
+                    WHERE pa.pago_id=NEW.id AND pa.factura_id IS NOT NULL
+                   UNION
+                   SELECT i.factura_id
+                     FROM pagos_aplicaciones pa
+                     JOIN facturas_cliente_items i ON i.envio_id=pa.envio_id
+                     JOIN facturas_cliente fi ON fi.id=i.factura_id AND fi.estado='EMITIDA'
+                    WHERE pa.pago_id=NEW.id AND pa.envio_id IS NOT NULL
+               )
+             ORDER BY f.id
+             FOR UPDATE
+        LOOP
+            SELECT COALESCE(SUM(pa.monto_ars),0)
+              INTO cubierto
+              FROM pagos_aplicaciones pa
+              JOIN pagos p ON p.id=pa.pago_id
+             WHERE (pa.factura_id=documento.id OR pa.envio_id IN (
+                       SELECT i.envio_id FROM facturas_cliente_items i
+                        WHERE i.factura_id=documento.id AND i.envio_id IS NOT NULL
+                   ))
+               AND NOT CASE WHEN p.id=NEW.id THEN NEW.fecha_revision_requerida
+                            ELSE p.fecha_revision_requerida END
+               AND CASE WHEN p.id=NEW.id THEN NEW.fecha ELSE p.fecha END
+                   <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               AND ((pa.estado='APLICADA' AND COALESCE(
+                        CASE WHEN p.id=NEW.id THEN NEW.estado ELSE p.estado END,
+                        'APROBADO')='APROBADO')
+                    OR (pa.estado='SOLICITADA' AND
+                        CASE WHEN p.id=NEW.id THEN NEW.estado ELSE p.estado END='PENDIENTE'));
+            IF cubierto > documento.total THEN
+                RAISE EXCEPTION 'La revisión activaría aplicaciones superiores al saldo de la factura %', documento.id;
+            END IF;
+        END LOOP;
+
+        FOR documento IN
+            SELECT e.id, e.monto_ars AS total
+              FROM envios e
+             WHERE e.id IN (
+                   SELECT pa.envio_id FROM pagos_aplicaciones pa
+                    WHERE pa.pago_id=NEW.id AND pa.envio_id IS NOT NULL
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM facturas_cliente_items i
+                   JOIN facturas_cliente f ON f.id=i.factura_id
+                    WHERE i.envio_id=e.id AND f.estado='EMITIDA'
+               )
+             ORDER BY e.id
+             FOR UPDATE
+        LOOP
+            SELECT COALESCE(SUM(pa.monto_ars),0)
+              INTO cubierto
+              FROM pagos_aplicaciones pa
+              JOIN pagos p ON p.id=pa.pago_id
+             WHERE pa.envio_id=documento.id
+               AND NOT CASE WHEN p.id=NEW.id THEN NEW.fecha_revision_requerida
+                            ELSE p.fecha_revision_requerida END
+               AND CASE WHEN p.id=NEW.id THEN NEW.fecha ELSE p.fecha END
+                   <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               AND ((pa.estado='APLICADA' AND COALESCE(
+                        CASE WHEN p.id=NEW.id THEN NEW.estado ELSE p.estado END,
+                        'APROBADO')='APROBADO')
+                    OR (pa.estado='SOLICITADA' AND
+                        CASE WHEN p.id=NEW.id THEN NEW.estado ELSE p.estado END='PENDIENTE'));
+            IF cubierto > documento.total THEN
+                RAISE EXCEPTION 'La revisión activaría aplicaciones superiores al saldo del envío %', documento.id;
+            END IF;
+        END LOOP;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validar_pago_con_aplicaciones ON pagos;
+CREATE TRIGGER trg_validar_pago_con_aplicaciones
+BEFORE UPDATE OF monto_ars, estado, fecha, fecha_revision_requerida,
+    fecha_revision_confirmada_at, fecha_revision_confirmada_por,
+    fecha_revision_motivo, fecha_revision_evidencia
+ON pagos FOR EACH ROW EXECUTE FUNCTION validar_pago_con_aplicaciones();
 
 -- 7) Auditoría permanente del módulo. No comparte la política de retención
 --    corta de security_audit porque forma parte de la evidencia financiera.
@@ -4125,3 +4439,18 @@ ALTER TABLE condiciones_operador ADD CONSTRAINT condiciones_operador_courier_che
 ALTER TABLE pagos_operador DROP CONSTRAINT IF EXISTS pagos_operador_courier_check;
 ALTER TABLE pagos_operador ADD CONSTRAINT pagos_operador_courier_check
     CHECK (courier IN ('DHL','FEDEX','ANDREANI','OCA','CORREO_ARGENTINO'));
+
+-- Sin payloads, tracking, nombres, documentos ni mensajes externos.
+CREATE TABLE IF NOT EXISTS automatizaciones_estado (
+    clave TEXT PRIMARY KEY,
+    estado TEXT NOT NULL CHECK (estado IN ('EN_CURSO','OK','ERROR','PARCIAL','OMITIDA','SIN_CONFIRMAR')),
+    ultima_ejecucion TIMESTAMPTZ NOT NULL,
+    ultimo_exito TIMESTAMPTZ
+);
+CREATE TABLE IF NOT EXISTS automatizaciones_historial (
+    id BIGSERIAL PRIMARY KEY,
+    clave TEXT NOT NULL REFERENCES automatizaciones_estado(clave),
+    estado TEXT NOT NULL CHECK (estado IN ('EN_CURSO','OK','ERROR','PARCIAL','OMITIDA','SIN_CONFIRMAR')),
+    fecha TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_automatizaciones_historial_clave ON automatizaciones_historial(clave,id DESC);

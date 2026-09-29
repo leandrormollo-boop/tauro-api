@@ -16,7 +16,7 @@
 {% set qp = request.query_params %}
 {% if qp.get('ok') == '2' and seleccionada and seleccionada.estado == 'CANCELADA' %}
     <div class="msg ok" role="status">Recolección cancelada. La guía se conserva.</div>
-{% elif qp.get('ok') == '1' and seleccionada and seleccionada.estado == 'AGENDADA' and seleccionada.confirmation_code %}
+{% elif qp.get('ok') == '1' and seleccionada and seleccionada.estado == 'AGENDADA' and seleccionada.confirmation_code and not seleccionada.vista_historica|default(false) %}
     <div class="msg ok" role="status">Listo: {{ (seleccionada.courier or 'el courier')|upper }} confirmó tu recolección. Guardá el número de reserva de abajo.</div>
 {% endif %}
 {% if qp.get('error') %}

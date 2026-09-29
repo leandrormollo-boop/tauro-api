@@ -56,6 +56,33 @@ def test_pago_publica_solo_hechos_sin_notas_privadas(estado, label):
     assert "Proveedor" not in str(pago)
 
 
+def test_pago_futuro_visible_no_se_presenta_como_credito_imputable():
+    pago = ec._presentar_pago({
+        "id": 9, "estado": "APROBADO", "fecha": date(2099, 1, 1),
+        "fecha_futura": True, "monto_ars": "100", "total_vinculado": "40",
+        "cantidad_envios": 1,
+    })
+    assert pago["estado_label"] == "Fecha futura · Sin acreditar"
+    assert pago["imputacion_label"] == "Fecha futura · Sin imputación"
+    assert pago["sin_imputar_ars"] == Decimal("0.00")
+    assert pago["puede_imputar"] is False
+    assert pago["pasos"][1]["completo"] is False
+
+
+def test_pago_con_fecha_en_revision_sigue_bloqueado_despues_de_su_fecha():
+    pago = ec._presentar_pago({
+        "id": 10, "estado": "APROBADO", "fecha": date(2020, 1, 1),
+        "fecha_futura": False, "fecha_revision_requerida": True,
+        "monto_ars": "100", "total_vinculado": "100", "cantidad_envios": 1,
+    })
+    assert pago["estado_label"] == "Fecha pendiente de revisión · Sin acreditar"
+    assert pago["imputacion_label"] == "Fecha pendiente de revisión · Sin imputación"
+    assert pago["sin_imputar_ars"] == Decimal("0.00")
+    assert pago["puede_imputar"] is False
+    assert pago["aplicaciones"] == []
+    assert pago["pasos"][1]["completo"] is False
+
+
 @pytest.mark.parametrize("tope,deuda,reserva,esperado", [
     (None, "100", "20", None), ("-1", "100", "20", None),
     ("0", "0", "0", Decimal("0.00")),
@@ -122,12 +149,12 @@ def cuenta_aislada(monkeypatch):
         # verificar que el lector filtra propietario/estado por sí mismo.
         cur.execute("""
             CREATE TABLE clientes(cliente_id text PRIMARY KEY, tope_deuda_ars numeric(14,2), puede_emitir boolean);
-            CREATE TABLE solicitudes_guia(id integer PRIMARY KEY, cliente_id text, precio_tauro_ars numeric(14,2), tracking text, estado text, cargo_pendiente boolean);
+            CREATE TABLE solicitudes_guia(id integer PRIMARY KEY, cliente_id text, precio_tauro_ars numeric(14,2), tracking text, estado text, cargo_pendiente boolean, dest_nombre text);
             CREATE TABLE envios(id integer PRIMARY KEY, cliente_id text, fecha date, monto_ars numeric(14,2), estado text, tracking text, solicitud_id integer, ambito text);
             CREATE TABLE ajustes_cliente(id integer PRIMARY KEY, solicitud_id integer, monto_ars numeric(18,4), estado text, aplicado_at timestamptz);
             CREATE TABLE facturas_cliente(id integer PRIMARY KEY, cliente_id text, tipo text, estado text, punto_venta integer, numero integer, fecha_emision date, fecha_vencimiento date, total numeric(14,2));
             CREATE TABLE facturas_cliente_items(id integer PRIMARY KEY, factura_id integer, envio_id integer);
-            CREATE TABLE pagos(id integer PRIMARY KEY, cliente_id text, fecha date, created_at timestamptz, monto_ars numeric(14,2), metodo text, referencia text, estado text, comprobante bytea);
+            CREATE TABLE pagos(id integer PRIMARY KEY, cliente_id text, fecha date, created_at timestamptz, monto_ars numeric(14,2), metodo text, referencia text, estado text, comprobante bytea, fecha_original_conocida boolean NOT NULL DEFAULT true, fecha_revision_requerida boolean NOT NULL DEFAULT false);
             CREATE TABLE pagos_aplicaciones(id integer PRIMARY KEY, pago_id integer, factura_id integer, envio_id integer, monto_ars numeric(14,2), estado text, ambito text);
         """)
 
@@ -168,6 +195,8 @@ def test_lecturas_reales_aislan_cliente_parciales_reservas_y_costos(cuenta_aisla
                     (5,'WAIMAO',30,'W5','GUIA_GENERADA',true),
                     (6,'OTRO',50000,NULL,'EMITIENDO',false),
                     (7,'WAIMAO',500,'COMPLETA','EMITIENDO',false);
+                UPDATE solicitudes_guia SET dest_nombre='DESTINO WAIMAO' WHERE id=1;
+                UPDATE solicitudes_guia SET dest_nombre='DESTINO PRIVADO' WHERE id=6;
                 INSERT INTO envios VALUES
                     (1,'WAIMAO','2026-09-05',100,'ACTIVO','W1',1,'NACIONAL'),
                     (2,'WAIMAO','2026-08-05',200,'ACTIVO','W2',2,'INTERNACIONAL'),
@@ -176,7 +205,7 @@ def test_lecturas_reales_aislan_cliente_parciales_reservas_y_costos(cuenta_aisla
                     (5,'WAIMAO','2026-09-05',70,'ACTIVO','W0',NULL,NULL),
                     (6,'WAIMAO','2026-04-05',10,'ACTIVO','WA',NULL,'NACIONAL'),
                     (7,'WAIMAO','2026-03-05',88,'ACTIVO','WB',NULL,'NACIONAL'),
-                    (8,'OTRO','2026-09-05',77777,'ACTIVO','PRIVADO',NULL,'NACIONAL'),
+                    (8,'OTRO','2026-09-05',77777,'ACTIVO','PRIVADO',6,'NACIONAL'),
                     (9,'WAIMAO','2026-10-05',25,'ACTIVO','WF',NULL,'NACIONAL');
                 INSERT INTO ajustes_cliente VALUES
                     (1,1,20,'APLICADO','2026-09-10 12:00+00'), (2,1,-5,'APLICADO','2026-09-10 12:00+00'),
@@ -224,6 +253,10 @@ def test_lecturas_reales_aislan_cliente_parciales_reservas_y_costos(cuenta_aisla
     assert "PRIVADO" not in str(resultado)
     p1 = next(p for p in resultado["pagos"] if p["id"] == 1)
     assert len(p1["aplicaciones"]) == 1  # No factura/envío de OTRO.
+    p2 = next(p for p in resultado["pagos"] if p["id"] == 2)
+    assert p2["aplicaciones"][0]["solicitud_id"] == 1
+    assert p2["aplicaciones"][0]["destinatario"] == "DESTINO WAIMAO"
+    assert "DESTINO PRIVADO" not in str(resultado)
     # El cupo incluye los ajustes aplicados (+20 -5), igual que el libro.
     assert resultado["cupo"]["deuda_ars"] == Decimal("323.00")
     assert resultado["cupo"]["reservado_ars"] == Decimal("100.00")
@@ -296,6 +329,37 @@ def test_inicio_waimao_filtra_pagos_por_fecha_antes_del_limite_sin_cambiar_deuda
             assert cur.fetchone()["cantidad"] == 14
 
 
+def test_pago_futuro_legacy_es_visible_sin_acreditar_ni_reservar(cuenta_aislada):
+    with cuenta_aislada() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO clientes VALUES ('WAIMAO',500,true);
+                INSERT INTO facturas_cliente
+                    (id,cliente_id,tipo,estado,punto_venta,numero,fecha_emision,fecha_vencimiento,total)
+                VALUES (1,'WAIMAO','FC','EMITIDA',1,1,CURRENT_DATE,CURRENT_DATE,100);
+                INSERT INTO pagos
+                    (id,cliente_id,fecha,created_at,monto_ars,metodo,referencia,estado,fecha_original_conocida)
+                VALUES
+                    (1,'WAIMAO',CURRENT_DATE+1,NOW(),50,'Transferencia','FUTURO-A','APROBADO',true),
+                    (2,'WAIMAO',CURRENT_DATE+1,NOW(),25,'Transferencia','FUTURO-P','PENDIENTE',true),
+                    (3,'WAIMAO',CURRENT_DATE,NOW(),10,'Transferencia','FECHA-CONTABLE','APROBADO',false);
+                INSERT INTO pagos_aplicaciones
+                    (id,pago_id,factura_id,monto_ars,estado,ambito)
+                VALUES (1,1,1,50,'APLICADA','NACIONAL'),
+                       (2,2,1,25,'SOLICITADA','NACIONAL');
+            """)
+    resultado = ec.obtener_experiencia_cuenta("WAIMAO", {})
+    factura = resultado["vencimientos"]["items"][0]
+    assert factura["pagado_ars"] == Decimal("0.00")
+    assert factura["en_revision_ars"] == Decimal("0.00")
+    futuros = [p for p in resultado["pagos"] if p["id"] in (1, 2)]
+    assert all(p["estado_label"] == "Fecha futura · Sin acreditar" for p in futuros)
+    assert all(not p["puede_imputar"] and not p["aplicaciones"] for p in futuros)
+    contable = next(p for p in resultado["pagos"] if p["id"] == 3)
+    assert contable["fecha_original_conocida"] is False
+    assert contable["puede_imputar"] is True
+
+
 @pytest.fixture
 def movimientos_aislados(cuenta_aislada, monkeypatch):
     from servicios import cuenta_corriente as cc
@@ -306,7 +370,7 @@ def movimientos_aislados(cuenta_aislada, monkeypatch):
                     ADD COLUMN nro_fc text, ADD COLUMN descripcion text,
                     ADD COLUMN factura_pdf bytea;
                 ALTER TABLE solicitudes_guia ADD COLUMN visible_cliente boolean DEFAULT true,
-                    ADD COLUMN test boolean DEFAULT false, ADD COLUMN dest_nombre text,
+                    ADD COLUMN test boolean DEFAULT false,
                     ADD COLUMN remitente_nombre text, ADD COLUMN etiqueta_cliente text,
                     ADD COLUMN remitente_ciudad text, ADD COLUMN remitente_pais text,
                     ADD COLUMN dest_ciudad text, ADD COLUMN destino_pais text,

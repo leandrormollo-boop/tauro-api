@@ -55,6 +55,54 @@ def test_guia_con_peso_cero_no_contacta_courier(monkeypatch):
     dhl.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "courier, cliente_path",
+    [
+        ("FEDEX", "core.fedex_client.FedExClient"),
+        ("UPS", "core.ups_client.UPSClient"),
+    ],
+)
+def test_fedex_y_ups_persisten_intento_antes_del_post_incierto(
+    monkeypatch, courier, cliente_path,
+):
+    solicitud = _solicitud_con_bulto()
+    solicitud["courier"] = courier
+    orden = []
+    referencias = []
+
+    def persistir(_solicitud_id, referencia):
+        orden.append("persistir")
+        referencias.append(referencia)
+        return True
+
+    api = mock.Mock()
+
+    def emitir(datos):
+        orden.append("post")
+        assert datos["message_reference"] == referencias[0]
+        return {"encontrado": False, "incierto": True,
+                "error": "respuesta perdida"}
+
+    api.create_shipment.side_effect = emitir
+    marcar = mock.Mock()
+    liberar = mock.Mock()
+    monkeypatch.setattr(sg, "obtener_solicitud", lambda _id: solicitud)
+    monkeypatch.setattr(sg, "_reservar_para_emitir", lambda _id: True)
+    monkeypatch.setattr(sg, "_persistir_referencia_courier", persistir)
+    monkeypatch.setattr(sg, "_marcar_verificacion_courier", marcar)
+    monkeypatch.setattr(sg, "_liberar_reserva", liberar)
+    monkeypatch.setattr("servicios.catalogo.get_producto", lambda *_: None)
+
+    with mock.patch(cliente_path, return_value=api):
+        salida = sg.generar_guia_internacional(44, courier=courier)
+
+    assert orden == ["persistir", "post"]
+    assert referencias[0].startswith(f"tauro-{courier.lower()}-ship-44-")
+    assert not salida["ok"] and "no vuelvas a emitir" in salida["error"]
+    marcar.assert_called_once()
+    liberar.assert_not_called()
+
+
 def test_pickup_desde_guia_corrupta_no_reserva_ni_contacta_courier(monkeypatch):
     sol = _solicitud_con_bulto(peso_kg="0")
     sol.update({"tracking": "DHL123", "estado": "GUIA_LISTA"})

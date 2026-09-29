@@ -50,20 +50,18 @@
 .envios-card .table-wrap { overflow-x: auto; overflow-y: visible; }
 .envios-table {
   width: 100%;
-  min-width: 1240px;
+  min-width: 780px;
   table-layout: fixed;
   border-collapse: collapse;
   border-spacing: 0;
 }
-.envios-table th:nth-child(1) { width: 88px; }
-.envios-table th:nth-child(2) { width: 72px; }
-.envios-table th:nth-child(3),
-.envios-table th:nth-child(4) { width: 150px; }
-.envios-table th:nth-child(5) { width: 142px; }
-.envios-table th:nth-child(6) { width: 202px; }
-.envios-table th:nth-child(7) { width: 172px; }
-.envios-table th:nth-child(8) { width: 82px; }
-.envios-table th:nth-child(9) { width: 102px; }
+/* Seis columnas: el documento y las acciones comparten el último bloque. */
+.envios-table th:nth-child(1) { width: 10%; }
+.envios-table th:nth-child(2) { width: 24%; }
+.envios-table th:nth-child(3) { width: 16%; }
+.envios-table th:nth-child(4) { width: 18%; }
+.envios-table th:nth-child(5) { width: 17%; }
+.envios-table th:nth-child(6) { width: 15%; }
 .envios-table thead th {
   padding: 12px 9px;
   border-bottom: 1px solid var(--line);
@@ -209,7 +207,7 @@
 .shipment-action-emphasized { color: var(--ok); }
 .shipment-action-danger { color: var(--error); }
 
-@media (max-width: 720px) {
+@media (max-width: 1180px) {
   .envios-card { padding: 2px 10px 8px; border: 0; background: transparent; }
   .envios-card .table-wrap { overflow: visible; }
   .envios-table { display: block; min-width: 0; }
@@ -232,6 +230,10 @@
   .envios-table .shipment-row td:last-child { display: block; min-width: 0; padding: 0; border: 0; background: transparent; }
   .envios-table .shipment-row td[data-label]::before {
     content: attr(data-label);
+    position: static;
+    transform: none;
+    width: auto;
+    background: none;
     display: block;
     margin-bottom: 5px;
     color: var(--fg-4);
@@ -248,4 +250,14 @@
   .envios-table .shipment-guide-cell .btn { width: auto; }
   .shipment-actions > summary { min-height: 44px; }
   .shipment-action { min-height: 42px; font-size: 11px; }
+}
+
+.shipment-actions-cell > .btn { margin-bottom: 6px; }
+
+@media (max-width: 1180px) {
+  .envios-table .shipment-row .shipment-date-cell,
+  .envios-table .shipment-row .shipment-tracking-cell,
+  .envios-table .shipment-row .envio-price-cell,
+  .envios-table .shipment-row .envio-status-cell { grid-column: auto; }
+  .envios-table .shipment-row .shipment-person-cell { grid-column: 1 / -1; grid-row: 1; }
 }

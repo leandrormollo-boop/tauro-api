@@ -20,13 +20,10 @@ function TauroLogo({ size = 32 }) {
 }
 
 /* ============================================================
-   PARTNERS — los couriers habilitados HOY
-   La lista sale de /partners, que la calcula de las credenciales
-   cargadas. A propósito no está escrita a mano: el día que se
-   encienda UPS aparece solo, y si a un courier se le caen las
-   credenciales deja de figurar en vez de quedar prometido en la
-   web. Mientras carga, muestra los que ya sabemos que operan
-   para que no haya un salto visual.
+   OFERTA DE COTIZACIÓN — integraciones y tarifarios visibles HOY
+   /partners cruza disponibilidad técnica con el contrato publicado.
+   Un tarifario legado se rotula como tal y no se presenta como una
+   integración de emisión.
    ============================================================ */
 function PartnersMeta() {
   const [partners, setPartners] = useState(null);
@@ -41,14 +38,17 @@ function PartnersMeta() {
   }, []);
 
   const nombres = partners
-    ? partners.map((p) => p.nombre.replace(" Express", ""))
+    ? partners.map((p) => {
+        const nombre = p.nombre.replace(" Express", "");
+        return p.estado === "tarifario_publico" ? `${nombre} tarifario` : nombre;
+      })
     : ["DHL"];
 
   return (
     <div className="hero-meta-item">
       <div className="num tweb-partners">{nombres.join(" · ")}</div>
       <div className="lbl">
-        {nombres.length === 1 ? "Partner de envíos" : "Partners de envío"}
+        Oferta de cotización
       </div>
     </div>
   );
@@ -86,8 +86,8 @@ function Nav() {
             <span className="tweb-txt-corto">Ingresar</span>
           </a>
           <a href={INTEGRACIONES_MAILTO} className="btn btn-primary" style={{ fontSize: 13, padding: "10px 18px" }}>
-            <span className="tweb-txt-largo">Conectá tu tienda</span>
-            <span className="tweb-txt-corto">Conectar</span>
+            <span className="tweb-txt-largo">Solicitar integración</span>
+            <span className="tweb-txt-corto">Solicitar</span>
             <ArrowRight size={14} />
           </a>
         </div>
@@ -197,7 +197,7 @@ function HeroSplit({ onCotizarClick }) {
             </p>
             <div className="hero-actions fade-up d3">
               <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-                Conectá tu tienda
+                Solicitar integración
                 <ArrowRight size={16} />
               </a>
               <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>
@@ -247,7 +247,7 @@ function HeroCentered({ onCotizarClick }) {
         </p>
         <div className="hero-actions fade-up d3" style={{ justifyContent: "center" }}>
           <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-            Conectá tu tienda <ArrowRight size={16} />
+            Solicitar integración <ArrowRight size={16} />
           </a>
           <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
         </div>
@@ -277,7 +277,7 @@ function HeroMinimal({ onCotizarClick }) {
               directamente a tu tienda, con carga manual disponible.
             </p>
             <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-              Conectá tu tienda <ArrowRight size={16} />
+              Solicitar integración <ArrowRight size={16} />
             </a>
             <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
           </div>

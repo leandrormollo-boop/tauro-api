@@ -47,6 +47,7 @@ def test_formularios_ofrecen_facturas_envios_parcial_y_saldo_a_favor():
     assert "A imputar a " in portal_js
     assert "[data-allocation-line]" in portal_js
     assert "Queda pendiente" in admin or "queda pendiente" in admin
+    assert "/portal/facturas/{{ aplicacion.factura_id }}/pdf" in portal
     assert 'name="fecha"' in portal
     assert 'name="preservar_solicitud" value="1"' in pendientes
 

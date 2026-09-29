@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Mi cuenta corriente{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=7">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=8">{% endblock %}
 
 {% macro dinero(valor) -%}
 $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
@@ -45,6 +45,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             <p>{% if inicio %}Movimientos desde septiembre de 2026.{% else %}Saldo, vencimientos y el detalle de tu operación.{% endif %}</p>
         </div>
         <div class="account-title-actions">
+            <a href="#movimientos" class="btn btn-ghost">Ver movimientos</a>
             <a href="#pagos" class="btn btn-ghost">Imputar un pago</a>
             <a href="#informar-pago" class="btn btn-primary" data-open-payment>Informar un pago</a>
             <a href="{{ cuenta_url(exportar=true, pagina=None) }}" class="btn btn-ghost" download data-account-export aria-label="Descargar movimientos filtrados en Excel"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg> Descargar Excel</a>
@@ -62,11 +63,12 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% if experiencia_error|default('') %}<div class="msg warn" role="status">{{ experiencia_error }}</div>{% endif %}
 <div class="account-position" aria-label="Saldo y próximos vencimientos">
     <article class="account-balance">
-        <span class="account-kicker">Saldo total · ARS</span><span data-help="Saldo total">Incluye cargos, ajustes y pagos aprobados de tu cuenta nacional e internacional. Los pagos en revisión aún no se descuentan.</span>
+        <span class="account-kicker">Saldo de tu cuenta · ARS</span><span data-help="Saldo total">Incluye cargos, ajustes y pagos aprobados de tu cuenta nacional e internacional. Los pagos en revisión aún no se descuentan.</span>
         <strong class="account-balance-value">{{ dinero(total.saldo_ars|abs) }}</strong>
         <span class="account-balance-state">{{ estado_saldo(total.saldo_ars) }}</span>
         {% if periodo %}
-        <dl class="account-opening"><div><dt>Saldo anterior{% if periodo.saldo_anterior_ars < 0 %} a favor{% endif %} al {{ periodo.fecha_inicio_visible }}<span data-help="Saldo anterior">Agrupa los cargos, ajustes y pagos registrados antes de esa fecha.</span></dt><dd>{{ dinero(periodo.saldo_anterior_ars|abs) }}</dd></div><div><dt>Movimientos desde el {{ periodo.fecha_inicio_visible }}</dt><dd>{{ dinero(periodo.neto_desde_ars) }}</dd></div>{% if periodo.redondeo_ars %}<div><dt>Redondeo</dt><dd>{{ dinero(periodo.redondeo_ars) }}</dd></div>{% endif %}</dl>
+        <dl class="account-opening"><div><dt>Saldo anterior{% if periodo.saldo_anterior_ars < 0 %} a favor{% endif %} al {{ periodo.fecha_inicio_visible }}<span data-help="Saldo anterior">Agrupa los cargos, ajustes y pagos registrados antes de esa fecha.</span></dt><dd>{{ dinero(periodo.saldo_anterior_ars|abs) }}</dd></div><div><dt>Movimientos desde el {{ periodo.fecha_inicio_visible }}</dt><dd>{{ dinero(periodo.neto_desde_ars) }}</dd></div>{% if periodo.pagos_sin_fecha_original_ars %}<div><dt>Pagos sin fecha original confirmada<span data-help="Fecha contable">Reducen el saldo acumulado, pero no se atribuyen al saldo anterior ni al cobrado desde el corte.</span></dt><dd>− {{ dinero(periodo.pagos_sin_fecha_original_ars) }}</dd></div>{% endif %}{% if periodo.redondeo_ars %}<div><dt>Redondeo</dt><dd>{{ dinero(periodo.redondeo_ars) }}</dd></div>{% endif %}</dl>
+        {% if periodo.advertencia_pagos_fecha_original %}<p class="account-opening-note">{{ periodo.advertencia_pagos_fecha_original }}</p>{% endif %}
         {% if periodo.advertencia_sin_fecha %}<p class="account-opening-note">{{ periodo.advertencia_sin_fecha }}</p>{% endif %}
         {% elif periodo_error|default('') %}<p role="status">{{ periodo_error }}</p>
         {% endif %}
@@ -94,13 +96,17 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         {% elif exp %}<div class="account-quiet-state"><div><strong>No hay facturas emitidas pendientes.</strong>{% if total.pendiente_facturacion_ars > 0 %}<p>Hay cargos todavía sin facturar. Ya están incluidos en el saldo de tu cuenta.</p><a href="#movimientos" class="account-text-action">Ver cargos y movimientos</a>{% else %}<p>Acá vas a ver los próximos vencimientos y sus pagos.</p>{% endif %}</div></div>
         {% else %}<p class="account-inline-empty">Los vencimientos no están disponibles en este momento.</p>{% endif %}
     </section>
+    <details class="account-position-extra"><summary>Pagos y límite de cuenta</summary>
     <dl class="account-payment-totals">
         <div><dt>Pagos en revisión<span data-help="Pagos en revisión">Comprobantes recibidos que TAURO todavía no aprobó. No se descuentan del saldo.</span></dt><dd>{{ dinero(resumen_cuenta.pagos_pendientes_ars|default(0)) }}</dd></div>
         <div><dt>Pagos por vincular<span data-help="Pagos por vincular">Pagos aprobados, ya descontados del saldo total, que aún no se vincularon a una factura o cargo.</span></dt><dd>{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd></div>
         {% if exp and exp.cupo.configurado %}<div class="account-capacity"><dt>Disponible para nuevos envíos</dt><dd>{{ dinero(exp.cupo.disponible_ars) }}</dd><small>De un límite de {{ dinero(exp.cupo.tope_ars) }}{% if exp.cupo.reservado_ars %} · {{ dinero(exp.cupo.reservado_ars) }} reservado{% endif %} · Se vuelve a verificar al emitir</small><details class="account-capacity-detail"><summary>Cómo se calcula el disponible</summary><p>El disponible considera cargos, ajustes aplicados, pagos aprobados y reservas de emisión.</p><p>Cargos menos pagos: {{ dinero(exp.cupo.deuda_ars|default(0)) }} · Reservas: {{ dinero(exp.cupo.reservado_ars) }}. Un saldo a favor no amplía el límite.</p></details></div>{% endif %}
     </dl>
+    </details>
 </div>
 <details class="account-scopes"><summary>Ver saldos por ámbito <span>Nacional / Internacional</span></summary><div class="account-scope-list">{{ resumen_ambito("Nacional", "nacional", resumen_cuenta.nacional) }}{{ resumen_ambito("Internacional", "internacional", resumen_cuenta.internacional) }}</div>{% if resumen_cuenta.cargos_sin_clasificar_ars %}<p class="account-classification-note">Pendiente de clasificar: {{ dinero(resumen_cuenta.cargos_sin_clasificar_ars) }}</p>{% endif %}</details>
+
+{% include "portal/cuenta_movimientos.html" %}
 
 {% if exp %}
 <div class="account-activity">
@@ -139,8 +145,9 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
             <summary><span>Ver detalle{% if pago.tiene_comprobante %} y comprobante{% endif %}</span><span class="account-detail-chevron" aria-hidden="true"></span></summary>
             <div class="account-payment-record-body">
                 <ol class="account-payment-steps" aria-label="Progreso del comprobante">{% for paso in pago.pasos %}<li{% if paso.completo %} class="is-complete"{% endif %}><span>{{ paso.label }}</span>{% if paso.fecha %}<time>{{ paso.fecha }}</time>{% endif %}</li>{% endfor %}</ol>
-                {% if pago.estado == 'RECHAZADO' %}<p class="account-payment-explanation">Comprobante rechazado: no modifica el saldo. Consultá a TAURO antes de volver a informarlo.</p>{% elif pago.estado == 'PENDIENTE' %}<p class="account-payment-explanation">Recibimos el comprobante. Se descuenta del saldo cuando TAURO lo aprueba.</p>{% else %}<p class="account-payment-explanation">Pago acreditado en tu cuenta.</p>{% endif %}
-                {% if pago.aplicaciones %}<ul class="account-payment-documents" aria-label="Documentos del pago">{% for aplicacion in pago.aplicaciones %}<li><span>{{ aplicacion.documento }}{% if aplicacion.tracking %}<small class="mono">{{ aplicacion.tracking }}</small>{% endif %}</span><strong>{{ dinero(aplicacion.monto_ars) }}</strong></li>{% endfor %}</ul>{% endif %}
+                {% if pago.fecha_futura %}<p class="account-payment-explanation">La fecha informada todavía no ocurrió. El pago no modifica el saldo ni admite imputaciones.</p>{% elif pago.fecha_revision_pendiente %}<p class="account-payment-explanation">La fecha requiere revisión administrativa. El pago sigue sin modificar el saldo ni admitir imputaciones.</p>{% elif pago.estado == 'RECHAZADO' %}<p class="account-payment-explanation">Comprobante rechazado: no modifica el saldo. Consultá a TAURO antes de volver a informarlo.</p>{% elif pago.estado == 'PENDIENTE' %}<p class="account-payment-explanation">Recibimos el comprobante. Se descuenta del saldo cuando TAURO lo aprueba.</p>{% else %}<p class="account-payment-explanation">Pago acreditado en tu cuenta.</p>{% endif %}
+                {% if pago.aplicaciones %}<ul class="account-payment-documents" aria-label="Documentos del pago">{% for aplicacion in pago.aplicaciones %}<li><span>{% if aplicacion.solicitud_id %}<a href="/portal/envios/{{ aplicacion.solicitud_id }}">{{ aplicacion.documento }} ↗</a>{% elif aplicacion.factura_id %}<a href="/portal/facturas/{{ aplicacion.factura_id }}/pdf" target="_blank" rel="noopener">{{ aplicacion.documento }} ↗</a>{% else %}{{ aplicacion.documento }}{% endif %}{% if aplicacion.destinatario %}<small>{{ aplicacion.destinatario }}</small>{% endif %}</span><strong>{{ dinero(aplicacion.monto_ars) }}</strong></li>{% endfor %}</ul>{% endif %}
+                {% if not pago.fecha_original_conocida %}<p class="account-payment-explanation">Fecha original sin confirmar · La fecha mostrada es contable.</p>{% endif %}
                 <div class="account-record-footer"><span>{{ pago.metodo or 'Método sin informar' }}</span></div>
                 {% if pago.tiene_comprobante %}
                 {% from 'portal/_documentos.html' import tarjeta_documento %}
@@ -204,7 +211,6 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     </form>
 </details>
 
-{% include "portal/cuenta_movimientos.html" %}
 </section>
 
 <script src="/static/js/portal-cuenta.js?v=4" defer nonce="{{ request.state.csp_nonce }}"></script>

@@ -1,10 +1,12 @@
-"""Control único a 7 días de guías DHL reemplazadas o canceladas.
+"""Vigilancia repetida de guías DHL reemplazadas o canceladas.
 
 Reemplazar una guía dentro de TAURO no invalida físicamente su etiqueta en
-DHL. Este módulo consulta el tracking anterior una vez al cumplirse 7 días:
-sin eventos confirma la cancelación y con movimiento enciende una alerta. El
-cargo cancelado jamás se reactiva acá: una eventual factura del courier exige
-conciliación documentada y una decisión humana separada.
+DHL. Este módulo consulta el tracking anterior desde el día 7: semanalmente
+durante los primeros 30 días y luego cada 30 días. Una ausencia o un 404 sólo
+significan "sin movimientos observados" y nunca prueban un void del courier.
+Cualquier evento enciende un riesgo interno. El cargo cancelado jamás se
+reactiva acá: una eventual factura exige conciliación documentada y una decisión
+humana separada.
 """
 
 from __future__ import annotations
@@ -129,7 +131,15 @@ def _candidato(reemision_id: int) -> Optional[dict]:
                   ON anterior.id=r.solicitud_anterior_id
                 WHERE r.id=%s
                   AND r.estado='EMITIDA'
-                  AND r.riesgo_estado <> 'CERRADA'
+                  AND (
+                      r.riesgo_estado <> 'CERRADA'
+                      OR (
+                          r.riesgo_estado='CERRADA'
+                          AND r.alerta_movimiento_at IS NULL
+                          AND r.riesgo_resuelto_nota LIKE
+                              'Cancelación confirmada: DHL no registró%'
+                      )
+                  )
                   AND UPPER(anterior.courier)='DHL'
                   AND NULLIF(BTRIM(r.tracking_anterior), '') IS NOT NULL
                 """,
@@ -143,21 +153,21 @@ def actualizar_tracking_reemplazado_dhl(
     reemision_id: int,
     *,
     cliente_dhl: Optional[DHLClient] = None,
-    confirmar_sin_movimiento: bool = False,
+    control_programado: bool = False,
 ) -> dict:
-    """Consulta una guía vieja; sólo el job a 7 días confirma su cancelación."""
+    """Consulta una guía vieja sin inferir que DHL anuló la etiqueta."""
     candidato = _candidato(reemision_id)
     if not candidato:
         return {"ok": True, "omitido": True, "reemision_id": int(reemision_id)}
     if (
-        not confirmar_sin_movimiento
+        not control_programado
         and candidato.get("riesgo_estado") != ALERTA_MOVIMIENTO
     ):
         return {
             "ok": True,
             "omitido": True,
             "motivo": "control_programado",
-            "error": "El tracking se controla una sola vez al cumplirse 7 días.",
+            "error": "El tracking se controla según la ventana programada.",
             "reemision_id": int(reemision_id),
         }
 
@@ -179,7 +189,15 @@ def actualizar_tracking_reemplazado_dhl(
                     WITH previo AS (
                         SELECT id, riesgo_estado, alerta_movimiento_at
                         FROM solicitudes_guia_reemisiones
-                        WHERE id=%s AND riesgo_estado='VIGILAR'
+                        WHERE id=%s AND (
+                            riesgo_estado IN ('VIGILAR', 'ALERTA_MOVIMIENTO')
+                            OR (
+                                riesgo_estado='CERRADA'
+                                AND alerta_movimiento_at IS NULL
+                                AND riesgo_resuelto_nota LIKE
+                                    'Cancelación confirmada: DHL no registró%'
+                            )
+                        )
                         FOR UPDATE
                     )
                     UPDATE solicitudes_guia_reemisiones r
@@ -233,21 +251,30 @@ def actualizar_tracking_reemplazado_dhl(
                         },
                     )
             elif normalizado.get("ok"):
-                if confirmar_sin_movimiento:
+                if control_programado:
+                    # Una ausencia, incluido HTTP 404, es sólo una observación.
+                    # La fila sigue en vigilancia y vuelve a entrar según el
+                    # backoff del lote. También reabre cierres automáticos de la
+                    # política anterior, sin tocar el cargo cancelado del cliente.
                     cur.execute(
                         """
                         UPDATE solicitudes_guia_reemisiones
-                        SET riesgo_estado='CERRADA',
+                        SET riesgo_estado='VIGILAR',
                             tracking_anterior_consultado_at=NOW(),
                             tracking_anterior_error=NULL,
                             tracking_anterior_error_at=NULL,
-                            riesgo_resuelto_at=NOW(),
-                            riesgo_resuelto_nota=(
-                                'Cancelación confirmada: DHL no registró ' ||
-                                'recolección ni movimientos al control de 7 días.'
-                            ),
+                            riesgo_resuelto_at=NULL,
+                            riesgo_resuelto_nota=NULL,
                             updated_at=NOW()
-                        WHERE id=%s AND riesgo_estado='VIGILAR'
+                        WHERE id=%s AND (
+                            riesgo_estado='VIGILAR'
+                            OR (
+                                riesgo_estado='CERRADA'
+                                AND alerta_movimiento_at IS NULL
+                                AND riesgo_resuelto_nota LIKE
+                                    'Cancelación confirmada: DHL no registró%'
+                            )
+                        )
                         RETURNING id
                         """,
                         (int(reemision_id),),
@@ -256,9 +283,9 @@ def actualizar_tracking_reemplazado_dhl(
                     if guardado:
                         registrar_evento_con_cursor(
                             cur,
-                            event="dhl.cancelacion_reemplazada_confirmada",
+                            event="dhl.guia_descartada_sin_movimientos_observados",
                             actor_type="sistema",
-                            actor_ref="tracking_dhl_7_dias",
+                            actor_ref="tracking_dhl_programado",
                             ip=None,
                             method=None,
                             path=None,
@@ -276,7 +303,6 @@ def actualizar_tracking_reemplazado_dhl(
                                 "tracking_anterior": candidato[
                                     "tracking_anterior"
                                 ],
-                                "control_dias": 7,
                                 "movimiento_detectado": False,
                             },
                         )
@@ -316,10 +342,10 @@ def actualizar_tracking_reemplazado_dhl(
         **normalizado,
         "reemision_id": int(reemision_id),
         "guardado": bool(guardado),
-        "cancelacion_confirmada": bool(
+        "sin_movimientos_observados": bool(
             normalizado.get("ok")
             and not normalizado.get("movimiento")
-            and confirmar_sin_movimiento
+            and control_programado
             and guardado
         ),
         "alerta_nueva": bool(
@@ -332,12 +358,10 @@ def actualizar_tracking_reemplazado_dhl(
 def actualizar_trackings_reemplazados_dhl(
     limite: Optional[int] = None,
 ) -> dict:
-    """Busca sólo guías que cumplieron 7 días y ejecuta su control único.
+    """Busca guías vencidas y aplica vigilancia con backoff persistente.
 
-    El scheduler puede correr diariamente sin consultar diariamente cada guía:
-    una fila entra al lote sólo al vencer el plazo y sale definitivamente ante
-    una respuesta concluyente. Los errores técnicos se reintentan al día
-    siguiente porque no prueban que la etiqueta haya sido cancelada.
+    Primera consulta al día 7; luego semanal hasta el día 30 y mensual sin
+    cierre automático. Los errores técnicos se reintentan al día siguiente.
     """
     if limite is None:
         try:
@@ -374,10 +398,31 @@ def actualizar_trackings_reemplazados_dhl(
                     JOIN solicitudes_guia anterior
                       ON anterior.id=r.solicitud_anterior_id
                     WHERE r.estado='EMITIDA'
-                      AND r.riesgo_estado='VIGILAR'
+                      AND (
+                          r.riesgo_estado='VIGILAR'
+                          OR (
+                              r.riesgo_estado='CERRADA'
+                              AND r.alerta_movimiento_at IS NULL
+                              AND r.riesgo_resuelto_nota LIKE
+                                  'Cancelación confirmada: DHL no registró%'
+                          )
+                      )
                       AND UPPER(anterior.courier)='DHL'
                       AND NULLIF(BTRIM(r.tracking_anterior), '') IS NOT NULL
                       AND r.completed_at <= NOW() - INTERVAL '7 days'
+                      AND (
+                          r.tracking_anterior_consultado_at IS NULL
+                          OR (
+                              r.completed_at > NOW() - INTERVAL '30 days'
+                              AND r.tracking_anterior_consultado_at <=
+                                  NOW() - INTERVAL '7 days'
+                          )
+                          OR (
+                              r.completed_at <= NOW() - INTERVAL '30 days'
+                              AND r.tracking_anterior_consultado_at <=
+                                  NOW() - INTERVAL '30 days'
+                          )
+                      )
                     ORDER BY
                         r.completed_at ASC NULLS FIRST,
                         r.id ASC
@@ -398,7 +443,7 @@ def actualizar_trackings_reemplazados_dhl(
                 resultado = actualizar_tracking_reemplazado_dhl(
                     reemision_id,
                     cliente_dhl=cliente_dhl,
-                    confirmar_sin_movimiento=True,
+                    control_programado=True,
                 )
                 if resultado.get("omitido"):
                     continue
@@ -411,10 +456,6 @@ def actualizar_trackings_reemplazados_dhl(
                         conteos["alertas_nuevas"] += 1
                 else:
                     conteos["sin_movimiento"] += 1
-                    if resultado.get("cancelacion_confirmada"):
-                        conteos.setdefault("cancelaciones_confirmadas", 0)
-                        conteos["cancelaciones_confirmadas"] += 1
-            conteos.setdefault("cancelaciones_confirmadas", 0)
             return {"ok": True, "candidatos": len(ids), **conteos}
         finally:
             with lock_conn.cursor() as cur:
@@ -534,8 +575,8 @@ def cerrar_control_reemision(reemision_id: int, nota: str) -> dict:
                 return {
                     "ok": False,
                     "error": (
-                        "Sólo se cierra manualmente una alerta con movimiento; "
-                        "sin eventos el sistema confirma la cancelación a los 7 días."
+                        "Sólo se cierra manualmente una alerta con movimiento. "
+                        "La ausencia de eventos permanece bajo vigilancia."
                     ),
                 }
             registrar_evento_con_cursor(
