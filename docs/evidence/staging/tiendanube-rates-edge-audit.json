@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "environment": "staging",
+  "observed_at": "2026-09-29T19:35:36.379044628Z",
+  "deployment_ref": "6682061",
+  "deployment_id": "8a71e3de-64b8-40d7-bccc-d60d34117fba",
+  "request": {
+    "method": "POST",
+    "path_recorded_by_edge": "/integraciones/tiendanube/shipping/rates",
+    "http_status": 422,
+    "railway_total_duration_ms": 191
+  },
+  "probe": {
+    "body_kind": "minimal_invalid_json_object",
+    "token_kind": "fictitious_callback_token",
+    "token_sha256": "8ad166c5ed4d3c54456befae136d58cc76864942bb50d3b97f463119e94a1e94",
+    "raw_token_persisted": false
+  },
+  "log_checks": {
+    "railway_http_edge_records": 1,
+    "exact_token_occurrences_in_http_edge": 0,
+    "application_or_deploy_log_lines": 0,
+    "exact_token_occurrences_in_application_or_deploy": 0,
+    "query_string_present_in_recorded_path": false
+  },
+  "conclusion": "The callback token was not present in the inspected Railway edge, application, or deploy logs."
+}

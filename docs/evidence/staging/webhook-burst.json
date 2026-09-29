@@ -1,0 +1,56 @@
+{
+  "checks": {
+    "all_requested_webhooks_attempted": true,
+    "at_least_200_webhook_2xx": true,
+    "burst_dispatched_within_window": true,
+    "health_all_2xx": true,
+    "health_p95_below_300_ms": true,
+    "health_sample_count_met": true,
+    "no_redirect_responses": true
+  },
+  "configuration": {
+    "health_interval_ms": 100,
+    "health_monitor_seconds": 10.0,
+    "requested_webhooks": 200,
+    "webhook_concurrency": 8,
+    "webhook_topic": "inventory_levels/update",
+    "window_seconds": 10.0
+  },
+  "environment": "staging",
+  "generated_at": "2026-09-29T19:57:05Z",
+  "health": {
+    "count": 101,
+    "errors": {},
+    "http_2xx": 101,
+    "http_statuses": {
+      "200": 101
+    },
+    "latency_p95_ms": 226.818,
+    "redirects_rejected": 0
+  },
+  "passed": true,
+  "privacy": {
+    "redirects_followed": false,
+    "request_bodies_persisted": false,
+    "request_headers_persisted": false,
+    "response_bodies_persisted": false,
+    "secret_persisted": false
+  },
+  "schema_version": 1,
+  "target": {
+    "base_origin": "https://tauro-api-staging.up.railway.app",
+    "shop_domain": "tauro-qa.myshopify.com"
+  },
+  "webhooks": {
+    "attempted": 200,
+    "burst_dispatch_ms": 6668.469,
+    "burst_duration_ms": 6840.658,
+    "errors": {},
+    "http_2xx": 200,
+    "http_statuses": {
+      "200": 200
+    },
+    "latency_p95_ms": 446.079,
+    "redirects_rejected": 0
+  }
+}

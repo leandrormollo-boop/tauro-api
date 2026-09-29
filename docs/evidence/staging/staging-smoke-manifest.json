@@ -1,0 +1,123 @@
+{
+  "all_passed": true,
+  "base_origin": "https://tauro-api-staging.up.railway.app",
+  "browser": "Google Chrome 154.0.8037.59",
+  "confirmed_deployment_ref": "6682061",
+  "environment": "staging",
+  "generated_at": "2026-09-29T19:44:21.330Z",
+  "privacy": {
+    "previews_sanitized": true,
+    "raw_bodies_persisted": false,
+    "request_credentials_used": false,
+    "user_browser_profile_used": false
+  },
+  "results": [
+    {
+      "bytes": 55,
+      "checks": {
+        "status_matches": true
+      },
+      "content_type": "application/json",
+      "expected_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/health",
+      "preview": "{\"service\": \"tauro-api\", \"status\": \"ok\", \"version\": \"1.0.0\"}",
+      "received_at": "2026-09-29T19:44:05.617Z",
+      "screenshot": "01-health-200.png",
+      "screenshot_sha256": "10a3c05556f8d60acf21b1a4f981764b85de1125084ed39019796fa142013ce9",
+      "sha256": "98ee6c64af7aabd72606bb363296836aaa086baa622fdbef5a370938a271a4a8",
+      "slug": "01-health-200",
+      "status": 200,
+      "title": "Health operativo"
+    },
+    {
+      "bytes": 5319,
+      "checks": {
+        "app_bridge_detected": true,
+        "status_matches": true
+      },
+      "content_type": "text/html; charset=utf-8",
+      "expected_status": 200,
+      "method": "GET",
+      "passed": true,
+      "path": "/shopify/app?shop=x.myshopify.com",
+      "preview": "TAURO Solutions · Pedidos de Shopify · Resumen operativo sin datos personales del comprador. · No hay pedidos sincronizados para mostrar. · Pedido · Estado · Total · Recibido · Estado de la integración · Validando sesión… · Cargando estado seguro… · Reconectar con Shopify · Abrir portal TAURO",
+      "received_at": "2026-09-29T19:44:06.167Z",
+      "screenshot": "02-shopify-app-200.png",
+      "screenshot_sha256": "474327c6d0dd2c9a6791cbea7e8401dd5c348bf09d76182d2eb01beeb73e1842",
+      "sha256": "e075f565e75d767ab304aa67afd65d306e94700cf659a8e4110bcd98acf2cb8b",
+      "slug": "02-shopify-app-200",
+      "status": 200,
+      "title": "Shopify App con App Bridge"
+    },
+    {
+      "bytes": 833,
+      "checks": {
+        "status_matches": true
+      },
+      "content_type": "text/html; charset=utf-8",
+      "expected_status": 400,
+      "method": "GET",
+      "passed": true,
+      "path": "/integraciones/tiendanube/callback",
+      "preview": "Instalación incompleta · TAURO Solutions · Instalación incompleta · Tiendanube no nos devolvió el código de autorización. Probá instalar de nuevo desde tu panel.",
+      "received_at": "2026-09-29T19:44:06.699Z",
+      "screenshot": "03-tiendanube-callback-400.png",
+      "screenshot_sha256": "a4fe627f08651e12f06de96c6c7a9ce88914ef413eb181c361e83631d0148ea7",
+      "sha256": "c2b86d7b6335bd0167b96a8d71ad22049c06c300c95730dae0301cb967a9cf40",
+      "slug": "03-tiendanube-callback-400",
+      "status": 400,
+      "title": "Tiendanube callback inválido"
+    },
+    {
+      "bytes": 12,
+      "checks": {
+        "status_matches": true
+      },
+      "content_type": "application/json",
+      "expected_status": 401,
+      "method": "POST",
+      "passed": true,
+      "path": "/integraciones/tiendanube/webhook",
+      "preview": "{\"ok\": false}",
+      "received_at": "2026-09-29T19:44:07.233Z",
+      "screenshot": "04-tiendanube-webhook-401.png",
+      "screenshot_sha256": "15ce62f2f24cc102f1284fd6a6d9be0fee35ff8f1ba5054205470a163d580e83",
+      "sha256": "38667e60226bf99701916900a2a265233dcc014e1206c173ade921d608824b53",
+      "slug": "04-tiendanube-webhook-401",
+      "status": 401,
+      "title": "Tiendanube webhook sin firma"
+    },
+    {
+      "bytes": 0,
+      "checks": {
+        "deployment_matches": true,
+        "environment_is_staging": true,
+        "fingerprint_is_sha256": true,
+        "fixed_path_without_query": true,
+        "no_token_in_app_logs": true,
+        "no_token_in_edge_logs": true,
+        "raw_token_not_persisted": true
+      },
+      "content_type": "Railway HTTP/edge",
+      "deployment_id": "8a71e3de-64b8-40d7-bccc-d60d34117fba",
+      "expected_status": 422,
+      "hash_label": "SHA-256 del token ficticio del probe (sin guardar el valor)",
+      "metadata": "Railway HTTP/edge · 1 registro · totalDuration 191 ms",
+      "method": "POST",
+      "passed": true,
+      "path": "/integraciones/tiendanube/shipping/rates",
+      "preview": "Railway registró sólo el path fijo, sin query. Ocurrencias exactas del token: edge 0 · aplicación/deploy 0.",
+      "received_at": "2026-09-29T19:35:36.379044628Z",
+      "screenshot": "05-tiendanube-rates-token-redaction.png",
+      "screenshot_sha256": "82b2449b59c009a1ebec2556a619f293a57ca64298fa5efc63e02c81ae195a1c",
+      "sha256": "8ad166c5ed4d3c54456befae136d58cc76864942bb50d3b97f463119e94a1e94",
+      "slug": "05-tiendanube-rates-token-redaction",
+      "source": "sanitized_railway_edge_audit",
+      "status": 422,
+      "title": "Token de rates fuera de logs"
+    }
+  ],
+  "schema_version": 1
+}
