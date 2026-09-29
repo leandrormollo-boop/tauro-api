@@ -2,7 +2,9 @@
 
 Estado de entrega: código local, sin despliegue ni llamadas reales. La
 publicación automática de tracking queda cerrada por defecto con
-`ECOMMERCE_FULFILLMENT_WORKER_ENABLED=false`.
+`ECOMMERCE_FULFILLMENT_WORKER_ENABLED=false`. Además,
+`ECOMMERCE_FULFILLMENT_ALLOWLIST` es fail-closed: vacía o ausente procesa cero
+tiendas aunque el worker esté encendido.
 
 ## Antes del piloto
 
@@ -21,8 +23,34 @@ SELECT estado, count(*) FROM tienda_cancelacion_obligaciones GROUP BY estado;
 4. Hacer UAT con una tienda de desarrollo y un pedido Shopify que tenga
    exactamente una fulfillment order elegible. Cero o más de una pasan a
    `MANUAL_REVIEW` sin ejecutar `fulfillmentCreate`.
-5. Sólo después del UAT y aprobación humana activar
-   `ECOMMERCE_FULFILLMENT_WORKER_ENABLED=true` para el piloto.
+5. Con el worker todavía apagado, configurar únicamente el dominio normalizado
+   de la dev store, por ejemplo
+   `ECOMMERCE_FULFILLMENT_ALLOWLIST=piloto.myshopify.com`.
+6. Sólo después del UAT y aprobación humana activar
+   `ECOMMERCE_FULFILLMENT_WORKER_ENABLED=true` para el piloto. El valor de la
+   allowlist se relee en cada ciclo, por lo que una ampliación o retiro no
+   necesita redeploy.
+
+## Rollout por tienda
+
+- Los dominios se separan con comas; espacios y mayúsculas se normalizan.
+- Una allowlist vacía nunca significa “todas”: detiene todos los claims.
+- Un job de un dominio excluido no se reclama, no consume intentos y conserva
+  su estado. Un `PENDIENTE` sigue `PENDIENTE`.
+- Cada dominio pendiente excluido deja una línea identificable:
+  `[fulfillment] tienda fuera de allowlist: <dominio>`.
+- Para retirar una tienda, quitar su dominio de la allowlist y comprobar en la
+  base que no quede un job de esa tienda ya reclamado como `PROCESANDO` antes
+  de considerar cerrado el retiro.
+
+Consulta de control antes y después de cada cambio:
+
+```sql
+SELECT dominio, estado, count(*)
+  FROM tienda_fulfillment_outbox
+ GROUP BY dominio, estado
+ ORDER BY dominio, estado;
+```
 
 ## Semántica operativa
 

@@ -26,6 +26,15 @@ def _flag(nombre: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _fulfillment_allowlist() -> frozenset[str]:
+    """Dominios habilitados en este ciclo; vacío siempre significa ninguno."""
+    return frozenset(
+        dominio.strip().lower()
+        for dominio in (os.getenv("ECOMMERCE_FULFILLMENT_ALLOWLIST") or "").split(",")
+        if dominio.strip()
+    )
+
+
 _PEDIDO_FINGERPRINT_SQL = """
 md5(jsonb_build_object(
     'cliente_id', p.cliente_id,
@@ -352,7 +361,36 @@ def reconciliar_fulfillments_faltantes(limite: int = 200) -> int:
     return insertados
 
 
-def _claim_fulfillment() -> Optional[dict]:
+def _excluded_fulfillment_domains(
+    allowed_domains: frozenset[str], limite: int = 100,
+) -> list[str]:
+    """Lista dominios pendientes excluidos sin reclamar ni mutar sus jobs."""
+    if not allowed_domains:
+        return []
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT LOWER(BTRIM(dominio)) AS dominio
+                  FROM tienda_fulfillment_outbox
+                 WHERE estado = 'PENDIENTE'
+                   AND proximo_intento_at <= NOW()
+                   AND NOT (LOWER(BTRIM(dominio)) = ANY(%s::text[]))
+                 ORDER BY dominio
+                 LIMIT %s
+                """,
+                (list(sorted(allowed_domains)), max(1, min(int(limite), 1000))),
+            )
+            return [
+                str(row.get("dominio") or "").strip().lower()
+                for row in cur.fetchall()
+                if str(row.get("dominio") or "").strip()
+            ]
+
+
+def _claim_fulfillment(allowed_domains: frozenset[str]) -> Optional[dict]:
+    if not allowed_domains:
+        return None
     claim_id = uuid.uuid4().hex
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -362,12 +400,15 @@ def _claim_fulfillment() -> Optional[dict]:
                     SELECT id, estado AS estado_anterior
                       FROM tienda_fulfillment_outbox
                      WHERE (
-                         estado IN ('PENDIENTE','REINTENTAR','RECONCILIAR')
-                         AND proximo_intento_at <= NOW()
-                     ) OR (
-                         estado='PROCESANDO'
-                         AND claimed_at < NOW()-INTERVAL '10 minutes'
+                         (
+                             estado IN ('PENDIENTE','REINTENTAR','RECONCILIAR')
+                             AND proximo_intento_at <= NOW()
+                         ) OR (
+                             estado='PROCESANDO'
+                             AND claimed_at < NOW()-INTERVAL '10 minutes'
+                         )
                      )
+                       AND LOWER(BTRIM(dominio)) = ANY(%s::text[])
                      ORDER BY proximo_intento_at, created_at, id
                      FOR UPDATE SKIP LOCKED
                      LIMIT 1
@@ -379,7 +420,7 @@ def _claim_fulfillment() -> Optional[dict]:
                  WHERE o.id=elegido.id
                 RETURNING o.*, elegido.estado_anterior
                 """,
-                (claim_id,),
+                (list(sorted(allowed_domains)), claim_id),
             )
             row = cur.fetchone()
     return dict(row) if row else None
@@ -472,9 +513,21 @@ def procesar_fulfillments(limite: int = 20) -> dict:
     """Publica tracking sólo si el gate explícito del piloto está activo."""
     if not _flag("ECOMMERCE_FULFILLMENT_WORKER_ENABLED", False):
         return {"procesados": 0, "errores": 0, "manuales": 0, "disabled": True}
+    # Se relee en cada ciclo para permitir ampliar o retirar el piloto sin
+    # redeploy. Vacío es fail-closed: no equivale nunca a "todas".
+    allowed_domains = _fulfillment_allowlist()
+    if not allowed_domains:
+        return {
+            "procesados": 0,
+            "errores": 0,
+            "manuales": 0,
+            "allowlist_empty": True,
+        }
+    for dominio in _excluded_fulfillment_domains(allowed_domains):
+        print(f"[fulfillment] tienda fuera de allowlist: {dominio}")
     procesados = errores = manuales = 0
     for _ in range(max(1, min(int(limite), 100))):
-        job = _claim_fulfillment()
+        job = _claim_fulfillment(allowed_domains)
         if not job:
             break
         try:

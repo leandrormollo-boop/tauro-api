@@ -384,6 +384,21 @@ def test_fulfillment_outbox_comparte_commit_y_deduplica(ecommerce_db, monkeypatc
         cur.execute("SELECT count(*) AS n FROM tienda_fulfillment_outbox")
         assert cur.fetchone()["n"] == 1
 
+    assert ecommerce_outbox._excluded_fulfillment_domains(
+        frozenset({"otra.myshopify.com"})
+    ) == [dominio]
+    assert ecommerce_outbox._claim_fulfillment(
+        frozenset({"otra.myshopify.com"})
+    ) is None
+    with ecommerce_db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT estado,intentos,claim_id FROM tienda_fulfillment_outbox"
+        )
+        excluido = cur.fetchone()
+        assert excluido["estado"] == "PENDIENTE"
+        assert excluido["intentos"] == 0
+        assert excluido["claim_id"] is None
+
     # Un restart durante PROCESANDO no puede repetir la mutación a ciegas.
     with ecommerce_db() as conn, conn.cursor() as cur:
         cur.execute(
@@ -393,7 +408,7 @@ def test_fulfillment_outbox_comparte_commit_y_deduplica(ecommerce_db, monkeypatc
                    claimed_at=NOW()-INTERVAL '11 minutes'
             """
         )
-    recuperado = ecommerce_outbox._claim_fulfillment()
+    recuperado = ecommerce_outbox._claim_fulfillment(frozenset({dominio}))
     assert recuperado["estado_anterior"] == "PROCESANDO"
     conciliaciones = []
     monkeypatch.setattr(
