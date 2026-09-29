@@ -304,12 +304,14 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
       </thead>
       <tbody>
         {% for p in pagos %}
+        {% set fecha_en_revision = p.fecha_revision_requerida|default(false) and p.estado != 'RECHAZADO' %}
         <tr>
           <td class="mono" id="pago-{{ p.id }}">{{ p.fecha.strftime("%d/%m/%Y") if p.fecha else "—" }}</td>
-          <td class="mono" style="color:var(--ok)">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
+          <td class="mono" style="color:var(--{{ 'warn' if fecha_en_revision else 'ok' }})">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>{{ p.metodo }}</td>
           <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}{% if p.tiene_comprobante %}<small><a href="/admin/pagos/{{ p.id }}/comprobante">Ver comprobante ↗</a></small>{% endif %}</td>
           <td>
+            {% if fecha_en_revision %}<a href="/admin/pagos/nuevo">Revisar fecha</a><small>Imputaciones registradas sin efecto en el saldo.</small>{% endif %}
             {% for a in p.aplicaciones|default([]) %}
             <div class="business-payment-application">
             {% if a.factura_id %}<a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas#factura-{{ a.factura_id }}">FC {{ '%04d'|format(a.punto_venta) }}-{{ '%08d'|format(a.numero) }}</a>
@@ -319,7 +321,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% endfor %}
             {% if p.estado == 'RECHAZADO' %}
               <span style="color:var(--fg-4);">No aplica</span>
-            {% else %}
+            {% elif not fecha_en_revision %}
               {% if p.monto_nacional > 0 %}
                 <span class="badge ok">N $ {{ "{:,.2f}".format(p.monto_nacional).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
               {% endif %}
@@ -333,9 +335,13 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% endif %}
           </td>
           <td>
+            {% if fecha_en_revision %}
+            <span class="badge warn">En revisión de fecha</span><small>Sin acreditar</small>
+            {% else %}
             <span class="badge {% if p.estado == 'APROBADO' or not p.estado %}ok{% elif p.estado == 'RECHAZADO' %}error{% else %}warn{% endif %}">
               {{ p.estado or 'APROBADO' }}
             </span>
+            {% endif %}
           </td>
           <td style="color:var(--fg-3)">{{ p.nota or "—" }}</td>
         </tr>

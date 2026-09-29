@@ -36,9 +36,13 @@ WITH facturas AS (
         SELECT SUM(pa.monto_ars) FILTER (
                    WHERE pa.estado='APLICADA'
                      AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                     AND p.fecha <= (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                     AND NOT p.fecha_revision_requerida
                ) AS pagado,
                SUM(pa.monto_ars) FILTER (
                    WHERE pa.estado='SOLICITADA' AND p.estado='PENDIENTE'
+                     AND p.fecha <= (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                     AND NOT p.fecha_revision_requerida
                ) AS solicitado
         FROM pagos_aplicaciones pa
         JOIN pagos p ON p.id=pa.pago_id AND p.cliente_id=f.cliente_id
@@ -67,7 +71,10 @@ LIMIT 6
 _PAGOS_SQL = """
 WITH recientes AS (
     SELECT p.id, p.cliente_id, p.fecha, p.created_at, p.monto_ars,
-           p.metodo, p.referencia, COALESCE(p.estado,'APROBADO') AS estado,
+           p.metodo, p.referencia, p.fecha_original_conocida,
+           p.fecha > (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha_futura,
+           p.fecha_revision_requerida,
+           COALESCE(p.estado,'APROBADO') AS estado,
            p.comprobante IS NOT NULL AS tiene_comprobante
     FROM pagos p WHERE p.cliente_id=%s
       AND (%s::date IS NULL OR p.fecha>=%s)
@@ -83,6 +90,7 @@ FROM recientes p
 LEFT JOIN LATERAL (
     SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
                'documento', d.documento, 'tracking', d.tracking,
+               'solicitud_id', d.solicitud_id, 'destinatario', d.destinatario,
                'monto_ars', d.monto_ars::text, 'estado', d.estado,
                'ambito', d.ambito, 'envio_id', d.envio_id, 'factura_id', d.factura_id
            ) ORDER BY d.id) AS detalle, MAX(d.cantidad) AS cantidad,
@@ -90,6 +98,7 @@ LEFT JOIN LATERAL (
            MAX(d.envios) AS envios, MAX(d.facturas) AS facturas
     FROM (
         SELECT pa.id, pa.monto_ars, pa.estado, pa.ambito, pa.envio_id, pa.factura_id,
+               s.id AS solicitud_id, s.dest_nombre AS destinatario,
                COUNT(*) OVER () AS cantidad,
                SUM(pa.monto_ars) OVER () AS total_vinculado,
                COUNT(pa.envio_id) OVER () AS envios,
@@ -109,6 +118,8 @@ LEFT JOIN LATERAL (
         LEFT JOIN solicitudes_guia s
                ON s.id=e.solicitud_id AND s.cliente_id=p.cliente_id
         WHERE pa.pago_id=p.id
+          AND NOT p.fecha_futura
+          AND NOT p.fecha_revision_requerida
           AND (pa.factura_id IS NULL OR f.id IS NOT NULL)
           AND (pa.envio_id IS NULL OR e.id IS NOT NULL)
           AND ((p.estado='APROBADO' AND pa.estado='APLICADA')
@@ -133,7 +144,9 @@ SELECT c.tope_deuda_ars,
                      AND a.estado='APLICADO'),0)
        - COALESCE((SELECT SUM(p.monto_ars) FROM pagos p
                    WHERE p.cliente_id=c.cliente_id
-                     AND COALESCE(p.estado,'APROBADO')='APROBADO'),0) AS deuda,
+                     AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                     AND p.fecha <= (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                     AND NOT p.fecha_revision_requerida),0) AS deuda,
        COALESCE((SELECT SUM(s2.precio_tauro_ars) FROM solicitudes_guia s2
                  WHERE s2.cliente_id=c.cliente_id AND (
                      (s2.tracking IS NULL AND s2.estado IN
@@ -256,11 +269,18 @@ def _presentar_vencimientos(filas: list[dict], hoy: date) -> dict:
 
 def _presentar_pago(fila: dict) -> dict:
     estado = str(fila.get("estado") or "APROBADO")
-    etiqueta = {"PENDIENTE": "En revisión", "APROBADO": "Acreditado", "RECHAZADO": "Rechazado"}[estado]
+    fecha_futura = bool(fila.get("fecha_futura"))
+    fecha_revision_pendiente = bool(fila.get("fecha_revision_requerida"))
+    fecha_bloqueada = fecha_futura or fecha_revision_pendiente
+    etiqueta = ("Fecha futura · Sin acreditar" if fecha_futura else
+                "Fecha pendiente de revisión · Sin acreditar" if fecha_revision_pendiente else
+                {"PENDIENTE": "En revisión", "APROBADO": "Acreditado", "RECHAZADO": "Rechazado"}[estado])
     registro = _registro_visible(fila.get("created_at"))
     aplicaciones = [{
         "documento": str(a.get("documento") or ""),
         "tracking": str(a.get("tracking") or ""),
+        "solicitud_id": a.get("solicitud_id"),
+        "destinatario": str(a.get("destinatario") or ""),
         "monto_ars": _decimal_monto(a.get("monto_ars")),
         "estado": str(a.get("estado") or ""),
         "ambito": str(a.get("ambito") or ""),
@@ -268,7 +288,8 @@ def _presentar_pago(fila: dict) -> dict:
     } for a in fila.get("aplicaciones") or []]
     monto = _decimal_monto(fila.get("monto_ars"))
     vinculado = _decimal_monto(fila.get("total_vinculado", sum((a["monto_ars"] for a in aplicaciones), _CERO)))
-    disponible = max(_CERO, monto - vinculado) if estado in ("APROBADO", "PENDIENTE") else _CERO
+    disponible = (max(_CERO, monto - vinculado)
+                  if not fecha_bloqueada and estado in ("APROBADO", "PENDIENTE") else _CERO)
     envios = int(fila.get("cantidad_envios") or 0)
     facturas = int(fila.get("cantidad_facturas") or 0)
     destinos = []
@@ -276,7 +297,9 @@ def _presentar_pago(fila: dict) -> dict:
         destinos.append(f"{envios} envío" + ("s" if envios != 1 else ""))
     if facturas:
         destinos.append(f"{facturas} factura" + ("s" if facturas != 1 else ""))
-    if estado == "RECHAZADO":
+    if fecha_bloqueada:
+        imputacion_label = etiqueta.replace("Sin acreditar", "Sin imputación")
+    elif estado == "RECHAZADO":
         imputacion_label = "Pago rechazado · Sin imputación"
     elif destinos:
         imputacion_label = ("Pago imputado a " if estado == "APROBADO" else "Imputación en revisión: ") + " y ".join(destinos)
@@ -285,6 +308,9 @@ def _presentar_pago(fila: dict) -> dict:
     return {
         "id": fila["id"], "fecha": _fecha_visible(fila.get("fecha")),
         "registrado_at": registro, "estado": estado, "estado_label": etiqueta,
+        "fecha_futura": fecha_futura,
+        "fecha_revision_pendiente": fecha_revision_pendiente,
+        "fecha_original_conocida": fila.get("fecha_original_conocida", True),
         "monto_ars": _decimal_monto(fila.get("monto_ars")),
         "referencia": str(fila.get("referencia") or ""),
         "metodo": str(fila.get("metodo") or ""),
@@ -293,11 +319,12 @@ def _presentar_pago(fila: dict) -> dict:
         "cantidad_aplicaciones": int(fila.get("cantidad_aplicaciones") or len(aplicaciones)),
         "imputacion_label": imputacion_label, "cantidad_envios": envios,
         "cantidad_facturas": facturas, "sin_imputar_ars": disponible,
-        "puede_imputar": disponible > 0 and estado in ("PENDIENTE", "APROBADO"),
+        "puede_imputar": (not fecha_bloqueada and disponible > 0
+                           and estado in ("PENDIENTE", "APROBADO")),
         "pasos": [
             {"label": "Comprobante recibido" if fila.get("tiene_comprobante") else "Pago registrado",
              "fecha": registro, "completo": True, "actual": False},
-            {"label": etiqueta, "fecha": "", "completo": estado != "PENDIENTE", "actual": True},
+            {"label": etiqueta, "fecha": "", "completo": not fecha_bloqueada and estado != "PENDIENTE", "actual": True},
         ],
     }
 

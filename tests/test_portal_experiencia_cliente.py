@@ -116,7 +116,7 @@ def test_listado_sin_ajustes_muestra_un_solo_costo_final():
     html = _render(parcial=True, precio=125)
     assert 'Ver desglose' not in html
     assert 'envio-price-initial' not in html
-    assert 'ARS · costo final' in html
+    assert 'Total registrado · ARS' in html
     assert html.count('$ 125,00') == 2  # fila + total de la página
 
 
@@ -125,8 +125,8 @@ def test_listado_prioriza_datos_concretos_y_deja_el_visor_en_el_detalle():
     detalle = _render(template="portal/envio_detalle.html")
 
     for encabezado in (
-        "Fecha", "Concepto", "Remitente", "Destinatario", "Tracking",
-        "Saldo inicial / final", "Estado", "Guía", "Acciones",
+        "Fecha", "Destinatario / recorrido", "Tracking",
+        "Precio del envío", "Estado", "Guía / opciones",
     ):
         assert f">{encabezado}<" in listado
     assert 'class="document-card' not in listado

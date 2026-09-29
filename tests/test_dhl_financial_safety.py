@@ -63,6 +63,7 @@ def test_limite_credito_usa_un_snapshot_y_no_duplica_cargo_ya_asentado(monkeypat
     sql_credito, params_credito = consultas[1]
     assert "SELECT SUM(e.monto_ars)" in sql_credito
     assert "SELECT SUM(p.monto_ars)" in sql_credito
+    assert "p.fecha <= ( NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires' )::date" in sql_credito
     assert "NOT EXISTS" in sql_credito
     assert "e2.solicitud_id=s2.id" in sql_credito
     assert params_credito == ("WAIMAO", "WAIMAO", "WAIMAO", 9)
@@ -260,3 +261,30 @@ def test_emitiendo_stale_sin_referencia_se_puede_liberar_sin_courier(monkeypatch
     assert "courier_message_reference IS NULL" in sql
     assert "INTERVAL '10 minutes'" in sql
     assert params == (9,)
+
+
+def test_respuesta_incierta_no_borra_la_referencia_previa(monkeypatch):
+    consultas = []
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): return None
+        def execute(self, sql, params=None):
+            consultas.append((" ".join(sql.split()), params))
+
+    class Conn:
+        def cursor(self): return Cursor()
+        def commit(self): pass
+
+    @contextmanager
+    def conexion(): yield Conn()
+
+    monkeypatch.setattr(sg, "get_conn", conexion)
+
+    sg._marcar_verificacion_courier(
+        9, {"incierto": True, "error": "respuesta perdida"},
+    )
+
+    sql, params = consultas[0]
+    assert "COALESCE( NULLIF(%s, ''), courier_message_reference )" in sql
+    assert params == (None, "respuesta perdida", 9)

@@ -1,26 +1,37 @@
 {% macro comprobante_retiro(r, destacado=false, mostrar_cancelar=false) %}
 {% set courier = (r.courier or 'FEDEX')|upper %}
-{% set confirmada = r.estado == 'AGENDADA' and r.confirmation_code %}
+{% set historica = r.vista_historica|default(false) %}
+{% set confirmada = r.estado == 'AGENDADA' and r.confirmation_code and not historica %}
 <article class="pickup-card{% if confirmada %} pickup-confirmed{% endif %}{% if destacado %} pickup-selected{% endif %}" id="recoleccion-{{ r.id }}" aria-label="Recolección {{ courier }}">
     <header class="pickup-heading">
         <div>
             <span class="eyebrow">Retiro · {{ courier }}</span>
-            <h2>{% if confirmada %}Recolección programada
+            <h2>{% if r.estado == 'COMPLETADA' %}Recolección completada
+                {% elif r.envio_entregado|default(false) %}Envío entregado
+                {% elif historica %}Fecha de recolección pasada
+                {% elif confirmada %}Recolección programada
                 {% elif r.estado == 'CANCELADA' %}Recolección cancelada
-                {% elif r.estado == 'COMPLETADA' %}Recolección completada
                 {% elif r.estado == 'CANCELANDO' %}Cancelación en proceso
                 {% else %}Recolección pendiente de confirmación{% endif %}</h2>
         </div>
         <span class="badge {% if confirmada or r.estado == 'COMPLETADA' %}ok{% elif r.estado != 'CANCELADA' %}warn{% endif %}">
-            {% if confirmada %}Confirmada por {{ courier }}{% elif r.estado == 'CANCELADA' %}Cancelada{% elif r.estado == 'COMPLETADA' %}Completada{% else %}En verificación{% endif %}
+            {% if r.estado == 'COMPLETADA' %}Completada
+            {% elif r.envio_entregado|default(false) %}Envío entregado
+            {% elif historica %}Historial
+            {% elif confirmada %}Confirmada por {{ courier }}
+            {% elif r.estado == 'CANCELADA' %}Cancelada{% else %}En verificación{% endif %}
         </span>
     </header>
-    {% if confirmada %}
+    {% if r.estado == 'COMPLETADA' %}
+    <p>La finalización del retiro fue registrada. Seguí el paquete con el tracking del envío.</p>
+    {% elif r.envio_entregado|default(false) %}
+    <p>El tracking confirma la entrega del envío. La reserva queda en el historial; este dato no confirma por sí solo la visita física del chofer.</p>
+    {% elif historica %}
+    <p>La fecha programada ya pasó. Consultá el tracking del envío; esta vista no confirma que el courier haya retirado los paquetes.</p>
+    {% elif confirmada %}
     <p>Retiro reservado. No necesitás solicitarlo de nuevo.</p>
     {% elif r.estado == 'CANCELADA' %}
     <p>Si necesitás otro retiro, programalo desde la guía vigente.</p>
-    {% elif r.estado == 'COMPLETADA' %}
-    <p>Seguí el paquete con el tracking del envío.</p>
     {% elif r.estado == 'CANCELANDO' %}
     <p>Estamos confirmando la cancelación con {{ courier }}. Esperá el resultado antes de pedir otro retiro.</p>
     {% else %}

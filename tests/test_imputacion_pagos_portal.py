@@ -1,5 +1,6 @@
 """El cliente vincula crédito existente sin acreditar dinero ni duplicarlo."""
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -97,6 +98,47 @@ def test_concurrencia_un_solo_remanente(datos):
         resultados = list(workers.map(intentar,ids[:2]))
     assert sorted(resultados) == [False,True]
     assert len(ec.obtener_pago_cliente('DEMO',id)['aplicaciones']) == 1
+
+
+def test_pago_futuro_no_reserva_destino_ni_admite_post_imputar(datos):
+    conn, ids = datos
+    futuro = (cc._hoy_argentina() + timedelta(days=1)).isoformat()
+    id = cc.registrar_pago(
+        'DEMO', futuro, '100', 'Transferencia', referencia='FUTURO-PORTAL',
+        estado='PENDIENTE', comprobante=b'%PDF-1.4\n%%EOF',
+    )
+    with conn() as db:
+        with db.cursor() as cur:
+            cur.execute(
+                "ALTER TABLE pagos_aplicaciones DISABLE TRIGGER trg_validar_pago_aplicacion"
+            )
+            cur.execute("""INSERT INTO pagos_aplicaciones
+                (pago_id,ambito,monto_ars,estado,envio_id)
+                VALUES (%s,'INTERNACIONAL',100,'SOLICITADA',%s)""", (id, ids[0]))
+            cur.execute(
+                "ALTER TABLE pagos_aplicaciones ENABLE TRIGGER trg_validar_pago_aplicacion"
+            )
+    destino = next(d for d in cc.listar_destinos_pago('DEMO') if d['clave'] == f'E:{ids[0]}')
+    assert destino['solicitado'] == Decimal('0.00')
+    assert destino['disponible'] == Decimal('100.00')
+    detalle = ec.obtener_pago_cliente('DEMO', id)
+    assert detalle['estado_label'] == 'Fecha futura · Sin acreditar'
+    assert detalle['puede_imputar'] is False
+    with pytest.raises(ValueError, match='fecha futura'):
+        ip.imputar_pago_cliente('DEMO', id, [f'E:{ids[1]}'], '100')
+
+
+def test_fecha_original_desconocida_no_impide_imputar_credito_real(datos):
+    _, ids = datos
+    id = cc.registrar_pago(
+        'DEMO', cc._hoy_argentina().isoformat(), '100', 'Transferencia',
+        referencia='ORIGINAL-DESCONOCIDA', estado='APROBADO',
+        comprobante=b'%PDF-1.4\n%%EOF', fecha_original_conocida=False,
+    )
+    assert ip.imputar_pago_cliente('DEMO', id, [f'E:{ids[0]}'], '100') == 'APLICADA'
+    detalle = ec.obtener_pago_cliente('DEMO', id)
+    assert detalle['fecha_original_conocida'] is False
+    assert detalle['cantidad_envios'] == 1
 
 
 def test_conteo_y_remanente_no_se_truncan_en_24_envios(datos):

@@ -40,6 +40,46 @@ _tabla_lista = False
 _tabla_lock = threading.Lock()
 
 
+def presentar_recoleccion(fila: dict, *, hoy: Optional[date] = None) -> dict:
+    """Deriva una vista operativa sin afirmar que el chofer retiró paquetes.
+
+    DHL no entrega una confirmación durable de visita en este flujo. Una fecha
+    pasada o un envío ya entregado vuelven histórica la tarjeta y eliminan el
+    llamado a preparar/cancelar, pero no cambian el estado real del retiro.
+    """
+    item = dict(fila)
+    hoy = hoy or date.today()
+    estado = str(item.get("estado") or "").strip().upper()
+    envio_entregado = (
+        str(item.get("envio_estado") or "").strip().upper() == "ENTREGADO"
+        or str(item.get("envio_tracking_estado") or "").strip().upper()
+        == "ENTREGADO"
+    )
+    fecha = item.get("fecha")
+    fecha_pasada = bool(isinstance(fecha, date) and fecha < hoy)
+    vista_historica = bool(
+        estado == "COMPLETADA"
+        or envio_entregado
+        or (estado == "AGENDADA" and fecha_pasada)
+    )
+    puede_conciliar = bool(item.get("puede_conciliar"))
+    if estado == "VERIFICAR_COURIER" or (
+        estado in {"AGENDANDO", "CANCELANDO"} and puede_conciliar
+    ):
+        seccion = "INCIDENCIAS"
+    elif vista_historica:
+        seccion = "HISTORIAL"
+    else:
+        seccion = "PENDIENTES"
+    item.update(
+        envio_entregado=envio_entregado,
+        fecha_pasada=fecha_pasada,
+        vista_historica=vista_historica,
+        seccion_operativa=seccion,
+    )
+    return item
+
+
 def _ensure_tabla() -> None:
     """Comprueba la migración canónica, sin ejecutar DDL en tráfico real.
 
@@ -479,10 +519,14 @@ def listar(cliente_id: str, limite: int = 50) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT * FROM recolecciones WHERE cliente_id = %s
-                ORDER BY fecha DESC, id DESC LIMIT %s
+                SELECT r.*, s.estado AS envio_estado,
+                       s.tracking_estado AS envio_tracking_estado
+                FROM recolecciones r
+                LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                WHERE r.cliente_id = %s
+                ORDER BY r.fecha DESC, r.id DESC LIMIT %s
             """, ((cliente_id or "").strip().upper(), limite))
-            return [dict(r) for r in cur.fetchall()]
+            return [presentar_recoleccion(r) for r in cur.fetchall()]
 
 
 def obtener(cliente_id: str, rec_id: int) -> Optional[dict]:
@@ -490,10 +534,16 @@ def obtener(cliente_id: str, rec_id: int) -> Optional[dict]:
     _ensure_tabla()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM recolecciones WHERE cliente_id=%s AND id=%s",
+            cur.execute("""
+                SELECT r.*, s.estado AS envio_estado,
+                       s.tracking_estado AS envio_tracking_estado
+                FROM recolecciones r
+                LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                WHERE r.cliente_id=%s AND r.id=%s
+            """,
                         ((cliente_id or "").strip().upper(), int(rec_id)))
             fila = cur.fetchone()
-    return dict(fila) if fila else None
+    return presentar_recoleccion(fila) if fila else None
 
 
 def listar_de_solicitudes(cliente_id: str, solicitudes: list[int]) -> dict[int, dict]:
@@ -504,14 +554,20 @@ def listar_de_solicitudes(cliente_id: str, solicitudes: list[int]) -> dict[int, 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT DISTINCT ON (solicitud_id)
-                       id, solicitud_id, estado, confirmation_code, courier,
-                       fecha, ready_time, close_time
-                FROM recolecciones
-                WHERE cliente_id=%s AND solicitud_id=ANY(%s)
-                ORDER BY solicitud_id, created_at DESC, id DESC
+                SELECT DISTINCT ON (r.solicitud_id)
+                       r.id, r.solicitud_id, r.estado, r.confirmation_code,
+                       r.courier, r.fecha, r.ready_time, r.close_time,
+                       s.estado AS envio_estado,
+                       s.tracking_estado AS envio_tracking_estado
+                FROM recolecciones r
+                JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                WHERE r.cliente_id=%s AND r.solicitud_id=ANY(%s)
+                ORDER BY r.solicitud_id, r.created_at DESC, r.id DESC
             """, ((cliente_id or "").strip().upper(), solicitudes))
-            return {r["solicitud_id"]: dict(r) for r in cur.fetchall()}
+            return {
+                r["solicitud_id"]: presentar_recoleccion(r)
+                for r in cur.fetchall()
+            }
 
 
 def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
@@ -526,18 +582,22 @@ def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, solicitud_id, courier, fecha, ready_time, close_time, bultos,
-                       peso_kg, direccion, instrucciones, estado,
-                       confirmation_code, ubicacion, created_at, updated_at
-                FROM recolecciones
-                WHERE cliente_id = %s AND solicitud_id = %s
-                ORDER BY created_at DESC, id DESC
+                SELECT r.id, r.solicitud_id, r.courier, r.fecha,
+                       r.ready_time, r.close_time, r.bultos,
+                       r.peso_kg, r.direccion, r.instrucciones, r.estado,
+                       r.confirmation_code, r.ubicacion, r.created_at,
+                       r.updated_at, s.estado AS envio_estado,
+                       s.tracking_estado AS envio_tracking_estado
+                FROM recolecciones r
+                JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                WHERE r.cliente_id = %s AND r.solicitud_id = %s
+                ORDER BY r.created_at DESC, r.id DESC
                 LIMIT 1
                 """,
                 ((cliente_id or "").strip().upper(), int(solicitud_id)),
             )
             fila = cur.fetchone()
-    return dict(fila) if fila else None
+    return presentar_recoleccion(fila) if fila else None
 
 
 def listar_admin(limite: int = 200) -> list[dict]:
@@ -546,20 +606,33 @@ def listar_admin(limite: int = 200) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT r.*, c.nombre AS cliente_nombre,
+                       s.estado AS envio_estado,
+                       s.tracking_estado AS envio_tracking_estado,
                        (r.estado='VERIFICAR_COURIER' OR
                         (r.estado IN ('AGENDANDO', 'CANCELANDO') AND
                          r.updated_at <= NOW() - INTERVAL '10 minutes')) AS puede_conciliar
                 FROM recolecciones r
                 LEFT JOIN clientes c ON c.cliente_id = r.cliente_id
+                LEFT JOIN solicitudes_guia s ON s.id = r.solicitud_id
                 WHERE r.estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO',
                                    'VERIFICAR_COURIER')
-                  AND (r.fecha >= CURRENT_DATE - 1 OR
-                       r.estado IN ('AGENDANDO', 'CANCELANDO', 'VERIFICAR_COURIER'))
-                ORDER BY CASE WHEN r.estado IN ('AGENDANDO', 'CANCELANDO',
-                                                 'VERIFICAR_COURIER') THEN 0 ELSE 1 END,
-                         r.fecha, r.id LIMIT %s
+                ORDER BY
+                    CASE
+                        WHEN r.estado='VERIFICAR_COURIER' OR
+                             (r.estado IN ('AGENDANDO', 'CANCELANDO') AND
+                              r.updated_at <= NOW() - INTERVAL '10 minutes')
+                            THEN 0
+                        WHEN r.estado='AGENDADA' AND
+                             (r.fecha < CURRENT_DATE OR
+                              s.estado='ENTREGADO' OR
+                              s.tracking_estado='ENTREGADO')
+                            THEN 2
+                        ELSE 1
+                    END,
+                    r.fecha DESC, r.id DESC
+                LIMIT %s
             """, (limite,))
-            return [dict(r) for r in cur.fetchall()]
+            return [presentar_recoleccion(r) for r in cur.fetchall()]
 
 
 def cancelar(rec_id: int, cliente_id: Optional[str] = None) -> dict:

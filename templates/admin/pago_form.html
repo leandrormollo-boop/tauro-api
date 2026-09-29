@@ -7,6 +7,37 @@
   <h1>Registrar pago</h1>
 </div>
 
+{% if anomalias_pago is none %}<p class="msg warn" role="status">No se pudo consultar el control de duplicados históricos. La validación de cada nuevo pago sigue activa.</p>{% endif %}
+{% if anomalias_pago %}
+<div class="card" style="max-width:760px;margin-bottom:16px;">
+  <div class="eyebrow">Revisión documental</div>
+  <h2>{{ anomalias_pago|length }} anomalía{{ '' if anomalias_pago|length == 1 else 's' }} de pagos</h2>
+  <p>Revisá la evidencia antes de confirmar una fecha o corregir cualquier registro histórico.</p>
+  <ul style="display:grid;gap:8px;margin-top:12px;">
+    {% for a in anomalias_pago %}
+    <li>
+      <strong>{% if a.tipo == 'REFERENCIA_DUPLICADA' %}Referencia duplicada{% elif a.tipo == 'COMPROBANTE_DUPLICADO' %}Comprobante duplicado{% else %}Fecha del pago pendiente de revisión{% endif %}</strong>
+      · {% if a.cliente_id %}<a href="/admin/clientes/{{ a.cliente_id|urlencode }}">{{ a.cliente_id }}</a>{% else %}Varios clientes{% endif %} · {{ a.identidad_visible }}
+      <small>Pagos #{{ a.pagos_ids|join(', #') }} · {{ a.cantidad }} registro{{ '' if a.cantidad == 1 else 's' }}</small>
+      {% if a.tipo == 'PAGO_FECHA_PENDIENTE_REVISION' %}
+      <form method="POST" action="/admin/pagos/{{ a.pagos_ids[0] }}/confirmar-fecha" style="margin-top:8px;">
+        <input type="hidden" name="csrf_fecha" value="{{ a.csrf_fecha }}">
+        <label>Motivo de la fecha confirmada
+          <input type="text" name="motivo" minlength="10" maxlength="1000" required placeholder="Qué dato se corrigió o verificó">
+        </label>
+        <label>Evidencia revisada
+          <input type="text" name="evidencia_ref" minlength="5" maxlength="1000" required placeholder="Comprobante, extracto o referencia documental">
+        </label>
+        <label><input type="checkbox" name="confirmacion" value="1" required> Verifiqué la fecha contra la evidencia del pago.</label>
+        <button type="submit" class="btn btn-ghost btn-sm">Confirmar fecha revisada</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <div class="card" style="max-width:480px;">
   <form method="POST" action="/admin/pagos/nuevo" enctype="multipart/form-data">
     <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
@@ -26,7 +57,7 @@
     <div class="form-grid-2">
       <div class="form-group">
         <label>Fecha *</label>
-        <input type="date" name="fecha" required value="{{ form_data.fecha if form_data else today }}">
+        <input type="date" name="fecha" required max="{{ today }}" value="{{ form_data.fecha if form_data else today }}">
       </div>
       <div class="form-group">
         <label>Monto ARS *</label>
@@ -68,8 +99,9 @@
     </div>
 
     <div class="form-group">
-      <label>Referencia / CBU / Comprobante</label>
-      <input type="text" name="referencia" value="{{ form_data.referencia if form_data else '' }}" placeholder="CBU 0110599220059901234567">
+      <label>Referencia de la operación</label>
+      <input type="text" name="referencia" value="{{ form_data.referencia if form_data else '' }}" placeholder="Número o referencia bancaria">
+      <small>Completá una referencia o adjuntá el comprobante.</small>
     </div>
 
     <div class="form-group">
@@ -78,10 +110,21 @@
     </div>
 
     <div class="form-group">
-      <label>Comprobante (JPG, PNG o PDF · opcional)</label>
+      <label>Comprobante (JPG, PNG o PDF)</label>
       <input type="file" name="comprobante"
              accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf">
     </div>
+
+    <details class="form-group">
+      <summary>Excepción por transferencia repetida</summary>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px;">
+        <input type="checkbox" name="autorizar_duplicado" value="1"{% if form_data and form_data.autorizar_duplicado %} checked{% endif %}>
+        <span>Confirmo que es otra transferencia y revisé su evidencia documental.</span>
+      </label>
+      <label for="duplicado-motivo">Motivo de la excepción</label>
+      <textarea id="duplicado-motivo" name="duplicado_motivo" minlength="10" maxlength="1000" rows="3" placeholder="Explicá qué evidencia distingue esta transferencia de la ya registrada.">{{ form_data.duplicado_motivo if form_data else '' }}</textarea>
+      <small>Usalo sólo cuando una referencia o un comprobante coinciden por una razón documentada. La excepción queda auditada con el administrador responsable.</small>
+    </details>
 
     <div style="display:flex;gap:12px;margin-top:8px;">
       <button type="submit" class="btn btn-primary">Guardar pago</button>
@@ -98,11 +141,34 @@
   cliente?.addEventListener('change', () => {
     if (cliente.value) location.href = '/admin/pagos/nuevo?cliente=' + encodeURIComponent(cliente.value);
   });
-  const numero = value => Number(String(value || '').replace(/\./g, '').replace(',', '.')) || 0;
+  const parseCanonicalDecimal = value => {
+    const parsed = Number(String(value || '0'));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const parseHumanAmount = value => {
+    const raw = String(value || '').trim().replace(/\s/g, '');
+    if (!raw) return 0;
+    const comma = raw.lastIndexOf(',');
+    const dot = raw.lastIndexOf('.');
+    let canonical = raw;
+    if (comma >= 0 && dot >= 0) {
+      canonical = comma > dot
+        ? raw.replace(/\./g, '').replace(',', '.')
+        : raw.replace(/,/g, '');
+    } else if (comma >= 0) {
+      const decimals = raw.length - comma - 1;
+      canonical = decimals === 3 ? raw.replace(/,/g, '') : raw.replace(',', '.');
+    } else if (dot >= 0) {
+      const decimals = raw.length - dot - 1;
+      canonical = decimals === 3 ? raw.replace(/\./g, '') : raw;
+    }
+    const parsed = Number(canonical);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   const dinero = value => value.toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
   const actualizar = () => {
-    const total = numero(monto?.value);
-    const elegido = checks.filter(c => c.checked).reduce((s,c) => s + numero(c.dataset.saldo), 0);
+    const total = parseHumanAmount(monto?.value);
+    const elegido = checks.filter(c => c.checked).reduce((s,c) => s + parseCanonicalDecimal(c.dataset.saldo), 0);
     const imputado = Math.min(total, elegido);
     const favor = Math.max(total - elegido, 0);
     const parcial = Math.max(elegido - total, 0);

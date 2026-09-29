@@ -75,6 +75,31 @@ def test_saldo_global_y_pago_solicitado_no_prueban_cobro_del_envio(db):
     assert negocio.listar_envios()['items'][0]['cobro']['label']=='Cobrado · imputación al envío'
 
 
+def test_pago_futuro_legacy_no_marca_envio_como_cobrado(db):
+    sid=crear(db,'FUTURO')
+    with db() as conn,conn.cursor() as cur:
+        cur.execute('SELECT id FROM envios WHERE solicitud_id=%s',(sid,))
+        envio_id=cur.fetchone()['id']
+        cur.execute('ALTER TABLE pagos DISABLE TRIGGER trg_validar_identidad_pago_cliente')
+        cur.execute("""INSERT INTO pagos(
+                cliente_id,fecha,monto_ars,metodo,estado,fecha_revision_requerida
+            ) VALUES(
+                'CLIENTE_FUTURO',CURRENT_DATE+1,100,'TRANSFERENCIA','APROBADO',TRUE
+            )
+            RETURNING id""")
+        pago_id=cur.fetchone()['id']
+        cur.execute('ALTER TABLE pagos ENABLE TRIGGER trg_validar_identidad_pago_cliente')
+        cur.execute('ALTER TABLE pagos_aplicaciones DISABLE TRIGGER trg_validar_pago_aplicacion')
+        cur.execute("""INSERT INTO pagos_aplicaciones(
+            pago_id,ambito,monto_ars,estado,envio_id
+        ) VALUES(%s,'INTERNACIONAL',100,'APLICADA',%s)""",(pago_id,envio_id))
+        cur.execute('ALTER TABLE pagos_aplicaciones ENABLE TRIGGER trg_validar_pago_aplicacion')
+
+    envio=negocio.listar_envios(cliente_id='CLIENTE_FUTURO')['items'][0]
+    assert envio['cobro']['label']=='Sin pago imputado'
+    assert envio['cobro']['importe']==Decimal('100')
+
+
 def test_cancelados_reemplazados_sin_impacto_y_alerta_inconsistencia(db):
     for key,estado in [('cancelados','CANCELADO'),('modificados','REEMPLAZADO')]:
         sid=crear(db,key.upper())

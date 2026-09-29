@@ -432,8 +432,8 @@ def actualizar_trackings_diarios_seguro() -> dict:
         resultado = {"ok": False, "error": type(exc).__name__}
     try:
         # Una guía REEMPLAZADA queda afuera del tracking normal. El control
-        # separado consulta cada tracking descartado una sola vez al cumplir
-        # 7 días: sin eventos confirma la cancelación; con actividad alerta.
+        # separado vigila cada tracking descartado desde el día 7, con backoff:
+        # una ausencia no prueba anulación y cualquier actividad abre alerta.
         from servicios.monitoreo_guias_reemplazadas import (
             actualizar_trackings_reemplazados_dhl,
         )
@@ -459,7 +459,6 @@ def actualizar_trackings_diarios_seguro() -> dict:
             "[tracking-dhl] reemplazadas: "
             f"consultados={reemplazadas.get('consultados', 0)} "
             f"sin_movimiento={reemplazadas.get('sin_movimiento', 0)} "
-            f"confirmadas={reemplazadas.get('cancelaciones_confirmadas', 0)} "
             f"alertas={reemplazadas.get('alertas', 0)} "
             f"alertas_nuevas={reemplazadas.get('alertas_nuevas', 0)} "
             f"errores={reemplazadas.get('errores', 0)} "

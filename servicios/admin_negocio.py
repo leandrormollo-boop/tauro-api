@@ -85,6 +85,8 @@ def _cobros(cur, ids):
             JOIN pagos p ON p.id=pa.pago_id
             WHERE pa.envio_id=e.id AND pa.estado='APLICADA'
               AND COALESCE(p.estado,'APROBADO')='APROBADO'
+              AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
               AND p.cliente_id=e.cliente_id),0) AS pagado
         FROM envios e JOIN solicitudes_guia s ON s.id=e.solicitud_id AND s.cliente_id=e.cliente_id
         WHERE e.solicitud_id=ANY(%s) ORDER BY e.id''', (ids,))
@@ -100,6 +102,8 @@ def _cobros(cur, ids):
             COALESCE((SELECT SUM(pa.monto_ars) FROM pagos_aplicaciones pa
                 JOIN pagos p ON p.id=pa.pago_id
                 WHERE pa.estado='APLICADA' AND COALESCE(p.estado,'APROBADO')='APROBADO'
+                  AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
                   AND p.cliente_id=f.cliente_id AND (pa.factura_id=f.id OR pa.envio_id IN (
                       SELECT envio_id FROM facturas_cliente_items WHERE factura_id=f.id))),0) AS pagado
         FROM facturas_cliente_items i JOIN facturas_cliente f ON f.id=i.factura_id

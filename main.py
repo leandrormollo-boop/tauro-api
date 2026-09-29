@@ -822,12 +822,31 @@ def apple_app_site_association():
 @app.get("/partners", tags=["public"])
 def partners_activos():
     """
-    Los couriers habilitados hoy, para la barra de partners de la web pública.
-    Sale de las credenciales cargadas, así que la web nunca promete un partner
-    que no puede cotizar.
+    Oferta de cotización visible hoy, con el estado comercial del contrato.
+
+    Tener credenciales en el motor legado no convierte al carrier en una
+    integración operativa. FedEx puede figurar como tarifario público, pero no
+    como emisión, etiqueta o retiro habilitados.
     """
     from servicios.carriers import carriers_activos
-    return {"partners": carriers_activos()}
+    from servicios.carrier_contract import Ambito, Capacidad, public_catalog
+
+    catalogo = {
+        item["id"]: item
+        for item in public_catalog(Ambito.INTERNACIONAL, canal="publico")
+    }
+    partners = []
+    for carrier in carriers_activos():
+        publicado = catalogo.get(carrier["id"]) or {}
+        if Capacidad.COTIZAR.value not in publicado.get("capacidades", ()):
+            continue
+        partners.append({
+            **carrier,
+            "estado": publicado.get("estado", "integracion_pendiente"),
+            "estado_label": publicado.get("estado_label", "Integración pendiente"),
+            "capacidades": publicado.get("capacidades", ()),
+        })
+    return {"partners": partners}
 
 
 @app.get("/operadores", tags=["public"])
@@ -839,8 +858,8 @@ def operadores_publicos():
     """
     from servicios.carrier_contract import Ambito, public_catalog
     return {
-        "internacionales": public_catalog(Ambito.INTERNACIONAL),
-        "nacionales": public_catalog(Ambito.NACIONAL),
+        "internacionales": public_catalog(Ambito.INTERNACIONAL, canal="publico"),
+        "nacionales": public_catalog(Ambito.NACIONAL, canal="publico"),
     }
 
 
@@ -946,8 +965,9 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
         raise HTTPException(
             status_code=409,
             detail=(
-                "Los envíos dentro de Argentina se habilitarán con OCA y "
-                "Andreani. Todavía no se pueden cotizar desde este formulario."
+                "Este formulario todavía no cotiza envíos dentro de Argentina. "
+                "OCA está preparada para cuentas habilitadas; solicitá la "
+                "activación desde el portal. Andreani continúa pendiente."
             ),
         )
 
@@ -991,6 +1011,26 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
     # Compara FedEx, UPS y DHL. Cada carrier cotiza si tiene credenciales;
     # si no, sale con su logo en "próximamente". Ver servicios/carriers.py.
     carriers = cotizar_carriers(origen, destino, paquete, dolar, markup_pct)
+
+    # El resultado técnico de una tarifa no debe presentarse como evidencia de
+    # emisión o retiro. El estado y las capacidades publicadas salen del mismo
+    # contrato que usa /operadores.
+    from servicios.carrier_contract import Ambito, public_catalog
+    publicados = {
+        item["id"]: item
+        for item in public_catalog(Ambito.INTERNACIONAL, canal="publico")
+    }
+    for carrier in carriers:
+        publicado = publicados.get(carrier["id"]) or {}
+        carrier.update({
+            "estado_publicacion": publicado.get(
+                "estado", "integracion_pendiente"
+            ),
+            "estado_label": publicado.get(
+                "estado_label", "Integración pendiente"
+            ),
+            "capacidades": publicado.get("capacidades", ()),
+        })
 
     cotizados = [c for c in carriers if c["estado"] == "cotizado"]
     if not cotizados:
@@ -1564,6 +1604,8 @@ if _cron_dia_raw not in _CRON_DIAS:
     print(f"[scheduler] CRON_DIA={_cron_dia_raw!r} inválido; se usa 'mon'.")
 CRON_HORA = int(os.getenv("CRON_HORA", 6))
 
+from servicios.control_automatizaciones import observar as observar_tarea
+
 scheduler = BackgroundScheduler(timezone="America/Argentina/Buenos_Aires")
 scheduler.add_job(
     job_actualizar_precios_fedex,
@@ -1610,7 +1652,7 @@ scheduler.add_job(
 # Rastreo DHL diario: la página lee el snapshot persistido y nunca llama al
 # courier al refrescarse. Un advisory lock evita que dos procesos ejecuten el
 # mismo lote. El wrapper también toma las guías reemplazadas que cumplieron
-# siete días y hace su único control del tracking descartado.
+# siete días y mantiene el control periódico del tracking descartado.
 def _entero_cron(nombre: str, default: int, minimo: int, maximo: int) -> int:
     try:
         valor = int(os.getenv(nombre, str(default)))
@@ -1630,7 +1672,7 @@ from servicios.tracking_envios import (
 # horarios_tracking valida DHL_TRACKING_CRON_HOUR / DHL_TRACKING_CRON_MINUTE.
 _DHL_TRACKING_HORA, _DHL_TRACKING_MINUTO = horarios_tracking()
 scheduler.add_job(
-    actualizar_trackings_diarios_seguro,
+    observar_tarea("tracking_dhl_diario", actualizar_trackings_diarios_seguro),
     trigger="cron",
     hour=_DHL_TRACKING_HORA,
     minute=_DHL_TRACKING_MINUTO,
@@ -1640,7 +1682,7 @@ scheduler.add_job(
     replace_existing=True,
 )
 scheduler.add_job(
-    actualizar_vigilancia_dhl_seguro,
+    observar_tarea("tracking_dhl_vigilancia", actualizar_vigilancia_dhl_seguro),
     trigger="cron",
     hour=(_DHL_TRACKING_HORA + 12) % 24,
     minute=_DHL_TRACKING_MINUTO,
@@ -1658,7 +1700,7 @@ from servicios.correo_facturas_dhl import sincronizar_facturas_dhl_seguro
 _DHL_GMAIL_HORA = _entero_cron("DHL_GMAIL_CRON_HOUR", 6, 0, 23)
 _DHL_GMAIL_MINUTO = _entero_cron("DHL_GMAIL_CRON_MINUTE", 0, 0, 59)
 scheduler.add_job(
-    sincronizar_facturas_dhl_seguro,
+    observar_tarea("facturas_dhl_gmail", sincronizar_facturas_dhl_seguro),
     trigger="cron",
     day_of_week="mon,fri",
     hour=_DHL_GMAIL_HORA,
@@ -1857,13 +1899,14 @@ def job_refrescar_tarifas():
     """
     try:
         from servicios.tarifas_cache import refrescar_cache
-        refrescar_cache()
+        return refrescar_cache()
     except Exception as e:
         print(f"[scheduler] refresco de tarifas falló: {type(e).__name__}")
+        return {"ok": False}
 
 
 scheduler.add_job(
-    job_refrescar_tarifas,
+    observar_tarea("tarifas_checkout", job_refrescar_tarifas),
     trigger="cron",
     hour=4,
     minute=0,

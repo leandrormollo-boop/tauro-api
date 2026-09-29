@@ -105,7 +105,9 @@ def periodo_db(monkeypatch):
             CREATE TABLE envios(id integer PRIMARY KEY,cliente_id text,fecha date,
                 monto_ars numeric(14,2),estado text,solicitud_id integer,ambito text,nro_fc text);
             CREATE TABLE pagos(id integer PRIMARY KEY,cliente_id text,fecha date,
-                monto_ars numeric(14,2),estado text);
+                monto_ars numeric(14,2),estado text,
+                fecha_original_conocida boolean NOT NULL DEFAULT true,
+                fecha_revision_requerida boolean NOT NULL DEFAULT false);
             CREATE TABLE ajustes_cliente(id integer PRIMARY KEY,solicitud_id integer,
                 monto_ars numeric(18,4),tipo text,estado text,aplicado_at timestamptz);
             CREATE TABLE pagos_aplicaciones(pago_id integer,ambito text,monto_ars numeric,
@@ -150,7 +152,7 @@ def test_particion_sql_reconcilia_con_resumen_real_y_pago_a_envio_anterior(perio
                     (5,'WAIMAO','2026-09-10',10,'ACTIVO',5,NULL),
                     (6,'WAIMAO',NULL,7,'ACTIVO',6,NULL),
                     (7,'AJENO','2026-09-10',90000,'ACTIVO',7,'NACIONAL');
-                INSERT INTO pagos VALUES
+                INSERT INTO pagos(id,cliente_id,fecha,monto_ars,estado) VALUES
                     (1,'WAIMAO','2026-08-10',30,NULL),
                     (2,'WAIMAO','2026-09-10',40,'APROBADO'),
                     (3,'WAIMAO','2026-09-10',60,'PENDIENTE'),
@@ -184,7 +186,7 @@ def test_fecha_corte_no_reescribe_estados_y_aprobacion_posterior_recalcula_anter
     with periodo_db() as conn:
         with conn.cursor() as cur:
             cur.execute("INSERT INTO envios VALUES (1,'WAIMAO','2026-08-10',100,'ACTIVO',1,'NACIONAL',NULL)")
-            cur.execute("INSERT INTO pagos VALUES (1,'WAIMAO','2026-08-30',25,'PENDIENTE')")
+            cur.execute("INSERT INTO pagos(id,cliente_id,fecha,monto_ars,estado) VALUES (1,'WAIMAO','2026-08-30',25,'PENDIENTE')")
     antes = pc.obtener_periodo_cuenta("WAIMAO", INICIO)
     assert antes["saldo_anterior_ars"] == Decimal("100")
     with periodo_db() as conn:
@@ -194,6 +196,38 @@ def test_fecha_corte_no_reescribe_estados_y_aprobacion_posterior_recalcula_anter
     assert despues["saldo_anterior_ars"] == Decimal("75")
     assert despues["neto_desde_ars"] == 0
     assert "no es un cierre histórico auditado" in despues["criterio"]
+
+
+def test_pago_con_fecha_original_desconocida_conserva_saldo_sin_atribuirlo_al_periodo(periodo_db):
+    with periodo_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO envios VALUES "
+                "(1,'WAIMAO','2026-09-10',100,'ACTIVO',1,'NACIONAL',NULL)"
+            )
+            cur.execute(
+                """
+                INSERT INTO pagos(
+                    id,cliente_id,fecha,monto_ars,estado,fecha_original_conocida
+                ) VALUES (1,'WAIMAO','2026-09-10',25,'APROBADO',FALSE)
+                """
+            )
+
+    resumen = pc.obtener_periodo_cuenta("WAIMAO", INICIO)
+
+    assert resumen["saldo_total_ars"] == Decimal("75.00")
+    assert resumen["pagos_desde_ars"] == Decimal("0.00")
+    assert resumen["saldo_anterior_ars"] == Decimal("0.00")
+    assert resumen["neto_desde_ars"] == Decimal("100.00")
+    assert resumen["pagos_sin_fecha_original_ars"] == Decimal("25.00")
+    assert (
+        resumen["saldo_anterior_ars"] + resumen["neto_desde_ars"]
+        - resumen["pagos_sin_fecha_original_ars"] + resumen["redondeo_ars"]
+        == resumen["saldo_total_ars"]
+    )
+    assert resumen["pagos_fecha_original_desconocida_cantidad"] == 1
+    assert resumen["pagos_fecha_original_desconocida_ars"] == Decimal("25.00")
+    assert "no se atribuyen" in resumen["advertencia_pagos_fecha_original"]
 
 
 def test_dos_ajustes_medios_centavos_concilian_periodo_lista_y_excel(periodo_db):

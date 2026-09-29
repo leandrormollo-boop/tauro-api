@@ -339,10 +339,15 @@ def resumen_documentos(documentos):
             continue
         k=f['moneda']
         r=resumen.setdefault(k,dict(moneda=k, pendiente=Decimal(0), vencido=Decimal(0),
-                                    sin_verificar=0, credito=Decimal(0), documentos=0))
+                                    sin_verificar=0,
+                                    importe_bruto_sin_verificar=Decimal(0),
+                                    credito=Decimal(0), documentos=0))
         r['documentos']+=1
         if f['estado_pago'] in ('SIN_VERIFICAR','CREDITO_SIN_VERIFICAR'):
             r['sin_verificar']+=1
+            # Exposición documental bruta, separada de deuda/crédito verificados.
+            # Usa el total del documento y no presume pagos históricos.
+            r['importe_bruto_sin_verificar']+=f['total']
         elif f['tipo_documento']=='NC':
             r['credito']+=f['saldo']
         elif f['saldo']>0:

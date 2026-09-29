@@ -62,6 +62,7 @@ from servicios.experiencia_cuenta import obtener_experiencia_cuenta, obtener_pag
 from servicios.imputacion_pagos_portal import imputar_pago_cliente
 from servicios.periodo_cuenta import inicio_cuenta_cliente, obtener_periodo_cuenta
 from servicios.filtros_cuenta import normalizar_filtros_cuenta
+from servicios.ubicaciones_envio import validar_ubicacion_cotizada
 from servicios.export_cuenta import generar_excel_cuenta
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
@@ -161,7 +162,7 @@ def _operadores_cliente(cliente: str, ambito: Ambito) -> tuple[dict, ...]:
         print(
             f"[portal-operadores] catálogo no disponible: {type(exc).__name__}"
         )
-        return public_catalog(ambito)
+        return public_catalog(ambito, canal="cuenta")
 
 
 def _nueva_idempotency_key() -> str:
@@ -2557,6 +2558,8 @@ def envio_nuevo_form(
     origen_cp: str = "",
     destino_ciudad: str = "",
     destino_cp: str = "",
+    origen_referencia: str = "",
+    destino_referencia: str = "",
     corregir: Optional[int] = None,
     repetir: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
@@ -2696,7 +2699,8 @@ def envio_nuevo_form(
                 # cada contenido. Se muestra como referencia, sin repartirlo.
                 if sum(b['cantidad'] for b in form['bultos']) == 1:
                     form['bultos'][0]['valor_declarado_caja_usd'] = valor
-                    form['bultos'][0]['valor_unitario_usd'] = valor
+                    # La cotización conoce el total, no las unidades de mercadería.
+                    form['bultos'][0]['valor_total_usd'] = valor
         except ValueError as exc:
             error = str(exc)
     # Si viene del cotizador ("tocá la opción para crear el envío"), el
@@ -2705,11 +2709,18 @@ def envio_nuevo_form(
         form["destino_pais"] = normalizar_pais(destino)
     if origen.strip() and not pedido_tienda:
         form["rem_pais"] = normalizar_pais(origen)
-    if cajas and not (quote_id or pedido_tienda or destinatario_id or corregir or repetir):
-        for key, value in (("rem_ciudad", origen_ciudad), ("rem_zip", origen_cp),
-                           ("dest_ciudad", destino_ciudad), ("dest_zip", destino_cp)):
-            if isinstance(value, str) and value.strip():
-                form[key] = value.strip()[:100]
+    if cajas and not (quote_id or pedido_tienda or corregir or repetir):
+        for lado, ident, referencia, campos in (
+            ("origen", remitente_id, origen_referencia, (("rem_ciudad", origen_ciudad), ("rem_zip", origen_cp))),
+            ("destino", destinatario_id, destino_referencia, (("dest_ciudad", destino_ciudad), ("dest_zip", destino_cp))),
+        ):
+            # Una ficha explícita reemplaza sólo su extremo de la ruta.
+            if ident:
+                continue
+            for key, value in campos:
+                if isinstance(value, str) and value.strip():
+                    form[key] = value.strip()[:100]
+            form[lado + "_referencia"] = "1" if referencia == "1" else ""
     courier = (courier or "").strip().lower()
 
     # Inicio directo desde "Mis clientes". El id nunca alcanza por sí solo:
@@ -2784,6 +2795,7 @@ def envio_nuevo_form(
         if saved:
             remitente = saved
             form["remitente_id"] = str(saved["id"])
+            form.pop("origen_referencia", None)
             for key, source in [("nombre","nombre"),("documento","documento"),("email","email"),
                                 ("telefono","telefono"),("direccion","direccion"),("ciudad","ciudad"),
                                 ("estado","estado"),("zip","cp"),("pais","pais")]:
@@ -2908,6 +2920,10 @@ def envio_nuevo_post(
     reemplaza_solicitud_id: str = Form(""),
     reemision_motivo: str = Form(""),
     borrador_token: str = Form(""),
+    origen_referencia: str = Form(""),
+    destino_referencia: str = Form(""),
+    origen_ubicacion_confirmada: str = Form(""),
+    destino_ubicacion_confirmada: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
     if _ambito_post(ambito) != "internacional":
@@ -3154,6 +3170,10 @@ def envio_nuevo_post(
         "reemplaza_solicitud_id": reemplaza_solicitud_id,
         "reemision_motivo": reemision_motivo,
         "borrador_token": borrador_token if isinstance(borrador_token, str) else "",
+        "origen_referencia": "1" if origen_referencia == "1" else "",
+        "destino_referencia": "1" if destino_referencia == "1" else "",
+        "origen_ubicacion_confirmada": "1" if origen_ubicacion_confirmada == "1" else "",
+        "destino_ubicacion_confirmada": "1" if destino_ubicacion_confirmada == "1" else "",
     }
 
     error_step = 1
@@ -3162,6 +3182,9 @@ def envio_nuevo_post(
     origen_tienda: dict = {}
     idempotency_tienda = ""
     try:
+        for error_step, lado in ((1, "origen"), (2, "destino")):
+            validar_ubicacion_cotizada(form, lado)
+        error_step = 1
         reemplaza_id = _id_opt(reemplaza_solicitud_id)
         if reemplaza_id:
             reemision_origen = obtener_solicitud_de_cliente(reemplaza_id, cliente)
@@ -3867,10 +3890,12 @@ def tienda_view(
     # primera (el caso normal es una tienda por cuenta).
     dominio_cfg = tiendas[0]["dominio"] if tiendas else ""
     try:
-        from servicios.tiendanube_app import app_configurada as _tn_ok
-        tiendanube_activa = _tn_ok()
+        from servicios.tiendanube_app import estado_publicacion as _tn_estado
+        tiendanube_estado = _tn_estado()
     except Exception:
-        tiendanube_activa = False
+        tiendanube_estado = {
+            "configurada": False, "publicable": False, "piloto": False,
+        }
     try:
         from servicios.shopify_app import app_configurada as _shopify_ok
         shopify_app_activa = _shopify_ok()
@@ -3887,7 +3912,8 @@ def tienda_view(
             "dominio_cfg": dominio_cfg,
             "cfg": obtener_config(dominio_cfg),
             "huerfanas": huerfanas,
-            "tiendanube_activa": tiendanube_activa,
+            "tiendanube_publicable": tiendanube_estado["publicable"],
+            "tiendanube_piloto": tiendanube_estado["piloto"],
             "shopify_app_activa": shopify_app_activa,
             "sync_estado": sync_estado,
             "stock_resumen": stock_resumen,
@@ -4027,12 +4053,13 @@ def tienda_tiendanube_instalar(cliente: str = Depends(cliente_actual)):
     al portal con aviso.
     """
     from servicios.tiendanube_app import (
-        app_configurada, firmar_oauth_cookie, url_instalacion,
+        app_configurada, app_publicable, firmar_oauth_cookie, url_instalacion,
     )
-    if not app_configurada():
+    if not app_configurada() or not app_publicable():
         return RedirectResponse(
             url="/portal/tienda?error=" + quote(
-                "La app de Tiendanube todavía no está habilitada. Escribinos y la activamos."),
+                "La app de Tiendanube sigue en piloto. Falta completar Shipping, "
+                "tarifas, UAT y homologación antes de habilitar instalaciones."),
             status_code=303)
     import secrets as _secrets
     state = _secrets.token_urlsafe(24)

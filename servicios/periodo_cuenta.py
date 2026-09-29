@@ -27,7 +27,8 @@ WITH asientos AS (
     SELECT e.fecha,
            CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                 THEN e.ambito ELSE 'SIN_CLASIFICAR' END AS ambito,
-           'ENVIO'::text AS clase, e.monto_ars AS importe
+           'ENVIO'::text AS clase, e.monto_ars AS importe,
+           FALSE AS fecha_original_desconocida
     FROM envios e
     WHERE e.cliente_id=%s AND e.estado NOT IN ('CANCELADO','NC')
       AND (e.monto_ars>0 OR e.monto_ars IS NULL)
@@ -35,22 +36,33 @@ WITH asientos AS (
     SELECT (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
            CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                 THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
-           a.tipo, ABS(a.monto_ars)
+           a.tipo, ABS(a.monto_ars), FALSE
     FROM ajustes_cliente a
     JOIN envios e ON e.solicitud_id=a.solicitud_id
     WHERE e.cliente_id=%s AND e.estado='ACTIVO' AND a.estado='APLICADO'
     UNION ALL
-    SELECT p.fecha, 'CONSOLIDADO', 'PAGO', p.monto_ars
+    SELECT p.fecha, 'CONSOLIDADO', 'PAGO', p.monto_ars,
+           NOT p.fecha_original_conocida
     FROM pagos p
     WHERE p.cliente_id=%s AND COALESCE(p.estado,'APROBADO')='APROBADO'
+      AND p.fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                                 AND NOT p.fecha_revision_requerida
 ), periodos AS (
-    SELECT *, CASE WHEN fecha IS NULL OR fecha<%s THEN 'ANTERIOR' ELSE 'DESDE' END AS periodo
+    SELECT *, CASE
+        WHEN fecha_original_desconocida THEN 'SIN_FECHA_ORIGINAL'
+        WHEN fecha IS NULL OR fecha<%s THEN 'ANTERIOR'
+        ELSE 'DESDE'
+    END AS periodo
     FROM asientos
 )
 SELECT periodo, ambito, clase, SUM(importe) AS importe,
        SUM(ROUND(importe,2)) AS importe_presentado,
        COUNT(*) FILTER (WHERE fecha IS NULL) AS sin_fecha_cantidad,
-       COUNT(*) FILTER (WHERE importe IS NULL) AS sin_importe_cantidad
+       COUNT(*) FILTER (WHERE importe IS NULL) AS sin_importe_cantidad,
+       COUNT(*) FILTER (WHERE fecha_original_desconocida)
+           AS pagos_fecha_original_desconocida_cantidad,
+       COALESCE(SUM(importe) FILTER (WHERE fecha_original_desconocida),0)
+           AS pagos_fecha_original_desconocida_ars
 FROM periodos
 GROUP BY periodo, ambito, clase
 ORDER BY periodo, ambito, clase
@@ -84,13 +96,15 @@ def _resumen_grupos(grupos: dict[tuple[str, str], Decimal]) -> dict:
 def _presentar_periodo(filas: list[dict], inicio: date) -> dict:
     if len(filas)>20:
         raise ValueError("Hay movimientos que no se pueden clasificar en el período.")
-    grupos = {"ANTERIOR": {}, "DESDE": {}, "TOTAL": {}}
+    grupos = {"ANTERIOR": {}, "DESDE": {}, "SIN_FECHA_ORIGINAL": {}, "TOTAL": {}}
     sin_fecha = 0
+    pagos_fecha_desconocida = 0
+    pagos_fecha_desconocida_ars = _CERO
     for fila in filas:
         if int(fila.get("sin_importe_cantidad") or 0):
             raise ValueError("Hay movimientos sin importe registrado. No se puede calcular el saldo anterior.")
         periodo, ambito, clase = fila["periodo"], fila["ambito"], fila["clase"]
-        if periodo not in {"ANTERIOR", "DESDE"} or clase not in {"ENVIO", "DEBITO", "CREDITO", "PAGO"}:
+        if periodo not in {"ANTERIOR", "DESDE", "SIN_FECHA_ORIGINAL"} or clase not in {"ENVIO", "DEBITO", "CREDITO", "PAGO"}:
             raise ValueError("Hay movimientos que no se pueden clasificar en el período.")
         clave = (ambito, clase)
         importe = _importe_exacto(fila["importe"])
@@ -103,23 +117,45 @@ def _presentar_periodo(filas: list[dict], inicio: date) -> dict:
         grupos[periodo][clave] = grupos[periodo].get(clave, _CERO) + presentado
         grupos["TOTAL"][clave] = grupos["TOTAL"].get(clave, _CERO) + importe
         sin_fecha += int(fila.get("sin_fecha_cantidad") or 0)
-    anterior, desde, total = (_resumen_grupos(grupos[k]) for k in ("ANTERIOR", "DESDE", "TOTAL"))
-    redondeo = total["neto"] - anterior["neto"] - desde["neto"]
+        pagos_fecha_desconocida += int(
+            fila.get("pagos_fecha_original_desconocida_cantidad") or 0
+        )
+        pagos_fecha_desconocida_ars += _importe_exacto(
+            fila.get("pagos_fecha_original_desconocida_ars") or 0
+        )
+    anterior, desde, sin_fecha_original, total = (
+        _resumen_grupos(grupos[k])
+        for k in ("ANTERIOR", "DESDE", "SIN_FECHA_ORIGINAL", "TOTAL")
+    )
+    redondeo = (
+        total["neto"] - anterior["neto"] - desde["neto"]
+        - sin_fecha_original["neto"]
+    )
     return {
         "saldo_anterior_ars": anterior["neto"],
         "cargos_desde_ars": desde["cargos"],
         "creditos_desde_ars": desde["creditos"],
         "pagos_desde_ars": desde["pagos"],
+        "pagos_sin_fecha_original_ars": sin_fecha_original["pagos"],
         "neto_desde_ars": desde["neto"],
         "saldo_total_ars": total["neto"],
         "redondeo_ars": redondeo,
         "sin_fecha_cantidad": sin_fecha,
+        "pagos_fecha_original_desconocida_cantidad": pagos_fecha_desconocida,
+        "pagos_fecha_original_desconocida_ars": pagos_fecha_desconocida_ars,
         "fecha_inicio": inicio.isoformat(),
         "fecha_inicio_visible": inicio.strftime("%d/%m/%Y"),
         "criterio": "Según movimientos registrados y sus estados actuales; no es un cierre histórico auditado.",
         "advertencia_sin_fecha": (
             f"Hay {sin_fecha} movimientos sin fecha: se incluyen en el saldo anterior para conservar el saldo total."
             if sin_fecha else ""
+        ),
+        "advertencia_pagos_fecha_original": (
+            f"Hay {pagos_fecha_desconocida} pagos por ARS "
+            f"{pagos_fecha_desconocida_ars:.2f} cuya fecha original no está "
+            "confirmada. Integran el saldo acumulado, pero no se atribuyen al "
+            "cobrado del período."
+            if pagos_fecha_desconocida else ""
         ),
     }
 

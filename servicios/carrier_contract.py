@@ -54,6 +54,8 @@ class CarrierSpec:
     capacidades: FrozenSet[Capacidad]
     implementacion: str
     variables_requeridas: Tuple[str, ...] = ()
+    oferta_publica: str = ""
+    capacidades_publicas: FrozenSet[Capacidad] | None = None
 
     @property
     def pendiente(self) -> bool:
@@ -84,6 +86,10 @@ CARRIER_SPECS: Tuple[CarrierSpec, ...] = (
         logo="/static/img/carriers/fedex.svg",
         capacidades=CAPACIDADES_INTERNACIONALES_COMPLETAS,
         implementacion="pendiente",
+        # La web conserva un cotizador legado de FedEx. Esto no habilita la
+        # integración por cliente, la emisión ni los retiros.
+        oferta_publica="tarifario_publico",
+        capacidades_publicas=CAPACIDADES_SOLO_COTIZACION,
         variables_requeridas=(
             "FEDEX_API_KEY",
             "FEDEX_SECRET_KEY",
@@ -158,31 +164,53 @@ def capability_supported(carrier_id: str, capacidad: Capacidad | str) -> bool:
     return capacidad in spec.capacidades
 
 
-def public_catalog(ambito: Ambito | str | None = None) -> Tuple[dict, ...]:
+def public_catalog(
+    ambito: Ambito | str | None = None,
+    *,
+    canal: str,
+) -> Tuple[dict, ...]:
     """Catálogo seguro para UI pública, sin estado de credenciales ni cuentas.
 
-    ``operativa`` significa solamente que existe una implementación preparada
-    en TAURO. La web pública nunca la presenta como disponible: credenciales,
-    UAT y permisos se verifican por separado para cada cuenta.
+    ``canal="publico"`` describe exactamente la oferta que puede mostrarse en
+    la web. En particular, FedEx publica sólo un tarifario legado: no hereda
+    las capacidades de emisión del contrato futuro. ``canal="cuenta"`` sirve
+    como base para el portal autenticado y sólo publica capacidades de una
+    integración cuyo código está preparado. Ningún canal comprueba
+    credenciales, UAT ni permisos de cliente.
     """
+    if canal not in {"publico", "cuenta"}:
+        raise ValueError("Canal de catálogo desconocido.")
     specs = CARRIER_SPECS if ambito is None else carriers_for(ambito)
-    return tuple({
-        "id": spec.id,
-        "nombre": spec.nombre,
-        "ambitos": tuple(sorted(item.value for item in spec.ambitos)),
-        "logo": spec.logo if spec.id in {"dhl", "fedex", "ups"} else "",
-        "estado": (
-            "integracion_preparada"
-            if spec.implementacion == "operativa"
-            else "integracion_pendiente"
-        ),
-        "estado_label": (
-            "Integración preparada"
-            if spec.implementacion == "operativa"
-            else "Integración pendiente"
-        ),
-        "estado_corto": (
-            "Preparada" if spec.implementacion == "operativa" else "Pendiente"
-        ),
-        "capacidades": tuple(sorted(item.value for item in spec.capacidades)),
-    } for spec in specs)
+
+    def publicar(spec: CarrierSpec) -> dict:
+        if canal == "publico" and spec.oferta_publica == "tarifario_publico":
+            estado = "tarifario_publico"
+            estado_label = "Tarifario público; emisión no habilitada"
+            estado_corto = "Tarifario"
+            capacidades = spec.capacidades_publicas or frozenset()
+        elif spec.implementacion == "operativa":
+            estado = "integracion_preparada"
+            estado_label = "Integración preparada; sujeta a habilitación"
+            estado_corto = "Preparada"
+            capacidades = (
+                spec.capacidades_publicas
+                if canal == "publico" and spec.capacidades_publicas is not None
+                else spec.capacidades
+            )
+        else:
+            estado = "integracion_pendiente"
+            estado_label = "Integración pendiente"
+            estado_corto = "Pendiente"
+            capacidades = frozenset()
+        return {
+            "id": spec.id,
+            "nombre": spec.nombre,
+            "ambitos": tuple(sorted(item.value for item in spec.ambitos)),
+            "logo": spec.logo if spec.id in {"dhl", "fedex", "ups"} else "",
+            "estado": estado,
+            "estado_label": estado_label,
+            "estado_corto": estado_corto,
+            "capacidades": tuple(sorted(item.value for item in capacidades)),
+        }
+
+    return tuple(publicar(spec) for spec in specs)

@@ -19,11 +19,15 @@ def imputar_pago_cliente(cliente_id, pago_id, destinos, disponible_esperado):
     with get_conn() as conn:
         with conn.cursor() as cur:
             # Serializa imputaciones y la aprobación del administrador.
-            cur.execute("""SELECT id, monto_ars, COALESCE(estado,'APROBADO') AS estado
+            cur.execute("""SELECT id, monto_ars, COALESCE(estado,'APROBADO') AS estado,
+                       fecha <= (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+                           AND NOT fecha_revision_requerida AS fecha_habilitada
                 FROM pagos WHERE id=%s AND cliente_id=%s FOR UPDATE""", (pago_id, cliente))
             pago = cur.fetchone()
             if not pago or pago["estado"] not in ("APROBADO", "PENDIENTE"):
                 raise ValueError("Este pago no está disponible para imputar.")
+            if not pago["fecha_habilitada"]:
+                raise ValueError("Un pago con fecha futura no admite imputaciones.")
             cur.execute("SELECT factura_id,envio_id,monto_ars FROM pagos_aplicaciones WHERE pago_id=%s", (pago_id,))
             previas = list(cur.fetchall())
             disponible = _decimal_monto(pago["monto_ars"]) - sum(

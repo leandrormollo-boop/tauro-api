@@ -6,7 +6,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 
 {% block content %}
 <section class="envios-page">
-<link rel="stylesheet" href="/static/css/portal-envios.css?v=4">
+<link rel="stylesheet" href="/static/css/portal-envios.css?v=5">
 <div class="envios-async-region" data-envios-region aria-busy="false">
 <div class="envios-async-status" data-envios-status role="status" aria-live="polite" hidden>
     <span class="envios-async-spinner" aria-hidden="true"></span>
@@ -16,7 +16,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Operaciones</div>
-            <h1><span aria-hidden="true">{% if tipo_filtro == 'nacional' %}🇦🇷{% elif tipo_filtro == 'internacional' %}🌐{% else %}📦{% endif %}</span> Mis envíos{% if tipo_filtro %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</h1>
+            <h1>Mis envíos{% if tipo_filtro %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</h1>
             <p>{% if tipo_filtro == 'nacional' %}Envíos dentro de Argentina.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones.{% else %}Tus envíos, del más reciente al más antiguo.{% endif %}</p>
         </div>
         <div class="envios-page-actions">
@@ -194,14 +194,11 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <thead>
                 <tr>
                     <th>Fecha</th>
-                    <th>Concepto</th>
-                    <th>Remitente</th>
-                    <th>Destinatario</th>
+                    <th>Destinatario / recorrido</th>
                     <th>Tracking</th>
-                    <th aria-label="Precio del envío">Saldo inicial / final</th>
+                    <th aria-label="Precio del envío">Precio del envío</th>
                     <th>Estado</th>
-                    <th>Guía</th>
-                    <th>Acciones</th>
+                    <th>Guía / opciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -211,20 +208,13 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     <td data-label="Fecha" class="shipment-date-cell mono">
                         {{ (s.fecha_operacion or s.created_at).strftime("%d/%m/%Y") if (s.fecha_operacion or s.created_at) else "—" }}
                     </td>
-                    <td data-label="Concepto" class="shipment-concept-cell">
-                        <strong>Flete</strong>
-                        <small>{{ (s.courier or '—')|upper }}</small>
-                        {% if s.etiqueta_cliente %}<small>{{ s.etiqueta_cliente }}</small>{% endif %}
-                    </td>
-                    <td data-label="Remitente" class="shipment-person-cell">
-                        <strong>{{ s.remitente_nombre or '—' }}</strong>
-                        <small>{{ s.remitente_ciudad or '' }}{% if s.remitente_ciudad and s.remitente_pais %}, {% endif %}{{ nombre_pais(s.remitente_pais) if s.remitente_pais else '' }}</small>
-                    </td>
-                    <td data-label="Destinatario" class="shipment-person-cell">
-                        <strong class="shipment-recipient">{{ s.dest_nombre or '—' }}</strong>
+                    <td data-label="Destinatario / recorrido" class="shipment-person-cell">
+                        <a href="/portal/envios/{{ s.id }}" class="shipment-recipient" title="Remitente: {{ s.remitente_nombre or 'Sin informar' }}">{{ s.dest_nombre or '—' }}</a>
+                        <small>{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) if s.remitente_pais else s.remitente_ciudad or 'Origen sin informar' }} →</small>
                         <small>{{ s.dest_ciudad or '' }}{% if s.dest_ciudad and s.destino_pais %}, {% endif %}{{ nombre_pais(s.destino_pais) if s.destino_pais else '' }}</small>
                     </td>
                     <td data-label="Tracking" class="shipment-tracking-cell">
+                        <small>{{ (s.courier or '—')|upper }}{% if s.etiqueta_cliente %} · {{ s.etiqueta_cliente }}{% endif %}</small>
                         {% if s.tracking %}
                             {% set turl = url_tracking(s.courier, s.tracking) %}
                             <a href="{{ turl }}" target="_blank" rel="noopener" class="shipment-tracking mono">{{ s.tracking }}</a>
@@ -232,14 +222,14 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if s.numero_guia_tauro %}<small class="mono">TAURO {{ s.numero_guia_tauro }}</small>{% endif %}
                         {% if s.estado == 'REEMPLAZADO' and s.tracking_vigente %}<small>Reemplazado por {{ s.tracking_vigente }}</small>{% elif s.reemplaza_solicitud_id and s.tracking_anterior %}<small>Corrige {{ s.tracking_anterior }}</small>{% endif %}
                     </td>
-                    <td class="mono envio-price-cell" data-label="Saldo inicial / final">
+                    <td class="mono envio-price-cell" data-label="Precio del envío">
                         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                             <strong class="shipment-no-charge">Sin cargo</strong>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
                             {% set tiene_ajuste = s.diferencia_flete_ars or s.tax_cliente_ars or s.ajuste_comercial_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}
                             {% if tiene_ajuste %}
-                            <span class="envio-price-initial"><small>Inicial · saldo cotizado</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
-                            <span class="envio-price-final"><small>Final · Total registrado · ARS · costo final</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
+                            <span class="envio-price-initial"><small>Cotizado</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
+                            <span class="envio-price-final"><small>Total registrado · ARS</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
                             <details class="envio-price-breakdown">
                             <summary>Ver desglose</summary>
                             {% if s.diferencia_flete_ars %}
@@ -253,7 +243,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                             {% endif %}
                             </details>
                             {% else %}
-                            <span class="envio-price-final"><small>Inicial / final · ARS · costo final</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
+                            <span class="envio-price-final"><small>Total registrado · ARS</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
                             {% endif %}
                         {% else %}—{% endif %}
                     </td>
@@ -262,12 +252,10 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if s.recoleccion and s.recoleccion.estado == 'AGENDADA' and s.estado_cliente_ui.codigo == 'ESPERA_RECOLECCION' %}<small class="tracking-updated">Recolección programada</small>{% endif %}
                         {% if s.seguimiento_sin_actualizaciones and not es_baja %}<small class="tracking-alert">Entrega aún no confirmada.</small>{% endif %}
                     </td>
-                    <td data-label="Guía" class="shipment-guide-cell">
+                    <td data-label="Guía / opciones" class="shipment-actions-cell">
                         {% if s.tiene_label and not es_baja %}<a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-ghost btn-sm" aria-label="{{ 'Descargar guía + invoice' if s.tiene_factura_comercial else 'Descargar guía' }}">Ver guía</a>
                         {% elif s.guia_url and not es_baja %}<a href="{{ s.guia_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Ver guía</a>
                         {% else %}<span class="shipment-empty">—</span>{% endif %}
-                    </td>
-                    <td data-label="Acciones" class="shipment-actions-cell">
                         <details class="shipment-actions">
                             <summary>Opciones <span aria-hidden="true">⌄</span></summary>
                             <div class="shipment-actions-menu">

@@ -23,6 +23,26 @@ import psycopg2.errors
 # es un fragmento estable del texto SQL; el valor, la explicación de negocio.
 _MENSAJES_TRIGGER: tuple[tuple[str, str], ...] = (
     (
+        "Pago duplicado: la referencia o el comprobante ya fue registrado",
+        "Ese pago ya fue registrado con la misma referencia o el mismo comprobante.",
+    ),
+    (
+        "Un pago futuro no puede acreditarse",
+        "La fecha debe corresponder a un pago ya realizado, no futuro.",
+    ),
+    (
+        "La fecha del pago requiere revisión administrativa explícita",
+        "La fecha del pago requiere una revisión administrativa con motivo y evidencia.",
+    ),
+    (
+        "La revisión activaría aplicaciones superiores al saldo",
+        "La fecha no puede confirmarse porque activaría imputaciones superiores al saldo del documento.",
+    ),
+    (
+        "La excepción documental requiere motivo y responsable",
+        "La excepción de pago repetido requiere un motivo y un responsable.",
+    ),
+    (
         "ya integra otra factura emitida",
         "Una de las partidas seleccionadas ya fue facturada en otro documento. "
         "Actualizá la lista y volvé a intentar.",

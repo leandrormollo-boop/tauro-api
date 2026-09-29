@@ -27,8 +27,8 @@ def test_portal_muestra_libro_operativo_y_acciones_seguras():
 
     assert "s.remitente_nombre" in html
     assert "s.dest_nombre" in html
-    assert "Inicial · saldo cotizado" in html
-    assert "Final · Total registrado" in html
+    assert "Cotizado" in html
+    assert "Total registrado" in html
     assert "s.estado_cliente_ui.label" in html
     assert "/portal/envios/{{ s.id }}/guia.pdf" in html
     assert "Editar / reemplazar" in html

@@ -445,3 +445,22 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
  .account-client .account-document-selection { padding:14px; }
  .account-client .account-selection-heading { align-items:flex-start; flex-direction:column; gap:6px; }
 }
+
+/* La consulta frecuente (movimientos) queda antes de gráficos y comprobantes. */
+.account-client .account-page-title { margin-bottom: 18px; }
+.account-client .account-balance { padding: 20px 24px; }
+.account-client .account-balance-value { font-size: clamp(27px,3vw,36px); margin: 8px 0; }
+.account-client .account-opening { margin-top: 12px; }
+.account-client .account-payment-totals { padding-top: 12px; padding-bottom: 12px; }
+.account-client .account-activity { margin-top: 24px; }
+
+.account-client .account-payment-totals { padding: 0; }
+.account-client .account-payment-totals > div { padding: 12px 20px; }
+.account-client .account-payment-totals dd { font-size: 19px; margin-top: 4px; }
+.account-client .account-due { padding: 20px 24px; }
+.account-client .account-quiet-state { padding: 14px 0 0; }
+.account-client .account-page-title .page-title-row { flex-wrap: wrap; gap: 12px; }
+.account-client .account-page-title h1 { white-space: nowrap; }
+.account-client .account-position-extra { grid-column: 1 / -1; border-top: 1px solid var(--line); }
+.account-client .account-position-extra > summary { cursor: pointer; padding: 12px 20px; font-size: 12px; color: var(--fg-2); }
+.account-client .account-position-extra .account-payment-totals { border-top: 0; }

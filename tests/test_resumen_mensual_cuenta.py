@@ -84,6 +84,8 @@ def test_resumen_mensual_separa_flete_tax_retorno_y_diferencia(monkeypatch):
     consulta, parametros = cursor.ejecuciones[-1]
     assert "tax_cliente_ars" in consulta
     assert "RETORNO" in consulta
+    assert "WHEN s.id IS NULL THEN 'OTRO'" in consulta
+    assert "COUNT(*) FILTER (WHERE categoria='FLETE') AS envios_realizados" in consulta
     assert parametros == (
         "MELCIOR", "2026-05-01", "2026-05-31", "INTERNACIONAL", "INTERNACIONAL",
         "MELCIOR", "2026-05-01", "2026-05-31", "INTERNACIONAL", "INTERNACIONAL",

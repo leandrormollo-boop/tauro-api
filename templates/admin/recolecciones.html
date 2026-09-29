@@ -5,7 +5,7 @@
 <div class="page-title">
   <div class="eyebrow">Operaciones</div>
   <h1>Recolecciones agendadas</h1>
-  <p>Retiros solicitados por los clientes, desde ayer.</p>
+  <p>Retiros pendientes, incidencias que requieren verificación e historial derivado.</p>
 </div>
 
 {% set qp = request.query_params %}
@@ -30,14 +30,25 @@
         </tr>
       </thead>
       <tbody>
+        {% set grupo = namespace(actual='') %}
         {% for r in recolecciones %}
+        {% if r.seccion_operativa != grupo.actual %}
+        {% set grupo.actual = r.seccion_operativa %}
+        <tr><th colspan="8" style="text-align:left;background:var(--surface-2);">
+          {% if grupo.actual == 'INCIDENCIAS' %}Incidencias · requieren verificación
+          {% elif grupo.actual == 'HISTORIAL' %}Historial · sin confirmación física inferida
+          {% else %}Pendientes operativos{% endif %}
+        </th></tr>
+        {% endif %}
         <tr>
           <td class="mono"><strong>{{ r.fecha.strftime('%d/%m') if r.fecha else '—' }}</strong></td>
           <td><a class="business-primary" href="/admin/clientes/{{ r.cliente_id|urlencode }}">{{ r.cliente_id }}</a>
               {% if r.cliente_nombre %}<br><small style="color:var(--fg-3);">{{ r.cliente_nombre }}</small>{% endif %}</td>
           <td>
             {% set operador=(r.courier or 'FEDEX')|upper %}{% if operador in ('DHL','FEDEX','OCA','ANDREANI','CORREO_ARGENTINO') %}<a href="/admin/operadores/{{ operador }}">{{ operador }}</a>{% else %}<strong>{{ operador }}</strong>{% endif %}<br>
-            {% if r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
+            {% if r.envio_entregado %}<span class="badge muted">Envío entregado</span>
+            {% elif r.vista_historica %}<span class="badge muted">Fecha pasada</span>
+            {% elif r.estado == 'AGENDADA' %}<span class="badge ok">Agendada</span>
             {% elif r.estado == 'AGENDANDO' %}<span class="badge warn">Confirmando</span>
             {% elif r.estado == 'CANCELANDO' %}<span class="badge warn">Cancelando</span>
             {% elif r.estado == 'VERIFICAR_COURIER' %}<span class="badge warn">Verificar courier</span>
@@ -55,7 +66,7 @@
             {% if r.error_operativo %}<br><small style="color:var(--warn);">{{ r.error_operativo }}</small>{% endif %}
           </td>
           <td>
-            {% if r.estado == 'AGENDADA' %}
+            {% if r.estado == 'AGENDADA' and not r.vista_historica %}
             <form method="POST" action="/admin/recolecciones/{{ r.id }}/cancelar"
                   data-confirm="¿Cancelar la recolección de {{ r.cliente_id }} del {{ r.fecha.strftime('%d/%m') if r.fecha else '' }}?">
               <button type="submit" class="btn btn-ghost btn-sm">Cancelar</button>
@@ -79,6 +90,8 @@
               <input type="hidden" name="resultado" value="CANCELADA">
               <button type="submit" class="btn btn-ghost btn-sm">No existe / cancelada</button>
             </form>
+            {% elif r.vista_historica %}
+            <small style="color:var(--fg-3);">Histórica. El sistema no afirma que el chofer haya retirado los paquetes.</small>
             {% else %}
             <small style="color:var(--fg-3);">Sin acción hasta recibir respuesta.</small>
             {% endif %}

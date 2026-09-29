@@ -2829,6 +2829,11 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
                             FROM pagos p
                             WHERE p.cliente_id=%s
                               AND COALESCE(p.estado, 'APROBADO')='APROBADO'
+                              AND p.fecha <= (
+                                  NOW() AT TIME ZONE
+                                      'America/Argentina/Buenos_Aires'
+                              )::date
+                              AND NOT p.fecha_revision_requerida
                         ), 0) AS deuda,
                         COALESCE((
                             SELECT SUM(s2.precio_tauro_ars)
@@ -3015,7 +3020,10 @@ def _marcar_verificacion_courier(solicitud_id: int, resultado: dict) -> None:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE solicitudes_guia
-                SET estado='VERIFICAR_COURIER', courier_message_reference=%s,
+                SET estado='VERIFICAR_COURIER',
+                    courier_message_reference=COALESCE(
+                        NULLIF(%s, ''), courier_message_reference
+                    ),
                     courier_error=%s, updated_at=NOW()
                 WHERE id=%s AND tracking IS NULL
             """, (referencia, error[:500] if error else None, solicitud_id))
@@ -3023,7 +3031,7 @@ def _marcar_verificacion_courier(solicitud_id: int, resultado: dict) -> None:
 
 
 def _persistir_referencia_courier(solicitud_id: int, referencia: str) -> bool:
-    """Guarda la referencia DHL antes de la operación irreversible."""
+    """Guarda un id interno de intento antes del POST irreversible."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -3393,24 +3401,27 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         from core.fedex_client import FedExClient
         cliente_courier = FedExClient()
 
-    referencia_previa = None
-    if courier == "DHL":
-        referencia_previa = (
-            f"tauro-dhl-ship-{solicitud_id}-{uuid.uuid4().hex[:12]}"
-        )
-        try:
-            if not _persistir_referencia_courier(solicitud_id, referencia_previa):
-                return {"ok": False, "error":
-                        "La solicitud cambió de estado antes de emitir. "
-                        "Actualizá la pantalla; no llamamos a DHL."}
-        except Exception as e:
-            print(f"[guia] no pude persistir la referencia DHL de "
-                  f"{solicitud_id}: {e}")
-            _liberar_reserva(solicitud_id)
+    # Todos los couriers cruzan la misma frontera irreversible. La referencia
+    # queda durable antes del POST aunque el proveedor no permita enviarla en
+    # su payload: así una caída no puede convertir el intento en una reserva
+    # liberable y habilitar una segunda guía. DHL además la recibe y permite
+    # buscarla; para FedEx/UPS sigue siendo una clave interna de conciliación.
+    referencia_previa = (
+        f"tauro-{courier.lower()}-ship-{solicitud_id}-{uuid.uuid4().hex[:12]}"
+    )
+    try:
+        if not _persistir_referencia_courier(solicitud_id, referencia_previa):
             return {"ok": False, "error":
-                    "No pudimos preparar la emisión segura. No llamamos a DHL "
-                    "ni generamos ningún cargo."}
-        datos_envio["message_reference"] = referencia_previa
+                    "La solicitud cambió de estado antes de emitir. "
+                    f"Actualizá la pantalla; no llamamos a {courier}."}
+    except Exception as e:
+        print(f"[guia] no pude persistir la referencia de {courier} para "
+              f"{solicitud_id}: {e}")
+        _liberar_reserva(solicitud_id)
+        return {"ok": False, "error":
+                f"No pudimos preparar la emisión segura. No llamamos a {courier} "
+                "ni generamos ningún cargo."}
+    datos_envio["message_reference"] = referencia_previa
 
     try:
         resultado = cliente_courier.create_shipment(datos_envio)

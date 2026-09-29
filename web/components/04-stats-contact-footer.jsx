@@ -149,7 +149,7 @@ function ContactCTA({ onCotizarClick }) {
             </p>
             <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
               <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-                Conectá tu tienda <ArrowRight size={16}/>
+                Solicitar integración <ArrowRight size={16}/>
               </a>
               <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
             </div>
@@ -184,7 +184,7 @@ function Footer() {
           <div>
             <h4>Servicios</h4>
             <ul>
-              <li><a href={INTEGRACIONES_MAILTO}>Conectar tienda</a></li>
+              <li><a href={INTEGRACIONES_MAILTO}>Solicitar integración</a></li>
               <li><a href="#servicios">Centralizar operación</a></li>
               <li><a href="#servicios">Cotizar envíos</a></li>
               <li><a href="/portal/login">Crear envíos</a></li>

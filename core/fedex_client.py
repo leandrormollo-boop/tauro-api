@@ -424,6 +424,13 @@ class FedExClient(CarrierBase):
 
         Retorna {encontrado, tracking, servicio, label_pdf(bytes), label_b64, error}.
         """
+        if not (self.api_key and self.secret_key and self.account_number):
+            return {
+                "encontrado": False,
+                "rechazo_confirmado": True,
+                "error": "Credenciales FedEx no configuradas.",
+            }
+
         shipper = datos.get("shipper", {}) or {}
         recipient = datos.get("recipient", {}) or {}
         bultos = datos.get("bultos") or []
@@ -546,7 +553,14 @@ class FedExClient(CarrierBase):
                     f"FedEx rechazó la emisión (HTTP {resp.status_code})."
                 )
                 print(f"[fedex] create_shipment error HTTP {resp.status_code}; código={codigo}")
-                return {"encontrado": False, "error": msg}
+                return {
+                    "encontrado": False,
+                    "error": msg,
+                    # Un 5xx puede ocurrir después de que el proveedor haya
+                    # aceptado el POST. 408/409 no prueban ausencia de emisión.
+                    "incierto": resp.status_code not in {400, 401, 403, 404, 422, 429},
+                    "rechazo_confirmado": resp.status_code in {400, 401, 403, 404, 422, 429},
+                }
 
             transaction = (data.get("output", {}).get("transactionShipments") or [{}])[0]
             tracking = transaction.get("masterTrackingNumber", "")
@@ -564,7 +578,11 @@ class FedExClient(CarrierBase):
                         break
 
             if not tracking:
-                return {"encontrado": False, "error": "FedEx no devolvió número de guía"}
+                return {
+                    "encontrado": False,
+                    "incierto": True,
+                    "error": "FedEx respondió sin número de guía",
+                }
 
             label_pdf = self._merge_pdfs(labels_pdf)
             return {
@@ -578,7 +596,7 @@ class FedExClient(CarrierBase):
 
         except Exception as e:
             print(f"[fedex] Excepción en create_shipment: {e}")
-            return {"encontrado": False, "error": str(e)}
+            return {"encontrado": False, "incierto": True, "error": str(e)}
 
     @staticmethod
     def _merge_pdfs(pdfs: list[bytes]) -> bytes | None:

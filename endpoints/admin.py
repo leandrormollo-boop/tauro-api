@@ -35,6 +35,7 @@ from servicios.cuenta_corriente import (
     get_envios_cliente, get_pagos,
     get_facturado_real, total_pagado, saldo,
     get_resumen_clientes_bulk, listar_destinos_pago,
+    listar_anomalias_pagos_documentales, confirmar_fecha_pago,
 )
 from servicios.facturacion_clientes import (
     FacturacionClienteError,
@@ -729,6 +730,15 @@ def admin_home(request: Request, admin_token: Optional[str] = Cookie(None)):
     )
 
 
+@router.get("/automatizaciones", response_class=HTMLResponse)
+def admin_automatizaciones(request: Request, admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.control_automatizaciones import resumen
+    return templates.TemplateResponse(request=request, name="admin/automatizaciones.html",
+                                      context={"seccion": "home", "automatizaciones": resumen()})
+
+
 @router.get("/seguridad", response_class=HTMLResponse)
 def admin_seguridad(request: Request, admin_token: Optional[str] = Cookie(None)):
     """
@@ -1373,7 +1383,7 @@ def admin_bandeja(request: Request, admin_token: Optional[str] = Cookie(None)):
 
 @router.get("/backup.json")
 def admin_backup(admin_token: Optional[str] = Cookie(None)):
-    """Descarga un snapshot de todos los datos del negocio."""
+    """Descarga una exportación parcial para consulta; no es restaurable."""
     if not _is_auth(admin_token):
         return _redirect_login()
     from datetime import datetime as _dt
@@ -1381,10 +1391,10 @@ def admin_backup(admin_token: Optional[str] = Cookie(None)):
     try:
         contenido = generar_backup_json()
     except Exception as e:
-        print(f"[admin] backup falló: {e}")
-        return JSONResponse({"ok": False, "error": "No se pudo generar el backup."},
+        print(f"[admin] exportación falló: {type(e).__name__}")
+        return JSONResponse({"ok": False, "error": "No se pudo completar la exportación. No se descargó ningún archivo."},
                             status_code=500)
-    nombre = f"tauro-backup-{_dt.now().strftime('%Y%m%d-%H%M')}.json"
+    nombre = f"tauro-exportacion-parcial-{_dt.now().strftime('%Y%m%d-%H%M')}.json"
     return Response(
         content=contenido,
         media_type="application/json",
@@ -1871,9 +1881,11 @@ def admin_cliente_detail(
                 """
                 SELECT
                     p.id,p.fecha,p.monto_ars,p.metodo,p.referencia,p.estado,p.nota,
+                    p.fecha_revision_requerida,
                     (p.comprobante IS NOT NULL) AS tiene_comprobante,
                     COALESCE(SUM(pa.monto_ars) FILTER (
                         WHERE pa.ambito = 'NACIONAL'
+                          AND NOT p.fecha_revision_requerida
                           AND pa.estado = CASE
                               WHEN p.estado = 'PENDIENTE' THEN 'SOLICITADA'
                               ELSE 'APLICADA'
@@ -1881,6 +1893,7 @@ def admin_cliente_detail(
                     ), 0) AS monto_nacional,
                     COALESCE(SUM(pa.monto_ars) FILTER (
                         WHERE pa.ambito = 'INTERNACIONAL'
+                          AND NOT p.fecha_revision_requerida
                           AND pa.estado = CASE
                               WHEN p.estado = 'PENDIENTE' THEN 'SOLICITADA'
                               ELSE 'APLICADA'
@@ -3521,10 +3534,32 @@ def admin_tracking_fedex_reset(admin_token: Optional[str] = Cookie(None)):
 
 # ── Pagos ────────────────────────────────────────────────────
 
+def _anomalias_pagos_admin() -> list[dict] | None:
+    """La carga de pagos sigue disponible si falla el reporte de sólo lectura."""
+    try:
+        alertas = listar_anomalias_pagos_documentales()
+        for alerta in alertas:
+            if alerta.get("tipo") == "PAGO_FECHA_PENDIENTE_REVISION":
+                pago_id = int(alerta["pagos_ids"][0])
+                alerta["csrf_fecha"] = _csrf_dhl(f"pago-fecha:{pago_id}")
+        return alertas
+    except Exception as exc:
+        print(f"[admin] no pude listar anomalías documentales de pagos: {type(exc).__name__}")
+        return None
+
+
+def _destinos_pago_admin(cliente: str) -> list[dict]:
+    try:
+        return listar_destinos_pago(cliente) if cliente else []
+    except Exception as exc:
+        print(f"[admin] no pude listar destinos del pago: {type(exc).__name__}")
+        return []
+
 @router.get("/pagos/nuevo", response_class=HTMLResponse)
 def admin_pago_form(
     request: Request,
     cliente: Optional[str] = None,
+    error: str = "",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -3533,12 +3568,7 @@ def admin_pago_form(
     clientes = _get_clientes_lista()
     today = datetime.now().strftime("%Y-%m-%d")
     preselect_cliente = (cliente or "").upper()
-    try:
-        destinos_pago = (
-            listar_destinos_pago(preselect_cliente) if preselect_cliente else []
-        )
-    except RuntimeError:
-        destinos_pago = []
+    destinos_pago = _destinos_pago_admin(preselect_cliente)
     return templates.TemplateResponse(
         request=request, name="admin/pago_form.html",
         context={
@@ -3547,6 +3577,8 @@ def admin_pago_form(
             "today": today,
             "preselect_cliente": preselect_cliente,
             "destinos_pago": destinos_pago,
+            "anomalias_pago": _anomalias_pagos_admin(),
+            "flash_error": str(error or "")[:500],
             "idempotency_key": _nueva_idempotency_key(),
         },
     )
@@ -3567,6 +3599,8 @@ async def admin_pago_nuevo(
     monto_nacional: str = Form(""),
     monto_internacional: str = Form(""),
     destinos: Optional[list[str]] = Form(None),
+    autorizar_duplicado: str = Form(""),
+    duplicado_motivo: str = Form(""),
     comprobante: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
@@ -3588,6 +3622,17 @@ async def admin_pago_nuevo(
             destinos_documentales = None
         from servicios.cuenta_corriente import leer_comprobante_con_tope
         contenido = await leer_comprobante_con_tope(comprobante)
+        excepcion_duplicado = (
+            isinstance(autorizar_duplicado, str)
+            and autorizar_duplicado.strip().lower() in {"1", "true", "on", "si", "sí"}
+        )
+        motivo_duplicado = (
+            duplicado_motivo.strip() if isinstance(duplicado_motivo, str) else ""
+        )
+        if excepcion_duplicado and not 10 <= len(motivo_duplicado) <= 1000:
+            raise ValueError(
+                "La excepción por transferencia repetida requiere un motivo de 10 a 1000 caracteres."
+            )
         registrar_pago(
             cliente_id=cliente_id.upper(),
             fecha=fecha,
@@ -3605,6 +3650,7 @@ async def admin_pago_nuevo(
             comprobante=contenido or None,
             comprobante_nombre=(comprobante.filename if comprobante else "") or "",
             idempotency_key=idempotency_key_normalizada,
+            duplicado_autorizado_motivo=(motivo_duplicado if excepcion_duplicado else ""),
         )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id.upper()}", status_code=303)
     except ValueError as e:
@@ -3617,7 +3663,8 @@ async def admin_pago_nuevo(
                 "clientes": clientes,
                 "today": today,
                 "preselect_cliente": cliente_id.upper(),
-                "destinos_pago": [],
+                "destinos_pago": _destinos_pago_admin(cliente_id.upper()),
+                "anomalias_pago": _anomalias_pagos_admin(),
                 "flash_error": str(e),
                 "idempotency_key": _idempotency_key_para_reintento(idempotency_key),
                 "form_data": {
@@ -3629,9 +3676,59 @@ async def admin_pago_nuevo(
                     "imputacion": str(imputacion or "").strip().upper(),
                     "monto_nacional": monto_nacional,
                     "monto_internacional": monto_internacional,
+                    "autorizar_duplicado": bool(
+                        isinstance(autorizar_duplicado, str)
+                        and autorizar_duplicado.strip().lower()
+                        in {"1", "true", "on", "si", "sí"}
+                    ),
+                    "duplicado_motivo": (
+                        duplicado_motivo if isinstance(duplicado_motivo, str) else ""
+                    ),
                 },
             },
         )
+
+
+@router.post("/pagos/{pago_id}/confirmar-fecha")
+def admin_confirmar_fecha_pago(
+    pago_id: int,
+    csrf_fecha: str = Form(""),
+    confirmacion: str = Form(""),
+    motivo: str = Form(""),
+    evidencia_ref: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf_fecha, f"pago-fecha:{pago_id}"):
+        return RedirectResponse(
+            url="/admin/pagos/nuevo?error=" + quote(
+                "La confirmación venció. Recargá y volvé a revisar el pago."
+            ),
+            status_code=303,
+        )
+    if confirmacion != "1":
+        return RedirectResponse(
+            url="/admin/pagos/nuevo?error=" + quote(
+                "Confirmá que revisaste la fecha contra la evidencia del pago."
+            ),
+            status_code=303,
+        )
+    try:
+        if not confirmar_fecha_pago(
+            pago_id,
+            actor_tipo="admin",
+            actor_ref="admin",
+            motivo=motivo,
+            evidencia_ref=evidencia_ref,
+        ):
+            raise ValueError("El pago ya no requiere revisión de fecha.")
+    except ValueError as exc:
+        return RedirectResponse(
+            url="/admin/pagos/nuevo?error=" + quote(str(exc)),
+            status_code=303,
+        )
+    return RedirectResponse(url="/admin/pagos/nuevo", status_code=303)
 
 
 # ── Recolecciones ───────────────────────────────────────────

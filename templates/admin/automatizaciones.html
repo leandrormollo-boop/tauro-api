@@ -1,0 +1,13 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Automatizaciones{% endblock %}
+{% macro fecha(v) %}{{ v.strftime('%d/%m/%Y %H:%M UTC') if v else 'Sin registro' }}{% endmacro %}
+{% set etiquetas={'OK':'Completada','ERROR':'Revisar error','PARCIAL':'Ejecución parcial','OMITIDA':'Omitida / sin conexión','SIN_CONFIRMAR':'Resultado sin confirmar','EN_CURSO':'En ejecución','ATRASADA':'Sin ejecución reciente','SIN_EVIDENCIA':'Todavía sin registro'} %}
+{% block content %}
+<div class="page-title"><h1>Automatizaciones</h1><p>Últimas ejecuciones registradas · Operaciones de TAURO</p><a href="/admin/home" class="btn btn-ghost">Volver al control del negocio</a></div>
+{% if not automatizaciones.disponible %}<div class="msg error" role="alert">No se pudo consultar el registro. El estado de las tareas no está confirmado.</div>{% else %}
+<div class="card"><div class="table-wrap"><table><thead><tr><th>Tarea</th><th>Estado</th><th>Último intento</th><th>Último éxito</th><th>Control</th></tr></thead><tbody>
+{% for t in automatizaciones['items'] %}<tr><td>{{ t.nombre }}</td><td><span class="badge {{ 'warn' if t.atencion else 'ok' }}">{{ etiquetas[t.estado] }}</span></td><td>{{ fecha(t.ultima_ejecucion) }}</td><td>{{ fecha(t.ultimo_exito) }}</td><td><a href="{{ t.url }}">Revisar operación ↗</a></td></tr>{% endfor %}
+</tbody></table></div><p class="sub">Un intento omitido o con errores no cuenta como éxito. Revisá la operación asociada antes de reintentar.</p></div>
+<details class="card"><summary>Historial reciente</summary><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Tarea</th><th>Resultado</th></tr></thead><tbody>{% for e in automatizaciones.historial %}<tr><td>{{ fecha(e.fecha) }}</td><td>{{ e.clave }}</td><td>{{ etiquetas[e.estado] }}</td></tr>{% else %}<tr><td colspan="3">Todavía no hay ejecuciones registradas.</td></tr>{% endfor %}</tbody></table></div></details>
+{% endif %}
+{% endblock %}

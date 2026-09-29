@@ -122,7 +122,7 @@ def test_alerta_se_persiste_sin_tocar_la_cuenta_corriente(monkeypatch):
     )
 
     resultado = monitoreo.actualizar_tracking_reemplazado_dhl(
-        3, cliente_dhl=DHL(), confirmar_sin_movimiento=True
+        3, cliente_dhl=DHL(), control_programado=True
     )
 
     assert resultado["movimiento"] is True
@@ -174,7 +174,7 @@ def test_no_consulta_antes_de_los_siete_dias(monkeypatch):
     assert resultado["motivo"] == "control_programado"
 
 
-def test_control_a_siete_dias_confirma_cancelacion_una_sola_vez(monkeypatch):
+def test_404_programado_deja_vigilancia_y_registra_observacion(monkeypatch):
     class Cursor:
         def __init__(self):
             self.actual = None
@@ -198,7 +198,7 @@ def test_control_a_siete_dias_confirma_cancelacion_una_sola_vez(monkeypatch):
                     "solicitud_nueva_id": 8,
                     "cliente_id": "MELCIOR",
                 }
-            elif "SET riesgo_estado='CERRADA'" in compacto:
+            elif "SET riesgo_estado='VIGILAR'" in compacto:
                 self.actual = {"id": 3}
             else:
                 self.actual = None
@@ -221,16 +221,26 @@ def test_control_a_siete_dias_confirma_cancelacion_una_sola_vez(monkeypatch):
             return {"encontrado": False, "error": "DHL 404", "http_status": 404}
 
     monkeypatch.setattr(monitoreo, "get_conn", conexion)
+    auditoria = []
+    monkeypatch.setattr(
+        monitoreo,
+        "registrar_evento_con_cursor",
+        lambda _cur, **datos: auditoria.append(datos),
+    )
     resultado = monitoreo.actualizar_tracking_reemplazado_dhl(
         3,
         cliente_dhl=DHL(),
-        confirmar_sin_movimiento=True,
+        control_programado=True,
     )
 
-    assert resultado["cancelacion_confirmada"] is True
-    cierre = next(q for q in cursor.sql if "SET riesgo_estado='CERRADA'" in q)
-    assert "control de 7 días" in cierre
+    assert resultado["sin_movimientos_observados"] is True
+    observacion = next(q for q in cursor.sql if "SET riesgo_estado='VIGILAR'" in q)
+    assert "riesgo_resuelto_at=NULL" in observacion
+    assert not any("SET riesgo_estado='CERRADA'" in q for q in cursor.sql)
     assert not any("UPDATE envios" in q for q in cursor.sql)
+    assert auditoria[0]["event"] == (
+        "dhl.guia_descartada_sin_movimientos_observados"
+    )
 
 
 def test_contrato_de_schema_scheduler_y_admin():
@@ -255,12 +265,14 @@ def test_contrato_de_schema_scheduler_y_admin():
     ).read_text(encoding="utf-8")
     assert "INTERVAL '7 days'" in servicio
     assert "r.riesgo_estado='VIGILAR'" in servicio
+    assert "INTERVAL '30 days'" in servicio
     assert '@router.get("/guias-reemplazadas"' in admin
     assert "Guías descartadas" in menu
     assert "Guías reemplazadas y canceladas" in pantalla
     assert "no reactiva el cargo viejo" in pantalla
-    assert "control único a 7 días" in pantalla
-    assert "único control en la fecha programada" in pantalla
+    assert "Sin movimientos observados" in pantalla
+    assert "semanal durante los primeros 30 días" in pantalla
+    assert "no prueban que DHL anuló la etiqueta" in pantalla
     assert "Descargar guía final" in pantalla
 
 

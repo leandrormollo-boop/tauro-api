@@ -114,6 +114,21 @@ def test_costos_desconocidos_cancelados_pruebas_y_saldos_separados(conciliacion_
     assert antiguo["cuentas_resumen"]==panel["cuentas_resumen"]
 
 
+def test_cuenta_gerencial_no_acredita_pago_futuro_legacy(conciliacion_db):
+    db=conciliacion_db
+    _crear(db,"FUTURO_CUENTA",precio="1000")
+    with db() as conn,conn.cursor() as cur:
+        cur.execute("ALTER TABLE pagos DISABLE TRIGGER trg_validar_identidad_pago_cliente")
+        cur.execute("""INSERT INTO pagos(cliente_id,fecha,monto_ars,metodo,estado)
+            VALUES('CLIENTE_FUTURO_CUENTA',CURRENT_DATE+1,1000,'TRANSFERENCIA','APROBADO')""")
+        cur.execute("ALTER TABLE pagos ENABLE TRIGGER trg_validar_identidad_pago_cliente")
+
+    cuenta=next(c for c in _leer(db)["cuentas"]
+                if c["cliente_id"]=='CLIENTE_FUTURO_CUENTA')
+    assert cuenta["pagos"]==D("0")
+    assert cuenta["saldo"]==D("1000")
+
+
 def test_vigilancia_paginada_no_trunca_totales_ni_incluye_finalizados(conciliacion_db):
     db=conciliacion_db
     with db() as conn,conn.cursor() as cur:

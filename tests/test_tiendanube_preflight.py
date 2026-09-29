@@ -15,6 +15,33 @@ def test_preflight_bloquea_release_sin_credenciales_ni_adapter(tmp_path):
     assert "nube_sdk_bundle" in result["blockers"]
 
 
+def test_portal_solo_publica_instalacion_con_preflight_completo(monkeypatch):
+    from servicios import tiendanube_app, tiendanube_preflight
+
+    monkeypatch.setenv("TIENDANUBE_CLIENT_ID", "id")
+    monkeypatch.setenv("TIENDANUBE_CLIENT_SECRET", "secret")
+    monkeypatch.setattr(
+        tiendanube_preflight,
+        "evaluate_preflight",
+        lambda: {"ready_for_release": False, "blockers": ["rates_uat"]},
+    )
+    estado = tiendanube_app.estado_publicacion()
+    assert estado == {
+        "configurada": True,
+        "publicable": False,
+        "piloto": True,
+        "blockers": ("rates_uat",),
+    }
+    assert tiendanube_app.app_publicable() is False
+
+    monkeypatch.setattr(
+        tiendanube_preflight,
+        "evaluate_preflight",
+        lambda: {"ready_for_release": True, "blockers": []},
+    )
+    assert tiendanube_app.app_publicable() is True
+
+
 def test_preflight_no_expone_valores_de_secretos(monkeypatch, tmp_path):
     bundle = tmp_path / "tiendanube_nube_app" / "dist" / "main.min.js"
     bundle.parent.mkdir(parents=True)

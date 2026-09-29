@@ -269,6 +269,7 @@ class _CursorResolver:
             self.one = {
                 "id": params[0], "cliente_id": "TEST",
                 "monto_ars": self.monto, "estado": self.estado,
+                "fecha": date.today(), "fecha_revision_requerida": False,
             }
         elif "UPDATE pagos SET estado = 'APROBADO'" in compacto:
             self.estado = "APROBADO"
