@@ -55,7 +55,7 @@ jobs:
         run: python scripts/migrate_database.py
 
       - name: Suite Python
-        run: pytest -q --junitxml=docs/evidence/pr28-hardening-junit.xml
+        run: python -m pytest -q --junitxml=docs/evidence/pr28-hardening-junit.xml
 
       - name: Node 22
         uses: actions/setup-node@v4
@@ -72,7 +72,7 @@ jobs:
           npm ci
           npm test
           npm run typecheck
-          npm run build
+          npm run build -- --skip-dependencies-installation
 
       - name: Tiendanube — test, typecheck y build
         working-directory: tiendanube_nube_app
@@ -81,6 +81,7 @@ jobs:
           npm test
           npm run typecheck
           npm run build
+          git diff --exit-code -- dist/main.min.js
 
       - name: Publicar JUnit
         if: always()
