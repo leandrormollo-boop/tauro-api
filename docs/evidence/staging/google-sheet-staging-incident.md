@@ -29,9 +29,10 @@ observado quedó limitado a la pestaña espejo.
 - Staging fue reiniciado mediante deployment
   `41b4943d-bb43-4aad-93fe-8affbdde5e99`, estado `SUCCESS`.
 - El código ahora bloquea el job en `ENV=STAGING` incluso si alguien vuelve a
-  copiar credenciales. Habilitarlo exige el opt-in separado
-  `TAURO_STAGING_SHEET_SYNC_ENABLED=true` y debe usarse únicamente con una
-  credencial y un Sheet exclusivos de staging.
+  copiar credenciales. El scheduler global no tiene bypass. Una ejecución
+  one-shot autorizada exige además el opt-in separado
+  `TAURO_STAGING_SHEET_SYNC_ENABLED=true`, una credencial y un Sheet exclusivos
+  de staging.
 - Se agregaron pruebas automatizadas para el comportamiento fail-closed y el
   opt-in explícito.
 
@@ -41,4 +42,3 @@ Restaurado y contenido. La pestaña quedó nuevamente con 622 envíos según el
 log de producción, y el proceso activo de staging quedó sin acceso a Google
 Sheets. El incidente se conserva como riesgo nuevo del release y no se
 presenta como una validación sin impacto sobre producción.
-

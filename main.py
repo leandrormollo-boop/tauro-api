@@ -40,6 +40,7 @@ from servicios.numeros_humanos import (
     parse_configuracion_numerica,
     parse_float_formulario,
 )
+from servicios.runtime_jobs import automatic_background_jobs_enabled
 
 
 def _decimal_json(valor):
@@ -1616,6 +1617,7 @@ CRON_HORA = int(os.getenv("CRON_HORA", 6))
 from servicios.control_automatizaciones import observar as observar_tarea
 
 scheduler = BackgroundScheduler(timezone="America/Argentina/Buenos_Aires")
+_AUTOMATIC_BACKGROUND_JOBS_ENABLED = automatic_background_jobs_enabled()
 scheduler.add_job(
     job_actualizar_precios_fedex,
     trigger="cron",
@@ -2035,8 +2037,6 @@ if _crm_agents_on():
 else:
     print("[scheduler] Agentes comerciales APAGADOS (flag, key o módulo faltante)")
 
-scheduler.start()
-
 
 def _tarifas_al_arrancar():
     """
@@ -2066,27 +2066,34 @@ def _tarifas_al_arrancar():
 # En un hilo aparte: el arranque no puede esperar ~66 cotizaciones, y
 # Railway mata el deploy si el healthcheck no responde a tiempo.
 import threading
-threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
-# Ejecuta el primer control sin esperar al próximo horario de cron. El filtro
-# por fecha de Argentina y el advisory lock mantienen, aun con reinicios o
-# varios workers, una consulta diaria normal y una por cada media jornada
-# argentina para las guías en vigilancia.
-threading.Thread(
-    target=actualizar_trackings_diarios_seguro,
-    daemon=True,
-).start()
+if _AUTOMATIC_BACKGROUND_JOBS_ENABLED:
+    scheduler.start()
+    threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
+    # Ejecuta el primer control sin esperar al próximo horario de cron. El
+    # filtro por fecha de Argentina y el advisory lock mantienen, aun con
+    # reinicios o varios workers, una consulta diaria normal y una por cada
+    # media jornada argentina para las guías en vigilancia.
+    threading.Thread(
+        target=actualizar_trackings_diarios_seguro,
+        daemon=True,
+    ).start()
 
-print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
-print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
-print(
-    "[scheduler] Rastreo DHL diario: "
-    f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
-)
-print("[scheduler] Segunda ronda DHL en vigilancia: "
-      f"{(_DHL_TRACKING_HORA + 12) % 24:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)")
-print(
-    "[scheduler] Facturas DHL por Gmail: lunes y viernes "
-    f"{_DHL_GMAIL_HORA:02d}:{_DHL_GMAIL_MINUTO:02d} (Argentina; si está conectado)"
-)
-print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
-print(f"[scheduler] Centinela del checkout: cada 15 min")
+    print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
+    print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
+    print(
+        "[scheduler] Rastreo DHL diario: "
+        f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
+    )
+    print("[scheduler] Segunda ronda DHL en vigilancia: "
+          f"{(_DHL_TRACKING_HORA + 12) % 24:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)")
+    print(
+        "[scheduler] Facturas DHL por Gmail: lunes y viernes "
+        f"{_DHL_GMAIL_HORA:02d}:{_DHL_GMAIL_MINUTO:02d} (Argentina; si está conectado)"
+    )
+    print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
+    print(f"[scheduler] Centinela del checkout: cada 15 min")
+else:
+    print(
+        "[scheduler] Automatizaciones y tareas de arranque APAGADAS "
+        "por ENV=STAGING"
+    )

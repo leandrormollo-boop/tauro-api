@@ -8,12 +8,18 @@ tiendas aunque el worker esté encendido.
 
 ## Aislamiento de staging
 
+- `ENV=STAGING` mantiene apagados el scheduler completo y los hilos automáticos
+  de arranque de tarifas y tracking DHL. No existe un override global. Si una
+  UAT necesita ejecutar un job, se invoca de forma one-shot y acotada, con
+  datos y credenciales exclusivos de staging; no se inicia el runtime
+  automático completo.
 - `OCA_ENVIRONMENT=qa`; ninguna credencial o endpoint productivo del carrier.
 - `GOOGLE_CREDENTIALS_JSON` debe quedar ausente. Aunque alguien la copiara por
-  error, `ENV=STAGING` mantiene apagado el espejo de Sheets salvo un opt-in
-  separado con `TAURO_STAGING_SHEET_SYNC_ENABLED=true`.
-- Ese opt-in permanece `false` durante las pruebas e-commerce. Antes de usarlo
-  se exige una credencial y un `TAURO_SHEET_ID` exclusivos de staging.
+  error, `ENV=STAGING` mantiene apagado el scheduler del espejo de Sheets.
+- `TAURO_STAGING_SHEET_SYNC_ENABLED` permanece `false` durante las pruebas
+  e-commerce. Es una segunda condición sólo para una ejecución one-shot
+  autorizada: no reactiva el scheduler. Antes de usarla se exige una credencial
+  y un `TAURO_SHEET_ID` exclusivos de staging.
 - El incidente que originó este control y su restauración están documentados
   en `docs/evidence/staging/google-sheet-staging-incident.md`.
 
