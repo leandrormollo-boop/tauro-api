@@ -268,10 +268,11 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     assert "A favor" in html
 
 
-def test_informar_pago_esta_antes_del_historial_y_es_compacto():
+def test_informar_pago_esta_anclado_desde_cabecera_y_despues_del_historial():
     html = _template("cuenta.html")
     assert 'class="card account-payment-card"' in html
-    assert html.index('id="informar-pago"') < html.index('{% include "portal/cuenta_movimientos.html" %}')
+    assert 'href="#informar-pago"' in html
+    assert html.index('{% include "portal/cuenta_movimientos.html" %}') < html.index('id="informar-pago"')
 
 
 def test_alta_y_edicion_de_clientes_abren_un_dialogo_sin_bajar_al_formulario():
@@ -289,11 +290,11 @@ def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
     detalle = _template("envio_detalle.html")
     assert "Monto activo del período" in html
     for encabezado in (
-        "Fecha", "Concepto", "Remitente", "Destinatario", "Tracking",
-        "Saldo inicial / final", "Estado", "Guía", "Acciones",
+        "Fecha", "Destinatario / recorrido", "Tracking",
+        "Precio del envío", "Estado", "Guía / opciones",
     ):
         assert f">{encabezado}<" in html
-    assert "ARS · costo final" in html
+    assert "Total registrado · ARS" in html
     assert "Ver desglose" in html
     assert "Precio inicial aceptado" in detalle
     assert "Diferencia" in detalle

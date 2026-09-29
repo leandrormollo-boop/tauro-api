@@ -715,6 +715,7 @@ def test_callback_rechaza_state_invalido_antes_del_canje(
     from servicios import tiendanube_app
 
     monkeypatch.setattr(tiendanube_app, "app_configurada", lambda: True)
+    monkeypatch.setattr(tiendanube_app, "app_publicable", lambda: True)
     monkeypatch.setattr(
         tiendanube_app,
         "canjear_token",
@@ -736,6 +737,7 @@ def test_callback_valida_state_antes_del_canje_y_vincula_owner(monkeypatch):
     monkeypatch.setenv("TIENDANUBE_CLIENT_SECRET", "secret-app")
     monkeypatch.setenv("TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED", "true")
     monkeypatch.setattr(tiendanube_app, "app_configurada", lambda: True)
+    monkeypatch.setattr(tiendanube_app, "app_publicable", lambda: True)
     orden = []
     monkeypatch.setattr(
         tiendanube_app,
