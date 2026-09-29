@@ -9,5 +9,8 @@
     "typecheck": "node --check tests/app-config.test.mjs",
     "validate:config": "shopify app config validate --json"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@shopify/cli": "4.8.2"
+  }
 }
