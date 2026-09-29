@@ -1,7 +1,10 @@
 {% extends "base.html" %}
+{% from 'portal/_ubicacion_cotizada.html' import confirmar_ubicacion %}
 {% block title %}{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío') }}{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
+<link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
+<script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>
 {% endblock %}
 
 {% block content %}
@@ -182,7 +185,7 @@
                 </summary>
                 <div class="remitente-editor">
             {% if remitente_por_completar|default(false) %}
-                <p class="msg warn" role="status">La ruta empieza en {{ nombre_pais(form.rem_pais) }}. Elegí un remitente de ese país o completá su dirección. Tu domicilio habitual no se copió porque pertenece a otro país.</p>
+                <p class="msg warn" role="status">Completá el domicilio de origen o elegí un remitente de esa ubicación. Tu domicilio habitual no coincide con la ruta cotizada.</p>
             {% endif %}
             {# Empresa Y contacto separados (guía HAILU): los couriers piden
                companyName ("Yiwu Hailu Garment") y personName ("JEFF JANG"). #}
@@ -246,6 +249,7 @@
             </div>
                 </div>
             </details>
+            {{ confirmar_ubicacion(form, 'origen', 'rem_pais rem_estado rem_ciudad rem_zip rem_direccion remitente_id') }}
         </div>
 
         <div class="form-section shipment-step shipment-step-recipient">
@@ -336,6 +340,7 @@
                 </div>
             </div>
 
+            {{ confirmar_ubicacion(form, 'destino', 'destino_pais dest_estado dest_ciudad dest_zip dest_direccion destinatario_id') }}
             <div class="guardar-dest">
             <label class="check-row">
                 <input type="checkbox" name="guardar_destinatario" value="1" {% if form.guardar_destinatario %}checked{% endif %}>

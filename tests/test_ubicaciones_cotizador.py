@@ -54,24 +54,27 @@ def test_api_autenticada_y_limitada(web, monkeypatch):
     assert web.get('/portal/cotizar/ubicaciones?pais=AR&q=CABA').status_code == 429
 
 
-def test_referencia_nacional_no_se_transfiere_como_domicilio(web, monkeypatch):
+def test_referencia_nacional_se_conserva_para_confirmar_domicilio(web, monkeypatch):
     configurar(monkeypatch)
     r = web.post('/portal/cotizar', data={**datos(), 'ambito':'nacional', 'origen_referencia':'1'})
     from html import unescape
     import re
     href = re.search(r'href="(/portal/oca/nuevo\?[^\"]+)"', r.text).group(1)
     params = parse_qs(urlparse(unescape(href)).query)
-    assert 'origen_cp' not in params and 'origen_localidad' not in params
+    assert params['origen_cp'] == ['1900']
+    assert params['origen_localidad'] == ['La Plata']
+    assert params['origen_referencia'] == ['1']
     assert params['destino_cp'] == ['5000']
     assert params['peso_kg'] == ['5.5']
 
 
-def test_referencia_internacional_no_se_transfiere_como_domicilio():
+def test_referencia_internacional_se_conserva_para_confirmar_domicilio():
     html = render_quote(form={'origen_pais':'AR','destino_pais':'US','origen_ciudad':'Buenos Aires',
        'origen_cp_internacional':'1000','origen_referencia':'1', 'destino_ciudad_internacional':'Miami',
        'destino_cp_internacional':'33101','valor_declarado_usd':'100','bultos':[{}]},
        opciones=[{'carrier_id':'dhl','carrier_nombre':'DHL','servicio':'Express','precio_final_ars':20000}])
-    assert 'origen_ciudad=&amp;origen_cp=&amp;' in html
+    assert 'origen_ciudad=Buenos%20Aires&amp;origen_cp=1000&amp;' in html
+    assert 'origen_referencia=1&amp;' in html
     assert 'destino_ciudad=Miami&amp;destino_cp=33101' in html
 
 

@@ -31,14 +31,16 @@ def cotizar_referencia_nacional(cliente: str, origen_referencia=False, destino_r
     prefill = {k: datos[k] for k in ('origen_provincia', 'origen_localidad',
                'destino_provincia', 'destino_localidad')}
     prefill.update(origen_provincia=normal['origen']['provincia_codigo'],
-                   destino_provincia=normal['destino']['provincia_codigo'], origen_cp=payload['origin']['cp'], destino_cp=payload['destination']['cp'],
+                   destino_provincia=normal['destino']['provincia_codigo'],
+                   origen_cp=datos['origen_cp'].strip(), destino_cp=datos['destino_cp'].strip(),
                    cantidad_bultos=b['cantidad'], peso_kg=b['peso_unitario_kg'],
                    largo_cm=b['largo_cm'], ancho_cm=b['ancho_cm'], alto_cm=b['alto_cm'],
                    valor_declarado_ars=payload['declared_value'])
     for side, reference in [('origen', origen_referencia), ('destino', destino_referencia)]:
         if reference:
-            prefill.pop(side + '_localidad', None)
-            prefill.pop(side + '_cp', None)
+            # Preservar la ubicación (incluido CPA completo) como referencia:
+            # el formulario pide confirmar el domicilio antes de recotizar.
+            prefill[side + '_referencia'] = '1'
     for spec in carriers_for(Ambito.NACIONAL):
         if spec.id not in habilitados:
             continue

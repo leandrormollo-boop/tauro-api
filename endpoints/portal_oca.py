@@ -40,7 +40,8 @@ def nuevo(request: Request, cliente: str = Depends(cliente_actual)):
         form = {key: request.query_params[key][:100] for key in (
             "origen_provincia", "origen_localidad", "origen_cp", "destino_provincia",
             "destino_localidad", "destino_cp", "cantidad_bultos", "peso_kg",
-            "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_ars"
+            "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_ars",
+            "origen_referencia", "destino_referencia"
         ) if key in request.query_params}
         error = None
         from servicios.direcciones import obtener_direccion
@@ -56,6 +57,7 @@ def nuevo(request: Request, cliente: str = Depends(cliente_actual)):
                 continue
             form.update({prefix + "_" + key: value for key, value in contact["fields"].items()})
             form[prefix + "_agenda_id"] = contact["id"]
+            form.pop(prefix + "_referencia", None)
         return pantalla(request, cliente, disponible=True, asegurada=config.insured_operation,
                         form=form, error=error)
     except Exception:
