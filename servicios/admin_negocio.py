@@ -13,11 +13,12 @@ PROVEEDORES = {'OCA': 'OCA', 'ANDREANI': 'Andreani',
                'CORREO_ARGENTINO': 'Correo Argentino', 'DHL': 'DHL', 'FEDEX': 'FedEx'}
 CERO = Decimal('0')
 PAGE_SIZE = 25
-_BASE = """FROM solicitudes_guia s JOIN clientes c ON c.cliente_id=s.cliente_id
- WHERE NOT c.test AND NOT s.test
+_BASE = """FROM solicitudes_guia s LEFT JOIN clientes c ON c.cliente_id=s.cliente_id
+ WHERE (s.cliente_id IS NULL OR NOT c.test) AND NOT s.test
  AND (NULLIF(BTRIM(s.tracking),'') IS NOT NULL OR s.guia_generada_at IS NOT NULL)"""
 _FILTROS = {
-    'vigentes': "s.estado NOT IN ('CANCELADO','REEMPLAZADO')",
+    'vigentes': "s.cliente_id IS NOT NULL AND s.estado NOT IN ('CANCELADO','REEMPLAZADO')",
+    'pendientes': "s.cliente_id IS NULL",
     'retenidos': "s.estado NOT IN ('CANCELADO','REEMPLAZADO') AND s.tracking_estado='RETENIDO'",
     'modificados': "s.estado='REEMPLAZADO'",
     'cancelados': "s.estado='CANCELADO'",
@@ -25,6 +26,8 @@ _FILTROS = {
 
 
 def cliente_url(cliente_id):
+    if not cliente_id:
+        return '/admin/control-envios?estado=pendientes'
     return '/admin/clientes/' + quote(cliente_id, safe='')
 
 
@@ -48,7 +51,7 @@ def resumen_proveedores():
                 JOIN facturas_courier f ON f.id=i.factura_id
                 WHERE m.solicitud_id=s.id AND m.estado='CONFIRMADO'
                   AND f.estado<>'ANULADA' AND f.tipo_documento<>'NC')) AS sin_factura
-            ''' + _BASE + " AND " + _FILTROS['vigentes'] + ' GROUP BY UPPER(BTRIM(s.courier))')
+            ''' + _BASE + " AND " + "s.estado NOT IN ('CANCELADO','REEMPLAZADO')" + ' GROUP BY UPPER(BTRIM(s.courier))')
         return {r['courier']: dict(r) for r in cur.fetchall()}
 
 
@@ -115,6 +118,8 @@ def _cobros(cur, ids):
 
 def estado_cobro(envio, cargos, ajuste, facturas):
     """Estado documental, nunca presume pago por el saldo global del cliente."""
+    if envio.get('cliente_id', 'asignado') is None:
+        return dict(importe=None, label='Sin cliente asignado', tono='warn', inconsistencia=False)
     if envio['estado'] in ('CANCELADO', 'REEMPLAZADO'):
         return dict(importe=CERO, label='Sin cargo al cliente', tono='muted',
                     inconsistencia=any(c['estado']=='ACTIVO' and c['monto_ars'] for c in cargos))
@@ -155,7 +160,7 @@ def listar_envios(*, cliente_id=None, courier=None, q='', estado='vigentes', pag
         where += ' AND UPPER(BTRIM(s.courier))=%s'
         params.append(courier)
     if q:
-        where += " AND concat_ws(' ',s.tracking,s.numero_guia_tauro,s.dest_nombre,s.cliente_id,c.nombre,s.dest_ciudad) ILIKE %s"
+        where += " AND concat_ws(' ',s.tracking,s.numero_guia_tauro,s.dest_nombre,s.cliente_id,s.cliente_pendiente_nombre,c.nombre,s.dest_ciudad) ILIKE %s"
         # Buscar texto literal, no comodines ingresados por el usuario.
         params.append('%' + q.replace('\\','\\\\').replace('%','\\%').replace('_','\\_') + '%')
     with get_conn() as conn, conn.cursor() as cur:
@@ -166,7 +171,7 @@ def listar_envios(*, cliente_id=None, courier=None, q='', estado='vigentes', pag
         total = conteos[estado]
         paginas = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
         pagina = min(pagina, paginas)
-        cur.execute('''SELECT s.id,s.cliente_id,c.nombre AS cliente_nombre,s.estado,s.courier,
+        cur.execute('''SELECT s.id,s.cliente_id,s.cliente_pendiente_nombre,c.nombre AS cliente_nombre,s.estado,s.courier,
                 s.numero_guia_tauro,s.tracking,s.dest_nombre,s.dest_ciudad,s.destino_pais,
                 s.remitente_pais,s.created_at,s.tracking_estado,s.ambito,
                 COALESCE((SELECT SUM(i.monto) FROM facturas_cliente_items i
@@ -197,7 +202,7 @@ def listar_envios(*, cliente_id=None, courier=None, q='', estado='vigentes', pag
     return dict(items=items,total=total,pagina=pagina,paginas=paginas,q=q,estado=estado,
                 conteos=conteos,prev_url=url(pagina-1),next_url=url(pagina+1),
                 filtros=[dict(clave=k,nombre=n,total=conteos[k],url=url(1,k)) for k,n in (
-                    ('vigentes','Vigentes'),('retenidos','Retenidos'),
+                    ('vigentes','Vigentes'),('pendientes','Pendientes de asignación'),('retenidos','Retenidos'),
                     ('modificados','Modificados'),('cancelados','Cancelados'))])
 
 

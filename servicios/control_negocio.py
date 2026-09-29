@@ -101,9 +101,9 @@ ORDER BY saldo DESC,c.cliente_id
 """
 
 _OPERACION_BASE = """
-FROM solicitudes_guia s JOIN clientes c ON c.cliente_id=s.cliente_id
+FROM solicitudes_guia s LEFT JOIN clientes c ON c.cliente_id=s.cliente_id
 LEFT JOIN envios e ON e.solicitud_id=s.id AND e.cliente_id=s.cliente_id
-WHERE c.test=FALSE AND s.test=FALSE
+WHERE (s.cliente_id IS NULL OR c.test=FALSE) AND s.test=FALSE
 """
 _ACTIVO = """s.estado NOT IN ('CANCELADO','REEMPLAZADO','ENTREGADO')
                AND s.tracking_estado IS DISTINCT FROM 'ENTREGADO'

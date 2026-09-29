@@ -4,8 +4,8 @@
 {% block content %}
 <div class="page-title">
   <div class="eyebrow">Operaciones</div>
-  <h1>Editar solicitud #{{ s.id }} · {{ s.cliente_id }}</h1>
-  <p>Corregí los datos antes de emitir. Las guías emitidas no se pueden editar.</p>
+  <h1>Envío #{{ s.id }} · {{ s.cliente_id or 'Pendiente de asignación' }}</h1>
+  <p>Datos de la guía y asignación de cliente.</p>
 </div>
 
 {% if request.query_params.get('error') %}
@@ -13,11 +13,11 @@
 {% endif %}
 
 {% if emitida %}
+{% include 'admin/asignacion_envio.html' %}
 <div class="msg warn">
-  Esta solicitud ya tiene guía emitida (tracking {{ s.tracking }}). No se puede editar:
-  si los datos están mal, anulá con el courier y creá una solicitud nueva.
+  Los datos de transporte de la guía {{ s.tracking }} ya emitida no se editan aquí.
 </div>
-<a href="/admin/pedidos" class="btn btn-ghost">← Volver</a>
+<a href="{{ ('/admin/clientes/' ~ s.cliente_id|urlencode ~ '?vista=envios') if s.cliente_id else '/admin/control-envios?estado=pendientes' }}" class="btn btn-ghost">← Volver a envíos</a>
 {% else %}
 <div class="card" style="max-width:720px;">
   <form data-draft-auto method="POST" action="/admin/pedidos/{{ s.id }}/editar">

@@ -1,0 +1,34 @@
+<section class="card" aria-labelledby="asignacion-titulo" style="max-width:800px;margin:20px 0;">
+  <div class="business-section-title"><h2 id="asignacion-titulo">Cliente del envío</h2>
+    {% if not s.cliente_id %}<span class="badge warn">Pendiente de asignación</span>{% endif %}
+  </div>
+  <p><strong>{{ s.dest_nombre }}</strong> · {{ s.tracking }} · {{ s.courier }}</p>
+  {% if s.cliente_id %}<p>Perfil actual: <a href="/admin/clientes/{{ s.cliente_id|urlencode }}">{{ s.cliente_id }}</a></p>
+  {% else %}<p>Corresponde a <strong>{{ s.cliente_pendiente_nombre }}</strong>. Visible sólo en el Admin.</p>{% endif %}
+  {% if request.query_params.get('asignacion')=='ok' %}<div class="msg success" role="status">Asignación guardada.</div>{% endif %}
+  {% if asignacion.bloqueo %}<p class="msg warn">{{ asignacion.bloqueo }}</p>
+  {% else %}
+  <form method="POST" action="/admin/pedidos/{{ s.id }}/asignacion">
+    <input type="hidden" name="cliente_esperado" value="{{ s.cliente_id or '' }}">
+    <div class="form-grid-2">
+      <div class="form-group"><label for="cliente-indicado">Cliente al que corresponde</label>
+        <input type="text" id="cliente-indicado" name="cliente_indicado" maxlength="120" value="{{ s.cliente_pendiente_nombre or '' }}" placeholder="Nombre del cliente"></div>
+      <div class="form-group"><label for="cliente-nuevo">Perfil para asignar</label>
+        <select id="cliente-nuevo" name="cliente_nuevo"><option value="">Elegir perfil existente</option>
+        {% for c in asignacion.clientes %}{% if c.cliente_id!=s.cliente_id %}<option value="{{ c.cliente_id }}">{{ c.cliente_id }}{% if c.nombre %} · {{ c.nombre }}{% endif %}</option>{% endif %}{% endfor %}
+        </select></div>
+    </div>
+    <div class="form-group"><label for="motivo-asignacion">Motivo</label>
+      <input type="text" id="motivo-asignacion" name="motivo" required minlength="5" maxlength="500" placeholder="Por qué se cambia la asignación"></div>
+    <p class="muted">Al asignar, el envío será visible en ese perfil. El cambio no genera cargos.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-primary" name="accion" value="asignar">Asignar al perfil</button>
+      {% if s.cliente_id %}<button class="btn btn-ghost" name="accion" value="pendiente">Dejar pendiente de asignación</button>{% endif %}
+      <a class="btn btn-ghost" href="/admin/control-envios?estado=pendientes">Ver pendientes</a>
+    </div>
+  </form>
+  {% endif %}
+  {% if asignacion.historial %}<details style="margin-top:16px;"><summary>Historial de asignación</summary>
+    {% for h in asignacion.historial %}<p>{{ h.created_at.strftime('%d/%m/%Y %H:%M') }} · {{ h.cliente_anterior or 'Pendiente' }} → {{ h.cliente_nuevo or 'Pendiente' }}<br>{{ h.motivo }}</p>{% endfor %}
+  </details>{% endif %}
+</section>

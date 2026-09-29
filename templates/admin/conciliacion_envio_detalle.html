@@ -8,12 +8,12 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% block content %}
 <div class="page-title page-title-row">
   <div>
-    <div class="eyebrow">Expediente financiero · {{ envio.cliente_id }}</div>
+    <div class="eyebrow">Expediente financiero · {{ envio.cliente_id or 'Pendiente de asignación' }}</div>
     <h1>Envío {{ envio.tracking or ('#' ~ envio.solicitud_id) }}</h1>
     <p>{{ envio.courier|upper }} · {{ envio.dest_nombre or envio.destino_pais }} · guía interna #{{ envio.solicitud_id }}</p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    <a href="{{ url_regreso|default(ruta_facturas ~ '?vista=conciliacion&cliente=' ~ envio.cliente_id|urlencode) }}" class="btn btn-ghost">Volver a conciliación</a>
+    <a href="{{ url_regreso|default(ruta_facturas ~ '?vista=conciliacion&cliente=' ~ (envio.cliente_id or '')|urlencode) }}" class="btn btn-ghost">Volver a conciliación</a>
     <a href="/admin/pedidos?buscar={{ envio.tracking or envio.solicitud_id }}" class="btn btn-ghost">Ver operación</a>
   </div>
 </div>
@@ -33,7 +33,9 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <div><h3>Estado y próxima acción<span data-help="Ajustes al cliente">Cada diferencia aprobada se registra por separado. El precio original se conserva.</span></h3></div>
     <span class="badge {% if envio.control_estado == 'CONCILIADO' %}ok{% elif envio.control_estado in ('BASE_PENDIENTE','DIFERENCIA_PENDIENTE') %}warn{% else %}muted{% endif %}">{{ envio.control_estado.replace('_',' ')|title }}</span>
   </div>
-  {% if envio.control_estado == 'BASE_PENDIENTE' %}
+  {% if not envio.cliente_id %}
+  <a class="btn btn-primary" href="/admin/pedidos/{{ envio.solicitud_id }}/editar">Asignar cliente</a>
+  {% elif envio.control_estado == 'BASE_PENDIENTE' %}
   <form method="POST" action="/admin/conciliacion-couriers/envios/{{ envio.solicitud_id }}/snapshot" class="form-grid-3" data-confirm="¿Congelar este costo estimado como base histórica? Después no podrá modificarse.">
     <div class="form-group"><label>Costo courier estimado ARS</label><input name="costo_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Ej. 100.000"></div>
     <div class="form-group" style="align-self:end;"><button class="btn btn-primary">Guardar base inmutable</button></div>

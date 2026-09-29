@@ -412,7 +412,7 @@ def registrar_snapshot_cotizacion(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, courier, coti_id, precio_tauro_ars
+                SELECT id, cliente_id, courier, coti_id, precio_tauro_ars
                   FROM solicitudes_guia
                  WHERE id = %s
                  FOR UPDATE
@@ -422,6 +422,8 @@ def registrar_snapshot_cotizacion(
             solicitud = cur.fetchone()
             if not solicitud:
                 raise ConciliacionCourierError("La solicitud de guía no existe.")
+            if not solicitud["cliente_id"]:
+                raise ConciliacionCourierError("Asigná el envío a un cliente antes de registrar su base comercial.")
             if normalizar_courier(solicitud["courier"]) != courier:
                 raise ConciliacionCourierError(
                     "El courier del snapshot no coincide con la guía."

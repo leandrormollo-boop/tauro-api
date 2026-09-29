@@ -177,7 +177,8 @@
       <a href="/admin/clientes" {% if seccion=='clientes' %}class="active"{% endif %}>Clientes</a>
       <a href="/admin/operadores" {% if seccion=='operadores' and request.url.path!='/admin/control-envios' %}class="active"{% endif %}>Proveedores</a>
       <div class="sidebar-label">Operación</div>
-      <a href="/admin/control-envios" {% if request.url.path=='/admin/control-envios' %}class="active"{% endif %}>Control de envíos</a>
+      <a href="/admin/control-envios" {% if request.url.path=='/admin/control-envios' and request.query_params.get('estado')!='pendientes' %}class="active"{% endif %}>Control de envíos</a>
+      <a href="/admin/control-envios?estado=pendientes" {% if request.url.path=='/admin/control-envios' and request.query_params.get('estado')=='pendientes' %}class="active"{% endif %}>Pendientes de asignación</a>
       <a href="/admin/pedidos" {% if seccion=='pedidos' %}class="active"{% endif %}>Solicitudes y emisión</a>
       <a href="/admin/recolecciones" {% if seccion=='recolecciones' %}class="active"{% endif %}>Recolecciones</a>
       <a href="/admin/bandeja" {% if seccion=='bandeja' %}class="active"{% endif %}>Pendientes de atención</a>
