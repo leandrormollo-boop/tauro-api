@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from fastapi import APIRouter, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from servicios.integraciones_tienda import (
@@ -62,7 +63,7 @@ def _contrato_payload_shopify(topic: str, datos: dict) -> bool:
 
 
 def _webhook_id_shopify(
-    _request: Request,
+    _request: Request | None,
     _dominio: str,
     _topic: str,
     cuerpo: bytes,
@@ -76,13 +77,27 @@ def _webhook_id_shopify(
 
 
 async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
-    topic = request.headers.get("x-shopify-topic", "").strip().lower()
+    """Recibe el webhook y delega todo el trabajo bloqueante al threadpool.
+
+    El cuerpo hace lecturas de base de datos y una verificación remota contra
+    Shopify. Ejecutarlo directo en un handler ``async`` congelaba el event loop
+    del proceso y, con una ráfaga de webhooks, dejaba sin responder al resto de
+    la API (incluido el callback de checkout de Tiendanube).
+    """
+    cuerpo = await request.body()
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    return await run_in_threadpool(
+        _procesar_shopify_webhook_sync, headers, cuerpo, topic_esperado
+    )
+
+
+def _procesar_shopify_webhook_sync(headers: dict, cuerpo: bytes, topic_esperado: str):
+    topic = headers.get("x-shopify-topic", "").strip().lower()
     if topic != topic_esperado:
         return JSONResponse({"ok": False}, status_code=400)
 
-    cuerpo = await request.body()
-    dominio = request.headers.get("x-shopify-shop-domain", "").strip().lower()
-    firma = request.headers.get("x-shopify-hmac-sha256", "")
+    dominio = headers.get("x-shopify-shop-domain", "").strip().lower()
+    firma = headers.get("x-shopify-hmac-sha256", "")
     from servicios.shopify_app import (
         clasificar_evento_instalacion, dominio_valido,
         firma_valida_webhook_app, instalacion,
@@ -137,7 +152,7 @@ async def _procesar_shopify_webhook(request: Request, topic_esperado: str):
 
     generation = str((instalacion_oauth or {}).get("install_generation") or "")
     webhook_id = _webhook_id_shopify(
-        request, dominio, topic, cuerpo, app_esperada,
+        None, dominio, topic, cuerpo, app_esperada,
     )
     from servicios.integraciones_tienda import webhook_shopify_ya_procesado
     try:
@@ -539,6 +554,15 @@ async def tiendanube_webhook(request: Request):
 
 
 async def _recibir_webhook_tiendanube(request: Request, evento_ruta: str = ""):
+    """Recibe el webhook y delega la persistencia al threadpool."""
+    cuerpo = await request.body()
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    return await run_in_threadpool(
+        _recibir_webhook_tiendanube_sync, headers, cuerpo, evento_ruta
+    )
+
+
+def _recibir_webhook_tiendanube_sync(headers: dict, cuerpo: bytes, evento_ruta: str = ""):
     """
     Ventas de Tiendanube. El webhook trae sólo el id del pedido, así que
     hay que ir a buscarlo a la API con el token de esa tienda.
@@ -556,13 +580,12 @@ async def _recibir_webhook_tiendanube(request: Request, evento_ruta: str = ""):
         evento_privacidad_canonico,
     )
 
-    cuerpo = await request.body()
     if not app_configurada():
         print("[tiendanube] webhook recibido pero la app no está configurada")
         return JSONResponse({"ok": False}, status_code=503)
 
     secreto = _os.getenv("TIENDANUBE_CLIENT_SECRET", "")
-    firma = request.headers.get("x-linkedstore-hmac-sha256", "")
+    firma = headers.get("x-linkedstore-hmac-sha256", "")
     if not verificar_hmac_tiendanube(secreto, cuerpo, firma):
         print("[tiendanube] firma INVÁLIDA")
         return JSONResponse({"ok": False}, status_code=401)
@@ -587,7 +610,7 @@ async def _recibir_webhook_tiendanube(request: Request, evento_ruta: str = ""):
         # el evento de la ruta para persistirlo en el contrato interno.
         datos = {**datos, "event": evento}
 
-    entrega_id = request.headers.get("x-linkedstore-event-id", "")
+    entrega_id = headers.get("x-linkedstore-event-id", "")
     evento_id = webhook_evento_id(datos, cuerpo, entrega_id)
     try:
         nuevo = encolar_webhook(evento_id, datos)

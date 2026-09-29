@@ -1015,6 +1015,8 @@ class PostgresLabelRepository:
                                            estado = %s,
                                            actualizada_en = now()
                                      WHERE store_id = %s AND label_id = %s
+                                       AND install_generation = %s
+                                       AND UPPER(customer_id) = UPPER(%s)
                                     """,
                                     (
                                         generate_payload,
@@ -1025,8 +1027,14 @@ class PostgresLabelRepository:
                                         state,
                                         operation.store_id,
                                         operation.label_id,
+                                        str(operation.install_generation or ""),
+                                        str(operation.customer_id or ""),
                                     ),
                                 )
+                                if cur.rowcount != 1:
+                                    raise LabelsConflictError(
+                                        "El label_id pertenece a otra instalación."
+                                    )
                         elif inserted_label:
                             # Una cancelación puede adelantarse a generate. Se
                             # conserva un placeholder que luego generate completa.
@@ -1035,9 +1043,21 @@ class PostgresLabelRepository:
                                 UPDATE tiendanube_labels
                                    SET estado = %s, actualizada_en = now()
                                  WHERE store_id = %s AND label_id = %s
+                                   AND install_generation = %s
+                                   AND UPPER(customer_id) = UPPER(%s)
                                 """,
-                                (state, operation.store_id, operation.label_id),
+                                (
+                                    state,
+                                    operation.store_id,
+                                    operation.label_id,
+                                    str(operation.install_generation or ""),
+                                    str(operation.customer_id or ""),
+                                ),
                             )
+                            if cur.rowcount != 1:
+                                raise LabelsConflictError(
+                                    "El label_id pertenece a otra instalación."
+                                )
 
                         cur.execute(
                             """

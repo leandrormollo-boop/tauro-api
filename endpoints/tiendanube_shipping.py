@@ -33,6 +33,8 @@ router = APIRouter(
 
 _MAX_LABEL_CALLBACK_BYTES = 2 * 1024 * 1024
 _LABEL_CANCEL_ENDPOINT_TIMEOUT_SECONDS = 4.5
+_RATES_ENDPOINT_TIMEOUT_SECONDS = 4.0
+
 _MAX_LABEL_DOCUMENT_ID_LENGTH = 128
 _LABEL_DOCUMENT_TOKEN_RE = re.compile(r"^[0-9a-f]{64}$")
 _LABEL_DOCUMENT_HEADERS = {
@@ -93,11 +95,21 @@ def _label_document_not_found() -> JSONResponse:
 @router.post("/rates/{callback_token}")
 async def rates(callback_token: str, request: Request):
     try:
-        payload = await request.json()
+        payload = await _bounded_json(request)
+    except _PayloadTooLarge:
+        return JSONResponse({"error": "payload_demasiado_grande"}, status_code=413)
     except Exception:
         return JSONResponse({"error": "payload_invalido"}, status_code=422)
     try:
-        return cotizar_callback(payload, callback_token)
+        # La cotización lee base de datos y consulta al operador nacional.
+        # Va al threadpool con un techo menor al SLA de 5 s del checkout para
+        # no bloquear el event loop del proceso.
+        return await asyncio.wait_for(
+            asyncio.to_thread(cotizar_callback, payload, callback_token),
+            timeout=_RATES_ENDPOINT_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return JSONResponse({"error": "tarifa_no_disponible"}, status_code=503)
     except ShippingAuthenticationError:
         return JSONResponse({"error": "no_autorizado"}, status_code=401)
     except ShippingContractError as exc:

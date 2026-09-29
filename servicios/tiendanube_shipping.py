@@ -75,6 +75,11 @@ def _enabled(name: str) -> bool:
     return (os.getenv(name) or "").strip().lower() in _TRUE
 
 
+
+def _es_produccion() -> bool:
+    """Mismo criterio que ``_ES_PROD`` en main.py: todo lo que no es DEV."""
+    return (os.getenv("ENV") or "").strip().upper() != "DEV"
+
 def _ensure_tabla() -> None:
     """Verifica configuración Shipping; el callback nunca ejecuta DDL."""
     global _tabla_lista
@@ -577,6 +582,13 @@ def _registrar_shipping_carrier_locked(
         return {"ready": False, "reason": "shipping_api_no_habilitada"}
     if not _enabled("TAURO_NACIONAL_RATES_READY"):
         return {"ready": False, "reason": "tarifas_nacionales_no_habilitadas"}
+    # Las aprobaciones externas son invariantes de runtime, no sólo de
+    # preflight: sin acceso confirmado por Partners no se publica el carrier,
+    # y en producción tampoco sin homologación aprobada.
+    if not _enabled("TIENDANUBE_SHIPPING_ACCESS_APPROVED"):
+        return {"ready": False, "reason": "shipping_access_no_aprobado"}
+    if _es_produccion() and not _enabled("TIENDANUBE_HOMOLOGATION_APPROVED"):
+        return {"ready": False, "reason": "homologacion_no_aprobada"}
 
     from servicios.tiendanube_app import _api, label_api_habilitada
     from servicios.tiendanube_labels import labels_execution_ready

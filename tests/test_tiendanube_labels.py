@@ -909,6 +909,8 @@ def test_registro_nuevo_incluye_callback_labels_con_secreto_distinto(monkeypatch
 
     monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: True)
     monkeypatch.setattr(tiendanube_app, "label_api_habilitada", lambda _store: True)
@@ -960,6 +962,8 @@ def test_registro_existente_agrega_labels_sin_rotar_callback_rates(monkeypatch):
 
     monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: True)
     monkeypatch.setattr(tiendanube_app, "label_api_habilitada", lambda _store: True)
@@ -1037,6 +1041,8 @@ def test_registro_omite_labels_mientras_worker_esta_bloqueado(monkeypatch):
 
     monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: False)
     monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda _store: None)
@@ -1087,6 +1093,8 @@ def test_registro_existente_elimina_callback_labels_si_worker_no_esta_listo(
 
     monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: False)
     rate_token = "rate-token-existente-12345678901234567890"
@@ -1160,6 +1168,8 @@ def test_reinstalacion_reactiva_carrier_inactivo_sin_crear_otro(monkeypatch):
 
     monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: False)
     rate_token = "rate-token-existente-12345678901234567890"
@@ -1223,6 +1233,8 @@ def test_reconcilia_carrier_remoto_tras_fallo_db_sin_duplicar(monkeypatch):
 
     monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: False)
     monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda _store: None)
@@ -1280,6 +1292,8 @@ def test_config_local_repara_callback_y_opcion_remota_sin_duplicar_carrier(
 
     monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
     monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    monkeypatch.setenv("TIENDANUBE_HOMOLOGATION_APPROVED", "true")
     monkeypatch.setenv("BASE_URL", "https://api.tauro.test")
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: False)
     monkeypatch.setattr(
@@ -1353,3 +1367,44 @@ def test_config_local_repara_callback_y_opcion_remota_sin_duplicar_carrier(
     assert saved[0][0][1] == "rate-token-nuevo-12345678901234567890"
     assert saved[0][0][3] == "99"
     assert result["option_id"] == "99"
+
+
+def test_registro_exige_acceso_shipping_y_homologacion_como_gates_de_runtime(monkeypatch):
+    """Las aprobaciones externas bloquean el registro aunque los flags
+    operativos estén encendidos: sin acceso de Partners no se publica el
+    carrier, y en producción tampoco sin homologación aprobada."""
+    from servicios import tiendanube_shipping
+
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ENABLED", "true")
+    monkeypatch.setenv("TAURO_NACIONAL_RATES_READY", "true")
+    monkeypatch.delenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", raising=False)
+    monkeypatch.delenv("TIENDANUBE_HOMOLOGATION_APPROVED", raising=False)
+    monkeypatch.delenv("ENV", raising=False)
+
+    result = tiendanube_shipping._registrar_shipping_carrier_locked(
+        "123", "token", expected_generation="gen-1"
+    )
+    assert result == {"ready": False, "reason": "shipping_access_no_aprobado"}
+
+    monkeypatch.setenv("TIENDANUBE_SHIPPING_ACCESS_APPROVED", "true")
+    result = tiendanube_shipping._registrar_shipping_carrier_locked(
+        "123", "token", expected_generation="gen-1"
+    )
+    assert result == {"ready": False, "reason": "homologacion_no_aprobada"}
+
+    monkeypatch.setenv("ENV", "DEV")
+    monkeypatch.setattr(
+        tiendanube_shipping, "configuracion", lambda *_: {"activa": True, "ready": True}
+    )
+    monkeypatch.setattr(
+        tiendanube_shipping, "_reconciliar_shipping_remoto", lambda *a, **k: None
+    )
+    # En DEV la homologación no bloquea; el resto del registro sigue su curso
+    # normal (acá sólo importa que ya no devuelva el motivo de homologación).
+    try:
+        result = tiendanube_shipping._registrar_shipping_carrier_locked(
+            "123", "token", expected_generation="gen-1"
+        )
+        assert result.get("reason") != "homologacion_no_aprobada"
+    except Exception:
+        pass

@@ -114,6 +114,8 @@ class LabelTask:
     document_key: str = ""
     document_url: str = ""
     document_size: int = 0
+    install_generation: str = ""
+    customer_id: str = ""
 
     @property
     def idempotency_key(self) -> str:
@@ -214,6 +216,8 @@ def _task(row: Mapping[str, Any]) -> LabelTask:
         id=int(row["id"]),
         store_id=str(row["store_id"]),
         label_id=str(row["label_id"]),
+        install_generation=str(row.get("install_generation") or ""),
+        customer_id=str(row.get("customer_id") or ""),
         fulfillment_order_id=str(row["fulfillment_order_id"]),
         payload=payload,
         attempts=int(row.get("intentos") or 0),
@@ -246,6 +250,8 @@ def _fallback_task(row: Mapping[str, Any]) -> LabelTask:
         id=int(row["id"]),
         store_id=str(row.get("store_id") or ""),
         label_id=str(row.get("label_id") or ""),
+        install_generation=str(row.get("install_generation") or ""),
+        customer_id=str(row.get("customer_id") or ""),
         fulfillment_order_id=str(row.get("fulfillment_order_id") or ""),
         payload={},
         attempts=int(row.get("intentos") or 0),
@@ -515,14 +521,22 @@ class PostgresLabelWorkerRepository:
                                    tracking_number = %s,
                                    actualizada_en = now()
                              WHERE store_id = %s AND label_id = %s
+                               AND install_generation = %s
+                               AND UPPER(customer_id) = UPPER(%s)
                             """,
                             (
                                 external_id,
                                 tracking or None,
                                 task.store_id,
                                 task.label_id,
+                                task.install_generation,
+                                task.customer_id,
                             ),
                         )
+                        if cur.rowcount != 1:
+                            raise LabelRetryableError(
+                                "La etiqueta ya no pertenece a esta instalación."
+                            )
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -598,9 +612,20 @@ class PostgresLabelWorkerRepository:
                                SET estado = 'ETIQUETA_PERSISTIDA',
                                    actualizada_en = now()
                              WHERE store_id = %s AND label_id = %s
+                               AND install_generation = %s
+                               AND UPPER(customer_id) = UPPER(%s)
                             """,
-                            (task.store_id, task.label_id),
+                            (
+                                task.store_id,
+                                task.label_id,
+                                task.install_generation,
+                                task.customer_id,
+                            ),
                         )
+                        if cur.rowcount != 1:
+                            raise LabelRetryableError(
+                                "La etiqueta ya no pertenece a esta instalación."
+                            )
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -675,8 +700,15 @@ class PostgresLabelWorkerRepository:
                                generate_payload_complete = TRUE,
                                actualizada_en = now()
                          WHERE store_id = %s AND label_id = %s
+                           AND install_generation = %s
+                           AND UPPER(customer_id) = UPPER(%s)
                         """,
-                        (task.store_id, task.label_id),
+                        (
+                            task.store_id,
+                            task.label_id,
+                            task.install_generation,
+                            task.customer_id,
+                        ),
                     )
                     if cur.rowcount != 1:
                         raise LabelRetryableError(

@@ -177,8 +177,19 @@ def test_caida_del_operador_sigue_siendo_indisponibilidad():
 
 
 class _JsonRequest:
+    """Doble mínimo de Request: el endpoint lee el cuerpo acotado, no .json()."""
+
+    def __init__(self, payload=None):
+        import json as _json
+        self._body = _json.dumps(_payload() if payload is None else payload).encode("utf-8")
+        self.headers = {"content-length": str(len(self._body))}
+
     async def json(self):
-        return _payload()
+        import json as _json
+        return _json.loads(self._body)
+
+    async def stream(self):
+        yield self._body
 
 
 def test_endpoint_mapea_negocio_a_422_y_caida_a_503(monkeypatch):
