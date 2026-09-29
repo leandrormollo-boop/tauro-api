@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Callable, Iterable, Mapping
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from core.database import get_conn
@@ -304,7 +304,58 @@ def _callback_token_from_url(value: object, base: str, kind: str) -> str:
     """Recupera un secreto remoto sólo desde una URL exacta de este backend."""
     candidate = urlparse(str(value or ""))
     expected = urlparse(base)
-    prefix = f"{expected.path.rstrip('/')}/integraciones/tiendanube/shipping/{kind}/"
+    if (
+        candidate.scheme != "https"
+        or candidate.scheme != expected.scheme
+        or candidate.netloc != expected.netloc
+        or candidate.params
+        or candidate.fragment
+    ):
+        return ""
+
+    callback_base = (
+        f"{expected.path.rstrip('/')}/integraciones/tiendanube/shipping/{kind}"
+    )
+    if kind == "rates":
+        if candidate.path != callback_base:
+            return ""
+        try:
+            query = parse_qs(
+                candidate.query,
+                keep_blank_values=True,
+                strict_parsing=True,
+            )
+        except ValueError:
+            return ""
+        if set(query) != {"callback_token"} or len(query["callback_token"]) != 1:
+            return ""
+        token = query["callback_token"][0]
+    else:
+        if candidate.query:
+            return ""
+        prefix = f"{callback_base}/"
+        if not candidate.path.startswith(prefix):
+            return ""
+        token = candidate.path[len(prefix):]
+
+    if "/" in token or len(token) < 24 or len(token) > 200:
+        return ""
+    return token
+
+
+def _rates_callback_url(base: str, token: str) -> str:
+    """Construye el callback sin secretos dentro del path del proxy."""
+    query = urlencode({"callback_token": str(token)})
+    return f"{base}/integraciones/tiendanube/shipping/rates?{query}"
+
+
+def _legacy_rate_token_from_url(value: object, base: str) -> str:
+    """Reconoce el formato viejo sólo para migrarlo sin duplicar carriers."""
+    candidate = urlparse(str(value or ""))
+    expected = urlparse(base)
+    prefix = (
+        f"{expected.path.rstrip('/')}/integraciones/tiendanube/shipping/rates/"
+    )
     if (
         candidate.scheme != "https"
         or candidate.scheme != expected.scheme
@@ -350,7 +401,7 @@ def _reconciliar_shipping_remoto(
             continue
         rate_token = _callback_token_from_url(
             carrier.get("callback_url"), base, "rates"
-        )
+        ) or _legacy_rate_token_from_url(carrier.get("callback_url"), base)
         if not rate_token or not carrier.get("id"):
             continue
         options_response = api(
@@ -657,9 +708,8 @@ def _registrar_shipping_carrier_locked(
                 )
             ):
                 remote_rate_token = secrets.token_urlsafe(32)
-                changes["callback_url"] = (
-                    f"{base}/integraciones/tiendanube/shipping/rates/"
-                    f"{remote_rate_token}"
+                changes["callback_url"] = _rates_callback_url(
+                    base, remote_rate_token,
                 )
                 config_needs_save = True
 
@@ -804,9 +854,7 @@ def _registrar_shipping_carrier_locked(
 
     token_callback = secrets.token_urlsafe(32)
     label_token = secrets.token_urlsafe(32) if labels_ready else ""
-    callback_url = (
-        f"{base}/integraciones/tiendanube/shipping/rates/{token_callback}"
-    )
+    callback_url = _rates_callback_url(base, token_callback)
     carrier_payload: dict[str, object] = {
         "name": "TAURO Solutions Ar",
         "callback_url": callback_url,

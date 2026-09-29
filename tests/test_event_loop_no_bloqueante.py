@@ -100,7 +100,9 @@ def test_rates_tiendanube_no_bloquea_el_loop_y_respeta_techo(monkeypatch):
 
     monkeypatch.setattr(endpoint, "cotizar_callback", _lento)
     resultados, total, ticks = _correr(
-        lambda: endpoint.rates("tok", _Req(b'{"store_id":"1"}')),
+        lambda: endpoint.rates(
+            _Req(b'{"store_id":"1"}'), callback_token="token-prueba-largo-1234567890"
+        ),
         n=5,
         espera=0.3,
     )
@@ -121,7 +123,9 @@ def test_rates_tiendanube_no_bloquea_el_loop_y_respeta_techo(monkeypatch):
         # Se mide dentro del loop: asyncio.run() espera al hilo colgado al
         # cerrar el executor, pero la respuesta al cliente ya salió antes.
         inicio = time.monotonic()
-        respuesta = await endpoint.rates("tok", _Req(b'{"store_id":"1"}'))
+        respuesta = await endpoint.rates(
+            _Req(b'{"store_id":"1"}'), callback_token="token-prueba-largo-1234567890"
+        )
         return respuesta, time.monotonic() - inicio
 
     respuesta, demora = asyncio.run(_medir())

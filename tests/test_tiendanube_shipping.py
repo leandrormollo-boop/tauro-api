@@ -192,6 +192,63 @@ class _JsonRequest:
         yield self._body
 
 
+def test_ruta_rates_no_expone_secreto_en_el_path():
+    from endpoints import tiendanube_shipping as endpoint
+
+    rate_route = next(
+        route for route in endpoint.router.routes
+        if getattr(route, "name", "") == "rates"
+    )
+
+    assert rate_route.path.endswith("/shipping/rates")
+    assert "callback_token" not in rate_route.path
+
+
+def test_ruta_rates_asgi_exige_una_unica_query_de_autenticacion(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from endpoints import tiendanube_shipping as endpoint
+
+    token = "token-prueba-largo-12345678901234567890"
+    monkeypatch.setattr(
+        endpoint,
+        "cotizar_callback",
+        lambda payload, callback_token: {
+            "rates": [],
+            "store_id": payload["store_id"],
+            "token_ok": callback_token == token,
+        },
+    )
+    app = FastAPI()
+    app.include_router(endpoint.router)
+
+    with TestClient(app) as client:
+        accepted = client.post(
+            f"/integraciones/tiendanube/shipping/rates?callback_token={token}",
+            json={"store_id": "123"},
+        )
+        missing = client.post(
+            "/integraciones/tiendanube/shipping/rates",
+            json={"store_id": "123"},
+        )
+        duplicate = client.post(
+            "/integraciones/tiendanube/shipping/rates"
+            f"?callback_token={token}&callback_token={token}",
+            json={"store_id": "123"},
+        )
+        extra = client.post(
+            "/integraciones/tiendanube/shipping/rates"
+            f"?callback_token={token}&otro=1",
+            json={"store_id": "123"},
+        )
+
+    assert accepted.status_code == 200
+    assert accepted.json()["token_ok"] is True
+    assert missing.status_code == 422
+    assert duplicate.status_code == 401
+    assert extra.status_code == 401
+
+
 def test_endpoint_mapea_negocio_a_422_y_caida_a_503(monkeypatch):
     from endpoints import tiendanube_shipping as endpoint
 
@@ -200,7 +257,9 @@ def test_endpoint_mapea_negocio_a_422_y_caida_a_503(monkeypatch):
         "cotizar_callback",
         lambda *_: (_ for _ in ()).throw(ShippingContractError("sin cobertura")),
     )
-    business = asyncio.run(endpoint.rates("token", _JsonRequest()))
+    business = asyncio.run(
+        endpoint.rates(_JsonRequest(), callback_token="token-prueba-largo-1234567890")
+    )
     assert business.status_code == 422
 
     monkeypatch.setattr(
@@ -208,7 +267,9 @@ def test_endpoint_mapea_negocio_a_422_y_caida_a_503(monkeypatch):
         "cotizar_callback",
         lambda *_: (_ for _ in ()).throw(ShippingUnavailableError("timeout")),
     )
-    unavailable = asyncio.run(endpoint.rates("token", _JsonRequest()))
+    unavailable = asyncio.run(
+        endpoint.rates(_JsonRequest(), callback_token="token-prueba-largo-1234567890")
+    )
     assert unavailable.status_code == 503
 
 

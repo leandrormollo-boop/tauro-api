@@ -23,7 +23,7 @@ sequenceDiagram
     API-->>M: Crear o vincular cuenta TAURO
 
     Note over TN,C: Cotización de checkout (máximo 5 s)
-    TN->>API: POST rates/{token} con carrito
+    TN->>API: POST rates?callback_token={secreto} con carrito
     API->>DB: Validar tienda, estado y token
     API->>C: Cotizar con contrato nacional
     C-->>API: Costo, servicio y plazo

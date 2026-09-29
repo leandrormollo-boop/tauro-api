@@ -949,12 +949,74 @@ def test_registro_nuevo_incluye_callback_labels_con_secreto_distinto(monkeypatch
         for call in calls
         if call[1:3] == ("POST", "shipping_carriers")
     )
-    assert carrier_payload["callback_url"].endswith("/rates/rate-token")
+    assert carrier_payload["callback_url"].endswith(
+        "/rates?callback_token=rate-token"
+    )
     assert carrier_payload["callback_labels_url"].endswith(
         "/labels/labels-token"
     )
     assert saved[0][1]["label_token"] == "labels-token"
     assert result["labels_callback_registered"] is True
+
+
+def test_callback_rates_guarda_secreto_en_query_y_parsea_url_exacta():
+    from servicios import tiendanube_shipping
+
+    base = "https://api.tauro.test"
+    token = "rate-token-seguro-12345678901234567890"
+    callback = tiendanube_shipping._rates_callback_url(base, token)
+
+    assert callback == (
+        "https://api.tauro.test/integraciones/tiendanube/shipping/rates"
+        f"?callback_token={token}"
+    )
+    assert tiendanube_shipping._callback_token_from_url(
+        callback, base, "rates"
+    ) == token
+
+
+@pytest.mark.parametrize("callback", [
+    (
+        "https://api.tauro.test/integraciones/tiendanube/shipping/rates/"
+        "rate-token-seguro-12345678901234567890"
+    ),
+    (
+        "https://api.tauro.test/integraciones/tiendanube/shipping/rates"
+        "?callback_token=rate-token-seguro-12345678901234567890&otro=1"
+    ),
+    (
+        "https://api.tauro.test/integraciones/tiendanube/shipping/rates"
+        "?callback_token=uno-123456789012345678901234"
+        "&callback_token=dos-123456789012345678901234"
+    ),
+    (
+        "https://otra.example/integraciones/tiendanube/shipping/rates"
+        "?callback_token=rate-token-seguro-12345678901234567890"
+    ),
+])
+def test_callback_rates_rechaza_path_legacy_query_ambigua_y_host_ajeno(callback):
+    from servicios import tiendanube_shipping
+
+    assert tiendanube_shipping._callback_token_from_url(
+        callback, "https://api.tauro.test", "rates"
+    ) == ""
+
+
+def test_callback_rates_legacy_solo_se_reconoce_para_migracion():
+    from servicios import tiendanube_shipping
+
+    token = "rate-token-legacy-12345678901234567890"
+    callback = (
+        "https://api.tauro.test/integraciones/tiendanube/shipping/rates/"
+        f"{token}"
+    )
+
+    assert tiendanube_shipping._callback_token_from_url(
+        callback, "https://api.tauro.test", "rates"
+    ) == ""
+    assert tiendanube_shipping._legacy_rate_token_from_url(
+        callback, "https://api.tauro.test"
+    ) == token
 
 
 def test_registro_existente_agrega_labels_sin_rotar_callback_rates(monkeypatch):
@@ -1003,7 +1065,7 @@ def test_registro_existente_agrega_labels_sin_rotar_callback_rates(monkeypatch):
                 "active": True,
                 "callback_url": (
                     "https://api.tauro.test/integraciones/tiendanube/"
-                    f"shipping/rates/{rate_token}"
+                    f"shipping/rates?callback_token={rate_token}"
                 ),
             })
         return _Response(200)
@@ -1131,7 +1193,7 @@ def test_registro_existente_elimina_callback_labels_si_worker_no_esta_listo(
                     "active": True,
                     "callback_url": (
                         "https://api.tauro.test/integraciones/tiendanube/"
-                        f"shipping/rates/{rate_token}"
+                        f"shipping/rates?callback_token={rate_token}"
                     ),
                     "callback_labels_url": (
                         "https://api.tauro.test/integraciones/tiendanube/"
@@ -1203,7 +1265,7 @@ def test_reinstalacion_reactiva_carrier_inactivo_sin_crear_otro(monkeypatch):
                 "active": False,
                 "callback_url": (
                     "https://api.tauro.test/integraciones/tiendanube/"
-                    f"shipping/rates/{rate_token}"
+                    f"shipping/rates?callback_token={rate_token}"
                 ),
             })
         return _Response(200)
@@ -1239,7 +1301,18 @@ def test_reconcilia_carrier_remoto_tras_fallo_db_sin_duplicar(monkeypatch):
     monkeypatch.setattr(tiendanube_labels, "labels_execution_ready", lambda: False)
     monkeypatch.setattr(tiendanube_shipping, "configuracion", lambda _store: None)
     rate_token = "rate-token-remoto-12345678901234567890"
+    replacement_token = "rate-token-nuevo-123456789012345678901"
+    monkeypatch.setattr(
+        tiendanube_shipping.secrets,
+        "token_urlsafe",
+        lambda _size: replacement_token,
+    )
     calls = []
+
+    legacy_callback = (
+        "https://api.tauro.test/integraciones/tiendanube/"
+        f"shipping/rates/{rate_token}"
+    )
 
     def fake_api(*args):
         calls.append(args)
@@ -1249,10 +1322,7 @@ def test_reconcilia_carrier_remoto_tras_fallo_db_sin_duplicar(monkeypatch):
                 "id": 77,
                 "name": "TAURO Solutions Ar",
                 "active": True,
-                "callback_url": (
-                    "https://api.tauro.test/integraciones/tiendanube/"
-                    f"shipping/rates/{rate_token}"
-                ),
+                "callback_url": legacy_callback,
             }])
         if method == "GET" and path.endswith("/options"):
             return _Response(200, [{
@@ -1260,7 +1330,11 @@ def test_reconcilia_carrier_remoto_tras_fallo_db_sin_duplicar(monkeypatch):
                 "code": "tauro_nacional_domicilio",
             }])
         if method == "GET":
-            return _Response(200, {"id": 77, "active": True})
+            return _Response(200, {
+                "id": 77,
+                "active": True,
+                "callback_url": legacy_callback,
+            })
         return _Response(200)
 
     monkeypatch.setattr(tiendanube_app, "_api", fake_api)
@@ -1282,6 +1356,11 @@ def test_reconcilia_carrier_remoto_tras_fallo_db_sin_duplicar(monkeypatch):
     assert not [call for call in calls if call[2] == "POST"]
     assert saved[0][0][1] == rate_token
     assert saved[0][0][2:] == ("77", "88")
+    assert saved[1][0][1] == replacement_token
+    update = next(call for call in calls if call[2] == "PUT")
+    assert update[4]["callback_url"].endswith(
+        f"/rates?callback_token={replacement_token}"
+    )
     assert result["existing"] is True
 
 
@@ -1326,7 +1405,7 @@ def test_config_local_repara_callback_y_opcion_remota_sin_duplicar_carrier(
                 "active": True,
                 "callback_url": (
                     "https://otra.example/integraciones/tiendanube/"
-                    "shipping/rates/token-ajeno"
+                    "shipping/rates?callback_token=token-ajeno"
                 ),
             })
         if method == "POST" and path.endswith("/options"):

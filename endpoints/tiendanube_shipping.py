@@ -5,7 +5,7 @@ import asyncio
 import json
 import re
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from servicios.tiendanube_labels import (
@@ -92,8 +92,17 @@ def _label_document_not_found() -> JSONResponse:
     )
 
 
-@router.post("/rates/{callback_token}")
-async def rates(callback_token: str, request: Request):
+@router.post("/rates")
+async def rates(
+    request: Request,
+    callback_token: str = Query(..., min_length=24, max_length=200),
+):
+    """Cotiza sin exponer el secreto en el path registrado por el edge."""
+    query_params = getattr(request, "query_params", None)
+    if query_params is not None:
+        query_items = list(query_params.multi_items())
+        if query_items != [("callback_token", callback_token)]:
+            return JSONResponse({"error": "no_autorizado"}, status_code=401)
     try:
         payload = await _bounded_json(request)
     except _PayloadTooLarge:
