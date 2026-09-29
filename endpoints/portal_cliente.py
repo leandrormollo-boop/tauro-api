@@ -2696,7 +2696,8 @@ def envio_nuevo_form(
                 # cada contenido. Se muestra como referencia, sin repartirlo.
                 if sum(b['cantidad'] for b in form['bultos']) == 1:
                     form['bultos'][0]['valor_declarado_caja_usd'] = valor
-                    form['bultos'][0]['valor_unitario_usd'] = valor
+                    # La cotización conoce el total, no las unidades de mercadería.
+                    form['bultos'][0]['valor_total_usd'] = valor
         except ValueError as exc:
             error = str(exc)
     # Si viene del cotizador ("tocá la opción para crear el envío"), el

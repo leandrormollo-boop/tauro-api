@@ -1,6 +1,8 @@
 """La copia enviada por mail debe continuar en el portal sin rehacer datos."""
 
 from pathlib import Path
+from decimal import Decimal
+from html.parser import HTMLParser
 import json
 import pytest
 
@@ -37,8 +39,12 @@ def _snapshot():
     }
 
 
-def _preparar_wizard(monkeypatch):
-    monkeypatch.setattr(pc.templates, "TemplateResponse", lambda **kw: kw)
+def _preparar_wizard(monkeypatch, *, render_real=False):
+    if not render_real:
+        monkeypatch.setattr(pc.templates, "TemplateResponse", lambda **kw: kw)
+    monkeypatch.setitem(pc.templates.env.globals, "saldo_menu", lambda *_a: None)
+    monkeypatch.setitem(pc.templates.env.globals, "pendientes_menu", lambda *_a: {"envios": 0, "tienda": 0})
+    monkeypatch.setitem(pc.templates.env.globals, "ayuda", lambda: {})
     monkeypatch.setattr(pc, "get_productos", lambda _cliente: [])
     monkeypatch.setattr(pc, "_paises_con_nacional", lambda: [("CN", "China"), ("US", "Estados Unidos")])
     monkeypatch.setattr(pc, "obtener_remitente_para_envio", lambda _cliente: None)
@@ -141,3 +147,87 @@ def test_cotizador_traslada_ciudad_y_cp_sin_mezclar_otro_domicilio(monkeypatch):
     assert contexto['form']['dest_zip']=='33101'
     assert contexto['remitente'] is None
     assert contexto['remitente_por_completar'] is True
+
+
+class _Inputs(HTMLParser):
+    def __init__(self, html):
+        super().__init__()
+        self.campos = {}
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == 'input' and attrs.get('name'):
+            self.campos.setdefault(attrs['name'], []).append(attrs)
+
+
+@pytest.mark.parametrize('valor', ['100', '100.50', '100,50'])
+def test_continuar_tarifa_dhl_renderiza_valor_total_sin_inventar_unidades(monkeypatch, valor):
+    _preparar_wizard(monkeypatch, render_real=True)
+    cajas = json.dumps([dict(cantidad=1, peso_kg=2, largo_cm=30, ancho_cm=20, alto_cm=10)])
+    respuesta = pc.envio_nuevo_form(
+        _request(), ambito='internacional', cliente='DEMO', courier='dhl',
+        origen='AR', destino='US', origen_ciudad='', origen_cp='',
+        destino_ciudad='Miami', destino_cp='33101', cajas=cajas,
+        valor_cotizado=valor,
+    )
+
+    assert respuesta.status_code == 200
+    html = respuesta.body.decode('utf-8')
+    assert 'Nuevo envío internacional' in html
+    campos = _Inputs(html).campos
+    esperado = Decimal(valor.replace(',', '.'))
+    assert Decimal(campos['bulto_valor_caja_usd'][0]['value']) == esperado
+    assert Decimal(campos['bulto_total_usd'][0]['value']) == esperado
+    assert Decimal(campos['bulto_peso'][0]['value']) == Decimal('2')
+    assert campos['bulto_cantidad'][0]['value'] == '1'
+    # Cotizar cajas no declara cantidades ni descripciones de mercadería.
+    for nombre in ('bulto_unidades_aduana', 'bulto_desc_en'):
+        assert campos[nombre][0]['value'] == ''
+        assert 'required' in campos[nombre][0]
+    assert 'precio_cotizado_ars' not in respuesta.context['form']
+
+
+def test_varias_cajas_renderizan_sin_repartir_el_total_de_cotizacion(monkeypatch):
+    _preparar_wizard(monkeypatch, render_real=True)
+    cajas = json.dumps([
+        dict(cantidad=2, peso_kg=2, largo_cm=30, ancho_cm=20, alto_cm=10),
+        dict(cantidad=1, peso_kg=1, largo_cm=20, ancho_cm=15, alto_cm=10),
+    ])
+    respuesta = pc.envio_nuevo_form(
+        _request(), ambito='internacional', cliente='DEMO', courier='dhl',
+        cajas=cajas, valor_cotizado='300',
+    )
+    assert respuesta.status_code == 200
+    campos = _Inputs(respuesta.body.decode('utf-8')).campos
+    assert [c['value'] for c in campos['bulto_cantidad']] == ['2', '1']
+    for nombre in ('bulto_valor_caja_usd', 'bulto_total_usd', 'bulto_unidades_aduana'):
+        assert [c['value'] for c in campos[nombre]] == ['', '']
+    assert respuesta.context['form']['valor_total_cotizado_usd'] == 300
+
+
+@pytest.mark.parametrize('valor', ['texto', '0', '-1', 'NaN'])
+def test_valor_invalido_muestra_error_sin_romper_el_formulario(monkeypatch, valor):
+    _preparar_wizard(monkeypatch, render_real=True)
+    cajas = json.dumps([dict(cantidad=1, peso_kg=2, largo_cm=30, ancho_cm=20, alto_cm=10)])
+    respuesta = pc.envio_nuevo_form(
+        _request(), ambito='internacional', cliente='DEMO', courier='dhl',
+        cajas=cajas, valor_cotizado=valor,
+    )
+    assert respuesta.status_code == 200
+    assert respuesta.context['error']
+    campos = _Inputs(respuesta.body.decode('utf-8')).campos
+    assert campos['bulto_peso'][0]['value'] == '2.0'
+    assert campos['bulto_total_usd'][0]['value'] == ''
+
+
+def test_snapshot_web_sigue_renderizando_el_valor_declarado(monkeypatch):
+    _preparar_wizard(monkeypatch, render_real=True)
+    monkeypatch.setattr(leads, 'obtener_cotizacion', lambda *a, **k: _snapshot())
+    respuesta = pc.envio_nuevo_form(
+        _request(), ambito='internacional', cliente='DEMO',
+        quote_id='Q-abcdefghijklmnopqrstuvwxyz123456',
+    )
+    assert respuesta.status_code == 200
+    campos = _Inputs(respuesta.body.decode('utf-8')).campos
+    assert Decimal(campos['bulto_total_usd'][0]['value']) == Decimal('100')
