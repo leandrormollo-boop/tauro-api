@@ -196,6 +196,30 @@ def test_json_b2b_privado_no_se_cachea_ni_mezcla_api_keys():
     assert "X-API-Key" in respuesta.headers["vary"]
 
 
+def test_app_shopify_embebida_retiro_x_frame_options_sin_error():
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/shopify/app",
+        "headers": [(b"host", b"testserver")],
+        "query_string": b"",
+        "scheme": "https",
+        "server": ("testserver", 443),
+        "client": ("127.0.0.1", 1234),
+    })
+
+    async def continuar(_request):
+        return JSONResponse(
+            {"ok": True},
+            headers={"X-Frame-Options": "DENY"},
+        )
+
+    respuesta = asyncio.run(main.headers_de_seguridad(request, continuar))
+
+    assert respuesta.status_code == 200
+    assert "x-frame-options" not in respuesta.headers
+
+
 def test_todas_las_descargas_privadas_declaran_no_store():
     """Evita que una nueva descarga con Content-Disposition olvide el header."""
     for ruta in (ROOT / "main.py", ROOT / "endpoints/admin.py", ROOT / "endpoints/portal_cliente.py"):

@@ -730,6 +730,27 @@ def test_callback_rechaza_state_invalido_antes_del_canje(
     assert "Instalación inválida" in respuesta.body.decode("utf-8")
 
 
+def test_callback_sin_code_rechaza_antes_de_gates_de_publicacion(monkeypatch):
+    from endpoints import integraciones
+    from servicios import tiendanube_app
+
+    monkeypatch.setattr(
+        tiendanube_app,
+        "app_configurada",
+        lambda: pytest.fail("no debe evaluar configuración sin código OAuth"),
+    )
+    monkeypatch.setattr(
+        tiendanube_app,
+        "app_publicable",
+        lambda: pytest.fail("no debe evaluar publicación sin código OAuth"),
+    )
+
+    respuesta = integraciones.tiendanube_callback(_Request(), code="")
+
+    assert respuesta.status_code == 400
+    assert "Instalación incompleta" in respuesta.body.decode("utf-8")
+
+
 def test_callback_valida_state_antes_del_canje_y_vincula_owner(monkeypatch):
     from endpoints import integraciones
     from servicios import tiendanube_app, tiendanube_shipping

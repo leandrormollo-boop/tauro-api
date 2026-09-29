@@ -385,6 +385,13 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
             status_code=status,
         )
 
+    # Validar primero el contrato del callback. Aunque el rollout esté
+    # cerrado, una llamada sin ``code`` sigue siendo un request incompleto
+    # (400), no una indisponibilidad de la app (503).
+    if not code:
+        return _pag("Instalación incompleta",
+                    "Tiendanube no nos devolvió el código de autorización. "
+                    "Probá instalar de nuevo desde tu panel.", status=400)
     if not app_configurada():
         return _pag("App en preparación",
                     "La integración con Tiendanube todavía no está habilitada.",
@@ -398,11 +405,6 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
             '<a href="https://taurosolutions.ar/portal/tienda">Ir al portal</a>',
             status=503,
         )
-    if not code:
-        return _pag("Instalación incompleta",
-                    "Tiendanube no nos devolvió el código de autorización. "
-                    "Probá instalar de nuevo desde tu panel.", status=400)
-
     # Si el flujo nació dentro del portal, la cookie y el state forman una
     # única prueba anti-CSRF. Validarla antes del canje evita que un callback
     # adulterado provoque efectos externos (token, webhooks o Shipping). Una

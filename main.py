@@ -247,7 +247,11 @@ async def headers_de_seguridad(request: Request, call_next):
         # X-Frame-Options no permite expresar los dos ancestros válidos de
         # Shopify. La defensa correcta para App Home es la CSP dinámica que
         # escribe el endpoint; no se agrega SAMEORIGIN ni DENY acá.
-        response.headers.pop("X-Frame-Options", None)
+        # ``MutableHeaders`` implementa borrado, pero no ``dict.pop`` en las
+        # versiones fijadas de Starlette. Usar la API del mapping evita que
+        # el shell embebido termine en 500 justo al retirar el header.
+        if "x-frame-options" in response.headers:
+            del response.headers["x-frame-options"]
     elif path.startswith("/shopify"):
         response.headers.setdefault("X-Frame-Options", "DENY")
     else:
