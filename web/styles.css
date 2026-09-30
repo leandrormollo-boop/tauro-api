@@ -983,3 +983,24 @@ html { scroll-behavior: smooth; }
  .public-quote-map .quote-map-itinerary { gap:10px; }
  .public-quote-map .quote-map-credit { font-size:8px; }
 }
+
+/* Match the portal result transition, keeping the same globe instance and route. */
+.public-quote-fields { padding:0; margin:0; border:0; min-width:0; }
+.public-quote-map { transition:opacity .16s ease; }
+.public-quote-map.is-loading { opacity:.58; }
+.public-quote-map.is-result { margin:0 0 16px; padding:3px 0 12px; border-bottom:1px solid var(--line); animation:quote-map-settle .2s ease-out both; }
+.public-quote-map.is-result .quote-route-map { grid-template-columns:74px minmax(0,1fr); gap:12px; }
+.public-quote-map.is-result .quote-map-art { grid-row:1; width:74px; max-width:74px; border-radius:50%; pointer-events:none; }
+.public-quote-map.is-result .quote-map-itinerary { display:grid; grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr); padding:0; gap:6px; align-items:start; }
+.public-quote-map.is-result .quote-map-connector { display:block; padding-top:11px; font-size:14px; }
+.public-quote-map.is-result .quote-map-endpoint strong { font-size:12px; }
+.public-quote-map.is-result .quote-map-endpoint small { font-size:10px; }
+.public-quote-map.is-result .quote-map-explore-bar,
+.public-quote-map.is-result .quote-map-footer,
+.public-quote-map.is-result .quote-map-credit { display:none; }
+.public-quote-results { animation:public-quote-result-enter .2s ease-out both; }
+@keyframes public-quote-result-enter { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+@media(prefers-reduced-motion:reduce) {
+ .public-quote-map { transition:none; }
+ .public-quote-map.is-result,.public-quote-results { animation:none; }
+}

@@ -1,5 +1,5 @@
 /* Same globe as the portal. React owns quote values; the map only reads this local bridge. */
-function PublicQuoteGlobe({ origin, destination, countries }) {
+function PublicQuoteGlobe({ origin, destination, countries, compact = false, busy = false }) {
   const rootRef = React.useRef(null);
   const previous = React.useRef({ origin, destination, countries });
   React.useEffect(() => {
@@ -17,7 +17,7 @@ function PublicQuoteGlobe({ origin, destination, countries }) {
     previous.current = { origin, destination, countries };
   }, [origin, destination, countries]);
   return (
-    <div ref={rootRef} className="quote-screen unified-quote public-quote-map" data-quote-active="internacional" data-map-countries-only>
+    <div ref={rootRef} className={`quote-screen unified-quote public-quote-map${compact ? " is-result" : ""}${busy ? " is-loading" : ""}`} data-quote-active="internacional" data-map-countries-only>
       {/* Hidden presentation values never submit or change the quote. */}
       <form hidden aria-hidden="true" data-unified-form="internacional" onSubmit={event => event.preventDefault()}>
         <select name="origen_pais" value={origin} onChange={() => {}} tabIndex={-1}>
@@ -33,7 +33,7 @@ function PublicQuoteGlobe({ origin, destination, countries }) {
   <div className="quote-map-heading"><span className="quote-map-live-dot" aria-hidden="true"></span></div>
   <div className="quote-map-art">
 
-    <canvas data-map-canvas tabIndex="0" role="img" aria-roledescription="globo interactivo" aria-label="Mapa del mundo. Arrastrá para girar. Con teclado, usá las flechas para girar, más y menos para acercar y alejar, e Inicio para volver a la ruta."></canvas>
+    <canvas data-map-canvas tabIndex={compact ? -1 : 0} role="img" aria-roledescription="globo interactivo" aria-label="Mapa del mundo. Arrastrá para girar. Con teclado, usá las flechas para girar, más y menos para acercar y alejar, e Inicio para volver a la ruta."></canvas>
     <svg className="quote-map-glint" data-map-glint aria-hidden="true" focusable="false" preserveAspectRatio="none">
       <defs>
         <linearGradient data-map-glint-gradient x1="0" y1="0" x2="1" y2="0">

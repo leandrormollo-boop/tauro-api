@@ -326,10 +326,10 @@ function QuoteWidget({ compact = false }) {
         )}
       </div>
 
-      {step !== "result" && <PublicQuoteGlobe origin={origen} destination={destino} countries={paises} />}
+      <PublicQuoteGlobe origin={origen} destination={destino} countries={paises} compact={step === "result"} busy={step === "calculating"} />
 
       {step !== "result" && (
-        <>
+        <fieldset className="public-quote-fields" disabled={step === "calculating"}>
           {/* Atajos del cotizador internacional: setean ambos combos. Los
               combos siguen libres para rutas entre terceros países. */}
           <div className="tweb-sentido" role="group" aria-label="Atajos de sentido">
@@ -386,11 +386,11 @@ function QuoteWidget({ compact = false }) {
           <div style={{ marginTop: 14, fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textAlign: "center" }}>
             Mostramos las opciones habilitadas para la ruta ingresada
           </div>
-        </>
+        </fieldset>
       )}
 
       {step === "result" && result && (
-        <div className="fade-up" role="status" aria-live="polite">
+        <div className="public-quote-results" role="status" aria-live="polite">
           <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600, marginBottom: 2 }}>
             Tus opciones de envío
           </div>
