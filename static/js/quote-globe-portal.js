@@ -13,22 +13,31 @@
     var shown = {};
 
     function panelFor(value) { return panels.find(function (panel) { return panel.dataset.quotePanel === value; }); }
+    function panelHasResults(panel) {
+      return Boolean(panel && panel.querySelector('[data-quote-results] .uq-price,[data-quote-results] .uq-error,[data-quote-results] .uq-unavailable'));
+    }
     function place() {
-      var target = mobile.matches ? root.querySelector('[data-mobile-map-slot]')
-        : panelFor(root.dataset.quoteActive).querySelector('[data-quote-map-slot]');
+      var activePanel = panelFor(root.dataset.quoteActive);
+      var target = mobile.matches && !panelHasResults(activePanel) ? root.querySelector('[data-mobile-map-slot]')
+        : activePanel.querySelector('[data-quote-map-slot]');
       if (map && map.parentNode !== target) target.appendChild(map);
     }
     function visibility() {
+      var activeHasResults = panelHasResults(panelFor(root.dataset.quoteActive));
+      disclosure.hidden = mobile.matches && activeHasResults;
       panels.forEach(function (panel) {
         var key = panel.dataset.quotePanel, results = panel.querySelector('[data-quote-results]');
         var hasResults = Boolean(results.querySelector('.uq-price,.uq-error,.uq-unavailable'));
+        var resultPanel = panel.querySelector('.uq-results');
         if (!hasResults) shown[key] = false;
-        var showMap = !mobile.matches && (!hasResults || shown[key]);
+        var showMap = !mobile.matches || key === root.dataset.quoteActive && hasResults;
+        resultPanel.classList.toggle('has-quote-result', hasResults);
+        resultPanel.classList.toggle('is-map-expanded', hasResults && Boolean(shown[key]));
         panel.querySelector('[data-quote-map-slot]').hidden = !showMap;
         results.hidden = !mobile.matches && hasResults && Boolean(shown[key]);
         var button = panel.querySelector('[data-quote-show-map]');
         button.hidden = mobile.matches || !hasResults;
-        button.textContent = shown[key] ? 'Ver tarifas' : 'Ver mapa';
+        button.textContent = shown[key] ? 'Ver tarifa' : 'Ampliar ruta';
         button.setAttribute('aria-pressed', String(Boolean(shown[key])));
       });
     }
@@ -61,7 +70,7 @@
     }
     panels.forEach(function (panel) {
       var results = panel.querySelector('[data-quote-results]');
-      new MutationObserver(visibility).observe(results, {childList:true,subtree:true});
+      new MutationObserver(function () { place(); visibility(); }).observe(results, {childList:true,subtree:true});
       panel.querySelector('[data-quote-show-map]').addEventListener('click', function () {
         var key = panel.dataset.quotePanel; shown[key] = !shown[key]; visibility();
       });

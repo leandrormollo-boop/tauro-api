@@ -56,12 +56,22 @@
     if (error) el.setAttribute('role', 'alert');
     container.replaceChildren(el);
   }
+  function quoteProgress(container) {
+    var box = document.createElement('div');
+    box.className = 'uq-quote-progress'; box.setAttribute('role', 'status');
+    var copy = document.createElement('div');
+    var title = document.createElement('strong'); title.textContent = 'Consultando esta ruta';
+    var detail = document.createElement('span'); detail.textContent = 'Origen, destino y peso listos. Esperando la tarifa.';
+    var track = document.createElement('i'); track.setAttribute('aria-hidden', 'true');
+    copy.append(title, detail); box.append(copy, track); container.replaceChildren(box);
+  }
   function init(root) {
     if (initialized.has(root)) return initialized.get(root);
     var controls = {}, locationControls = {}, active = root.dataset.quoteActive || 'internacional';
     root.querySelectorAll('[data-unified-form]').forEach(function (form) {
       var scope = form.dataset.unifiedForm, panel = form.closest('[data-quote-panel]');
       var result = panel.querySelector('[data-quote-results]');
+      var resultPanel = result.closest('.uq-results');
       var status = form.querySelector('[data-quote-status]');
       var submit = form.querySelector('[data-quote-submit]'), initial = true, hasCurrentQuote = false;
       var packageList = form.querySelector('#quote-package-list');
@@ -182,14 +192,18 @@
           hasCurrentQuote = false; submit.textContent = 'Consultar tarifas';
           if (initial && !complete) { initial = false; return; }
           initial = false;
+          resultPanel.dataset.quoteState = complete ? 'editing' : 'idle';
+          result.classList.remove('is-revealing');
           result.setAttribute('aria-busy', 'false');
           status.textContent = complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.';
           message(result, complete ? 'Las tarifas se actualizan automáticamente.' : 'Tus opciones aparecerán al completar los datos.');
         },
         loading: function () {
+          resultPanel.dataset.quoteState = 'loading';
+          result.classList.remove('is-revealing');
           result.setAttribute('aria-busy', 'true');
-          status.textContent = 'Consultando tus operadores…';
-          message(result, 'Consultando tarifas disponibles…');
+          status.textContent = 'Consultando la tarifa para esta ruta…';
+          quoteProgress(result);
         },
         fetch: async function (signal) {
           var timeout = setTimeout(function () { control.pause(); message(result, 'La consulta demoró demasiado. Volvé a consultar.', true); result.setAttribute('aria-busy','false'); status.textContent='Volvé a consultar las tarifas.'; }, 90000);
@@ -205,12 +219,15 @@
           } finally { clearTimeout(timeout); }
         },
         render: function (block) {
+          result.classList.remove('is-revealing');
           result.replaceChildren(block); result.setAttribute('aria-busy', 'false');
+          resultPanel.dataset.quoteState = 'ready';
+          window.requestAnimationFrame(function () { result.classList.add('is-revealing'); });
           hasCurrentQuote = Boolean(block.querySelector('.uq-price'));
           submit.textContent = hasCurrentQuote ? 'Ver tarifas' : 'Volver a consultar';
           status.textContent = block.querySelector('.uq-price') ? 'Tarifas actualizadas.' : 'Revisá el resultado de la consulta.';
         },
-        error: function (error) { result.setAttribute('aria-busy', 'false'); message(result, error.message, true); status.textContent = 'Podés volver a consultar.'; }
+        error: function (error) { resultPanel.dataset.quoteState = 'error'; result.setAttribute('aria-busy', 'false'); message(result, error.message, true); status.textContent = 'Podés volver a consultar.'; }
       });
       controls[scope] = control;
       form.addEventListener('input', control.changed);
