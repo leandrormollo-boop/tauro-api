@@ -118,6 +118,80 @@ def test_envio_se_presenta_ordenado_sin_cambiar_el_movimiento(cuenta_db):
     assert movimiento["haber_ars"] == Decimal("0.00")
 
 
+def test_diferencia_y_tax_son_filas_separadas_del_mismo_envio(cuenta_db):
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO clientes (cliente_id,email,nombre)
+                   VALUES ('PRETE ROSSO','qa-prete@example.invalid','PRETE ROSSO')"""
+            )
+            cur.execute(
+                """INSERT INTO solicitudes_guia (
+                       cliente_id,producto_alias,remitente_nombre,destino_pais,
+                       dest_nombre,tracking,ambito,visible_cliente,test
+                   ) VALUES (
+                       'PRETE ROSSO','Ropa','PRETE ROSSO','US',
+                       'CLIENTE FINAL','TRACK-TAX-1','INTERNACIONAL',TRUE,FALSE
+                   ) RETURNING id"""
+            )
+            solicitud_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """INSERT INTO envios (
+                       cliente_id,fecha,monto_ars,estado,descripcion,tracking,
+                       solicitud_id,ambito
+                   ) VALUES (
+                       'PRETE ROSSO','2026-09-02',1000,'ACTIVO','Flete',
+                       'TRACK-TAX-1',%s,'INTERNACIONAL'
+                   )""",
+                (solicitud_id,),
+            )
+            cur.execute(
+                """INSERT INTO conciliaciones_envio (
+                       solicitud_id,version,estado,precio_cliente_inicial_ars,
+                       costo_courier_estimado_ars,margen_tauro_protegido_ars,
+                       costo_courier_real_ars,precio_cliente_final_ars,
+                       ajuste_cliente_ars,diferencia_flete_ars,tax_cliente_ars,
+                       motivo_diferencia,calculo_hash,evidencia_completa,
+                       calculado_por,aprobado_por,aprobado_at
+                   ) VALUES (
+                       %s,1,'CERRADA',1000,1000,0,1130,1130,130,30,100,
+                       'MIXTO',%s,TRUE,'qa','qa','2026-09-03 12:00+00'
+                   ) RETURNING id""",
+                (solicitud_id, "a" * 64),
+            )
+            conciliacion_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """INSERT INTO ajustes_cliente (
+                       conciliacion_id,solicitud_id,tipo,monto_ars,
+                       precio_anterior_ars,precio_nuevo_ars,estado,
+                       idempotency_key,propuesto_por,aprobado_por,aprobado_at,
+                       aplicado_por,aplicado_at,referencia_aplicacion
+                   ) VALUES (
+                       %s,%s,'DEBITO',130,1000,1130,'APLICADO',%s,
+                       'qa','qa','2026-09-03 12:00+00',
+                       'qa','2026-09-03 12:00+00','QA-TAX-DIF'
+                   )""",
+                (conciliacion_id, solicitud_id, "b" * 64),
+            )
+
+    resultado = cuenta_corriente.movimientos_cuenta_paginados(
+        "PRETE ROSSO", "internacional", "diferencias", 1, 10,
+    )
+
+    assert resultado["total_resultados"] == 2
+    assert {item["tipo"] for item in resultado["items"]} == {"DIFERENCIA", "TAX"}
+    assert sum(item["debe_ars"] for item in resultado["items"]) == Decimal("130.00")
+    assert {item["numero_guia"] for item in resultado["items"]} == {"TRACK-TAX-1"}
+    tax = next(item for item in resultado["items"] if item["tipo"] == "TAX")
+    diferencia = next(
+        item for item in resultado["items"] if item["tipo"] == "DIFERENCIA"
+    )
+    assert tax["concepto"] == "TAX"
+    assert tax["debe_ars"] == Decimal("100.00")
+    assert tax["diferencia_detalle"]["motivo_legible"] == "Impuestos del courier"
+    assert diferencia["debe_ars"] == Decimal("30.00")
+
+
 def test_busqueda_literal_periodo_y_export_solo_cuenta_propia(cuenta_db):
     from io import BytesIO
     from openpyxl import load_workbook

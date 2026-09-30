@@ -37,6 +37,21 @@ def test_presentacion_de_recargo_usa_descripcion_documentada():
     assert detalle["motivo_legible"] == "Recargo del courier"
 
 
+def test_presentacion_de_tax_lo_nombra_sin_mezclarlo_con_diferencia():
+    detalle = presentar_diferencia({
+        "motivo": "IMPUESTOS",
+        "concepto_courier": "TAX",
+        "valor_inicial_ars": "1000",
+        "diferencia_ars": "100",
+        "valor_final_ars": "1100",
+    })
+
+    assert detalle["motivo_legible"] == "Impuestos del courier"
+    assert detalle["leyenda"] == (
+        "TAURO traslada el TAX del courier sin agregar margen."
+    )
+
+
 def test_presentacion_explica_valor_inicial_diferencia_y_final():
     detalle = presentar_diferencia({
         "motivo": "RECARGO",
@@ -90,8 +105,8 @@ def test_portal_muestra_explicacion_en_cuenta_y_detalle():
     for texto in ("Valor cotizado", "Diferencia", "Costo final"):
         assert texto in cuenta
     assert "Peso facturado por el courier" in envio
-    assert "'valor_inicial_ars', ROUND(c.precio_cliente_inicial_ars, 2)" in servicio
-    assert "- ROUND(c.precio_cliente_inicial_ars, 2)" in servicio
-    assert "'valor_final_ars', ROUND(a.precio_nuevo_ars, 2)" in servicio
+    assert "'valor_inicial_ars', ROUND(componente.valor_inicial_ars, 2)" in servicio
+    assert "'diferencia_ars', ROUND(componente.monto_firmado_ars, 2)" in servicio
+    assert "'valor_final_ars', ROUND(componente.valor_final_ars, 2)" in servicio
     assert "concepto_courier" in servicio
     assert "i.concepto_tipo <> 'FLETE'" in servicio

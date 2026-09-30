@@ -1082,27 +1082,23 @@ def movimientos_cuenta_paginados(
             SELECT
                 (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
                 a.aplicado_at,
-                CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' THEN 36 ELSE 35 END,
+                CASE componente.tipo
+                    WHEN 'AJUSTE_PRECIO' THEN 36
+                    WHEN 'DIFERENCIA' THEN 35
+                    ELSE 34
+                END,
                 a.id,
-                CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN'
-                     THEN 'AJUSTE_PRECIO' ELSE 'DIFERENCIA' END,
+                componente.tipo,
                 CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                      THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
-                CASE
-                    WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' AND a.tipo='CREDITO'
-                        THEN 'Descuento comercial'
-                    WHEN a.origen='AJUSTE_COMERCIAL_ADMIN'
-                        THEN 'Ajuste de precio'
-                    WHEN ABS(c.tax_cliente_ars) > 0
-                     AND ABS(c.diferencia_flete_ars) > 0 THEN 'Diferencia + TAX'
-                    WHEN ABS(c.tax_cliente_ars) > 0 THEN 'TAX'
-                    ELSE 'Diferencia de envío'
-                END,
+                componente.concepto,
                 CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' THEN a.motivo
                      ELSE COALESCE(c.motivo_diferencia, a.motivo) END,
-                CASE WHEN a.tipo='DEBITO' THEN ABS(a.monto_ars) ELSE 0 END,
-                CASE WHEN a.tipo='CREDITO' THEN ABS(a.monto_ars) ELSE 0 END,
-                ABS(a.monto_ars), a.estado, FALSE, e.id, NULL::integer,
+                CASE WHEN componente.monto_firmado_ars > 0
+                     THEN ABS(componente.monto_firmado_ars) ELSE 0 END,
+                CASE WHEN componente.monto_firmado_ars < 0
+                     THEN ABS(componente.monto_firmado_ars) ELSE 0 END,
+                ABS(componente.monto_firmado_ars), a.estado, FALSE, e.id, NULL::integer,
                 CASE WHEN s.visible_cliente AND s.test=FALSE
                      THEN a.solicitud_id END AS solicitud_id, NULL::text,
                 COALESCE(
@@ -1116,14 +1112,12 @@ def movimientos_cuenta_paginados(
                 NULLIF(BTRIM(s.remitente_pais), ''),
                 NULLIF(BTRIM(s.dest_ciudad), ''),
                 NULLIF(BTRIM(s.destino_pais), ''),
-                a.precio_nuevo_ars,
+                componente.valor_final_ars,
                 NULLIF(BTRIM(e.nro_fc), ''),
                 JSONB_BUILD_OBJECT(
-                    'valor_inicial_ars', ROUND(c.precio_cliente_inicial_ars, 2),
-                    'diferencia_ars',
-                        ROUND(a.precio_nuevo_ars, 2)
-                        - ROUND(c.precio_cliente_inicial_ars, 2),
-                    'valor_final_ars', ROUND(a.precio_nuevo_ars, 2),
+                    'valor_inicial_ars', ROUND(componente.valor_inicial_ars, 2),
+                    'diferencia_ars', ROUND(componente.monto_firmado_ars, 2),
+                    'valor_final_ars', ROUND(componente.valor_final_ars, 2),
                     'tipo_ajuste', a.tipo,
                     'peso_inicial_kg', c.peso_cotizado_kg,
                     'peso_facturado_kg', c.peso_final_facturado_kg,
@@ -1133,8 +1127,11 @@ def movimientos_cuenta_paginados(
                         THEN c.peso_final_facturado_kg-c.peso_cotizado_kg
                     END,
                     'base_peso', c.peso_base_facturado,
-                    'motivo', c.motivo_diferencia,
-                    'concepto_courier', COALESCE((
+                    'motivo', componente.motivo,
+                    'concepto_courier', CASE
+                        WHEN componente.tipo='TAX' THEN 'TAX'
+                        WHEN componente.tipo='AJUSTE_PRECIO' THEN COALESCE(a.motivo, '')
+                        ELSE COALESCE((
                         SELECT STRING_AGG(DISTINCT COALESCE(
                             NULLIF(BTRIM(i.descripcion), ''),
                             REPLACE(i.concepto_tipo, '_', ' ')
@@ -1144,18 +1141,47 @@ def movimientos_cuenta_paginados(
                         WHERE m.solicitud_id=a.solicitud_id
                           AND m.estado='CONFIRMADO'
                           AND i.concepto_tipo <> 'FLETE'
-                    ), ''),
+                    ), '') END,
                     'origen', a.origen
-                ) || CASE WHEN a.origen='AJUSTE_COMERCIAL_ADMIN' THEN
-                    JSONB_BUILD_OBJECT(
-                        'valor_inicial_ars', ROUND(a.precio_anterior_ars, 2),
-                        'diferencia_ars', ROUND(a.monto_ars, 2),
-                        'motivo', 'AJUSTE_COMERCIAL',
-                        'concepto_courier', a.motivo
-                    )
-                ELSE '{}'::jsonb END
+                )
             FROM ajustes_cliente a
             LEFT JOIN conciliaciones_envio c ON c.id=a.conciliacion_id
+            CROSS JOIN LATERAL (
+                SELECT
+                    'AJUSTE_PRECIO'::text AS tipo,
+                    CASE WHEN a.tipo='CREDITO' THEN 'Descuento comercial'
+                         ELSE 'Ajuste de precio' END AS concepto,
+                    CASE WHEN a.tipo='CREDITO' THEN -ABS(a.monto_ars)
+                         ELSE ABS(a.monto_ars) END AS monto_firmado_ars,
+                    a.precio_anterior_ars AS valor_inicial_ars,
+                    a.precio_nuevo_ars AS valor_final_ars,
+                    'AJUSTE_COMERCIAL'::text AS motivo
+                WHERE a.origen='AJUSTE_COMERCIAL_ADMIN'
+
+                UNION ALL
+
+                SELECT
+                    'DIFERENCIA', 'Diferencia de envío',
+                    c.diferencia_flete_ars,
+                    c.precio_cliente_inicial_ars,
+                    c.precio_cliente_inicial_ars + c.diferencia_flete_ars,
+                    COALESCE(c.motivo_diferencia, 'OTRO')
+                WHERE a.origen='CONCILIACION_COURIER'
+                  AND c.id IS NOT NULL
+                  AND ABS(c.diferencia_flete_ars) > 0
+
+                UNION ALL
+
+                SELECT
+                    'TAX', 'TAX', c.tax_cliente_ars,
+                    c.precio_cliente_inicial_ars + c.diferencia_flete_ars,
+                    c.precio_cliente_inicial_ars
+                        + c.diferencia_flete_ars + c.tax_cliente_ars,
+                    'IMPUESTOS'
+                WHERE a.origen='CONCILIACION_COURIER'
+                  AND c.id IS NOT NULL
+                  AND ABS(c.tax_cliente_ars) > 0
+            ) componente
             JOIN envios e ON e.solicitud_id=a.solicitud_id
             JOIN solicitudes_guia s ON s.id=a.solicitud_id
             WHERE e.cliente_id=%s AND e.estado='ACTIVO'
@@ -1210,9 +1236,9 @@ def movimientos_cuenta_paginados(
               AND (
                   (%s = 'todos' AND tipo NOT IN ('ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'))
                   OR (%s = 'cargos' AND tipo IN ('FC', 'PENDIENTE_FACTURA'))
-                  OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'DIFERENCIA', 'AJUSTE_PRECIO'))
+                  OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'DIFERENCIA', 'TAX', 'AJUSTE_PRECIO'))
                   OR (%s = 'pagos' AND tipo IN ('PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO'))
-                  OR (%s = 'diferencias' AND tipo = 'DIFERENCIA')
+                  OR (%s = 'diferencias' AND tipo IN ('DIFERENCIA', 'TAX'))
                   OR (%s = 'revision' AND tipo = 'PAGO_PENDIENTE')
                   OR (%s = 'cancelados' AND tipo = 'ENVIO_CANCELADO')
                   OR (%s = 'modificados' AND tipo = 'ENVIO_REEMPLAZADO')
@@ -1316,7 +1342,7 @@ def movimientos_cuenta_paginados(
             item[campo] = Decimal(str(item.get(campo) or 0)).quantize(
                 _CENTAVO, rounding=ROUND_HALF_UP
             )
-        if item.get("tipo") in ("DIFERENCIA", "AJUSTE_PRECIO"):
+        if item.get("tipo") in ("DIFERENCIA", "TAX", "AJUSTE_PRECIO"):
             item["diferencia_detalle"] = presentar_diferencia(
                 item.get("diferencia_detalle")
             )
