@@ -1,0 +1,124 @@
+name: CI
+
+"on":
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-build:
+    name: Imagen Docker reproducible
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir imagen sin publicar
+        run: docker build --tag tauro:ci-${{ github.sha }} .
+
+  account-audit:
+    name: Cuenta corriente y PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.10-alpine
+        env:
+          POSTGRES_DB: tauro_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tauro_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TAURO_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tauro_test
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.16"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: Instalar runtime bloqueado
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r requirements.lock
+          python -m pip check
+      - name: Instalar runner de pruebas
+        run: >-
+          python -m pip install
+          pytest==9.1.1
+          iniconfig==2.3.0
+          packaging==26.3
+          pluggy==1.6.0
+          pygments==2.21.0
+          httpx2==2.13.1
+          httpcore2==2.13.1
+          truststore==0.10.4
+      - name: Probar movimientos, TAX y diferencias
+        run: |
+          python -m pytest \
+            tests/test_cuenta_corriente_presentacion_postgres.py \
+            tests/test_diferencias_cliente.py \
+            tests/test_resumen_mensual_cuenta.py \
+            tests/test_portal_amount_colors.py \
+            tests/test_diferencia_tax_envio.py::test_cuenta_muestra_tax_como_fila_independiente_y_no_como_flete \
+            tests/test_portal_cuenta_ambitos_ux.py::test_columna_cuenta_conserva_cargos_y_pagos_contables_con_copy_claro
+
+  web-build:
+    name: Build web reproducible
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Instalar dependencias web
+        run: npm ci
+      - name: Compilar sitio público
+        run: |
+          npm run build:web
+          git diff --exit-code -- static/js/app.js
+      - name: Probar contratos JavaScript estables
+        run: >-
+          node --test
+          tests/js/payment-allocation.test.cjs
+          tests/js/pago-preview.test.cjs
+          tests/js/quote-request.test.cjs
+          tests/js/quote-locations.test.cjs
+          tests/js/shipment-location-confirmation.test.cjs
+
+  ci:
+    name: ci
+    if: ${{ always() }}
+    needs: [container-build, account-audit, web-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Exigir que todos los controles hayan pasado
+        env:
+          CONTAINER_BUILD_RESULT: ${{ needs.container-build.result }}
+          ACCOUNT_AUDIT_RESULT: ${{ needs.account-audit.result }}
+          WEB_BUILD_RESULT: ${{ needs.web-build.result }}
+        run: |
+          test "$CONTAINER_BUILD_RESULT" = "success"
+          test "$ACCOUNT_AUDIT_RESULT" = "success"
+          test "$WEB_BUILD_RESULT" = "success"
