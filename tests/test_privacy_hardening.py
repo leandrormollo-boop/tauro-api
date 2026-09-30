@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import main
+import pytest
 from core import database, sheets_client
 from jobs import sync_sheet_tauro
 from servicios import integraciones_tienda, solicitudes_guia
@@ -132,6 +133,39 @@ def test_sheet_operativo_no_copia_identificadores_del_comprador(monkeypatch):
         assert columna not in cursor.query
 
 
+def test_sheet_staging_falla_cerrado_aunque_copien_credenciales(monkeypatch):
+    monkeypatch.setenv("ENV", "STAGING")
+    monkeypatch.setenv("GOOGLE_CREDENTIALS_JSON", "credencial-copiada")
+    monkeypatch.delenv("TAURO_STAGING_SHEET_SYNC_ENABLED", raising=False)
+
+    assert sync_sheet_tauro.configurado() is False
+
+
+def test_sheet_staging_exige_opt_in_explicito(monkeypatch):
+    monkeypatch.setenv("ENV", "STAGING")
+    monkeypatch.setenv("GOOGLE_CREDENTIALS_JSON", "credencial-aislada")
+    monkeypatch.setenv("TAURO_STAGING_SHEET_SYNC_ENABLED", "true")
+    monkeypatch.setenv("TAURO_SHEET_ID", "sheet-exclusivo-staging")
+
+    assert sync_sheet_tauro.configurado() is True
+
+
+@pytest.mark.parametrize(
+    "sheet_id",
+    ["", sync_sheet_tauro.SHEET_ID_DEFAULT],
+)
+def test_sheet_staging_rechaza_sheet_ausente_o_productivo(monkeypatch, sheet_id):
+    monkeypatch.setenv("ENV", "STAGING")
+    monkeypatch.setenv("GOOGLE_CREDENTIALS_JSON", "credencial-aislada")
+    monkeypatch.setenv("TAURO_STAGING_SHEET_SYNC_ENABLED", "true")
+    if sheet_id:
+        monkeypatch.setenv("TAURO_SHEET_ID", sheet_id)
+    else:
+        monkeypatch.delenv("TAURO_SHEET_ID", raising=False)
+
+    assert sync_sheet_tauro.configurado() is False
+
+
 def test_poda_global_de_huerfanos_es_independiente_de_nuevos_webhooks(monkeypatch):
     cursor = _Cursor(rowcount=7)
     conn = _Conn(cursor)
@@ -194,6 +228,30 @@ def test_json_b2b_privado_no_se_cachea_ni_mezcla_api_keys():
     assert "private" in respuesta.headers["cache-control"]
     assert "no-store" in respuesta.headers["cache-control"]
     assert "X-API-Key" in respuesta.headers["vary"]
+
+
+def test_app_shopify_embebida_retiro_x_frame_options_sin_error():
+    request = Request({
+        "type": "http",
+        "method": "GET",
+        "path": "/shopify/app",
+        "headers": [(b"host", b"testserver")],
+        "query_string": b"",
+        "scheme": "https",
+        "server": ("testserver", 443),
+        "client": ("127.0.0.1", 1234),
+    })
+
+    async def continuar(_request):
+        return JSONResponse(
+            {"ok": True},
+            headers={"X-Frame-Options": "DENY"},
+        )
+
+    respuesta = asyncio.run(main.headers_de_seguridad(request, continuar))
+
+    assert respuesta.status_code == 200
+    assert "x-frame-options" not in respuesta.headers
 
 
 def test_todas_las_descargas_privadas_declaran_no_store():

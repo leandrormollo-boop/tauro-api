@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencias Python reproducibles (capa cacheable). El lock contiene el
-# cierre transitivo y hashes de artefactos para Python 3.11/Linux.
+# cierre transitivo fijado para Python 3.11/Linux.
 COPY requirements.lock .
-RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r requirements.lock \
+RUN pip install --no-cache-dir --only-binary=:all: -r requirements.lock \
     && pip check
 
 # Copiar el resto del código
@@ -39,5 +39,7 @@ USER tauro
 EXPOSE 8000
 
 # El bind a 0.0.0.0 es necesario para que Render lo expose afuera del container
-# --no-server-header: no regalar la versión de uvicorn en cada respuesta.
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --no-server-header
+# Los callbacks de Shipping/Labels llevan un bearer aleatorio en el path por
+# contrato de Tiendanube. El access log HTTP imprimiría ese secreto completo.
+# --no-access-log es obligatorio; la app conserva auditoría estructurada sin URL.
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --no-server-header --no-access-log

@@ -205,7 +205,7 @@ def test_resolver_cuarentena_preserva_instalacion_y_registra_accion(monkeypatch)
         "id": 7,
         "request_id": "evt-1",
         "store_id": "123",
-        "tipo": "store/redact",
+        "tipo": "app/store_redact",
         "resolucion": "MANTENER_INSTALACION_ACTUAL",
     }
     cursor = CursorFalso([fila])

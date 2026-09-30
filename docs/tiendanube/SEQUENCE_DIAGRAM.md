@@ -1,4 +1,4 @@
-# Diagrama de secuencia · TAURO Solutions Ar
+# Diagrama de secuencia · Tauro Solutions Ar
 
 Este es el artefacto técnico base para homologación. No existe polling de
 pedidos: la sincronización parte de webhooks.
@@ -12,7 +12,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant C as Courier nacional
 
-    M->>TN: Instalar TAURO Solutions Ar
+    M->>TN: Instalar Tauro Solutions Ar
     TN->>API: GET callback?code=...
     API->>TN: POST OAuth token
     TN-->>API: access_token + store_id
@@ -23,7 +23,7 @@ sequenceDiagram
     API-->>M: Crear o vincular cuenta TAURO
 
     Note over TN,C: Cotización de checkout (máximo 5 s)
-    TN->>API: POST rates/{token} con carrito
+    TN->>API: POST rates?callback_token={secreto} con carrito
     API->>DB: Validar tienda, estado y token
     API->>C: Cotizar con contrato nacional
     C-->>API: Costo, servicio y plazo
@@ -38,8 +38,20 @@ sequenceDiagram
     TN-->>API: Pedido completo
     API->>DB: Crear solicitud pendiente
     M->>API: Revisar y autorizar emisión
-    API->>DB: Mantener emisión bloqueada hasta aprobar UAT OCA
-    Note over API,C: Emisión, etiqueta y tracking se habilitan sólo después de UAT
+    API->>DB: Vincular Fulfillment Order con pedido y snapshot
+    M->>TN: Solicitar generación de etiqueta
+    TN->>API: POST labels/{token}/generate
+    API->>DB: Validar contrato y encolar (sin emitir en request)
+    API-->>TN: 200 PENDING
+    Note over API,C: Worker habilitado sólo después de UAT OCA
+    API->>DB: Claim + lock/revalidación de privacidad
+    API->>C: Crear envío con idempotencia
+    C-->>API: Orden + tracking
+    API->>DB: Checkpoint CREATE_SHIPMENT
+    API->>C: Obtener PDF
+    API->>DB: Checkpoint FETCH_LABEL + documento durable
+    API->>TN: Publicar READY_TO_DOWNLOAD
+    API->>DB: Checkpoint PUBLISH → DONE y limpiar PII de cola
 
     alt app/suspended
         TN->>API: Webhook firmado
@@ -56,11 +68,12 @@ sequenceDiagram
     end
 ```
 
-El diagrama refleja el release candidate actual. La cotización, recepción del
-pedido y revisión manual están implementadas. La emisión de guías, cancelación,
-retiro y tracking permanecen deliberadamente bloqueados hasta completar las
-credenciales QA, la prueba UAT y la aprobación operativa de OCA. Recién entonces
-se ampliará este flujo y se registrará `callback_labels_url` en Tiendanube.
+El diagrama refleja el candidato local actual. La cotización y el flujo durable
+de Labels están implementados, pero sus flags y el registro de
+`callback_labels_url` permanecen bloqueados hasta completar credenciales QA,
+aplicación de la migración ya validada sobre staging/base objetivo, UAT OCA y
+aprobación operativa. El código listo no equivale a una integración desplegada
+u homologada.
 
 ## Datos que no salen de TAURO
 

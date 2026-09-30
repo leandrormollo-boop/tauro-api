@@ -32,7 +32,7 @@ def test_portal_resume_el_total_y_mantiene_el_desglose_en_el_detalle():
         encoding="utf-8"
     )
 
-    assert "ARS · costo final" in listado
+    assert "Total registrado · ARS" in listado
     assert "Ver desglose" in listado
     assert "envio-price-extra diferencia" in listado
     assert "envio-price-extra tax" in listado

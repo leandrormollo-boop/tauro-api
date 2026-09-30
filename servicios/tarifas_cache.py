@@ -42,35 +42,34 @@ _tabla_lista = False
 
 
 def _ensure_tabla() -> None:
+    """Comprueba la cache creada por predeploy; no toma locks DDL."""
     global _tabla_lista
     if _tabla_lista:
         return
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS tarifas_cache (
-                    id             SERIAL PRIMARY KEY,
-                    carrier        TEXT NOT NULL,
-                    nombre         TEXT NOT NULL,
-                    logo           TEXT,
-                    pais           TEXT NOT NULL,
-                    peso_hasta_kg  NUMERIC(6,2) NOT NULL,
-                    precio_ars     NUMERIC(14,2) NOT NULL,
-                    precio_usd     NUMERIC(14,2) NOT NULL,
-                    dias_estimados TEXT,
-                    servicio       TEXT,
-                    actualizado    TIMESTAMPTZ NOT NULL DEFAULT now(),
-                    UNIQUE (carrier, pais, peso_hasta_kg)
-                );
-                CREATE INDEX IF NOT EXISTS ix_tarifas_cache_busqueda
-                    ON tarifas_cache (pais, peso_hasta_kg);
-                -- `entorno` deja registrado con qué cuenta de FedEx se calculó
-                -- cada tarifa. Sin esto, el día que se pase a producción el
-                -- checkout seguiría sirviendo precios de sandbox (con el piso
-                -- de seguridad apagado) hasta el refresco de las 4am.
-                ALTER TABLE tarifas_cache ADD COLUMN IF NOT EXISTS entorno TEXT;
-            """)
-        conn.commit()
+            cur.execute(
+                """
+                SELECT
+                    to_regclass('tarifas_cache') IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_schema = CURRENT_SCHEMA()
+                           AND table_name = 'tarifas_cache'
+                           AND column_name = 'entorno'
+                    ) AS schema_ready
+                """
+            )
+            row = cur.fetchone()
+    ready = bool(
+        row.get("schema_ready")
+        if hasattr(row, "get")
+        else row[0] if row else False
+    )
+    if not ready:
+        raise RuntimeError(
+            "La cache de tarifas requiere ejecutar la migración previa."
+        )
     _tabla_lista = True
 
 

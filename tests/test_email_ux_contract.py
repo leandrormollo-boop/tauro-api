@@ -18,7 +18,9 @@ def test_web_no_promete_operacion_nacional_antes_de_oca_andreani():
     )
     assert "Logística nacional e internacional conectada" not in fuentes
     assert "Operación nacional e internacional" not in fuentes
-    assert "Nacional en preparación" in fuentes
+    assert "Logística internacional conectada" in fuentes
+    assert "OCA está preparada para cuentas nacionales habilitadas" in fuentes
+    assert "Andreani continúa pendiente" in fuentes
 
 
 def test_recupero_preserva_quote_id_hasta_volver_al_login():

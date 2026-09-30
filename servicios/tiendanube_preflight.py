@@ -70,6 +70,11 @@ def evaluate_preflight(
         "Los access tokens necesitan una clave de cifrado exclusiva y rotatable.",
     )
     add(
+        "privacy_webhooks_partners",
+        _enabled("TIENDANUBE_PRIVACY_WEBHOOKS_CONFIRMED", env),
+        "Verificar las tres URLs de privacidad en Partners y su recepción firmada.",
+    )
+    add(
         "shipping_access",
         _enabled("TIENDANUBE_SHIPPING_ACCESS_APPROVED", env),
         "El Platform Team debe habilitar Shipping API.",
@@ -149,13 +154,29 @@ def evaluate_preflight(
     add(
         "oca_environment_gate",
         oca_status["environment_approved"],
-        "Producción OCA requiere una aprobación independiente y explícita.",
+        "QA habilita UAT; producción OCA requiere una aprobación independiente.",
     )
 
     add(
         "oca_fulfillment_ready",
         oca_status["fulfillment_ready"],
         "La emisión OCA requiere centro de costo, seguro confirmado y habilitación/UAT propios.",
+    )
+    oca_environment = str(env.get("OCA_ENVIRONMENT") or "qa").strip().lower()
+    add(
+        "oca_production_environment",
+        oca_environment == "production",
+        "El release exige OCA_ENVIRONMENT=production; QA queda reservado para UAT.",
+    )
+    add(
+        "oca_production_approved",
+        _enabled("OCA_PRODUCTION_APPROVED", env),
+        "El release exige la aprobación productiva explícita de OCA.",
+    )
+    add(
+        "oca_confirm_withdrawal",
+        _enabled("OCA_CONFIRM_WITHDRAWAL", env),
+        "El release exige confirmar la orden de retiro en producción.",
     )
 
     bundle = root / "tiendanube_nube_app" / "dist" / "main.min.js"

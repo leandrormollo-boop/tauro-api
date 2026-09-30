@@ -13,7 +13,8 @@
 #
 # Se enciende solo cuando existen las dos variables en Railway:
 #   GOOGLE_CREDENTIALS_JSON  (el JSON del service account)
-#   TAURO_SHEET_ID           (opcional: default el TAURO 2026 conocido)
+#   TAURO_SHEET_ID           (opcional en producción; obligatorio y distinto
+#                             del productivo en staging)
 # Además hay que COMPARTIR el sheet con el mail del service account,
 # permiso Editor — sin eso Google rechaza la escritura.
 # ============================================================
@@ -36,7 +37,20 @@ ENCABEZADOS = [
 
 
 def configurado() -> bool:
-    return bool(os.getenv("GOOGLE_CREDENTIALS_JSON"))
+    credenciales = bool(os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip())
+    if os.getenv("ENV", "").strip().upper() == "STAGING":
+        habilitado_staging = os.getenv(
+            "TAURO_STAGING_SHEET_SYNC_ENABLED", ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if not habilitado_staging:
+            return False
+        sheet_staging = os.getenv("TAURO_SHEET_ID", "").strip()
+        return bool(
+            credenciales
+            and sheet_staging
+            and sheet_staging != SHEET_ID_DEFAULT
+        )
+    return credenciales
 
 
 def sincronizar() -> None:
