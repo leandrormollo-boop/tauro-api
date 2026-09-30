@@ -946,3 +946,40 @@ html { scroll-behavior: smooth; }
   }
   .tweb-fab:hover, .btn:active { transform: none; }
 }
+
+/* Public quote: the existing globe replaces the operator-status panel.
+   It is a country-level illustration and never determines price or coverage. */
+.public-quote-map { margin: -10px 0 14px; }
+.public-quote-map .quote-route-map {
+  display:grid; grid-template-columns:minmax(145px,.95fr) minmax(0,1fr);
+  column-gap:14px; align-items:center;
+}
+.public-quote-map .quote-map-art {
+  grid-column:1; grid-row:1 / 3; width:100%; max-width:210px;
+  border:0; background:none; border-radius:14px; overflow:hidden;
+}
+.public-quote-map .quote-map-itinerary {
+  grid-column:2; grid-row:1; display:flex; flex-direction:column;
+  gap:13px; margin:0; padding:5px 0;
+}
+.public-quote-map .quote-map-endpoint strong { font-size:14px; }
+.public-quote-map .quote-map-endpoint small {
+  color:#aaa3b5; font:11px var(--font-body); letter-spacing:0;
+}
+.public-quote-map .quote-map-endpoint div > span { display:none; }
+.public-quote-map .quote-map-connector { display:none; }
+.public-quote-map .quote-map-footer { grid-column:2; grid-row:2; align-self:start; }
+.public-quote-map .quote-map-footer > span { color:#aaa3b5; font-size:10px; max-width:none; }
+.public-quote-map .quote-map-credit {
+  grid-column:1 / -1; color:#aaa3b5; font:9px var(--font-body); opacity:1; margin:2px 0 0;
+}
+.public-quote-map .quote-map-explore-bar { bottom:0; left:0; right:0; justify-content:center; }
+.public-quote-map .quote-map-drag-hint { display:none; }
+.public-quote-map .quote-map-controls { padding:1px; }
+.public-quote-map .quote-map-controls button { width:30px; height:30px; }
+@media(max-width:560px) {
+ .public-quote-map .quote-route-map { grid-template-columns:minmax(135px,1.1fr) minmax(0,1fr); column-gap:9px; }
+ .public-quote-map .quote-map-endpoint strong { font-size:12px; }
+ .public-quote-map .quote-map-itinerary { gap:10px; }
+ .public-quote-map .quote-map-credit { font-size:8px; }
+}

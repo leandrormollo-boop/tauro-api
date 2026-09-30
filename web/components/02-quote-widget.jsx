@@ -326,7 +326,7 @@ function QuoteWidget({ compact = false }) {
         )}
       </div>
 
-      <OperatorStatus />
+      {step !== "result" && <PublicQuoteGlobe origin={origen} destination={destino} countries={paises} />}
 
       {step !== "result" && (
         <>

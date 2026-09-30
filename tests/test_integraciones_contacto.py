@@ -26,4 +26,4 @@ def test_bundle_publico_publica_el_mailto_y_cache_nuevo():
 
     assert "integraciones@taurosolutions.ar" in bundle
     assert "Quiero integrar mi tienda con TAURO" in bundle
-    assert 'src="/static/js/app.js?v=19"' in html
+    assert 'src="/static/js/app.js?v=20"' in html

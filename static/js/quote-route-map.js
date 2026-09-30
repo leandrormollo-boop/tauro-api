@@ -273,7 +273,7 @@
       try{
         var a,b;
         if(national){state.provinces=await provinces();a=resolveProvince(f.origin.value,state.provinces);b=resolveProvince(f.destination.value,state.provinces);}
-        else{var rows=await Promise.all([cities(f.origin.value,state.world),cities(f.destination.value,state.world)]);
+        else{var rows=root.hasAttribute('data-map-countries-only')?[[],[]]:await Promise.all([cities(f.origin.value,state.world),cities(f.destination.value,state.world)]);
           if(version!==state.version||state.disposed)return;
           suggest('origin',rows[0]);suggest('destination',rows[1]);a=resolveLocation(f.origin.value,f.originCity.value,state.world.countries,rows[0]);b=resolveLocation(f.destination.value,f.destinationCity.value,state.world.countries,rows[1]);}
         if(version!==state.version||state.disposed)return;
