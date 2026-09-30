@@ -128,10 +128,12 @@ def test_diferencia_y_tax_son_filas_separadas_del_mismo_envio(cuenta_db):
             cur.execute(
                 """INSERT INTO solicitudes_guia (
                        cliente_id,producto_alias,remitente_nombre,destino_pais,
-                       dest_nombre,tracking,ambito,visible_cliente,test
+                       dest_nombre,dest_direccion,dest_ciudad,dest_zip,
+                       tracking,ambito,visible_cliente,test
                    ) VALUES (
                        'PRETE ROSSO','Ropa','PRETE ROSSO','US',
-                       'CLIENTE FINAL','TRACK-TAX-1','INTERNACIONAL',TRUE,FALSE
+                       'CLIENTE FINAL','QA Street 123','Miami','33101',
+                       'TRACK-TAX-1','INTERNACIONAL',TRUE,FALSE
                    ) RETURNING id"""
             )
             solicitud_id = int(cur.fetchone()["id"])
