@@ -1708,11 +1708,12 @@ def listar_resumen_pedidos_shopify_embebido(
     *,
     limite: int = 25,
 ) -> list[dict]:
-    """Pedidos mínimos de una instalación exacta para Shopify App Home.
+    """Pedidos mínimos y contadores de una instalación para App Home.
 
     No devuelve destinatario, dirección, email, teléfono ni detalle de ítems.
     El filtro exige simultáneamente plataforma, dominio y owner en la tienda y
-    el pedido, para que un ID token jamás seleccione otro tenant.
+    el pedido, para que un ID token jamás seleccione otro tenant. Los contadores
+    de ventana se calculan antes del LIMIT y, por eso, representan toda la tienda.
     """
     _ensure_tablas()
     dominio = str(dominio or "").strip().lower()
@@ -1725,7 +1726,14 @@ def listar_resumen_pedidos_shopify_embebido(
             cur.execute(
                 """
                 SELECT p.numero, p.pedido_externo_id, p.estado,
-                       p.valor_total, p.moneda, p.created_at
+                       p.valor_total, p.moneda, p.created_at,
+                       COUNT(*) OVER () AS total_count,
+                       COUNT(*) FILTER (
+                           WHERE UPPER(COALESCE(p.estado, '')) = 'PENDIENTE'
+                       ) OVER () AS pending_count,
+                       COUNT(*) FILTER (
+                           WHERE UPPER(COALESCE(p.estado, '')) = 'CONVERTIDO'
+                       ) OVER () AS shipment_count
                   FROM pedidos_tienda p
                   JOIN tiendas_conectadas t ON t.id = p.tienda_id
                  WHERE p.plataforma = 'shopify'

@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 from datetime import datetime, timezone
 
@@ -136,11 +137,53 @@ def test_app_home_carga_app_bridge_primero_y_csp_es_por_tienda(monkeypatch):
     assert "cdn.shopify.com/shopifycloud/app-bridge.js" in scripts[0]
     assert "polaris-1.js" in scripts[1]
     assert body.index("app-bridge.js") < body.index("polaris-1.js")
+    assert 'role="tablist"' in body
+    assert 'aria-controls="home-panel">Inicio</button>' in body
+    assert 'aria-controls="orders-panel">Pedidos</button>' in body
+    assert 'aria-controls="shipments-panel">Envíos</button>' in body
+    assert 'id="orders-tab" class="tab" type="button" role="tab" tabindex="-1"' in body
+    assert 'id="shipments-tab" class="tab" type="button" role="tab" tabindex="-1"' in body
+    assert 'id="home-panel" role="tabpanel"' in body
+    assert 'id="orders-panel" role="tabpanel"' in body
+    assert 'id="shipments-panel" role="tabpanel"' in body
+    assert "Tu operación, de un vistazo" in body
     assert f"frame-ancestors https://{SHOP} https://admin.shopify.com;" in response.headers[
         "content-security-policy"
     ]
     assert "x-frame-options" not in response.headers
     assert "destinatario" not in body
+
+
+def test_app_home_tabs_conservan_id_token_csp_y_render_seguro(monkeypatch):
+    from endpoints import shopify
+
+    host = base64.urlsafe_b64encode(b"admin.shopify.com/store/tauro-qa").decode().rstrip("=")
+    monkeypatch.setattr(shopify, "app_configurada", lambda: True)
+    monkeypatch.setattr(shopify, "api_key_publica", lambda: CLIENT_ID)
+
+    response = shopify.app_home(_Request(), shop=SHOP, host=host)
+    body = response.body.decode()
+    csp = response.headers["content-security-policy"]
+
+    assert body.count('fetch("/shopify/app/data"') == 1
+    assert "shopify.idToken()" in body
+    assert 'Authorization: `Bearer ${{token}}`' not in body
+    assert 'Authorization: `Bearer ${token}`' in body
+    assert "innerHTML" not in body
+    assert "eval(" not in body
+    assert "onclick=" not in body
+    assert 'selectTab(byId("home-tab"));' in body
+    assert 'id="health" class="health" role="status" aria-live="polite"' in body
+    assert "unsafe-inline" not in csp
+    assert "unsafe-eval" not in csp
+    assert all(
+        'nonce="nonce-prueba"' in tag
+        for tag in re.findall(r"<script\b[^>]*>", body)
+    )
+    assert all(
+        'nonce="nonce-prueba"' in tag
+        for tag in re.findall(r"<style\b[^>]*>", body)
+    )
 
 
 def test_app_data_usa_jwt_y_no_expone_pii(monkeypatch):
@@ -167,6 +210,9 @@ def test_app_data_usa_jwt_y_no_expone_pii(monkeypatch):
             "valor_total": 25,
             "moneda": "USD",
             "created_at": datetime(2026, 9, 25, tzinfo=timezone.utc),
+            "total_count": 31,
+            "pending_count": 7,
+            "shipment_count": 19,
             "destinatario": {"email": "no-debe-salir@example.com"},
         }],
     )
@@ -178,6 +224,7 @@ def test_app_data_usa_jwt_y_no_expone_pii(monkeypatch):
     assert response["linked"] is True
     assert consultas == [(SHOP, "MELCIOR")]
     assert response["orders"][0]["number"] == "#1001"
+    assert response["summary"] == {"orders": 31, "pending": 7, "shipments": 19}
     assert "destinatario" not in encoded
     assert "no-debe-salir" not in encoded
 
@@ -284,6 +331,9 @@ def test_consulta_de_pedidos_ata_tienda_y_owner_sin_columnas_pii(monkeypatch):
     assert "LOWER(t.dominio) = %s" in cursor.sql
     assert "UPPER(t.cliente_id) = %s" in cursor.sql
     assert "UPPER(p.cliente_id) = %s" in cursor.sql
+    assert "COUNT(*) OVER () AS total_count" in cursor.sql
+    assert "AS pending_count" in cursor.sql
+    assert "AS shipment_count" in cursor.sql
     assert cursor.params == (SHOP, "MELCIOR", "MELCIOR", 50)
     for pii in ("destinatario", "direccion", "email", "telefono", "items"):
         assert pii not in cursor.sql.lower()
