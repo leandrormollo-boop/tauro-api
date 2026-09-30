@@ -297,8 +297,9 @@ def test_la_vista_no_esconde_dhl_despues_de_dos_opciones():
     html = open(ruta, encoding="utf-8").read()
     assert "opciones[:2]" not in html
     assert "opciones[2:]" not in html
-    assert "op.carrier_logo" in html
-    assert 'class="quote-carrier-logo"' in html
+    assert "op.carrier_nombre" in html
+    assert 'class="uq-carrier"' in html
+    assert "quote-carrier-logo" not in html
     assert "no_disponibles" in html
     assert "{% if no_disponibles %}" in html
 
