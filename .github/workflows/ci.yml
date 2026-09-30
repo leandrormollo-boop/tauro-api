@@ -21,6 +21,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: taurotest
           POSTGRES_DB: tauro_test
+          TZ: America/Argentina/Buenos_Aires
         ports:
           - 5432:5432
         options: >-
@@ -32,6 +33,10 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:taurotest@127.0.0.1:5432/tauro_test
       TAURO_TEST_DATABASE_URL: postgresql://postgres:taurotest@127.0.0.1:5432/tauro_test
+      # La fecha operativa y las validaciones financieras usan calendario AR.
+      # PGTZ alinea CURRENT_DATE de cada sesión PostgreSQL; TZ alinea Python.
+      TZ: America/Argentina/Buenos_Aires
+      PGTZ: America/Argentina/Buenos_Aires
 
     steps:
       - name: Checkout
