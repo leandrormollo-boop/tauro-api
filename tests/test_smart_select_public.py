@@ -44,8 +44,8 @@ def test_web_publica_adapta_el_panel_al_viewport_y_bumpea_assets():
     assert "setPanelMaxHeight" in WIDGET
     assert ".tweb-select-panel.open-up" in STYLES
     assert ".tweb-select-options" in STYLES
-    assert 'styles.css?v=12' in HTML
-    assert '/static/js/app.js?v=17' in HTML
+    assert 'styles.css?v=13' in HTML
+    assert '/static/js/app.js?v=19' in HTML
 
 
 def test_boton_publico_expone_el_valor_seleccionado_en_su_nombre_accesible():

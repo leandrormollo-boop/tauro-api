@@ -64,8 +64,8 @@ const SERVICES = [
     Icon: IconPlane,
     name: "Expandí",
     tagline: "Expandí con control.",
-    desc: "Usá una misma operación internacional. OCA está preparada para cuentas nacionales habilitadas y Andreani continúa pendiente.",
-    bullets: ["Operación internacional según tu cuenta", "OCA sujeta a habilitación", "Andreani pendiente"],
+    desc: "Gestioná envíos nacionales e internacionales con los operadores habilitados para tu cuenta.",
+    bullets: ["Envíos internacionales", "Envíos nacionales con OCA según tu cuenta", "Consultá los servicios habilitados"],
     span: "Operación escalable",
     cta: "Cotizá un envío",
     action: "quote",
@@ -172,9 +172,9 @@ function Services({ onCotizarClick }) {
    TRACKING — interactive shipment status
    ============================================================ */
 const TRACK_STATES = [
-  { id: "booked", label: "Reservado", time: "12 oct · 09:14", loc: "Buenos Aires, AR", desc: "Reserva confirmada con número TRO-2026-04812." },
+  { id: "booked", label: "Reservado", time: "12 oct · 09:14", loc: "Buenos Aires, AR", desc: "Ejemplo: el envío quedó registrado." },
   { id: "pickup", label: "Recogida", time: "13 oct · 14:32", loc: "Depósito CABA", desc: "Carga retirada del depósito y consolidada para vuelo." },
-  { id: "transit", label: "En tránsito", time: "14 oct · 02:18", loc: "EZE → MIA", desc: "Embarcado en vuelo AA-908. ETA: 14 oct 11:45 EDT." },
+  { id: "transit", label: "En tránsito", time: "14 oct · 02:18", loc: "EZE → MIA", desc: "Ejemplo: el operador informó que la carga está en tránsito." },
   { id: "customs", label: "En aduana", time: "14 oct · 12:40", loc: "Miami, US", desc: "Despacho aduanero en proceso. Documentación completa." },
   { id: "delivery", label: "Entregado", time: "14 oct · 16:08", loc: "Doral, FL", desc: "Entrega confirmada al destinatario." },
 ];
@@ -271,11 +271,11 @@ function Tracking() {
                 <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#28c840" }}/>
               </div>
               <div style={{ marginLeft: 12, color: "var(--fg-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                tauro://tracking/{res ? nro.trim().toUpperCase() : "TRO-2026-04812"}
+                {res ? `tauro://tracking/${nro.trim().toUpperCase()}` : "Datos ilustrativos"}
               </div>
               <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, color: res ? "var(--accent)" : "var(--ok)" }}>
                 <span style={{ width: 6, height: 6, background: res ? "var(--accent)" : "var(--ok)", borderRadius: "50%" }} className="pulse"/>
-                {res ? "RESULTADO" : "DEMO"}
+                {res ? "RESULTADO" : "EJEMPLO"}
               </div>
             </div>
 
@@ -289,7 +289,7 @@ function Tracking() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 24 }}>
                 <div>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                    Tracking · TRO-2026-04812
+                    Ejemplo de seguimiento
                   </div>
                   <div style={{ fontFamily: "var(--font-display)", fontSize: 24, fontWeight: 600, marginTop: 4 }}>
                     Buenos Aires → Miami

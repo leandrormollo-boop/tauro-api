@@ -150,6 +150,11 @@ h1, h2, h3, h4 {
   align-items: center;
   gap: 12px;
 }
+.nav .nav-menu-toggle, .nav-mobile-links { display: none; }
+.nav a:focus-visible, .nav button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
 
 /* ---------- buttons ---------- */
 .btn {
@@ -906,3 +911,38 @@ html { scroll-behavior: smooth; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-4); }
+
+/* El menú recupera los enlaces que se ocultaban en celular. */
+@media (max-width: 960px) {
+  .nav-cta .nav-account { display: none; }
+  .nav-cta .nav-menu-toggle {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    padding: 10px !important;
+  }
+  .nav-cta .nav-menu-toggle svg { display: block; }
+  .nav-mobile-links:not([hidden]) {
+    display: block;
+    max-height: calc(100dvh - 84px);
+    overflow-y: auto;
+    margin: 12px 12px 0;
+    padding: 12px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+  }
+  .nav-mobile-links ul { list-style: none; margin: 0; padding: 0; }
+  .nav-mobile-links a { display: flex; padding: 12px; font-size: 14px; }
+  .nav-mobile-links .btn { margin-top: 8px; }
+}
+
+/* Conserva el aspecto estático cuando el usuario pide menos movimiento. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .tweb-fab:hover, .btn:active { transform: none; }
+}

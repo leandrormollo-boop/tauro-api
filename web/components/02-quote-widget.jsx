@@ -98,10 +98,56 @@ const PAISES_FALLBACK = [
 ];
 
 const MENSAJE_COTIZACION_NACIONAL =
-  "Este formulario todavía no cotiza envíos nacionales. OCA está preparada para cuentas habilitadas; solicitá la activación desde el portal. Andreani continúa pendiente.";
+  "Para cotizar un envío nacional, ingresá al portal.";
 
 function normalizeCountry(value) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+const ACCOUNT_SERVICES_HELP =
+  "La cotización y la emisión dependen de los servicios habilitados en tu cuenta.";
+const ESTIMATED_RATE_HELP =
+  "Es una referencia de precio. La emisión de guías no está habilitada para esta opción.";
+
+function operatorStatusCopy(operator) {
+  if (operator.estado === "tarifario_publico") {
+    return {
+      label: "Cotización estimada",
+      help: ESTIMATED_RATE_HELP,
+    };
+  }
+  if (
+    operator.estado === "disponible_segun_cuenta" ||
+    operator.estado === "integracion_preparada"
+  ) {
+    return {
+      label: "Según cuenta",
+      help: ACCOUNT_SERVICES_HELP,
+    };
+  }
+  return {
+    label: "No disponible aquí",
+    help: "Este operador todavía no ofrece cotizaciones en esta web.",
+  };
+}
+
+function estimatedDeliveryLabel(value) {
+  const match = String(value ?? "").trim().match(
+    /^(\d+)(?:\s*(?:-|–|a)\s*(\d+))?\s*(?:d[ií]as?)?$/i,
+  );
+  if (!match) return "Plazo a confirmar";
+  const inicio = Number(match[1]);
+  const fin = match[2] ? Number(match[2]) : null;
+  if (inicio <= 0 || (fin !== null && (fin <= 0 || fin < inicio))) {
+    return "Plazo a confirmar";
+  }
+  const plazo = `${inicio}${fin !== null ? `–${fin}` : ""}`;
+  return `${plazo} ${inicio === 1 && fin === null ? "día" : "días"}`;
+}
+
+function quotedCountryLabel(value) {
+  const label = String(value ?? "");
+  return /\(FK\)\s*$/i.test(label) ? "Islas Malvinas" : label;
 }
 
 function OperatorStatus() {
@@ -129,15 +175,16 @@ function OperatorStatus() {
     }}>
       {groups.map(([label, operators]) => (
         <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span style={{ minWidth: 74, color: "var(--fg-4)", fontFamily: "var(--font-mono)", fontSize: 9, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</span>
+          <span style={{ minWidth: 74, color: "#AAA3B5", fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</span>
           {operators.map((operator) => {
             const ready = operator.estado === "disponible_segun_cuenta";
             const prepared = operator.estado === "integracion_preparada";
+            const status = operatorStatusCopy(operator);
             return (
-              <span key={operator.id} title={operator.estado_label} style={{
+              <span key={operator.id} style={{
                 display: "inline-flex", alignItems: "center", gap: 5,
                 padding: "3px 7px", border: "1px solid var(--line-soft)",
-                borderRadius: 99, color: "var(--fg-3)", fontSize: 10,
+                borderRadius: 99, color: "#AAA3B5", fontSize: 10,
               }}>
                 <i aria-hidden="true" style={{
                   width: 6, height: 6, borderRadius: 99,
@@ -146,11 +193,12 @@ function OperatorStatus() {
                 }}/>
                 {operator.nombre}
                 <small style={{
-                  color: "var(--fg-4)", fontFamily: "var(--font-mono)",
-                  fontSize: 7, letterSpacing: ".03em", textTransform: "uppercase",
+                  color: "#AAA3B5", fontFamily: "var(--font-mono)",
+                  fontSize: 10, letterSpacing: ".03em", textTransform: "uppercase",
                 }}>
-                  {operator.estado_corto || operator.estado_label}
+                  {status.label}
                 </small>
+                <InfoAyuda label={`${operator.nombre}: ${status.label}`} text={status.help} />
               </span>
             );
           })}
@@ -347,7 +395,7 @@ function QuoteWidget({ compact = false }) {
             Tus opciones de envío
           </div>
           <div style={{ color: "var(--fg-3)", marginBottom: 18, fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            {peso}kg · {result.origen} → {result.destino} · opciones disponibles
+            {peso}kg · {quotedCountryLabel(result.origen)} → {quotedCountryLabel(result.destino)} · opciones disponibles
           </div>
 
           <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
@@ -539,8 +587,13 @@ function SelectField({ label, value, onChange, options }) {
   const searchRef = useRefQ(null);
   const listIdRef = useRefQ(null);
   if (!listIdRef.current) listIdRef.current = `tweb-select-${++selectFieldSeq}`;
-  const seleccionada = options.find((o) => o.value === value) || options[0];
-  const filtered = rankedSelectOptions(options, query);
+  const visibleOptions = options.map((option) => (
+    normalizeCountry(option.value) === "FK"
+      ? { ...option, label: "Islas Malvinas" }
+      : option
+  ));
+  const seleccionada = visibleOptions.find((o) => o.value === value) || visibleOptions[0];
+  const filtered = rankedSelectOptions(visibleOptions, query);
 
   const close = (focusButton = false) => {
     setOpen(false);
@@ -680,7 +733,12 @@ function SelectField({ label, value, onChange, options }) {
             transition: "border-color .15s, box-shadow .15s",
           }}
         >
-          <span id={`${listIdRef.current}-value`}>{seleccionada ? seleccionada.label : "Seleccionar"}</span>
+          <span id={`${listIdRef.current}-value`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {seleccionada && normalizeCountry(seleccionada.value) === "FK" && (
+              <img src="/static/img/flags/ar.svg" alt="" aria-hidden="true" style={{ width: 16, height: 11, objectFit: "cover", flexShrink: 0 }} />
+            )}
+            {seleccionada ? seleccionada.label : "Seleccionar"}
+          </span>
           <svg width="11" height="7" viewBox="0 0 10 6" fill="none" aria-hidden="true"
                style={{ color: open ? "var(--accent-soft)" : "var(--fg-3)", transform: open ? "rotate(180deg)" : "none", transition: "transform .22s cubic-bezier(.2,.7,.3,1), color .15s", flexShrink: 0 }}>
             <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
@@ -714,6 +772,7 @@ function SelectField({ label, value, onChange, options }) {
               {filtered.length ? filtered.map((o, index) => {
                 const sel = o.value === value;
                 const active = index === activeIndex;
+                const isMalvinas = normalizeCountry(o.value) === "FK";
                 return (
                   <div
                     id={`${listIdRef.current}-option-${index}`}
@@ -725,8 +784,13 @@ function SelectField({ label, value, onChange, options }) {
                     className={`tweb-select-opt${active ? " active" : ""}${sel ? " selected" : ""}`}
                   >
                     <span className="tweb-select-check" aria-hidden="true">✓</span>
-                    <span>{o.label}</span>
-                    <small>{o.value}</small>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {isMalvinas && (
+                        <img src="/static/img/flags/ar.svg" alt="" aria-hidden="true" style={{ width: 16, height: 11, objectFit: "cover", flexShrink: 0 }} />
+                      )}
+                      {o.label}
+                    </span>
+                    {!isMalvinas && <small>{o.value}</small>}
                   </div>
                 );
               }) : (
@@ -770,7 +834,7 @@ function CarrierCard({ carrier, recomendado }) {
           letterSpacing: "0.06em", textTransform: "uppercase",
           padding: "2px 8px", borderRadius: 99,
         }}>
-          Menor tarifa disponible
+          Menor precio cotizado
         </div>
       )}
 
@@ -806,14 +870,17 @@ function CarrierCard({ carrier, recomendado }) {
                 boxShadow: "0 0 8px rgba(46,194,126,.8)", flexShrink: 0,
               }}/>
               {carrier.estado_publicacion === "tarifario_publico"
-                ? "Tarifario público"
+                ? "Tarifa estimada"
                 : "Tarifa disponible"}
+              {carrier.estado_publicacion === "tarifario_publico" && (
+                <InfoAyuda label="Tarifa estimada" text={ESTIMATED_RATE_HELP} />
+              )}
             </span>
           )}
         </div>
         <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {cotizado
-            ? `${carrier.servicio} · ${carrier.dias_estimados ? `${carrier.dias_estimados} días` : "Plazo a confirmar"}`
+            ? `${carrier.servicio} · ${estimatedDeliveryLabel(carrier.dias_estimados)}`
             : carrier.servicio}
         </div>
       </div>

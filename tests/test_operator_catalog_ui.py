@@ -16,7 +16,7 @@ def test_web_y_portal_consumen_catalogo_publico_sin_habilitar_operaciones():
     assert "fetch(`${API_URL}/operadores`)" in web
     assert "disponible_segun_cuenta" in web
     assert "integracion_preparada" in web
-    assert "operator.estado_corto || operator.estado_label" in web
+    assert "operatorStatusCopy(operator)" in web
 
 
 def test_catalogo_visible_no_contiene_nombres_de_secretos():

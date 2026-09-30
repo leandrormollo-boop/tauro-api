@@ -12,25 +12,12 @@ APP = (ROOT / "web/components/05-app.jsx").read_text(encoding="utf-8")
 HTML = (ROOT / "web/Tauro Solutions.html").read_text(encoding="utf-8")
 
 
-def _word_count(text: str) -> int:
-    return len(re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", text))
-
-
-def test_arquitectura_3_6_9_es_exacta_y_visible():
-    copy_3 = "Conectá. Centralizá. Expandí."
-    copy_6 = "Tu logística en un solo portal."
-    copy_9 = "Logística internacional conectada directamente a tu tienda y portal."
-
-    assert _word_count(copy_3) == 3
-    assert _word_count(copy_6) == 6
-    assert _word_count(copy_9) == 9
-
-    hero_sin_tags = re.sub(r"<[^>]+>", " ", HERO)
-    hero_normalizado = " ".join(hero_sin_tags.split())
+def test_claim_y_operacion_se_describen_sin_exigir_una_tienda():
+    hero_normalizado = " ".join(re.sub(r"<[^>]+>", " ", HERO).split())
     assert "Conectá. Centralizá. Expandí." in hero_normalizado
-    assert copy_6 in HERO
-    assert copy_9 in HERO
-    assert copy_3 in APP
+    assert "Cotizaciones, envíos y pagos en tu cuenta." in HERO
+    assert "Gestioná tus envíos internacionales desde el portal de TAURO." in HERO
+    assert "Conectá. Centralizá. Expandí." in APP
 
 
 def test_las_seis_acciones_reemplazan_despachar_por_automatizar():
@@ -64,8 +51,10 @@ def test_copy_no_promete_capacidades_no_demostradas():
     assert ': ["DHL"];' in HERO
 
 
-def test_ctas_principales_siguen_el_sistema_parise():
-    assert HERO.count("Solicitar integración") >= 3
+def test_cuenta_general_y_contacto_de_integraciones_se_distinguen():
+    assert HERO.count("Solicitar una cuenta") >= 3
+    assert "Solicitar integración" in SERVICES
+    assert "href: INTEGRACIONES_MAILTO" in SERVICES
     assert HERO.count("Cotizá un envío") >= 3
     assert 'href="/portal/login"' in HERO
     assert "¿No tenés tienda? Cargá tus envíos manualmente." in HERO
@@ -82,8 +71,8 @@ def test_seo_social_y_datos_estructurados_quedan_alineados():
     assert '<link rel="canonical" href="https://taurosolutions.ar/"' in HTML
     assert 'property="og:title" content="Conectá. Centralizá. Expandí. | Tauro Solutions"' in HTML
     assert 'name="twitter:card" content="summary_large_image"' in HTML
-    assert 'styles.css?v=12' in HTML
-    assert '/static/js/app.js?v=18' in HTML
+    assert 'styles.css?v=13' in HTML
+    assert '/static/js/app.js?v=19' in HTML
 
     structured = re.search(
         r'<script type="application/ld\+json">\s*(\{.*?\})\s*</script>',
@@ -105,5 +94,5 @@ def test_bundle_publicado_por_el_repo_contiene_el_copy_nuevo():
     assert "Conectá." in bundle_visible
     assert "Centralizá." in bundle_visible
     assert "Expandí." in bundle_visible
-    assert "Tu logística en un solo portal." in bundle_visible
+    assert "Cotizaciones, envíos y pagos en tu cuenta." in bundle_visible
     assert "Cotizador instantáneo" not in bundle_visible
