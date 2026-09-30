@@ -89,6 +89,8 @@ def presentar_diferencia(datos: Mapping[str, Any] | None) -> dict[str, Any]:
         "leyenda": (
             "TAURO aplicó este cambio comercial sin modificar la cotización original."
             if origen == "AJUSTE_COMERCIAL_ADMIN"
+            else "TAURO traslada el TAX del courier sin agregar margen."
+            if motivo == "IMPUESTOS"
             else "TAURO traslada la diferencia del courier sin agregar margen."
         ),
     }

@@ -45,6 +45,21 @@ def test_portal_resume_el_total_y_mantiene_el_desglose_en_el_detalle():
     assert consultas.count("AS tax_cliente_ars") == 3
 
 
+def test_cuenta_muestra_tax_como_fila_independiente_y_no_como_flete():
+    servicio = (ROOT / "servicios" / "cuenta_corriente.py").read_text(
+        encoding="utf-8"
+    )
+    plantilla = (ROOT / "templates" / "portal" / "cuenta_movimientos.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "'TAX', 'TAX', c.tax_cliente_ars" in servicio
+    assert "tipo IN ('DIFERENCIA', 'TAX')" in servicio
+    assert "m.tipo == 'TAX'" in plantilla
+    assert ">TAX</span>" in plantilla
+    assert ">Diferencia</span>" in plantilla
+
+
 def test_casillero_tax_admin_agrega_linea_impuesto_al_tracking(monkeypatch):
     monkeypatch.setattr(admin, "_is_auth", lambda _token: True)
 
