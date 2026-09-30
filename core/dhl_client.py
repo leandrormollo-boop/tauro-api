@@ -232,7 +232,36 @@ class DHLClient(CarrierBase):
                     prefijo = re.match(r"\s*(\d{3,6})\s*:", detalle)
                     if prefijo:
                         codigos.append(prefijo[1])
+        detalle = data.get("detail")
+        if isinstance(detalle, str):
+            prefijo = re.match(r"\s*(\d{3,6})\s*:", detalle)
+            if prefijo:
+                codigos.append(prefijo[1])
         return ",".join(c for c in codigos[:5] if re.fullmatch(r"\d{3,6}", c)) or "sin_codigo"
+
+    @staticmethod
+    def _codigo_negocio_error(resp) -> str:
+        """Código MyDHL del detalle, separado del estado HTTP del gateway."""
+        try:
+            data = resp.json()
+        except Exception:
+            return ""
+        if not isinstance(data, dict):
+            return ""
+        textos = [data.get("detail")]
+        detalles = data.get("additionalDetails") or []
+        if isinstance(detalles, (str, dict)):
+            detalles = [detalles]
+        for detalle in detalles if isinstance(detalles, (list, tuple)) else []:
+            textos.append(
+                detalle.get("detail") or detalle.get("message")
+                if isinstance(detalle, dict) else detalle
+            )
+        for texto in textos:
+            coincidencia = re.match(r"\s*(\d{3,6})\s*:", str(texto or ""))
+            if coincidencia:
+                return coincidencia[1]
+        return ""
 
     def _parsear_rates(self, data: dict) -> dict:
         """
@@ -294,7 +323,7 @@ class DHLClient(CarrierBase):
             ),
         }
 
-    def _fecha_envio(self, origen_pais: str = "AR") -> str:
+    def _fecha_envio(self, origen_pais: str = "AR", dia_habil: str = "") -> str:
         """
         plannedShippingDateAndTime para el POST: YYYY-MM-DDTHH:MM:SSGMT-03:00.
 
@@ -310,12 +339,96 @@ class DHLClient(CarrierBase):
         # excepción se convierte en un error legible antes de llamar a DHL.
         if error:
             raise ValueError(error)
-        d = datetime.now(zona) + timedelta(days=1)
-        while d.weekday() >= 5:
-            d += timedelta(days=1)
+        if dia_habil:
+            try:
+                d = datetime.strptime(dia_habil, "%Y-%m-%d").replace(
+                    hour=8, minute=0, second=0, tzinfo=zona,
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("DHL devolvió una fecha de retiro inválida.") from exc
+        else:
+            d = datetime.now(zona) + timedelta(days=1)
+            while d.weekday() >= 5:
+                d += timedelta(days=1)
         offset = d.strftime("%z")
         offset = f"{offset[:3]}:{offset[3:]}"
-        return d.strftime("%Y-%m-%dT13:00:00GMT") + offset
+        hora = "08:00:00" if dia_habil else "13:00:00"
+        return d.strftime(f"%Y-%m-%dT{hora}GMT") + offset
+
+    def _parametros_rates_una_pieza(
+        self, origen: dict, destino: dict, paquete: dict, cuenta: str,
+        zona_origen: ZoneInfo,
+    ) -> dict:
+        """Query canónico del GET /rates, también usado para resolver feriados."""
+        return {
+            "accountNumber": cuenta,
+            "originCountryCode": origen.get("country", "AR"),
+            "originCityName": origen.get("city", "BUENOS AIRES"),
+            "originPostalCode": self._codigo_postal(
+                origen.get("country", "AR"), origen.get("postal_code", "1043")
+            ),
+            "destinationCountryCode": destino.get("country", "US"),
+            "destinationCityName": destino.get("city", ""),
+            "destinationPostalCode": self._codigo_postal(
+                destino.get("country", "US"), destino.get("postal_code", "")
+            ),
+            "weight": paquete.get("peso_kg", 0.5),
+            "length": math.ceil(float(
+                paquete.get("largo_cm") or paquete.get("largo") or 30
+            )),
+            "width": math.ceil(float(
+                paquete.get("ancho_cm") or paquete.get("ancho") or 20
+            )),
+            "height": math.ceil(float(
+                paquete.get("alto_cm") or paquete.get("alto") or 10
+            )),
+            "plannedShippingDate": (
+                datetime.now(zona_origen).date() + timedelta(days=1)
+            ).isoformat(),
+            "nextBusinessDay": "true",
+            "isCustomsDeclarable": "true",
+            "unitOfMeasurement": "metric",
+        }
+
+    def _proximo_dia_habil_rates(
+        self, origen: dict, destino: dict, paquete: dict, cuenta: str,
+        zona_origen: ZoneInfo,
+    ) -> str:
+        """Pregunta a DHL la próxima fecha operativa sin inventar feriados."""
+        referencia = str(uuid.uuid4())
+        try:
+            respuesta = requests.get(
+                f"{self.base_url}/rates",
+                params=self._parametros_rates_una_pieza(
+                    origen, destino, paquete, cuenta, zona_origen,
+                ),
+                auth=(self.api_key, self.api_secret),
+                headers={
+                    "Accept": "application/json",
+                    "x-version": self.API_VERSION,
+                    "Message-Reference": referencia,
+                },
+                timeout=30,
+            )
+            if respuesta.status_code != 200:
+                return ""
+            fechas = []
+            hoy = datetime.now(zona_origen).date()
+            for producto in (respuesta.json().get("products") or []):
+                if producto.get("productCode") != self.product_code:
+                    continue
+                retiro = (producto.get("pickupCapabilities") or {}).get(
+                    "localCutoffDateAndTime"
+                )
+                try:
+                    fecha = datetime.strptime(str(retiro or "")[:10], "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                if fecha > hoy:
+                    fechas.append(fecha)
+            return min(fechas).isoformat() if fechas else ""
+        except (requests.RequestException, TypeError, ValueError):
+            return ""
 
     @staticmethod
     def _codigo_postal(pais: str, valor) -> str:
@@ -460,10 +573,47 @@ class DHLClient(CarrierBase):
                 },
                 timeout=30,
             )
+            # El POST multibulto no tiene el query ``nextBusinessDay`` del
+            # GET. En feriados DHL responde HTTP 404 con código de negocio
+            # 996 aunque la ruta sí tenga servicio. Consultamos UNA pieza para
+            # obtener la próxima fecha operativa informada por DHL y repetimos
+            # una sola vez; nunca inventamos el calendario ni alteramos cajas.
+            if (
+                resp.status_code == 404
+                and self._codigo_negocio_error(resp) == "996"
+            ):
+                dia_habil = self._proximo_dia_habil_rates(
+                    origen, destino, paquetes[0], str(cuenta), zona_origen,
+                )
+                if dia_habil:
+                    cuerpo["plannedShippingDateAndTime"] = self._fecha_envio(
+                        origen.get("country", "AR"), dia_habil,
+                    )
+                    msg_ref = str(uuid.uuid4())
+                    resp = requests.post(
+                        f"{self.base_url}/rates",
+                        json=cuerpo,
+                        auth=(self.api_key, self.api_secret),
+                        headers={
+                            "Content-Type": "application/json",
+                            "Accept": "application/json",
+                            "x-version": self.API_VERSION,
+                            "Message-Reference": msg_ref,
+                        },
+                        timeout=30,
+                    )
             if resp.status_code != 200:
                 codigo = self._codigos_error(resp)
                 print(f"[dhl] POST /rates error HTTP {resp.status_code}; "
                       f"código={codigo}; ref={msg_ref}")
+                if self._codigo_negocio_error(resp) == "996":
+                    return {
+                        "encontrado": False,
+                        "error": (
+                            "DHL no encontró un día hábil de retiro para esta ruta. "
+                            "Probá nuevamente más tarde."
+                        ),
+                    }
                 return {"encontrado": False, "error": self._error_legible(resp)}
             return self._parsear_rates(resp.json())
         except Exception as e:
@@ -515,44 +665,9 @@ class DHLClient(CarrierBase):
 
         try:
             url = f"{self.base_url}/rates"
-            params = {
-                "accountNumber": cuenta,
-                "originCountryCode": origen.get("country", "AR"),
-                "originCityName": origen.get("city", "BUENOS AIRES"),
-                "originPostalCode": self._codigo_postal(
-                    origen.get("country", "AR"), origen.get("postal_code", "1043")
-                ),
-                "destinationCountryCode": destino.get("country", "US"),
-                "destinationCityName": destino.get("city", ""),
-                "destinationPostalCode": self._codigo_postal(
-                    destino.get("country", "US"), destino.get("postal_code", "")
-                ),
-                "weight": paquete.get("peso_kg", 0.5),
-                # El wizard usa *_cm; el cotizador rápido usa las claves
-                # cortas. Aceptar ambos evita cotizar 30×20×10 y emitir luego
-                # las medidas reales, una diferencia directa de facturación.
-                # Nunca truncar hacia abajo: 48,9 cm no puede cotizarse como
-                # 48 y emitirse después con 48,9. Redondear hacia arriba evita
-                # subcotizar peso volumétrico.
-                "length": math.ceil(float(paquete.get("largo_cm") or paquete.get("largo") or 30)),
-                "width":  math.ceil(float(paquete.get("ancho_cm") or paquete.get("ancho") or 20)),
-                "height": math.ceil(float(paquete.get("alto_cm") or paquete.get("alto") or 10)),
-                # OBLIGATORIO según el OpenAPI oficial (required: true). Antes
-                # iba en None y el filtro de abajo lo borraba, con el comentario
-                # "DHL usa la fecha del día si se omite" — la spec dice lo
-                # contrario y sin este parámetro DHL contesta 400 SIEMPRE.
-                # Formato YYYY-MM-DD, no ISO con hora.
-                "plannedShippingDate": (
-                    datetime.now(zona_origen).date() + timedelta(days=1)
-                ).isoformat(),
-                # Si la fecha cae domingo o feriado, DHL devuelve los productos
-                # del próximo día hábil en vez de una lista vacía.
-                "nextBusinessDay": "true",
-                "isCustomsDeclarable": "true",
-                "unitOfMeasurement": "metric",
-            }
-            # Limpiar los None para no romper el querystring
-            params = {k: v for k, v in params.items() if v is not None}
+            params = self._parametros_rates_una_pieza(
+                origen, destino, paquete, cuenta, zona_origen,
+            )
 
             resp = requests.get(
                 url,

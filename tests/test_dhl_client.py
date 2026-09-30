@@ -318,6 +318,66 @@ def test_varias_cajas_van_por_post_con_una_entrada_cada_una():
     assert pk[1]["dimensions"]["length"] == 40.0
 
 
+def test_multibulto_reintenta_con_la_fecha_habil_que_informa_dhl():
+    """El código 996 es un feriado, no falta de cobertura multibulto."""
+    feriado = mock.Mock(status_code=404)
+    feriado.json.return_value = {
+        "status": "404", "title": "Product not found",
+        "detail": "996: The requested product(s) not available for the requested pickup date.",
+    }
+    disponible = mock.Mock(status_code=200)
+    disponible.json.return_value = {"products": [_producto("P", 240.0)]}
+    producto_fecha = _producto("P", 120.0)
+    producto_fecha["pickupCapabilities"] = {
+        "localCutoffDateAndTime": "2099-10-06T17:00:00",
+    }
+    proximo_dia = mock.Mock(status_code=200)
+    proximo_dia.json.return_value = {"products": [producto_fecha]}
+
+    entorno = {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_EXPO": "741622792",
+    }
+    with mock.patch.dict(os.environ, entorno, clear=True), \
+         mock.patch(
+             "core.dhl_client.requests.post",
+             side_effect=[feriado, disponible],
+         ) as post, \
+         mock.patch(
+             "core.dhl_client.requests.get", return_value=proximo_dia,
+         ) as get:
+        out = DHLClient().get_rates(ORIGEN, DESTINO, paquetes=BULTOS)
+
+    assert out["encontrado"]
+    assert post.call_count == 2
+    assert get.call_count == 1
+    segundo_body = post.call_args_list[1].kwargs["json"]
+    assert segundo_body["plannedShippingDateAndTime"].startswith(
+        "2099-10-06T08:00:00GMT"
+    )
+    assert len(segundo_body["packages"]) == 2
+
+
+def test_multibulto_no_reintenta_un_rechazo_que_no_es_feriado():
+    rechazo = mock.Mock(status_code=404)
+    rechazo.json.return_value = {
+        "status": "404", "title": "Product not found",
+        "detail": "999: Process failure occurred.",
+    }
+    entorno = {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_EXPO": "741622792",
+    }
+    with mock.patch.dict(os.environ, entorno, clear=True), \
+         mock.patch("core.dhl_client.requests.post", return_value=rechazo) as post, \
+         mock.patch("core.dhl_client.requests.get") as get:
+        out = DHLClient().get_rates(ORIGEN, DESTINO, paquetes=BULTOS)
+
+    assert not out["encontrado"]
+    assert post.call_count == 1
+    get.assert_not_called()
+
+
 def test_la_cuenta_va_en_accounts_no_en_la_raiz():
     """
     En el GET era un query param suelto; en el POST es un array. Y la raíz

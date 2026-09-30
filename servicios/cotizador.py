@@ -410,6 +410,11 @@ def cotizar_referencia_couriers(
                 motivo = "La integración todavía no está disponible."
             elif tarjeta.get("estado") == "sin_multibulto":
                 motivo = "No cotiza esta cantidad de bultos."
+            elif "día hábil de retiro" in error_interno:
+                motivo = (
+                    "DHL no encontró una fecha de retiro disponible para esta ruta. "
+                    "Probá nuevamente más tarde."
+                )
             else:
                 motivo = "No devolvió tarifa para esta referencia."
             no_disponibles.append({
