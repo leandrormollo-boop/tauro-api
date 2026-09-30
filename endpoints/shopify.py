@@ -45,7 +45,7 @@ router = APIRouter(prefix="/shopify", tags=["shopify"])
 _PAGINA = """<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{titulo} · TAURO Solutions</title>
+<title>{titulo} · Tauro Solutions Ar</title>
 <style>
 body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
 background:#0c0a14;color:#f4f5f7;font-family:'Helvetica Neue',system-ui,sans-serif;text-align:center;padding:24px}}
@@ -85,7 +85,7 @@ def _app_home_html(api_key: str, nonce: str, reconnect_url: str) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="shopify-api-key" content="{api_key}">
-<title>TAURO Solutions</title>
+<title>Tauro Solutions Ar</title>
 <style nonce="{nonce}">
   :root {{ color-scheme: light; }}
   body {{ margin:0; background:#f6f6f7; color:#202223;
@@ -176,7 +176,7 @@ def _app_home_html(api_key: str, nonce: str, reconnect_url: str) -> str:
   }});
 </script>
 </head><body>
-<ui-title-bar title="TAURO Solutions"></ui-title-bar>
+<ui-title-bar title="Tauro Solutions Ar"></ui-title-bar>
 <main>
   <div class="grid">
     <section class="card" aria-labelledby="orders-title">
@@ -313,7 +313,7 @@ def install(request: Request, shop: str = "", host: str = ""):
         return _pagina(
             "Abrí TAURO desde tu tienda",
             "Shopify no incluyó una tienda válida. Volvé al panel "
-            "de Shopify y abrí TAURO Solutions desde Apps.",
+            "de Shopify y abrí Tauro Solutions Ar desde Apps.",
             '<a href="https://admin.shopify.com">Volver a Shopify</a>',
         )
 

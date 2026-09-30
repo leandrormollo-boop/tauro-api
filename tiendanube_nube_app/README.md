@@ -1,4 +1,4 @@
-# TAURO Solutions Ar · NubeSDK
+# Tauro Solutions Ar · NubeSDK
 
 Extensión mínima de checkout para la aplicación pública de envíos de TAURO.
 Corre dentro del Web Worker aislado de Tiendanube y personaliza únicamente la

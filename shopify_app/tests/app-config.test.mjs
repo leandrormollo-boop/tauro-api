@@ -17,6 +17,7 @@ const expectedScopes = [
 ];
 
 test("declares the embedded TAURO App Home surface", () => {
+  assert.match(manifest, /^name = "Tauro Solutions Ar"$/m);
   assert.match(manifest, /^application_url = "https:\/\/taurosolutions\.ar\/shopify\/app"$/m);
   assert.match(manifest, /^embedded = true$/m);
   assert.match(manifest, /^extension_directories = \[\]$/m);

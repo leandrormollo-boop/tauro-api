@@ -66,7 +66,7 @@ def _payload(
         "items": items,
         "carrier": {
             "id": carrier_id,
-            "name": "TAURO Solutions Ar",
+            "name": "Tauro Solutions Ar",
             "options": [
                 {
                     "id": option_id,

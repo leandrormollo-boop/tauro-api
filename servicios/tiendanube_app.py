@@ -31,7 +31,7 @@ from psycopg2.extras import Json
 from core.database import get_conn
 
 OAUTH_URL = "https://www.tiendanube.com/apps/authorize/token"
-USER_AGENT = "TAURO Solutions (cotizaciones@taurosolutions.ar)"
+USER_AGENT = "Tauro Solutions Ar (cotizaciones@taurosolutions.ar)"
 OAUTH_SECRET_MARKER = "oauth:tiendanube-app"
 
 # Sólo estos eventos se registran por tienda con POST /webhooks. Los avisos

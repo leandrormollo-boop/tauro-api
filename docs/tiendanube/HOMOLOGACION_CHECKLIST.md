@@ -1,4 +1,4 @@
-# Checklist de homologación · TAURO Solutions Ar
+# Checklist de homologación · Tauro Solutions Ar
 
 No marcar un control por intención. Cada `OK` necesita evidencia reproducible.
 

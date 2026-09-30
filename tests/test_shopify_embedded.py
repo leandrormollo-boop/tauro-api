@@ -131,6 +131,8 @@ def test_app_home_carga_app_bridge_primero_y_csp_es_por_tienda(monkeypatch):
     scripts = [line.strip() for line in body.splitlines() if "<script" in line]
 
     assert response.status_code == 200
+    assert "<title>Tauro Solutions Ar</title>" in body
+    assert '<ui-title-bar title="Tauro Solutions Ar"></ui-title-bar>' in body
     assert "cdn.shopify.com/shopifycloud/app-bridge.js" in scripts[0]
     assert "polaris-1.js" in scripts[1]
     assert body.index("app-bridge.js") < body.index("polaris-1.js")

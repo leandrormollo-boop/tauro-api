@@ -374,7 +374,7 @@ def tiendanube_callback(request: Request, code: str = "", state: str = ""):
         return HTMLResponse(
             f"""<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{titulo} · TAURO Solutions</title><style>
+<title>{titulo} · Tauro Solutions Ar</title><style>
 body{{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
 background:#0c0a14;color:#f4f5f7;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;
 text-align:center;padding:24px;}} .b{{max-width:480px;}}

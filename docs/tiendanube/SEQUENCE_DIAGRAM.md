@@ -1,4 +1,4 @@
-# Diagrama de secuencia · TAURO Solutions Ar
+# Diagrama de secuencia · Tauro Solutions Ar
 
 Este es el artefacto técnico base para homologación. No existe polling de
 pedidos: la sincronización parte de webhooks.
@@ -12,7 +12,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant C as Courier nacional
 
-    M->>TN: Instalar TAURO Solutions Ar
+    M->>TN: Instalar Tauro Solutions Ar
     TN->>API: GET callback?code=...
     API->>TN: POST OAuth token
     TN-->>API: access_token + store_id

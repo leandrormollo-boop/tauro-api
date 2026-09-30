@@ -1,4 +1,4 @@
-# TAURO Solutions para Shopify
+# Tauro Solutions Ar para Shopify
 
 Configuración Shopify CLI para la app pública embebida de TAURO. App Home se
 sirve desde `https://taurosolutions.ar/shopify/app` dentro de Shopify Admin; el

@@ -485,6 +485,6 @@ def test_install_fallback_no_pide_dominio_manual():
     fin = shopify.index("# Reintento explícito", inicio)
     fallback = shopify[inicio:fin]
 
-    assert "abrí TAURO Solutions desde Apps" in fallback
+    assert "abrí Tauro Solutions Ar desde Apps" in fallback
     assert "?shop=tutienda" not in fallback
     assert "agregá tu dominio" not in fallback

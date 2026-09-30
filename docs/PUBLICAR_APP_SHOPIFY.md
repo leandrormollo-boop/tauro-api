@@ -1,4 +1,4 @@
-# Publicar TAURO Solutions en el Shopify App Store
+# Publicar Tauro Solutions Ar en el Shopify App Store
 
 Guía para preparar el futuro envío al App Store. Actualizada 25/09/2026. Este
 cambio deja un candidato local: no despliega, no modifica Dev Dashboard y no
@@ -83,7 +83,7 @@ Shopify requiere desplegar y aceptar una vez los permisos nuevos:
 ## Configuración operativa
 
 ### 1. Credenciales requeridas (no verificadas ni modificadas en este cambio)
-- `SHOPIFY_PUBLIC_API_KEY` y `SHOPIFY_PUBLIC_API_SECRET` (app pública TAURO):
+- `SHOPIFY_PUBLIC_API_KEY` y `SHOPIFY_PUBLIC_API_SECRET` (app pública **Tauro Solutions Ar**):
   toda instalación nueva usa este par.
 - Durante la migración de Pesca Jacks, conservar `SHOPIFY_API_KEY` y
   `SHOPIFY_API_SECRET` con la app histórica. Sus webhooks siguen aceptándose
@@ -119,7 +119,7 @@ Una reinstalación que ocurra durante el claim cambia la generación y hace que 
 operación falle sin vincular. No existe alta automática a partir de una sesión
 TAURO ambiental.
 
-### 2. Dev Dashboard → Apps → TAURO → Configuration — pendiente de confirmar
+### 2. Dev Dashboard → Apps → Tauro Solutions Ar → Configuration — pendiente de confirmar
 
 Los valores siguientes son el contrato local esperado. No se publicaron con
 CLI ni se cambió configuración remota al preparar este candidato.
@@ -140,7 +140,7 @@ CLI ni se cambió configuración remota al preparar este candidato.
 
 | Campo | Qué poner |
 |---|---|
-| **Nombre** | TAURO Solutions |
+| **Nombre** | Tauro Solutions Ar |
 | **Ícono** | 1200×1200 px, la T de la marca sobre violeta `#7c5cf6` |
 | **Tagline** | Envíos internacionales puerta a puerta desde Argentina |
 | **Categoría** | Shipping and delivery |

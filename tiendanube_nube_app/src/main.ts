@@ -14,7 +14,7 @@ export function buildTauroLabels(
   for (const option of options ?? []) {
     if (option.code !== TAURO_NACIONAL_CODE) continue;
     labels[option.id] = {
-      title: "TAURO Solutions Ar",
+      title: "Tauro Solutions Ar",
       description: "Entrega a domicilio con seguimiento de punta a punta.",
     };
   }

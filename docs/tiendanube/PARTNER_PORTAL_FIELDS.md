@@ -1,6 +1,6 @@
 # Configuración del Portal de Partners
 
-Valores candidatos para **TAURO Solutions Ar**. Los secretos no se copian a este
+Valores candidatos para **Tauro Solutions Ar**. Los secretos no se copian a este
 archivo ni a tickets de homologación.
 
 ## Aplicación
@@ -44,7 +44,7 @@ solicitar Products ni Locations mientras el producto no use esos endpoints.
 
 ## Admin links
 
-Crear dos links con el texto **TAURO Solutions Ar - Gestionar envíos**:
+Crear dos links con el texto **Tauro Solutions Ar - Gestionar envíos**:
 
 1. Detalle de pedido.
 2. Acción masiva en el listado de pedidos.

@@ -1,4 +1,4 @@
-# TAURO Solutions Ar en Tiendanube
+# Tauro Solutions Ar en Tiendanube
 
 Estado de trabajo actualizado: 25/09/2026. Pipeline de Shipping/Labels y rutas
 de privacidad preparados localmente para UAT; todavía sin desplegar, homologar
@@ -16,7 +16,7 @@ la homologación síncrona de Tiendanube.
 - Ingreso del pedido al portal TAURO sin emitir una guía automáticamente.
 - Contrato de Fulfillment Orders preparado para actualizar tracking; la
   ejecución OCA permanece bloqueada hasta UAT.
-- Callback de tarifas `TAURO Solutions Ar` protegido por token por tienda.
+- Callback de tarifas `Tauro Solutions Ar` protegido por token por tienda.
 - El token de cada callback se acepta únicamente si instalación activa,
   configuración Shipping, mapping TAURO, dueño e `install_generation` coinciden.
 - Contrato fail-closed: sin adapter nacional operativo no se publica tarifa.
@@ -34,7 +34,7 @@ la homologación síncrona de Tiendanube.
 
 ## Bloqueadores externos y comerciales
 
-1. Crear o confirmar la app **TAURO Solutions Ar** en Partners, categoría Shipping.
+1. Crear o confirmar la app **Tauro Solutions Ar** en Partners, categoría Shipping.
 2. Confirmar con Partners los scopes mínimos candidatos: `write_shipping`,
    `read_orders` y `write_fulfillment_orders`. No pedir `read_customers`: la
    v1 no consulta el recurso Customer y los avisos de privacidad no lo exigen.

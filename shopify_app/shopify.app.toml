@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "c8357c0bfb8cdd371729d8bc321a6bd6"
-name = "TAURO Solutions"
+name = "Tauro Solutions Ar"
 application_url = "https://taurosolutions.ar/shopify/app"
 embedded = true
 # App Home la sirve el backend FastAPI. La v1 no incluye Functions ni
