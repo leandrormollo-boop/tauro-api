@@ -33,7 +33,7 @@ function PublicQuoteGlobe({ origin, destination, countries, compact = false, bus
   <div className="quote-map-heading"><span className="quote-map-live-dot" aria-hidden="true"></span></div>
   <div className="quote-map-art">
 
-    <canvas data-map-canvas tabIndex={compact ? -1 : 0} role="img" aria-roledescription="globo interactivo" aria-label="Mapa del mundo. Arrastrá para girar. Con teclado, usá las flechas para girar, más y menos para acercar y alejar, e Inicio para volver a la ruta."></canvas>
+    <canvas data-map-canvas aria-hidden={compact} tabIndex={compact ? -1 : 0} role="img" aria-roledescription="globo interactivo" aria-label="Mapa del mundo. Arrastrá para girar. Con teclado, usá las flechas para girar, más y menos para acercar y alejar, e Inicio para volver a la ruta."></canvas>
     <svg className="quote-map-glint" data-map-glint aria-hidden="true" focusable="false" preserveAspectRatio="none">
       <defs>
         <linearGradient data-map-glint-gradient x1="0" y1="0" x2="1" y2="0">
