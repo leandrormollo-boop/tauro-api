@@ -378,6 +378,13 @@ def cliente_actual(token: Optional[str] = Cookie(None)) -> str:
     return cliente
 
 
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+def acceso_portal():
+    """Acceso compartible; el inicio conserva la validación de sesión."""
+    return RedirectResponse(url="/portal/home", status_code=303)
+
+
 # ── Login ───────────────────────────────────────────────────
 _QUOTE_ID_PORTAL_RE = re.compile(r"^Q-[A-Za-z0-9_-]{20,64}$")
 
