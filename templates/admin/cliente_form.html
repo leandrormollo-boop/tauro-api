@@ -189,12 +189,24 @@
       <textarea name="notas" rows="2" placeholder="Observaciones...">{{ cliente.notas if cliente else '' }}</textarea>
     </div>
 
-    <div class="form-group">
-      <label>Estado</label>
-      <select name="activo">
-        <option value="true" {% if not cliente or cliente.activo %}selected{% endif %}>Activo</option>
-        <option value="false" {% if cliente and not cliente.activo %}selected{% endif %}>Inactivo</option>
-      </select>
+    <div class="form-grid-2">
+      <div class="form-group">
+        <label>Estado</label>
+        <select name="activo">
+          <option value="true" {% if not cliente or cliente.activo %}selected{% endif %}>Activo</option>
+          <option value="false" {% if cliente and not cliente.activo %}selected{% endif %}>Inactivo</option>
+        </select>
+      </div>
+      {% if cliente %}
+      <div class="form-group">
+        <label>Tipo de cuenta</label>
+        <select name="cuenta_prueba">
+          <option value="false" {% if not cliente.get('test') %}selected{% endif %}>Cliente real</option>
+          <option value="true" {% if cliente.get('test') %}selected{% endif %}>Cuenta de prueba</option>
+        </select>
+        <small style="color:var(--fg-4);">Una cuenta de prueba no aparece en Clientes, bandeja ni totales del negocio. El cambio queda auditado.</small>
+      </div>
+      {% endif %}
     </div>
 
     <div style="display:flex;gap:12px;margin-top:8px;">

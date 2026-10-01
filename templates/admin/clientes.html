@@ -47,4 +47,15 @@
     </table>
   </div>
 </div>
+{% if clientes_prueba %}
+<div class="card" style="margin-top:16px;">
+  <div class="eyebrow">Cuentas de prueba</div>
+  <p style="color:var(--fg-3);margin:4px 0 8px;">Fuera de la lista, la bandeja y los totales del negocio. Si una es un cliente real, cambiá «Tipo de cuenta» en su configuración.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% for c in clientes_prueba %}
+    <a class="badge warn" href="/admin/clientes/{{ c.cliente_id|urlencode }}/editar">{{ c.cliente_id }}{% if c.email %} · {{ c.email }}{% endif %}</a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 {% endblock %}
