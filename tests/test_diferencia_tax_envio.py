@@ -55,9 +55,13 @@ def test_cuenta_muestra_tax_como_fila_independiente_y_la_diferencia_en_el_flete(
     )
 
     assert "'TAX', 'TAX', c.tax_cliente_ars" in servicio
-    assert "'DIFERENCIA', 'Diferencia de envío'" not in servicio
+    # La diferencia desglosada va en la fila del flete; sólo queda una fila
+    # aparte para lo que la conciliación no desglosa (residuo).
+    assert servicio.count("'DIFERENCIA', 'Diferencia de envío'") == 1
+    assert "la conciliación no" in servicio
     assert "e.monto_ars + COALESCE(dif.diferencia_ars, 0) AS debe_ars" in servicio
     assert "tipo IN ('FC', 'PENDIENTE_FACTURA') AND diferencia_detalle IS NOT NULL" in servicio
+    assert "tipo IN ('DIFERENCIA', 'TAX')" in servicio
     assert "m.tipo == 'TAX'" in plantilla
     assert ">TAX</span>" in plantilla
     assert "Con diferencia" in plantilla
