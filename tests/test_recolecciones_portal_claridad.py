@@ -161,6 +161,30 @@ def test_selector_ofrece_guia_vigente_y_envio_nuevo(page):
     assert 'action="/portal/recolecciones"' in body
 
 
+def test_vista_previa_no_ofrece_reservar_ni_cancelar_visitas(page):
+    page['estado'] = 'CANCELADA'
+    response = pc.recolecciones_view(request(), cliente='DEMO', envio=81)
+    preview = pc.templates.TemplateResponse(
+        request=request(), name='portal/recolecciones.html',
+        context={**response.context, 'vista_previa_recolecciones': True},
+    ).body.decode()
+    assert 'Vista previa de diseño.' in preview
+    assert 'desde acá no se reservan ni cancelan retiros' in preview
+    assert 'disabled aria-describedby="pickup-preview-notice"' in preview
+    assert 'Cancelar recolección' not in preview
+    assert 'pickup-preview-notice' not in response.body.decode()
+
+
+def test_vista_previa_oculta_cancelacion_pero_portal_real_la_conserva(page):
+    response = pc.recolecciones_view(request(), cliente='DEMO')
+    preview = pc.templates.TemplateResponse(
+        request=request(), name='portal/recolecciones.html',
+        context={**response.context, 'vista_previa_recolecciones': True},
+    ).body.decode()
+    assert 'Cancelar recolección' in response.body.decode()
+    assert 'Cancelar recolección' not in preview
+
+
 def test_selector_excluye_guia_que_ya_tiene_retiro(page,monkeypatch):
     monkeypatch.setattr(pc,'listar_solicitudes_cliente',lambda *_ ,**__: [{
         'id':81,'tracking':'DEMO-TRACKING','estado':'GUIA_LISTA','courier':'DHL',

@@ -2,6 +2,7 @@
 {% block title %}Recolecciones{% endblock %}
 
 {% block content %}
+{% set vista_previa_recolecciones = vista_previa_recolecciones|default(false) %}
 <section class="pickups-page">
 <div class="page-title pickup-page-title">
     <div class="page-title-row">
@@ -13,6 +14,14 @@
         <a class="btn btn-primary" href="#programar-recoleccion">Programar nueva recolección</a>
     </div>
 </div>
+
+{% if vista_previa_recolecciones %}
+<div class="msg warn" id="pickup-preview-notice" role="status">
+    <strong>Vista previa de diseño.</strong> Las guías y recolecciones de esta pantalla son de ejemplo.
+    Podés elegir una guía y revisar el formulario, pero desde acá no se reservan ni cancelan retiros.
+    Para operar, ingresá a <a href="https://taurosolutions.ar/portal/recolecciones">tu portal de TAURO</a>.
+</div>
+{% endif %}
 
 {% from 'portal/_recoleccion_resumen.html' import comprobante_retiro with context %}
 {% set qp = request.query_params %}
@@ -39,7 +48,7 @@
     {% if recolecciones %}
     <div class="pickup-list">
         {% for r in recolecciones %}
-            {{ comprobante_retiro(r, destacado=seleccionada and seleccionada.id == r.id, mostrar_cancelar=true) }}
+            {{ comprobante_retiro(r, destacado=seleccionada and seleccionada.id == r.id, mostrar_cancelar=not vista_previa_recolecciones) }}
         {% endfor %}
     </div>
     {% else %}
@@ -154,7 +163,7 @@
                 </div>
                 <div class="pickup-submit-row">
                     <span>Prepará los paquetes cerrados y etiquetados.</span>
-                    <button type="submit" class="btn btn-primary">Programar recolección con {{ envio_pre.courier }}</button>
+                    <button type="submit" class="btn btn-primary" {% if vista_previa_recolecciones %}disabled aria-describedby="pickup-preview-notice"{% endif %}>Programar recolección con {{ envio_pre.courier }}</button>
                 </div>
             </form>
             {% endif %}
@@ -175,7 +184,7 @@
                     <div class="form-group"><label for="manual-peso">Peso total (kg)</label><input type="text" name="peso_kg" id="manual-peso" inputmode="decimal" data-numero="decimal" value="1"></div>
                 </div>
                 <div class="form-group"><label for="manual-obs">Indicaciones para el chofer</label><input type="text" name="instrucciones" id="manual-obs" placeholder="Timbre, contacto o acceso"></div>
-                <button type="submit" class="btn btn-primary">Programar recolección</button>
+                <button type="submit" class="btn btn-primary" {% if vista_previa_recolecciones %}disabled aria-describedby="pickup-preview-notice"{% endif %}>Programar recolección</button>
             </form>
         </details>
         {% elif not puede_recolectar and not dhl_requiere_envio %}
