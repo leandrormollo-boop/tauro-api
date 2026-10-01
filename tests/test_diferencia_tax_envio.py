@@ -32,7 +32,8 @@ def test_portal_resume_el_total_y_mantiene_el_desglose_en_el_detalle():
         encoding="utf-8"
     )
 
-    assert "ARS · costo final" in listado
+    # El #41 rediseñó la lista: el total registrado del envío es el costo final.
+    assert "Total registrado · ARS" in listado
     assert "Ver desglose" in listado
     assert "envio-price-extra diferencia" in listado
     assert "envio-price-extra tax" in listado
@@ -43,6 +44,24 @@ def test_portal_resume_el_total_y_mantiene_el_desglose_en_el_detalle():
     assert "Precio final del envío" in detalle
     assert consultas.count("AS diferencia_flete_ars") == 3
     assert consultas.count("AS tax_cliente_ars") == 3
+
+
+def test_cuenta_muestra_tax_como_fila_independiente_y_la_diferencia_en_el_flete():
+    servicio = (ROOT / "servicios" / "cuenta_corriente.py").read_text(
+        encoding="utf-8"
+    )
+    plantilla = (ROOT / "templates" / "portal" / "cuenta_movimientos.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "'TAX', 'TAX', c.tax_cliente_ars" in servicio
+    assert "'DIFERENCIA', 'Diferencia de envío'" not in servicio
+    assert "e.monto_ars + COALESCE(dif.diferencia_ars, 0) AS debe_ars" in servicio
+    assert "tipo IN ('FC', 'PENDIENTE_FACTURA') AND diferencia_detalle IS NOT NULL" in servicio
+    assert "m.tipo == 'TAX'" in plantilla
+    assert ">TAX</span>" in plantilla
+    assert "Con diferencia" in plantilla
+    assert "peso facturado por el courier" in plantilla
 
 
 def test_casillero_tax_admin_agrega_linea_impuesto_al_tracking(monkeypatch):
