@@ -130,7 +130,13 @@ jobs:
             tests/test_operator_catalog_ui.py \
             tests/test_precio_web_fedex.py \
             tests/test_smart_select_public.py \
-            tests/test_web_copy_parise_369.py
+            tests/test_web_copy_parise_369.py \
+            tests/test_importacion_cuenta_cliente.py \
+            tests/test_cuenta_corriente_presentacion_postgres.py \
+            tests/test_diferencia_tax_envio.py \
+            tests/test_diferencias_cliente.py \
+            tests/test_portal_raiz.py \
+            tests/test_cliente_cuenta_prueba_postgres.py
 
   web-audit:
     name: Build web y contratos JavaScript

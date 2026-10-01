@@ -1360,8 +1360,24 @@ def admin_clientes(request: Request, admin_token: Optional[str] = Cookie(None)):
         cliente["saldo_ars"] = financiero.get("saldo", 0)
     return templates.TemplateResponse(
         request=request, name="admin/clientes.html",
-        context={"seccion": "clientes", "clientes": clientes},
+        context={
+            "seccion": "clientes",
+            "clientes": clientes,
+            "clientes_prueba": _get_clientes_prueba(),
+        },
     )
+
+
+def _get_clientes_prueba():
+    """Cuentas marcadas como prueba: fuera de listados y totales, pero
+    accesibles para poder volverlas reales desde su configuración."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT cliente_id, email, nombre FROM clientes "
+                "WHERE test=TRUE ORDER BY cliente_id"
+            )
+            return [dict(r) for r in cur.fetchall()]
 
 
 @router.get("/bandeja", response_class=HTMLResponse)
@@ -2420,11 +2436,15 @@ def admin_cliente_editar(
     tax_paga: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
+    # Cuenta de prueba: queda fuera de listados, bandeja y totales del
+    # negocio. Se cambia sólo desde acá y queda auditado.
+    cuenta_prueba: str = Form("false"),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
 
+    es_prueba = cuenta_prueba.strip().lower() == "true"
     try:
         markup_pct_num = _numero_form(markup_pct, "Porcentaje general", minimo=0)
         pricing = parse_pricing_value(
@@ -2444,12 +2464,19 @@ def admin_cliente_editar(
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
+                    "SELECT test FROM clientes WHERE cliente_id=%s FOR UPDATE",
+                    (cliente_id.strip().upper(),),
+                )
+                anterior = cur.fetchone()
+                if anterior is None:
+                    raise ValueError("Cliente inexistente.")
+                cur.execute(
                     """
                     UPDATE clientes SET
                         email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
                         direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s,
                         markup_nac_tipo=%s, markup_nac_valor=%s,
-                        tax_paga=%s
+                        tax_paga=%s, test=%s
                     WHERE cliente_id=%s
                     """,
                     (
@@ -2460,9 +2487,18 @@ def admin_cliente_editar(
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
                         nac_tipo, nac_valor, normalizar_tax(tax_paga),
+                        es_prueba,
                         cliente_id.strip().upper(),
                     ),
                 )
+                if bool(anterior["test"]) != es_prueba:
+                    from servicios.auditoria import registrar_desde_request_con_cursor
+                    registrar_desde_request_con_cursor(
+                        cur, request,
+                        event="admin.cliente_cuenta_prueba", actor_type="admin",
+                        actor_ref=cliente_id.strip().upper(), status_code=303,
+                        metadata={"antes": bool(anterior["test"]), "despues": es_prueba},
+                    )
     except Exception as e:
         cliente_form = {
             "cliente_id": cliente_id.strip().upper(),
@@ -2482,6 +2518,7 @@ def admin_cliente_editar(
             "tax_paga": normalizar_tax(tax_paga),
             "notas": notas,
             "activo": activo.lower() == "true",
+            "test": es_prueba,
         }
         return templates.TemplateResponse(
             request=request, name="admin/cliente_form.html",
