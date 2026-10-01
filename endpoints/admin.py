@@ -398,6 +398,13 @@ def json_dumps_pretty(value: dict) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+def acceso_admin():
+    """Acceso directo; el panel conserva la validación de sesión admin."""
+    return RedirectResponse(url="/admin/home", status_code=303)
+
+
 # ── Login ───────────────────────────────────────────────────
 
 def _totp_secret() -> str:
