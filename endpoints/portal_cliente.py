@@ -884,6 +884,22 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
     )
 
 
+@router.get("/estadisticas", response_class=HTMLResponse)
+def estadisticas(request: Request, cliente: str = Depends(cliente_actual)):
+    """Panorama operativo real del cliente, sin mezclar datos de cuenta."""
+    historial = listar_solicitudes_cliente(cliente, limite=None)
+    embudo = embudo_envios(cliente)
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/estadisticas.html",
+        context={
+            "cliente": cliente,
+            "embudo": embudo,
+            "resumen_inicio": resumen_inicio_cliente(historial, embudo),
+        },
+    )
+
+
 # ── Rastreo: resuelve el courier antes de mandar afuera ─────
 @router.get("/track")
 def track_redirect(nro: str = "", cliente: str = Depends(cliente_actual)):

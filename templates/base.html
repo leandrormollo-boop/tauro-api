@@ -24,7 +24,7 @@
     })();
     </script>
     <link rel="stylesheet" href="/static/css/tauro.css?v=49">
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=5">{% endif %}
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=6">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=1">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/documentos.css?v=3">
     <script src="/static/js/documentos.js?v=3" defer></script>{% endif %}
@@ -137,6 +137,11 @@
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8.5 12 3 3 8.5v7L12 21l9-5.5z"/><path d="M3.3 8.7 12 14l8.7-5.3M12 21v-7"/></svg>
                 Mis envíos
                 {% if pend.envios %}<span class="side-badge" title="{{ pend.envios }} guía(s) lista(s) para descargar">{{ pend.envios }}</span>{% endif %}
+            </a>
+
+            <a href="/portal/estadisticas" class="side-item {% if '/estadisticas' in path %}active{% endif %}">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+                Estadísticas
             </a>
 
             <a href="/portal/tienda" class="side-item {% if '/tienda' in path %}active{% endif %}">
