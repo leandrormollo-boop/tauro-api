@@ -45,6 +45,7 @@ def test_identidad_de_edicion_invalida_no_se_convierte_en_alta(portal):
 
 def test_edicion_recotiza_y_guarda_mismo_id(portal, monkeypatch):
     created, quotes = portal
+    quotes.return_value[0]['_base_interna'] = {'origen': 'cotizador_privado'}
     sol = pendiente()
     monkeypatch.setattr(pc, 'obtener_solicitud_de_cliente', lambda *a: sol)
     editar = Mock(return_value=sol)
@@ -55,12 +56,16 @@ def test_edicion_recotiza_y_guarda_mismo_id(portal, monkeypatch):
     assert editar.call_args.args[3]['precio_tauro_ars'] == 195000
     assert len(editar.call_args.args[3]['bultos'][0]['items_invoice']) == 2
     quotes.assert_called_once()
+    assert quotes.call_args.kwargs['incluir_base_interna'] is True
+    assert editar.call_args.kwargs['base_interna'] == {'origen': 'cotizador_privado'}
+    assert '_base_interna' not in editar.call_args.args[3]
     created.assert_not_called()
 
 
 @pytest.mark.parametrize('modo', ['ajeno', 'emitido', 'precio', 'version'])
 def test_error_edicion_no_crea_otra_solicitud(portal, monkeypatch, modo):
-    created, _ = portal
+    created, quotes = portal
+    quotes.return_value[0]['_base_interna'] = {'origen': 'cotizador_privado'}
     sol = None if modo == 'ajeno' else pendiente(tracking='123') if modo == 'emitido' else pendiente()
     monkeypatch.setattr(pc, 'obtener_solicitud_de_cliente', lambda *a: sol)
     editar = Mock(side_effect=ValueError('El envío cambió mientras lo editabas.'))

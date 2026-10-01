@@ -284,6 +284,35 @@ def test_lecturas_reales_aislan_cuentas_y_eligen_ultima_reserva(guias_db,monkeyp
     assert rec.obtener_de_solicitud('WAIMAO',ajena) is None
 
 
+def test_join_recoleccion_no_expone_metadatos_de_guia_ajena(guias_db,monkeypatch):
+    conexion,_=guias_db
+    monkeypatch.setattr(rec,'get_conn',conexion)
+    monkeypatch.setattr(rec,'_ensure_tabla',lambda: None)
+    ajena=crear_guia(conexion,cliente='DEMO')
+    with conexion() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''UPDATE solicitudes_guia
+                SET tracking='TRACKING-SECRETO-DEMO',dest_nombre='DESTINATARIO SECRETO DEMO'
+                WHERE id=%s''',(ajena,))
+            cur.execute('''INSERT INTO recolecciones
+                (cliente_id,solicitud_id,fecha,ready_time,close_time,bultos,peso_kg,
+                 courier,estado,confirmation_code)
+                VALUES('WAIMAO',%s,'2026-09-18','09:00','17:00',1,1,'DHL',
+                       'AGENDADA','RESERVA-WAIMAO') RETURNING id''',(ajena,))
+            rec_id=cur.fetchone()['id']
+
+    listado=rec.listar('WAIMAO')
+    assert len(listado)==1
+    assert listado[0]['confirmation_code']=='RESERVA-WAIMAO'
+    assert listado[0]['envio_tracking'] is None
+    assert listado[0]['envio_destinatario'] is None
+    detalle=rec.obtener('WAIMAO',rec_id)
+    assert detalle['envio_tracking'] is None
+    assert detalle['envio_destinatario'] is None
+    assert rec.listar_de_solicitudes('WAIMAO',[ajena])=={}
+    assert rec.obtener_de_solicitud('WAIMAO',ajena) is None
+
+
 def test_error_local_de_bultos_conserva_guia_sin_llamar_courier(monkeypatch):
     create_mock=mock.Mock(side_effect=AssertionError('no crear'))
     monkeypatch.setattr(rec,'crear',create_mock)

@@ -1,6 +1,8 @@
 """Edición de una solicitud propia: nunca modifica una guía emitida."""
 import json
+import uuid
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from core.database import get_conn
 from servicios.couriers_urls import ambito_envio
@@ -25,7 +27,40 @@ def puede_editar_solicitud(s):
                     "cargo_pendiente", "reemplaza_solicitud_id", "reemplazada_por_solicitud_id")))
 
 
-def editar_solicitud_cliente(solicitud_id, cliente, version, campos):
+def _registrar_tarifa_revision(cur, cliente, campos, base):
+    """La recotización multibulto no trae coti_id: guardar su base privada.
+
+    Se usa la misma transacción del envío. El log legacy normaliza a USD;
+    el snapshot conserva moneda, costo y tipo de cambio originales.
+    Nunca recibe importes del navegador, sólo el resultado del cotizador.
+    """
+    try:
+        precio_ars = Decimal(str(campos['precio_tauro_ars']))
+        precio_usd = Decimal(str(campos['precio_tauro_usd']))
+        costo_ars = Decimal(str(base['costo_courier_estimado_ars']))
+        peso = Decimal(str(base['peso_real_cotizado_kg']))
+        facturable = Decimal(str(base['peso_facturable_cotizado_kg']))
+        if (not all(v.is_finite() for v in (precio_ars, precio_usd, costo_ars, peso, facturable))
+                or min(precio_ars, precio_usd, peso, facturable) <= 0 or costo_ars < 0):
+            raise ValueError
+        costo_usd = costo_ars * precio_usd / precio_ars
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        raise ValueError('La nueva tarifa no tiene una base válida. Volvé a cotizar.')
+    identidad = uuid.uuid4().hex
+    origen, destino = campos.get('remitente_pais'), campos.get('destino_pais')
+    ruta = campos.get('ruta_id') or f'{origen}-{destino}'
+    cur.execute("""INSERT INTO cotizaciones
+        (coti_id, cliente_id, ruta_id, peso_kg, peso_usado_kg,
+         costo_fedex_usd, markup_tipo, markup_valor, precio_final_usd,
+         precio_final_ars, courier, ambito, origen_iso, destino_iso)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'INTERNACIONAL',%s,%s)""",
+        (identidad, cliente, ruta, peso, facturable, costo_usd,
+         base.get('markup_tipo'), base.get('markup_valor'), precio_usd,
+         precio_ars, campos['courier'], origen, destino))
+    return identidad, ruta
+
+
+def editar_solicitud_cliente(solicitud_id, cliente, version, campos, *, base_interna=None):
     """Campos ya validados y recotizados por el mismo POST de creación.
 
     Conserva identidad, vínculo con tienda e idempotencia. El lock compartido
@@ -63,6 +98,11 @@ def editar_solicitud_cliente(solicitud_id, cliente, version, campos):
         nuevos["courier"] = str(nuevos.get("courier") or anterior.get("courier") or "DHL").upper()
         if ambito_envio({**anterior, **nuevos, "ambito": None}) != "internacional":
             raise ValueError("Para un envío nacional iniciá una cotización nacional nueva.")
+        if base_interna is not None:
+            nuevos['coti_id'], nuevos['ruta_id'] = _registrar_tarifa_revision(
+                cur, cliente, {**anterior, **nuevos}, base_interna)
+        cur.execute('SELECT 1 FROM envio_cotizacion_snapshots WHERE solicitud_id=%s', (solicitud_id,))
+        tenia_snapshot = bool(cur.fetchone())
         valores = [json.dumps(v) if k == "bultos" else v for k, v in nuevos.items()]
         sets = ", ".join(f"{k}=%s" for k in nuevos)
         cur.execute(f"UPDATE solicitudes_guia SET {sets}, updated_at=NOW() WHERE id=%s AND cliente_id=%s RETURNING *",
@@ -71,8 +111,19 @@ def editar_solicitud_cliente(solicitud_id, cliente, version, campos):
         # La base archiva la versión anterior y permite el cambio únicamente
         # en esta transacción, antes de cualquier emisión o cargo.
         cur.execute("SELECT set_config('tauro.edicion_solicitud', %s, true)", (str(solicitud_id),))
-        if not _congelar_cotizacion_aceptada_con_cursor(cur, {**actual, "created_at": actual["updated_at"]}, actualizar_pendiente=True):
+        if not _congelar_cotizacion_aceptada_con_cursor(cur, {**actual, "created_at": actual["updated_at"]},
+                base_interna=base_interna, actualizar_pendiente=True):
             raise ValueError("No pudimos guardar la nueva tarifa. Volvé a cotizar antes de guardar los cambios.")
+        if not tenia_snapshot:
+            # Algunas solicitudes anteriores sólo guardaban el precio final.
+            # Conservar lo conocido sin inventar su costo o margen anterior.
+            previa = dict(origen='solicitud_previa_sin_snapshot',
+                precio_cliente_inicial_ars=anterior.get('precio_tauro_ars'),
+                coti_id=anterior.get('coti_id'), courier=anterior.get('courier'),
+                costo_courier_estimado_ars=None, margen_tauro_protegido_ars=None)
+            cur.execute("""INSERT INTO solicitud_cotizacion_revisiones
+                (solicitud_id, snapshot_anterior, cotizacion_nueva) VALUES(%s,%s::jsonb,%s)""",
+                (solicitud_id, json.dumps(previa, default=str), actual['coti_id']))
         registrar_evento_con_cursor(cur, event="portal.solicitud_editada", actor_type="cliente",
             actor_ref=cliente, ip=None, method="POST", path=None, status_code=200,
             success=True, request_id=None, metadata={"solicitud_id": solicitud_id,

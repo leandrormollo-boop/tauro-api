@@ -3402,6 +3402,7 @@ def envio_nuevo_post(
                 )
 
         courier_extra = {}
+        base_revision = None
         if legacy_single:
             precio = obtener_precio_envio(
                 cliente, filas[0]["producto"], destino_pais,
@@ -3425,6 +3426,7 @@ def envio_nuevo_post(
                     "estado": remitente.get("estado") or "",
                 },
                 asegurar_carga=asegurar_carga == "SI",
+                **({"incluir_base_interna": True} if editar_id else {}),
             )
             if not multi.get("encontrado"):
                 if asegurar_carga == "SI" and multi.get("motivo") == "sin_cobertura":
@@ -3475,6 +3477,10 @@ def envio_nuevo_post(
             # El courier queda GUARDADO en la solicitud: sin esto el
             # despachador de emisión no sabe por dónde sale y cae al default.
             courier_extra = {"courier": op["id"].upper()}
+            if editar_id:
+                base_revision = op.get("_base_interna")
+                if not isinstance(base_revision, dict) or not base_revision:
+                    raise ValueError("No pudimos confirmar la nueva tarifa. Volvé a cotizar antes de guardar los cambios.")
 
             # ruta_id / coti_id salen de la cotización base (la de trazabilidad
             # que ya se loguea); el precio, del courier elegido.
@@ -3574,7 +3580,8 @@ def envio_nuevo_post(
             ), 2) or (precio.get("valor_total_usd") or 100)
         guardar_solicitud = crear_solicitud_guia
         if editar_id:
-            guardar_solicitud = lambda **campos: editar_solicitud_cliente(editar_id, cliente, editar_version, campos)
+            guardar_solicitud = lambda **campos: editar_solicitud_cliente(
+                editar_id, cliente, editar_version, campos, base_interna=base_revision)
         solicitud_creada = guardar_solicitud(
             cliente_id=cliente,
             producto_alias=alias_display,

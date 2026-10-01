@@ -8,6 +8,8 @@ import pytest
 import psycopg2
 
 from servicios import edicion_solicitud as ed, solicitudes_guia as sg
+from servicios.carriers import cotizar_carriers_cliente as cotizador_real
+from test_dhl_invoice_multiitems import portal, submit
 from test_conciliacion_couriers_postgres import conciliacion_db
 
 pytestmark = pytest.mark.skipif(not os.getenv('TAURO_TEST_DATABASE_URL'), reason='requiere PostgreSQL aislado')
@@ -132,3 +134,98 @@ def test_ni_con_marca_de_edicion_se_puede_cambiar_guia_emitida(caso):
         with conn() as c, c.cursor() as cur:
             cur.execute("SELECT set_config('tauro.edicion_solicitud', %s, true)", (str(sol['id']),))
             cur.execute('UPDATE envio_cotizacion_snapshots SET aceptado_at=NOW() WHERE solicitud_id=%s', (sol['id'],))
+
+
+def test_wizard_real_sin_coti_id_guarda_revision_y_nunca_expone_base(conciliacion_db, portal, monkeypatch):
+    """Cotizador B2B + pricing reales; sólo la respuesta courier es ficticia."""
+    from endpoints import portal_cliente as pc
+    from servicios import carriers
+    from unittest.mock import Mock
+    import json
+
+    conn = conciliacion_db
+    monkeypatch.setattr(ed, 'get_conn', conn)
+    monkeypatch.setattr(sg, 'get_conn', conn)
+    monkeypatch.setattr(carriers, 'cotizar_carriers_cliente', cotizador_real)
+    raw = dict(id='dhl', nombre='DHL', logo='', servicio='P', estado='cotizado',
+               costo=100, moneda='USD', dias_estimados=4)
+    monkeypatch.setattr(carriers, 'costos_carriers', lambda *a, **kw: [raw])
+    monkeypatch.setattr('servicios.configuracion_couriers_cliente.configuracion_cotizacion', lambda *a: {
+        'pricing_general': {'tipo':'FIJO_ARS','valor':95000},
+        'pricing_por_courier':{}, 'couriers_habilitados':{'dhl'}})
+    with conn() as c, c.cursor() as cur:
+        cur.execute("INSERT INTO clientes(cliente_id,nombre,email) VALUES('WAIMAO','Prueba','test@example.invalid')")
+        cur.execute("""INSERT INTO solicitudes_guia(cliente_id,producto_alias,destino_pais,
+            dest_nombre,dest_direccion,dest_ciudad,dest_zip,remitente_pais,courier,
+            precio_tauro_ars) VALUES('WAIMAO','Prueba','AR','Destino','Calle','CABA',
+            '1000','CN','DHL',180000) RETURNING *""")
+        initial = dict(cur.fetchone())
+
+    def actual(*args):
+        with conn() as c, c.cursor() as cur:
+            cur.execute('SELECT * FROM solicitudes_guia WHERE id=%s', (initial['id'],))
+            return dict(cur.fetchone())
+    monkeypatch.setattr(pc, 'obtener_solicitud_de_cliente', actual)
+    emitter = Mock(side_effect=AssertionError('No emitir en edición'))
+    monkeypatch.setattr(sg, 'emitir_guia_como_cliente', emitter)
+    for amount in (195000, 205000):
+        raw['costo'] = 100 if amount == 195000 else 110
+        row = actual()
+        response = submit(editar_solicitud_id=str(row['id']),
+            editar_version=row['updated_at'].isoformat(), precio_cotizado_ars=str(amount))
+        assert response.status_code == 303
+        assert str(row['id']) in response.headers['location']
+        row = actual()
+        assert row['precio_tauro_ars'] == amount and row['coti_id']
+        with conn() as c, c.cursor() as cur:
+            cur.execute('SELECT * FROM cotizaciones WHERE coti_id=%s', (row['coti_id'],))
+            quote = cur.fetchone()
+            assert quote['cliente_id'] == 'WAIMAO' and quote['courier'] == 'DHL'
+            assert quote['precio_final_ars'] == amount
+            cur.execute('SELECT * FROM envio_cotizacion_snapshots WHERE solicitud_id=%s', (row['id'],))
+            snapshot = cur.fetchone()
+            assert snapshot['coti_id'] == row['coti_id']
+            assert snapshot['moneda_courier'] == 'USD'
+            assert snapshot['costo_courier_estimado'] == raw['costo']
+            assert snapshot['margen_tauro_protegido_ars'] == 95000
+
+    with conn() as c, c.cursor() as cur:
+        cur.execute('SELECT snapshot_anterior FROM solicitud_cotizacion_revisiones WHERE solicitud_id=%s ORDER BY id', (row['id'],))
+        history = [r['snapshot_anterior'] for r in cur.fetchall()]
+        assert len(history) == 2
+        assert Decimal(str(history[0]['precio_cliente_inicial_ars'])) == 180000
+        assert history[0]['margen_tauro_protegido_ars'] is None
+        assert history[1]['precio_cliente_inicial_ars'] == 195000
+        cur.execute("SELECT metadata FROM security_audit WHERE event='portal.solicitud_editada'")
+        audit = json.dumps(cur.fetchall(), default=str)
+        assert 'costo_courier' not in audit and '_base_interna' not in audit
+        cur.execute('SELECT COUNT(*) AS n FROM envios WHERE solicitud_id=%s', (row['id'],))
+        assert cur.fetchone()['n'] == 0
+    # Un error de confirmación sólo vuelve a mostrar datos públicos del form.
+    rejected = submit(editar_solicitud_id=str(row['id']),
+        editar_version=row['updated_at'].isoformat(), precio_cotizado_ars='1')
+    context = json.dumps(rejected['context'], default=str)
+    assert rejected['context']['error']
+    assert '_base_interna' not in context and 'costo_courier' not in context
+    assert 'margen_tauro_protegido' not in context
+    assert actual()['coti_id'] == row['coti_id']
+    portal[0].assert_not_called()
+    emitter.assert_not_called()
+
+
+def test_base_privada_inconsistente_revierte_cotizacion_y_edicion(caso):
+    conn, sol = caso
+    base = dict(moneda_courier='USD', tipo_cambio_ars='1000',
+        costo_courier_estimado='80', costo_courier_estimado_ars='80000',
+        precio_cliente_inicial_ars='1', margen_tauro_protegido_ars='40000',
+        peso_real_cotizado_kg='1', peso_facturable_cotizado_kg='1')
+    with pytest.raises(ValueError, match='no coincide'):
+        ed.editar_solicitud_cliente(sol['id'], 'TEST', sol['updated_at'].isoformat(),
+            dict(dest_nombre='NO', precio_tauro_ars=120000, precio_tauro_usd=120), base_interna=base)
+    with conn() as c, c.cursor() as cur:
+        cur.execute('SELECT dest_nombre,coti_id FROM solicitudes_guia WHERE id=%s', (sol['id'],))
+        assert dict(cur.fetchone()) == dict(dest_nombre='Destino', coti_id='A')
+        cur.execute('SELECT COUNT(*) AS n FROM cotizaciones')
+        assert cur.fetchone()['n'] == 2
+        cur.execute('SELECT COUNT(*) AS n FROM solicitud_cotizacion_revisiones')
+        assert cur.fetchone()['n'] == 0

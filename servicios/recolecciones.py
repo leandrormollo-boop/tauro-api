@@ -527,7 +527,8 @@ def listar(cliente_id: str, limite: int = 50) -> list[dict]:
                        s.dest_ciudad AS envio_destino_ciudad,
                        s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                LEFT JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id = %s
                 ORDER BY r.fecha DESC, r.id DESC LIMIT %s
             """, ((cliente_id or "").strip().upper(), limite))
@@ -548,7 +549,8 @@ def obtener(cliente_id: str, rec_id: int) -> Optional[dict]:
                        s.dest_ciudad AS envio_destino_ciudad,
                        s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                LEFT JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id=%s AND r.id=%s
             """,
                         ((cliente_id or "").strip().upper(), int(rec_id)))
@@ -575,7 +577,8 @@ def listar_de_solicitudes(cliente_id: str, solicitudes: list[int]) -> dict[int, 
                        s.dest_ciudad AS envio_destino_ciudad,
                        s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id=%s AND r.solicitud_id=ANY(%s)
                 ORDER BY r.solicitud_id, r.created_at DESC, r.id DESC
             """, ((cliente_id or "").strip().upper(), solicitudes))
@@ -609,7 +612,8 @@ def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
                        s.dest_ciudad AS envio_destino_ciudad,
                        s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id = %s AND r.solicitud_id = %s
                 ORDER BY r.created_at DESC, r.id DESC
                 LIMIT 1
