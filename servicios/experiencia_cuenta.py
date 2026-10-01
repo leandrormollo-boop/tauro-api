@@ -165,13 +165,13 @@ WITH cargos AS (
     WHERE e.cliente_id=%s AND e.estado NOT IN ('CANCELADO','NC')
       AND e.monto_ars>0 AND e.fecha>=%s AND e.fecha<%s
     UNION ALL
-    SELECT (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
-           e.ambito, ROUND(a.monto_ars,2)
+    -- Diferencias y TAX cuentan en el mes del envío, como en la planilla
+    -- del cliente y en la lista de movimientos.
+    SELECT e.fecha, e.ambito, ROUND(a.monto_ars,2)
     FROM ajustes_cliente a
     JOIN envios e ON e.solicitud_id=a.solicitud_id
     WHERE e.cliente_id=%s AND e.estado='ACTIVO' AND a.estado='APLICADO'
-      AND a.aplicado_at >= (%s::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
-      AND a.aplicado_at < (%s::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+      AND e.fecha >= %s AND e.fecha < %s
 )
 SELECT DATE_TRUNC('month',fecha)::date AS mes,
        COALESCE(SUM(monto_ars) FILTER (WHERE ambito='NACIONAL'),0)

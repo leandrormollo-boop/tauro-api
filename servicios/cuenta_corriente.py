@@ -1154,7 +1154,10 @@ def movimientos_cuenta_paginados(
             UNION ALL
 
             SELECT
-                (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+                -- Los ajustes se muestran en la fecha del envío, como en la
+                -- planilla del cliente (el TAX y la diferencia pertenecen al
+                -- envío, no al día en que el courier los informó).
+                e.fecha,
                 a.aplicado_at,
                 CASE componente.tipo
                     WHEN 'AJUSTE_PRECIO' THEN 36
@@ -1255,6 +1258,26 @@ def movimientos_cuenta_paginados(
                 WHERE a.origen='CONCILIACION_COURIER'
                   AND c.id IS NOT NULL
                   AND ABS(c.tax_cliente_ars - COALESCE(prev.tax_cliente_ars, 0)) > 0
+
+                UNION ALL
+
+                -- Lo que el ajuste cobra o acredita y la conciliación no
+                -- desglosa (sin diferencia ni TAX informados, o redondeos):
+                -- se muestra igual, para que la lista sume lo mismo que el libro.
+                SELECT
+                    'DIFERENCIA', 'Diferencia de envío',
+                    (CASE WHEN a.tipo='CREDITO' THEN -ABS(a.monto_ars) ELSE ABS(a.monto_ars) END)
+                        - (c.diferencia_flete_ars - COALESCE(prev.diferencia_flete_ars, 0))
+                        - (c.tax_cliente_ars - COALESCE(prev.tax_cliente_ars, 0)),
+                    a.precio_anterior_ars, a.precio_nuevo_ars,
+                    COALESCE(c.motivo_diferencia, a.motivo, 'OTRO')
+                WHERE a.origen='CONCILIACION_COURIER'
+                  AND c.id IS NOT NULL
+                  AND ABS(
+                    (CASE WHEN a.tipo='CREDITO' THEN -ABS(a.monto_ars) ELSE ABS(a.monto_ars) END)
+                        - (c.diferencia_flete_ars - COALESCE(prev.diferencia_flete_ars, 0))
+                        - (c.tax_cliente_ars - COALESCE(prev.tax_cliente_ars, 0))
+                  ) > 0
             ) componente
             JOIN envios e ON e.solicitud_id=a.solicitud_id
             JOIN solicitudes_guia s ON s.id=a.solicitud_id
@@ -1310,10 +1333,10 @@ def movimientos_cuenta_paginados(
               AND (
                   (%s = 'todos' AND tipo NOT IN ('ENVIO_CANCELADO', 'ENVIO_REEMPLAZADO'))
                   OR (%s = 'cargos' AND tipo IN ('FC', 'PENDIENTE_FACTURA'))
-                  OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'TAX', 'AJUSTE_PRECIO'))
+                  OR (%s = 'costos' AND tipo IN ('FC', 'PENDIENTE_FACTURA', 'DIFERENCIA', 'TAX', 'AJUSTE_PRECIO'))
                   OR (%s = 'pagos' AND tipo IN ('PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO'))
                   OR (%s = 'diferencias' AND (
-                        tipo = 'TAX'
+                        tipo IN ('DIFERENCIA', 'TAX')
                         OR (tipo IN ('FC', 'PENDIENTE_FACTURA') AND diferencia_detalle IS NOT NULL)
                   ))
                   OR (%s = 'revision' AND tipo = 'PAGO_PENDIENTE')
