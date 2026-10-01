@@ -150,6 +150,11 @@ h1, h2, h3, h4 {
   align-items: center;
   gap: 12px;
 }
+.nav .nav-menu-toggle, .nav-mobile-links { display: none; }
+.nav a:focus-visible, .nav button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
 
 /* ---------- buttons ---------- */
 .btn {
@@ -906,3 +911,96 @@ html { scroll-behavior: smooth; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-4); }
+
+/* El menú recupera los enlaces que se ocultaban en celular. */
+@media (max-width: 960px) {
+  .nav-cta .nav-account { display: none; }
+  .nav-cta .nav-menu-toggle {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    padding: 10px !important;
+  }
+  .nav-cta .nav-menu-toggle svg { display: block; }
+  .nav-mobile-links:not([hidden]) {
+    display: block;
+    max-height: calc(100dvh - 84px);
+    overflow-y: auto;
+    margin: 12px 12px 0;
+    padding: 12px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+  }
+  .nav-mobile-links ul { list-style: none; margin: 0; padding: 0; }
+  .nav-mobile-links a { display: flex; padding: 12px; font-size: 14px; }
+  .nav-mobile-links .btn { margin-top: 8px; }
+}
+
+/* Conserva el aspecto estático cuando el usuario pide menos movimiento. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .tweb-fab:hover, .btn:active { transform: none; }
+}
+
+/* Public quote: the existing globe replaces the operator-status panel.
+   It is a country-level illustration and never determines price or coverage. */
+.public-quote-map { margin: -10px 0 14px; }
+.public-quote-map .quote-route-map {
+  display:grid; grid-template-columns:minmax(145px,.95fr) minmax(0,1fr);
+  column-gap:14px; align-items:center;
+}
+.public-quote-map .quote-map-art {
+  grid-column:1; grid-row:1 / 3; width:100%; max-width:210px;
+  border:0; background:none; border-radius:14px; overflow:hidden;
+}
+.public-quote-map .quote-map-itinerary {
+  grid-column:2; grid-row:1; display:flex; flex-direction:column;
+  gap:13px; margin:0; padding:5px 0;
+}
+.public-quote-map .quote-map-endpoint strong { font-size:14px; }
+.public-quote-map .quote-map-endpoint small {
+  color:#aaa3b5; font:11px var(--font-body); letter-spacing:0;
+}
+.public-quote-map .quote-map-endpoint div > span { display:none; }
+.public-quote-map .quote-map-connector { display:none; }
+.public-quote-map .quote-map-footer { grid-column:2; grid-row:2; align-self:start; }
+.public-quote-map .quote-map-footer > span { color:#aaa3b5; font-size:10px; max-width:none; }
+.public-quote-map .quote-map-credit {
+  grid-column:1 / -1; color:#aaa3b5; font:9px var(--font-body); opacity:1; margin:2px 0 0;
+}
+.public-quote-map .quote-map-explore-bar { bottom:0; left:0; right:0; justify-content:center; }
+.public-quote-map .quote-map-drag-hint { display:none; }
+.public-quote-map .quote-map-controls { padding:1px; }
+.public-quote-map .quote-map-controls button { width:30px; height:30px; }
+@media(max-width:560px) {
+ .public-quote-map .quote-route-map { grid-template-columns:minmax(135px,1.1fr) minmax(0,1fr); column-gap:9px; }
+ .public-quote-map .quote-map-endpoint strong { font-size:12px; }
+ .public-quote-map .quote-map-itinerary { gap:10px; }
+ .public-quote-map .quote-map-credit { font-size:8px; }
+}
+
+/* Match the portal result transition, keeping the same globe instance and route. */
+.public-quote-fields { padding:0; margin:0; border:0; min-width:0; }
+.public-quote-map { transition:opacity .16s ease; }
+.public-quote-map.is-loading { opacity:.58; }
+.public-quote-map.is-result { margin:0 0 16px; padding:3px 0 12px; border-bottom:1px solid var(--line); animation:quote-map-settle .2s ease-out both; }
+.public-quote-map.is-result .quote-route-map { grid-template-columns:74px minmax(0,1fr); gap:12px; }
+.public-quote-map.is-result .quote-map-art { grid-row:1; width:74px; max-width:74px; border-radius:50%; pointer-events:none; }
+.public-quote-map.is-result .quote-map-itinerary { display:grid; grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr); padding:0; gap:6px; align-items:start; }
+.public-quote-map.is-result .quote-map-connector { display:block; padding-top:11px; font-size:14px; }
+.public-quote-map.is-result .quote-map-endpoint strong { font-size:12px; }
+.public-quote-map.is-result .quote-map-endpoint small { font-size:10px; }
+.public-quote-map.is-result .quote-map-explore-bar,
+.public-quote-map.is-result .quote-map-footer,
+.public-quote-map.is-result .quote-map-credit { display:none; }
+.public-quote-results { animation:public-quote-result-enter .2s ease-out both; }
+@keyframes public-quote-result-enter { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+@media(prefers-reduced-motion:reduce) {
+ .public-quote-map { transition:none; }
+ .public-quote-map.is-result,.public-quote-results { animation:none; }
+}

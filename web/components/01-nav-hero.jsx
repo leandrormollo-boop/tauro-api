@@ -2,6 +2,7 @@
 
 const INTEGRACIONES_EMAIL = "integraciones@taurosolutions.ar";
 const INTEGRACIONES_MAILTO = `mailto:${INTEGRACIONES_EMAIL}?subject=${encodeURIComponent("Quiero integrar mi tienda con TAURO")}&body=${encodeURIComponent("Hola equipo de Integraciones,\n\nQuiero conectar mi tienda con TAURO.\n\nPlataforma (Shopify/Tiendanube/otra):\nURL de la tienda:\nNombre y empresa:\nTeléfono de contacto:\n")}`;
+const CUENTA_MAILTO = `mailto:cotizaciones@taurosolutions.ar?subject=${encodeURIComponent("Quiero abrir una cuenta en TAURO")}&body=${encodeURIComponent("Hola equipo de TAURO,\n\nQuiero abrir una cuenta para gestionar mis envíos.\n\nNombre y empresa:\nTeléfono de contacto:\nTipo de envíos (nacionales/internacionales):\n")}`;
 const { useState, useEffect, useRef } = React;
 
 /* ============================================================
@@ -59,13 +60,53 @@ function PartnersMeta() {
    ============================================================ */
 function Nav() {
   const [scrolled, setScrolled] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const navRef = useRef(null);
+  const menuButtonRef = useRef(null);
+  const links = [
+    ["servicios", "Servicios"], ["tracking", "Tracking"],
+    ["proceso", "Cómo funciona"], ["nosotros", "Nosotros"], ["contacto", "Contacto"],
+  ];
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    };
+    const onPointerDown = (event) => {
+      if (!navRef.current?.contains(event.target)) setMenuOpen(false);
+    };
+    const desktop = window.matchMedia("(min-width: 961px)");
+    const onResize = () => { if (desktop.matches) setMenuOpen(false); };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    desktop.addEventListener("change", onResize);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+      desktop.removeEventListener("change", onResize);
+    };
+  }, [menuOpen]);
+  const goToSection = (id) => {
+    setMenuOpen(false);
+    const section = document.getElementById(id);
+    if (section) {
+      section.setAttribute("tabindex", "-1");
+      section.focus({ preventScroll: true });
+    }
+  };
   return (
-    <nav className={`nav ${scrolled ? "scrolled" : ""}`}>
+    <nav ref={navRef} aria-label="Principal" className={`nav ${scrolled ? "scrolled" : ""}`}
+      onBlur={(event) => {
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false);
+      }}>
       <div className="container nav-inner">
         <a href="/web" className="logo">
           <span className="logo-mark"><TauroLogo size={28} color="#fff" /></span>
@@ -73,11 +114,7 @@ function Nav() {
           <span>Tauro<span className="tweb-price-metal" style={{ fontWeight: 400, marginLeft: 2 }}>solutions</span></span>
         </a>
         <ul className="nav-links">
-          <li><a href="#servicios">Servicios</a></li>
-          <li><a href="#tracking">Tracking</a></li>
-          <li><a href="#proceso">Cómo funciona</a></li>
-          <li><a href="#nosotros">Nosotros</a></li>
-          <li><a href="#contacto">Contacto</a></li>
+          {links.map(([id, label]) => <li key={id}><a href={`#${id}`}>{label}</a></li>)}
         </ul>
         <div className="nav-cta">
           <a href="/portal/login" className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 16px" }}>
@@ -85,12 +122,29 @@ function Nav() {
             <span className="tweb-txt-largo">Iniciar sesión</span>
             <span className="tweb-txt-corto">Ingresar</span>
           </a>
-          <a href={INTEGRACIONES_MAILTO} className="btn btn-primary" style={{ fontSize: 13, padding: "10px 18px" }}>
-            <span className="tweb-txt-largo">Solicitar integración</span>
+          <a href={CUENTA_MAILTO} className="btn btn-primary nav-account" style={{ fontSize: 13, padding: "10px 18px" }}>
+            <span className="tweb-txt-largo">Solicitar una cuenta</span>
             <span className="tweb-txt-corto">Solicitar</span>
             <ArrowRight size={14} />
           </a>
+          <button ref={menuButtonRef} type="button" className="nav-menu-toggle btn btn-ghost"
+            aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"}
+            aria-expanded={menuOpen} aria-controls="nav-mobile-links"
+            onClick={() => setMenuOpen((open) => !open)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d={menuOpen ? "M6 6L18 18M6 18L18 6" : "M4 6H20M4 12H20M4 18H20"}
+                stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
+      </div>
+      <div id="nav-mobile-links" className="nav-mobile-links" hidden={!menuOpen}>
+        <ul>
+          {links.map(([id, label]) => <li key={id}>
+            <a href={`#${id}`} onClick={() => goToSection(id)}>{label}</a>
+          </li>)}
+          <li><a href={CUENTA_MAILTO} className="btn btn-primary" onClick={() => setMenuOpen(false)}>Solicitar una cuenta <ArrowRight size={14} /></a></li>
+        </ul>
       </div>
     </nav>
   );
@@ -189,15 +243,15 @@ function HeroSplit({ onCotizarClick }) {
               Expandí.
             </h1>
             <p className="hero-promise fade-up d2">
-              Tu logística en un solo portal.
+              Cotizaciones, envíos y pagos en tu cuenta.
             </p>
             <p className="lead fade-up d2">
-              Logística internacional conectada directamente a tu tienda y portal.
+              Gestioná tus envíos internacionales desde el portal de TAURO.
               <span className="hero-manual-note"> ¿No tenés tienda? Cargá tus envíos manualmente.</span>
             </p>
             <div className="hero-actions fade-up d3">
-              <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-                Solicitar integración
+              <a href={CUENTA_MAILTO} className="btn btn-primary btn-lg">
+                Solicitar una cuenta
                 <ArrowRight size={16} />
               </a>
               <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>
@@ -239,15 +293,15 @@ function HeroCentered({ onCotizarClick }) {
           Expandí.
         </h1>
         <p className="hero-promise fade-up d2" style={{ margin: "32px auto 12px" }}>
-          Tu logística en un solo portal.
+          Cotizaciones, envíos y pagos en tu cuenta.
         </p>
         <p className="lead fade-up d2" style={{ margin: "0 auto 40px", fontSize: 19 }}>
-          Logística internacional conectada directamente a tu tienda y portal.
+          Gestioná tus envíos internacionales desde el portal de TAURO.
           <span className="hero-manual-note"> También podés operar manualmente.</span>
         </p>
         <div className="hero-actions fade-up d3" style={{ justifyContent: "center" }}>
-          <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-            Solicitar integración <ArrowRight size={16} />
+          <a href={CUENTA_MAILTO} className="btn btn-primary btn-lg">
+            Solicitar una cuenta <ArrowRight size={16} />
           </a>
           <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
         </div>
@@ -273,11 +327,11 @@ function HeroMinimal({ onCotizarClick }) {
           </h1>
           <div className="fade-up d2" style={{ display: "flex", gap: 64, marginTop: 80, alignItems: "flex-end", flexWrap: "wrap" }}>
             <p style={{ maxWidth: 420, color: "var(--fg-2)", fontSize: 17, lineHeight: 1.6, margin: 0 }}>
-              Tu logística en un solo portal. Logística internacional conectada
-              directamente a tu tienda, con carga manual disponible.
+              Cotizaciones, envíos y pagos en tu cuenta. Cargá tus envíos
+              manualmente o conectá tu tienda.
             </p>
-            <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-              Solicitar integración <ArrowRight size={16} />
+            <a href={CUENTA_MAILTO} className="btn btn-primary btn-lg">
+              Solicitar una cuenta <ArrowRight size={16} />
             </a>
             <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
           </div>
