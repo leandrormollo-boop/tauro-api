@@ -48,3 +48,10 @@ def test_inicio_compacta_sin_scroll_horizontal_en_mobile():
     assert ".portal-operacion .home-activity-scopes { grid-template-columns: 1fr; }" in CSS
     assert ".portal-operacion .home-dashboard-rail { grid-template-columns: 1fr; }" in CSS
     assert 'portal-operacion.css?v=' in BASE
+
+
+def test_barras_mensuales_entran_una_vez_y_respetan_movimiento_reducido():
+    assert "@keyframes home-bar-rise" in CSS
+    assert "animation: home-bar-rise" in CSS
+    assert "--bar-delay" in CSS
+    assert "@media (prefers-reduced-motion: reduce)" in CSS

@@ -124,16 +124,34 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 
 .portal-operacion .home-insights-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 16px; }
 .portal-operacion .home-monthly-chart { display: grid; min-height: 196px; grid-template-columns: repeat(6, minmax(36px, 1fr)); gap: 10px; align-items: end; padding: 6px 20px 20px; }
-.portal-operacion .home-monthly-bar { display: grid; justify-items: center; gap: 7px; }
-.portal-operacion .home-monthly-bar strong { color: var(--fg-2); font-size: 11px; }
+.portal-operacion .home-monthly-bar { --bar-delay: 0ms; display: grid; justify-items: center; gap: 7px; }
+.portal-operacion .home-monthly-bar:nth-child(2) { --bar-delay: 55ms; }
+.portal-operacion .home-monthly-bar:nth-child(3) { --bar-delay: 110ms; }
+.portal-operacion .home-monthly-bar:nth-child(4) { --bar-delay: 165ms; }
+.portal-operacion .home-monthly-bar:nth-child(5) { --bar-delay: 220ms; }
+.portal-operacion .home-monthly-bar:nth-child(6) { --bar-delay: 275ms; }
+.portal-operacion .home-monthly-bar strong { color: var(--fg-2); font-size: 11px; transition: color .18s ease, transform .18s ease; }
 .portal-operacion .home-monthly-bar span { color: var(--fg-3); font-size: 10px; }
 .portal-operacion .home-monthly-bar progress {
   width: 20px; height: 112px; overflow: hidden; border: 0; border-radius: 8px;
-  background: var(--bg-elev-2); writing-mode: vertical-lr; direction: rtl; transform: rotate(180deg);
+  background: var(--bg-elev-2); writing-mode: vertical-lr; direction: rtl;
+  transform-origin: center top;
+  animation: home-bar-rise .72s cubic-bezier(.22,.72,.28,1) var(--bar-delay) both;
+  transition: filter .18s ease;
 }
 .portal-operacion .home-monthly-bar progress::-webkit-progress-bar { background: var(--bg-elev-2); border-radius: 8px; }
-.portal-operacion .home-monthly-bar progress::-webkit-progress-value { background: linear-gradient(180deg, #a580ff, #7249cb); border-radius: 8px; }
-.portal-operacion .home-monthly-bar progress::-moz-progress-bar { background: #8d68e3; border-radius: 8px; }
+.portal-operacion .home-monthly-bar progress::-webkit-progress-value {
+  background: linear-gradient(180deg, #a580ff, #7249cb); border-radius: 8px;
+}
+.portal-operacion .home-monthly-bar progress::-moz-progress-bar {
+  background: #8d68e3; border-radius: 8px;
+}
+.portal-operacion .home-monthly-bar:hover progress { filter: brightness(1.12) drop-shadow(0 0 6px rgba(167,139,250,.28)); }
+.portal-operacion .home-monthly-bar:hover strong { color: var(--accent-soft); transform: translateY(-1px); }
+@keyframes home-bar-rise {
+  from { opacity: .45; transform: rotate(180deg) scaleY(.08); }
+  to { opacity: 1; transform: rotate(180deg) scaleY(1); }
+}
 .portal-operacion .home-destinations-list { list-style: none; margin: 0; padding: 0 20px 18px; }
 .portal-operacion .home-destinations-list li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; }
 .portal-operacion .home-country-code {
