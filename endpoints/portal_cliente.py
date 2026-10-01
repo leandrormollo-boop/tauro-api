@@ -1003,6 +1003,32 @@ def recolecciones_view(
         if permisos_pickup.get(c["id"].lower(), False)
     ]
 
+    # La recolección nace desde una guía real. Ofrecemos las guías listas de
+    # ESTA cuenta, internacionales y sin otro retiro vigente. Una guía vieja
+    # sigue disponible mientras continúe lista para despachar; una cancelada,
+    # reemplazada o ya asociada no vuelve a aparecer como opción engañosa.
+    guias_recoleccion = []
+    guias_recoleccion_error = False
+    try:
+        envios_con_retiro = {
+            int(r["solicitud_id"])
+            for r in recolecciones
+            if r.get("solicitud_id") and r.get("estado") != "CANCELADA"
+        }
+        for solicitud in listar_solicitudes_cliente(cliente, limite=None):
+            courier = str(solicitud.get("courier") or "").strip().upper()
+            if (
+                solicitud.get("tracking")
+                and solicitud.get("estado") == "GUIA_LISTA"
+                and ambito_envio(solicitud) == "internacional"
+                and permisos_pickup.get(courier.lower(), False)
+                and int(solicitud["id"]) not in envios_con_retiro
+            ):
+                guias_recoleccion.append(solicitud)
+    except Exception as exc:
+        guias_recoleccion_error = True
+        print(f"[portal] no pude listar guías para retiro: {type(exc).__name__}")
+
     envio_pre = None
     envio_pre_error = None
     if envio:
@@ -1072,6 +1098,8 @@ def recolecciones_view(
                  "envio_pre_error": envio_pre_error,
                  "puede_recolectar": puede_recolectar,
                  "dhl_requiere_envio": dhl_requiere_envio,
+                 "guias_recoleccion": guias_recoleccion,
+                 "guias_recoleccion_error": guias_recoleccion_error,
                  "couriers_recoleccion": couriers_recoleccion,
                  "courier_default": (courier_default_cliente(cliente) or "fedex").upper(),
                  "fecha_sugerida": sugerida.strftime("%Y-%m-%d"),

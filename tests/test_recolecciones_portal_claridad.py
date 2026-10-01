@@ -21,7 +21,12 @@ def pickup(**changes):
     return dict(dict(id=71,solicitud_id=81,courier='DHL',estado='AGENDADA',
                      confirmation_code='CBJ-DEMO-71',fecha=date(2026,9,18),
                      ready_time='09:00',close_time='17:00',bultos=1,peso_kg=20,
-                     direccion='Dirección de prueba'),**changes)
+                     direccion='Dirección de prueba',
+                     envio_tracking='DEMO-TRACKING',
+                     envio_etiqueta='Reposición otoño',
+                     envio_destinatario='Destinatario DEMO',
+                     envio_destino_ciudad='Buenos Aires',
+                     envio_destino_pais='AR'),**changes)
 
 
 @pytest.fixture
@@ -33,6 +38,11 @@ def page(monkeypatch):
     monkeypatch.setattr(config,'mapa_permisos',lambda *_: {'dhl':True})
     monkeypatch.setattr(pc,'courier_default_cliente',lambda _: 'dhl')
     monkeypatch.setattr(pc,'obtener_remitente_para_envio',lambda *_: None)
+    monkeypatch.setattr(pc,'listar_solicitudes_cliente',lambda *_ ,**__: [{
+        'id':82,'tracking':'GUIA-DISPONIBLE','estado':'GUIA_LISTA','courier':'DHL',
+        'etiqueta_cliente':'Muestras octubre','dest_nombre':'Cliente final',
+        'remitente_pais':'AR','destino_pais':'US',
+    }])
     monkeypatch.setattr(pc,'obtener_solicitud_de_cliente',lambda *_: {
         'id':81,'tracking':'DEMO-TRACKING','estado':'GUIA_LISTA','courier':'DHL',
         'remitente_pais':'CN','destino_pais':'AR'})
@@ -131,6 +141,33 @@ def test_numero_se_escapa_como_texto(page):
     body=html()
     assert '&lt;script&gt;no ejecutar&lt;/script&gt;' in body
     assert '<script>no ejecutar</script>' not in body
+
+
+def test_listado_compacto_identifica_guia_y_envio(page):
+    body=html()
+    assert 'Reposición otoño' in body
+    assert 'DEMO-TRACKING' in body
+    assert 'Buenos Aires, AR' in body
+    assert '<summary>Acciones</summary>' in body
+    assert 'Programar nueva recolección' in body
+
+
+def test_selector_ofrece_guia_vigente_y_envio_nuevo(page):
+    page['estado']='CANCELADA'
+    body=html()
+    assert 'Usar una guía existente' in body
+    assert 'GUIA-DISPONIBLE · Muestras octubre · DHL' in body
+    assert 'Crear un envío nuevo' in body
+    assert 'action="/portal/recolecciones"' in body
+
+
+def test_selector_excluye_guia_que_ya_tiene_retiro(page,monkeypatch):
+    monkeypatch.setattr(pc,'listar_solicitudes_cliente',lambda *_ ,**__: [{
+        'id':81,'tracking':'DEMO-TRACKING','estado':'GUIA_LISTA','courier':'DHL',
+        'remitente_pais':'AR','destino_pais':'US',
+    }])
+    body=html()
+    assert '<option value="81">' not in body
 
 
 def create(**extra):

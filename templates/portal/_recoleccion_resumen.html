@@ -2,67 +2,66 @@
 {% set courier = (r.courier or 'FEDEX')|upper %}
 {% set historica = r.vista_historica|default(false) %}
 {% set confirmada = r.estado == 'AGENDADA' and r.confirmation_code and not historica %}
+{% set referencia = r.envio_etiqueta|default('', true) or r.envio_destinatario|default('', true) or ('Envío #' ~ r.solicitud_id if r.solicitud_id else 'Retiro general') %}
 <article class="pickup-card{% if confirmada %} pickup-confirmed{% endif %}{% if destacado %} pickup-selected{% endif %}" id="recoleccion-{{ r.id }}" aria-label="Recolección {{ courier }}">
-    <header class="pickup-heading">
-        <div>
-            <span class="eyebrow">Retiro · {{ courier }}</span>
-            <h2>{% if r.estado == 'COMPLETADA' %}Recolección completada
-                {% elif r.envio_entregado|default(false) %}Envío entregado
-                {% elif historica %}Fecha de recolección pasada
-                {% elif confirmada %}Recolección programada
-                {% elif r.estado == 'CANCELADA' %}Recolección cancelada
-                {% elif r.estado == 'CANCELANDO' %}Cancelación en proceso
-                {% else %}Recolección pendiente de confirmación{% endif %}</h2>
-        </div>
+    <div class="pickup-identity">
+        <span class="pickup-date">{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else 'Sin fecha' }}</span>
+        <strong>{{ referencia }}</strong>
+        <span>
+            {% if r.envio_destino_ciudad|default(false) %}{{ r.envio_destino_ciudad }}{% endif %}{% if r.envio_destino_pais|default(false) %}{% if r.envio_destino_ciudad|default(false) %}, {% endif %}{{ r.envio_destino_pais }}{% endif %}
+            {% if not r.envio_destino_ciudad|default(false) and not r.envio_destino_pais|default(false) %}{{ courier }}{% endif %}
+        </span>
+    </div>
+
+    <div class="pickup-shipment">
+        <span>Guía asociada</span>
+        {% if r.envio_tracking|default(false) %}<strong class="mono">{{ r.envio_tracking }}</strong>{% elif r.solicitud_id %}<strong>Envío #{{ r.solicitud_id }}</strong>{% else %}<strong>Sin guía</strong>{% endif %}
+        <small>{{ courier }}</small>
+    </div>
+
+    <div class="pickup-schedule">
+        <span>Horario en el origen</span>
+        <strong>{{ r.ready_time }}–{{ r.close_time }}</strong>
+        <small>{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ '%g'|format(r.peso_kg or 0) }} kg</small>
+    </div>
+
+    <div class="pickup-reservation">
+        <span>Número de recolección {{ courier }}<span data-help="Número de recolección">Identifica la reserva del retiro; es distinto del tracking del envío. La reserva no confirma que los paquetes ya hayan sido retirados.</span></span>
+        <strong class="mono">{{ r.confirmation_code or 'Pendiente' }}</strong>
+        <small>{{ r.direccion or 'Dirección no informada' }}</small>
+    </div>
+
+    <div class="pickup-state">
         <span class="badge {% if confirmada or r.estado == 'COMPLETADA' %}ok{% elif r.estado != 'CANCELADA' %}warn{% endif %}">
             {% if r.estado == 'COMPLETADA' %}Completada
             {% elif r.envio_entregado|default(false) %}Envío entregado
             {% elif historica %}Historial
-            {% elif confirmada %}Confirmada por {{ courier }}
-            {% elif r.estado == 'CANCELADA' %}Cancelada{% else %}En verificación{% endif %}
+            {% elif confirmada %}Programada
+            {% elif r.estado == 'CANCELADA' %}Cancelada
+            {% elif r.estado == 'CANCELANDO' %}Cancelando
+            {% else %}En verificación{% endif %}
         </span>
-    </header>
-    {% if r.estado == 'COMPLETADA' %}
-    <p>La finalización del retiro fue registrada. Seguí el paquete con el tracking del envío.</p>
-    {% elif r.envio_entregado|default(false) %}
-    <p>El tracking confirma la entrega del envío. La reserva queda en el historial; este dato no confirma por sí solo la visita física del chofer.</p>
-    {% elif historica %}
-    <p>La fecha programada ya pasó. Consultá el tracking del envío; esta vista no confirma que el courier haya retirado los paquetes.</p>
-    {% elif confirmada %}
-    <p>Retiro reservado. No necesitás solicitarlo de nuevo.</p>
-    {% elif r.estado == 'CANCELADA' %}
-    <p>Si necesitás otro retiro, programalo desde la guía vigente.</p>
-    {% elif r.estado == 'CANCELANDO' %}
-    <p>Estamos confirmando la cancelación con {{ courier }}. Esperá el resultado antes de pedir otro retiro.</p>
-    {% else %}
-    <p>TAURO está verificando la reserva. No vuelvas a solicitarla hasta tener confirmación.</p>
-    {% endif %}
-    {% if r.confirmation_code %}
-    <div class="pickup-number">
-        <span>Número de recolección {{ courier }}<span data-help="Número de recolección">Identifica la reserva del retiro; es distinto del tracking del envío. La reserva no confirma que los paquetes ya hayan sido retirados.</span></span>
-        <strong class="mono">{{ r.confirmation_code }}</strong>
-
+        <small class="pickup-status-note">
+            {% if r.estado == 'COMPLETADA' %}La finalización del retiro fue registrada.
+            {% elif r.envio_entregado|default(false) %}El tracking confirma la entrega; no confirma por sí solo la visita física del chofer.
+            {% elif historica %}Fecha de recolección pasada. La fecha programada ya pasó; esta vista no confirma que el courier haya retirado los paquetes.
+            {% elif confirmada %}Recolección programada. Retiro reservado. Prepará los paquetes antes del horario de inicio.
+            {% elif r.estado == 'CANCELADA' %}Recolección cancelada. La guía se conserva y puede volver a programarse.
+            {% elif r.estado == 'CANCELANDO' %}Estamos confirmando la cancelación con {{ courier }}.
+            {% else %}Recolección pendiente de confirmación. TAURO está verificando la reserva. No vuelvas a solicitarla todavía.{% endif %}
+        </small>
     </div>
-    {% endif %}
-    <dl class="pickup-facts">
-        <div><dt>Fecha acordada</dt><dd>{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else '—' }}</dd></div>
-        <div><dt>Horario en el origen</dt><dd>{{ r.ready_time }} a {{ r.close_time }}</dd></div>
-        <div><dt>Paquetes</dt><dd>{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ '%g'|format(r.peso_kg or 0) }} kg</dd></div>
-        <div class="pickup-address"><dt>Dirección de retiro</dt><dd>{{ r.direccion or '—' }}</dd></div>
-    </dl>
-    {% if confirmada %}
-    <p class="pickup-note">Prepará los paquetes cerrados y etiquetados antes del horario de inicio.</p>
-    {% endif %}
-    <footer class="pickup-actions">
-        {% if r.solicitud_id %}<a class="btn btn-ghost btn-sm" href="/portal/envios/{{ r.solicitud_id }}">Ver envío #{{ r.solicitud_id }}</a>{% endif %}
-        {% if mostrar_cancelar and confirmada %}
-        <details><summary>Opciones de la recolección</summary>
-            <form method="POST" action="/portal/recolecciones/{{ r.id }}/cancelar"
-                  data-confirm="¿Cancelar esta recolección {{ courier }}? Se anula la reserva del retiro; la guía se conserva.">
-                <button type="submit" class="btn btn-ghost btn-sm">Cancelar recolección</button>
+
+    <details class="pickup-menu">
+        <summary>Acciones</summary>
+        <div>
+            {% if r.solicitud_id %}<a href="/portal/envios/{{ r.solicitud_id }}">Ver envío</a>{% endif %}
+            {% if mostrar_cancelar and confirmada %}
+            <form method="POST" action="/portal/recolecciones/{{ r.id }}/cancelar" data-confirm="¿Cancelar esta recolección {{ courier }}? Se anula la reserva del retiro; la guía se conserva.">
+                <button type="submit">Cancelar recolección</button>
             </form>
-        </details>
-        {% elif not mostrar_cancelar %}<a class="btn btn-ghost btn-sm" href="/portal/recolecciones?recoleccion={{ r.id }}{% if r.solicitud_id %}&amp;envio={{ r.solicitud_id }}{% endif %}#recoleccion-{{ r.id }}">Ver recolección</a>{% endif %}
-    </footer>
+            {% elif not mostrar_cancelar %}<a href="/portal/recolecciones?recoleccion={{ r.id }}{% if r.solicitud_id %}&amp;envio={{ r.solicitud_id }}{% endif %}#recoleccion-{{ r.id }}">Ver recolección</a>{% endif %}
+        </div>
+    </details>
 </article>
 {% endmacro %}

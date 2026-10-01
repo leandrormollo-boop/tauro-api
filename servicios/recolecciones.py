@@ -520,7 +520,12 @@ def listar(cliente_id: str, limite: int = 50) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT r.*, s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
                 LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
                 WHERE r.cliente_id = %s
@@ -536,7 +541,12 @@ def obtener(cliente_id: str, rec_id: int) -> Optional[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT r.*, s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
                 LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
                 WHERE r.cliente_id=%s AND r.id=%s
@@ -558,7 +568,12 @@ def listar_de_solicitudes(cliente_id: str, solicitudes: list[int]) -> dict[int, 
                        r.id, r.solicitud_id, r.estado, r.confirmation_code,
                        r.courier, r.fecha, r.ready_time, r.close_time,
                        s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
                 JOIN solicitudes_guia s ON s.id=r.solicitud_id
                 WHERE r.cliente_id=%s AND r.solicitud_id=ANY(%s)
@@ -587,7 +602,12 @@ def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
                        r.peso_kg, r.direccion, r.instrucciones, r.estado,
                        r.confirmation_code, r.ubicacion, r.created_at,
                        r.updated_at, s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
                 JOIN solicitudes_guia s ON s.id=r.solicitud_id
                 WHERE r.cliente_id = %s AND r.solicitud_id = %s
