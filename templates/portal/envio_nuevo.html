@@ -3,6 +3,7 @@
 {% block title %}{{ 'Editar envío' if form and form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío')) }}{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
+<link rel="stylesheet" href="/static/css/invoice-compact.css?v=1">
 <link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
 <script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>
 {% endblock %}
@@ -445,7 +446,7 @@
                     <input type="hidden" name="bulto_items_extra" class="invoice-extras" value="{{ (f.items_invoice[1:] if f.items_invoice else [])|tojson|forceescape }}">
                     <div class="invoice-items">
                     <div class="bulto-invoice" data-invoice-item data-hs-scope>
-                        <div class="invoice-item-heading" style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                        <div class="invoice-item-heading">
                             <strong data-item-number>Artículo 1</strong>
                             <button type="button" class="btn btn-ghost btn-sm invoice-item-remove" hidden style="display:none">Quitar artículo</button>
                         </div>
@@ -454,7 +455,7 @@
                             <input type="text" name="bulto_desc_en" class="bulto-desc" data-hs-description maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
                         </div>
                         <div class="form-group">
-                            <label>Cantidad de unidades</label>
+                            <label>Unidades</label>
                             <input type="text" name="bulto_unidades_aduana" aria-label="Cantidad de unidades" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group shipment-declared-value">
@@ -476,7 +477,7 @@
                             </select>
                         </div>
                         <div class="form-group invoice-net-weight" {% if not f.items_invoice %}hidden{% endif %}>
-                            <label>Peso neto total de este artículo</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span>
+                            <div class="shipment-field-label"><label>Peso neto total</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span></div>
                             <div class="input-unit"><input type="text" name="bulto_peso_neto" aria-label="Peso neto total del artículo" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
 
                         </div>
