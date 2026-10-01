@@ -109,6 +109,8 @@ jobs:
             tests/test_recolecciones_portal_claridad.py \
             tests/test_recolecciones_permiso.py \
             tests/test_recolecciones_concurrencia.py \
+            tests/test_recolecciones_origen_servicio.py \
+            tests/test_recolecciones_origen_migracion.py \
             tests/test_pickup_dhl.py \
             tests/test_edicion_solicitud_postgres.py \
             tests/test_envio_gestion.py \

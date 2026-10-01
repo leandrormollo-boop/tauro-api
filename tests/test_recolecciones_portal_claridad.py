@@ -136,6 +136,25 @@ def test_error_de_lectura_bloquea_nuevo_form_sin_decir_que_no_hay_retiro(page,mo
     assert 'action="/portal/recolecciones/nueva"' not in body
 
 
+def test_conflicto_redirige_al_retiro_propietario_y_conserva_guia(monkeypatch):
+    monkeypatch.setattr(rec, 'crear', lambda *args, **kwargs: {
+        'ok': False, 'error': 'Revisá la recolección #71 del historial.',
+        'recoleccion_conflicto_id': 71,
+    })
+    response = pc.recoleccion_nueva(
+        fecha='2026-10-02', ready_time='09:00', close_time='17:00',
+        bultos='1', peso_kg='3,8', instrucciones='', courier='DHL',
+        solicitud_id='81', cliente='DEMO', gestion_ventana='',
+    )
+    destino = urlsplit(response.headers['location'])
+    assert destino.path == '/portal/recolecciones'
+    query = parse_qs(destino.query)
+    assert query['envio'] == ['81']
+    assert query['recoleccion'] == ['71']
+    assert query['error'] == ['Revisá la recolección #71 del historial.']
+    assert 'ok' not in query
+
+
 def test_numero_se_escapa_como_texto(page):
     page['confirmation_code']='<script>no ejecutar</script>'
     body=html()
