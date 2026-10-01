@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from 'portal/_ubicacion_cotizada.html' import confirmar_ubicacion %}
-{% block title %}{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío') }}{% endblock %}
+{% block title %}{{ 'Editar envío' if form and form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío')) }}{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
 <link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
@@ -24,11 +24,12 @@
      data-initial-step="{{ form.initial_step or 1 }}">
 <div class="page-title page-title-row">
     <div>
-        <h1>{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional') }}</h1>
+        {% if form.editar_solicitud_id %}<a class="shipment-edit-back" href="/portal/envios/{{ form.editar_solicitud_id }}/gestion?ventana=1">← Volver a la revisión</a>{% endif %}
+        <h1>{{ 'Editar envío' if form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional')) }}</h1>
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>{% if reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
+        <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
     </div>
     <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a>
 </div>
@@ -122,9 +123,12 @@
     </div>
 </div>
 {% endif %}
-<form data-draft-server="{{ 1 if error else 0 }}" method="POST" action="/portal/envios/nuevo"
+<form data-draft-server="{{ 1 if error or form.editar_solicitud_id else 0 }}" method="POST" action="/portal/envios/nuevo{% if request.query_params.get('ventana') == '1' %}?ventana=1{% endif %}"
       {% if reemision_origen %}data-confirm="¿Confirmar la corrección? DHL emitirá un tracking nuevo. La guía anterior quedará reemplazada y sólo la nueva se aplicará a tu cuenta corriente."{% endif %}>
     <input type="hidden" name="borrador_token" value="{{ form.borrador_token or '' }}">
+    <input type="hidden" name="editar_solicitud_id" value="{{ form.editar_solicitud_id or '' }}">
+    <input type="hidden" name="editar_version" value="{{ form.editar_version or '' }}">
+    <input type="hidden" name="gestion_ventana" value="{{ '1' if request.query_params.get('ventana') == '1' else '' }}">
     <input type="hidden" name="ambito" value="internacional">
     <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
     <input type="hidden" name="reemplaza_solicitud_id" value="{{ form.reemplaza_solicitud_id or '' }}">
@@ -582,9 +586,9 @@
             <button type="button" id="wizard-back-final" class="btn btn-ghost">
                 ← Atrás
             </button>
-            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Salir</a>
+            <a href="{% if form.editar_solicitud_id %}/portal/envios/{{ form.editar_solicitud_id }}/gestion?ventana=1{% elif reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">{{ 'Volver sin guardar' if form.editar_solicitud_id else 'Salir' }}</a>
             <button type="submit" class="btn btn-primary">
-                {{ 'Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud' }}
+                {{ 'Guardar cambios y revisar' if form.editar_solicitud_id else ('Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud y revisar') }}
             </button>
         </div>
     </div>

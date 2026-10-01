@@ -1,3 +1,4 @@
+{% set gestion_embebida = request.query_params is defined and request.query_params.get('ventana') == '1' %}
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -57,8 +58,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="TAURO">
     <script src="/static/js/portal-pwa.js?v=1" defer></script>
+    {% if cliente %}
+    <link rel="stylesheet" href="/static/css/envio-gestion.css?v=1">
+    <script src="/static/js/envio-gestion.js?v=1" defer></script>
+    {% endif %}
 </head>
-<body data-draft-scope="{{ ('portal:' ~ cliente) if cliente else '' }}"{% if cliente %} class="portal-operacion"{% endif %}>
+<body data-draft-scope="{{ ('portal:' ~ cliente) if cliente else '' }}"{% if cliente %} class="portal-operacion{% if gestion_embebida %} portal-embedded{% endif %}"{% endif %}>
 {% if not cliente %}
 <button type="button" class="theme-toggle theme-toggle-floating" data-theme-toggle aria-label="Cambiar apariencia" title="Cambiar apariencia">
     <span class="theme-toggle-track" aria-hidden="true">
@@ -309,6 +314,12 @@
         </div>
     </section>
 </dialog>
+{% if not gestion_embebida %}
+<dialog id="shipment-manager-dialog" class="shipment-manager-dialog" aria-labelledby="shipment-manager-title">
+    <header><h2 id="shipment-manager-title">Gestionar envío</h2><button type="button" data-manager-close aria-label="Cerrar gestión del envío">×</button></header>
+    <iframe title="Revisión, guía y recolección del envío" data-manager-frame></iframe>
+</dialog>
+{% endif %}
 {% else %}
 </main>
 {% endif %}

@@ -3703,6 +3703,63 @@ CREATE TRIGGER trg_auditoria_courier_append_only
 BEFORE UPDATE ON auditoria_facturas_courier
 FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_mutacion_auditoria();
 
+-- Una solicitud SIN emitir se puede corregir. Su tarifa anterior no se
+-- borra: se conserva completa antes de sustituir la versión pendiente.
+-- Una guía emitida o con movimiento contable sigue siendo inmutable.
+CREATE TABLE IF NOT EXISTS solicitud_cotizacion_revisiones (
+    id BIGSERIAL PRIMARY KEY,
+    solicitud_id INTEGER NOT NULL REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    snapshot_anterior JSONB NOT NULL,
+    cotizacion_nueva TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ix_solicitud_cotizacion_revisiones
+    ON solicitud_cotizacion_revisiones(solicitud_id, id);
+DROP TRIGGER IF EXISTS trg_revision_cotizacion_inmutable ON solicitud_cotizacion_revisiones;
+CREATE TRIGGER trg_revision_cotizacion_inmutable
+BEFORE UPDATE OR DELETE ON solicitud_cotizacion_revisiones
+FOR EACH ROW EXECUTE FUNCTION tauro_bloquear_mutacion_auditoria();
+
+CREATE OR REPLACE FUNCTION tauro_bloquear_mutacion_snapshot()
+RETURNS TRIGGER AS $$
+DECLARE
+    solicitud RECORD;
+BEGIN
+    IF TG_OP <> 'UPDATE' THEN
+        RAISE EXCEPTION 'El snapshot de cotización aceptada es inmutable';
+    END IF;
+    IF NEW.solicitud_id <> OLD.solicitud_id OR NEW.id <> OLD.id
+       OR NEW.created_at <> OLD.created_at
+       OR current_setting('tauro.edicion_solicitud', true) IS DISTINCT FROM NEW.solicitud_id::TEXT THEN
+        RAISE EXCEPTION 'El snapshot de cotización aceptada es inmutable';
+    END IF;
+    SELECT * INTO solicitud FROM solicitudes_guia WHERE id=NEW.solicitud_id FOR UPDATE;
+    IF NOT FOUND OR solicitud.estado <> 'SOLICITADO'
+       OR solicitud.test OR NOT solicitud.visible_cliente OR solicitud.cargo_pendiente
+       OR NULLIF(solicitud.tracking, '') IS NOT NULL
+       OR NULLIF(solicitud.guia_url, '') IS NOT NULL OR solicitud.label_pdf IS NOT NULL
+       OR EXISTS(SELECT 1 FROM envios WHERE solicitud_id=NEW.solicitud_id)
+       OR EXISTS(SELECT 1 FROM conciliaciones_envio WHERE solicitud_id=NEW.solicitud_id)
+       OR EXISTS(SELECT 1 FROM ajustes_cliente WHERE solicitud_id=NEW.solicitud_id)
+       OR EXISTS(SELECT 1 FROM factura_courier_item_matches WHERE solicitud_id=NEW.solicitud_id)
+       OR EXISTS(SELECT 1 FROM solicitudes_guia_reemisiones
+                 WHERE solicitud_nueva_id=NEW.solicitud_id OR solicitud_anterior_id=NEW.solicitud_id)
+       OR EXISTS(SELECT 1 FROM recolecciones WHERE solicitud_id=NEW.solicitud_id AND estado <> 'CANCELADA') THEN
+        RAISE EXCEPTION 'El snapshot de cotización aceptada es inmutable';
+    END IF;
+    IF NEW.coti_id IS NULL OR NEW.coti_id IS DISTINCT FROM solicitud.coti_id
+       OR NEW.courier IS DISTINCT FROM UPPER(BTRIM(solicitud.courier))
+       OR solicitud.precio_tauro_ars IS NULL
+       OR ABS(solicitud.precio_tauro_ars::NUMERIC-NEW.precio_cliente_inicial_ars)>0.02
+       OR NOT EXISTS(SELECT 1 FROM cotizaciones WHERE coti_id=NEW.coti_id AND cliente_id=solicitud.cliente_id) THEN
+        RAISE EXCEPTION 'La revisión no coincide con la cotización de la solicitud';
+    END IF;
+    INSERT INTO solicitud_cotizacion_revisiones(solicitud_id, snapshot_anterior, cotizacion_nueva)
+    VALUES(OLD.solicitud_id, to_jsonb(OLD), NEW.coti_id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pricing_rangos_internacional JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS pricing_rangos_nacional JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS perfil_comercial TEXT NOT NULL DEFAULT '';

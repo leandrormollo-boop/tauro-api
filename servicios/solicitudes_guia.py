@@ -38,12 +38,15 @@ def _congelar_cotizacion_aceptada_con_cursor(
     costo_estimado_manual_ars: Optional[float] = None,
     origen_costo: str = "carga_manual_admin",
     base_interna: Optional[dict] = None,
+    actualizar_pendiente: bool = False,
 ) -> bool:
     """Congela costo estimado, precio aceptado y margen para conciliar luego.
 
     El snapshot queda ligado a la solicitud y no cambia si el ADMIN modifica
     el markup del cliente en el futuro. Para cargas externas, el costo base
     debe ser informado explícitamente por el operador.
+    Sólo una edición explícita previa a la emisión puede sustituir la tarifa
+    pendiente; el trigger conserva la versión anterior sin modificarla.
     """
     courier = str(solicitud.get("courier") or "").strip().upper()
     coti_id = str(solicitud.get("coti_id") or "").strip()
@@ -130,8 +133,16 @@ def _congelar_cotizacion_aceptada_con_cursor(
     huella = hashlib.sha256(
         json.dumps(huella_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
+    conflicto = "DO NOTHING"
+    if actualizar_pendiente:
+        # Sólo el editor de solicitudes, bajo el lock de una fila sin emitir.
+        columnas = ("coti_id courier servicio_courier moneda_courier tipo_cambio_ars "
+                    "costo_courier_estimado costo_courier_estimado_ars precio_cliente_inicial_ars "
+                    "margen_tauro_protegido_ars markup_tipo markup_valor peso_real_cotizado_kg "
+                    "peso_volumetrico_cotizado_kg peso_facturable_cotizado_kg bultos origen_calculo aceptado_at").split()
+        conflicto = "DO UPDATE SET " + ", ".join(f"{c}=EXCLUDED.{c}" for c in columnas)
     cur.execute(
-        """
+        f"""
         INSERT INTO envio_cotizacion_snapshots (
             solicitud_id, coti_id, courier, servicio_courier,
             moneda_courier, tipo_cambio_ars,
@@ -145,7 +156,7 @@ def _congelar_cotizacion_aceptada_con_cursor(
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s
         )
-        ON CONFLICT (solicitud_id) DO NOTHING
+        ON CONFLICT (solicitud_id) {conflicto}
         """,
         (
             int(solicitud["id"]), coti_id, courier,
@@ -2446,7 +2457,7 @@ def cargar_envio_externo(
     return {"ok": True, "solicitud_id": sid}
 
 
-def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
+def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str, *, revision: str | None = None) -> dict:
     """
     Emisión desde el PORTAL, con las tres llaves que definió Leandro:
 
@@ -2475,7 +2486,8 @@ def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
         if not elegible.get("ok"):
             return elegible
 
-    reserva = _reservar_credito_cliente(solicitud_id, cliente_id)
+    reserva = (_reservar_credito_cliente(solicitud_id, cliente_id, revision=revision)
+               if revision is not None else _reservar_credito_cliente(solicitud_id, cliente_id))
     if not reserva.get("ok"):
         return reserva
 
@@ -2723,7 +2735,7 @@ def _explicar_rechazo_recotizacion_dhl(motivo) -> str:
     return texto
 
 
-def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
+def _reservar_credito_cliente(solicitud_id: int, cliente_id: str, *, revision: str | None = None) -> dict:
     """Autoriza y reserva guía + crédito en una sola sección crítica.
 
     El lock de la fila del cliente serializa emisiones distintas de la misma
@@ -2734,7 +2746,7 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT s.cliente_id, s.tracking, s.estado, s.precio_tauro_ars,
+                SELECT s.cliente_id, s.tracking, s.estado, s.precio_tauro_ars, s.updated_at,
                        s.courier, s.ambito, s.remitente_pais, s.destino_pais,
                        c.activo,
                        r.solicitud_anterior_id,
@@ -2768,6 +2780,8 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
 
             if not fila or fila["cliente_id"] != cliente_id:
                 return {"ok": False, "error": "Esa solicitud no existe o no es tuya."}
+            if revision is not None and (not fila.get("updated_at") or fila["updated_at"].isoformat() != revision):
+                return {"ok": False, "error": "El envío o su precio cambió. Revisá los datos actualizados antes de confirmar la emisión."}
             if fila["tracking"]:
                 return {"ok": False, "error": "Esa solicitud ya tiene guía emitida."}
             if fila["estado"] == "VERIFICAR_COURIER":
