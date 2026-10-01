@@ -41,8 +41,11 @@
             <div class="home-monthly-chart">
                 {% for mes in r.serie_mensual %}
                 <a href="/portal/envios?anio={{ mes.anio }}&amp;mes={{ mes.mes }}" class="home-monthly-bar stats-month-link" aria-label="Ver {{ mes.etiqueta }}: {{ mes.cantidad }} envíos">
+                    {% set tope = r.maximo_mensual if r.maximo_mensual else 1 %}
                     <strong>{{ mes.cantidad }}</strong>
-                    <progress max="{{ r.maximo_mensual if r.maximo_mensual else 1 }}" value="{{ mes.cantidad }}"></progress>
+                    <div class="home-bar-track" role="img" aria-label="{{ mes.etiqueta }}: {{ mes.cantidad }} envíos">
+                        <div class="home-bar-fill" style="--p:{{ ((mes.cantidad / tope) * 100) | round(1) }}%;--d:{{ loop.index0 * 70 }}ms"></div>
+                    </div>
                     <span>{{ mes.etiqueta }}</span>
                 </a>
                 {% endfor %}
@@ -81,7 +84,9 @@
                     <span class="home-country-code">{{ destino.codigo }}</span>
                     <div>
                         <span><strong>{{ nombre_pais(destino.codigo) }}</strong><small>{{ destino.cantidad }} envíos · {{ destino.porcentaje }}%</small></span>
-                        <progress max="100" value="{{ destino.porcentaje }}" aria-label="{{ nombre_pais(destino.codigo) }}: {{ destino.porcentaje }} por ciento"></progress>
+                        <div class="home-dest-track" role="img" aria-label="{{ nombre_pais(destino.codigo) }}: {{ destino.porcentaje }} por ciento">
+                            <div class="home-dest-fill" style="--p:{{ destino.porcentaje }}%;--d:{{ loop.index0 * 90 }}ms"></div>
+                        </div>
                     </div>
                 </li>
                 {% endfor %}
