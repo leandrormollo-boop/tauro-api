@@ -77,6 +77,8 @@ jobs:
           httpx2==2.13.1
           httpcore2==2.13.1
           truststore==0.10.4
+          httpx==0.28.1
+          httpcore==1.0.9
       - name: Probar controles auditados y presentación web
         run: |
           python -m pytest \
@@ -104,6 +106,14 @@ jobs:
             tests/test_ups_emision.py \
             tests/test_monitoreo_guias_reemplazadas.py \
             tests/test_recolecciones_portal_claridad.py \
+            tests/test_recolecciones_permiso.py \
+            tests/test_recolecciones_concurrencia.py \
+            tests/test_pickup_dhl.py \
+            tests/test_edicion_solicitud_postgres.py \
+            tests/test_envio_gestion.py \
+            tests/test_portal_mis_clientes.py \
+            tests/test_portal_home_panorama.py \
+            tests/test_agenda_nacional.py \
             tests/test_carrier_contract.py \
             tests/test_tiendanube_app.py \
             tests/test_tiendanube_preflight.py \
@@ -145,6 +155,9 @@ jobs:
           tests/js/shipment-location-confirmation.test.cjs
           tests/js/web-quote-presentation.test.cjs
           tests/js/quote-route-map.test.cjs
+          tests/js/hs-assistant.test.cjs
+          tests/js/invoice-totales.test.cjs
+          tests/js/portal-agenda.test.cjs
 
   ci:
     name: ci

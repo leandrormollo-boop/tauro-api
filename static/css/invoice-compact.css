@@ -1,0 +1,84 @@
+/* Compactar artículos, no la carga física del paso Paquete. El ancho real de
+   la caja manda: el mismo formulario también se abre dentro de una ventana. */
+#shipment-wizard .shipment-invoice-card {
+  container: invoice / inline-size;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  box-shadow: none;
+}
+#shipment-wizard .shipment-invoice-card .shipment-box-head { margin-bottom: 4px; padding-bottom: 6px; }
+#shipment-wizard .invoice-items { display: grid; gap: 0; }
+#shipment-wizard .shipment-invoice-card [data-invoice-item] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  padding: 6px 0;
+  align-items: start;
+}
+#shipment-wizard [data-invoice-item] + [data-invoice-item] { border-top: 1px solid var(--line); }
+#shipment-wizard .invoice-item-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font: 600 13px/1.25 Inter, sans-serif;
+}
+#shipment-wizard .shipment-invoice-card .shipment-content-field { grid-column: 1 / -1; }
+#shipment-wizard .shipment-invoice-card .form-group > label,
+#shipment-wizard .shipment-invoice-card .shipment-field-label {
+  min-height: 30px;
+  margin: 0 0 3px;
+  font: 500 12px/1.25 Inter, sans-serif;
+  white-space: normal;
+  overflow: visible;
+}
+#shipment-wizard .shipment-invoice-card .shipment-field-label label {
+  min-height: 0;
+  font: inherit;
+  line-height: inherit;
+}
+#shipment-wizard .shipment-invoice-card .form-group > label { display: block; }
+#shipment-wizard .shipment-invoice-card .form-group > input,
+#shipment-wizard .shipment-invoice-card .input-unit,
+#shipment-wizard .shipment-invoice-card .tselect-btn {
+  height: 38px;
+  min-height: 38px;
+  padding: 7px 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+#shipment-wizard .shipment-invoice-card .input-unit { padding: 0; }
+#shipment-wizard .shipment-invoice-card .input-unit > input {
+  height: 36px;
+  min-height: 36px;
+  padding: 7px 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+#shipment-wizard .shipment-invoice-card .invoice-line-total { margin-top: 2px; line-height: 1.25; }
+#shipment-wizard .shipment-invoice-card .invoice-line-total:empty { display: none; }
+#shipment-wizard .shipment-invoice-card .hs-assistant { margin-top: 0; line-height: 1.3; }
+#shipment-wizard .shipment-invoice-card .hs-assistant summary { display: list-item; min-height: 28px; padding: 5px 0; }
+#shipment-wizard .shipment-invoice-card .invoice-item-add,
+#shipment-wizard .shipment-invoice-card .invoice-item-remove { min-height: 32px; padding: 5px 10px; margin-top: 0; font-size: 12px; }
+#shipment-wizard .shipment-invoice-card > .invoice-item-add { margin-top: 6px; }
+#shipment-wizard .shipment-invoice-card [data-invoice-box-total] { margin: 6px 0 0; line-height: 1.3; }
+@container invoice (min-width: 480px) {
+  #shipment-wizard .shipment-invoice-card [data-invoice-item] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #shipment-wizard .shipment-invoice-card .shipment-content-field { grid-column: auto; }
+}
+@container invoice (min-width: 760px) {
+  #shipment-wizard .shipment-invoice-card [data-invoice-item] {
+    grid-template-columns: minmax(0, 1.8fr) minmax(0, .65fr) minmax(0, 1.15fr) minmax(0, 1.05fr) minmax(0, 1.25fr) minmax(0, .9fr);
+  }
+}
+@media (max-width: 640px) {
+  /* En celular seguimos dejando espacio para tocar y evitamos el zoom al escribir. */
+  #shipment-wizard .shipment-invoice-card .form-group > input,
+  #shipment-wizard .shipment-invoice-card .input-unit,
+  #shipment-wizard .shipment-invoice-card .tselect-btn { height: 44px; min-height: 44px; font-size: 16px; }
+  #shipment-wizard .shipment-invoice-card .input-unit > input { height: 42px; min-height: 42px; font-size: 16px; }
+  #shipment-wizard .shipment-invoice-card .invoice-item-add,
+  #shipment-wizard .shipment-invoice-card .invoice-item-remove { min-height: 40px; }
+}

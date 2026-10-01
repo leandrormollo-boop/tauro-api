@@ -230,6 +230,7 @@ async def headers_de_seguridad(request: Request, call_next):
             construir_content_security_policy(
                 nonce,
                 pixel_habilitado=meta_pixel_habilitado(path),
+                marco_portal=path.startswith("/portal/"),
             ),
         )
 

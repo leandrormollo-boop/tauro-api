@@ -36,6 +36,9 @@
         var input = form.elements[prefix+'_'+key];
         if (!input) return;
         input.value = contact ? (contact.fields[key] || '') : '';
+        if (contact && prefix === 'origen' && key === 'nombre') {
+          input.value = contact.nombre_completo || contact.fields.nombre || '';
+        }
         input.dispatchEvent(new Event('change', {bubbles:true}));
       });
       if (form.tauroDraft) form.tauroDraft.save();

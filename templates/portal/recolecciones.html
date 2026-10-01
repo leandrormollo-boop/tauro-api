@@ -2,22 +2,33 @@
 {% block title %}Recolecciones{% endblock %}
 
 {% block content %}
-<div class="page-title">
+{% set vista_previa_recolecciones = vista_previa_recolecciones|default(false) %}
+<section class="pickups-page">
+<div class="page-title pickup-page-title">
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Operaciones</div>
             <h1>Recolecciones</h1>
-            <p>Reservas, confirmaciones y horarios de retiro.</p>
+            <p>Revisá tus retiros y programá el próximo desde una guía.</p>
         </div>
+        <a class="btn btn-primary" href="#programar-recoleccion">Programar nueva recolección</a>
     </div>
 </div>
+
+{% if vista_previa_recolecciones %}
+<div class="msg warn" id="pickup-preview-notice" role="status">
+    <strong>Vista previa de diseño.</strong> Las guías y recolecciones de esta pantalla son de ejemplo.
+    Podés elegir una guía y revisar el formulario, pero desde acá no se reservan ni cancelan retiros.
+    Para operar, ingresá a <a href="https://taurosolutions.ar/portal/recolecciones">tu portal de TAURO</a>.
+</div>
+{% endif %}
 
 {% from 'portal/_recoleccion_resumen.html' import comprobante_retiro with context %}
 {% set qp = request.query_params %}
 {% if qp.get('ok') == '2' and seleccionada and seleccionada.estado == 'CANCELADA' %}
     <div class="msg ok" role="status">Recolección cancelada. La guía se conserva.</div>
 {% elif qp.get('ok') == '1' and seleccionada and seleccionada.estado == 'AGENDADA' and seleccionada.confirmation_code and not seleccionada.vista_historica|default(false) %}
-    <div class="msg ok" role="status">Listo: {{ (seleccionada.courier or 'el courier')|upper }} confirmó tu recolección. Guardá el número de reserva de abajo.</div>
+    <div class="msg ok" role="status">Listo: {{ (seleccionada.courier or 'el courier')|upper }} confirmó tu recolección. Guardá el número de reserva.</div>
 {% endif %}
 {% if qp.get('error') %}
     <div class="msg error" role="alert">{{ qp.get('error') }}</div>
@@ -26,117 +37,160 @@
     <div class="msg warn" role="status">No pudimos consultar todas tus recolecciones. Volvé a cargar esta página antes de pedir otro retiro para evitar duplicados.</div>
 {% endif %}
 
-{% for r in recolecciones %}
-    {{ comprobante_retiro(r, destacado=seleccionada and seleccionada.id == r.id, mostrar_cancelar=true) }}
-{% endfor %}
-
-{% if retiro_bloquea_form %}
-    {% if retiro_envio %}<p class="pickup-note">El estado de este retiro figura arriba. Para otro envío, elegí su guía en Mis envíos.</p>{% endif %}
-    <a href="/portal/envios?tipo=internacional&amp;paso=guia_lista" class="btn btn-ghost">Ver mis guías</a>
-{% else %}
-<details class="card pickup-new"{% if envio_pre or not recolecciones %} open{% endif %}>
-    <summary>{% if envio_pre %}Programar el retiro de esta guía{% elif recolecciones %}Programar otra recolección{% else %}Programar una recolección{% endif %}</summary>
-    <p>Elegí la guía, la fecha y el horario del retiro.</p>
-
-    {% if envio_pre_error %}
-        <div class="msg warn">{{ envio_pre_error }}</div>
-    {% elif not puede_recolectar and dhl_requiere_envio %}
-        <p>Seleccioná una guía DHL para programar su retiro.</p>
-        <a class="btn btn-primary" href="/portal/envios?tipo=internacional&amp;paso=guia_lista">Elegir una guía para retirar →</a>
-    {% elif not puede_recolectar %}
-        <div class="msg warn">
-            La programación de recolecciones todavía no está habilitada para tu cuenta.
-            Escribinos y la activamos cuando coordinemos el courier y la dirección de retiro.
+<section class="pickup-history" aria-labelledby="retiros-title">
+    <div class="pickup-section-heading">
+        <div>
+            <span class="eyebrow">Historial</span>
+            <h2 id="retiros-title">Tus recolecciones</h2>
         </div>
-    {% elif not remitente or not remitente.direccion %}
-        <div class="msg warn">Primero cargá tu dirección de retiro en la
-        <a href="/portal/direcciones">libreta</a> — es donde el chofer tiene que ir.</div>
+        <span>{{ recolecciones|length }} retiro{{ '' if recolecciones|length == 1 else 's' }}</span>
+    </div>
+    {% if recolecciones %}
+    <div class="pickup-list">
+        {% for r in recolecciones %}
+            {{ comprobante_retiro(r, destacado=seleccionada and seleccionada.id == r.id, mostrar_cancelar=not vista_previa_recolecciones) }}
+        {% endfor %}
+    </div>
     {% else %}
-    {% if dhl_requiere_envio %}
-    <div class="msg" style="margin-bottom:14px;">
-        ¿La guía es DHL? Programá el retiro desde <a href="/portal/envios?tipo=internacional&amp;paso=guia_lista">Mis envíos</a>
-        para conservar sus cajas y su dirección exacta.
+    <div class="pickup-empty">
+        <strong>Todavía no programaste recolecciones.</strong>
+        <span>Elegí una guía y coordiná el primer retiro desde esta pantalla.</span>
     </div>
     {% endif %}
-    <div style="background:rgba(167,139,250,.08);border-left:3px solid var(--brand,#a78bfa);
-                padding:11px 14px;border-radius:0 8px 8px 0;margin-bottom:16px;font-size:13px;">
-        <strong>Retiran en:</strong> {{ remitente.direccion }}{% if remitente.ciudad %}, {{ remitente.ciudad }}{% endif %}{% if remitente.pais %} · {{ remitente.pais }}{% endif %}
-        <br><small style="color:var(--fg-3);">
-            {% if envio_pre %}Es el origen guardado en esta guía; no se reemplaza por la dirección general de tu cuenta.{% else %}Es tu dirección de remitente. Se cambia desde la libreta.{% endif %}
-        </small>
+</section>
+
+<section class="pickup-create" id="programar-recoleccion" aria-labelledby="programar-title">
+    <div class="pickup-section-heading pickup-create-heading">
+        <div>
+            <span class="eyebrow">Nuevo retiro</span>
+            <h2 id="programar-title">Programar una recolección</h2>
+            <p>Asociala a una guía para cargar automáticamente el courier, el origen y los paquetes.</p>
+        </div>
+        {% if envio_pre %}<span class="badge ok">Guía seleccionada</span>{% endif %}
     </div>
 
-    <form method="POST" action="/portal/recolecciones/nueva">
-        {% if envio_pre %}
-        <input type="hidden" name="solicitud_id" value="{{ envio_pre.solicitud_id }}">
-        {# Llegó desde "Mis envíos": el retiro es DE ese envío, así que
-           courier, bultos y peso vienen puestos (editables igual). #}
-        <div class="msg" style="margin-bottom:14px;">
-            Preparando el retiro del envío <b>#{{ envio_pre.solicitud_id }}</b>
-            ({{ envio_pre.courier }} · guía {{ envio_pre.tracking }}).
-            Ya cargamos su origen y sus cajas. Revisá fecha y horario; la recolección se programa cuando confirmás abajo.
+    {% if retiro_bloquea_form %}
+        {% if retiro_envio %}
+        <div class="pickup-blocked">
+            <strong>Esta guía ya tiene una recolección.</strong>
+            <span>El estado y el número de reserva figuran arriba.</span>
         </div>
         {% endif %}
-        {# El courier que va a pasar a buscar. Antes no se elegía y TODA
-           recolección se agendaba en FedEx — con una guía DHL el chofer
-           equivocado tocaba el timbre. #}
-        <div class="form-group">
-            <label for="rec-courier">¿Quién pasa a buscar? *</label>
-            <select name="courier" id="rec-courier" required {% if envio_pre %}disabled{% endif %}>
-                {% if envio_pre %}
-                <option value="{{ envio_pre.courier }}" selected>{{ envio_pre.courier }}</option>
+        <a href="/portal/envios?tipo=internacional&amp;paso=guia_lista" class="btn btn-ghost btn-sm">Ver mis guías</a>
+    {% else %}
+        {% if envio_pre_error %}
+            <div class="msg warn">{{ envio_pre_error }}</div>
+        {% endif %}
+
+        {% if not envio_pre %}
+        <div class="pickup-start-grid">
+            <div class="pickup-choice pickup-choice-primary">
+                <span class="pickup-step">1</span>
+                <div>
+                    <strong>Usar una guía existente</strong>
+                    <p>Elegí una guía lista, aunque la hayas creado anteriormente.</p>
+                </div>
+                {% if guias_recoleccion_error %}
+                    <div class="msg warn">No pudimos cargar tus guías disponibles. Volvé a intentar.</div>
+                {% elif guias_recoleccion %}
+                <form method="GET" action="/portal/recolecciones" class="pickup-guide-form">
+                    <label for="pickup-envio">Guía para retirar</label>
+                    <div class="pickup-guide-control">
+                        <select name="envio" id="pickup-envio" required>
+                            <option value="">Elegí una guía</option>
+                            {% for guia in guias_recoleccion %}
+                            <option value="{{ guia.id }}">{{ guia.tracking }} · {{ guia.etiqueta_cliente or guia.dest_nombre or ('Envío #' ~ guia.id) }} · {{ guia.courier }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-primary btn-sm">Continuar</button>
+                    </div>
+                </form>
                 {% else %}
-                {% for c in couriers_recoleccion %}
-                <option value="{{ c.id }}" {% if courier_default == c.id %}selected{% endif %}>{{ c.nombre }}</option>
-                {% endfor %}
+                <div class="pickup-choice-empty">No tenés guías disponibles para programar.</div>
                 {% endif %}
-            </select>
-            <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                Elegí el mismo courier de las guías que van a retirar.
-            </p>
+            </div>
+            <a class="pickup-choice pickup-choice-link" href="/portal/envios/nuevo?ambito=internacional">
+                <span class="pickup-step">2</span>
+                <span>
+                    <strong>Crear un envío nuevo</strong>
+                    <small>Emití la guía y después programá su retiro.</small>
+                </span>
+                <span class="pickup-choice-arrow" aria-hidden="true">→</span>
+            </a>
         </div>
-        <div class="form-grid-3">
-            <div class="form-group">
-                <label for="rec-fecha">Fecha *</label>
-                {# Sin fines de semana ni más de 14 días: son las reglas del
-                   courier, mejor frenarlas acá que recibir el rechazo. #}
-                <input type="date" name="fecha" id="rec-fecha" required
-                       value="{{ fecha_sugerida }}" min="{{ fecha_sugerida }}" max="{{ fecha_max }}">
-            </div>
-            <div class="form-group">
-                <label for="rec-desde">Listos desde (hora del origen) *</label>
-                <input type="time" name="ready_time" id="rec-desde" required value="09:00">
-            </div>
-            <div class="form-group">
-                <label for="rec-hasta">Hasta (hora del origen) *</label>
-                <input type="time" name="close_time" id="rec-hasta" required value="17:00">
-                <small class="hint">Dejá al menos 2 horas entre inicio y fin.</small>
-            </div>
-        </div>
+        {% endif %}
 
-        <div class="form-grid-2">
-            <div class="form-group">
-                <label for="rec-bultos">Cantidad de bultos</label>
-                <input type="text" name="bultos" id="rec-bultos" inputmode="numeric" data-numero="entero" value="{{ envio_pre.bultos if envio_pre else 1 }}" {% if envio_pre %}readonly{% endif %}>
+        {% if envio_pre %}
+            {% if not puede_recolectar %}
+            <div class="msg warn">La recolección con {{ envio_pre.courier }} todavía no está habilitada para tu cuenta.</div>
+            {% elif not remitente or not remitente.direccion %}
+            <div class="msg warn">Esta guía no tiene una dirección de retiro completa. Revisala desde <a href="/portal/envios/{{ envio_pre.solicitud_id }}">el envío</a>.</div>
+            {% else %}
+            <div class="pickup-selected-guide">
+                <div><span>Guía elegida</span><strong>{{ envio_pre.tracking }}</strong></div>
+                <div><span>Courier</span><strong>{{ envio_pre.courier }}</strong></div>
+                <div><span>Retiran en</span><strong>{{ remitente.direccion }}{% if remitente.ciudad %}, {{ remitente.ciudad }}{% endif %}</strong></div>
+                <a href="/portal/recolecciones" class="btn btn-ghost btn-sm">Cambiar guía</a>
             </div>
-            <div class="form-group">
-                <label for="rec-peso">Peso total aproximado (kg)</label>
-                <input type="text" name="peso_kg" id="rec-peso" inputmode="decimal" data-numero="decimal" value="{{ '%g'|format(envio_pre.peso_kg) if envio_pre else 1 }}" {% if envio_pre %}readonly{% endif %}>
-            </div>
-        </div>
 
-        <div class="form-group">
-            <label for="rec-obs">Indicaciones para el chofer</label>
-            <input type="text" name="instrucciones" id="rec-obs"
-                   placeholder="Timbre 3B · preguntar por Ana · portón del fondo">
-        </div>
-
-        <button type="submit" class="btn btn-primary">{% if envio_pre %}Programar recolección con {{ envio_pre.courier }}{% else %}Programar recolección{% endif %}</button>
-        <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
-            Prepará los paquetes cerrados y etiquetados. Debe haber alguien durante el horario acordado.
-        </p>
-    </form>
+            <form method="POST" action="/portal/recolecciones/nueva" class="pickup-schedule-form">
+                <input type="hidden" name="solicitud_id" value="{{ envio_pre.solicitud_id }}">
+                <input type="hidden" name="courier" value="{{ envio_pre.courier }}">
+                <div class="form-grid-3">
+                    <div class="form-group">
+                        <label for="rec-fecha">Fecha *</label>
+                        <input type="date" name="fecha" id="rec-fecha" required value="{{ fecha_sugerida }}" min="{{ fecha_sugerida }}" max="{{ fecha_max }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="rec-desde">Listos desde *</label>
+                        <input type="time" name="ready_time" id="rec-desde" required value="09:00">
+                    </div>
+                    <div class="form-group">
+                        <label for="rec-hasta">Disponibles hasta *</label>
+                        <input type="time" name="close_time" id="rec-hasta" required value="17:00">
+                        <small class="hint">Horario del origen. Dejá al menos 2 horas.</small>
+                    </div>
+                </div>
+                <div class="form-grid-2 pickup-package-summary">
+                    <div><span>Paquetes</span><strong>{{ envio_pre.bultos }} bulto{{ '' if envio_pre.bultos == 1 else 's' }}</strong></div>
+                    <div><span>Peso total</span><strong>{{ '%g'|format(envio_pre.peso_kg) }} kg</strong></div>
+                </div>
+                <input type="hidden" name="bultos" value="{{ envio_pre.bultos }}">
+                <input type="hidden" name="peso_kg" value="{{ '%g'|format(envio_pre.peso_kg) }}">
+                <div class="form-group">
+                    <label for="rec-obs">Indicaciones para el chofer</label>
+                    <input type="text" name="instrucciones" id="rec-obs" placeholder="Timbre 3B · preguntar por Ana · portón del fondo">
+                </div>
+                <div class="pickup-submit-row">
+                    <span>Prepará los paquetes cerrados y etiquetados.</span>
+                    <button type="submit" class="btn btn-primary" {% if vista_previa_recolecciones %}disabled aria-describedby="pickup-preview-notice"{% endif %}>Programar recolección con {{ envio_pre.courier }}</button>
+                </div>
+            </form>
+            {% endif %}
+        {% elif dhl_requiere_envio %}
+            <p class="pickup-selection-hint">Elegí una guía disponible para continuar. El portal va a completar los datos del retiro.</p>
+        {% elif puede_recolectar and remitente and remitente.direccion %}
+        <details class="pickup-manual">
+            <summary>Programar un retiro general sin asociar una guía</summary>
+            <p>Usalo solamente si el courier y los paquetes todavía no están ligados a un envío del portal.</p>
+            <form method="POST" action="/portal/recolecciones/nueva" class="pickup-schedule-form">
+                <div class="form-grid-3">
+                    <div class="form-group"><label for="manual-courier">Courier *</label><select name="courier" id="manual-courier" required>{% for c in couriers_recoleccion %}<option value="{{ c.id }}" {% if courier_default == c.id %}selected{% endif %}>{{ c.nombre }}</option>{% endfor %}</select></div>
+                    <div class="form-group"><label for="manual-fecha">Fecha *</label><input type="date" name="fecha" id="manual-fecha" required value="{{ fecha_sugerida }}" min="{{ fecha_sugerida }}" max="{{ fecha_max }}"></div>
+                    <div class="form-group"><label for="manual-ready">Horario *</label><div class="pickup-time-pair"><input type="time" name="ready_time" id="manual-ready" required value="09:00"><input type="time" name="close_time" aria-label="Disponibles hasta" required value="17:00"></div></div>
+                </div>
+                <div class="form-grid-2">
+                    <div class="form-group"><label for="manual-bultos">Bultos</label><input type="text" name="bultos" id="manual-bultos" inputmode="numeric" data-numero="entero" value="1"></div>
+                    <div class="form-group"><label for="manual-peso">Peso total (kg)</label><input type="text" name="peso_kg" id="manual-peso" inputmode="decimal" data-numero="decimal" value="1"></div>
+                </div>
+                <div class="form-group"><label for="manual-obs">Indicaciones para el chofer</label><input type="text" name="instrucciones" id="manual-obs" placeholder="Timbre, contacto o acceso"></div>
+                <button type="submit" class="btn btn-primary" {% if vista_previa_recolecciones %}disabled aria-describedby="pickup-preview-notice"{% endif %}>Programar recolección</button>
+            </form>
+        </details>
+        {% elif not puede_recolectar and not dhl_requiere_envio %}
+            <div class="msg warn">La programación de recolecciones todavía no está habilitada para tu cuenta.</div>
+        {% endif %}
     {% endif %}
-</details>
-{% endif %}
+</section>
+</section>
 {% endblock %}

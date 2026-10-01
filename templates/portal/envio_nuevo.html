@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% from 'portal/_ubicacion_cotizada.html' import confirmar_ubicacion %}
-{% block title %}{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío') }}{% endblock %}
+{% block title %}{{ 'Editar envío' if form and form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío')) }}{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
+<link rel="stylesheet" href="/static/css/invoice-compact.css?v=1">
 <link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
 <script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>
 {% endblock %}
 
 {% block content %}
-<script src="/static/js/portal-agenda.js?v=1" defer></script>
-<link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
-<script src="/static/js/hs-assistant.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
+<script src="/static/js/portal-agenda.js?v=2" defer></script>
+<link rel="stylesheet" href="/static/css/hs-assistant.css?v=2">
+<script src="/static/js/hs-assistant.js?v=2" defer nonce="{{ request.state.csp_nonce }}"></script>
 {% if not ambito %}
     {% set flujo = 'crear' %}
     {% include 'portal/_ambito_selector.html' %}
@@ -24,12 +25,12 @@
      data-initial-step="{{ form.initial_step or 1 }}">
 <div class="page-title page-title-row">
     <div>
-        <div class="eyebrow"><span aria-hidden="true">🌐</span> Envío internacional</div>
-        <h1>{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional') }}</h1>
+        {% if form.editar_solicitud_id %}<a class="shipment-edit-back" href="/portal/envios/{{ form.editar_solicitud_id }}/gestion?ventana=1">← Volver a la revisión</a>{% endif %}
+        <h1>{{ 'Editar envío' if form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional')) }}</h1>
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>{% if reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
+        <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
     </div>
     <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a>
 </div>
@@ -123,9 +124,12 @@
     </div>
 </div>
 {% endif %}
-<form data-draft-server="{{ 1 if error else 0 }}" method="POST" action="/portal/envios/nuevo"
+<form data-draft-server="{{ 1 if error or form.editar_solicitud_id else 0 }}" method="POST" action="/portal/envios/nuevo{% if request.query_params.get('ventana') == '1' %}?ventana=1{% endif %}"
       {% if reemision_origen %}data-confirm="¿Confirmar la corrección? DHL emitirá un tracking nuevo. La guía anterior quedará reemplazada y sólo la nueva se aplicará a tu cuenta corriente."{% endif %}>
     <input type="hidden" name="borrador_token" value="{{ form.borrador_token or '' }}">
+    <input type="hidden" name="editar_solicitud_id" value="{{ form.editar_solicitud_id or '' }}">
+    <input type="hidden" name="editar_version" value="{{ form.editar_version or '' }}">
+    <input type="hidden" name="gestion_ventana" value="{{ '1' if request.query_params.get('ventana') == '1' else '' }}">
     <input type="hidden" name="ambito" value="internacional">
     <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
     <input type="hidden" name="reemplaza_solicitud_id" value="{{ form.reemplaza_solicitud_id or '' }}">
@@ -147,7 +151,7 @@
                de ORIGEN del envío sale de acá, tampoco se podía cotizar desde
                otro país sin pasar por la libreta. #}
                 <div class="form-group">
-                    <label for="remitente_id">Remitente guardado · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
+                    <label for="remitente_id">Usar un cliente como remitente · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
                     <select data-agenda-role="REMITENTE" name="remitente_id" id="remitente_id" data-searchable data-search-placeholder="Buscar nombre, ciudad o país">
                         <option value="">Cargar remitente nuevo</option>
                         {% for r in remitentes %}
@@ -161,7 +165,7 @@
                                     data-estado="{{ r.estado or '' }}"
                                     data-cp="{{ r.cp }}"
                                     data-pais="{{ r.pais }}"
-                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada and remitente and not form.rem_nombre) %}selected{% endif %}>
+                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and remitente and remitente.id == r.id and not form.rem_nombre) %}selected{% endif %}>
                                 {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
                             </option>
                         {% endfor %}
@@ -256,7 +260,7 @@
             <h4><span class="n">2</span> Destinatario <span class="badge warn">Entrega</span></h4>
 
                 <div class="form-group">
-                    <label for="destinatario_id">Elegir de Mis clientes · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Administrar ↗</a></label>
+                    <label for="destinatario_id">Usar un cliente como destinatario · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
                     <select data-agenda-role="DESTINATARIO" name="destinatario_id" id="destinatario_id" data-searchable
                             data-search-placeholder="Buscar cliente, ciudad o país">
                         <option value="">Cargar un destinatario nuevo</option>
@@ -272,7 +276,7 @@
                                     data-cp="{{ d.cp }}"
                                     data-pais="{{ d.pais }}"
                                     {% if form.destinatario_id|string == d.id|string %}selected{% endif %}>
-                                {{ d.label }} · {{ d.nombre }} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
+                                {{ d.label }}{% if d.nombre != d.label %} · {{ d.nombre }}{% endif %} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
                             </option>
                         {% endfor %}
                     </select>
@@ -344,7 +348,7 @@
             <div class="guardar-dest">
             <label class="check-row">
                 <input type="checkbox" name="guardar_destinatario" value="1" {% if form.guardar_destinatario %}checked{% endif %}>
-                <span>Guardar este destinatario para próximos envíos</span>
+                <span>Guardar este cliente para usarlo como remitente o destinatario</span>
             </label>
                 <div class="form-group compact-field">
                 <label for="dest_alias">Alias para guardar</label>
@@ -437,11 +441,12 @@
                     <div class="shipment-box-head">
                         <div><span>Invoice comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
                         <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
+                        <button type="button" class="btn btn-ghost btn-sm invoice-item-add">Agregar artículo</button>
                     </div>
                     <input type="hidden" name="bulto_items_extra" class="invoice-extras" value="{{ (f.items_invoice[1:] if f.items_invoice else [])|tojson|forceescape }}">
                     <div class="invoice-items">
                     <div class="bulto-invoice" data-invoice-item data-hs-scope>
-                        <div class="invoice-item-heading" style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                        <div class="invoice-item-heading">
                             <strong data-item-number>Artículo 1</strong>
                             <button type="button" class="btn btn-ghost btn-sm invoice-item-remove" hidden style="display:none">Quitar artículo</button>
                         </div>
@@ -450,7 +455,7 @@
                             <input type="text" name="bulto_desc_en" class="bulto-desc" data-hs-description maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
                         </div>
                         <div class="form-group">
-                            <label>Cantidad de unidades</label>
+                            <label>Unidades</label>
                             <input type="text" name="bulto_unidades_aduana" aria-label="Cantidad de unidades" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group shipment-declared-value">
@@ -461,7 +466,6 @@
                         <div class="form-group">
                             <label>HS code <span class="field-optional">(opcional)</span></label>
                             <input type="text" name="bulto_hs" class="bulto-hs" data-hs-input placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}">
-                            {% include 'portal/_hs_assistant.html' %}
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
@@ -473,10 +477,11 @@
                             </select>
                         </div>
                         <div class="form-group invoice-net-weight" {% if not f.items_invoice %}hidden{% endif %}>
-                            <label>Peso neto total de este artículo</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span>
+                            <div class="shipment-field-label"><label>Peso neto total</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span></div>
                             <div class="input-unit"><input type="text" name="bulto_peso_neto" aria-label="Peso neto total del artículo" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
 
                         </div>
+                        {% include 'portal/_hs_assistant.html' %}
                     </div>
                     </div>
                     <button type="button" class="btn-add-bulto invoice-item-add">+ Agregar otro artículo a esta caja</button>
@@ -582,9 +587,9 @@
             <button type="button" id="wizard-back-final" class="btn btn-ghost">
                 ← Atrás
             </button>
-            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Salir</a>
+            <a href="{% if form.editar_solicitud_id %}/portal/envios/{{ form.editar_solicitud_id }}/gestion?ventana=1{% elif reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">{{ 'Volver sin guardar' if form.editar_solicitud_id else 'Salir' }}</a>
             <button type="submit" class="btn btn-primary">
-                {{ 'Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud' }}
+                {{ 'Guardar cambios y revisar' if form.editar_solicitud_id else ('Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud y revisar') }}
             </button>
         </div>
     </div>

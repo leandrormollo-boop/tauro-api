@@ -79,6 +79,7 @@ from servicios.solicitudes_guia import (
     cancelar_solicitud_cliente, periodos_solicitudes_cliente,
 )
 from servicios.periodos_envios import normalizar_periodo
+from servicios.edicion_solicitud import puede_editar_solicitud, editar_solicitud_cliente
 from servicios.rutas_frecuentes import obtener_rutas_frecuentes
 from servicios.carriers import courier_default_cliente
 from servicios.carrier_contract import Ambito, public_catalog
@@ -884,6 +885,22 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
     )
 
 
+@router.get("/estadisticas", response_class=HTMLResponse)
+def estadisticas(request: Request, cliente: str = Depends(cliente_actual)):
+    """Panorama operativo real del cliente, sin mezclar datos de cuenta."""
+    historial = listar_solicitudes_cliente(cliente, limite=None)
+    embudo = embudo_envios(cliente)
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/estadisticas.html",
+        context={
+            "cliente": cliente,
+            "embudo": embudo,
+            "resumen_inicio": resumen_inicio_cliente(historial, embudo),
+        },
+    )
+
+
 # ── Rastreo: resuelve el courier antes de mandar afuera ─────
 @router.get("/track")
 def track_redirect(nro: str = "", cliente: str = Depends(cliente_actual)):
@@ -987,6 +1004,32 @@ def recolecciones_view(
         if permisos_pickup.get(c["id"].lower(), False)
     ]
 
+    # La recolección nace desde una guía real. Ofrecemos las guías listas de
+    # ESTA cuenta, internacionales y sin otro retiro vigente. Una guía vieja
+    # sigue disponible mientras continúe lista para despachar; una cancelada,
+    # reemplazada o ya asociada no vuelve a aparecer como opción engañosa.
+    guias_recoleccion = []
+    guias_recoleccion_error = False
+    try:
+        envios_con_retiro = {
+            int(r["solicitud_id"])
+            for r in recolecciones
+            if r.get("solicitud_id") and r.get("estado") != "CANCELADA"
+        }
+        for solicitud in listar_solicitudes_cliente(cliente, limite=None):
+            courier = str(solicitud.get("courier") or "").strip().upper()
+            if (
+                solicitud.get("tracking")
+                and solicitud.get("estado") == "GUIA_LISTA"
+                and ambito_envio(solicitud) == "internacional"
+                and permisos_pickup.get(courier.lower(), False)
+                and int(solicitud["id"]) not in envios_con_retiro
+            ):
+                guias_recoleccion.append(solicitud)
+    except Exception as exc:
+        guias_recoleccion_error = True
+        print(f"[portal] no pude listar guías para retiro: {type(exc).__name__}")
+
     envio_pre = None
     envio_pre_error = None
     if envio:
@@ -1056,6 +1099,8 @@ def recolecciones_view(
                  "envio_pre_error": envio_pre_error,
                  "puede_recolectar": puede_recolectar,
                  "dhl_requiere_envio": dhl_requiere_envio,
+                 "guias_recoleccion": guias_recoleccion,
+                 "guias_recoleccion_error": guias_recoleccion_error,
                  "couriers_recoleccion": couriers_recoleccion,
                  "courier_default": (courier_default_cliente(cliente) or "fedex").upper(),
                  "fecha_sugerida": sugerida.strftime("%Y-%m-%d"),
@@ -1074,6 +1119,7 @@ def recoleccion_nueva(
     courier: str = Form("FEDEX"),
     solicitud_id: str = Form(""),
     cliente: str = Depends(cliente_actual),
+    gestion_ventana: str = Form(""),
 ):
     from servicios.recolecciones import crear
 
@@ -1095,6 +1141,9 @@ def recoleccion_nueva(
         r = {"ok": False, "error": "No pudimos confirmar el retiro. Revisá su estado o escribinos antes de volver a pedirlo."}
 
     parametros = {"envio": solicitud_id_num} if solicitud_id_num else {}
+    if gestion_ventana == "1" and solicitud_id_num:
+        resultado_url = "ok=recoleccion" if r.get("ok") else "error=" + quote(str(r.get("error") or "No pudimos confirmar el retiro"))
+        return RedirectResponse(url=f"/portal/envios/{solicitud_id_num}/gestion?ventana=1&retiro=1&{resultado_url}", status_code=303)
     if r.get("ok"):
         parametros.update(ok="1", recoleccion=r["id"])
         return RedirectResponse(
@@ -2569,11 +2618,14 @@ def envio_nuevo_form(
     destino_referencia: str = "",
     corregir: Optional[int] = None,
     repetir: Optional[int] = None,
+    editar: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    if editar:
+        corregir = repetir = None
     if corregir:
         repetir = None
-    if corregir or repetir:
+    if corregir or repetir or editar:
         ambito = "internacional"
     quote_id = _quote_id_portal(quote_id)
     if quote_id and not (ambito or "").strip():
@@ -2582,6 +2634,7 @@ def envio_nuevo_form(
     selector_valores = {
         "pedido_tienda": pedido_tienda,
         "destinatario_id": destinatario_id,
+        "remitente_id": remitente_id,
         "origen": origen,
         "destino": destino,
         "courier": courier,
@@ -2590,7 +2643,9 @@ def envio_nuevo_form(
         "valor_cotizado": valor_cotizado,
     }
     if ambito == "nacional":
-        return RedirectResponse("/portal/oca/nuevo" + (f"?destinatario_id={destinatario_id}" if destinatario_id else ""), status_code=303)
+        contactos = {k: v for k, v in (("remitente_id", remitente_id),
+                    ("destinatario_id", destinatario_id)) if v}
+        return RedirectResponse("/portal/oca/nuevo" + ("?" + urlencode(contactos) if contactos else ""), status_code=303)
     if not ambito:
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
@@ -2611,7 +2666,8 @@ def envio_nuevo_form(
     error = None
     reemision_origen = None
     repeticion_origen = None
-    origen_existente_id = corregir or repetir
+    origen_existente_id = editar or corregir or repetir
+    contactos_guardados = listar_direcciones(cliente)
     if origen_existente_id:
         origen_existente = obtener_solicitud_de_cliente(
             origen_existente_id, cliente
@@ -2627,6 +2683,8 @@ def envio_nuevo_form(
                      "Repetir+env%C3%ADos+nacionales+se+habilitar%C3%A1+con+OCA+y+Andreani"),
                 status_code=303,
             )
+        if editar and not puede_editar_solicitud(origen_existente):
+            return RedirectResponse(url=f"/portal/envios/{editar}/gestion?ventana=1&error=Este+envío+ya+no+se+puede+editar", status_code=303)
         if corregir:
             reemision_origen = origen_existente
             elegible = validar_reemision_cliente(corregir, cliente)
@@ -2639,12 +2697,14 @@ def envio_nuevo_form(
                          f"{quote(str(elegible.get('error') or 'No se puede corregir'))}"),
                     status_code=303,
                 )
-        else:
+        elif not editar:
             repeticion_origen = origen_existente
 
         form, remitente_precargado = _precargar_envio_existente(
             origen_existente, corregir_id=corregir
         )
+        if editar:
+            form.update(editar_solicitud_id=str(editar), editar_version=origen_existente["updated_at"].isoformat())
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={
@@ -2652,8 +2712,8 @@ def envio_nuevo_form(
                 "productos": get_productos(cliente),
                 "paises_destino": _paises_con_nacional(),
                 "remitente": remitente_precargado,
-                "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
-                "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+                "remitentes": contactos_guardados,
+                "destinatarios": contactos_guardados,
                 "form": form, "pedido_tienda": None, "cotizacion_web": None,
                 "reemision_origen": reemision_origen,
                 "repeticion_origen": repeticion_origen,
@@ -2734,7 +2794,7 @@ def envio_nuevo_form(
     # se resuelve junto con el cliente autenticado, así una cuenta no puede
     # precargar un destinatario perteneciente a otra.
     if destinatario_id and not pedido_tienda:
-        destinatario = obtener_direccion(cliente, destinatario_id, TIPO_DESTINATARIO)
+        destinatario = obtener_direccion(cliente, destinatario_id)
         if destinatario:
             form.update({
                 "destinatario_id": str(destinatario["id"]),
@@ -2798,7 +2858,7 @@ def envio_nuevo_form(
         form["intl_courier"] = courier
     remitente = obtener_remitente_para_envio(cliente)
     if remitente_id and not (pedido_tienda or corregir or repetir or quote_id):
-        saved = obtener_direccion(cliente, remitente_id, TIPO_REMITENTE)
+        saved = obtener_direccion(cliente, remitente_id)
         if saved:
             remitente = saved
             form["remitente_id"] = str(saved["id"])
@@ -2830,8 +2890,8 @@ def envio_nuevo_form(
             "paises_destino": _paises_con_nacional(),
             "remitente": remitente,
             "remitente_por_completar": remitente_por_completar,
-            "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
-            "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+            "remitentes": contactos_guardados,
+            "destinatarios": contactos_guardados,
             "form": form,
             "pedido_tienda": pedido_info,
             "cotizacion_web": cotizacion_web,
@@ -2927,6 +2987,9 @@ def envio_nuevo_post(
     reemplaza_solicitud_id: str = Form(""),
     reemision_motivo: str = Form(""),
     borrador_token: str = Form(""),
+    editar_solicitud_id: str = Form(""),
+    editar_version: str = Form(""),
+    gestion_ventana: str = Form(""),
     origen_referencia: str = Form(""),
     destino_referencia: str = Form(""),
     origen_ubicacion_confirmada: str = Form(""),
@@ -2938,8 +3001,8 @@ def envio_nuevo_post(
 
     productos = get_productos(cliente)
     paises_destino = _paises_con_nacional()
-    remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
-    destinatarios = listar_direcciones(cliente, TIPO_DESTINATARIO)
+    remitentes = destinatarios = listar_direcciones(cliente)
+    editar_id = _id_opt(editar_solicitud_id) if isinstance(editar_solicitud_id, str) else None
     # Algunos tests/consumidores internos invocan la función directamente,
     # fuera del inyector de FastAPI. En ese caso el default sigue siendo un
     # FormInfo, no una lista enviada por el navegador.
@@ -3177,6 +3240,8 @@ def envio_nuevo_post(
         "reemplaza_solicitud_id": reemplaza_solicitud_id,
         "reemision_motivo": reemision_motivo,
         "borrador_token": borrador_token if isinstance(borrador_token, str) else "",
+        "editar_solicitud_id": str(editar_id or (editar_solicitud_id if isinstance(editar_solicitud_id, str) else "")),
+        "editar_version": editar_version if isinstance(editar_version, str) else "",
         "origen_referencia": "1" if origen_referencia == "1" else "",
         "destino_referencia": "1" if destino_referencia == "1" else "",
         "origen_ubicacion_confirmada": "1" if origen_ubicacion_confirmada == "1" else "",
@@ -3192,6 +3257,12 @@ def envio_nuevo_post(
         for error_step, lado in ((1, "origen"), (2, "destino")):
             validar_ubicacion_cotizada(form, lado)
         error_step = 1
+        if isinstance(editar_solicitud_id, str) and editar_solicitud_id.strip() and not editar_id:
+            raise ValueError("No pudimos identificar el envío a editar. Volvé a abrirlo desde Mis envíos.")
+        if editar_id:
+            actual = obtener_solicitud_de_cliente(editar_id, cliente)
+            if not puede_editar_solicitud(actual) or _id_opt(reemplaza_solicitud_id) or str(pedido_tienda_id if isinstance(pedido_tienda_id, str) else "").strip():
+                raise ValueError("Este envío ya no se puede editar. Revisá su estado antes de continuar.")
         reemplaza_id = _id_opt(reemplaza_solicitud_id)
         if reemplaza_id:
             reemision_origen = obtener_solicitud_de_cliente(reemplaza_id, cliente)
@@ -3222,6 +3293,8 @@ def envio_nuevo_post(
             )
 
         remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id)) or {}
+        if _id_opt(remitente_id) and not remitente:
+            raise ValueError("Ese cliente guardado no está disponible en tu cuenta.")
         # Lo que el cliente EDITÓ en el form manda sobre la libreta: campo
         # por campo, para que elegir de la libreta y corregir una sola cosa
         # (el CP, el teléfono) no pierda el resto.
@@ -3248,7 +3321,7 @@ def envio_nuevo_post(
         error_step = 2
         if destinatario_id:
             destinatario = obtener_direccion(
-                cliente, _id_opt(destinatario_id) or 0, TIPO_DESTINATARIO
+                cliente, _id_opt(destinatario_id) or 0
             )
             if not destinatario:
                 raise ValueError("Ese cliente guardado no está disponible en tu cuenta.")
@@ -3329,6 +3402,7 @@ def envio_nuevo_post(
                 )
 
         courier_extra = {}
+        base_revision = None
         if legacy_single:
             precio = obtener_precio_envio(
                 cliente, filas[0]["producto"], destino_pais,
@@ -3352,6 +3426,7 @@ def envio_nuevo_post(
                     "estado": remitente.get("estado") or "",
                 },
                 asegurar_carga=asegurar_carga == "SI",
+                **({"incluir_base_interna": True} if editar_id else {}),
             )
             if not multi.get("encontrado"):
                 if asegurar_carga == "SI" and multi.get("motivo") == "sin_cobertura":
@@ -3402,6 +3477,10 @@ def envio_nuevo_post(
             # El courier queda GUARDADO en la solicitud: sin esto el
             # despachador de emisión no sabe por dónde sale y cae al default.
             courier_extra = {"courier": op["id"].upper()}
+            if editar_id:
+                base_revision = op.get("_base_interna")
+                if not isinstance(base_revision, dict) or not base_revision:
+                    raise ValueError("No pudimos confirmar la nueva tarifa. Volvé a cotizar antes de guardar los cambios.")
 
             # ruta_id / coti_id salen de la cotización base (la de trazabilidad
             # que ya se loguea); el precio, del courier elegido.
@@ -3499,7 +3578,11 @@ def envio_nuevo_post(
                 )
                 for b in bultos_detalle
             ), 2) or (precio.get("valor_total_usd") or 100)
-        solicitud_creada = crear_solicitud_guia(
+        guardar_solicitud = crear_solicitud_guia
+        if editar_id:
+            guardar_solicitud = lambda **campos: editar_solicitud_cliente(
+                editar_id, cliente, editar_version, campos, base_interna=base_revision)
+        solicitud_creada = guardar_solicitud(
             cliente_id=cliente,
             producto_alias=alias_display,
             cantidad=total_cajas,
@@ -3597,7 +3680,7 @@ def envio_nuevo_post(
             },
         )
 
-    if pedido_origen:
+    if pedido_origen and not editar_id:
         try:
             marcar_convertido(cliente, pedido_origen["pedido_id"],
                               solicitud_id=solicitud_creada.get("id"))
@@ -3621,8 +3704,10 @@ def envio_nuevo_post(
             status_code=303,
         )
 
+    destino_gestion = (f"/portal/envios/{solicitud_creada['id']}/gestion?ventana=1&ok=editado"
+                       if gestion_ventana == "1" else f"/portal/envios/{solicitud_creada['id']}?gestionar=1")
     return RedirectResponse(
-        url=confirmar_borrador("/portal/envios?tipo=internacional&ok=solicitado", borrador_token),
+        url=confirmar_borrador(destino_gestion, borrador_token),
         status_code=303,
     )
 
@@ -3681,6 +3766,7 @@ def envio_verificacion(
 # OJO: declarado DESPUÉS de /envios/nuevo para que "nuevo" no matchee
 # como {solicitud_id}.
 @router.get("/envios/{solicitud_id}", response_class=HTMLResponse)
+@router.get("/envios/{solicitud_id}/gestion", response_class=HTMLResponse)
 def envio_detalle(
     request: Request,
     solicitud_id: int,
@@ -3720,14 +3806,30 @@ def envio_detalle(
             recoleccion_error = True
             print(f"[portal] no pude consultar retiro: {type(exc).__name__}")
 
+    es_gestion = request.url.path.endswith("/gestion")
+    retiro_form = None
+    if es_gestion and s.get("estado") == "GUIA_LISTA" and not recoleccion_error and (not recoleccion or recoleccion.get("estado") == "CANCELADA"):
+        from servicios.configuracion_couriers_cliente import permiso_courier
+        from servicios.recolecciones import datos_retiro_desde_solicitud
+        from datetime import date, timedelta
+        if ambito_envio(s) == "internacional" and permiso_courier(cliente, s.get("courier") or "", "recolectar"):
+            try:
+                retiro_form = datos_retiro_desde_solicitud(s)
+                sugerida = date.today() + timedelta(days=1)
+                while sugerida.weekday() >= 5:
+                    sugerida += timedelta(days=1)
+                retiro_form.update(fecha_sugerida=sugerida.isoformat(), fecha_max=(date.today() + timedelta(days=14)).isoformat())
+            except ValueError:
+                recoleccion_error = True
     return templates.TemplateResponse(
-        request=request, name="portal/envio_detalle.html",
+        request=request, name="portal/envio_gestion.html" if es_gestion else "portal/envio_detalle.html",
         context={
             "cliente": cliente, "s": s, "puede_emitir": puede_emitir,
             "puede_corregir": puede_corregir,
             "puede_cancelar": bool(cancelacion.get("ok")),
             "cancelar_bloqueo": str(cancelacion.get("error") or ""),
             "recoleccion": recoleccion, "recoleccion_error": recoleccion_error,
+            "puede_editar": puede_editar_solicitud(s), "retiro_form": retiro_form,
         },
     )
 
@@ -3803,6 +3905,8 @@ def emitir_guia_portal(
     request: Request,
     solicitud_id: int,
     cliente: str = Depends(cliente_actual),
+    gestion_ventana: str = Form(""),
+    revision_envio: str = Form(""),
 ):
     """
     El cliente emite su propia guía (spec: "el cliente podrá generar las
@@ -3812,15 +3916,21 @@ def emitir_guia_portal(
     """
     from servicios.solicitudes_guia import emitir_guia_como_cliente
 
-    resultado = emitir_guia_como_cliente(solicitud_id, cliente)
+    if gestion_ventana == "1":
+        if not isinstance(revision_envio, str) or not revision_envio:
+            resultado = {"ok": False, "error": "Volvé a abrir el envío y revisá sus datos antes de emitir."}
+        else:
+            resultado = emitir_guia_como_cliente(solicitud_id, cliente, revision=revision_envio)
+    else:
+        resultado = emitir_guia_como_cliente(solicitud_id, cliente)
     if resultado.get("ok"):
         from servicios.auditoria import registrar_desde_request
         registrar_desde_request(request, event="portal.emitir_guia", actor_type="cliente",
                                 actor_ref=cliente, metadata={"solicitud_id": solicitud_id})
-        return RedirectResponse(url=f"/portal/envios/{solicitud_id}?ok=guia",
+        return RedirectResponse(url=f"/portal/envios/{solicitud_id}" + ("/gestion?ventana=1&ok=guia" if gestion_ventana == "1" else "?gestionar=1&ok=guia"),
                                 status_code=303)
     return RedirectResponse(
-        url=f"/portal/envios/{solicitud_id}?error={quote(str(resultado.get('error') or 'No se pudo emitir'))}",
+        url=f"/portal/envios/{solicitud_id}" + ("/gestion?ventana=1&" if gestion_ventana == "1" else "?gestionar=1&") + f"error={quote(str(resultado.get('error') or 'No se pudo emitir'))}",
         status_code=303)
 
 

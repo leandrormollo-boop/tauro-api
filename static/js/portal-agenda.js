@@ -18,8 +18,7 @@
       document.querySelectorAll('[data-national-form]').forEach(function (form) {form.dispatchEvent(new CustomEvent('tauro:agenda', {detail:data}));});
       document.querySelectorAll('[data-agenda-role],[data-national-contact]').forEach(function (select) {
         var selected = select.value, national = !!select.dataset.nationalContact;
-        var role = select.dataset.agendaRole || (select.dataset.nationalContact==='origen' ? 'REMITENTE' : 'DESTINATARIO');
-        var rows = (national ? data.nacionales : data.contactos).filter(function (row) {return row.tipo===role;});
+        var rows = national ? data.nacionales : data.contactos;
         var placeholder = select.options[0].cloneNode(true);
         select.replaceChildren(placeholder);
         rows.forEach(function (row) {

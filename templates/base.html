@@ -1,3 +1,4 @@
+{% set gestion_embebida = request.query_params is defined and request.query_params.get('ventana') == '1' %}
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24,8 +25,8 @@
     })();
     </script>
     <link rel="stylesheet" href="/static/css/tauro.css?v=49">
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=5">{% endif %}
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=1">{% endif %}
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=6">{% endif %}
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=2">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/documentos.css?v=3">
     <script src="/static/js/documentos.js?v=3" defer></script>{% endif %}
     <link rel="stylesheet" href="/static/css/portal-cotizador.css?v=7">
@@ -57,8 +58,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="TAURO">
     <script src="/static/js/portal-pwa.js?v=1" defer></script>
+    {% if cliente %}
+    <link rel="stylesheet" href="/static/css/envio-gestion.css?v=1">
+    <script src="/static/js/envio-gestion.js?v=1" defer></script>
+    {% endif %}
 </head>
-<body data-draft-scope="{{ ('portal:' ~ cliente) if cliente else '' }}"{% if cliente %} class="portal-operacion"{% endif %}>
+<body data-draft-scope="{{ ('portal:' ~ cliente) if cliente else '' }}"{% if cliente %} class="portal-operacion{% if gestion_embebida %} portal-embedded{% endif %}"{% endif %}>
 {% if not cliente %}
 <button type="button" class="theme-toggle theme-toggle-floating" data-theme-toggle aria-label="Cambiar apariencia" title="Cambiar apariencia">
     <span class="theme-toggle-track" aria-hidden="true">
@@ -137,6 +142,11 @@
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8.5 12 3 3 8.5v7L12 21l9-5.5z"/><path d="M3.3 8.7 12 14l8.7-5.3M12 21v-7"/></svg>
                 Mis envíos
                 {% if pend.envios %}<span class="side-badge" title="{{ pend.envios }} guía(s) lista(s) para descargar">{{ pend.envios }}</span>{% endif %}
+            </a>
+
+            <a href="/portal/estadisticas" class="side-item {% if '/estadisticas' in path %}active{% endif %}">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+                Estadísticas
             </a>
 
             <a href="/portal/tienda" class="side-item {% if '/tienda' in path %}active{% endif %}">
@@ -304,6 +314,12 @@
         </div>
     </section>
 </dialog>
+{% if not gestion_embebida %}
+<dialog id="shipment-manager-dialog" class="shipment-manager-dialog" aria-labelledby="shipment-manager-title">
+    <header><h2 id="shipment-manager-title">Gestionar envío</h2><button type="button" data-manager-close aria-label="Cerrar gestión del envío">×</button></header>
+    <iframe title="Revisión, guía y recolección del envío" data-manager-frame></iframe>
+</dialog>
+{% endif %}
 {% else %}
 </main>
 {% endif %}

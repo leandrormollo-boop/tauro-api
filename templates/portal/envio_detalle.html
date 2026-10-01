@@ -20,6 +20,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <p>{% if s.etiqueta_cliente %}Destinatario: {{ s.dest_nombre }} · {% endif %}{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) }} · {{ s.created_at.strftime("%d/%m/%Y a las %H:%M") if s.created_at else "Fecha sin informar" }}.</p>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+        <a href="/portal/envios/{{ s.id }}/gestion" data-shipment-manage class="btn btn-primary btn-sm">Gestionar envío</a>
         <span class="badge {{ s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
         {% if ambito == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-primary btn-sm">Repetir envío</a>{% endif %}
         <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos {{ ambito if ambito != 'sin_clasificar' else '' }}</a>
@@ -198,10 +199,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         {% elif not s.tracking and puede_emitir and s.estado not in ('VERIFICAR_COURIER', 'EMITIENDO') %}
             {# Emisión habilitada para este cliente (flag + tope de deuda se
                validan de nuevo en el servidor: el botón es sólo la puerta). #}
-            <form method="POST" action="/portal/envios/{{ s.id }}/emitir"
-                  data-confirm="¿Emitir la guía ahora? Se genera la guía real en el courier y el cargo entra a tu cuenta corriente. No se puede deshacer.">
-                <button type="submit" class="btn btn-primary btn-full">Emitir guía ahora</button>
-            </form>
+            <a href="/portal/envios/{{ s.id }}/gestion" data-shipment-manage class="btn btn-primary btn-full">Revisar y emitir guía</a>
             <p style="color:var(--fg-3);font-size:12.5px;margin-top:10px;">
                 Al emitir, el cargo de
                 <strong class="portal-money-green">{{ dinero_ars(s.precio_tauro_ars) }}</strong>

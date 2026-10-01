@@ -233,6 +233,12 @@ SELECT
     ) AS tracking_dhl_estado_controlado,
     TO_REGCLASS('envio_cotizacion_snapshots') IS NOT NULL
         AS envio_cotizacion_snapshots_existe,
+    TO_REGCLASS('solicitud_cotizacion_revisiones') IS NOT NULL
+        AS solicitud_cotizacion_revisiones_existe,
+    EXISTS(SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('solicitud_cotizacion_revisiones')
+          AND t.tgname = 'trg_revision_cotizacion_inmutable'
+          AND t.tgenabled IN ('O', 'A')) AS revisiones_cotizacion_protegidas,
     TO_REGCLASS('facturas_courier') IS NOT NULL
         AS facturas_courier_existe,
     TO_REGCLASS('facturas_courier_items') IS NOT NULL
@@ -417,6 +423,8 @@ _READINESS_CONTABLE_CAMPOS = (
     "tracking_dhl_estado_controlado",
     "tracking_dhl_indice_pendiente",
     "envio_cotizacion_snapshots_existe",
+    "solicitud_cotizacion_revisiones_existe",
+    "revisiones_cotizacion_protegidas",
     "facturas_courier_existe",
     "facturas_courier_items_existe",
     "factura_courier_item_matches_existe",

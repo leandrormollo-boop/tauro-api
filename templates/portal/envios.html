@@ -259,6 +259,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         <details class="shipment-actions">
                             <summary>Opciones <span aria-hidden="true">⌄</span></summary>
                             <div class="shipment-actions-menu">
+                            <a href="/portal/envios/{{ s.id }}/gestion" data-shipment-manage class="shipment-action">Gestionar envío</a>
                             <a href="/portal/envios/{{ s.id }}" class="shipment-action shipment-action-primary">Ver información completa <span aria-hidden="true">→</span></a>
                             {% if s.tiene_label and not es_baja %}
                             <a href="/portal/envios/{{ s.id }}#guia-del-envio" class="shipment-action">Ver guía en pantalla</a>
@@ -291,10 +292,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="shipment-action">Programar recolección</a>
                                 {% endif %}
                             {% elif (s.courier or '')|upper != 'ENVIA' and s.puede_emitir_cliente and not s.tracking and s.estado not in ('CANCELADO', 'REEMPLAZADO', 'EMITIENDO', 'VERIFICAR_COURIER') %}
-                                <form method="POST" action="/portal/envios/{{ s.id }}/emitir"
-                                      data-confirm="¿Emitir la guía de {{ (s.courier or 'el courier')|upper }} ahora? Se genera la guía real y el cargo entra a tu cuenta corriente. No se puede deshacer.">
-                                    <button type="submit" class="shipment-action shipment-action-emphasized">Emitir guía</button>
-                                </form>
+                                <a href="/portal/envios/{{ s.id }}/gestion" data-shipment-manage class="shipment-action shipment-action-emphasized">Revisar y emitir guía</a>
                             {% endif %}
                             </div>
                         </details>
