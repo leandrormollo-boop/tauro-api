@@ -39,7 +39,8 @@ def test_metricas_y_graficos_salen_de_datos_reales():
     assert "r.en_seguimiento" in HOME
     assert "r.serie_mensual" in HOME
     assert "r.destinos_frecuentes" in HOME
-    assert "<progress" in HOME
+    assert "home-bar-fill" in HOME
+    assert "home-dest-fill" in HOME
     assert "574" not in HOME
     assert "8.669.507" not in HOME
 
@@ -56,7 +57,8 @@ def test_inicio_compacta_sin_scroll_horizontal_en_mobile():
 def test_barras_mensuales_entran_una_vez_y_respetan_movimiento_reducido():
     assert "@keyframes home-bar-rise" in CSS
     assert "animation: home-bar-rise" in CSS
-    assert "--bar-delay" in CSS
+    assert "home-bar-bob" in CSS
+    assert "home-bar-liquid" in CSS
     assert "@media (prefers-reduced-motion: reduce)" in CSS
 
 
@@ -83,7 +85,7 @@ def test_estadisticas_no_desborda_en_mobile():
     assert ".portal-operacion .stats-layout { grid-template-columns: 1fr; }" in CSS
     assert ".portal-operacion .stats-summary { grid-template-columns: 1fr; }" in CSS
     assert ".portal-operacion .stats-destinations .home-destinations-list { grid-template-columns: 1fr; }" in CSS
-    assert 'portal-operacion.css?v=6' in BASE
+    assert 'portal-operacion.css?v=7' in BASE
 
 
 def test_estadisticas_renderiza_aun_sin_historial():

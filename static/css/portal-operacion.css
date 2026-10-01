@@ -157,33 +157,32 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-insights-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 16px; }
 .portal-operacion .home-monthly-chart { display: grid; min-height: 196px; grid-template-columns: repeat(6, minmax(36px, 1fr)); gap: 10px; align-items: end; padding: 6px 20px 20px; }
 .portal-operacion .home-monthly-bar { --bar-delay: 0ms; display: grid; justify-items: center; gap: 7px; }
-.portal-operacion .home-monthly-bar:nth-child(2) { --bar-delay: 55ms; }
-.portal-operacion .home-monthly-bar:nth-child(3) { --bar-delay: 110ms; }
-.portal-operacion .home-monthly-bar:nth-child(4) { --bar-delay: 165ms; }
-.portal-operacion .home-monthly-bar:nth-child(5) { --bar-delay: 220ms; }
-.portal-operacion .home-monthly-bar:nth-child(6) { --bar-delay: 275ms; }
 .portal-operacion .home-monthly-bar strong { color: var(--fg-2); font-size: 11px; transition: color .18s ease, transform .18s ease; }
 .portal-operacion .home-monthly-bar span { color: var(--fg-3); font-size: 10px; }
-.portal-operacion .home-monthly-bar progress {
-  width: 20px; height: 112px; overflow: hidden; border: 0; border-radius: 8px;
-  background: var(--bg-elev-2); writing-mode: vertical-lr; direction: rtl;
-  transform-origin: center top;
-  animation: home-bar-rise .72s cubic-bezier(.22,.72,.28,1) var(--bar-delay) both;
+.portal-operacion .home-bar-track { position: relative; width: 20px; height: 112px; overflow: hidden; border-radius: 8px; background: var(--bg-elev-2); }
+.portal-operacion .home-bar-fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: var(--p, 0%);
+  border-radius: 0 0 8px 8px;
+  background: linear-gradient(180deg, #b99bff, #6f45cf);
+  transform-origin: bottom; transform: scaleY(0);
+  animation: home-bar-rise .9s cubic-bezier(.3,1.35,.45,1) var(--d, 0ms) forwards,
+             home-bar-bob 4.6s ease-in-out calc(var(--d, 0ms) + 1s) infinite;
   transition: filter .18s ease;
 }
-.portal-operacion .home-monthly-bar progress::-webkit-progress-bar { background: var(--bg-elev-2); border-radius: 8px; }
-.portal-operacion .home-monthly-bar progress::-webkit-progress-value {
-  background: linear-gradient(180deg, #a580ff, #7249cb); border-radius: 8px;
+.portal-operacion .home-bar-fill::before,
+.portal-operacion .home-bar-fill::after {
+  content: ""; position: absolute; top: 0; left: 50%; width: 46px; height: 46px;
+  translate: -50% -50%; background: #b99bff; border-radius: 42% 46% 44% 48%; opacity: .85;
+  animation: home-bar-liquid 5.2s linear infinite;
 }
-.portal-operacion .home-monthly-bar progress::-moz-progress-bar {
-  background: #8d68e3; border-radius: 8px;
-}
-.portal-operacion .home-monthly-bar:hover progress { filter: brightness(1.12) drop-shadow(0 0 6px rgba(167,139,250,.28)); }
+.portal-operacion .home-bar-fill::after { background: #a07ff2; opacity: .5; border-radius: 47% 42% 49% 43%; animation-duration: 7.4s; animation-direction: reverse; }
+.portal-operacion .home-monthly-bar:hover .home-bar-fill { filter: brightness(1.14) drop-shadow(0 0 7px rgba(167,139,250,.35)); }
+.portal-operacion .home-monthly-bar:hover .home-bar-fill::before { animation-duration: 1.8s; }
+.portal-operacion .home-monthly-bar:hover .home-bar-fill::after { animation-duration: 2.6s; }
+@keyframes home-bar-rise { to { transform: scaleY(1); } }
+@keyframes home-bar-bob { 0%, 100% { height: var(--p, 0%); } 50% { height: calc(var(--p, 0%) + 3px); } }
+@keyframes home-bar-liquid { to { rotate: 360deg; } }
 .portal-operacion .home-monthly-bar:hover strong { color: var(--accent-soft); transform: translateY(-1px); }
-@keyframes home-bar-rise {
-  from { opacity: .45; transform: rotate(180deg) scaleY(.08); }
-  to { opacity: 1; transform: rotate(180deg) scaleY(1); }
-}
 .portal-operacion .home-destinations-list { list-style: none; margin: 0; padding: 0 20px 18px; }
 .portal-operacion .home-destinations-list li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; }
 .portal-operacion .home-country-code {
@@ -194,10 +193,31 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-destinations-list li > div > span { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .portal-operacion .home-destinations-list strong { overflow: hidden; color: var(--fg-1); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .portal-operacion .home-destinations-list small { color: var(--fg-3); font-size: 10px; white-space: nowrap; }
-.portal-operacion .home-destinations-list progress { display: block; width: 100%; height: 4px; margin-top: 6px; overflow: hidden; border: 0; border-radius: 4px; background: var(--bg-elev-2); }
-.portal-operacion .home-destinations-list progress::-webkit-progress-bar { background: var(--bg-elev-2); }
-.portal-operacion .home-destinations-list progress::-webkit-progress-value { background: #8d68e3; border-radius: 4px; }
-.portal-operacion .home-destinations-list progress::-moz-progress-bar { background: #8d68e3; border-radius: 4px; }
+.portal-operacion .home-dest-track { position: relative; display: block; height: 6px; margin-top: 6px; overflow: hidden; border-radius: 6px; background: var(--bg-elev-2); }
+.portal-operacion .home-dest-fill {
+  position: absolute; inset: 0 auto 0 0; width: var(--p, 0%); border-radius: 6px;
+  background: linear-gradient(90deg, #6f45cf, #b99bff);
+  transform-origin: left; transform: scaleX(0);
+  animation: home-dest-flow .9s cubic-bezier(.3,1.3,.5,1) var(--d, 0ms) forwards;
+  transition: filter .18s ease;
+}
+.portal-operacion .home-dest-fill::before {
+  content: ""; position: absolute; inset: 0; border-radius: 6px;
+  background: linear-gradient(90deg, transparent 20%, rgba(255,255,255,.28) 50%, transparent 80%);
+  background-size: 220% 100%;
+  animation: home-dest-stream 3.4s ease-in-out calc(var(--d, 0ms) + 1s) infinite;
+}
+.portal-operacion .home-dest-fill::after {
+  content: ""; position: absolute; right: -1px; top: 50%; width: 9px; height: 9px; translate: 0 -50%;
+  border-radius: 50%; background: #b99bff; box-shadow: 0 0 8px 1px rgba(185,155,255,.55);
+}
+.portal-operacion .home-destinations-list li:hover .home-dest-fill { filter: brightness(1.12); }
+@keyframes home-dest-flow { to { transform: scaleX(1); } }
+@keyframes home-dest-stream { 0% { background-position: 160% 0; } 100% { background-position: -90% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .portal-operacion .home-bar-fill, .portal-operacion .home-dest-fill { animation: none; transform: none; }
+  .portal-operacion .home-bar-fill::before, .portal-operacion .home-bar-fill::after, .portal-operacion .home-dest-fill::before { content: none; }
+}
 .portal-operacion .home-insight-empty { min-height: 160px; display: grid; place-items: center; padding: 20px; color: var(--fg-3); font-size: 12px; text-align: center; }
 
 .portal-operacion .home-tools-panel { padding-bottom: 6px; }
@@ -402,7 +422,7 @@ html[data-theme="light"] .portal-operacion .quote-form-card { background: var(--
   .portal-operacion .home-insights-grid,
   .portal-operacion .home-dashboard-rail { grid-template-columns: 1fr; }
   .portal-operacion .home-monthly-chart { gap: 4px; padding-inline: 12px; }
-  .portal-operacion .home-monthly-bar progress { width: 16px; }
+  .portal-operacion .home-bar-track { width: 16px; }
   .portal-operacion .home-tool { margin-inline: 14px; padding-left: 34px; }
   .portal-operacion .home-tool > div { align-items: stretch; flex-direction: column; }
   .portal-operacion .home-tool button { width: 100%; }
