@@ -89,6 +89,8 @@ jobs:
             tests/test_shopify_catalogo_postgres.py \
             tests/test_fedex_emision_recuperacion.py \
             tests/test_dhl_emision.py \
+            tests/test_dhl_client.py \
+            tests/test_cotizar_sentido.py \
             tests/test_portal_experiencia_cliente.py \
             tests/test_cotizacion_portal_handoff.py \
             tests/test_ubicaciones_handoff.py \
