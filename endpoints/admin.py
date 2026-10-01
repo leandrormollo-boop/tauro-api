@@ -5406,6 +5406,89 @@ async def admin_importar_melcior_2026(
     )
 
 
+@router.post("/importaciones-historicas/cuenta-cliente", response_class=HTMLResponse)
+async def admin_importar_cuenta_cliente(
+    request: Request,
+    accion: str = Form("previsualizar"),
+    confirmacion: str = Form(""),
+    huella: str = Form(""),
+    manifiesto: UploadFile = File(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Completa la cuenta 2026 de MELCIOR / PRETE ROSSO desde su planilla.
+
+    Primero se previsualiza (misma transacción, revertida al final). Para
+    importar hay que volver a subir el mismo archivo, escribir la confirmación
+    y los primeros 12 caracteres de la huella que mostró la vista previa.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.importacion_historica_melcior import PERIODOS
+    from servicios.importacion_cuenta_cliente import (
+        MAX_MANIFEST_BYTES,
+        ImportacionCuentaError,
+        leer_manifiesto,
+        procesar,
+    )
+
+    contexto = {
+        "seccion": "importaciones_historicas",
+        "periodos": PERIODOS,
+        "periodo_seleccionado": "ENERO",
+        "resultado": None,
+        "resultado_waimao": None,
+        "resultado_cuenta": None,
+        "flash_ok": None,
+        "flash_error": None,
+    }
+
+    def _responder(status_code: int = 200):
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=status_code,
+        )
+
+    if not str(manifiesto.filename or "").lower().endswith(".json"):
+        contexto["flash_error"] = "El manifiesto debe ser un archivo .json."
+        return _responder(422)
+    contenido = await manifiesto.read(MAX_MANIFEST_BYTES + 1)
+    try:
+        lote = leer_manifiesto(contenido)
+    except (ImportacionCuentaError, ValueError) as exc:
+        contexto["flash_error"] = str(exc)
+        return _responder(422)
+    cliente = str(lote["cliente_id"]).upper()
+    aplicar = str(accion or "").strip().lower() == "importar"
+    if aplicar:
+        if confirmacion.strip().upper() != f"IMPORTAR {cliente}":
+            contexto["flash_error"] = f'Escribí "IMPORTAR {cliente}" para ejecutar.'
+            return _responder(422)
+        if huella.strip().lower() != lote["manifest_sha256"][:12]:
+            contexto["flash_error"] = (
+                "La huella no coincide con el archivo: volvé a previsualizar y copiá la huella."
+            )
+            return _responder(422)
+    try:
+        informe = procesar(lote, aplicar=aplicar, actor="admin")
+    except (ImportacionCuentaError, ValueError) as exc:
+        contexto["flash_error"] = str(exc)
+        return _responder(422)
+    except Exception as exc:
+        print(f"[admin] importación cuenta cliente: {type(exc).__name__}: {exc}")
+        contexto["flash_error"] = (
+            "La importación se revirtió completa. Revisá los logs antes de reintentar."
+        )
+        return _responder(500)
+    informe["huella_corta"] = lote["manifest_sha256"][:12]
+    contexto["resultado_cuenta"] = informe
+    contexto["flash_ok"] = (
+        f"{cliente}: importación confirmada en una sola transacción."
+        if aplicar else
+        f"{cliente}: vista previa lista. No se escribió nada."
+    )
+    return _responder()
+
+
 @router.post("/importaciones-historicas/waimao-dhl", response_class=HTMLResponse)
 async def admin_importar_waimao_dhl_historico(
     request: Request,

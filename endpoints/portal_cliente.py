@@ -859,6 +859,15 @@ def offline_pwa(request: Request):
     )
 
 
+# ── Raíz del portal ─────────────────────────────────────────
+# taurosolutions.ar/portal respondía 404: el portal vive en /portal/home y el
+# login en /portal/login. La raíz sólo redirige; /portal/home ya exige sesión.
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+def portal_raiz():
+    return RedirectResponse(url="/portal/home", status_code=303)
+
+
 # ── Home ────────────────────────────────────────────────────
 @router.get("/home", response_class=HTMLResponse)
 def home(request: Request, cliente: str = Depends(cliente_actual)):
