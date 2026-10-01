@@ -99,9 +99,38 @@ def test_diferencia_muestra_una_sola_ecuacion_y_no_duplica_el_cargo():
     assert "$ 97.700,00" in html
     assert "$ 24.571,34" in html
     assert "$ 122.271,34" in html
-    assert "El ajuste ya está incluido en el costo final." in html
+    assert "La diferencia ya está incluida en el costo final." in html
     assert 'data-label="Importe"' not in html
     assert ">Cargo<" not in html
+
+
+def test_tax_se_muestra_como_fila_propia_vinculada_a_la_guia():
+    tax = dict(
+        tipo="TAX", estado="APLICADA", concepto="TAX",
+        referencia="", numero_guia="888244412640", numero_factura=None,
+        solicitud_id=13, destinatario="DESTINO", remitente="ORIGEN",
+        fecha="01/09/2026", valor_envio_ars=Decimal("97500"),
+        ambito="internacional", debe_ars=Decimal("7500"), haber_ars=0,
+        diferencia_detalle=dict(
+            montos_completos=True, valor_inicial_ars=Decimal("90000"),
+            diferencia_ars=Decimal("7500"), valor_final_ars=Decimal("97500"),
+            es_credito=False, es_peso=False, concepto_courier="TAX",
+            motivo_legible="Impuestos del courier",
+            leyenda="TAURO traslada el TAX del courier sin agregar margen.",
+        ),
+    )
+
+    html = render_account("7500", movement=tax)
+
+    assert ">TAX</span>" in html
+    assert "Valor previo" in html
+    assert "Impuesto asociado a esta guía." in html
+    assert "El TAX ya está incluido en el costo final." in html
+    assert "$ 90.000,00" in html
+    assert "$ 7.500,00" in html
+    assert "$ 97.500,00" in html
+    assert "888244412640" in html
+    assert 'data-label="Importe"' not in html
 
 
 def test_saldos_contrastan_en_ambos_temas_sin_cambiar_metalico_de_marca():

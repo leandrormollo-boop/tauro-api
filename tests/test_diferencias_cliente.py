@@ -21,7 +21,7 @@ def test_presentacion_por_peso_calcula_diferencia_y_no_filtra_costos():
     assert detalle["peso_facturado_kg"] == Decimal("13.000")
     assert detalle["diferencia_peso_kg"] == Decimal("3.000")
     assert detalle["leyenda"] == (
-        "TAURO traslada la diferencia del courier sin agregar margen."
+        "Diferencia entre lo cotizado y lo facturado por el courier, trasladada sin margen."
     )
     assert "costo_courier_real_ars" not in detalle
     assert "margen_tauro_protegido_ars" not in detalle
@@ -35,6 +35,21 @@ def test_presentacion_de_recargo_usa_descripcion_documentada():
     assert detalle["es_peso"] is False
     assert detalle["concepto_courier"] == "Cargo por zona extendida"
     assert detalle["motivo_legible"] == "Recargo del courier"
+
+
+def test_presentacion_de_tax_lo_nombra_sin_mezclarlo_con_diferencia():
+    detalle = presentar_diferencia({
+        "motivo": "IMPUESTOS",
+        "concepto_courier": "TAX",
+        "valor_inicial_ars": "1000",
+        "diferencia_ars": "100",
+        "valor_final_ars": "1100",
+    })
+
+    assert detalle["motivo_legible"] == "Impuestos del courier"
+    assert detalle["leyenda"] == (
+        "TAX de importación de esta guía, según la liquidación del courier."
+    )
 
 
 def test_presentacion_explica_valor_inicial_diferencia_y_final():
@@ -82,7 +97,7 @@ def test_portal_muestra_explicacion_en_cuenta_y_detalle():
     envio = (ROOT / "templates" / "portal" / "envio_detalle.html").read_text()
     servicio = (ROOT / "servicios" / "cuenta_corriente.py").read_text()
     for html in (cuenta, envio):
-        assert "Peso inicial" in html
+        assert "Peso cotizado" in html and "facturado por el courier" in html
         assert "diferencia_peso_kg" in html
         assert "leyenda" in html
         assert "costo_courier" not in html
@@ -90,8 +105,8 @@ def test_portal_muestra_explicacion_en_cuenta_y_detalle():
     for texto in ("Valor cotizado", "Diferencia", "Costo final"):
         assert texto in cuenta
     assert "Peso facturado por el courier" in envio
-    assert "'valor_inicial_ars', ROUND(c.precio_cliente_inicial_ars, 2)" in servicio
-    assert "- ROUND(c.precio_cliente_inicial_ars, 2)" in servicio
-    assert "'valor_final_ars', ROUND(a.precio_nuevo_ars, 2)" in servicio
+    assert "'valor_inicial_ars', ROUND(componente.valor_inicial_ars, 2)" in servicio
+    assert "'diferencia_ars', ROUND(componente.monto_firmado_ars, 2)" in servicio
+    assert "'valor_final_ars', ROUND(componente.valor_final_ars, 2)" in servicio
     assert "concepto_courier" in servicio
     assert "i.concepto_tipo <> 'FLETE'" in servicio

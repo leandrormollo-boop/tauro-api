@@ -33,7 +33,7 @@ WITH asientos AS (
     WHERE e.cliente_id=%s AND e.estado NOT IN ('CANCELADO','NC')
       AND (e.monto_ars>0 OR e.monto_ars IS NULL)
     UNION ALL
-    SELECT (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+    SELECT e.fecha,
            CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                 THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
            a.tipo, ABS(a.monto_ars), FALSE

@@ -389,6 +389,8 @@ def movimientos_aislados(cuenta_aislada, monkeypatch):
                     id integer PRIMARY KEY, tax_cliente_ars numeric DEFAULT 0,
                     diferencia_flete_ars numeric DEFAULT 0, motivo_diferencia text DEFAULT 'PESO_REAL',
                     precio_cliente_inicial_ars numeric DEFAULT 100,
+                    precio_cliente_final_ars numeric DEFAULT 100,
+                    solicitud_id integer, version integer DEFAULT 1, estado text DEFAULT 'CERRADA',
                     peso_cotizado_kg numeric, peso_final_facturado_kg numeric, peso_base_facturado text);
                 CREATE TABLE factura_courier_item_matches(solicitud_id integer,item_id integer,estado text);
                 CREATE TABLE facturas_courier_items(id integer,descripcion text,concepto_tipo text);
@@ -452,7 +454,9 @@ def test_buscar_pago_por_factura_guia_o_destinatario_no_duplica_haber(movimiento
     assert sum(f[8] for f in filas) == 40
 
 
-def test_costos_asientos_negativos_y_timezone_coinciden_con_lista_y_excel(movimientos_aislados):
+def test_costos_asientos_negativos_en_el_mes_del_envio_coinciden_con_lista_y_excel(movimientos_aislados):
+    """Las diferencias y el TAX cuentan en el mes del envío (como en la
+    planilla del cliente), no en el día en que el courier los informó."""
     from servicios import cuenta_corriente as cc
     from servicios.export_cuenta import generar_excel_cuenta
     from io import BytesIO
@@ -464,27 +468,29 @@ def test_costos_asientos_negativos_y_timezone_coinciden_con_lista_y_excel(movimi
                 INSERT INTO solicitudes_guia(id,cliente_id,tracking)
                     VALUES (1,'CLIENTE_QA','ANTERIOR'),(2,'CLIENTE_QA','ACTUAL');
                 INSERT INTO envios(id,cliente_id,fecha,monto_ars,estado,solicitud_id,ambito)
-                    VALUES (1,'CLIENTE_QA','2026-03-10',100,'ACTIVO',1,'NACIONAL'),
+                    VALUES (1,'CLIENTE_QA','2026-08-10',10,'ACTIVO',1,'NACIONAL'),
                            (2,'CLIENTE_QA','2026-09-10',50,'ACTIVO',2,'INTERNACIONAL');
                 INSERT INTO conciliaciones_envio(id) SELECT generate_series(1,5);
                 INSERT INTO ajustes_cliente(id,solicitud_id,monto_ars,estado,aplicado_at,tipo,conciliacion_id)
                     VALUES (1,1,20,'APLICADO','2026-09-15 01:00+00','DEBITO',1),
                            (2,1,-75,'APLICADO','2026-09-15 01:00+00','CREDITO',2),
-                           (3,1,-7,'APLICADO','2026-08-15 12:00+00','CREDITO',3),
+                           (3,1,-7,'APLICADO','2026-07-15 12:00+00','CREDITO',3),
                            (4,1,0.005,'APLICADO','2026-09-15 01:00+00','DEBITO',4),
                            (5,1,0.005,'APLICADO','2026-09-15 01:00+00','DEBITO',5);
             """)
     costos = ec.obtener_experiencia_cuenta("CLIENTE_QA", {})["costos"]
     agosto, septiembre = costos["meses"][-2:]
-    assert agosto["total_ars"] == Decimal("-7.00")
-    assert septiembre["nacional_ars"] == Decimal("-54.98")
+    # Todos los ajustes son del envío de agosto, aunque se aplicaron en julio y septiembre.
+    assert agosto["nacional_ars"] == Decimal("-51.98")
+    assert agosto["total_ars"] == Decimal("-51.98")
+    assert agosto["negativo_ars"] == Decimal("51.98")
     assert septiembre["internacional_ars"] == Decimal("50.00")
-    assert septiembre["total_ars"] == Decimal("-4.98")
+    assert septiembre["total_ars"] == Decimal("50.00")
     assert septiembre["positivo_ars"] == Decimal("50.00")
-    assert septiembre["negativo_ars"] == Decimal("54.98")
-    assert costos["total_ars"] == Decimal("-11.98")
+    assert septiembre["negativo_ars"] == Decimal("0")
+    assert costos["total_ars"] == Decimal("-1.98")
     assert costos["maximo_positivo_ars"] == Decimal("50.00")
-    assert costos["maximo_negativo_ars"] == Decimal("54.98")
+    assert costos["maximo_negativo_ars"] == Decimal("51.98")
     assert costos["hay_negativos"] is True
     for mes in (agosto, septiembre):
         filtros = {"tipo": "costos", "desde": mes["desde"], "hasta": mes["hasta"]}
@@ -493,7 +499,7 @@ def test_costos_asientos_negativos_y_timezone_coinciden_con_lista_y_excel(movimi
         libro = load_workbook(BytesIO(generar_excel_cuenta("CLIENTE_QA", **filtros)))
         filas = list(libro["Movimientos"].values)[1:]
         assert sum(Decimal(str(f[7]))-Decimal(str(f[8])) for f in filas) == mes["total_ars"]
-    ajustes = cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-09-14", hasta="2026-09-14")
-    assert ajustes["total_resultados"] == 4
-    assert {m["fecha_iso"] for m in ajustes["items"]} == {"2026-09-14"}
-    assert cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-09-15")["total_resultados"] == 0
+    ajustes = cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-08-10", hasta="2026-08-10")
+    assert ajustes["total_resultados"] == 5
+    assert {m["fecha_iso"] for m in ajustes["items"]} == {"2026-08-10"}
+    assert cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-08-11")["total_resultados"] == 0
