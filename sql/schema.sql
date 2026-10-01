@@ -2014,6 +2014,8 @@ CREATE TABLE IF NOT EXISTS recolecciones (
     solicitud_id               INTEGER REFERENCES solicitudes_guia(id),
     courier_message_reference  TEXT,
     error_operativo            TEXT,
+    origen_retiro              JSONB,
+    origen_clave               TEXT,
     created_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -2023,18 +2025,258 @@ ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS courier_message_ref
 ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS error_operativo TEXT;
 ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS updated_at
     TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS origen_retiro JSONB;
+ALTER TABLE IF EXISTS recolecciones ADD COLUMN IF NOT EXISTS origen_clave TEXT;
 CREATE INDEX IF NOT EXISTS ix_recolecciones_cliente
     ON recolecciones (cliente_id, fecha DESC);
--- Un cliente no puede reservar dos visitas para el mismo día mientras una
--- creación/cancelación siga abierta o la respuesta del courier sea incierta.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_recoleccion_cliente_fecha_abierta_v2
-    ON recolecciones (cliente_id, fecha)
-    WHERE estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER');
 -- La misma guía tampoco puede tener dos retiros abiertos en días distintos.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_recoleccion_solicitud_abierta_v2
     ON recolecciones (solicitud_id)
     WHERE solicitud_id IS NOT NULL
       AND estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER');
+
+-- Una cuenta puede tener retiros el mismo día en orígenes distintos. El
+-- snapshot conserva exactamente la ubicación enviada al courier; la clave sólo
+-- se usa para comparar y no reemplaza ese dato auditable.
+CREATE OR REPLACE FUNCTION tauro_recoleccion_normalizar_componente(valor TEXT)
+RETURNS TEXT AS $$
+    SELECT regexp_replace(
+        lower(translate(
+            btrim(COALESCE(valor, '')),
+            'ÁÉÍÓÚÜÑáéíóúüñ',
+            'AEIOUUNaeiouun'
+        )),
+        '[^[:alnum:]]+', '', 'g'
+    )
+$$ LANGUAGE SQL IMMUTABLE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION tauro_recoleccion_origen_clave(origen JSONB)
+RETURNS TEXT AS $$
+DECLARE
+    pais_norm TEXT;
+    estado_norm TEXT;
+    ciudad_norm TEXT;
+    zip_norm TEXT;
+    calle_norm TEXT;
+BEGIN
+    IF jsonb_typeof(origen) IS DISTINCT FROM 'object'
+       OR NOT (origen ?& ARRAY['pais', 'estado', 'ciudad', 'zip', 'calle'])
+       OR jsonb_typeof(origen->'pais') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(origen->'estado') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(origen->'ciudad') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(origen->'zip') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(origen->'calle') IS DISTINCT FROM 'string' THEN
+        RETURN NULL;
+    END IF;
+
+    pais_norm := tauro_recoleccion_normalizar_componente(origen->>'pais');
+    estado_norm := tauro_recoleccion_normalizar_componente(origen->>'estado');
+    ciudad_norm := tauro_recoleccion_normalizar_componente(origen->>'ciudad');
+    zip_norm := tauro_recoleccion_normalizar_componente(origen->>'zip');
+    calle_norm := tauro_recoleccion_normalizar_componente(origen->>'calle');
+    IF pais_norm = '' OR ciudad_norm = '' OR calle_norm = '' THEN
+        RETURN NULL;
+    END IF;
+    RETURN concat_ws('|', pais_norm, estado_norm, ciudad_norm, zip_norm, calle_norm);
+END;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+
+-- Backfill conservador: sólo reconstruye desde la guía de la misma cuenta y
+-- cuando la dirección congelada del retiro coincide con calle + ciudad. Países
+-- legacy no ISO2 quedan para revisión en vez de adivinar una normalización.
+WITH candidatos AS (
+    SELECT r.id, jsonb_build_object(
+        'pais', upper(btrim(s.remitente_pais)),
+        'estado', COALESCE(s.remitente_estado, ''),
+        'ciudad', COALESCE(s.remitente_ciudad, ''),
+        'zip', COALESCE(s.remitente_zip, ''),
+        'calle', COALESCE(s.remitente_direccion, '')
+    ) AS snapshot
+    FROM recolecciones r
+    JOIN solicitudes_guia s
+      ON s.id = r.solicitud_id AND s.cliente_id = r.cliente_id
+    WHERE r.origen_retiro IS NULL
+      AND upper(btrim(COALESCE(s.remitente_pais, ''))) ~ '^[A-Z]{2}$'
+      AND tauro_recoleccion_normalizar_componente(r.direccion) =
+          tauro_recoleccion_normalizar_componente(
+              btrim(
+                  COALESCE(s.remitente_direccion, '') || ', ' ||
+                  COALESCE(s.remitente_ciudad, ''),
+                  ', '
+              )
+          )
+)
+UPDATE recolecciones r
+SET origen_retiro = candidato.snapshot,
+    origen_clave = tauro_recoleccion_origen_clave(candidato.snapshot)
+FROM candidatos candidato
+WHERE r.id = candidato.id
+  AND tauro_recoleccion_origen_clave(candidato.snapshot) IS NOT NULL;
+
+-- No se pierde ni se falsifica historia: lo no reconstruible conserva una
+-- marca inequívoca. El trigger usa esa marca para fallar cerrado por
+-- cuenta+fecha+courier hasta que un operador pueda revisar el origen.
+UPDATE recolecciones
+SET origen_retiro = '{"_legacy_desconocido": true}'::jsonb,
+    origen_clave = 'legacy-desconocido:' || id::TEXT
+WHERE origen_retiro IS NULL;
+
+ALTER TABLE recolecciones ALTER COLUMN origen_retiro SET NOT NULL;
+ALTER TABLE recolecciones ALTER COLUMN origen_clave SET NOT NULL;
+
+CREATE OR REPLACE FUNCTION tauro_preparar_origen_recoleccion()
+RETURNS TRIGGER AS $$
+DECLARE
+    snapshot_derivado JSONB;
+    clave_derivada TEXT;
+    origen_desconocido BOOLEAN := FALSE;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.cliente_id IS DISTINCT FROM OLD.cliente_id
+           OR NEW.fecha IS DISTINCT FROM OLD.fecha
+           OR NEW.courier IS DISTINCT FROM OLD.courier
+           OR NEW.solicitud_id IS DISTINCT FROM OLD.solicitud_id
+           OR NEW.direccion IS DISTINCT FROM OLD.direccion
+           OR NEW.origen_retiro IS DISTINCT FROM OLD.origen_retiro
+           OR NEW.origen_clave IS DISTINCT FROM OLD.origen_clave THEN
+            RAISE EXCEPTION USING
+                ERRCODE = '23514',
+                MESSAGE = 'El origen congelado de la recolección es inmutable.',
+                CONSTRAINT = 'ck_recoleccion_origen_inmutable';
+        END IF;
+        IF NEW.estado NOT IN (
+               'AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER'
+           ) OR OLD.estado IN (
+               'AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER'
+           ) THEN
+            RETURN NEW;
+        END IF;
+        origen_desconocido := NEW.origen_retiro @>
+            '{"_legacy_desconocido": true}'::jsonb;
+    END IF;
+
+    -- Serializa sólo el alcance donde una fila legacy desconocida debe cerrar
+    -- el paso. El índice único resuelve luego la concurrencia entre orígenes
+    -- conocidos sin bloquear otras cuentas, fechas ni couriers.
+    PERFORM pg_advisory_xact_lock(hashtextextended(
+        jsonb_build_array(
+            upper(btrim(NEW.cliente_id)),
+            NEW.fecha::TEXT,
+            upper(btrim(NEW.courier))
+        )::TEXT,
+        0
+    ));
+
+    IF TG_OP = 'INSERT' AND NEW.origen_retiro IS NOT NULL THEN
+        clave_derivada := tauro_recoleccion_origen_clave(NEW.origen_retiro);
+        IF clave_derivada IS NULL THEN
+            RAISE EXCEPTION USING
+                ERRCODE = '23514',
+                MESSAGE = 'El snapshot de origen de la recolección es inválido.',
+                CONSTRAINT = 'ck_recoleccion_origen_valido';
+        END IF;
+        IF tauro_recoleccion_normalizar_componente(NEW.direccion) IS DISTINCT FROM
+           tauro_recoleccion_normalizar_componente(
+               btrim(
+                   (NEW.origen_retiro->>'calle') || ', ' ||
+                   (NEW.origen_retiro->>'ciudad'),
+                   ', '
+               )
+           ) THEN
+            RAISE EXCEPTION USING
+                ERRCODE = '23514',
+                MESSAGE = 'La dirección no coincide con el snapshot de origen.',
+                CONSTRAINT = 'ck_recoleccion_origen_direccion';
+        END IF;
+    ELSIF TG_OP = 'INSERT' THEN
+        SELECT jsonb_build_object(
+            'pais', upper(btrim(s.remitente_pais)),
+            'estado', COALESCE(s.remitente_estado, ''),
+            'ciudad', COALESCE(s.remitente_ciudad, ''),
+            'zip', COALESCE(s.remitente_zip, ''),
+            'calle', COALESCE(s.remitente_direccion, '')
+        )
+        INTO snapshot_derivado
+        FROM solicitudes_guia s
+        WHERE s.id = NEW.solicitud_id
+          AND s.cliente_id = NEW.cliente_id
+          AND upper(btrim(COALESCE(s.remitente_pais, ''))) ~ '^[A-Z]{2}$'
+          AND tauro_recoleccion_normalizar_componente(NEW.direccion) =
+              tauro_recoleccion_normalizar_componente(
+                  btrim(
+                      COALESCE(s.remitente_direccion, '') || ', ' ||
+                      COALESCE(s.remitente_ciudad, ''),
+                      ', '
+                  )
+              );
+        clave_derivada := tauro_recoleccion_origen_clave(snapshot_derivado);
+        IF clave_derivada IS NULL THEN
+            origen_desconocido := TRUE;
+            NEW.origen_retiro := '{"_legacy_desconocido": true}'::jsonb;
+            NEW.origen_clave := 'legacy-desconocido:' || NEW.id::TEXT;
+        ELSE
+            NEW.origen_retiro := snapshot_derivado;
+        END IF;
+    END IF;
+
+    IF TG_OP = 'INSERT' AND NOT origen_desconocido THEN
+        NEW.origen_clave := clave_derivada;
+    END IF;
+
+    IF NEW.estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER')
+       AND (
+           (origen_desconocido AND EXISTS (
+               SELECT 1
+               FROM recolecciones existente
+               WHERE existente.cliente_id = NEW.cliente_id
+                 AND existente.fecha = NEW.fecha
+                 AND upper(btrim(existente.courier)) = upper(btrim(NEW.courier))
+                 AND existente.estado IN (
+                     'AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER'
+                 )
+                 AND existente.id IS DISTINCT FROM NEW.id
+           ))
+           OR
+           (NOT origen_desconocido AND EXISTS (
+               SELECT 1
+               FROM recolecciones existente
+               WHERE existente.cliente_id = NEW.cliente_id
+                 AND existente.fecha = NEW.fecha
+                 AND upper(btrim(existente.courier)) = upper(btrim(NEW.courier))
+                 AND existente.estado IN (
+                     'AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER'
+                 )
+                 AND existente.id IS DISTINCT FROM NEW.id
+                 AND existente.origen_retiro @>
+                     '{"_legacy_desconocido": true}'::jsonb
+           ))
+       ) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '23505',
+            MESSAGE = 'Hay un origen legacy pendiente de revisar para esa cuenta, fecha y courier.',
+            CONSTRAINT = 'uq_recoleccion_origen_pendiente_v3';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_recoleccion_origen ON recolecciones;
+CREATE TRIGGER trg_recoleccion_origen
+BEFORE INSERT OR UPDATE OF cliente_id, fecha, courier, estado, solicitud_id,
+    direccion, origen_retiro, origen_clave
+ON recolecciones
+FOR EACH ROW EXECUTE FUNCTION tauro_preparar_origen_recoleccion();
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_recoleccion_origen_fecha_abierta_v3
+    ON recolecciones (
+        cliente_id, fecha, upper(btrim(courier)), origen_clave
+    )
+    WHERE estado IN ('AGENDANDO', 'AGENDADA', 'CANCELANDO', 'VERIFICAR_COURIER');
+
+-- Se elimina al final: hasta que columnas, backfill, trigger e índice v3 están
+-- listos, el contrato anterior sigue cerrando cualquier ventana concurrente.
+DROP INDEX IF EXISTS uq_recoleccion_cliente_fecha_abierta_v2;
 
 -- ── Configuración global (ex CONFIG) ────────────────────────
 CREATE TABLE IF NOT EXISTS config (

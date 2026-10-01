@@ -1157,6 +1157,8 @@ def recoleccion_nueva(
             url="/portal/recolecciones?" + urlencode(parametros) + f"#recoleccion-{r['id']}",
             status_code=303)
     parametros["error"] = str(r.get("error") or "Error")
+    if r.get("recoleccion_conflicto_id"):
+        parametros["recoleccion"] = int(r["recoleccion_conflicto_id"])
     return RedirectResponse(
         url="/portal/recolecciones?" + urlencode(parametros),
         status_code=303)
