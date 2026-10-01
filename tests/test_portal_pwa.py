@@ -300,6 +300,19 @@ def _render_shell(path="/portal/home", pendientes=0):
             solicitudes_nacionales=[],
             solicitudes_internacionales=[],
             embudo=[],
+            resumen_inicio={
+                "envios_mes": 0,
+                "envios_total": 0,
+                "en_seguimiento": 0,
+                "entregados": 0,
+                "guias_listas": 0,
+                "retenidos": 0,
+                "requieren_accion": 0,
+                "serie_mensual": [],
+                "maximo_mensual": 0,
+                "destinos_frecuentes": [],
+                "paises_total": 0,
+            },
         )
     finally:
         env.globals.update(originales)
