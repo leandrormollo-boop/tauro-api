@@ -94,7 +94,11 @@ from servicios.paises import (
     referencias_formulario as referencias_paises_formulario,
 )
 from servicios.provincias import opciones as opciones_provincias
-from servicios.panel_cliente import embudo_envios, preparar_historial_envios
+from servicios.panel_cliente import (
+    embudo_envios,
+    preparar_historial_envios,
+    resumen_inicio_cliente,
+)
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
     reiniciar_integracion_shopify_cliente,
@@ -863,6 +867,7 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
         solicitud for solicitud in historial
         if ambito_envio(solicitud) == "internacional"
     ][:3]
+    embudo = embudo_envios(cliente)
 
     return templates.TemplateResponse(
         request=request, name="portal/home.html",
@@ -871,8 +876,10 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
             "saldo": saldo_data,
             "solicitudes_nacionales": solicitudes_nacionales,
             "solicitudes_internacionales": solicitudes_internacionales,
-            # Sólo alimenta recordatorios compactos de acciones reales.
-            "embudo": embudo_envios(cliente),
+            # El resumen y los recordatorios parten de la misma foto para que
+            # una cifra nunca contradiga el filtro que abre el cliente.
+            "embudo": embudo,
+            "resumen_inicio": resumen_inicio_cliente(historial, embudo),
         },
     )
 
