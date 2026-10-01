@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Mis clientes{% endblock %}
 
-{% block extra_css %}<style nonce="{{ request.state.csp_nonce }}">.client-role-tabs{display:flex;gap:6px;margin-bottom:14px}.client-role-tabs button{border:1px solid var(--line);border-radius:999px;padding:8px 16px;background:var(--bg-elev);color:var(--fg-2);font:500 12px var(--font-body);cursor:pointer}.client-role-tabs button[aria-pressed=true]{border-color:var(--accent-deep);background:var(--accent-glow);color:var(--fg)}.client-dialog [hidden]{display:none!important}.client-dialog input:not([type=hidden]),.client-dialog textarea,.client-dialog .tselect-btn{border-radius:14px}.client-dialog .btn{border-radius:999px}</style>{% endblock %}
+{% block extra_css %}<style nonce="{{ request.state.csp_nonce }}">.client-dialog [hidden]{display:none!important}.client-dialog input:not([type=hidden]),.client-dialog textarea,.client-dialog .tselect-btn{border-radius:14px}.client-dialog .btn{border-radius:999px}</style>{% endblock %}
 {% block content %}
 <div class="page-title page-title-row">
     <div>
-        <div class="eyebrow">Tu base privada</div>
         <h1>Mis clientes</h1>
-        <p>Tu agenda de remitentes y destinatarios, nacionales e internacionales.</p>
+        <p>Guardá cada cliente una vez y elegilo como remitente o destinatario en tus envíos.</p>
     </div>
     <div class="client-page-actions">
 
@@ -28,7 +27,6 @@
 </section>
 
 {% if clientes_guardados %}
-<div class="client-role-tabs" aria-label="Filtrar contactos"><button type="button" data-contact-role="" aria-pressed="true">Todos</button><button type="button" data-contact-role="REMITENTE" aria-pressed="false">Remitentes</button><button type="button" data-contact-role="DESTINATARIO" aria-pressed="false">Destinatarios</button></div>
 <div class="client-directory-tools">
     <div class="client-search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -39,18 +37,18 @@
 
 <div class="client-directory-grid" id="client-directory-grid">
     {% for d in clientes_guardados %}
-    <article class="client-card" data-role="{{d.tipo}}">
+    <article class="client-card">
         <div class="client-card-head">
             <span class="client-avatar" aria-hidden="true">{{ (d.alias or d.nombre)[:1]|upper }}</span>
             <div>
-                <h3>{{ d.nombre }}</h3><span class="badge muted">{{"Remitente" if d.tipo=="REMITENTE" else "Destinatario"}}</span>
+                <h3>{{ d.nombre }}</h3>
                 {% if d.alias %}<span class="client-alias">{{ d.alias }}</span>{% endif %}
             </div>
         </div>
 
         <div class="client-card-details">
             <p>
-                <span>{{"Origen" if d.tipo=="REMITENTE" else "Entrega"}}</span>
+                <span>Dirección</span>
                 <strong>{{ d.direccion }}</strong>
                 {{ d.ciudad }}{% if d.estado %}, {{ d.estado }}{% endif %} · {{ d.cp }} · {{ paises_por_iso.get(d.pais, d.pais) }}
             </p>
@@ -62,7 +60,8 @@
         </div>
 
         <div class="client-card-actions">
-            {% if d.tipo=='DESTINATARIO' %}<a href="/portal/envios/nuevo?destinatario_id={{ d.id }}" class="btn btn-primary btn-sm">Crear envío</a>{% else %}<a href="/portal/envios/nuevo?ambito=internacional&remitente_id={{d.id}}" class="btn btn-primary btn-sm">Internacional</a>{% if d.pais=='AR' %}<a href="/portal/oca/nuevo?remitente_id={{d.id}}" class="btn btn-ghost btn-sm">Nacional</a>{% endif %}{% endif %}
+            <a href="/portal/envios/nuevo?remitente_id={{ d.id }}" class="btn btn-ghost btn-sm">Usar como remitente</a>
+            <a href="/portal/envios/nuevo?destinatario_id={{ d.id }}" class="btn btn-primary btn-sm">Usar como destinatario</a>
             <button type="button" class="btn btn-ghost btn-sm client-edit"
                     data-provincia="{{ nombre_provincia(d.estado) }}" data-tipo="{{d.tipo}}" data-nacional='{{ (d.datos_nacionales or {})|tojson }}' data-id="{{ d.id }}" data-alias="{{ d.alias or '' }}"
                     data-nombre="{{ d.nombre }}" data-documento="{{ d.documento or '' }}"
@@ -83,7 +82,7 @@
 <section class="card client-directory-empty">
     <span class="client-avatar" aria-hidden="true">+</span>
     <h3>Tu base todavía está vacía</h3>
-    <p>Guardá un remitente o destinatario para tus próximos envíos.</p>
+    <p>Guardá un cliente para usar sus datos en el origen o destino de tus próximos envíos.</p>
     <button type="button" class="btn btn-primary btn-sm" data-client-form-open>Guardar mi primer contacto</button>
 </section>
 {% endif %}
@@ -93,7 +92,6 @@
 <section class="card client-form-card" id="cliente-form">
     <div class="card-head">
         <div>
-            <div class="eyebrow">Agenda privada</div>
             <h3 id="client-form-title">Agregar contacto</h3>
             <p id="client-form-copy">Completá los datos que querés reutilizar en futuros envíos.</p>
         </div>
@@ -102,7 +100,8 @@
 
     <form method="POST" action="/portal/clientes" class="form">
         <input type="hidden" name="direccion_id" id="client-id" value="">
-        <div class="form-grid-2"><div class="form-group"><label for="client-type">Tipo de contacto</label><select name="tipo" id="client-type"><option value="DESTINATARIO">Destinatario</option><option value="REMITENTE">Remitente</option></select></div><div class="form-group"><label for="client-country">País *</label><select name="pais" id="client-country" data-searchable data-search-placeholder="Buscar país" required>{% for iso,nombre in paises %}<option value="{{iso}}" {% if iso=='AR' %}selected{% endif %}>{{nombre}}{% if iso != 'FK' %} ({{iso}}){% endif %}</option>{% endfor %}</select></div></div>
+        <input type="hidden" name="tipo" id="client-type" value="DESTINATARIO">
+        <div class="form-group"><label for="client-country">País *</label><select name="pais" id="client-country" data-searchable data-search-placeholder="Buscar país" required>{% for iso,nombre in paises %}<option value="{{iso}}" {% if iso=='AR' %}selected{% endif %}>{{nombre}}{% if iso != 'FK' %} ({{iso}}){% endif %}</option>{% endfor %}</select></div>
         <div class="form-grid-2">
             <div class="form-group">
                 <label for="client-alias">Alias interno</label>
@@ -129,7 +128,7 @@
                 <input type="text" name="telefono" id="client-phone">
             </div>
             <div class="form-group">
-                <label for="client-address">Dirección de entrega *</label>
+                <label for="client-address">Dirección *</label>
                 <input type="text" name="direccion" id="client-address" required>
             </div>
         </div>
@@ -175,12 +174,11 @@
         var text = String(value || "").toLowerCase();
         return text.normalize ? text.normalize("NFD").replace(/[\u0300-\u036f]/g, "") : text;
     }
-    var selectedRole = "";
     function filterContacts() {
             var query = normalize(search ? search.value : "").trim();
             var visible = 0;
             cards.forEach(function (card) {
-                var show = (!selectedRole || card.dataset.role === selectedRole) && (!query || normalize(card.textContent).indexOf(query) !== -1);
+                var show = !query || normalize(card.textContent).indexOf(query) !== -1;
                 card.hidden = !show;
                 if (show) visible += 1;
             });
@@ -188,13 +186,6 @@
             if (empty) empty.hidden = visible !== 0;
     }
     if (search) search.addEventListener("input", filterContacts);
-    document.querySelectorAll('[data-contact-role]').forEach(function (button) {
-        button.addEventListener('click', function () {
-            selectedRole = button.dataset.contactRole;
-            document.querySelectorAll('[data-contact-role]').forEach(function (b) {b.setAttribute('aria-pressed', String(b === button));});
-            filterContacts();
-        });
-    });
 
     var fields = {
         tipo: "client-type", alias: "client-alias", nombre: "client-name", documento: "client-document",

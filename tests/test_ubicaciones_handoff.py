@@ -91,8 +91,8 @@ def _contacto(ident, tipo, *, ciudad, cp, pais="AR"):
 def web(monkeypatch):
     """Portal completo, con menús, agenda, DB y operadores aislados."""
     contactos = {
-        (7, "REMITENTE"): _contacto(7, "REMITENTE", ciudad="Azul", cp="B7300ABC"),
-        (8, "DESTINATARIO"): _contacto(8, "DESTINATARIO", ciudad="Tandil", cp="B7000XYZ"),
+        7: _contacto(7, "REMITENTE", ciudad="Azul", cp="B7300ABC"),
+        8: _contacto(8, "DESTINATARIO", ciudad="Tandil", cp="B7000XYZ"),
     }
     agenda = list(contactos.values())
 
@@ -115,7 +115,8 @@ def web(monkeypatch):
     monkeypatch.setattr(
         pc,
         "obtener_direccion",
-        lambda _cliente, ident, tipo=None: contactos.get((int(ident), tipo)),
+        lambda cliente, ident, tipo=None: contactos.get(int(ident))
+        if cliente == "CLIENTE-UBICACIONES" and (not tipo or contactos.get(int(ident), {}).get("tipo") == tipo) else None,
     )
     monkeypatch.setattr(pc, "tax_paga_cliente", lambda *_a: "DESTINATARIO")
     monkeypatch.setattr(pc, "courier_default_cliente", lambda *_a: "dhl")
@@ -125,7 +126,8 @@ def web(monkeypatch):
     monkeypatch.setattr(
         direcciones_servicio,
         "obtener_direccion",
-        lambda _cliente, ident, tipo=None: contactos.get((int(ident), tipo)),
+        lambda cliente, ident, tipo=None: contactos.get(int(ident))
+        if cliente == "CLIENTE-UBICACIONES" and (not tipo or contactos.get(int(ident), {}).get("tipo") == tipo) else None,
     )
     monkeypatch.setattr(po, "check_rate", lambda *_a, **_k: True)
     adapter_oca = Mock()
@@ -193,6 +195,20 @@ def test_link_oca_conserva_cpa_y_manda_cp4_al_courier(monkeypatch, invertir):
     request = adapter.quote.call_args.args[0]
     assert request.origin["codigo_postal"] == entrada["origen_cp"][1:5]
     assert request.destination["codigo_postal"] == entrada["destino_cp"][1:5]
+
+
+@pytest.mark.parametrize('path,prefijos', [
+    ('/portal/envios/nuevo?ambito=internacional', ('rem_ciudad', 'dest_ciudad')),
+    ('/portal/oca/nuevo?ambito=nacional', ('origen_localidad', 'destino_localidad')),
+])
+def test_formularios_aceptan_contactos_con_roles_invertidos(web, path, prefijos):
+    client, adapter, _ = web
+    response = client.get(path + '&remitente_id=8&destinatario_id=7')
+    assert response.status_code == 200
+    parser = _HTML(response.text)
+    assert _input(parser, prefijos[0])['value'] == 'Tandil'
+    assert _input(parser, prefijos[1])['value'] == 'Azul'
+    assert not adapter.mock_calls
 
 
 @pytest.mark.parametrize(

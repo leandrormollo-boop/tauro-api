@@ -2626,6 +2626,7 @@ def envio_nuevo_form(
     selector_valores = {
         "pedido_tienda": pedido_tienda,
         "destinatario_id": destinatario_id,
+        "remitente_id": remitente_id,
         "origen": origen,
         "destino": destino,
         "courier": courier,
@@ -2634,7 +2635,9 @@ def envio_nuevo_form(
         "valor_cotizado": valor_cotizado,
     }
     if ambito == "nacional":
-        return RedirectResponse("/portal/oca/nuevo" + (f"?destinatario_id={destinatario_id}" if destinatario_id else ""), status_code=303)
+        contactos = {k: v for k, v in (("remitente_id", remitente_id),
+                    ("destinatario_id", destinatario_id)) if v}
+        return RedirectResponse("/portal/oca/nuevo" + ("?" + urlencode(contactos) if contactos else ""), status_code=303)
     if not ambito:
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
@@ -2656,6 +2659,7 @@ def envio_nuevo_form(
     reemision_origen = None
     repeticion_origen = None
     origen_existente_id = corregir or repetir
+    contactos_guardados = listar_direcciones(cliente)
     if origen_existente_id:
         origen_existente = obtener_solicitud_de_cliente(
             origen_existente_id, cliente
@@ -2696,8 +2700,8 @@ def envio_nuevo_form(
                 "productos": get_productos(cliente),
                 "paises_destino": _paises_con_nacional(),
                 "remitente": remitente_precargado,
-                "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
-                "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+                "remitentes": contactos_guardados,
+                "destinatarios": contactos_guardados,
                 "form": form, "pedido_tienda": None, "cotizacion_web": None,
                 "reemision_origen": reemision_origen,
                 "repeticion_origen": repeticion_origen,
@@ -2778,7 +2782,7 @@ def envio_nuevo_form(
     # se resuelve junto con el cliente autenticado, así una cuenta no puede
     # precargar un destinatario perteneciente a otra.
     if destinatario_id and not pedido_tienda:
-        destinatario = obtener_direccion(cliente, destinatario_id, TIPO_DESTINATARIO)
+        destinatario = obtener_direccion(cliente, destinatario_id)
         if destinatario:
             form.update({
                 "destinatario_id": str(destinatario["id"]),
@@ -2842,7 +2846,7 @@ def envio_nuevo_form(
         form["intl_courier"] = courier
     remitente = obtener_remitente_para_envio(cliente)
     if remitente_id and not (pedido_tienda or corregir or repetir or quote_id):
-        saved = obtener_direccion(cliente, remitente_id, TIPO_REMITENTE)
+        saved = obtener_direccion(cliente, remitente_id)
         if saved:
             remitente = saved
             form["remitente_id"] = str(saved["id"])
@@ -2874,8 +2878,8 @@ def envio_nuevo_form(
             "paises_destino": _paises_con_nacional(),
             "remitente": remitente,
             "remitente_por_completar": remitente_por_completar,
-            "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
-            "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+            "remitentes": contactos_guardados,
+            "destinatarios": contactos_guardados,
             "form": form,
             "pedido_tienda": pedido_info,
             "cotizacion_web": cotizacion_web,
@@ -2982,8 +2986,7 @@ def envio_nuevo_post(
 
     productos = get_productos(cliente)
     paises_destino = _paises_con_nacional()
-    remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
-    destinatarios = listar_direcciones(cliente, TIPO_DESTINATARIO)
+    remitentes = destinatarios = listar_direcciones(cliente)
     # Algunos tests/consumidores internos invocan la función directamente,
     # fuera del inyector de FastAPI. En ese caso el default sigue siendo un
     # FormInfo, no una lista enviada por el navegador.
@@ -3266,6 +3269,8 @@ def envio_nuevo_post(
             )
 
         remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id)) or {}
+        if _id_opt(remitente_id) and not remitente:
+            raise ValueError("Ese cliente guardado no está disponible en tu cuenta.")
         # Lo que el cliente EDITÓ en el form manda sobre la libreta: campo
         # por campo, para que elegir de la libreta y corregir una sola cosa
         # (el CP, el teléfono) no pierda el resto.
@@ -3292,7 +3297,7 @@ def envio_nuevo_post(
         error_step = 2
         if destinatario_id:
             destinatario = obtener_direccion(
-                cliente, _id_opt(destinatario_id) or 0, TIPO_DESTINATARIO
+                cliente, _id_opt(destinatario_id) or 0
             )
             if not destinatario:
                 raise ValueError("Ese cliente guardado no está disponible en tu cuenta.")

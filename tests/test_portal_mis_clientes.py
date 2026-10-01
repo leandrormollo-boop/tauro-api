@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import inspect
 from pathlib import Path
+import pytest
 
 import endpoints.portal_cliente as pc
 import servicios.direcciones as dd
@@ -57,7 +58,7 @@ def _preparar_form(monkeypatch, direccion):
         "nombre": "Melcior", "direccion": "Av. Córdoba 1", "ciudad": "CABA",
         "cp": "1000", "pais": "AR",
     })
-    monkeypatch.setattr(pc, "listar_direcciones", lambda cliente, tipo: [direccion] if direccion and tipo == dd.TIPO_DESTINATARIO else [])
+    monkeypatch.setattr(pc, "listar_direcciones", lambda cliente, tipo=None: [direccion] if direccion else [])
     monkeypatch.setattr(pc, "tax_paga_cliente", lambda cliente: "DESTINATARIO")
     monkeypatch.setattr(pc, "courier_default_cliente", lambda cliente: "FEDEX")
 
@@ -78,7 +79,7 @@ def test_inicio_desde_cliente_propietario_precarga_la_ficha(monkeypatch):
     )
     form = respuesta["context"]["form"]
 
-    assert llamadas == [("MELCIOR", 77, dd.TIPO_DESTINATARIO)]
+    assert llamadas == [("MELCIOR", 77, None)]
     assert form["destinatario_id"] == "77"
     assert form["dest_nombre"] == "Elle McGill"
     assert form["destino_pais"] == "US"
@@ -94,6 +95,54 @@ def test_id_ajeno_o_inexistente_no_precarga_ni_revela_existencia(monkeypatch):
 
     assert "destinatario_id" not in respuesta["context"]["form"]
     assert respuesta["context"]["error"] == "Ese cliente guardado no está disponible en tu cuenta."
+
+
+@pytest.mark.parametrize("rol", [dd.TIPO_REMITENTE, dd.TIPO_DESTINATARIO])
+@pytest.mark.parametrize("lado", ["remitente_id", "destinatario_id"])
+def test_contacto_guardado_disponible_en_ambos_lados(monkeypatch, rol, lado):
+    direccion = {**_destinatario(), "tipo": rol}
+    _preparar_form(monkeypatch, direccion)
+    llamados = []
+
+    def obtener(cliente, ident, tipo=None):
+        llamados.append((cliente, ident, tipo))
+        return direccion if (cliente, ident, tipo) == ("MELCIOR", 77, None) else None
+
+    monkeypatch.setattr(pc, "obtener_direccion", obtener)
+    respuesta = pc.envio_nuevo_form(_request(), cliente="MELCIOR",
+                                     ambito="internacional", **{lado: 77})
+    context = respuesta["context"]
+    assert context["error"] is None
+    assert context["form"][lado] == "77"
+    assert context["remitentes"] == context["destinatarios"] == [direccion]
+    if lado == "remitente_id":
+        assert context["remitente"]["nombre"] == "Elle McGill"
+    else:
+        assert context["form"]["dest_nombre"] == "Elle McGill"
+    assert llamados == [("MELCIOR", 77, None)]
+
+
+@pytest.mark.parametrize("cliente,ident,esperado", [
+    ("MELCIOR", 77, True), ("OTRA-CUENTA", 77, False), ("MELCIOR", 999, False),
+])
+def test_remitente_explicito_respeta_propietario_sin_fallback(monkeypatch, cliente, ident, esperado):
+    direccion = _destinatario()
+    monkeypatch.setattr(dd, "obtener_direccion", lambda cuenta, did, tipo=None:
+                        direccion if (cuenta, did, tipo) == ("MELCIOR", 77, None) else None)
+    monkeypatch.setattr(dd, "listar_direcciones", lambda *_args:
+                        pytest.fail("Un id explícito no debe sustituirse por otra ficha"))
+    assert dd.obtener_remitente_para_envio(cliente, ident) == (direccion if esperado else None)
+
+
+def test_elegir_ambito_conserva_ambos_contactos(monkeypatch):
+    _preparar_form(monkeypatch, _destinatario())
+    response = pc.envio_nuevo_form(_request(), cliente="MELCIOR", remitente_id=77, destinatario_id=88)
+    for key in ("nacional_url", "internacional_url"):
+        assert "remitente_id=77" in response['context'][key]
+        assert "destinatario_id=88" in response['context'][key]
+    national = pc.envio_nuevo_form(_request(), cliente="MELCIOR", ambito="nacional",
+                                   remitente_id=77, destinatario_id=88)
+    assert national.headers['location'] == '/portal/oca/nuevo?remitente_id=77&destinatario_id=88'
 
 
 def test_edicion_de_mis_clientes_fuerza_tipo_y_propietario(monkeypatch):
@@ -205,7 +254,8 @@ def test_portal_expone_mis_clientes_y_un_pais_canonico():
     assert "Mis clientes" in base
     assert "/portal/envios/nuevo?destinatario_id={{ d.id }}" in clientes
     assert 'name="cliente_id"' not in clientes
-    assert "Elegir de Mis clientes" in nuevo
+    assert "Usar un cliente como remitente" in nuevo
+    assert "Usar un cliente como destinatario" in nuevo
     assert 'id="destinatario_id" data-searchable' in nuevo
     assert 'name="dest_pais"' not in nuevo
     assert "dest_pais" not in firma_post.parameters
@@ -220,17 +270,22 @@ def test_la_ficha_solo_precarga_y_no_reaparece_un_contacto_borrado():
     assert 'or (destinatario.get("telefono")' not in fuente
 
 
-def test_error_del_paquete_conserva_remitente_manual_y_vuelve_al_paso_tres(monkeypatch):
+@pytest.mark.parametrize("contacto_guardado", [False, True])
+def test_error_del_paquete_conserva_remitente_manual_y_vuelve_al_paso_tres(monkeypatch, contacto_guardado):
     monkeypatch.setattr(pc.templates, "TemplateResponse", lambda **kwargs: kwargs)
     monkeypatch.setattr(pc, "get_productos", lambda cliente: [])
     monkeypatch.setattr(
         pc, "_paises_con_nacional",
         lambda: [("AR", "Argentina"), ("CN", "China"), ("US", "Estados Unidos")],
     )
-    monkeypatch.setattr(pc, "listar_direcciones", lambda cliente, tipo: [])
+    monkeypatch.setattr(pc, "listar_direcciones", lambda cliente, tipo=None: [])
     monkeypatch.setattr(pc, "obtener_remitente_para_envio", lambda *args, **kwargs: None)
     monkeypatch.setattr(pc, "tax_paga_cliente", lambda cliente: "DESTINATARIO")
     monkeypatch.setattr(pc, "courier_default_cliente", lambda cliente: "FEDEX")
+    # Un contacto históricamente guardado como remitente también es destino.
+    monkeypatch.setattr(pc, "obtener_direccion", lambda cliente, ident, tipo=None:
+                        {**_destinatario(), "tipo": dd.TIPO_REMITENTE}
+                        if (cliente, ident, tipo) == ("MELCIOR", 77, None) else None)
 
     respuesta = pc.envio_nuevo_post(
         _request(), destino_pais="US",
@@ -241,7 +296,7 @@ def test_error_del_paquete_conserva_remitente_manual_y_vuelve_al_paso_tres(monke
         remitente_id="", rem_nombre="Yiwu Hailu Garment", rem_contacto="Jeff Jang",
         rem_documento="CN-TAX-8", rem_email="jeff@example.cn", rem_telefono="+86 10",
         rem_direccion="88 Fabric Road", rem_ciudad="Yiwu", rem_estado="Zhejiang",
-        rem_zip="322000", rem_pais="CN", destinatario_id="",
+        rem_zip="322000", rem_pais="CN", destinatario_id="77" if contacto_guardado else "",
         dest_nombre="Elle McGill", dest_contacto="Elle", dest_documento="US-TAX-77",
         dest_email="elle@example.com", dest_telefono="+1 305", dest_direccion="Brickell Ave",
         dest_ciudad="Miami", dest_estado="FL", dest_zip="33131", dest_alias="Elle",
@@ -268,7 +323,7 @@ def test_error_de_invoice_vuelve_directo_al_paso_cuatro(monkeypatch):
         pc, "_paises_con_nacional",
         lambda: [("AR", "Argentina"), ("CN", "China"), ("US", "Estados Unidos")],
     )
-    monkeypatch.setattr(pc, "listar_direcciones", lambda cliente, tipo: [])
+    monkeypatch.setattr(pc, "listar_direcciones", lambda cliente, tipo=None: [])
     monkeypatch.setattr(pc, "obtener_remitente_para_envio", lambda *args, **kwargs: None)
     monkeypatch.setattr(pc, "tax_paga_cliente", lambda cliente: "DESTINATARIO")
     monkeypatch.setattr(pc, "courier_default_cliente", lambda cliente: "DHL")

@@ -31,10 +31,9 @@ def proyectar(direccion):
     national = direccion.get("datos_nacionales") or {}
     fields = {key: national.get(key) or "" for key in ("nombre", "apellido", "calle", "numero", "piso", "depto")}
     fields["nombre"] = national.get("nombre") or direccion.get("nombre") or ""
-    if direccion["tipo"] == "REMITENTE":
-        fields["nombre"] = direccion.get("nombre") or fields["nombre"]
     fields.update(provincia=normalizar_provincia(direccion.get("estado")),
                   localidad=direccion.get("ciudad") or "", cp=direccion.get("cp") or "",
                   email=direccion.get("email") or "", telefono=direccion.get("telefono") or "")
     return {"id": str(direccion["id"]), "label": direccion.get("label") or direccion.get("nombre"),
+            "nombre_completo": direccion.get("nombre") or fields["nombre"],
             "tipo": direccion["tipo"], "direccion": direccion.get("direccion") or "", "fields": fields}

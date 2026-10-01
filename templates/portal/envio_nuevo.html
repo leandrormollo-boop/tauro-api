@@ -8,9 +8,9 @@
 {% endblock %}
 
 {% block content %}
-<script src="/static/js/portal-agenda.js?v=1" defer></script>
-<link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
-<script src="/static/js/hs-assistant.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
+<script src="/static/js/portal-agenda.js?v=2" defer></script>
+<link rel="stylesheet" href="/static/css/hs-assistant.css?v=2">
+<script src="/static/js/hs-assistant.js?v=2" defer nonce="{{ request.state.csp_nonce }}"></script>
 {% if not ambito %}
     {% set flujo = 'crear' %}
     {% include 'portal/_ambito_selector.html' %}
@@ -24,7 +24,6 @@
      data-initial-step="{{ form.initial_step or 1 }}">
 <div class="page-title page-title-row">
     <div>
-        <div class="eyebrow"><span aria-hidden="true">🌐</span> Envío internacional</div>
         <h1>{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional') }}</h1>
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
@@ -147,7 +146,7 @@
                de ORIGEN del envío sale de acá, tampoco se podía cotizar desde
                otro país sin pasar por la libreta. #}
                 <div class="form-group">
-                    <label for="remitente_id">Remitente guardado · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
+                    <label for="remitente_id">Usar un cliente como remitente · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
                     <select data-agenda-role="REMITENTE" name="remitente_id" id="remitente_id" data-searchable data-search-placeholder="Buscar nombre, ciudad o país">
                         <option value="">Cargar remitente nuevo</option>
                         {% for r in remitentes %}
@@ -161,7 +160,7 @@
                                     data-estado="{{ r.estado or '' }}"
                                     data-cp="{{ r.cp }}"
                                     data-pais="{{ r.pais }}"
-                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada and remitente and not form.rem_nombre) %}selected{% endif %}>
+                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and remitente and remitente.id == r.id and not form.rem_nombre) %}selected{% endif %}>
                                 {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
                             </option>
                         {% endfor %}
@@ -256,7 +255,7 @@
             <h4><span class="n">2</span> Destinatario <span class="badge warn">Entrega</span></h4>
 
                 <div class="form-group">
-                    <label for="destinatario_id">Elegir de Mis clientes · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Administrar ↗</a></label>
+                    <label for="destinatario_id">Usar un cliente como destinatario · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
                     <select data-agenda-role="DESTINATARIO" name="destinatario_id" id="destinatario_id" data-searchable
                             data-search-placeholder="Buscar cliente, ciudad o país">
                         <option value="">Cargar un destinatario nuevo</option>
@@ -272,7 +271,7 @@
                                     data-cp="{{ d.cp }}"
                                     data-pais="{{ d.pais }}"
                                     {% if form.destinatario_id|string == d.id|string %}selected{% endif %}>
-                                {{ d.label }} · {{ d.nombre }} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
+                                {{ d.label }}{% if d.nombre != d.label %} · {{ d.nombre }}{% endif %} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
                             </option>
                         {% endfor %}
                     </select>
@@ -344,7 +343,7 @@
             <div class="guardar-dest">
             <label class="check-row">
                 <input type="checkbox" name="guardar_destinatario" value="1" {% if form.guardar_destinatario %}checked{% endif %}>
-                <span>Guardar este destinatario para próximos envíos</span>
+                <span>Guardar este cliente para usarlo como remitente o destinatario</span>
             </label>
                 <div class="form-group compact-field">
                 <label for="dest_alias">Alias para guardar</label>
@@ -437,6 +436,7 @@
                     <div class="shipment-box-head">
                         <div><span>Invoice comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
                         <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
+                        <button type="button" class="btn btn-ghost btn-sm invoice-item-add">Agregar artículo</button>
                     </div>
                     <input type="hidden" name="bulto_items_extra" class="invoice-extras" value="{{ (f.items_invoice[1:] if f.items_invoice else [])|tojson|forceescape }}">
                     <div class="invoice-items">
@@ -461,7 +461,6 @@
                         <div class="form-group">
                             <label>HS code <span class="field-optional">(opcional)</span></label>
                             <input type="text" name="bulto_hs" class="bulto-hs" data-hs-input placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}">
-                            {% include 'portal/_hs_assistant.html' %}
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
@@ -477,6 +476,7 @@
                             <div class="input-unit"><input type="text" name="bulto_peso_neto" aria-label="Peso neto total del artículo" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
 
                         </div>
+                        {% include 'portal/_hs_assistant.html' %}
                     </div>
                     </div>
                     <button type="button" class="btn-add-bulto invoice-item-add">+ Agregar otro artículo a esta caja</button>

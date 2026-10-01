@@ -1,13 +1,14 @@
 <div class="hs-assistant" data-hs-assistant>
-    <details>
-        <summary>Buscar código aduanero</summary>
-        <p>Agregá material y uso para mejorar la sugerencia.</p>
-        <label>Material, composición y uso
-            <input type="text" data-hs-details maxlength="700" placeholder="Ej.: 100% algodón, tejido de punto, para vestir">
-        </label>
-        <button type="button" class="btn btn-ghost btn-sm" data-hs-search>Buscar clasificación</button>
+    <details data-hs-panel>
+        <summary><span data-hs-summary>Buscar código aduanero</span></summary>
+        <div class="hs-search-controls">
+            <label>Material, composición y uso
+                <input type="text" data-hs-details maxlength="700" placeholder="Ej.: 100% algodón, tejido de punto, para vestir">
+            </label>
+            <button type="button" class="btn btn-ghost btn-sm" data-hs-search>Buscar clasificación</button>
+        </div>
+        <div data-hs-status role="status" aria-live="polite"></div>
+        <div data-hs-results></div>
+        <small>Confirmá que el código corresponda a tu producto.</small>
     </details>
-    <div data-hs-status role="status" aria-live="polite"></div>
-    <div data-hs-results></div>
-    <small>Confirmá que el código corresponda a tu producto.</small><span data-help="Código aduanero (HS)">El código internacional tiene 6 dígitos. El país de destino puede exigir una extensión nacional.</span>
 </div>

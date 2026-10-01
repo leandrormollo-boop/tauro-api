@@ -3,10 +3,10 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 const source=fs.readFileSync('static/js/portal-agenda.js','utf8');
-function fixture(data){
+function fixture(data,dataset={nationalContact:'destino'}){
   const handlers={},docHandlers={},link={},events=[];
   const placeholder={cloneNode(){return this;}};
-  const select={dataset:{nationalContact:'destino'},value:'1',options:[placeholder],children:[],replaceChildren(n){this.children=[n];},appendChild(n){this.children.push(n);}};
+  const select={dataset,value:'1',options:[placeholder],children:[],replaceChildren(n){this.children=[n];},appendChild(n){this.children.push(n);}};
   const fields={nombre:'Editado por el usuario',numero:'999',paquete:'3'};
   const document={hidden:false,body:{dataset:{draftScope:'portal:A'}},
     querySelectorAll(q){return q==='[data-agenda-manage]'?[{addEventListener(k,fn){link[k]=fn;}}]:q==='[data-national-form]'?[{dispatchEvent(e){events.push(e);}}]:[select];},
@@ -37,3 +37,13 @@ test('señal de guardado en otra pestaña vuelve a habilitar la actualización',
  f.handlers.storage({key:'tauro:agenda:portal:B'});await new Promise(r=>setImmediate(r));
  assert.equal(f.count(),2);
 });
+for (const dataset of [{agendaRole:'REMITENTE'}, {agendaRole:'DESTINATARIO'}, {nationalContact:'origen'}, {nationalContact:'destino'}]) {
+ test('ambos tipos de contactos disponibles en '+JSON.stringify(dataset),async()=>{
+  const rows=[{id:'1',tipo:'REMITENTE',label:'Ana',ciudad:'Wilde',fields:{localidad:'Wilde'}},
+              {id:'2',tipo:'DESTINATARIO',label:'Luis',ciudad:'CABA',fields:{localidad:'CABA'}}];
+  const f=fixture({...data,contactos:rows,nacionales:rows},dataset);
+  f.link.click();await f.handlers.focus();
+  assert.deepEqual(f.select.children.slice(1).map(o=>o.value),['1','2']);
+  assert.equal(f.select.value,'1');
+ });
+}

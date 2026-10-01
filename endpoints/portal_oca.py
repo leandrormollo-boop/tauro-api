@@ -45,17 +45,19 @@ def nuevo(request: Request, cliente: str = Depends(cliente_actual)):
         ) if key in request.query_params}
         error = None
         from servicios.direcciones import obtener_direccion
-        for param, prefix, tipo in [("remitente_id", "origen", "REMITENTE"),
-                                    ("destinatario_id", "destino", "DESTINATARIO")]:
+        for param, prefix in [("remitente_id", "origen"),
+                              ("destinatario_id", "destino")]:
             ident = request.query_params.get(param)
             if not ident:
                 continue
-            row = obtener_direccion(cliente, int(ident), tipo) if ident.isdigit() else None
+            row = obtener_direccion(cliente, int(ident)) if ident.isdigit() else None
             contact = proyectar(row) if row else None
             if not contact:
                 error = "Ese contacto nacional no está disponible en tu cuenta."
                 continue
             form.update({prefix + "_" + key: value for key, value in contact["fields"].items()})
+            if prefix == "origen":
+                form["origen_nombre"] = row.get("nombre") or contact["fields"]["nombre"]
             form[prefix + "_agenda_id"] = contact["id"]
             form.pop(prefix + "_referencia", None)
         return pantalla(request, cliente, disponible=True, asegurada=config.insured_operation,
