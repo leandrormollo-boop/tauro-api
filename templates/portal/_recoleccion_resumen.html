@@ -4,6 +4,12 @@
 {% set confirmada = r.estado == 'AGENDADA' and r.confirmation_code and not historica %}
 {% set referencia = r.envio_etiqueta|default('', true) or r.envio_destinatario|default('', true) or ('Envío #' ~ r.solicitud_id if r.solicitud_id else 'Retiro general') %}
 <article class="pickup-card{% if confirmada %} pickup-confirmed{% endif %}{% if destacado %} pickup-selected{% endif %}" id="recoleccion-{{ r.id }}" aria-label="Recolección {{ courier }}">
+    <div class="pickup-reservation">
+        <span>Número de recolección {{ courier }}<span data-help="Número de recolección">Identifica la reserva del retiro; es distinto del tracking del envío. La reserva no confirma que los paquetes ya hayan sido retirados.</span></span>
+        <strong class="pickup-number{% if r.confirmation_code %} mono{% else %} pickup-number-pending{% endif %}">{{ r.confirmation_code or 'Pendiente de confirmación' }}</strong>
+        <small>{{ r.direccion or 'Dirección no informada' }}</small>
+    </div>
+
     <div class="pickup-identity">
         <span class="pickup-date">{{ r.fecha.strftime('%d/%m/%Y') if r.fecha else 'Sin fecha' }}</span>
         <strong>{{ referencia }}</strong>
@@ -23,12 +29,6 @@
         <span>Horario en el origen</span>
         <strong>{{ r.ready_time }}–{{ r.close_time }}</strong>
         <small>{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ '%g'|format(r.peso_kg or 0) }} kg</small>
-    </div>
-
-    <div class="pickup-reservation">
-        <span>Número de recolección {{ courier }}<span data-help="Número de recolección">Identifica la reserva del retiro; es distinto del tracking del envío. La reserva no confirma que los paquetes ya hayan sido retirados.</span></span>
-        <strong class="mono">{{ r.confirmation_code or 'Pendiente' }}</strong>
-        <small>{{ r.direccion or 'Dirección no informada' }}</small>
     </div>
 
     <div class="pickup-state">
