@@ -99,19 +99,6 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
     </a>
 </section>
 
-{% if r.requieren_accion %}
-<aside class="home-action-reminder" aria-label="Pendientes que requieren tu acción">
-    <span>Requiere tu acción</span>
-    <div>
-        {% for paso in embudo %}
-        {% if paso.cantidad and paso.accion_de == 'cliente' %}
-        <a href="{{ paso.url }}"><strong>{{ paso.cantidad }} {{ paso.titulo|lower }}</strong><small>{{ paso.detalle }}</small></a>
-        {% endif %}
-        {% endfor %}
-    </div>
-</aside>
-{% endif %}
-
 <div class="home-dashboard-layout">
     <main class="home-dashboard-main">
         <section class="home-panel home-activity-panel">

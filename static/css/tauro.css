@@ -381,43 +381,6 @@ h1, h2, h3, h4 {
   box-shadow: 0 0 8px var(--ok-glow);
 }
 
-/* Saldo siempre a la vista, arriba a la izquierda. Va justo debajo del
-   nombre del cliente y arriba del menú: es lo primero que mira cuando
-   abre cualquier pantalla. Sobrio a propósito — es plata que debe, no
-   un logro; el metálico está reservado para lo que celebra algo. */
-.side-saldo {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 11px;
-  margin: -4px 0 14px;
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
-  background: rgba(167, 139, 250, .05);
-  text-decoration: none;
-  transition: border-color .18s ease, background .18s ease;
-}
-.side-saldo:hover {
-  border-color: rgba(167, 139, 250, .4);
-  background: rgba(167, 139, 250, .09);
-}
-.side-saldo-lbl {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: .09em;
-  color: var(--fg-3);
-}
-.side-saldo-n {
-  font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: -.02em;
-  color: var(--fg-1);
-  white-space: nowrap;
-}
-.side-saldo.al-dia .side-saldo-n { color: var(--ok); font-size: 13px; }
 .side-user .estado.warn { color: var(--warn); }
 .side-user .estado.warn::before { background: var(--warn); box-shadow: none; }
 

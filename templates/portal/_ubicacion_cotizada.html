@@ -1,13 +1,4 @@
 {% macro confirmar_ubicacion(form, lado, campos) %}
 {% set referencia = form.get(lado ~ '_referencia') == '1' %}
 <input type="hidden" name="{{ lado }}_referencia" value="{{ '1' if referencia else '' }}" data-draft-persist>
-<div class="location-confirmation" data-location-confirmation="{{ lado }}" data-location-fields="{{ campos }}" {% if not referencia %}hidden{% endif %}>
-    <label class="check-row">
-        <input type="checkbox" name="{{ lado }}_ubicacion_confirmada" value="1"
-               {% if referencia %}required{% else %}disabled{% endif %}
-               {% if form.get(lado ~ '_ubicacion_confirmada') == '1' %}checked{% endif %}>
-        <span>Confirmo ciudad y código postal del domicilio de {{ lado }}.</span>
-    </label>
-    <span data-help="Ubicación de la cotización">Conservamos los datos usados para cotizar. Revisá que el código postal corresponda a la dirección completa, ya que puede ser una referencia de la ciudad.</span>
-</div>
 {% endmacro %}

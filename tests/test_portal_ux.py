@@ -37,11 +37,12 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "tauro.css?v=49" in base
 
 
-def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
+def test_home_muestra_requiere_tu_accion_una_sola_vez():
     html = _template("home.html")
-    assert "Requiere tu acción" in html
-    assert "paso.accion_de == 'cliente'" in html
-    assert "paso.cantidad" in html
+    # La franja duplicada se sacó: queda sólo la tarjeta resumen.
+    assert "home-action-reminder" not in html
+    assert html.count("Requiere tu acción") == 1
+    assert '<a href="/portal/envios?paso=' in html
 
 
 def test_paises_largos_tienen_busqueda():

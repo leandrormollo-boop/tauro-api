@@ -62,7 +62,6 @@ from servicios.experiencia_cuenta import obtener_experiencia_cuenta, obtener_pag
 from servicios.imputacion_pagos_portal import imputar_pago_cliente
 from servicios.periodo_cuenta import inicio_cuenta_cliente, obtener_periodo_cuenta
 from servicios.filtros_cuenta import normalizar_filtros_cuenta
-from servicios.ubicaciones_envio import validar_ubicacion_cotizada
 from servicios.export_cuenta import generar_excel_cuenta
 from servicios.api_b2b import (
     obtener_precio_envio, obtener_precio_envio_multi, cotizar_couriers_cliente,
@@ -3010,8 +3009,6 @@ def envio_nuevo_post(
     gestion_ventana: str = Form(""),
     origen_referencia: str = Form(""),
     destino_referencia: str = Form(""),
-    origen_ubicacion_confirmada: str = Form(""),
-    destino_ubicacion_confirmada: str = Form(""),
     cliente: str = Depends(cliente_actual),
 ):
     if _ambito_post(ambito) != "internacional":
@@ -3262,8 +3259,6 @@ def envio_nuevo_post(
         "editar_version": editar_version if isinstance(editar_version, str) else "",
         "origen_referencia": "1" if origen_referencia == "1" else "",
         "destino_referencia": "1" if destino_referencia == "1" else "",
-        "origen_ubicacion_confirmada": "1" if origen_ubicacion_confirmada == "1" else "",
-        "destino_ubicacion_confirmada": "1" if destino_ubicacion_confirmada == "1" else "",
     }
 
     error_step = 1
@@ -3272,9 +3267,6 @@ def envio_nuevo_post(
     origen_tienda: dict = {}
     idempotency_tienda = ""
     try:
-        for error_step, lado in ((1, "origen"), (2, "destino")):
-            validar_ubicacion_cotizada(form, lado)
-        error_step = 1
         if isinstance(editar_solicitud_id, str) and editar_solicitud_id.strip() and not editar_id:
             raise ValueError("No pudimos identificar el envío a editar. Volvé a abrirlo desde Mis envíos.")
         if editar_id:
