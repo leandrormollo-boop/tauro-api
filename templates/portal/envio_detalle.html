@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "portal/_sprites.html" import portal_sprite %}
 {% set courier_codigo = (s.courier or "FEDEX")|upper %}
 {% set courier_nombre = nombre_courier(s.courier or "FEDEX") %}
 {% set ambito = ambito_envio(s) %}
@@ -153,7 +154,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="card" id="guia-del-envio">
         <div class="card-head">
             <div>
-                <h3>Guía {{ courier_nombre }}<span data-help="Archivo de la guía">El PDF incluye una etiqueta por caja.{% if s.tiene_factura_comercial %} La factura comercial está al final del archivo.{% endif %}</span></h3>
+                <h3 class="portal-sprite-heading">{{ portal_sprite("guias") }}Guía {{ courier_nombre }}<span data-help="Archivo de la guía">El PDF incluye una etiqueta por caja.{% if s.tiene_factura_comercial %} La factura comercial está al final del archivo.{% endif %}</span></h3>
                 <p>Etiquetas para imprimir y pegar en cada caja.</p>
             </div>
         </div>
@@ -219,7 +220,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="card">
         <div class="card-head">
             <div>
-                <h3>Tracking{% if courier_codigo == 'DHL' %}<span data-help="Actualización del tracking">El portal consulta DHL una vez al día. El seguimiento oficial puede tener movimientos posteriores.</span>{% endif %}</h3>
+                <h3 class="portal-sprite-heading">{{ portal_sprite("seguimiento") }}Tracking{% if courier_codigo == 'DHL' %}<span data-help="Actualización del tracking">El portal consulta DHL una vez al día. El seguimiento oficial puede tener movimientos posteriores.</span>{% endif %}</h3>
                 <p>Seguimiento oficial en la red de {{ courier_nombre }}.</p>
             </div>
         </div>

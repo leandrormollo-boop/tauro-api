@@ -1,0 +1,4 @@
+{# Piezas aprobadas por TAURO. El nombre de la acción permanece visible al lado. #}
+{% macro portal_sprite(nombre, clase='') -%}
+<img src="/static/img/portal-sprites/{{ nombre }}.svg?v=1" class="portal-sprite{% if clase %} {{ clase }}{% endif %}" width="32" height="32" alt="" aria-hidden="true" draggable="false">
+{%- endmacro %}
