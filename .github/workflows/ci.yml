@@ -88,6 +88,10 @@ jobs:
             tests/test_conciliacion_couriers_postgres.py \
             tests/test_libreta_aislada.py \
             tests/test_visibilidad_envios_cliente.py \
+            tests/test_invoice_marca.py \
+            tests/test_portal_pdf_unificado.py \
+            tests/test_documentos_portal.py \
+            tests/test_numeracion_guias_tauro.py \
             tests/test_shopify_catalogo_postgres.py \
             tests/test_fedex_emision_recuperacion.py \
             tests/test_dhl_emision.py \
