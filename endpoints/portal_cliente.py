@@ -285,6 +285,14 @@ def _pendientes_menu(cliente_id: str) -> dict:
 templates.env.globals["pendientes_menu"] = _pendientes_menu
 
 
+def _invoice_asistente_habilitado() -> bool:
+    from servicios.invoice_asistente import habilitado
+    return habilitado()
+
+
+templates.env.globals["invoice_asistente_habilitado"] = _invoice_asistente_habilitado
+
+
 def _saldo_menu(cliente_id: str, ya_calculado: Optional[dict] = None) -> Optional[dict]:
     """
     Saldo para la barra lateral: visible en TODAS las pantallas del portal,
@@ -2204,6 +2212,60 @@ async def api_hs_code(request: Request, cliente: str = Depends(cliente_actual)):
         return JSONResponse({"error": mensaje}, status_code=422, headers=headers)
     except (OSError, KeyError):
         return JSONResponse({"error": "El asistente HS no está disponible. Podés ingresar el código manualmente."}, status_code=503, headers=headers)
+    return JSONResponse(resultado, headers=headers)
+
+
+# ── API: asistente para cargar la invoice desde archivo o texto ──
+@router.post("/api/invoice/leer")
+async def api_invoice_leer(request: Request, cliente: str = Depends(cliente_actual)):
+    """Lee una invoice y devuelve artículos para revisar. No guarda nada.
+
+    El archivo vive en memoria durante el request: no se persiste ni se
+    loguea. Solo quedan métricas (tipo, cantidad de ítems y duración).
+    """
+    import time
+    from starlette.concurrency import run_in_threadpool
+    from servicios import invoice_asistente as asistente
+    from servicios.agentes_comerciales import SalidaAgenteInvalida
+
+    if not asistente.habilitado():
+        raise HTTPException(status_code=404)
+    headers = {"Cache-Control": "private, no-store"}
+    if not check_rate(f"invoice_leer:{cliente}", max_attempts=20, window_seconds=3600):
+        return JSONResponse({"error": "Leíste muchas invoices en la última hora. Esperá un rato o cargá los artículos a mano."},
+                            status_code=429, headers={**headers, "Retry-After": "600"})
+    inicio = time.monotonic()
+    try:
+        form = await request.form(max_files=1, max_fields=5)
+    except Exception:
+        return JSONResponse({"error": "No pudimos recibir el archivo. Probá otra vez."}, status_code=400, headers=headers)
+    try:
+        archivo = form.get("archivo")
+        nombre, contenido = None, None
+        if archivo is not None and not isinstance(archivo, str) and getattr(archivo, "filename", ""):
+            nombre = archivo.filename
+            contenido = await archivo.read(asistente.MAX_BYTES + 1)
+        texto = form.get("texto")
+        texto = texto if isinstance(texto, str) else ""
+        if len(texto) > asistente.MAX_TEXTO:
+            return JSONResponse({"error": "El texto pegado es demasiado largo. Subí el archivo."}, status_code=413, headers=headers)
+        pais = form.get("pais_origen_envio")
+        pais = pais[:60] if isinstance(pais, str) else ""
+        resultado = await run_in_threadpool(asistente.leer_invoice, nombre, contenido, texto, pais)
+    except asistente.InvoiceAsistenteError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422, headers=headers)
+    except asistente.AsistenteNoDisponible as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503, headers=headers)
+    except SalidaAgenteInvalida:
+        return JSONResponse({"error": "No pudimos interpretar la invoice. Probá otra vez o cargá los artículos a mano."},
+                            status_code=502, headers=headers)
+    except Exception as exc:
+        print(f"[invoice_asistente] error {type(exc).__name__}")
+        return JSONResponse({"error": asistente.MENSAJE_NO_DISPONIBLE}, status_code=503, headers=headers)
+    finally:
+        await form.close()
+    ms = int((time.monotonic() - inicio) * 1000)
+    print(f"[invoice_asistente] tipo={resultado['tipo']} fuente={resultado['fuente']} items={len(resultado['items'])} ms={ms}")
     return JSONResponse(resultado, headers=headers)
 
 

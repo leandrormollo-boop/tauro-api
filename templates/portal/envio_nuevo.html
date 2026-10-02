@@ -12,6 +12,7 @@
 <script src="/static/js/portal-agenda.js?v=2" defer></script>
 <link rel="stylesheet" href="/static/css/hs-assistant.css?v=2">
 <script src="/static/js/hs-assistant.js?v=2" defer nonce="{{ request.state.csp_nonce }}"></script>
+{% if invoice_asistente_habilitado() %}<script src="/static/js/invoice-asistente.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>{% endif %}
 {% if not ambito %}
     {% set flujo = 'crear' %}
     {% include 'portal/_ambito_selector.html' %}
@@ -443,6 +444,7 @@
                         <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
                         <button type="button" class="btn btn-ghost btn-sm invoice-item-add">Agregar artículo</button>
                     </div>
+                    {% if invoice_asistente_habilitado() %}{% include 'portal/_invoice_asistente.html' %}{% endif %}
                     <input type="hidden" name="bulto_items_extra" class="invoice-extras" value="{{ (f.items_invoice[1:] if f.items_invoice else [])|tojson|forceescape }}">
                     <div class="invoice-items">
                     <div class="bulto-invoice" data-invoice-item data-hs-scope>

@@ -141,7 +141,8 @@ jobs:
             tests/test_diferencia_tax_envio.py \
             tests/test_diferencias_cliente.py \
             tests/test_portal_raiz.py \
-            tests/test_cliente_cuenta_prueba_postgres.py
+            tests/test_cliente_cuenta_prueba_postgres.py \
+            tests/test_invoice_asistente.py
 
   web-audit:
     name: Build web y contratos JavaScript
@@ -172,6 +173,7 @@ jobs:
           tests/js/hs-assistant.test.cjs
           tests/js/invoice-totales.test.cjs
           tests/js/portal-agenda.test.cjs
+          tests/js/invoice-asistente.test.cjs
 
   ci:
     name: ci
