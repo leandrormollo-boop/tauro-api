@@ -67,7 +67,6 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
     <div>
         <span class="eyebrow">Escritorio</span>
         <h1>Hola, {{ cliente }}</h1>
-        <p>Tu operación nacional e internacional, en una sola vista.</p>
     </div>
     <nav class="home-workspace-actions home-primary-actions" aria-label="Acciones principales">
         <a href="/portal/envios/nuevo" class="btn btn-primary">{{ icono("plus") }} Nuevo envío</a>
@@ -80,12 +79,12 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
     <a href="/portal/envios{% if r.serie_mensual %}?anio={{ r.serie_mensual[-1].anio }}&amp;mes={{ r.serie_mensual[-1].mes }}{% endif %}" class="home-summary-item">
         <span>Envíos este mes</span>
         <strong>{{ r.envios_mes }}</strong>
-        <small>{{ r.envios_total }} operaciones vigentes</small>
+        <small>{{ r.envios_total }} activos</small>
     </a>
     <a href="/portal/envios?paso=despachados" class="home-summary-item">
         <span>En seguimiento</span>
         <strong>{{ r.en_seguimiento }}</strong>
-        <small>{{ r.entregados }} entregados en total</small>
+        <small>{{ r.entregados }} entregados</small>
     </a>
     <a href="/portal/envios?paso=requieren_accion" class="home-summary-item{% if r.requieren_accion %} needs-attention{% endif %}">
         <span>Requiere tu acción</span>
@@ -95,22 +94,9 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
     <a href="/portal/cuenta" class="home-summary-item home-summary-balance{% if balance > 0 %} has-debt{% endif %}">
         <span>{% if balance > 0 %}Pendiente de pago{% elif balance < 0 %}Saldo a favor{% else %}Cuenta corriente{% endif %}</span>
         <strong>{% if balance == 0 %}Al día{% else %}{{ dinero(balance) }}{% endif %}</strong>
-        <small>Ver movimientos y comprobantes</small>
+        <small>Ver movimientos</small>
     </a>
 </section>
-
-{% if r.requieren_accion %}
-<aside class="home-action-reminder" aria-label="Pendientes que requieren tu acción">
-    <span>Requiere tu acción</span>
-    <div>
-        {% for paso in embudo %}
-        {% if paso.cantidad and paso.accion_de == 'cliente' %}
-        <a href="{{ paso.url }}"><strong>{{ paso.cantidad }} {{ paso.titulo|lower }}</strong><small>{{ paso.detalle }}</small></a>
-        {% endif %}
-        {% endfor %}
-    </div>
-</aside>
-{% endif %}
 
 <div class="home-dashboard-layout">
     <main class="home-dashboard-main">
@@ -199,7 +185,7 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
             <div class="home-tool">
                 <span class="home-tool-icon">{{ icono("tracking") }}</span>
                 <label for="track-input">Rastrear con el courier</label>
-                <small>Consultá el estado oficial de una guía</small>
+                <small>Estado oficial de la guía</small>
                 <div><input type="text" id="track-input" placeholder="Número de tracking" autocomplete="off"><button type="button" id="track-submit" class="btn btn-primary">Rastrear</button></div>
             </div>
 

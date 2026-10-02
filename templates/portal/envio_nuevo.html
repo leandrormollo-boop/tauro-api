@@ -4,8 +4,6 @@
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
 <link rel="stylesheet" href="/static/css/invoice-compact.css?v=1">
-<link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
-<script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>
 {% endblock %}
 
 {% block content %}
@@ -30,9 +28,8 @@
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
+        {% if form.editar_solicitud_id %}<p>Corregí los datos. Al guardar se recotiza; la guía todavía no se emite.</p>{% elif reemision_origen %}<p>Revisá los datos. Al confirmar se emite un tracking nuevo que reemplaza al anterior.</p>{% elif repeticion_origen %}<p>Datos copiados del envío anterior. Se cotiza de nuevo; el original no cambia.</p>{% endif %}
     </div>
-    <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a>
 </div>
 
 {% if error %}
@@ -66,24 +63,6 @@
 {% endif %}
 {% if form.valor_total_cotizado_usd %}
     <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>USD {{ "{:,.2f}".format(form.valor_total_cotizado_usd).replace(",", "_").replace(".", ",").replace("_", ".") }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
-{% endif %}
-
-{# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
-   (es un atajo, no el camino principal) y ni aparece cuando el envío ya
-   viene de una venta de la tienda: ahí no hay nada que pegar. #}
-{% if not pedido_tienda and not reemision_origen and not repeticion_origen %}
-<details class="card" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
-    <summary style="cursor:pointer;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:10px;font-size:13.5px;">
-        ⚡ Atajo: ¿te llegó el pedido por mail? Pegalo y te completo el formulario
-    </summary>
-    <div style="margin-top:14px;">
-        <textarea id="pedido-pegado" rows="7" placeholder="Pegá el texto del pedido tal como te llegó (cajas, medidas, quien envía, quien recibe...)"></textarea>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-            <button type="button" id="btn-parsear" class="btn btn-primary btn-sm">Leer pedido y precargar</button>
-            <span id="parse-status" style="font-size:12.5px;color:var(--fg-3);"></span>
-        </div>
-    </div>
-</details>
 {% endif %}
 
 <!-- Cuatro pantallas independientes: cada tema se completa sin mezclar datos. -->
@@ -189,7 +168,7 @@
                 </summary>
                 <div class="remitente-editor">
             {% if remitente_por_completar|default(false) %}
-                <p class="msg warn" role="status">Completá el domicilio de origen o elegí un remitente de esa ubicación. Tu domicilio habitual no coincide con la ruta cotizada.</p>
+                <p class="msg warn" role="status">El domicilio no coincide con la ruta cotizada: completalo o elegí otro remitente.</p>
             {% endif %}
             {# Empresa Y contacto separados (guía HAILU): los couriers piden
                companyName ("Yiwu Hailu Garment") y personName ("JEFF JANG"). #}
@@ -362,7 +341,6 @@
             <div class="shipment-step-heading">
                 <div>
                     <h4><span class="n">3</span> Información del paquete <span class="badge ok">Cajas</span></h4>
-                    <p>Peso, medidas, cantidad y valor total de mercadería dentro de cada caja.</p>
                 </div>
                 <span class="shipment-step-counter"><b data-package-types>{{ filas|length }}</b> tipo{% if filas|length != 1 %}s{% endif %} de caja</span>
             </div>
@@ -376,7 +354,7 @@
                     </div>
                     <div class="shipment-package-main">
                         <div class="form-group shipment-catalog-field">
-                            <div class="shipment-field-label"><label>Precargar del catálogo <span class="field-optional">(opcional)</span></label><span data-help="Precargar del catálogo">El catálogo es opcional. Precarga peso, medidas y contenido de un producto guardado. También podés completar la caja manualmente.</span></div>
+                            <div class="shipment-field-label"><label>Precargar del catálogo <span class="field-optional">(opcional)</span></label><span data-help="Precargar del catálogo">Precarga peso, medidas y contenido de un producto guardado; también podés completar la caja a mano.</span></div>
                             <select name="bulto_producto" class="bulto-producto">
                                 <option value="">— caja manual —</option>
                                 {% for p in productos %}
@@ -409,11 +387,11 @@
                                 <div class="input-unit"><input type="text" name="bulto_alto" aria-label="Alto" class="bulto-alto" inputmode="decimal" data-numero="decimal" value="{{ f.alto_cm or '' }}" required><span>cm</span></div>
                             </div>
                             <div class="form-group">
-                                <div class="shipment-field-label"><label>Cajas iguales</label><span data-help="Cajas iguales">Usá una sola fila para cajas con las mismas medidas, peso y contenido. Indicá cuántas enviás.</span></div>
+                                <div class="shipment-field-label"><label>Cajas iguales</label><span data-help="Cajas iguales">Una fila por tipo de caja: indicá cuántas iguales enviás.</span></div>
                                 <input type="text" name="bulto_cantidad" aria-label="Cajas iguales" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
                             </div>
                             <div class="form-group shipment-box-value">
-                                <div class="shipment-field-label"><label>Valor por caja</label><span data-help="Valor por caja">Valor total de la mercadería dentro de una caja. El total declarado multiplica este valor por la cantidad de cajas iguales.</span></div>
+                                <div class="shipment-field-label"><label>Valor por caja</label><span data-help="Valor por caja">Valor de la mercadería de una caja; el total se calcula solo.</span></div>
                                 <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_caja_usd" aria-label="Valor por caja" class="bulto-valor-caja" inputmode="decimal" data-numero="monto" value="{{ f.valor_declarado_caja_usd or '' }}" required></div>
                                 <small data-box-declared-total>Total cajas: USD —</small>
                             </div>
@@ -429,7 +407,7 @@
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
             <div class="shipment-step-heading">
                 <div>
-                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Ingresá cantidad y valor total de cada artículo.</span></h4>
+                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Lo que se declara en aduana: cantidad y valor de cada artículo.</span></h4>
 
                 </div>
                 <span class="shipment-step-counter">Valores en USD</span>
@@ -459,7 +437,7 @@
                             <input type="text" name="bulto_unidades_aduana" aria-label="Cantidad de unidades" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group shipment-declared-value">
-                            <div class="shipment-field-label"><label>Valor total</label><span data-help="Valor total">Valor de todas las unidades de este artículo, en todas las cajas de esta fila. No hace falta dividirlo por la cantidad.</span></div>
+                            <div class="shipment-field-label"><label>Valor total</label><span data-help="Valor total">Valor de todas las unidades del artículo en esta fila.</span></div>
                             <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_total_usd if f.valor_total_usd is defined else (f.items_invoice[0].valor_total_usd if f.items_invoice and f.items_invoice[0].valor_total_usd is defined else ('%.2f'|format((f.valor_unitario_usd|float) * (f.unidades_aduana|int)) if f.valor_unitario_usd else '')) }}" required></div>
                             <small class="invoice-line-total" data-invoice-line-total></small>
                         </div>
@@ -513,7 +491,7 @@
                 </summary>
                 <div class="shipment-extra-body">
             <div class="form-group shipment-label-field">
-                <label for="etiqueta_cliente">Nombre para reconocer este envío <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label><span data-help="Nombre del envío">Nombre interno para encontrar el envío en tu cuenta. No modifica la guía ni el tracking.</span>
+                <label for="etiqueta_cliente">Nombre para reconocer este envío <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label><span data-help="Nombre del envío">Solo interno: no cambia la guía ni el tracking.</span>
                 <input type="text" name="etiqueta_cliente" id="etiqueta_cliente" maxlength="80"
                        value="{{ form.etiqueta_cliente or '' }}" placeholder="Ej. Pedido 21036 · Enrique Vila">
 
@@ -532,19 +510,12 @@
             <div class="form-group">
                 <label>Courier del envío</label>
                 <div id="courier-btns" style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button type="button" class="btn btn-ghost btn-sm" data-courier="fedex" disabled title="API pendiente">
-                        FedEx · próximamente <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
-                    </button>
                     <button type="button" class="btn btn-ghost btn-sm" data-courier="dhl">
                         DHL <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
                     </button>
-                    <button type="button" class="btn btn-ghost btn-sm" data-courier="ups" disabled title="API pendiente">
-                        UPS · próximamente <span class="courier-precio" style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3);"></span>
-                    </button>
                 </div>
                 <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                    Hoy la operación automática está disponible únicamente con DHL.
-                    {% if courier_default %}Tu cuenta tiene {{ courier_default|upper }} configurado.{% endif %}
+                    Por ahora operamos con DHL.{% if courier_default %} Tu cuenta tiene {{ courier_default|upper }} configurado.{% endif %}
                 </p>
             </div>
 
@@ -565,7 +536,7 @@
                         </option>
                     </select>
                     <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                        Los aranceles e impuestos dependen de la mercadería y del país de destino. No están incluidos salvo indicación expresa.
+                        Aranceles e impuestos del destino no incluidos.
                     </p>
                 </div>
                 <div class="form-group">
@@ -1290,84 +1261,6 @@
     }
   });
   refreshLivePrice();
-
-  // ── Pegar pedido → precargar form ─────────────────────────
-  const btnParsear = document.getElementById("btn-parsear");
-  const parseStatus = document.getElementById("parse-status");
-
-  function setIf(id, value) {
-    if (value === null || value === undefined || value === "") return false;
-    const el = document.getElementById(id);
-    if (!el) return false;
-    el.value = value;
-    return true;
-  }
-
-  if (btnParsear) {
-    btnParsear.addEventListener("click", function () {
-      var texto = (document.getElementById("pedido-pegado") || {}).value || "";
-      if (!texto.trim()) { parseStatus.textContent = "Pegá el texto del pedido primero."; return; }
-      parseStatus.textContent = "Leyendo…";
-
-      fetch("/portal/api/parsear-pedido", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: texto }),
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (!data.ok) { parseStatus.textContent = "No pude leer ese texto. Cargalo a mano, perdón."; return; }
-          var llenados = 0;
-          var d = data.destinatario || {};
-          [["dest_nombre", d.nombre], ["dest_direccion", d.direccion], ["dest_ciudad", d.ciudad],
-           ["dest_estado", d.estado], ["dest_zip", d.cp], ["dest_email", d.email],
-           ["dest_telefono", d.telefono], ["dest_documento", d.documento]].forEach(function (par) {
-            if (setIf(par[0], par[1])) llenados++;
-          });
-          if (d.pais_iso && countrySelect) {
-            for (var i = 0; i < countrySelect.options.length; i++) {
-              if (countrySelect.options[i].value === d.pais_iso) {
-                countrySelect.value = d.pais_iso;
-                llenados++;
-                break;
-              }
-            }
-          }
-          // Bultos del mail → una fila de caja por cada uno.
-          var paquetes = data.paquetes || [];
-          if (paquetes.length) {
-            // Re-parse: sacar las filas que sobran de un pegado anterior,
-            // para que el form quede EXACTAMENTE como el pedido nuevo.
-            var limiteFilas = Math.max(paquetes.length, 1);
-            bultoRows().slice(limiteFilas).forEach(function (r) { r.remove(); });
-            invoiceRows().slice(limiteFilas).forEach(function (r) { r.remove(); });
-            var rows = bultoRows();
-            paquetes.slice(0, 20).forEach(function (p, i) {
-              var row = rows[i] || agregarBulto("", 1);
-              var cant = row.querySelector(".bulto-cantidad");
-              if (cant && p.cantidad) { cant.value = p.cantidad; llenados++; }
-              var invoiceRow = invoiceRows()[i];
-              var unidades = invoiceRow && invoiceRow.querySelector(".bulto-unidades-aduana");
-              if (unidades && (p.unidades_aduana || p.cantidad)) {
-                unidades.value = p.unidades_aduana || p.cantidad;
-              }
-            });
-            renumerarBultos();
-          }
-          var aviso = "Listo: " + llenados + " campos precargados.";
-          if (paquetes.length > 1) {
-            aviso += " El pedido trae " + paquetes.length + " bultos distintos — te armé una fila por cada uno; elegí el producto del catálogo en cada fila.";
-          } else if (paquetes.length) {
-            var p = paquetes[0];
-            aviso += " Elegí el producto del catálogo que corresponda" +
-              (p.peso_kg ? " (el mail dice " + p.peso_kg + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
-          }
-          parseStatus.textContent = aviso;
-          refreshLivePrice();
-        })
-        .catch(function () { parseStatus.textContent = "Error de conexión al leer el pedido."; });
-    });
-  }
 
   // ── Pasos navegables (guía HAILU, 05/08) ─────────────────────
   // Como la web de DHL: un paso por pantalla — 1 Remitente,

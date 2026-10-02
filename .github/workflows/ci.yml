@@ -162,7 +162,6 @@ jobs:
           tests/js/pago-preview.test.cjs
           tests/js/quote-request.test.cjs
           tests/js/quote-locations.test.cjs
-          tests/js/shipment-location-confirmation.test.cjs
           tests/js/web-quote-presentation.test.cjs
           tests/js/quote-route-map.test.cjs
           tests/js/hs-assistant.test.cjs

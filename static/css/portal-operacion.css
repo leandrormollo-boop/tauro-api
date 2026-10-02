@@ -72,21 +72,6 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-summary-balance { background: linear-gradient(125deg, rgba(138, 92, 246, .08), rgba(138, 92, 246, .015)); }
 .portal-operacion .home-summary-balance.has-debt strong { font-size: clamp(21px, 1.8vw, 28px); }
 
-.portal-operacion .home-action-reminder {
-  display: flex; align-items: center; gap: 18px; margin: 0 0 16px; padding: 11px 16px;
-  border: 1px solid rgba(220, 174, 76, .32); border-radius: 12px; background: rgba(220, 174, 76, .045);
-}
-.portal-operacion .home-action-reminder > span {
-  flex: 0 0 auto; color: #dcb461; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
-}
-.portal-operacion .home-action-reminder > div { display: flex; min-width: 0; gap: 8px; overflow-x: auto; scrollbar-width: thin; }
-.portal-operacion .home-action-reminder a {
-  display: flex; align-items: baseline; gap: 8px; padding: 4px 10px; color: var(--fg-1); text-decoration: none;
-  border-left: 1px solid rgba(220, 174, 76, .24); white-space: nowrap;
-}
-.portal-operacion .home-action-reminder strong { font-size: 12px; }
-.portal-operacion .home-action-reminder small { color: var(--fg-3); font-size: 11px; }
-
 .portal-operacion .home-dashboard-layout {
   display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start;
 }
@@ -430,10 +415,6 @@ html[data-theme="light"] .portal-operacion .quote-form-card { background: var(--
   .portal-operacion .home-summary-item { min-height: 112px; padding: 16px; }
   .portal-operacion .home-summary-item strong { font-size: 25px; }
   .portal-operacion .home-summary-balance.has-debt strong { font-size: 18px; }
-  .portal-operacion .home-action-reminder { align-items: flex-start; flex-direction: column; gap: 7px; }
-  .portal-operacion .home-action-reminder > div { width: 100%; flex-direction: column; overflow: visible; }
-  .portal-operacion .home-action-reminder a { white-space: normal; }
-  .portal-operacion .home-action-reminder small { display: none; }
   .portal-operacion .home-panel-head { padding: 17px 16px 13px; }
   .portal-operacion .home-panel-head > a { font-size: 11px; }
   .portal-operacion .home-activity-scopes { grid-template-columns: 1fr; }

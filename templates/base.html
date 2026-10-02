@@ -95,27 +95,6 @@
             <span class="estado">Cuenta activa</span>
         </div>
 
-        {# Saldo siempre a la vista (pedido de Leandro): el número que el
-           cliente quiere chequear de reojo, en todas las pantallas. Si no
-           se pudo calcular, el bloque directamente no aparece. #}
-        {# Si la vista ya calculó el saldo (escritorio y cuenta corriente lo
-           hacen para el desglose), se reusa en vez de repetir la consulta. #}
-        {% set sal = saldo_menu(cliente, saldo if saldo is defined else None) %}
-        {% if sal %}
-        <a href="/portal/cuenta" class="side-saldo {% if sal.al_dia %}al-dia{% endif %}">
-            <span class="side-saldo-lbl">{% if sal.a_favor_ars %}A favor · total{% elif sal.al_dia %}Cuenta total{% else %}Saldo total{% endif %}</span>
-            <span class="side-saldo-n {% if not sal.al_dia %}portal-balance-metal{% endif %}">
-                {% if sal.a_favor_ars %}
-                    $ {{ "{:,.0f}".format(sal.a_favor_ars).replace(",", ".") }}
-                {% elif sal.al_dia %}
-                    Al día
-                {% else %}
-                    $ {{ "{:,.0f}".format(sal.pendiente_ars).replace(",", ".") }}
-                {% endif %}
-            </span>
-        </a>
-        {% endif %}
-
         {% set path = request.url.path if request else "" %}
         {# Globos rojos estilo Mac: sólo lo que espera una acción del cliente #}
         {% set pend = pendientes_menu(cliente) if cliente else {"envios": 0, "tienda": 0} %}

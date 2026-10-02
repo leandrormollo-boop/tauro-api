@@ -131,4 +131,3 @@ jobs:
           tests/js/pago-preview.test.cjs
           tests/js/quote-request.test.cjs
           tests/js/quote-locations.test.cjs
-          tests/js/shipment-location-confirmation.test.cjs

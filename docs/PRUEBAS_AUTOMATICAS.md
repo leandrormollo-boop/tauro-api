@@ -142,8 +142,7 @@ node --test \
   tests/js/payment-allocation.test.cjs \
   tests/js/pago-preview.test.cjs \
   tests/js/quote-request.test.cjs \
-  tests/js/quote-locations.test.cjs \
-  tests/js/shipment-location-confirmation.test.cjs
+  tests/js/quote-locations.test.cjs
 ```
 
 `npm ci` instala exactamente el árbol de `package-lock.json`. El build genera

@@ -31,8 +31,10 @@ def test_el_selector_de_courier_esta_a_la_vista():
     """Botones en el formulario, no un combo escondido en el precio."""
     html = _html()
     assert 'id="courier-btns"' in html
-    for c in ("fedex", "dhl", "ups"):
-        assert f'data-courier="{c}"' in html, f"falta el botón de {c}"
+    assert 'data-courier="dhl"' in html, "falta el botón de dhl"
+    # FedEx y UPS "próximamente" eran botones deshabilitados: se sacaron.
+    for c in ("fedex", "ups"):
+        assert f'data-courier="{c}"' not in html
 
 
 def test_cada_boton_muestra_su_precio_al_cotizar():

@@ -42,7 +42,7 @@ def test_valor_total_esta_en_invoice_y_no_en_paquete():
     invoice = html[html.index("shipment-step-invoice"):html.index('class="submit-bar"')]
     assert 'name="bulto_total_usd"' not in paquete
     assert 'name="bulto_total_usd"' in invoice
-    assert "cantidad y valor total de cada artículo" in invoice
+    assert "cantidad y valor de cada artículo" in invoice
     assert "actualizarSubtotalInvoice(invoice)" in html
     assert "refreshLivePrice()" in html
 
