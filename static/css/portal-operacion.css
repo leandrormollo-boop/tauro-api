@@ -251,6 +251,27 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-account-actions { display: flex; gap: 14px; padding: 14px 20px 0; }
 .portal-operacion .home-account-actions a { color: var(--accent-soft); font-size: 11px; text-decoration: none; }
 
+/* Mis clientes reutiliza las barras del inicio, sin aumentar las fichas. */
+.portal-operacion .client-shipment-panel { margin-bottom: 18px; }
+.portal-operacion .client-shipment-panel .home-panel-head { align-items: center; padding-bottom: 8px; }
+.portal-operacion .client-shipment-panel .home-panel-head h2 { margin: 0; }
+.portal-operacion .client-shipment-chart {
+  min-height: 0; grid-template-columns: none; grid-auto-flow: column;
+  grid-auto-columns: minmax(92px, 1fr); align-items: start; overflow-x: auto;
+  scrollbar-width: thin; scrollbar-color: var(--accent) transparent;
+  overscroll-behavior-inline: contain;
+}
+.portal-operacion .client-shipment-bar { color: inherit; text-decoration: none; border-radius: 9px; padding: 8px 4px 0; }
+.portal-operacion .client-shipment-bar[hidden] { display: none; }
+.portal-operacion .client-shipment-bar .home-bar-fill { overflow: hidden; border-radius: 6px; }
+.portal-operacion .client-shipment-bar > span {
+  height: 2.8em; max-width: 120px; line-height: 1.4; text-align: center; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.portal-operacion .client-shipment-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.portal-operacion .client-card { scroll-margin-top: 75px; }
+html[data-theme="light"] .portal-operacion .client-card { background: var(--bg-elev); }
+
 /* Estadísticas: una vista operativa, con cada dato enlazado a su detalle. */
 .portal-operacion .stats-page-head {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 18px;
@@ -272,7 +293,8 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .stats-summary strong { margin: 6px 0 2px; color: var(--fg-1); font-family: var(--font-display); font-size: 30px; }
 .portal-operacion .stats-summary small { color: var(--fg-3); font-size: 11px; }
 .portal-operacion .stats-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(300px, .8fr); gap: 16px; }
-.portal-operacion .stats-monthly { min-height: 288px; }
+.portal-operacion .stats-monthly { min-height: 0; align-self: start; }
+.portal-operacion .stats-monthly .home-monthly-chart { min-height: 0; padding-bottom: 16px; }
 .portal-operacion .stats-month-link { color: inherit; text-decoration: none; border-radius: 9px; transition: background-color .16s ease; }
 .portal-operacion .stats-month-link:hover { background: rgba(138, 92, 246, .07); }
 .portal-operacion .stats-status-list { padding: 0 16px 14px; }

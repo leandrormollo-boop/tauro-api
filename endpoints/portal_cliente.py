@@ -2292,6 +2292,16 @@ def envios_view(
         pagina=pagina,
         buscar=busqueda_global,
     )
+    # El contador del inicio también incluye ventas sin convertir en envío.
+    # Se muestran aparte: todavía no son solicitudes ni filas del historial.
+    pedidos_por_armar = 0
+    pedidos_por_armar_error = False
+    if vista["paso_filtro"] == "requieren_accion":
+        embudo = embudo_envios(cliente)
+        pedidos_por_armar_error = not embudo
+        pedidos_por_armar = next(
+            (p["cantidad"] for p in embudo if p["clave"] == "por_armar"), 0,
+        )
     # El período puede no tener filas aunque el cliente sí tenga historia. La
     # pantalla debe decir "sin envíos en agosto", no "nunca hiciste envíos".
     vista["tiene_historial"] = periodo["tiene_actividad_historica"]
@@ -2375,6 +2385,8 @@ def envios_view(
             "parcial": request.headers.get("X-Tauro-Partial") == "envios",
             "periodo": periodo,
             "periodo_query": urlencode(periodo_parametros),
+            "pedidos_por_armar": pedidos_por_armar,
+            "pedidos_por_armar_error": pedidos_por_armar_error,
             "puede_emitir": puede_emitir,
             "flash_ok": (
                 ("Solicitud creada. Podés emitir la guía vos mismo desde el botón "
@@ -4406,12 +4418,28 @@ def clientes_view(
         flash_ok = "Contacto guardado en tu agenda."
     elif ok == "2":
         flash_ok = "Contacto eliminado de tu agenda."
+    from servicios.estadisticas_contactos import (
+        contar_envios_emitidos_por_contacto, TOOLTIP_ENVIOS_IDENTIFICADOS,
+    )
+    clientes_guardados = listar_direcciones(cliente)
+    estadisticas_clientes = None
+    try:
+        estadisticas_clientes = contar_envios_emitidos_por_contacto(cliente, clientes_guardados)
+    except Exception as exc:
+        print(f"[portal] no pude consultar envíos por contacto: {type(exc).__name__}")
+    clientes_grafico = sorted(
+        [dict(d, **(estadisticas_clientes or {}).get(d["id"], {})) for d in clientes_guardados],
+        key=lambda d: (-d.get("envios_identificados", 0), (d.get("nombre") or "").casefold()),
+    )
     return templates.TemplateResponse(
         request=request, name="portal/clientes.html",
         context={
             "cliente": cliente,
             # listar_direcciones siempre filtra por el cliente de la sesión.
-            "clientes_guardados": listar_direcciones(cliente),
+            "clientes_guardados": clientes_guardados,
+            "clientes_grafico": clientes_grafico,
+            "estadisticas_clientes_error": estadisticas_clientes is None,
+            "ayuda_estadisticas_clientes": TOOLTIP_ENVIOS_IDENTIFICADOS,
             "paises": paises,
             "provincias": opciones(),
             "nombre_provincia": nombre_provincia,

@@ -85,7 +85,7 @@ def test_estadisticas_no_desborda_en_mobile():
     assert ".portal-operacion .stats-layout { grid-template-columns: 1fr; }" in CSS
     assert ".portal-operacion .stats-summary { grid-template-columns: 1fr; }" in CSS
     assert ".portal-operacion .stats-destinations .home-destinations-list { grid-template-columns: 1fr; }" in CSS
-    assert 'portal-operacion.css?v=7' in BASE
+    assert 'portal-operacion.css?v=8' in BASE
 
 
 def test_estadisticas_renderiza_aun_sin_historial():
@@ -123,3 +123,108 @@ def test_estadisticas_renderiza_aun_sin_historial():
     assert "Estadísticas de envíos" in html
     assert 'href="/portal/envios"' in html
     assert "Los destinos aparecerán" in html
+
+
+def _action_portal(monkeypatch, historial, pedidos=0):
+    from collections import Counter
+    from starlette.requests import Request
+    from endpoints import portal_cliente as portal
+    from servicios import configuracion_couriers_cliente, recolecciones
+    from servicios.panel_cliente import PASOS_EMBUDO, paso_de_estado
+
+    counts = Counter(paso_de_estado(s['estado'], s.get('tracking_estado')) for s in historial)
+    counts['por_armar'] = pedidos
+    embudo = [{**p, 'cantidad': counts[p['clave']]} for p in PASOS_EMBUDO]
+    monkeypatch.setattr(portal, 'get_facturado_real', lambda *_: 0)
+    monkeypatch.setattr(portal, 'saldo', lambda *_, **__: {'saldo_pendiente_ars': 0, 'facturado_ars': 0, 'pagado_ars': 0})
+    monkeypatch.setattr(portal, 'listar_solicitudes_cliente', lambda *_, **__: [dict(s) for s in historial])
+    monkeypatch.setattr(portal, 'periodos_solicitudes_cliente', lambda *_: [(2026, 10)] if historial else [])
+    monkeypatch.setattr(portal, 'embudo_envios', lambda cliente: embudo)
+    monkeypatch.setattr(configuracion_couriers_cliente, 'mapa_permisos', lambda *_: {})
+    monkeypatch.setattr(recolecciones, 'listar_de_solicitudes', lambda *_: {})
+    monkeypatch.setitem(portal.templates.env.globals, 'pendientes_menu', lambda *_: {})
+    monkeypatch.setitem(portal.templates.env.globals, 'saldo_menu', lambda *_, **__: None)
+    monkeypatch.setitem(portal.templates.env.globals, 'ayuda', lambda: {'mail_url': 'mailto:demo@example.invalid'})
+
+    def request(path='/portal/home', query='', parcial=False):
+        return Request({'type': 'http', 'method': 'GET', 'path': path,
+                        'query_string': query.encode(), 'state': {'csp_nonce': 'test'},
+                        'headers': [(b'x-tauro-partial', b'envios')] if parcial else []})
+    return portal, request
+
+
+def _action_shipments():
+    from servicios.estados_envio import presentar_estados_envio
+    states = [('GUIA_LISTA', None), ('DESPACHADO', 'RETENIDO'),
+              ('GUIA_LISTA', 'ENTREGADO'), ('GUIA_LISTA', 'PROCESO_ENTREGA'),
+              ('CANCELADO', 'RETENIDO'), ('REEMPLAZADO', 'RETENIDO'),
+              ('SOLICITADO', None), ('EN_PROCESO', None),
+              ('EMITIENDO', None), ('VERIFICAR_COURIER', None)]
+    return [presentar_estados_envio(dict(
+        id=n, estado=state, tracking_estado=tracking_state,
+        courier='OCA' if n == 2 else 'DHL', remitente_pais='AR',
+        destino_pais='AR' if n == 2 else 'US', tracking=f'DEMO-{n}',
+        dest_nombre=f'Destinatario DEMO {n}', bultos=[], cantidad=1,
+        precio_tauro_ars=0, resumen_pesos={},
+    )) for n, (state, tracking_state) in enumerate(states, 1)]
+
+
+def test_tarjeta_accion_abre_todos_los_pendientes_y_separa_pedidos_de_tienda(monkeypatch):
+    from html.parser import HTMLParser
+    from urllib.parse import urlsplit, parse_qs
+
+    class SummaryLinks(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'a' and 'home-summary-item' in attrs.get('class', '').split():
+                self.links.append(attrs['href'])
+
+    portal, request = _action_portal(monkeypatch, _action_shipments(), pedidos=3)
+    inicio = portal.home(request(), cliente='DEMO')
+    assert inicio.context['resumen_inicio']['requieren_accion'] == 5
+    parser = SummaryLinks()
+    parser.feed(inicio.body.decode())
+    link = urlsplit(parser.links[2])
+    query = {k: v[0] for k, v in parse_qs(link.query).items()}
+    assert query == {'paso': 'requieren_accion'}
+
+    for parcial in (False, True):
+        lista = portal.envios_view(request(link.path, link.query, parcial), cliente='DEMO', **query)
+        assert [s['id'] for s in lista.context['solicitudes']] == [1, 2]
+        assert lista.context['total_resultados'] == 2
+        assert lista.context['pedidos_por_armar'] == 3
+        assert lista.context['total_nacionales'] == lista.context['total_internacionales'] == 1
+        html = lista.body.decode()
+        assert '<h1>Requiere tu acción</h1>' in html
+        assert 'Mi tienda: 3 pedidos por armar' in html
+        assert 'paso=requieren_accion' in html
+        assert 'class="chip-e on" aria-current="true"><b>2</b> Requiere tu acción' in html
+
+
+def test_accion_solo_pedidos_tienda_no_termina_en_una_lista_vacia_sin_salida(monkeypatch):
+    portal, request = _action_portal(monkeypatch, [], pedidos=3)
+    assert portal.home(request(), cliente='DEMO').context['resumen_inicio']['requieren_accion'] == 3
+    lista = portal.envios_view(request('/portal/envios', 'paso=requieren_accion'), cliente='DEMO', paso='requieren_accion')
+    html = lista.body.decode()
+    assert '<a href="/portal/tienda"><strong>Mi tienda: 3 pedidos por armar</strong></a>' in html
+    assert 'No tenés envíos que requieran acción' in html
+    assert 'Todavía no hiciste envíos' not in html
+    assert lista.context['total_resultados'] == 0
+
+
+def test_filtro_accion_conserva_busqueda_ambito_y_paginacion():
+    from servicios.panel_cliente import preparar_historial_envios
+    historial = _action_shipments()
+    nacional = preparar_historial_envios(historial, paso='requieren_accion', tipo='nacional')
+    assert [s['id'] for s in nacional['solicitudes']] == [2]
+    buscada = preparar_historial_envios(historial, paso='requieren_accion', buscar='DEMO-1')
+    assert [s['id'] for s in buscada['solicitudes']] == [1]
+    assert buscada['total_requieren_accion'] == 1
+    historial = [dict(historial[0], id=n) for n in range(11)] + historial[2:]
+    segunda = preparar_historial_envios(historial, paso='requieren_accion', pagina=2)
+    assert [s['id'] for s in segunda['solicitudes']] == [10]
+    assert segunda['total_resultados'] == segunda['total_requieren_accion'] == 11
+    assert segunda['paso_filtro'] == 'requieren_accion'

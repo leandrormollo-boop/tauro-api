@@ -49,6 +49,59 @@ def _destinatario():
     }
 
 
+def test_estadisticas_agenda_usa_sesion_y_enlaza_cada_barra(monkeypatch):
+    from servicios import estadisticas_contactos
+    from test_portal_home_panorama import _action_portal
+
+    portal, request = _action_portal(monkeypatch, [])
+    contactos = [_destinatario(), {**_destinatario(), "id": 78, "nombre": "Ana", "alias": "Ana"}]
+    llamadas = []
+    monkeypatch.setattr(portal, "listar_direcciones", lambda cuenta: contactos if cuenta == "MELCIOR" else [])
+
+    def contar(cuenta, agenda):
+        llamadas.append((cuenta, agenda))
+        return {77: {"envios_identificados": 0, "porcentaje_relativo": 0},
+                78: {"envios_identificados": 12, "porcentaje_relativo": 100}}
+
+    monkeypatch.setattr(estadisticas_contactos, "contar_envios_emitidos_por_contacto", contar)
+    respuesta = portal.clientes_view(request('/portal/clientes'), cliente="MELCIOR")
+    assert llamadas == [("MELCIOR", contactos)]
+    assert [d["id"] for d in respuesta.context["clientes_grafico"]] == [78, 77]
+    html = respuesta.body.decode()
+    assert 'href="#cliente-78"' in html and 'id="cliente-78"' in html
+    assert 'Ver Ana: 12 envíos identificados' in html
+    assert 'Ver Elle McGill: 0 envíos identificados' in html
+    assert html.count('class="home-bar-fill"') == 1
+    assert "envios_identificados" not in contactos[0]
+
+
+def test_estadisticas_agenda_error_no_inventa_ceros_y_mantiene_contactos(monkeypatch):
+    from servicios import estadisticas_contactos
+    from test_portal_home_panorama import _action_portal
+
+    portal, request = _action_portal(monkeypatch, [])
+    monkeypatch.setattr(portal, "listar_direcciones", lambda _: [_destinatario()])
+
+    def fallar(*_):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(estadisticas_contactos, "contar_envios_emitidos_por_contacto", fallar)
+    html = portal.clientes_view(request('/portal/clientes'), cliente="MELCIOR").body.decode()
+    assert "No pudimos cargar las estadísticas. Volvé a intentar." in html
+    assert 'id="cliente-77"' in html
+    assert 'class="home-monthly-bar client-shipment-bar"' not in html
+
+
+def test_agenda_vacia_no_muestra_grafico_vacio(monkeypatch):
+    from test_portal_home_panorama import _action_portal
+
+    portal, request = _action_portal(monkeypatch, [])
+    monkeypatch.setattr(portal, "listar_direcciones", lambda _: [])
+    html = portal.clientes_view(request('/portal/clientes'), cliente="MELCIOR").body.decode()
+    assert "Guardar mi primer contacto" in html
+    assert "client-shipment-panel" not in html
+
+
 def _preparar_form(monkeypatch, direccion):
     monkeypatch.setattr(pc.templates, "TemplateResponse", lambda **kwargs: kwargs)
     monkeypatch.setattr(pc, "obtener_direccion", lambda cliente, did, tipo=None: direccion)

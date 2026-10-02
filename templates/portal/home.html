@@ -87,10 +87,10 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
         <strong>{{ r.en_seguimiento }}</strong>
         <small>{{ r.entregados }} entregados en total</small>
     </a>
-    <a href="/portal/envios?paso={% if r.retenidos %}retenidos{% else %}guia_lista{% endif %}" class="home-summary-item{% if r.requieren_accion %} needs-attention{% endif %}">
+    <a href="/portal/envios?paso=requieren_accion" class="home-summary-item{% if r.requieren_accion %} needs-attention{% endif %}">
         <span>Requiere tu acción</span>
         <strong>{{ r.requieren_accion }}</strong>
-        <small>{% if r.retenidos %}{{ r.retenidos }} con novedades{% elif r.guias_listas %}{{ r.guias_listas }} guías para descargar{% else %}Nada pendiente{% endif %}</small>
+        <small>{% if r.requieren_accion %}Ver todos los pendientes{% else %}Nada pendiente{% endif %}</small>
     </a>
     <a href="/portal/cuenta" class="home-summary-item home-summary-balance{% if balance > 0 %} has-debt{% endif %}">
         <span>{% if balance > 0 %}Pendiente de pago{% elif balance < 0 %}Saldo a favor{% else %}Cuenta corriente{% endif %}</span>
