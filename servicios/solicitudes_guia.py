@@ -2190,7 +2190,7 @@ def obtener_factura_comercial_pdf(
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    """SELECT s.commercial_invoice_pdf FROM solicitudes_guia s
+                    """SELECT s.commercial_invoice_pdf, s.courier FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
                          AND s.test=FALSE
                          AND s.visible_cliente=TRUE
@@ -2218,7 +2218,11 @@ def obtener_factura_comercial_pdf(
             row = cur.fetchone()
     if not row or not row["commercial_invoice_pdf"]:
         return None
-    return bytes(row["commercial_invoice_pdf"])
+    original = bytes(row["commercial_invoice_pdf"])
+    if cliente_id:
+        from servicios.invoice_marca import factura_para_cliente
+        return factura_para_cliente(original, row.get("courier"))
+    return original
 
 
 def _segmento_nombre_pdf(valor: Optional[str], respaldo: str) -> str:
@@ -2300,7 +2304,7 @@ def preparar_documentos_envio_portal(
                 """
                 SELECT s.label_pdf, s.commercial_invoice_pdf,
                        s.cliente_id, s.dest_nombre, s.remitente_pais,
-                       s.numero_guia_tauro
+                       s.numero_guia_tauro, s.courier
                 FROM solicitudes_guia s
                 WHERE s.id=%s AND s.cliente_id=%s
                   AND s.test=FALSE
@@ -2326,6 +2330,7 @@ def preparar_documentos_envio_portal(
             row = cur.fetchone()
             if not row or not row.get("label_pdf"):
                 return None
+            # Valida ambos originales antes de asignar un número histórico.
             pdf = unir_guia_e_invoice_pdf(
                 bytes(row["label_pdf"]),
                 bytes(row["commercial_invoice_pdf"])
@@ -2354,6 +2359,14 @@ def preparar_documentos_envio_portal(
                     numero_guia_tauro=numero,
                 ),
             }
+    # El renderer no retiene una conexión ni un lock de la base. La autorización
+    # ya se comprobó y el original queda guardado como lo entregó el courier.
+    if row.get("commercial_invoice_pdf") and str(row.get("courier") or "").upper() == "DHL":
+        from servicios.invoice_marca import factura_para_cliente
+        original_invoice = bytes(row["commercial_invoice_pdf"])
+        invoice_cliente = factura_para_cliente(original_invoice, row["courier"])
+        if invoice_cliente != original_invoice:
+            documentos["pdf"] = unir_guia_e_invoice_pdf(bytes(row["label_pdf"]), invoice_cliente)
     return documentos
 
 
