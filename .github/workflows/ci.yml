@@ -115,6 +115,7 @@ jobs:
             tests/test_edicion_solicitud_postgres.py \
             tests/test_envio_gestion.py \
             tests/test_portal_mis_clientes.py \
+            tests/test_estadisticas_contactos.py \
             tests/test_portal_home_panorama.py \
             tests/test_agenda_nacional.py \
             tests/test_carrier_contract.py \

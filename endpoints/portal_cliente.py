@@ -4418,12 +4418,28 @@ def clientes_view(
         flash_ok = "Contacto guardado en tu agenda."
     elif ok == "2":
         flash_ok = "Contacto eliminado de tu agenda."
+    from servicios.estadisticas_contactos import (
+        contar_envios_emitidos_por_contacto, TOOLTIP_ENVIOS_IDENTIFICADOS,
+    )
+    clientes_guardados = listar_direcciones(cliente)
+    estadisticas_clientes = None
+    try:
+        estadisticas_clientes = contar_envios_emitidos_por_contacto(cliente, clientes_guardados)
+    except Exception as exc:
+        print(f"[portal] no pude consultar envíos por contacto: {type(exc).__name__}")
+    clientes_grafico = sorted(
+        [dict(d, **(estadisticas_clientes or {}).get(d["id"], {})) for d in clientes_guardados],
+        key=lambda d: (-d.get("envios_identificados", 0), (d.get("nombre") or "").casefold()),
+    )
     return templates.TemplateResponse(
         request=request, name="portal/clientes.html",
         context={
             "cliente": cliente,
             # listar_direcciones siempre filtra por el cliente de la sesión.
-            "clientes_guardados": listar_direcciones(cliente),
+            "clientes_guardados": clientes_guardados,
+            "clientes_grafico": clientes_grafico,
+            "estadisticas_clientes_error": estadisticas_clientes is None,
+            "ayuda_estadisticas_clientes": TOOLTIP_ENVIOS_IDENTIFICADOS,
             "paises": paises,
             "provincias": opciones(),
             "nombre_provincia": nombre_provincia,

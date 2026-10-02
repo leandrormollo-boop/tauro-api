@@ -17,14 +17,29 @@
 {% if flash_ok %}<div class="msg ok">{{ flash_ok }}</div>{% endif %}
 {% if error %}<div class="msg error">{{ error }}</div>{% endif %}
 
-<section class="client-directory-intro">
-    <div>
-        <span class="client-directory-kicker">Base exclusiva de {{ cliente }}</span>
-        <strong>Cada cuenta tiene sus propios clientes.</strong>
-        <p>Elegí tus contactos guardados al crear cualquier envío.</p>
+{% if clientes_guardados %}
+<section class="home-panel client-shipment-panel" aria-labelledby="client-shipment-title">
+    <header class="home-panel-head">
+        <h2 id="client-shipment-title">Envíos por cliente <span data-help="Cómo se cuentan los envíos">Todo el historial de guías emitidas. No incluye canceladas ni reemplazadas. {{ ayuda_estadisticas_clientes }}</span></h2>
+        <small>Todo el historial</small>
+    </header>
+    {% if estadisticas_clientes_error %}
+    <div class="home-insight-empty">No pudimos cargar las estadísticas. Volvé a intentar.</div>
+    {% else %}
+    <div class="home-monthly-chart client-shipment-chart" aria-label="Envíos identificados por cliente">
+        {% for d in clientes_grafico %}
+        <a href="#cliente-{{ d.id }}" class="home-monthly-bar client-shipment-bar" data-client-chart-id="{{ d.id }}" title="{{ d.nombre }}" aria-label="Ver {{ d.nombre }}: {{ d.envios_identificados if d.envios_identificados is defined else 'sin datos' }} envíos identificados">
+            <strong>{{ d.envios_identificados if d.envios_identificados is defined else '—' }}</strong>
+            <div class="home-bar-track" aria-hidden="true">
+                {% if d.envios_identificados|default(0) %}<div class="home-bar-fill" style="--p:{{ d.porcentaje_relativo }}%;--d:{{ (loop.index0 % 6) * 70 }}ms"></div>{% endif %}
+            </div>
+            <span>{{ d.alias or d.nombre }}</span>
+        </a>
+        {% endfor %}
     </div>
-    <span class="client-directory-lock" aria-label="Base privada">Privada</span>
+    {% endif %}
 </section>
+{% endif %}
 
 {% if clientes_guardados %}
 <div class="client-directory-tools">
@@ -37,7 +52,7 @@
 
 <div class="client-directory-grid" id="client-directory-grid">
     {% for d in clientes_guardados %}
-    <article class="client-card">
+    <article class="client-card" id="cliente-{{ d.id }}" data-client-id="{{ d.id }}">
         <div class="client-card-head">
             <span class="client-avatar" aria-hidden="true">{{ (d.alias or d.nombre)[:1]|upper }}</span>
             <div>
@@ -180,6 +195,8 @@
             cards.forEach(function (card) {
                 var show = !query || normalize(card.textContent).indexOf(query) !== -1;
                 card.hidden = !show;
+                var bar = document.querySelector('[data-client-chart-id="' + card.dataset.clientId + '"]');
+                if (bar) bar.hidden = !show;
                 if (show) visible += 1;
             });
             if (counter) counter.textContent = String(visible);
