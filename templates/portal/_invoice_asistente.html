@@ -1,0 +1,15 @@
+<div class="hs-assistant" data-invoice-asistente>
+    <details>
+        <summary>Cargar invoice desde archivo o texto</summary>
+        <label>Archivo (Excel, CSV, PDF o foto)
+            <input type="file" data-invoice-asistente-archivo accept=".xlsx,.xls,.csv,.pdf,.jpg,.jpeg,.png">
+        </label>
+        <label>O pegá el texto de la invoice
+            <textarea rows="4" data-invoice-asistente-texto maxlength="60000" placeholder="Pegá las líneas de la factura, packing list o pedido"></textarea>
+        </label>
+        <button type="button" class="btn btn-ghost btn-sm" data-invoice-asistente-leer>Leer invoice</button>
+        <p role="status" aria-live="polite" data-invoice-asistente-estado hidden></p>
+        <div data-invoice-asistente-avisos hidden></div>
+        <small>Completamos los artículos de esta caja para que los revises. No se envía nada hasta que crees la solicitud.</small>
+    </details>
+</div>
