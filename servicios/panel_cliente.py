@@ -93,6 +93,12 @@ PASOS_EMBUDO = [
 ]
 
 
+# El filtro combinado usa la misma definición que el contador del inicio.
+PASOS_ACCION_CLIENTE = frozenset(
+    paso["clave"] for paso in PASOS_EMBUDO if paso["accion_de"] == "cliente"
+)
+
+
 # Diez filas permiten recorrer el historial sin saltar de página a cada rato.
 # El historial completo sigue disponible: sólo se divide en páginas, nunca se
 # recorta.
@@ -371,7 +377,13 @@ def preparar_historial_envios(
     ]
 
     paso = (paso or "").strip().lower()
-    if paso in {chip["clave"] for chip in chips}:
+    total_requieren_accion = sum(conteos.get(clave, 0) for clave in PASOS_ACCION_CLIENTE)
+    if paso == "requieren_accion":
+        filtradas = [
+            s for s in filtradas
+            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) in PASOS_ACCION_CLIENTE
+        ]
+    elif paso in {chip["clave"] for chip in chips}:
         filtradas = [
             s for s in filtradas
             if paso_de_estado(s.get("estado"), s.get("tracking_estado")) == paso
@@ -385,6 +397,11 @@ def preparar_historial_envios(
         s.get("estado") == historicos[paso] if paso in historicos
         else s.get("estado") not in ("CANCELADO", "REEMPLAZADO")
     )]
+    if paso == "requieren_accion":
+        historial_del_grupo = [
+            s for s in historial_del_grupo
+            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) in PASOS_ACCION_CLIENTE
+        ]
     por_pagina = max(1, int(por_pagina or ENVIOS_POR_PAGINA))
     total_resultados = len(filtradas)
     total_paginas = max(1, (total_resultados + por_pagina - 1) // por_pagina)
@@ -401,6 +418,7 @@ def preparar_historial_envios(
         "total_sin_filtrar": total_sin_filtrar,
         "total_busqueda": total_busqueda,
         "total_resultados": total_resultados,
+        "total_requieren_accion": total_requieren_accion,
         "pagina_actual": pagina_actual,
         "total_paginas": total_paginas,
         "paginas_visibles": _paginas_visibles(pagina_actual, total_paginas),

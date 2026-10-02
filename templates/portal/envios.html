@@ -1,5 +1,5 @@
 {% extends "portal/_partial.html" if parcial else "base.html" %}
-{% block title %}Mis envíos{% endblock %}
+{% block title %}{{ "Requiere tu acción" if paso_filtro == "requieren_accion" else "Mis envíos" }}{% endblock %}
 {% macro dinero_ars(valor) -%}
 $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}
 {%- endmacro %}
@@ -16,8 +16,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="page-title-row">
         <div>
             <div class="eyebrow">Operaciones</div>
-            <h1>Mis envíos{% if tipo_filtro %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</h1>
-            <p>{% if tipo_filtro == 'nacional' %}Envíos dentro de Argentina.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones.{% else %}Tus envíos, del más reciente al más antiguo.{% endif %}</p>
+            <h1>{{ "Requiere tu acción" if paso_filtro == "requieren_accion" else "Mis envíos" }}{% if tipo_filtro and paso_filtro != 'requieren_accion' %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</h1>
+            <p>{% if paso_filtro == 'requieren_accion' %}Guías listas para despachar y envíos retenidos.{% elif tipo_filtro == 'nacional' %}Envíos dentro de Argentina.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones.{% else %}Tus envíos, del más reciente al más antiguo.{% endif %}</p>
         </div>
         <div class="envios-page-actions">
             {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para
@@ -104,7 +104,17 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 </div>
 {% endif %}
 
-{% if not tiene_historial %}
+{% if paso_filtro == 'requieren_accion' %}
+{% if pedidos_por_armar %}
+<div class="msg warn" role="status">
+    <a href="/portal/tienda"><strong>Mi tienda: {{ pedidos_por_armar }} pedido{{ 's' if pedidos_por_armar != 1 else '' }} por armar</strong></a>
+</div>
+{% elif pedidos_por_armar_error %}
+<div class="msg warn" role="status">No pudimos consultar los pedidos pendientes. <a href="/portal/tienda">Revisar Mi tienda</a></div>
+{% endif %}
+{% endif %}
+
+{% if not tiene_historial and paso_filtro != 'requieren_accion' %}
 <div class="card">
     <div class="empty" style="padding:48px 20px;">
         <img src="/static/img/logo-mark-white.png" alt="" style="height:40px;width:auto;opacity:.85;">
@@ -126,7 +136,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 {% set solo_tipo = ("?tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 {% set con_tipo = ("&tipo=" ~ tipo_filtro) if tipo_filtro else "" %}
 <nav class="chips-embudo" aria-label="Filtrar por estado">
-    <a href="/portal/envios?{{ ('tipo=' ~ tipo_filtro) if tipo_filtro else '' }}{{ con_periodo }}{{ con_busqueda }}" class="chip-e {% if paso_filtro not in ('modificados', 'canceladas') %}on{% endif %}"{% if paso_filtro not in ('modificados', 'canceladas') %} aria-current="true"{% endif %}>
+    <a href="/portal/envios?{{ ('tipo=' ~ tipo_filtro) if tipo_filtro else '' }}{{ con_periodo }}{{ con_busqueda }}" class="chip-e {% if not paso_filtro %}on{% endif %}"{% if not paso_filtro %} aria-current="true"{% endif %}>
         <b>{{ total_busqueda }}</b> Todos
     </a>
     {% for c in chips if c.clave in ('modificados', 'canceladas') %}
@@ -140,6 +150,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 </nav>
 {% if paso_filtro not in ('modificados','canceladas') %}
 <nav class="chips-embudo" aria-label="Filtrar envíos vigentes">
+    <a href="/portal/envios?paso=requieren_accion{{ con_tipo }}{{ con_busqueda }}{{ con_periodo }}" class="chip-e {% if paso_filtro == 'requieren_accion' %}on{% endif %}"{% if paso_filtro == 'requieren_accion' %} aria-current="true"{% endif %}><b>{{ total_requieren_accion }}</b> Requiere tu acción</a>
     {% for c in chips if c.clave not in ('modificados','canceladas') %}
     <a href="/portal/envios?paso={{ c.clave }}{{ con_tipo }}{{ con_busqueda }}{{ con_periodo }}" class="chip-e {% if paso_filtro == c.clave %}on{% endif %}"{% if paso_filtro == c.clave %} aria-current="true"{% endif %}><b>{{ c.cantidad }}</b> {{ c.titulo }}</a>
     {% endfor %}
@@ -184,7 +195,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     {# Filtro sin resultados: no dibujamos una tabla con encabezados y nada
        adentro, que parece rota. #}
     <div class="msg envios-empty-filter" id="envios-resultados" tabindex="-1">
-        {% if busqueda_filtro %}No encontramos “{{ busqueda_filtro }}” en esta solapa.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
+        {% if busqueda_filtro %}No encontramos “{{ busqueda_filtro }}” en esta solapa.{% elif paso_filtro == 'requieren_accion' %}No tenés envíos que requieran acción con estos filtros.{% else %}No hay envíos que coincidan con estos filtros.{% endif %}
         <a href="/portal/envios?tipo={{ tipo_filtro }}{{ con_periodo }}">Ver todo el período</a>
     </div>
 {% else %}
