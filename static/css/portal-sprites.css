@@ -1,0 +1,62 @@
+/* Colección aprobada: violeta metálico como material, con los rótulos visibles.
+   SVG propios y livianos; sin canvas, bucles de animación ni llamadas de red externas. */
+.portal-operacion img.portal-sprite {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+.portal-operacion .side-item .portal-sprite {
+  width: 28px;
+  height: 28px;
+  margin: -5px -5.5px;
+}
+.portal-operacion .side-quick-action .portal-sprite {
+  width: 28px;
+  height: 28px;
+  margin: -6px;
+}
+
+/* Conserva el espacio del dock y su respuesta al foco/hover, sin encerrar
+   las facetas dentro de otra tarjeta ni reducirlas con el padding del SVG lineal. */
+.portal-operacion .tabbar img.portal-sprite {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+@media (min-width: 901px) {
+  .portal-operacion .tabbar img.portal-sprite {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+.portal-operacion .home-tool-icon.home-tool-sprite,
+.portal-operacion .home-pickup-link > .home-pickup-sprite {
+  background: none;
+}
+.portal-operacion .home-tool-sprite .portal-sprite {
+  width: 28px;
+  height: 28px;
+}
+.portal-operacion .portal-sprite-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-operacion .tabbar img.portal-sprite {
+    transition: none;
+    transform: none;
+  }
+}

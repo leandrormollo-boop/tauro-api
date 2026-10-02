@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "portal/_scope_icons.html" import scope_icon %}
+{% from "portal/_sprites.html" import portal_sprite %}
 {% block title %}Inicio{% endblock %}
 
 {% macro icono(nombre) -%}
@@ -197,14 +198,14 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
             </form>
 
             <div class="home-tool">
-                <span class="home-tool-icon">{{ icono("tracking") }}</span>
+                <span class="home-tool-icon home-tool-sprite">{{ portal_sprite("seguimiento") }}</span>
                 <label for="track-input">Rastrear con el courier</label>
                 <small>Consultá el estado oficial de una guía</small>
                 <div><input type="text" id="track-input" placeholder="Número de tracking" autocomplete="off"><button type="button" id="track-submit" class="btn btn-primary">Rastrear</button></div>
             </div>
 
             <a href="/portal/recolecciones" class="home-pickup-link">
-                <span>{{ icono("pickup") }}</span>
+                <span class="home-pickup-sprite">{{ portal_sprite("recolecciones") }}</span>
                 <div><strong>Recolecciones</strong><small>Solicitá o revisá un retiro</small></div>
                 <b aria-hidden="true">→</b>
             </a>
