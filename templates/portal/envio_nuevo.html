@@ -28,9 +28,8 @@
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
+        {% if form.editar_solicitud_id %}<p>Corregí los datos. Al guardar se recotiza; la guía todavía no se emite.</p>{% elif reemision_origen %}<p>Revisá los datos. Al confirmar se emite un tracking nuevo que reemplaza al anterior.</p>{% elif repeticion_origen %}<p>Datos copiados del envío anterior. Se cotiza de nuevo; el original no cambia.</p>{% endif %}
     </div>
-    <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a>
 </div>
 
 {% if error %}
@@ -169,7 +168,7 @@
                 </summary>
                 <div class="remitente-editor">
             {% if remitente_por_completar|default(false) %}
-                <p class="msg warn" role="status">Completá el domicilio de origen o elegí un remitente de esa ubicación. Tu domicilio habitual no coincide con la ruta cotizada.</p>
+                <p class="msg warn" role="status">El domicilio no coincide con la ruta cotizada: completalo o elegí otro remitente.</p>
             {% endif %}
             {# Empresa Y contacto separados (guía HAILU): los couriers piden
                companyName ("Yiwu Hailu Garment") y personName ("JEFF JANG"). #}
@@ -342,7 +341,6 @@
             <div class="shipment-step-heading">
                 <div>
                     <h4><span class="n">3</span> Información del paquete <span class="badge ok">Cajas</span></h4>
-                    <p>Peso, medidas, cantidad y valor total de mercadería dentro de cada caja.</p>
                 </div>
                 <span class="shipment-step-counter"><b data-package-types>{{ filas|length }}</b> tipo{% if filas|length != 1 %}s{% endif %} de caja</span>
             </div>
@@ -356,7 +354,7 @@
                     </div>
                     <div class="shipment-package-main">
                         <div class="form-group shipment-catalog-field">
-                            <div class="shipment-field-label"><label>Precargar del catálogo <span class="field-optional">(opcional)</span></label><span data-help="Precargar del catálogo">El catálogo es opcional. Precarga peso, medidas y contenido de un producto guardado. También podés completar la caja manualmente.</span></div>
+                            <div class="shipment-field-label"><label>Precargar del catálogo <span class="field-optional">(opcional)</span></label><span data-help="Precargar del catálogo">Precarga peso, medidas y contenido de un producto guardado; también podés completar la caja a mano.</span></div>
                             <select name="bulto_producto" class="bulto-producto">
                                 <option value="">— caja manual —</option>
                                 {% for p in productos %}
@@ -389,11 +387,11 @@
                                 <div class="input-unit"><input type="text" name="bulto_alto" aria-label="Alto" class="bulto-alto" inputmode="decimal" data-numero="decimal" value="{{ f.alto_cm or '' }}" required><span>cm</span></div>
                             </div>
                             <div class="form-group">
-                                <div class="shipment-field-label"><label>Cajas iguales</label><span data-help="Cajas iguales">Usá una sola fila para cajas con las mismas medidas, peso y contenido. Indicá cuántas enviás.</span></div>
+                                <div class="shipment-field-label"><label>Cajas iguales</label><span data-help="Cajas iguales">Una fila por tipo de caja: indicá cuántas iguales enviás.</span></div>
                                 <input type="text" name="bulto_cantidad" aria-label="Cajas iguales" class="bulto-cantidad" inputmode="numeric" data-numero="entero" min="1" max="20" value="{{ f.cantidad if f.cantidad is not none else 1 }}" required>
                             </div>
                             <div class="form-group shipment-box-value">
-                                <div class="shipment-field-label"><label>Valor por caja</label><span data-help="Valor por caja">Valor total de la mercadería dentro de una caja. El total declarado multiplica este valor por la cantidad de cajas iguales.</span></div>
+                                <div class="shipment-field-label"><label>Valor por caja</label><span data-help="Valor por caja">Valor de la mercadería de una caja; el total se calcula solo.</span></div>
                                 <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_valor_caja_usd" aria-label="Valor por caja" class="bulto-valor-caja" inputmode="decimal" data-numero="monto" value="{{ f.valor_declarado_caja_usd or '' }}" required></div>
                                 <small data-box-declared-total>Total cajas: USD —</small>
                             </div>
@@ -409,7 +407,7 @@
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
             <div class="shipment-step-heading">
                 <div>
-                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Ingresá cantidad y valor total de cada artículo.</span></h4>
+                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Lo que se declara en aduana: cantidad y valor de cada artículo.</span></h4>
 
                 </div>
                 <span class="shipment-step-counter">Valores en USD</span>
@@ -439,7 +437,7 @@
                             <input type="text" name="bulto_unidades_aduana" aria-label="Cantidad de unidades" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group shipment-declared-value">
-                            <div class="shipment-field-label"><label>Valor total</label><span data-help="Valor total">Valor de todas las unidades de este artículo, en todas las cajas de esta fila. No hace falta dividirlo por la cantidad.</span></div>
+                            <div class="shipment-field-label"><label>Valor total</label><span data-help="Valor total">Valor de todas las unidades del artículo en esta fila.</span></div>
                             <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_total_usd if f.valor_total_usd is defined else (f.items_invoice[0].valor_total_usd if f.items_invoice and f.items_invoice[0].valor_total_usd is defined else ('%.2f'|format((f.valor_unitario_usd|float) * (f.unidades_aduana|int)) if f.valor_unitario_usd else '')) }}" required></div>
                             <small class="invoice-line-total" data-invoice-line-total></small>
                         </div>
@@ -493,7 +491,7 @@
                 </summary>
                 <div class="shipment-extra-body">
             <div class="form-group shipment-label-field">
-                <label for="etiqueta_cliente">Nombre para reconocer este envío <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label><span data-help="Nombre del envío">Nombre interno para encontrar el envío en tu cuenta. No modifica la guía ni el tracking.</span>
+                <label for="etiqueta_cliente">Nombre para reconocer este envío <span style="color:var(--fg-4);font-weight:400;">(opcional)</span></label><span data-help="Nombre del envío">Solo interno: no cambia la guía ni el tracking.</span>
                 <input type="text" name="etiqueta_cliente" id="etiqueta_cliente" maxlength="80"
                        value="{{ form.etiqueta_cliente or '' }}" placeholder="Ej. Pedido 21036 · Enrique Vila">
 
@@ -517,8 +515,7 @@
                     </button>
                 </div>
                 <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                    Hoy la operación automática está disponible únicamente con DHL.
-                    {% if courier_default %}Tu cuenta tiene {{ courier_default|upper }} configurado.{% endif %}
+                    Por ahora operamos con DHL.{% if courier_default %} Tu cuenta tiene {{ courier_default|upper }} configurado.{% endif %}
                 </p>
             </div>
 
@@ -539,7 +536,7 @@
                         </option>
                     </select>
                     <p style="color:var(--fg-3);font-size:12px;margin-top:6px;">
-                        Los aranceles e impuestos dependen de la mercadería y del país de destino. No están incluidos salvo indicación expresa.
+                        Aranceles e impuestos del destino no incluidos.
                     </p>
                 </div>
                 <div class="form-group">

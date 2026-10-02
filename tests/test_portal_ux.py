@@ -215,7 +215,7 @@ def test_paquete_e_invoice_estan_separados_y_sin_perder_multibulto():
         assert f'name="{campo}"' not in paquete
 
     assert 'name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor"' in invoice
-    assert "cantidad y valor total de cada artículo" in invoice
+    assert "cantidad y valor de cada artículo" in invoice
     assert "data-invoice-line-total" in invoice
     hs = invoice[invoice.index('name="bulto_hs"'):invoice.index('name="bulto_hs"') + 180]
     assert "required" not in hs
@@ -249,8 +249,8 @@ def test_opciones_secundarias_del_paquete_no_alargan_el_paso_principal():
 
 def test_catalogo_se_presenta_como_opcional_para_revendedores():
     html = _template("envio_nuevo.html")
-    assert "El catálogo es opcional" in html
-    assert "completar la caja manualmente" in html
+    assert 'Precargar del catálogo <span class="field-optional">(opcional)</span>' in html
+    assert "completar la caja a mano" in html
     assert "Todavía no tenés productos en el catálogo" not in html
 
 
