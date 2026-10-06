@@ -109,6 +109,9 @@ jobs:
             tests/test_restauracion_aislada.py \
             tests/test_experiencia_cuenta.py \
             tests/test_periodo_cuenta.py \
+            tests/test_periodo_visual_cuenta.py \
+            tests/test_portal_cuenta_experiencia.py \
+            tests/test_portal_cuenta_ambitos_ux.py \
             tests/test_admin_cuenta_ambitos.py \
             tests/test_admin_pago_revision_ui.py \
             tests/test_ups_emision.py \

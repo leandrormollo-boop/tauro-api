@@ -133,6 +133,7 @@ def _presentar_periodo(filas: list[dict], inicio: date) -> dict:
     )
     return {
         "saldo_anterior_ars": anterior["neto"],
+        "hay_movimientos_anteriores": any(f["periodo"] == "ANTERIOR" for f in filas),
         "cargos_desde_ars": desde["cargos"],
         "creditos_desde_ars": desde["creditos"],
         "pagos_desde_ars": desde["pagos"],

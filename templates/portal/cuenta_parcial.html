@@ -1,0 +1,4 @@
+{% macro dinero(valor) -%}$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}{%- endmacro %}
+{% include "portal/cuenta_movimientos.html" %}
+{% include "portal/cuenta_apertura.html" %}
+{% include "portal/cuenta_pagos.html" %}

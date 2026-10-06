@@ -39,6 +39,19 @@ def _grupo(periodo, ambito, clase, importe, **extra):
             "importe": Decimal(importe), **extra}
 
 
+def test_apertura_depende_de_movimientos_previos_aunque_el_neto_sea_cero():
+    solo_actual = [_grupo("DESDE", "INTERNACIONAL", "ENVIO", "100")]
+    assert pc._presentar_periodo(solo_actual, INICIO)["hay_movimientos_anteriores"] is False
+    previo_saldado = [
+        _grupo("ANTERIOR", "INTERNACIONAL", "ENVIO", "25"),
+        _grupo("ANTERIOR", "CONSOLIDADO", "PAGO", "25"),
+    ]
+    resultado = pc._presentar_periodo(previo_saldado + solo_actual, INICIO)
+    assert resultado["hay_movimientos_anteriores"] is True
+    assert resultado["saldo_anterior_ars"] == Decimal("0.00")
+    assert resultado["saldo_total_ars"] == Decimal("100.00")
+
+
 @pytest.mark.parametrize("importe,anterior,neto,total,redondeo", [
     ("0.005", "0.01", "0.01", "0.01", "-0.01"),
     ("0.004", "0.00", "0.00", "0.01", "0.01"),
