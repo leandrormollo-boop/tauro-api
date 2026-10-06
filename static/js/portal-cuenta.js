@@ -121,6 +121,24 @@
 
   var region = document.querySelector("[data-account-region]");
   var currentRequest = null;
+  if (!region) return;
+  function updateWindowFields() {
+    if (!region) return;
+    var selection = region.querySelector("[data-account-window]");
+    if (!selection) return;
+    region.querySelectorAll("[data-account-window-field]").forEach(function (field) {
+      var active = field.dataset.accountWindowField === selection.value;
+      field.hidden = !active;
+      field.querySelectorAll("input").forEach(function (input) {
+        input.disabled = !active;
+        input.required = active;
+      });
+    });
+  }
+  updateWindowFields();
+  document.addEventListener("change", function (event) {
+    if (event.target.matches("[data-account-window]")) updateWindowFields();
+  });
   if (!region || !window.fetch || !window.DOMParser || !window.AbortController) return;
 
   function accountUrl(value) {
@@ -143,6 +161,7 @@
       var exportUrl = new URL("/portal/cuenta/exportar.xlsx", url);
       exportUrl.search = url.search;
       exportUrl.searchParams.delete("pagina");
+      exportUrl.searchParams.delete("pagina_pagos");
       exportUrl.searchParams.delete("pagar");
       exportLink.href = exportUrl.href;
     }
@@ -150,6 +169,7 @@
       var chartUrl = new URL(link.href);
       // El gráfico muestra ambos ámbitos; su detalle debe sumar el mismo total.
       chartUrl.searchParams.set("ambito", "consolidado");
+      chartUrl.searchParams.set("ventana", "mes");
       link.href = chartUrl.href;
       var selectedPeriod = url.searchParams.get("periodo");
       var chartPeriod = chartUrl.searchParams.get("periodo");
@@ -204,14 +224,24 @@
       if (html === null || currentRequest !== controller) return;
       var parsed = new DOMParser().parseFromString(html, "text/html");
       var next = parsed.querySelector("[data-account-region]");
-      if (!next) throw new Error("Respuesta incompleta");
+      var paymentNext = parsed.querySelector("[data-account-payments]");
+      var openingNext = parsed.querySelector("[data-account-opening]");
+      var paymentCurrent = document.querySelector("[data-account-payments]");
+      var openingCurrent = document.querySelector("[data-account-opening]");
+      if (!next || !paymentNext || !openingNext || !paymentCurrent || !openingCurrent) throw new Error("Respuesta incompleta");
+      var toPayments = url.hash === "#pagos";
       url = accountUrl(next.dataset.accountUrl) || url;
+      url.hash = toPayments ? "pagos" : "movimientos";
       region.replaceWith(document.importNode(next, true));
+      paymentCurrent.replaceWith(document.importNode(paymentNext, true));
+      openingCurrent.replaceWith(document.importNode(openingNext, true));
       region = document.querySelector("[data-account-region]");
-      if (pushHistory) window.history.pushState({ tauroCuenta: true }, "", url.pathname + url.search + "#movimientos");
+      if (pushHistory) window.history.pushState({ tauroCuenta: true }, "", url.pathname + url.search + url.hash);
+      updateWindowFields();
       updateSurroundingLinks(url);
-      region.scrollIntoView({ behavior: "auto", block: "start" });
-      region.focus({ preventScroll: true });
+      var focusRegion = toPayments ? document.querySelector("[data-account-payments]") : region;
+      focusRegion.scrollIntoView({ behavior: "auto", block: "start" });
+      focusRegion.focus({ preventScroll: true });
     }).catch(function (error) {
       if (currentRequest !== controller || (error.name === "AbortError" && !timedOut)) return;
       keepError = true;
@@ -240,7 +270,7 @@
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     var link = event.target.closest && event.target.closest("a[href]");
     if (!link || link.target || link.hasAttribute("download")) return;
-    if (!region.contains(link) && !link.matches(".account-chart-month, .account-scope-summary, [data-account-link]")) return;
+    if (!region.contains(link) && !link.matches(".account-chart-month, .account-scope-summary, [data-account-link], [data-account-payment-page]")) return;
     var url = accountUrl(link.href);
     if (!url) return;
     event.preventDefault();

@@ -6,6 +6,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[1]
 CUENTA = (RAIZ / "templates/portal/cuenta.html").read_text(encoding="utf-8")
 MOVIMIENTOS = (RAIZ / "templates/portal/cuenta_movimientos.html").read_text(encoding="utf-8")
+PAGOS = (RAIZ / "templates/portal/cuenta_pagos.html").read_text(encoding="utf-8")
 
 
 def test_un_solo_camino_para_informar_un_pago():
@@ -25,4 +26,4 @@ def test_el_cliente_no_ve_lo_pendiente_de_facturar():
 def test_proximo_paso_es_pagar_el_saldo_eligiendo_envios():
     assert "Saldo a pagar" in CUENTA
     assert "elegí qué envíos estás pagando" in CUENTA
-    assert "Asignar envíos" in CUENTA
+    assert "Asignar envíos" in PAGOS
