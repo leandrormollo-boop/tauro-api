@@ -183,6 +183,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if not m.numero_guia and not m.numero_factura %}<span>—</span>{% endif %}
                         <span class="account-document-actions">
                             {% if m.pago_id and m.tipo != "PAGO_RECHAZADO" %}<a href="/portal/pagos/{{ m.pago_id }}/imputar">Ver / imputar pago</a>{% endif %}
+                            {% if m.pago_id and not m.archivo_url %}<a href="/portal/pagos/{{ m.pago_id }}/adjuntar-comprobante">Adjuntar comprobante</a>{% endif %}
                             {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}">Ver envío</a>{% endif %}
                         </span>
                         {% if m.archivo_url %}

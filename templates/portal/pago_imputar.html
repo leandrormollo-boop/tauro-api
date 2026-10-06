@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% from 'portal/_selector_envios_pago.html' import selector_envios, dinero %}
 {% block title %}Imputar pago{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=8">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=9">{% endblock %}
 {% block content %}
 <section class="account-page account-client account-imputation-page">
   <a class="account-text-action" href="/portal/cuenta#pagos">← Mi cuenta</a>
@@ -10,6 +10,7 @@
   {% if request.query_params.get('guardado') %}<div class="msg ok" role="status">{{ 'Imputación guardada. El pago sigue en revisión.' if pago.estado == 'PENDIENTE' else 'Imputación guardada.' }}</div>{% endif %}
   <div class="account-imputation-position"><div><span>Total del pago</span><strong>{{ dinero(pago.monto_ars) }}</strong><span class="account-status">{{ pago.estado_label }}</span></div><div><span>Disponible para imputar</span><strong>{{ dinero(pago.sin_imputar_ars) }}</strong></div></div>
   <h2 class="account-imputation-label">{{ pago.imputacion_label }}</h2>
+  {% if not pago.tiene_comprobante %}<p><a class="btn btn-ghost btn-sm" href="/portal/pagos/{{ pago.id }}/adjuntar-comprobante">Adjuntar comprobante</a></p>{% endif %}
   {% if pago.fecha_futura %}<p class="account-payment-notice">La fecha informada todavía no ocurrió. El pago no modifica el saldo ni admite imputaciones.</p>{% endif %}
   {% if pago.fecha_revision_pendiente and not pago.fecha_futura %}<p class="account-payment-notice">La fecha requiere revisión administrativa. El pago sigue sin modificar el saldo ni admitir imputaciones.</p>{% endif %}
   {% if not pago.fecha_original_conocida %}<p class="account-payment-notice">Fecha original sin confirmar · La fecha mostrada es contable.</p>{% endif %}

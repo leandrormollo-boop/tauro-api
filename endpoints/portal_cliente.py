@@ -1516,6 +1516,63 @@ def ver_imputacion_pago(request: Request, pago_id: int, cliente: str = Depends(c
         context={"cliente":cliente,"pago":pago,"destinos_pago":destinos})
 
 
+@router.get("/pagos/{pago_id}/adjuntar-comprobante")
+def formulario_comprobante_pago(
+    request: Request, pago_id: int, cliente: str = Depends(cliente_actual),
+):
+    pago = obtener_pago_cliente(cliente, pago_id)
+    if not pago:
+        raise HTTPException(status_code=404, detail="Pago no disponible")
+    return templates.TemplateResponse(
+        request=request, name="portal/pago_comprobante.html",
+        context={"cliente": cliente, "pago": pago},
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/pagos/{pago_id}/adjuntar-comprobante")
+async def guardar_comprobante_pago(
+    request: Request, pago_id: int, cliente: str = Depends(cliente_actual),
+):
+    from servicios.cuenta_corriente import (
+        adjuntar_comprobante_pago, leer_comprobante_con_tope,
+    )
+
+    # Comprobar dueño antes de procesar el archivo. El servicio vuelve a
+    # comprobarlo bajo bloqueo: un formulario abierto no autoriza escrituras.
+    if not obtener_pago_cliente(cliente, pago_id):
+        raise HTTPException(status_code=404, detail="Pago no disponible")
+    volver = f"/portal/pagos/{pago_id}/adjuntar-comprobante"
+    if not check_rate(f"pago_comprobante:{cliente}", max_attempts=20, window_seconds=600):
+        return RedirectResponse(
+            f"{volver}?error={quote('Hiciste varios intentos. Esperá unos minutos y volvé a probar.')}",
+            status_code=303,
+        )
+    try:
+        async with request.form(max_files=1, max_fields=2) as form:
+            archivo = form.get("comprobante")
+            contenido = await leer_comprobante_con_tope(archivo)
+            if not contenido:
+                raise ValueError("Seleccioná un comprobante en PDF, JPG o PNG.")
+            adjuntar_comprobante_pago(
+                cliente, pago_id, contenido,
+                getattr(archivo, "filename", "") or "",
+            )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Pago no disponible")
+    except ValueError as exc:
+        return RedirectResponse(f"{volver}?error={quote(str(exc))}", status_code=303)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[portal] adjuntar_comprobante falló: {type(exc).__name__}")
+        return RedirectResponse(
+            f"{volver}?error={quote('No pudimos guardar el comprobante. Volvé a intentarlo.')}",
+            status_code=303,
+        )
+    return RedirectResponse(f"{volver}?adjuntado=1", status_code=303)
+
+
 @router.post("/pagos/{pago_id}/imputar")
 async def guardar_imputacion_pago(request: Request, pago_id: int, cliente: str = Depends(cliente_actual)):
     form = await request.form()

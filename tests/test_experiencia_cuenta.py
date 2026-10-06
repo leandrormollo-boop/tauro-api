@@ -51,6 +51,10 @@ def test_pago_publica_solo_hechos_sin_notas_privadas(estado, label):
     assert pago["monto_ars"] == Decimal("10.10")
     assert pago["registrado_at"] == "14/09/2026 · 22:20 (AR)"
     assert len(pago["pasos"]) == 2
+    # El archivo puede haberse adjuntado después: created_at fecha el pago,
+    # no la recepción del comprobante.
+    assert pago["pasos"][0]["label"] == "Pago registrado"
+    assert pago["pasos"][0]["fecha"] == pago["registrado_at"]
     assert pago["pasos"][1]["fecha"] == ""
     assert "nota" not in pago and "rechazo_motivo" not in pago
     assert "Proveedor" not in str(pago)
