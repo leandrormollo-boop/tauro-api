@@ -86,7 +86,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <p>{{ s.tracking_descripcion or 'El courier todavía no informó el motivo de la retención.' }}</p>
     <p>Consultá a TAURO con la guía {{ s.tracking }} para confirmar qué falta y quién debe resolverlo. El aviso por sí solo no confirma que exista un impuesto a pagar.</p>
     <div class="shipment-incident-actions"><a class="btn btn-primary btn-sm" href="{{ ayuda().whatsapp_url or ayuda().mail_url }}">Consultar incidencia</a><a class="btn btn-ghost btn-sm" href="{{ url_tracking(s.courier, s.tracking) }}" target="_blank" rel="noopener">Ver aviso del courier ↗</a></div>
-    {% if s.tracking_actualizado_at %}<small>Última consulta al courier: {{ s.tracking_actualizado_at.strftime('%d/%m/%Y %H:%M %Z') }}</small>{% endif %}
+    {% if s.tracking_ui is defined and s.tracking_ui.consulta_label %}<small>Última consulta al courier: {{ s.tracking_ui.consulta_label }} (hora de Argentina)</small>{% elif s.tracking_actualizado_at %}<small>Última consulta al courier: {{ s.tracking_actualizado_at.strftime('%d/%m/%Y %H:%M') }}</small>{% endif %}
 </aside>
 {% endif %}
 {% if s.seguimiento_sin_actualizaciones %}
@@ -230,14 +230,22 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <div class="mono" style="font-size:17px;margin-bottom:12px;">
                 <a href="{{ track_url }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
             </div>
+            {% set tu = s.tracking_ui|default({}) %}
             {% if s.tracking_descripcion %}
             <div class="msg{% if s.estado_cliente_ui.codigo == 'RETENIDO' %} error{% endif %}">
-                <strong>Último mensaje de {{ courier_nombre }}</strong><br>{{ s.tracking_descripcion }}
+                <strong>Último movimiento</strong><br>{{ tu.mensaje or s.tracking_descripcion }}
+                {% if tu.evento_label %}<br><small class="tracking-event-time">{{ tu.evento_label }} · hora de Argentina</small>{% endif %}
+                {% if tu.original %}<br><small class="tracking-original">Mensaje de {{ courier_nombre }}: {{ tu.original }}</small>{% endif %}
+            </div>
+            {% endif %}
+            {% if tu.alerta_sin_avance %}
+            <div class="msg warn tracking-stalled" role="status">
+                <strong>Sin movimientos hace {{ tu.dias_sin_movimiento }} días.</strong>
+                Puede ser una demora normal en aduana o en un centro de {{ courier_nombre }}. Ya lo estamos revisando; si te urge, escribinos con la guía {{ s.tracking }}.
             </div>
             {% endif %}
             <p class="tracking-sync-note">
-                {% if s.tracking_actualizado_at %}Última sincronización: {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M %Z") }}.{% else %}Todavía no recibimos una actualización del courier.{% endif %}
-
+                {% if tu.consulta_label %}Consultamos a {{ courier_nombre }} por última vez el {{ tu.consulta_label }} (hora de Argentina).{% elif s.tracking_actualizado_at %}Consultamos a {{ courier_nombre }} por última vez el {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M") }}.{% else %}Todavía no recibimos una actualización del courier.{% endif %}
             </p>
             <a href="{{ track_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Seguir envío →</a>
         {% else %}

@@ -1865,6 +1865,13 @@ ALTER TABLE IF EXISTS solicitudes_guia
 UPDATE solicitudes_guia
 SET tracking_vigilancia_desde=COALESCE(tracking_actualizado_at, NOW())
 WHERE tracking_estado='RETENIDO' AND tracking_vigilancia_desde IS NULL;
+-- Fecha real del último evento del courier (con su zona horaria) y momento en
+-- que el portal vio cambiar el mensaje. Permiten avisar "sin movimientos hace
+-- N días" sin confundir la consulta diaria con un avance real.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_evento_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_cambio_at TIMESTAMPTZ;
 
 DO $$
 BEGIN
