@@ -7,7 +7,7 @@
 {% endmacro %}
 {% block content %}
 <div class="national-shipment">
-<header class="ns-heading"><div><a class="ns-back" href="/portal/envios?tipo=nacional">← Mis envíos</a><h1>Crear envío nacional</h1></div><div class="ns-operator"><img src="/static/img/carriers/oca.png" alt="OCA"><span>Puerta a puerta</span></div></header>
+<header class="ns-heading tauro-branded-heading"><div><a class="ns-back" href="/portal/envios?tipo=nacional">← Mis envíos</a><h1>Crear envío nacional</h1></div><div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<div class="ns-operator"><img src="/static/img/carriers/oca.png" alt="OCA"><span>Puerta a puerta</span></div></div></header>
 {% if error or request.query_params.get('error') %}<p class="msg error" role="alert">{{error or request.query_params.get('error')}}</p>{% endif %}
 {% if not disponible %}<section class="ns-card"><h2>OCA aún no está habilitado</h2><p>Contactá a TAURO para activar el servicio en tu cuenta.</p></section>
 {% elif tarifa %}

@@ -1,0 +1,9 @@
+{# Sello solicitado por el cliente: mismo material del cotizador público.
+   Decorativo, sin interacción. El gestor aporta la marca en modo embebido. #}
+{% if not gestion_embebida %}
+<span class="tauro-brand-badge" aria-hidden="true">
+    <img class="tauro-brand-mark-dark" src="/static/img/logo-mark-white.png" alt="" draggable="false">
+    <img class="tauro-brand-mark-light" src="/static/img/logo-mark-dark.png" alt="" draggable="false">
+    <span>TAURO SOLUTIONS</span>
+</span>
+{% endif %}

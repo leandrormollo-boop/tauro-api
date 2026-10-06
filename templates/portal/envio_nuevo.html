@@ -24,7 +24,7 @@
    UN PASO POR PANTALLA en static/css/tauro.css. #}
 <div class="wizard-compacto" id="shipment-wizard" data-step="1"
      data-initial-step="{{ form.initial_step or 1 }}">
-<div class="page-title page-title-row">
+<div class="page-title page-title-row tauro-branded-heading">
     <div>
         {% if form.editar_solicitud_id %}<a class="shipment-edit-back" href="/portal/envios/{{ form.editar_solicitud_id }}/gestion?ventana=1">← Volver a la revisión</a>{% endif %}
         <h1>{{ 'Editar envío' if form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional')) }}</h1>
@@ -33,7 +33,7 @@
         {% endif %}
         <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
     </div>
-    <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a>
+    <div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a></div>
 </div>
 
 {% if error %}

@@ -38,12 +38,13 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% endfor %}
 <section class="account-page account-client" aria-label="Cuenta corriente">
 <div class="page-title account-page-title">
-    <div class="page-title-row">
+    <div class="page-title-row tauro-account-heading">
         <div>
             <div class="eyebrow">Administración</div>
             <h1>Cuenta corriente</h1>
             <p>{% if inicio %}Movimientos desde septiembre de 2026.{% else %}Saldo, vencimientos y el detalle de tu operación.{% endif %}</p>
         </div>
+        {% include 'portal/_brand_badge.html' %}
         <div class="account-title-actions">
             <a href="#movimientos" class="btn btn-ghost">Ver movimientos</a>
             <a href="#pagos" class="btn btn-ghost">Imputar un pago</a>

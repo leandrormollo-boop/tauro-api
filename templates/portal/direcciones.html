@@ -136,12 +136,12 @@
 </div>
 
 <div class="card" id="form-direccion">
-    <div class="card-head">
+    <div class="card-head tauro-branded-heading">
         <div>
             <h3 id="form-dir-titulo">Agregar dirección</h3>
             <p id="form-dir-sub">Elegí el tipo, completá los datos y queda guardada en tu libreta.</p>
         </div>
-        <a href="/portal/direcciones" id="form-dir-cancelar" class="btn btn-ghost btn-sm" hidden>Cancelar edición</a>
+        <div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<a href="/portal/direcciones" id="form-dir-cancelar" class="btn btn-ghost btn-sm" hidden>Cancelar edición</a></div>
     </div>
 
     <form method="POST" action="/portal/direcciones" class="form">

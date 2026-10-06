@@ -1,0 +1,138 @@
+/* Sello solicitado: material del cotizador público, sin animación ni interacción. */
+.portal-operacion .tauro-brand-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 38px;
+  margin: 0;
+  padding: 8px 17px;
+  border: 1px solid rgba(167, 139, 250, .62);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #2a1a4a 0%, #1a0f30 55%, #120a20 100%);
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, .1),
+    0 3px 15px rgba(124, 92, 246, .23),
+    inset 0 1px 0 rgba(255, 255, 255, .18),
+    inset 0 -3px 8px rgba(0, 0, 0, .45);
+  font-family: 'Space Grotesk', Inter, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: .08em;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+.portal-operacion .tauro-brand-badge img {
+  display: block;
+  width: auto;
+  height: 15px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+.portal-operacion .tauro-brand-badge > span {
+  display: inline;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: #c9b4ff;
+  background: linear-gradient(105deg, #9878ff 0%, #a78bfa 40%, #f6f0ff 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.portal-operacion .tauro-brand-badge .tauro-brand-mark-light { display: none; }
+/* En blanco, una superficie perlada: el relieve acompaña al resto del portal. */
+html[data-theme="light"] .portal-operacion .tauro-brand-badge {
+  border-color: #d4c8e7;
+  background: linear-gradient(175deg, #fff 0%, #faf8ff 48%, #eee8f5 100%);
+  box-shadow: 0 2px 6px rgba(55, 32, 86, .07),
+    inset 0 1px 0 #fff, inset 0 -1px 0 rgba(112, 69, 206, .06);
+}
+html[data-theme="light"] .portal-operacion .tauro-brand-badge > span {
+  color: #653db9;
+  background-image: linear-gradient(105deg, #4e2d8e 0%, #7045ce 48%, #53318f 100%);
+}
+html[data-theme="light"] .portal-operacion .tauro-brand-badge .tauro-brand-mark-dark { display: none; }
+html[data-theme="light"] .portal-operacion .tauro-brand-badge .tauro-brand-mark-light { display: block; }
+.portal-operacion .tauro-branded-heading {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.portal-operacion .tauro-branded-heading > :first-child { min-width: 0; }
+.portal-operacion .tauro-brand-tools {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  margin-left: auto;
+}
+.portal-operacion .tauro-branded-heading > .tauro-brand-badge { margin-left: auto; }
+.portal-operacion .tauro-account-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+.portal-operacion .tauro-account-heading .account-title-actions { grid-column: 1 / -1; }
+.portal-operacion .tauro-branded-dialog-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+}
+.portal-operacion .tauro-branded-dialog-head > :first-child { min-width: 0; }
+.portal-operacion .tauro-branded-dialog-head > :last-child { justify-self: end; }
+/* El cotizador inyectado usa únicamente el encabezado de su ventana. */
+.portal-operacion .quote-window-content .uq-heading { display: none; }
+.portal-operacion .shipment-manager-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.portal-operacion .shipment-manager-dialog > .tauro-branded-dialog-head {
+  height: auto;
+  flex: 0 0 auto;
+}
+.portal-operacion .shipment-manager-dialog > iframe {
+  height: auto;
+  flex: 1 1 0;
+  min-height: 0;
+}
+/* La ventana padre ya muestra la marca al editar un envío dentro del iframe. */
+.portal-embedded .tauro-brand-badge { display: none; }
+@media (max-width: 600px) {
+  .portal-operacion .tauro-brand-badge {
+    min-height: 30px;
+    padding: 6px 12px;
+    gap: 7px;
+    font-size: 9px;
+    letter-spacing: .065em;
+  }
+  .portal-operacion .tauro-brand-badge img { height: 12px; }
+  .portal-operacion .tauro-branded-heading { gap: 12px; }
+  .portal-operacion .wizard-compacto .tauro-brand-tools {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .portal-operacion .tauro-account-heading { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .portal-operacion .tauro-account-heading > .tauro-brand-badge { justify-self: end; }
+  .portal-operacion .tauro-branded-dialog-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .portal-operacion .tauro-branded-dialog-head > .tauro-brand-badge {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: end;
+  }
+  .portal-operacion .tauro-branded-dialog-head > :last-child { grid-column: 2; grid-row: 1; }
+}
+@media (forced-colors: active) {
+  .portal-operacion .tauro-brand-badge > span { -webkit-text-fill-color: currentColor; }
+}
