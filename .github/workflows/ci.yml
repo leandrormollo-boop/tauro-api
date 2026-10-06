@@ -142,6 +142,7 @@ jobs:
             tests/test_admin_precios_web.py \
             tests/test_admin_precio_web_dhl.py \
             tests/test_precios_web_dhl.py \
+            tests/test_pricing_rangos_usd.py \
             tests/test_precios_web_dhl_postgres.py \
             tests/test_pricing_carriers.py \
             tests/test_numeros_config_carriers_integracion.py \

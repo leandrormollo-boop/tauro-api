@@ -124,7 +124,8 @@ def _pricing_configurado() -> dict:
                     "   OR parametro IN ("
                     "       'WEB_DHL_PRICING_MODE', "
                     "       'WEB_DHL_MARKUP_PCT', "
-                    "       'WEB_DHL_MARGEN_FIJO_ARS'"
+                    "       'WEB_DHL_MARGEN_FIJO_ARS', "
+                    "       'WEB_DHL_RANGOS_USD'"
                     "   )"
                 )
                 filas = cur.fetchall()
@@ -138,11 +139,13 @@ def _pricing_configurado() -> dict:
         PARAMETRO_FIJO_ARS,
         PARAMETRO_MARKUP_PCT,
         PARAMETRO_MODO,
+        PARAMETRO_RANGOS_USD,
     )
     valores = {FILAS_CONFIG_KEY: [dict(f) for f in filas]}
     for f in filas:
         if f["parametro"] in {
             PARAMETRO_MODO, PARAMETRO_MARKUP_PCT, PARAMETRO_FIJO_ARS,
+            PARAMETRO_RANGOS_USD,
         }:
             continue
         numero = _numero_config(f["parametro"], f["valor"])

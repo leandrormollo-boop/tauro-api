@@ -22,6 +22,7 @@ from servicios.numeros_humanos import (
 PARAMETRO_MODO = "WEB_DHL_PRICING_MODE"
 PARAMETRO_MARKUP_PCT = "WEB_DHL_MARKUP_PCT"
 PARAMETRO_FIJO_ARS = "WEB_DHL_MARGEN_FIJO_ARS"
+PARAMETRO_RANGOS_USD = "WEB_DHL_RANGOS_USD"
 
 PARAMETRO_MARKUP_PCT_LEGACY = "WEB_MARKUP_PCT_DHL"
 PARAMETRO_FIJO_ARS_LEGACY = "WEB_MARGEN_FIJO_DHL_ARS"
@@ -33,13 +34,15 @@ PARAMETROS_RESERVADOS = frozenset({
     PARAMETRO_MODO,
     PARAMETRO_MARKUP_PCT,
     PARAMETRO_FIJO_ARS,
+    PARAMETRO_RANGOS_USD,
     PARAMETRO_MARKUP_PCT_LEGACY,
     PARAMETRO_FIJO_ARS_LEGACY,
 })
 
 MODO_PCT = "PCT"
 MODO_FIJO_ARS = "FIJO_ARS"
-MODOS = frozenset({MODO_PCT, MODO_FIJO_ARS})
+MODO_RANGOS_USD = "RANGOS_USD"
+MODOS = frozenset({MODO_PCT, MODO_FIJO_ARS, MODO_RANGOS_USD})
 
 MAX_MARKUP_PCT = Decimal("300")
 MAX_FIJO_ARS = Decimal("999999999")
@@ -54,6 +57,7 @@ _CLAVES_DB = (
     PARAMETRO_MODO,
     PARAMETRO_MARKUP_PCT,
     PARAMETRO_FIJO_ARS,
+    PARAMETRO_RANGOS_USD,
     PARAMETRO_MARKUP_PCT_LEGACY,
     PARAMETRO_FIJO_ARS_LEGACY,
     PARAMETRO_MARKUP_GENERAL,
@@ -170,6 +174,10 @@ def _resolver(
         ("DB_NUEVA", db.get(PARAMETRO_FIJO_ARS), PARAMETRO_FIJO_ARS in db),
         ("ENV_NUEVO", entorno.get(PARAMETRO_FIJO_ARS), PARAMETRO_FIJO_ARS in entorno),
     )
+    rangos_nuevos = (
+        ("DB_NUEVA", db.get(PARAMETRO_RANGOS_USD), PARAMETRO_RANGOS_USD in db),
+        ("ENV_NUEVO", entorno.get(PARAMETRO_RANGOS_USD), PARAMETRO_RANGOS_USD in entorno),
+    )
     fijo_legacy = (
         ("DB_DHL_LEGACY", db.get(PARAMETRO_FIJO_ARS_LEGACY), PARAMETRO_FIJO_ARS_LEGACY in db),
         ("ENV_DHL_LEGACY", entorno.get(PARAMETRO_FIJO_ARS_LEGACY), PARAMETRO_FIJO_ARS_LEGACY in entorno),
@@ -187,9 +195,11 @@ def _resolver(
         if modo_fuente == "DB_NUEVA":
             markup_del_modo = markup_nuevo[:1]
             fijo_del_modo = fijo_nuevo[:1]
+            rangos_del_modo = rangos_nuevos[:1]
         else:
             markup_del_modo = markup_nuevo[1:]
             fijo_del_modo = fijo_nuevo[1:]
+            rangos_del_modo = rangos_nuevos[1:]
         markup_opciones = (
             markup_del_modo
             if modo_solicitado == MODO_PCT
@@ -200,11 +210,15 @@ def _resolver(
             if modo_solicitado == MODO_FIJO_ARS
             else fijo_del_modo + fijo_legacy
         )
+        rangos_opciones = rangos_del_modo
         markup_crudo, markup_fuente = _elegir(
             markup_opciones, default=("AUSENTE", None)
         )
         fijo_crudo, fijo_fuente = _elegir(
             fijo_opciones, default=("AUSENTE", None)
+        )
+        rangos_crudo, rangos_fuente = _elegir(
+            rangos_opciones, default=("AUSENTE", None)
         )
     else:
         markup_crudo, markup_fuente = _elegir(
@@ -215,6 +229,7 @@ def _resolver(
             fijo_legacy,
             default=("DEFAULT", Decimal("0")),
         )
+        rangos_crudo, rangos_fuente = None, "AUSENTE"
 
     try:
         markup = _parsear_markup(markup_crudo)
@@ -228,6 +243,18 @@ def _resolver(
     except ValueError as exc:
         fijo = None
         fijo_error = str(exc)
+    try:
+        from servicios.pricing_rangos_usd import (
+            normalizar_rangos_usd,
+            serializar_rangos_usd,
+        )
+        rangos = normalizar_rangos_usd(rangos_crudo)
+        rangos_texto = serializar_rangos_usd(rangos)
+        rangos_error = None
+    except ValueError as exc:
+        rangos = []
+        rangos_texto = _texto(rangos_crudo)
+        rangos_error = str(exc)
 
     error_modo = None
     if modo_explicito:
@@ -249,6 +276,8 @@ def _resolver(
         error = markup_error
     elif modo == MODO_FIJO_ARS:
         error = fijo_error
+    elif modo == MODO_RANGOS_USD:
+        error = rangos_error
     else:
         error = fijo_error or "No se pudo determinar el modo de precio de DHL."
 
@@ -256,6 +285,8 @@ def _resolver(
         estado = error
     elif modo == MODO_PCT:
         estado = f"Ganancia aplicada: {_porcentaje_visible(markup)}% sobre costo."
+    elif modo == MODO_RANGOS_USD:
+        estado = f"Ganancia según {len(rangos)} rangos de costo."
     else:
         estado = f"Ganancia aplicada: $ {_ars_visible(fijo)} por envío."
 
@@ -276,6 +307,11 @@ def _resolver(
         "fijo_fuente": fijo_fuente,
         "fijo_valido": fijo_error is None,
         "fijo_error": fijo_error,
+        "rangos_usd": rangos,
+        "rangos_texto": rangos_texto,
+        "rangos_fuente": rangos_fuente,
+        "rangos_valido": rangos_error is None,
+        "rangos_error": rangos_error,
         "configuracion_completa": error is None,
         "publicable": error is None,
         "estado": estado,
@@ -310,6 +346,11 @@ def _error_lectura() -> dict:
         "fijo_fuente": "ERROR_DB",
         "fijo_valido": False,
         "fijo_error": "No pudimos leer la configuración de precios.",
+        "rangos_usd": [],
+        "rangos_texto": "",
+        "rangos_fuente": "ERROR_DB",
+        "rangos_valido": False,
+        "rangos_error": "No pudimos leer la configuración de precios.",
         "configuracion_completa": False,
         "publicable": False,
         "estado": "No pudimos leer la configuración de precios.",
@@ -356,19 +397,19 @@ def pricing_publico_dhl(config_compartida: Mapping[str, Any] | None = None) -> d
     configuracion = _resolver(filas)
     if not configuracion["publicable"]:
         raise PrecioWebDHLNoDisponible(configuracion["estado"])
-    valor = (
-        configuracion["markup_pct"]
-        if configuracion["modo"] == MODO_PCT
-        else configuracion["margen_fijo_ars"]
-    )
+    if configuracion["modo"] == MODO_PCT:
+        valor = configuracion["markup_pct"]
+        fuente = configuracion["markup_fuente"]
+    elif configuracion["modo"] == MODO_FIJO_ARS:
+        valor = configuracion["margen_fijo_ars"]
+        fuente = configuracion["fijo_fuente"]
+    else:
+        valor = configuracion["rangos_usd"]
+        fuente = configuracion["rangos_fuente"]
     return {
         "tipo": configuracion["modo"],
         "valor": valor,
-        "fuente": (
-            configuracion["markup_fuente"]
-            if configuracion["modo"] == MODO_PCT
-            else configuracion["fijo_fuente"]
-        ),
+        "fuente": fuente,
         "modo_explicito": configuracion["modo_explicito"],
     }
 
@@ -395,9 +436,15 @@ def calcular_precio_publico_dhl(
     if tipo == MODO_PCT:
         markup = _parsear_markup(valor)
         fijo = None
+        rangos = None
     elif tipo == MODO_FIJO_ARS:
         fijo = _parsear_fijo(valor)
         markup = None
+        rangos = None
+    elif tipo == MODO_RANGOS_USD:
+        from servicios.pricing_rangos_usd import normalizar_rangos_usd
+        rangos = normalizar_rangos_usd(valor)
+        markup = fijo = None
     else:
         raise PrecioWebDHLNoDisponible("La regla de DHL no es válida.")
 
@@ -405,6 +452,18 @@ def calcular_precio_publico_dhl(
     if moneda not in {"USD", "ARS"}:
         raise PrecioWebDHLNoDisponible("La moneda de DHL no está soportada.")
     cambio = _decimal_positivo(dolar, "Tipo de cambio")
+
+    if tipo == MODO_RANGOS_USD:
+        try:
+            from servicios.pricing_rangos_usd import aplicar_rangos_usd
+            return aplicar_rangos_usd(
+                costo=costo,
+                moneda=moneda,
+                dolar=cambio,
+                rangos=rangos,
+            )
+        except ValueError as exc:
+            raise PrecioWebDHLNoDisponible(str(exc)) from None
 
     # Antes del primer guardado se conserva incluso el redondeo Python del
     # motor histórico. Cambiar half-even por half-up en esa etapa podría mover
@@ -480,14 +539,25 @@ def guardar_configuracion_dhl(
     modo: Any,
     markup_pct: Any,
     margen_fijo_ars: Any,
+    rangos_usd: Any = None,
 ) -> dict:
     """Guarda sólo la regla activa y la auditoría en una transacción."""
     modo_normalizado = _texto(modo).upper()
     if modo_normalizado not in MODOS:
-        raise ValueError("Elegí porcentaje o margen fijo para DHL.")
+        raise ValueError("Elegí porcentaje, margen fijo o rangos para DHL.")
 
     markup = _parsear_markup(markup_pct) if modo_normalizado == MODO_PCT else None
     fijo = _parsear_fijo(margen_fijo_ars) if modo_normalizado == MODO_FIJO_ARS else None
+    if modo_normalizado == MODO_RANGOS_USD:
+        from servicios.pricing_rangos_usd import (
+            normalizar_rangos_usd,
+            serializar_rangos_usd,
+        )
+        rangos = normalizar_rangos_usd(rangos_usd)
+        rangos_texto = serializar_rangos_usd(rangos)
+    else:
+        rangos = None
+        rangos_texto = None
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -504,10 +574,13 @@ def guardar_configuracion_dhl(
                 texto_valor = decimal_a_texto(markup)
                 valores[PARAMETRO_MARKUP_PCT] = texto_valor
                 cambios.append((PARAMETRO_MARKUP_PCT, texto_valor))
-            else:
+            elif modo_normalizado == MODO_FIJO_ARS:
                 texto_valor = decimal_a_texto(fijo)
                 valores[PARAMETRO_FIJO_ARS] = texto_valor
                 cambios.append((PARAMETRO_FIJO_ARS, texto_valor))
+            else:
+                valores[PARAMETRO_RANGOS_USD] = rangos_texto
+                cambios.append((PARAMETRO_RANGOS_USD, rangos_texto))
 
             for parametro, valor in cambios:
                 cur.execute(
@@ -537,12 +610,14 @@ def guardar_configuracion_dhl(
                         "modo_explicito": antes["modo_explicito"],
                         "markup_pct": antes["markup_texto"] or None,
                         "margen_fijo_ars": antes["fijo_texto"] or None,
+                        "rangos_usd": antes["rangos_usd"] or None,
                     },
                     "despues": {
                         "modo": despues["modo"],
                         "modo_explicito": despues["modo_explicito"],
                         "markup_pct": despues["markup_texto"] or None,
                         "margen_fijo_ars": despues["fijo_texto"] or None,
+                        "rangos_usd": despues["rangos_usd"] or None,
                     },
                 },
             )

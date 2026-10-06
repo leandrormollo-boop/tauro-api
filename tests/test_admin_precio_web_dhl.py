@@ -6,6 +6,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from starlette.datastructures import FormData
 from starlette.requests import Request
 
 from endpoints import admin
@@ -81,6 +82,19 @@ def _mock_lecturas(monkeypatch, *, dhl=None):
     )
 
 
+def _form_rangos(*filas: dict, **extras) -> FormData:
+    pares = [
+        ("csrf_precio_dhl", admin._csrf_dhl("precios-web:dhl")),
+        ("dhl_modo", "RANGOS_USD"),
+        *extras.items(),
+    ]
+    for fila in filas:
+        for campo in ("desde", "hasta", "tipo", "valor"):
+            if campo in fila:
+                pares.append((f"dhl_rango_{campo}", str(fila[campo])))
+    return FormData(pares)
+
+
 def test_get_exige_admin_y_muestra_la_regla_dhl_separada(monkeypatch):
     monkeypatch.setattr(admin, "_is_auth", lambda token: token == "valido")
     _mock_lecturas(monkeypatch)
@@ -97,9 +111,31 @@ def test_get_exige_admin_y_muestra_la_regla_dhl_separada(monkeypatch):
     assert 'action="/admin/precios-web/dhl"' in html
     assert 'name="csrf_precio_dhl"' in html
     assert '<option value="FIJO_ARS" selected>' in html
+    assert '<option value="RANGOS_USD"' in html
     assert 'name="dhl_margen_fijo_ars"' in html
+    assert 'name="dhl_rango_desde"' in html
+    assert "Hasta, sin incluir (USD)" in html
     assert 'value="135.000,00"' in html
     assert "no modifica el portal ni el checkout de tiendas" in html
+
+
+def test_get_rangos_formatea_tres_decimales_sin_convertirlos_en_miles(monkeypatch):
+    monkeypatch.setattr(admin, "_is_auth", lambda _token: True)
+    _mock_lecturas(monkeypatch, dhl=_dhl_config(
+        modo="RANGOS_USD",
+        rangos_usd=[
+            {"desde": "0", "hasta": "150.125", "tipo": "PCT", "valor": "20.125"},
+            {"desde": "150.125", "hasta": None, "tipo": "FIJO_USD", "valor": "100"},
+        ],
+    ))
+
+    respuesta = admin.admin_precios_web(_request(), admin_token="valido")
+    html = respuesta.body.decode()
+
+    assert respuesta.status_code == 200
+    assert '<option value="RANGOS_USD" selected>' in html
+    assert html.count('value="150,1250"') == 2
+    assert 'value="20,1250"' in html
 
 
 def test_post_no_autorizado_no_lee_el_formulario(monkeypatch):
@@ -196,6 +232,108 @@ def test_post_envia_modo_y_solo_el_valor_activo_del_formulario(
     assert llamadas == [{"request": request, **esperado}]
 
 
+def test_post_rangos_envia_campos_repetidos_en_el_orden_visible(monkeypatch):
+    monkeypatch.setattr(admin, "_is_auth", lambda _token: True)
+    llamadas = []
+    monkeypatch.setattr(
+        "servicios.precios_web_dhl.guardar_configuracion_dhl",
+        lambda **kwargs: llamadas.append(kwargs),
+    )
+    request = _FormRequest(_form_rangos(
+        {"desde": "0", "hasta": "150", "tipo": "PCT", "valor": "20,5"},
+        {"desde": "150", "hasta": "", "tipo": "FIJO_USD", "valor": "100"},
+    ))
+
+    respuesta = asyncio.run(
+        admin.admin_precio_web_dhl_guardar(request, admin_token="valido")
+    )
+
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"] == "/admin/precios-web?ok=dhl"
+    assert llamadas == [{
+        "request": request,
+        "modo": "RANGOS_USD",
+        "markup_pct": "",
+        "margen_fijo_ars": "",
+        "rangos_usd": [
+            {
+                "desde": Decimal("0"), "hasta": Decimal("150"),
+                "tipo": "PCT", "valor": Decimal("20.5"),
+            },
+            {
+                "desde": Decimal("150"), "hasta": None,
+                "tipo": "FIJO_USD", "valor": Decimal("100"),
+            },
+        ],
+    }]
+
+
+@pytest.mark.parametrize("caso", ["vacio", "columnas_desparejas", "treinta_y_uno"])
+def test_post_rangos_rechaza_forma_invalida_antes_de_guardar(monkeypatch, caso):
+    monkeypatch.setattr(admin, "_is_auth", lambda _token: True)
+    _mock_lecturas(monkeypatch)
+    llamadas = []
+    monkeypatch.setattr(
+        "servicios.precios_web_dhl.guardar_configuracion_dhl",
+        lambda **kwargs: llamadas.append(kwargs),
+    )
+    if caso == "vacio":
+        data = _form_rangos()
+    elif caso == "columnas_desparejas":
+        data = _form_rangos({
+            "desde": "0", "hasta": "", "tipo": "FIJO_USD",
+        })
+    else:
+        data = _form_rangos(*[
+            {
+                "desde": str(indice),
+                "hasta": str(indice + 1) if indice < 30 else "",
+                "tipo": "PCT",
+                "valor": "20",
+            }
+            for indice in range(31)
+        ])
+    request = _FormRequest(data)
+
+    respuesta = asyncio.run(
+        admin.admin_precio_web_dhl_guardar(request, admin_token="valido")
+    )
+
+    assert respuesta.status_code == 422
+    assert "Completá de 1 a 30 rangos, con todos sus campos." in respuesta.body.decode()
+    assert llamadas == []
+
+
+def test_post_pct_ignora_campos_de_rango_inactivos(monkeypatch):
+    monkeypatch.setattr(admin, "_is_auth", lambda _token: True)
+    llamadas = []
+    monkeypatch.setattr(
+        "servicios.precios_web_dhl.guardar_configuracion_dhl",
+        lambda **kwargs: llamadas.append(kwargs),
+    )
+    request = _FormRequest(FormData([
+        ("csrf_precio_dhl", admin._csrf_dhl("precios-web:dhl")),
+        ("dhl_modo", "PCT"),
+        ("dhl_markup_pct", "25"),
+        ("dhl_rango_desde", "0"),
+        ("dhl_rango_hasta", ""),
+        ("dhl_rango_tipo", "FIJO_USD"),
+        ("dhl_rango_valor", "999"),
+    ]))
+
+    respuesta = asyncio.run(
+        admin.admin_precio_web_dhl_guardar(request, admin_token="valido")
+    )
+
+    assert respuesta.status_code == 303
+    assert llamadas == [{
+        "request": request,
+        "modo": "PCT",
+        "markup_pct": "25",
+        "margen_fijo_ars": "",
+    }]
+
+
 @pytest.mark.parametrize(
     ("modo", "campo", "valor"),
     [
@@ -265,6 +403,39 @@ def test_error_503_no_expone_la_excepcion_y_preserva_la_regla(monkeypatch):
     assert "RuntimeError" not in html
 
 
+def test_error_422_rangos_preserva_filas_y_escapa_html_con_unicode(monkeypatch):
+    monkeypatch.setattr(admin, "_is_auth", lambda _token: True)
+    _mock_lecturas(monkeypatch)
+    llamadas = []
+    monkeypatch.setattr(
+        "servicios.precios_web_dhl.guardar_configuracion_dhl",
+        lambda **kwargs: llamadas.append(kwargs),
+    )
+    request = _FormRequest(_form_rangos(
+        {"desde": "0", "hasta": "150", "tipo": "PCT", "valor": "20,5"},
+        {
+            "desde": "150",
+            "hasta": "",
+            "tipo": "FIJO_USD",
+            "valor": '<script>alert("ñ")</script>',
+        },
+    ))
+
+    respuesta = asyncio.run(
+        admin.admin_precio_web_dhl_guardar(request, admin_token="valido")
+    )
+    html = respuesta.body.decode()
+
+    assert respuesta.status_code == 422
+    assert '<option value="RANGOS_USD" selected>' in html
+    assert html.count('name="dhl_rango_desde"') == 3  # dos filas + template
+    assert 'value="150"' in html
+    assert "Rango 2: revisá los números." in html
+    assert '&lt;script&gt;alert(&#34;ñ&#34;)&lt;/script&gt;' in html
+    assert '<script>alert("ñ")</script>' not in html
+    assert llamadas == []
+
+
 @pytest.mark.parametrize("parametro", sorted(precios_dhl.PARAMETROS_RESERVADOS))
 @pytest.mark.parametrize("como_nuevo", [False, True])
 def test_config_generica_rechaza_claves_dhl_nuevas_y_legacy(
@@ -287,3 +458,7 @@ def test_config_generica_rechaza_claves_dhl_nuevas_y_legacy(
 
     assert respuesta.status_code == 422
     assert "Precios de la web" in respuesta.body.decode()
+
+
+def test_config_generica_reserva_la_clave_de_rangos_dhl():
+    assert precios_dhl.PARAMETRO_RANGOS_USD in precios_dhl.PARAMETROS_RESERVADOS

@@ -65,6 +65,7 @@ from servicios.numeros_humanos import (
     parse_entero_formulario as _entero_form,
     parse_float_formulario as _numero_form,
     parse_importe_humano,
+    parse_numero_humano,
     politica_configuracion_numerica,
 )
 from servicios.configuracion_couriers_cliente import (
@@ -5245,16 +5246,29 @@ def admin_referencia(request: Request, admin_token: Optional[str] = Cookie(None)
 def _contexto_precios_web(*, configuracion_oca=None, configuracion_dhl=None):
     from servicios.precios_web_nacional import leer_configuracion_oca
     from servicios.precios_web_dhl import leer_configuracion_dhl
+    dhl = dict(configuracion_dhl if configuracion_dhl is not None else leer_configuracion_dhl())
+    if not dhl.get("error"):
+        # El servicio persiste decimales canónicos. El formulario usa formato
+        # humano: tres decimales llevan un cero más para evitar leerlos como miles.
+        filas = []
+        for original in dhl.get("rangos_usd", []):
+            fila = dict(original)
+            for campo in ("desde", "hasta", "valor"):
+                valor = fila.get(campo)
+                if valor is not None:
+                    texto = str(valor)
+                    if "." in texto and len(texto.split(".")[1]) == 3:
+                        texto += "0"
+                    fila[campo] = texto.replace(".", ",")
+            filas.append(fila)
+        dhl["rangos_usd"] = filas
     return {
         "seccion": "precios_web",
         "configuracion": (
             configuracion_oca if configuracion_oca is not None
             else leer_configuracion_oca()
         ),
-        "configuracion_dhl": (
-            configuracion_dhl if configuracion_dhl is not None
-            else leer_configuracion_dhl()
-        ),
+        "configuracion_dhl": dhl,
         "csrf_precio_web": _csrf_dhl("precios-web:oca"),
         "csrf_precio_dhl": _csrf_dhl("precios-web:dhl"),
     }
@@ -5376,10 +5390,44 @@ async def admin_precio_web_dhl_guardar(
     modo = str(form.get("dhl_modo") or "").strip().upper()
     markup = str(form.get("dhl_markup_pct") or "").strip()
     fijo = str(form.get("dhl_margen_fijo_ars") or "").strip()
+    rangos = None
     try:
+        extra = {}
+        if modo == "RANGOS_USD":
+            columnas = {
+                campo: form.getlist(f"dhl_rango_{campo}")
+                for campo in ("desde", "hasta", "tipo", "valor")
+            }
+            cantidades = {len(valores) for valores in columnas.values()}
+            if len(cantidades) != 1 or not 1 <= next(iter(cantidades)) <= 30:
+                raise ValueError("Completá de 1 a 30 rangos, con todos sus campos.")
+            rangos = [
+                {campo: str(valores[i]).strip() for campo, valores in columnas.items()}
+                for i in range(len(columnas["desde"]))
+            ]
+            normalizados = []
+            for indice, fila in enumerate(rangos, start=1):
+                try:
+                    normalizados.append({
+                        "desde": parse_importe_humano(fila["desde"]),
+                        "hasta": parse_importe_humano(fila["hasta"]),
+                        "tipo": fila["tipo"],
+                        "valor": (
+                            parse_numero_humano(fila["valor"])
+                            if fila["tipo"].upper() == "PCT"
+                            else parse_importe_humano(fila["valor"])
+                        ),
+                    })
+                except ValueError:
+                    raise ValueError(
+                        f"Rango {indice}: revisá los números. Usá coma para decimales; "
+                        "por ejemplo, 150,50."
+                    ) from None
+            extra["rangos_usd"] = normalizados
         guardar_configuracion_dhl(
             request=request, modo=modo,
             markup_pct=markup, margen_fijo_ars=fijo,
+            **extra,
         )
     except Exception as exc:
         status = 422 if isinstance(exc, ValueError) else 503
@@ -5390,12 +5438,14 @@ async def admin_precio_web_dhl_guardar(
         if status == 503:
             print(f"[admin] no pude guardar precio web DHL: {type(exc).__name__}")
         configuracion = leer_configuracion_dhl()
-        if modo in {"PCT", "FIJO_ARS"}:
+        if modo in {"PCT", "FIJO_ARS", "RANGOS_USD"}:
             configuracion["modo"] = modo
         if "dhl_markup_pct" in form:
             configuracion["markup_texto"] = markup
         if "dhl_margen_fijo_ars" in form:
             configuracion["fijo_texto"] = fijo
+        if rangos is not None:
+            configuracion["rangos_usd"] = rangos
         configuracion.update(estado=mensaje, error=mensaje)
         return templates.TemplateResponse(
             request=request, name="admin/precios_web.html",

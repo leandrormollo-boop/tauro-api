@@ -20,6 +20,12 @@ def _filas(**valores):
     ]
 
 
+RANGOS_DEMO = [
+    {"desde": "0", "hasta": "150", "tipo": "FIJO_ARS", "valor": "20000"},
+    {"desde": "150", "hasta": None, "tipo": "FIJO_USD", "valor": "100"},
+]
+
+
 def test_legacy_fijo_gana_sin_validar_porcentaje_inactivo_real():
     configuracion = precios._resolver(_filas(
         WEB_MARGEN_FIJO_DHL_ARS="135000",
@@ -82,6 +88,59 @@ def test_modo_nuevo_fijo_cero_es_valido_y_no_activa_porcentaje():
     })
     assert regla["tipo"] == precios.MODO_FIJO_ARS
     assert regla["valor"] == Decimal("0")
+
+
+def test_modo_rangos_lee_json_normalizado_y_no_valores_inactivos():
+    import json
+    regla = precios.pricing_publico_dhl({
+        precios.FILAS_CONFIG_KEY: _filas(
+            WEB_DHL_PRICING_MODE="RANGOS_USD",
+            WEB_DHL_RANGOS_USD=json.dumps(RANGOS_DEMO),
+            WEB_DHL_MARKUP_PCT="500",
+            WEB_DHL_MARGEN_FIJO_ARS="-1",
+        )
+    })
+    assert regla["tipo"] == "RANGOS_USD"
+    assert regla["valor"] == RANGOS_DEMO
+    assert regla["fuente"] == "DB_NUEVA"
+
+
+def test_rangos_invalidos_inactivos_no_bloquean_pct():
+    configuracion = precios._resolver(_filas(
+        WEB_DHL_PRICING_MODE="PCT",
+        WEB_DHL_MARKUP_PCT="20",
+        WEB_DHL_RANGOS_USD="json roto",
+    ), entorno={})
+    assert configuracion["publicable"] is True
+    assert configuracion["modo"] == "PCT"
+    assert configuracion["rangos_valido"] is False
+    assert configuracion["rangos_error"]
+
+
+def test_modo_rangos_db_no_completa_desde_env_y_env_ignora_db_huerfano():
+    import json
+    entorno = {precios.PARAMETRO_RANGOS_USD: json.dumps(RANGOS_DEMO)}
+    incompleta = precios._resolver(
+        _filas(WEB_DHL_PRICING_MODE="RANGOS_USD"),
+        entorno=entorno,
+    )
+    assert incompleta["publicable"] is False
+    invalida = precios._resolver(
+        _filas(
+            WEB_DHL_PRICING_MODE="RANGOS_USD",
+            WEB_DHL_RANGOS_USD="json DB roto",
+        ),
+        entorno=entorno,
+    )
+    assert invalida["publicable"] is False
+    assert invalida["rangos_fuente"] == "DB_NUEVA"
+    desde_entorno = precios._resolver(
+        _filas(WEB_DHL_RANGOS_USD="json DB roto"),
+        entorno={precios.PARAMETRO_MODO: "RANGOS_USD", **entorno},
+    )
+    assert desde_entorno["publicable"] is True
+    assert desde_entorno["rangos_fuente"] == "ENV_NUEVO"
+    assert desde_entorno["rangos_usd"] == RANGOS_DEMO
 
 
 @pytest.mark.parametrize(
@@ -255,6 +314,45 @@ def test_guardado_valida_solo_regla_activa_y_audita_en_transaccion(monkeypatch):
     )
 
 
+def test_guardado_rangos_es_atomico_y_serializa_json_canonico(monkeypatch):
+    cursor = _Cursor()
+    monkeypatch.setattr(precios, "get_conn", lambda: _Conn(cursor))
+    auditorias = []
+    monkeypatch.setattr(
+        "servicios.auditoria.registrar_desde_request_con_cursor",
+        lambda cur, request, **kwargs: auditorias.append((cur, kwargs)),
+    )
+
+    resultado = precios.guardar_configuracion_dhl(
+        request=SimpleNamespace(),
+        modo="RANGOS_USD",
+        markup_pct="inactivo inválido",
+        margen_fijo_ars="inactivo inválido",
+        rangos_usd=[
+            {"desde": Decimal("0"), "hasta": Decimal("150.50"),
+             "tipo": "PCT", "valor": Decimal("20.5")},
+            {"desde": Decimal("150.50"), "hasta": None,
+             "tipo": "FIJO_USD", "valor": Decimal("100")},
+        ],
+    )
+
+    assert resultado["modo"] == "RANGOS_USD"
+    assert resultado["rangos_usd"][0] == {
+        "desde": "0", "hasta": "150.5", "tipo": "PCT", "valor": "20.5",
+    }
+    guardado = next(
+        params[1]
+        for _, params in cursor.ejecutadas
+        if params and params[0] == precios.PARAMETRO_RANGOS_USD
+    )
+    assert guardado == (
+        '[{"desde":"0","hasta":"150.5","tipo":"PCT","valor":"20.5"},'
+        '{"desde":"150.5","hasta":null,"tipo":"FIJO_USD","valor":"100"}]'
+    )
+    assert auditorias[0][0] is cursor
+    assert auditorias[0][1]["metadata"]["despues"]["rangos_usd"]
+
+
 def _carrier_dhl_falso():
     class DHLFalso:
         def get_rates(self, _origen, _destino, _paquete):
@@ -306,6 +404,23 @@ def test_admin_nuevo_mueve_solo_web_y_allowlist_no_filtra_costos():
         clave for clave in web_30
         if clave.startswith(("costo", "markup", "margen", "fuente"))
     }
+
+
+def test_rangos_afectan_solo_wrapper_web_y_no_filtran_tramo():
+    import json
+    rangos_web_demo = [
+        {"desde": "0", "hasta": "150", "tipo": "FIJO_ARS", "valor": "30000"},
+        {"desde": "150", "hasta": None, "tipo": "FIJO_USD", "valor": "100"},
+    ]
+    filas = _filas(
+        WEB_DHL_PRICING_MODE="RANGOS_USD",
+        WEB_DHL_RANGOS_USD=json.dumps(rangos_web_demo),
+    )
+    web = _cotizar_con_filas(filas, carriers.cotizar_carriers_web)
+    legacy = _cotizar_con_filas(filas, carriers.cotizar_carriers)
+    assert web["precio_ars"] == 130000
+    assert legacy["precio_ars"] == 120000
+    assert not {"rango", "tipo", "valor", "fuente"}.intersection(web)
 
 
 def test_web_dhl_falla_cerrado_si_no_puede_verificar_db():

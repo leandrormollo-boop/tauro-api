@@ -106,6 +106,31 @@ def test_fijo_cero_explicito_persiste_y_audita(db):
     assert auditoria["metadata"]["despues"]["modo"] == "FIJO_ARS"
 
 
+def test_rangos_persisten_canonicos_y_cotizan_por_umbral_usd(db):
+    rangos_demo = [
+        {"desde": "0", "hasta": "150", "tipo": "FIJO_ARS", "valor": "20000"},
+        {"desde": "150", "hasta": None, "tipo": "FIJO_USD", "valor": "100"},
+    ]
+    resultado = precios.guardar_configuracion_dhl(
+        request=_request(),
+        modo="RANGOS_USD",
+        markup_pct="inactivo",
+        margen_fijo_ars="inactivo",
+        rangos_usd=rangos_demo,
+    )
+    regla = precios.pricing_publico_dhl()
+    cotizacion = precios.calcular_precio_publico_dhl(
+        {"costo": "150000", "moneda": "ARS"}, "1000", regla,
+    )
+    assert resultado["rangos_usd"] == rangos_demo
+    assert regla["tipo"] == "RANGOS_USD"
+    assert cotizacion == {"precio_ars": 250000, "precio_usd": 250.0}
+    assert _config(db)[precios.PARAMETRO_RANGOS_USD] == (
+        '[{"desde":"0","hasta":"150","tipo":"FIJO_ARS","valor":"20000"},'
+        '{"desde":"150","hasta":null,"tipo":"FIJO_USD","valor":"100"}]'
+    )
+
+
 def test_fallo_de_auditoria_revierte_modo_y_valor(db, monkeypatch):
     with db() as conn, conn.cursor() as cur:
         cur.execute(
@@ -136,3 +161,39 @@ def test_fallo_de_auditoria_revierte_modo_y_valor(db, monkeypatch):
     config = _config(db)
     assert config[precios.PARAMETRO_MODO] == "PCT"
     assert config[precios.PARAMETRO_MARKUP_PCT] == "10"
+
+
+def test_fallo_de_auditoria_revierte_modo_y_rangos(db, monkeypatch):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO config (parametro, valor) VALUES (%s, %s), (%s, %s)",
+            (
+                precios.PARAMETRO_MODO,
+                "PCT",
+                precios.PARAMETRO_MARKUP_PCT,
+                "10",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "servicios.auditoria.registrar_desde_request_con_cursor",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("auditoría indisponible")
+        ),
+    )
+    with pytest.raises(RuntimeError, match="auditoría indisponible"):
+        precios.guardar_configuracion_dhl(
+            request=_request(),
+            modo="RANGOS_USD",
+            markup_pct="",
+            margen_fijo_ars="",
+            rangos_usd=[{
+                "desde": "0", "hasta": None,
+                "tipo": "PCT", "valor": "20",
+            }],
+        )
+
+    config = _config(db)
+    assert config[precios.PARAMETRO_MODO] == "PCT"
+    assert config[precios.PARAMETRO_MARKUP_PCT] == "10"
+    assert precios.PARAMETRO_RANGOS_USD not in config

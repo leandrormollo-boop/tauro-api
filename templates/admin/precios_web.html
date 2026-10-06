@@ -2,6 +2,20 @@
 {% block title %}Precios de la web{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="/static/css/admin-precios-web.css?v=1">
+{% macro rango_dhl(fila={}) %}
+<div class="dhl-range-row" data-dhl-range-row>
+  <label>Desde (USD)<input name="dhl_rango_desde" type="text" inputmode="decimal" data-numero="importe" value="{{ fila.get('desde', '0') }}" aria-label="Costo desde (USD)" required></label>
+  <label>Hasta, sin incluir (USD)<input name="dhl_rango_hasta" type="text" inputmode="decimal" data-numero="importe" value="{{ fila.get('hasta') or '' }}" aria-label="Costo hasta, sin incluir (USD)" placeholder="Sin límite"></label>
+  <label>Ganancia<select name="dhl_rango_tipo" aria-label="Tipo de ganancia" required>
+    <option value="FIJO_USD" {% if fila.get('tipo', 'FIJO_USD') == 'FIJO_USD' %}selected{% endif %}>Fijo en USD</option>
+    <option value="PCT" {% if fila.get('tipo') == 'PCT' %}selected{% endif %}>% sobre costo</option>
+    <option value="FIJO_ARS" {% if fila.get('tipo') == 'FIJO_ARS' %}selected{% endif %}>Fijo en ARS</option>
+  </select></label>
+  <label>Valor<input name="dhl_rango_valor" type="text" inputmode="decimal" data-numero="decimal" value="{{ fila.get('valor', '') }}" aria-label="Valor de ganancia" required></label>
+  <button type="button" class="btn btn-ghost" data-dhl-remove-range aria-label="Quitar rango">Quitar</button>
+</div>
+{% endmacro %}
 <div class="page-title">
   <h1>Precios de la web</h1>
   <p>Definí los precios del cotizador público. Los precios por cliente se configuran desde cada cuenta.</p>
@@ -9,24 +23,33 @@
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:20px;max-width:1100px;align-items:start;">
 {% set dhl = configuracion_dhl|default({}) %}
-<section class="card" style="margin:0;">
+<section class="card" id="dhl-precio-card" style="margin:0;">
   <h2 style="font-size:20px;margin:0 0 20px;">DHL · Internacional</h2>
   <form method="POST" action="/admin/precios-web/dhl" data-web-price-dhl>
     <input type="hidden" name="csrf_precio_dhl" value="{{ csrf_precio_dhl }}">
     <div class="form-group">
-      <label for="dhl-modo">Cómo calcular la ganancia<span data-help="Ganancia de DHL">Se aplica una sola regla: porcentaje sobre el costo o un monto fijo en pesos. Cambia las nuevas cotizaciones de la web; no modifica el portal ni el checkout de tiendas.</span></label>
+      <label for="dhl-modo">Cómo calcular la ganancia<span data-help="Ganancia de DHL">Elegí una regla para todos los costos o una ganancia según el rango de costo. Cambia las nuevas cotizaciones de la web; no modifica el portal ni el checkout de tiendas.</span></label>
       <select id="dhl-modo" name="dhl_modo" data-dhl-mode>
         <option value="PCT" {% if dhl.modo == 'PCT' %}selected{% endif %}>Porcentaje sobre costo</option>
         <option value="FIJO_ARS" {% if dhl.modo == 'FIJO_ARS' %}selected{% endif %}>Ganancia fija en pesos</option>
+        <option value="RANGOS_USD" {% if dhl.modo == 'RANGOS_USD' %}selected{% endif %}>Según el costo del envío</option>
       </select>
     </div>
-    <div class="form-group" data-dhl-rule="PCT" {% if dhl.modo == 'FIJO_ARS' %}hidden{% endif %}>
+    <div class="form-group" data-dhl-rule="PCT" {% if dhl.modo in ('FIJO_ARS', 'RANGOS_USD') %}hidden{% endif %}>
       <label for="dhl-markup-pct">Markup DHL (%)</label>
       <input id="dhl-markup-pct" name="dhl_markup_pct" type="text" inputmode="decimal"
              data-numero="decimal" value="{{ dhl.markup_texto }}" placeholder="Ej.: 20"
-             {% if dhl.modo == 'FIJO_ARS' %}disabled{% else %}required{% endif %}>
+             {% if dhl.modo in ('FIJO_ARS', 'RANGOS_USD') %}disabled{% else %}required{% endif %}>
       <small>Precio = costo DHL + este porcentaje.</small>
     </div>
+    <fieldset class="dhl-ranges" data-dhl-rule="RANGOS_USD" {% if dhl.modo != 'RANGOS_USD' %}hidden disabled{% endif %}>
+      <legend>Rangos de costo DHL<span data-help="Costo y ganancia por rango">El rango se elige según el costo que DHL le cobra a TAURO, convertido a USD con el dólar de la cotización. Desde se incluye; Hasta pertenece al siguiente rango. Se suma sólo la ganancia de ese rango. Un importe fijo en USD se convierte con ese mismo dólar.</span></legend>
+      <div data-dhl-range-rows>
+        {% for fila in dhl.rangos_usd|default([]) %}{{ rango_dhl(fila) }}{% else %}{{ rango_dhl() }}{% endfor %}
+      </div>
+      <button type="button" class="btn btn-ghost" data-dhl-add-range>Agregar rango</button>
+      <small>Comenzá en 0. Dejá el último «Hasta» vacío para cubrir cualquier costo.</small>
+    </fieldset>
     <div class="form-group" data-dhl-rule="FIJO_ARS" {% if dhl.modo != 'FIJO_ARS' %}hidden{% endif %}>
       <label for="dhl-margen-fijo">Ganancia por envío (ARS)</label>
       <input id="dhl-margen-fijo" name="dhl_margen_fijo_ars" type="text" inputmode="decimal"
@@ -68,5 +91,6 @@
   </form>
 </section>
 </div>
-<script src="/static/js/admin-precios-web.js?v=1" defer></script>
+<template id="dhl-range-template">{{ rango_dhl() }}</template>
+<script src="/static/js/admin-precios-web.js?v=2" defer></script>
 {% endblock %}
