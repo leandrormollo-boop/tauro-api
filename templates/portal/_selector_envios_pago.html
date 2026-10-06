@@ -1,4 +1,4 @@
-{% macro dinero(valor) -%}$ {{ '{:,.2f}'.format(valor|default(0, true)).replace(',', '_').replace('.', ',').replace('_', '.') }}{%- endmacro %}
+{% macro dinero(valor) -%}$ {{ (valor|default(0, true))|numero_ars }}{%- endmacro %}
 {% macro selector_envios(destinos_pago, seleccion='') -%}
 <section class="account-document-selection" id="payment-documents" aria-labelledby="payment-selection-title">
   <div class="account-selection-heading"><h3 id="payment-selection-title">¿Qué envíos estás pagando?</h3><span id="payment-selected-count" aria-live="polite"></span></div>

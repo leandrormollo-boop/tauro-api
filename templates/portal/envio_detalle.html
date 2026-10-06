@@ -5,7 +5,7 @@
 {% set ambito = ambito_envio(s) %}
 {% block title %}Envío #{{ s.id }}{% endblock %}
 {% macro dinero_ars(valor) -%}
-$ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }} ARS
+$ {{ (valor or 0)|numero_ars }} ARS
 {%- endmacro %}
 
 {% block content %}
@@ -280,16 +280,16 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if loop.first and b.embalaje %}<div class="badge">{{ b.embalaje.nombre }}</div>{% endif %}
                         <div><strong>{{ item.descripcion_en or b.producto_alias }}</strong>
                         {% if item.hs_code %}<br><small class="mono" style="color:var(--fg-3)">HS {{ item.hs_code }}</small>{% endif %}
-                        {% if b.items_invoice %}<br><small>{{ item.unidades_aduana }} unidades {% if item.valor_total_usd is defined %}· Total USD {{ numero_ars(item.valor_total_usd) }}{% else %}× USD {{ numero_ars(item.valor_unitario_usd) }}{% endif %} · {{ numero_ars(item.peso_neto_kg) }} kg netos</small>{% endif %}</div>
+                        {% if b.items_invoice %}<br><small>{{ item.unidades_aduana }} unidades {% if item.valor_total_usd is defined %}· Total {{ (item.valor_total_usd)|dinero_usd }}{% else %}× {{ (item.valor_unitario_usd)|dinero_usd }}{% endif %} · {{ (item.peso_neto_kg)|kg }} netos</small>{% endif %}</div>
                     {% endfor %}</td>
                     <td class="mono">x{{ b.cantidad }}</td>
                     <td class="mono">{{ medida_cm(b.largo_cm) }} × {{ medida_cm(b.ancho_cm) }} × {{ medida_cm(b.alto_cm) }} cm</td>
-                    <td class="mono">{{ numero_ars(b.peso_kg) }} kg</td>
+                    <td class="mono">{{ (b.peso_kg)|kg }}</td>
                     <td class="num">
                         {% if courier_codigo == "OCA" %}Incluido en el total declarado{% elif b.valor_declarado_caja_usd %}
-                            USD {{ numero_ars(b.valor_declarado_caja_usd) }} por caja
+                            {{ (b.valor_declarado_caja_usd)|dinero_usd }} por caja
                         {% else %}
-                            USD {{ numero_ars(b.valor_unitario_usd) }} por unidad
+                            {{ (b.valor_unitario_usd)|dinero_usd }} por unidad
                         {% endif %}
                     </td>
                 </tr>
@@ -299,8 +299,8 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     <td><strong>{{ s.producto_alias }}</strong></td>
                     <td class="mono">x{{ s.cantidad }}</td>
                     <td class="mono">{{ medida_cm(s.largo_cm) }} × {{ medida_cm(s.ancho_cm) }} × {{ medida_cm(s.alto_cm) }} cm</td>
-                    <td class="mono">{{ numero_ars(s.peso_kg) }} kg</td>
-                    <td class="num">USD {{ numero_ars(s.valor_declarado_usd) }}</td>
+                    <td class="mono">{{ (s.peso_kg)|kg }}</td>
+                    <td class="num">{{ (s.valor_declarado_usd)|dinero_usd }}</td>
                 </tr>
             {% endif %}
             </tbody>
@@ -308,19 +308,19 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     </div>
     <div class="mini-row" style="margin-top:10px;">
         <span>Peso real total</span>
-        <strong>{{ numero_ars(s.resumen_pesos.real_total_kg) }} kg</strong>
+        <strong>{{ (s.resumen_pesos.real_total_kg)|kg }}</strong>
     </div>
     <div class="mini-row">
         <span>Peso por volumen (largo × ancho × alto ÷ {{ s.resumen_pesos.divisor }})</span>
-        <strong>{{ numero_ars(s.resumen_pesos.volumetrico_total_kg) }} kg</strong>
+        <strong>{{ (s.resumen_pesos.volumetrico_total_kg)|kg }}</strong>
     </div>
     <div class="mini-row">
         <span>Peso facturable total</span>
-        <strong>{{ numero_ars(s.resumen_pesos.facturable_total_kg) }} kg{% if s.resumen_pesos.cobra_por_volumen %} · <span class="badge warn">Se cobra por volumen</span>{% endif %}</strong>
+        <strong>{{ (s.resumen_pesos.facturable_total_kg)|kg }}{% if s.resumen_pesos.cobra_por_volumen %} · <span class="badge warn">Se cobra por volumen</span>{% endif %}</strong>
     </div>
     <div class="mini-row">
         <span>Valor declarado total</span>
-        <strong>{% if courier_codigo == "OCA" %}{{ dinero_ars(s.valor_declarado_ars) if s.valor_declarado_ars else "Pendiente de revisión" }}{% else %}USD {{ numero_ars(s.valor_declarado_usd) }}{% endif %}</strong>
+        <strong>{% if courier_codigo == "OCA" %}{{ dinero_ars(s.valor_declarado_ars) if s.valor_declarado_ars else "Pendiente de revisión" }}{% else %}{{ (s.valor_declarado_usd)|dinero_usd }}{% endif %}</strong>
     </div>
     <div class="mini-row">
         <span>Protección de carga</span>
@@ -390,15 +390,15 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <hr class="divider">
         <div class="mini-row">
             <span>Peso cotizado</span>
-            <strong>{{ d.peso_inicial_kg }} kg</strong>
+            <strong>{{ (d.peso_inicial_kg)|kg }}</strong>
         </div>
         <div class="mini-row">
             <span>Peso facturado por el courier</span>
-            <strong>{{ d.peso_facturado_kg }} kg · {{ (d.base_peso or 'otro').replace('_', ' ')|title }}</strong>
+            <strong>{{ (d.peso_facturado_kg)|kg }} · {{ (d.base_peso or 'otro').replace('_', ' ')|title }}</strong>
         </div>
         <div class="mini-row">
             <span>Diferencia de peso</span>
-            <strong>{{ d.diferencia_peso_kg }} kg</strong>
+            <strong>{{ (d.diferencia_peso_kg)|kg }}</strong>
         </div>
         <div class="mini-row">
             <span>Motivo</span>

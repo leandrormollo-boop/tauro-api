@@ -16,7 +16,7 @@
 {% if s.numero_guia_tauro %}<small>TAURO {{ s.numero_guia_tauro }}</small>{% endif %}<small>{{ op.fecha(s.created_at) }}</small></td>
 <td data-label="Cliente / proveedor"><a class="business-primary" href="{{ s.cliente_url }}">{{ s.cliente_id }}</a><small>{% if s.proveedor_url %}<a class="business-chip" href="{{ s.proveedor_url }}">{{ s.proveedor_nombre }} ↗</a>{% else %}{{ s.proveedor_nombre }}{% endif %}</small></td>
 <td data-label="Destino"><strong>{{ s.dest_nombre }}</strong><small>{{ s.dest_ciudad }} · {{ s.destino_pais }}</small><small>{{ s.remitente_pais or 'Origen sin informar' }} → {{ s.destino_pais }}</small></td>
-<td data-label="Cobro al cliente">{% if s.cobro.importe is not none %}<strong class="business-money">ARS {{ op.dinero(s.cobro.importe) }}</strong>{% endif %}
+<td data-label="Cobro al cliente">{% if s.cobro.importe is not none %}<strong class="business-money">$ {{ op.dinero(s.cobro.importe) }}</strong>{% endif %}
 <a href="{{ s.cliente_url }}?vista=pagos" class="business-status {{ s.cobro.tono }}">{{ s.cobro.label }}</a>
 {% if s.cobro.inconsistencia %}<a class="business-status error" href="{{ s.cliente_url }}#envios-cliente">Revisar: existe un cargo activo</a>{% endif %}
 {% for f in s.facturas_cliente %}<small><a href="{{ s.cliente_url }}/facturas#factura-{{ f.id }}">FC {{ '%04d'|format(f.punto_venta) }}-{{ '%08d'|format(f.numero) }}</a>{% if f.fecha_vencimiento %} · Vence {{ op.fecha(f.fecha_vencimiento) }}{% endif %}</small>{% endfor %}

@@ -2,7 +2,7 @@
 {% from 'portal/_documentos.html' import tarjeta_documento %}
 {% from 'portal/_recoleccion_resumen.html' import comprobante_retiro with context %}
 {% block title %}Gestionar envío #{{ s.id }}{% endblock %}
-{% macro ars(valor) %}$ {{ '{:,.2f}'.format(valor or 0).replace(',', '_').replace('.', ',').replace('_', '.') }}{% endmacro %}
+{% macro ars(valor) %}$ {{ (valor or 0)|numero_ars }}{% endmacro %}
 {% block content %}
 <section class="shipment-hub" data-shipment-hub>
     <header class="shipment-hub-summary">
@@ -55,12 +55,12 @@
         <div class="shipment-hub-content-list">
         {% for b in s.bultos or [] %}
             <section><h2>Caja {{ loop.index }} · {{ b.cantidad or 1 }} bulto{{ 's' if (b.cantidad or 1) != 1 else '' }}</h2>
-                <p>{{ b.peso_kg }} kg por caja · {{ b.largo_cm }} × {{ b.ancho_cm }} × {{ b.alto_cm }} cm</p>
-                {% for item in b.items_invoice or [b] %}<p class="shipment-hub-item"><strong>{{ item.descripcion_en or s.producto_alias }}</strong><span>{{ item.unidades_aduana or b.cantidad or 1 }} unidades · HS {{ item.hs_code or 'sin informar' }}{% if item.valor_total_usd is defined %} · USD {{ '%.2f'|format(item.valor_total_usd) }} total{% else %} · USD {{ item.valor_unitario_usd or 0 }} por unidad{% endif %}<br>Fabricación: {{ nombre_pais(item.pais_origen) if item.pais_origen else 'sin informar' }}{% if item.peso_neto_kg %} · Peso neto {{ item.peso_neto_kg }} kg{% endif %}</span></p>{% endfor %}
+                <p>{{ (b.peso_kg)|kg }} por caja · {{ (b.largo_cm)|medida_cm }} × {{ (b.ancho_cm)|medida_cm }} × {{ (b.alto_cm)|medida_cm }} cm</p>
+                {% for item in b.items_invoice or [b] %}<p class="shipment-hub-item"><strong>{{ item.descripcion_en or s.producto_alias }}</strong><span>{{ item.unidades_aduana or b.cantidad or 1 }} unidades · HS {{ item.hs_code or 'sin informar' }}{% if item.valor_total_usd is defined %} · {{ ((item.valor_total_usd))|dinero_usd }} total{% else %} · {{ (item.valor_unitario_usd or 0)|dinero_usd }} por unidad{% endif %}<br>Fabricación: {{ nombre_pais(item.pais_origen) if item.pais_origen else 'sin informar' }}{% if item.peso_neto_kg %} · Peso neto {{ (item.peso_neto_kg)|kg }}{% endif %}</span></p>{% endfor %}
             </section>
-        {% else %}<p>{{ s.cantidad }} bultos · {{ s.peso_kg }} kg · {{ s.producto_alias }}</p>{% endfor %}
+        {% else %}<p>{{ s.cantidad }} bultos · {{ (s.peso_kg)|kg }} · {{ s.producto_alias }}</p>{% endfor %}
         </div>
-        <p class="shipment-hub-declared">Valor declarado total <strong>USD {{ '%.2f'|format(s.valor_declarado_usd or 0) }}</strong> · {{ 'Con protección de carga' if s.asegurar_carga else 'Sin protección de carga' }}</p>
+        <p class="shipment-hub-declared">Valor declarado total <strong>{{ ((s.valor_declarado_usd or 0))|dinero_usd }}</strong> · {{ 'Con protección de carga' if s.asegurar_carga else 'Sin protección de carga' }}</p>
         <p>Pagador de impuestos: {{ (s.tax_paga or 'DESTINATARIO')|lower }}.</p>
     </div>
     {% if s.tracking %}
@@ -71,7 +71,7 @@
             <p>Fecha de recolección: <strong>{{ recoleccion.fecha.strftime('%d/%m/%Y') if recoleccion.fecha else 'Pendiente de confirmar' }}</strong></p>
             {{ comprobante_retiro(recoleccion) }}
         {% elif retiro_form %}
-            <p class="shipment-hub-pickup-address">Retiran en <strong>{{ retiro_form.origen.calle }}, {{ retiro_form.origen.ciudad }}</strong><br>{{ retiro_form.bultos }} bulto{{ 's' if retiro_form.bultos != 1 else '' }} · {{ '%g'|format(retiro_form.peso_kg) }} kg · Guía {{ s.tracking }}</p>
+            <p class="shipment-hub-pickup-address">Retiran en <strong>{{ retiro_form.origen.calle }}, {{ retiro_form.origen.ciudad }}</strong><br>{{ retiro_form.bultos }} bulto{{ 's' if retiro_form.bultos != 1 else '' }} · {{ ((retiro_form.peso_kg))|kg }} · Guía {{ s.tracking }}</p>
             <form method="POST" action="/portal/recolecciones/nueva" data-hub-operation>
                 <input type="hidden" name="gestion_ventana" value="1"><input type="hidden" name="solicitud_id" value="{{ s.id }}">
                 <input type="hidden" name="courier" value="{{ s.courier }}"><input type="hidden" name="bultos" value="{{ retiro_form.bultos }}"><input type="hidden" name="peso_kg" value="{{ retiro_form.peso_kg }}">

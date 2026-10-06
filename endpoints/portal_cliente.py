@@ -130,7 +130,8 @@ templates = Jinja2Templates(directory="templates")
 # de tracking y la división nacional/internacional salen de un solo lugar.
 from servicios.borradores import confirmar_borrador
 from servicios.couriers_urls import ambito_envio, es_nacional, nombre_courier, url_tracking
-from servicios.presentacion import dinero_ars, numero_ars, medida_cm, condiciones_cotizacion
+from servicios.presentacion import registrar_filtros, dinero_ars, numero_ars, medida_cm, condiciones_cotizacion
+registrar_filtros(templates.env)
 from servicios.estados_envio import HITOS_ENVIO_UI
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
@@ -144,16 +145,6 @@ templates.env.globals["condiciones_cotizacion"] = condiciones_cotizacion
 templates.env.globals["hitos_envio_ui"] = HITOS_ENVIO_UI
 
 
-def _es_admin_request(request: Request) -> bool:
-    token = getattr(request, "cookies", {}).get("admin_token")
-    if not token:
-        return False
-    # admin también importa helpers del portal: evitar el ciclo al cargar.
-    from endpoints.admin import _is_auth
-    return _is_auth(token)
-
-
-templates.env.globals["es_admin_request"] = _es_admin_request
 templates.env.globals["descriptor_documento"] = descriptor_documento
 
 
@@ -2316,13 +2307,12 @@ async def api_invoice_leer(request: Request, cliente: str = Depends(cliente_actu
 @router.post("/api/parsear-pedido")
 async def api_parsear_pedido(
     request: Request,
+    cliente: str = Depends(cliente_actual),
 ):
     """
     Recibe el texto de un pedido tal como llega por mail y devuelve los
     campos detectados para precargar el form de nuevo envío.
     """
-    if not _es_admin_request(request):
-        return JSONResponse({"ok": False, "motivo": "solo_admin"}, status_code=403)
     from servicios.parser_pedidos import parsear_pedido
     try:
         body = await request.json()
@@ -2718,24 +2708,6 @@ def _precargar_envio_existente(origen: dict, *, corregir_id: int | None = None):
     return form, remitente
 
 
-def _prefiere_envio_internacional(cliente: str) -> bool:
-    """Entrar directo a internacional solo si la cuenta nunca hizo nacionales.
-
-    Un cliente mixto sigue eligiendo; uno 100 % internacional (o sin historial
-    pero con courier internacional configurado, como WAIMAO → DHL) se ahorra
-    el paso. Ante cualquier error, mostramos el selector como siempre.
-    """
-    try:
-        ambitos = {ambito_envio(s) for s in listar_solicitudes_cliente(cliente, limite=None)}
-    except Exception:
-        return False
-    if "nacional" in ambitos:
-        return False
-    if "internacional" in ambitos:
-        return True
-    return str(courier_default_cliente(cliente) or "").lower() in {"dhl", "fedex", "ups"}
-
-
 @router.get("/envios/nuevo", response_class=HTMLResponse)
 def envio_nuevo_form(
     request: Request,
@@ -2779,19 +2751,22 @@ def envio_nuevo_form(
         "destino": destino,
         "courier": courier,
         "quote_id": quote_id,
+        "cotizacion_origen_id": cotizacion_origen_id,
         "cajas": cajas,
         "valor_cotizado": valor_cotizado,
+        "origen_ciudad": origen_ciudad,
+        "origen_cp": origen_cp,
+        "destino_ciudad": destino_ciudad,
+        "destino_cp": destino_cp,
+        "origen_referencia": origen_referencia,
+        "destino_referencia": destino_referencia,
+        "ventana": request.query_params.get("ventana", ""),
     }
     if ambito == "nacional":
         contactos = {k: v for k, v in (("remitente_id", remitente_id),
                     ("destinatario_id", destinatario_id)) if v}
         return RedirectResponse("/portal/oca/nuevo" + ("?" + urlencode(contactos) if contactos else ""), status_code=303)
     if not ambito:
-        if _prefiere_envio_internacional(cliente):
-            return RedirectResponse(
-                str(request.url.include_query_params(ambito="internacional")),
-                status_code=303,
-            )
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={

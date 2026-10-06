@@ -72,10 +72,10 @@
               {% for b in s.bultos %}
                 <strong>{{ b.producto_alias }}</strong> <small style="color:var(--fg-3)">x{{ b.cantidad }}</small>{% if not loop.last %}<br>{% endif %}
               {% endfor %}
-              <small class="admin-pedido-secondary">{{ s.cantidad }} cajas · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+              <small class="admin-pedido-secondary">{{ s.cantidad }} cajas · {{ (s.peso_kg)|kg }} · {{ (s.valor_declarado_usd)|dinero_usd }}</small>
             {% else %}
               <strong>{{ s.producto_alias }}</strong>
-              <small class="admin-pedido-secondary">x{{ s.cantidad }} · {{ s.peso_kg }} kg · USD {{ s.valor_declarado_usd }}</small>
+              <small class="admin-pedido-secondary">x{{ s.cantidad }} · {{ (s.peso_kg)|kg }} · {{ (s.valor_declarado_usd)|dinero_usd }}</small>
             {% endif %}
             {% if s.coti_id %}<small class="mono admin-pedido-secondary">{{ s.coti_id }}</small>{% endif %}
             </div>

@@ -100,7 +100,8 @@ from servicios import admin_sesiones
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
 from servicios.couriers_urls import nombre_courier
-from servicios.presentacion import dinero_ars, numero_ars
+from servicios.presentacion import registrar_filtros, dinero_ars, numero_ars
+registrar_filtros(templates.env)
 templates.env.globals["nombre_courier"] = nombre_courier
 templates.env.globals["dinero_ars"] = dinero_ars
 templates.env.globals["numero_ars"] = numero_ars

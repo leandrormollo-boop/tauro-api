@@ -57,7 +57,7 @@
 {% endmacro %}
 {% block title %}{{ "Requiere tu acción" if paso_filtro == "requieren_accion" else "Mis envíos" }}{% endblock %}
 {% macro dinero_ars(valor) -%}
-$ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}
+$ {{ (valor or 0)|numero_ars }}
 {%- endmacro %}
 
 {% block content %}
@@ -224,7 +224,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div><small style="color:var(--fg-4);display:block;">Operaciones vigentes</small><strong>{{ resumen_periodo.operaciones_vigentes }}</strong></div>
     <div>
         <small style="color:var(--fg-4);display:block;">Monto activo del período</small>
-        <strong class="portal-money-green">$ {{ "{:,.0f}".format(resumen_periodo.total_ars).replace(",", ".") }}</strong>
+        <strong class="portal-money-green">$ {{ (resumen_periodo.total_ars)|numero_ars }}</strong>
         <small style="color:var(--fg-4);display:block;">No suma guías canceladas o reemplazadas</small>
     </div>
     {% if resumen_periodo.canceladas_reemplazadas %}

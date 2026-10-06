@@ -28,7 +28,7 @@
     <div class="pickup-schedule">
         <span>Horario en el origen</span>
         <strong>{{ r.ready_time }}–{{ r.close_time }}</strong>
-        <small>{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ '%g'|format(r.peso_kg or 0) }} kg</small>
+        <small>{{ r.bultos }} bulto{{ 's' if r.bultos != 1 else '' }} · {{ ((r.peso_kg or 0))|kg }}</small>
     </div>
 
     <div class="pickup-state">

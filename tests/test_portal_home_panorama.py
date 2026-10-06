@@ -20,14 +20,15 @@ def test_inicio_es_un_escritorio_y_no_una_portada_decorativa():
 
 def test_acciones_y_ambitos_estan_visibles_sin_copiar_otras_marcas():
     for texto in (
-        "Nuevo envío",
         "Cotizar",
-        "Mis envíos",
         "Nacionales",
         "Internacionales",
         "Cuenta corriente",
     ):
         assert texto in HOME
+    assert 'home-primary-actions' not in HOME
+    for accion in ("Nuevo envío", "Cotizar", "Mis envíos"):
+        assert accion in BASE
     assert "BOXFLY" not in HOME.upper()
     assert "🌐" not in HOME
     assert "🇦🇷" not in HOME

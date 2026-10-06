@@ -2,7 +2,7 @@
 {% block title %}Nueva factura por lote{% endblock %}
 
 {% macro dinero(valor) -%}
-$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
+$ {{ (valor|default(0, true))|numero_ars }}
 {%- endmacro %}
 
 {% block content %}

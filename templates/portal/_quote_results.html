@@ -32,7 +32,7 @@
     {% if es_reseller and op.reseller_quote_id %}
     <form method="POST" action="/portal/cotizaciones/reseller.pdf" target="_blank" class="uq-reseller">
         <input type="hidden" name="quote_id" value="{{ op.reseller_quote_id }}">
-        <label>Precio en el PDF (ARS)<input type="text" name="precio" value="{{ '%.2f'|format(op.precio_final_ars) }}" inputmode="decimal" data-numero="monto" required></label>
+        <label>Precio en el PDF (ARS)<input type="text" name="precio" value="{{ (op.precio_final_ars)|numero_ars }}" inputmode="decimal" data-numero="monto" required></label>
         <button type="submit" class="btn btn-ghost btn-sm">Descargar cotización PDF</button>
     </form>
     {% endif %}

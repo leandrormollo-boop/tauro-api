@@ -33,7 +33,6 @@
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
         <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete y factura comercial.{% endif %}</p>
-        {% if not form.editar_solicitud_id and not reemision_origen and not repeticion_origen %}<a class="shipment-scope-switch" href="/portal/envios/nuevo?ambito=nacional">¿Es un envío nacional?</a>{% endif %}
     </div>
     <div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a></div>
 </div>
@@ -68,22 +67,20 @@
     </div>
 {% endif %}
 {% if form.valor_total_cotizado_usd %}
-    <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>USD {{ "{:,.2f}".format(form.valor_total_cotizado_usd).replace(",", "_").replace(".", ",").replace("_", ".") }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
+    <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>{{ ((form.valor_total_cotizado_usd))|dinero_usd }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
 {% endif %}
 
-{# Atajo exclusivo para operadores con sesión administrativa validada. #}
-{% if es_admin_request(request) and not pedido_tienda and not reemision_origen and not repeticion_origen %}
-<section class="card shipment-admin-paste" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
-    <label for="pedido-pegado">Pegar pedido recibido por mail (solo TAURO)</label>
+<details class="card shipment-paste" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
+    <summary>Pegar pedido recibido por mail</summary>
     <div style="margin-top:14px;">
+        <label for="pedido-pegado">Texto del pedido</label>
         <textarea id="pedido-pegado" rows="7" placeholder="Pegá el texto del pedido tal como te llegó (cajas, medidas, quien envía, quien recibe...)"></textarea>
         <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
             <button type="button" id="btn-parsear" class="btn btn-primary btn-sm">Leer pedido y precargar</button>
             <span id="parse-status" style="font-size:12.5px;color:var(--fg-3);"></span>
         </div>
     </div>
-</section>
-{% endif %}
+</details>
 
 <!-- Cuatro pantallas independientes: cada tema se completa sin mezclar datos. -->
 <div class="stepper" id="stepper-envio">
@@ -386,7 +383,7 @@
                                             data-valor="{{ p.valor_usd_default }}"
                                             data-desc="{{ p.nombre_invoice }}" data-hs="{{ p.hs_code }}"
                                             {% if f.producto == p.alias_interno %}selected{% endif %}>
-                                        {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
+                                        {{ p.alias_interno }} · {{ (p.peso_kg)|kg }} · {{ (p.largo_cm)|medida_cm }} × {{ (p.ancho_cm)|medida_cm }} × {{ (p.alto_cm)|medida_cm }} cm
                                     </option>
                                 {% endfor %}
                             </select>
@@ -440,7 +437,7 @@
                 <article class="bulto-row shipment-invoice-card" data-invoice-bulto data-bulto-index="{{ loop.index0 }}">
                     <div class="shipment-box-head">
                         <div><span>Factura comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
-                        <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
+                        <small data-package-reference>{% if f.peso_kg %}{{ (f.peso_kg)|kg }}{% else %}Medidas del paso anterior{% endif %}</small>
                         <button type="button" class="btn btn-ghost btn-sm invoice-item-add">Agregar artículo</button>
                     </div>
                     {% if invoice_asistente_habilitado() %}{% include 'portal/_invoice_asistente.html' %}{% endif %}
@@ -461,7 +458,7 @@
                         </div>
                         <div class="form-group shipment-declared-value">
                             <div class="shipment-field-label"><label>Valor total</label><span data-help="Valor total">Valor de todas las unidades de este artículo, en todas las cajas de esta fila. No hace falta dividirlo por la cantidad.</span></div>
-                            <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_total_usd if f.valor_total_usd is defined else (f.items_invoice[0].valor_total_usd if f.items_invoice and f.items_invoice[0].valor_total_usd is defined else ('%.2f'|format((f.valor_unitario_usd|float) * (f.unidades_aduana|int)) if f.valor_unitario_usd else '')) }}" required></div>
+                            <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_total_usd if f.valor_total_usd is defined else (f.items_invoice[0].valor_total_usd if f.items_invoice and f.items_invoice[0].valor_total_usd is defined else (((f.valor_unitario_usd|float) * (f.unidades_aduana|int))|numero_maquina if f.valor_unitario_usd else '')) }}" required></div>
                             <small class="invoice-line-total" data-invoice-line-total></small>
                         </div>
                         <div class="form-group">
@@ -773,8 +770,14 @@
     var cantidad = valor(".bulto-cantidad") || "1";
     var medidas = [valor(".bulto-largo"), valor(".bulto-ancho"), valor(".bulto-alto")];
     var partes = [];
-    if (peso) partes.push(peso + " kg");
-    if (medidas.every(Boolean)) partes.push(medidas.join("×") + " cm");
+    if (peso) {
+      var pesoNumero = numeroInvoice(peso, "decimal");
+      partes.push(Number.isFinite(pesoNumero) ? pesoNumero.toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " kg" : "Revisá el peso");
+    }
+    if (medidas.every(Boolean)) partes.push(medidas.map(function (m) {
+      var n = numeroInvoice(m, "decimal");
+      return Number.isFinite(n) ? n.toLocaleString("es-AR", {maximumFractionDigits: 20}) : "—";
+    }).join(" × ") + " cm");
     partes.push(cantidad + (cantidad === "1" ? " caja" : " cajas iguales"));
     var ref = invoice.querySelector("[data-package-reference]");
     if (ref) ref.textContent = partes.join(" · ");
@@ -855,7 +858,7 @@
       var unidades = numeroInvoice(items[i].unidades_aduana, "entero");
       var valor = numeroInvoice(items[i].valor_total_usd);
       item.querySelector("[data-invoice-line-total]").textContent = unidades > 0 && valor > 0
-        ? "Por unidad: ≈ USD " + (valor / unidades).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 3})
+        ? "Por unidad: ≈ USD " + (valor / unidades).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
         : "";
     });
     var total = subtotalArticulos(invoice);
@@ -1371,7 +1374,7 @@
           } else if (paquetes.length) {
             var p = paquetes[0];
             aviso += " Elegí el producto del catálogo que corresponda" +
-              (p.peso_kg ? " (el mail dice " + p.peso_kg + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
+              (p.peso_kg ? " (el mail dice " + Number(p.peso_kg).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
           }
           parseStatus.textContent = aviso;
           refreshLivePrice();

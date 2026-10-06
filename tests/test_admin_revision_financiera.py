@@ -105,7 +105,7 @@ def test_pantalla_bloquea_acciones_y_separa_importes(monkeypatch, requerida, apr
     html = r.body.decode()
     pendiente = requerida and not aprobada
     assert ('Aprobar TC, sin aplicar cargos' in html) == pendiente
-    assert ('1500.000000 ARS por USD' in html) == pendiente
+    assert ('1.500,00 ARS por USD' in html) == pendiente
     assert ('Confirmar y calcular' in html) == (not pendiente)
     assert ('/matches/3/confirmar' in html) == (not pendiente)
     assert ('(TC aprobado)' in html) == aprobada

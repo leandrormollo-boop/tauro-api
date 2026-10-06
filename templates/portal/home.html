@@ -20,7 +20,7 @@
 {%- endmacro %}
 
 {% macro dinero(valor) -%}
-$ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").replace("X", ".") }}
+$ {{ (valor|abs)|numero_ars }}
 {%- endmacro %}
 
 {% macro lista_ambito(titulo, ambito, solicitudes) -%}
@@ -69,11 +69,6 @@ $ {{ "{:,.2f}".format(valor|float|abs).replace(",", "X").replace(".", ",").repla
         <h1>Hola, {{ cliente }}</h1>
         <p>Tu operación nacional e internacional, en una sola vista.</p>
     </div>
-    <nav class="home-workspace-actions home-primary-actions" aria-label="Acciones principales">
-        <a href="/portal/envios/nuevo" class="btn btn-primary">{{ icono("plus") }} Nuevo envío</a>
-        <a href="/portal/cotizar" data-cotizar-ventana class="btn btn-ghost">{{ icono("quote") }} Cotizar</a>
-        <a href="/portal/envios" class="btn btn-ghost">{{ icono("shipments") }} Mis envíos</a>
-    </nav>
 </header>
 
 <section class="home-summary-strip" aria-label="Resumen de la operación">

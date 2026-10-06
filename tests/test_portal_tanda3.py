@@ -39,7 +39,7 @@ def render_quote(op=None, *, ambito="internacional", tax="DESTINATARIO", reselle
                                       (None, "Se confirma al emitir")])
 def test_7a_condiciones_reales_de_cada_opcion_y_configuracion(tax, texto):
     html = render_quote(tax=tax)
-    for esperado in ("Moneda", "ARS", "8 kg", "Cobro por volumen", "Sí",
+    for esperado in ("Moneda", "ARS", "8,00 kg", "Cobro por volumen", "Sí",
                      "3 días hábiles", texto):
         assert esperado in html
     assert "Puerta a puerta" not in html

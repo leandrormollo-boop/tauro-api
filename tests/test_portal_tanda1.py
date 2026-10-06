@@ -41,55 +41,45 @@ def wizard(monkeypatch):
     return lambda token="": pc.envio_nuevo_form(request(token=token), ambito="internacional", cliente="DEMO").body.decode()
 
 
-@pytest.mark.parametrize("courier,rutas,automatico", [
-    ("dhl", [], True), ("fedex", [("AR", "AR")], False), ("dhl", [("CN", "MX")], True),
-    ("", [("CN", "AR")], True), ("", [("AR", "US")], True),
-    ("", [("AR", "AR"), ("CN", "AR")], False),
-    ("", [("AR", "AR")], False), ("", [], False),
-    ("", [("", "")], False),
+@pytest.mark.parametrize("courier,rutas", [
+    ("dhl", []), ("fedex", [("AR", "AR")]), ("dhl", [("CN", "MX")]),
+    ("", [("CN", "AR")]), ("", [("AR", "US")]),
+    ("", [("AR", "AR"), ("CN", "AR")]),
+    ("", [("AR", "AR")]), ("", []), ("", [("", "")]),
 ])
-def test_entrada_internacional_conserva_parametros(wizard, monkeypatch, courier, rutas, automatico):
+def test_entrada_siempre_ofrece_ambitos_y_conserva_contactos(wizard, monkeypatch, courier, rutas):
     monkeypatch.setattr(pc, "courier_default_cliente", lambda _: courier)
     monkeypatch.setattr(pc, "listar_solicitudes_cliente", lambda *_, **__: [
         dict(remitente_pais=o, destino_pais=d) for o, d in rutas])
-    response = pc.envio_nuevo_form(request("remitente_id=7&destinatario_id=8&ventana=1"), cliente="DEMO")
-    assert response.status_code == (303 if automatico else 200)
-    if automatico:
-        assert parse_qs(urlsplit(response.headers["location"]).query) == {
-            "remitente_id": ["7"], "destinatario_id": ["8"], "ventana": ["1"],
-            "ambito": ["internacional"],
-        }
+    response = pc.envio_nuevo_form(request(), remitente_id=7, destinatario_id=8, cliente="DEMO")
+    assert response.status_code == 200
+    assert "Envío nacional" in response.body.decode() and "Envío internacional" in response.body.decode()
+    for ambito in ("nacional", "internacional"):
+        assert parse_qs(urlsplit(response.context[ambito + "_url"]).query) == {
+            "remitente_id": ["7"], "destinatario_id": ["8"], "ambito": [ambito]}
 
 
-def test_ambito_explicito_prevalece_y_hay_link_nacional(wizard, monkeypatch):
+def test_ambito_explicito_prevalece_sin_link_nacional(wizard, monkeypatch):
     monkeypatch.setattr(pc, "courier_default_cliente", lambda _: "dhl")
     response = pc.envio_nuevo_form(request("ambito=nacional"), ambito="nacional", cliente="DEMO")
     assert response.headers["location"] == "/portal/oca/nuevo"
-    assert 'href="/portal/envios/nuevo?ambito=nacional">¿Es un envío nacional?</a>' in wizard()
+    assert '¿Es un envío nacional?' not in wizard()
 
 
-@pytest.mark.parametrize("token,permitido", [("", False), ("invalido", False), ("vigente", True)])
-def test_pegar_pedido_solo_admin_en_form_y_api(wizard, monkeypatch, token, permitido):
-    from endpoints import admin
+@pytest.mark.parametrize("token", ["", "invalido", "vigente"])
+def test_pegar_pedido_para_clientes_cerrado_sin_gate_admin(wizard, monkeypatch, token):
     from servicios import parser_pedidos
-    auth = Mock(side_effect=lambda token: token == "vigente")
-    monkeypatch.setattr(admin, "_is_auth", auth)
     parser = Mock(return_value={"campos": {"dest_nombre": "Prueba"}})
     monkeypatch.setattr(parser_pedidos, "parsear_pedido", parser)
     html = wizard(token)
-    assert ('id="pedido-pegado"' in html) == permitido
-    assert ('Pegar pedido recibido por mail (solo TAURO)' in html) == permitido
-    if permitido:
-        assert '<section class="card shipment-admin-paste"' in html
+    assert '<details class="card shipment-paste"' in html
+    assert '<summary>Pegar pedido recibido por mail</summary>' in html
+    assert 'open' not in html.split('<details class="card shipment-paste"', 1)[1].split('>', 1)[0]
     api_request = request(token=token)
     api_request._body = json.dumps({"texto": "Pedido de prueba"}).encode()
-    response = asyncio.run(pc.api_parsear_pedido(api_request))
-    assert response.status_code == (200 if permitido else 403)
-    assert parser.call_count == int(permitido)
-    if token:
-        assert auth.call_count == 2
-    else:
-        auth.assert_not_called()
+    response = asyncio.run(pc.api_parsear_pedido(api_request, cliente="DEMO"))
+    assert response.status_code == 200
+    parser.assert_called_once_with("Pedido de prueba")
 
 
 class EstadoActual(HTMLParser):
@@ -159,8 +149,9 @@ def test_espacio_de_navegacion_y_foco_responsive():
     dock = (ROOT / "static/css/portal-dock.css").read_text()
     css = (ROOT / "static/css/tauro.css").read_text()
     assert "@media (min-width: 901px)" in dock
-    assert ".portal-operacion .tabbar { display: none; }" in dock
-    assert "padding-right" not in dock
+    assert "padding-right: var(--dock-rail)" in dock
+    assert "--dock-rail: 76px" in dock and "max-height: 719px" in dock
+    assert "clamp(" in dock and "overflow-y: auto" not in dock
     assert "padding-bottom: 96px" in css
     assert "scroll-margin-bottom: calc(96px + var(--tabbar-h, 62px)" in css
     result = subprocess.run(["node", "--test", "tests/js/shipment-focus.test.cjs"],
@@ -228,7 +219,7 @@ def browser():
         browser.close()
 
 
-def abrir_local(page, html):
+def abrir_local(page, html, path="/portal/envios/nuevo?ambito=internacional"):
     """Recorrido con assets reales; sin red, base de datos ni couriers."""
     def responder(route):
         path = urlsplit(route.request.url).path
@@ -244,15 +235,25 @@ def abrir_local(page, html):
         else:
             route.abort()
     page.route("**/*", responder)
-    page.goto("https://portal.test/portal/envios/nuevo?ambito=internacional")
+    page.goto("https://portal.test" + path)
 
 
-@pytest.mark.parametrize("ancho", [1100, 390])
-def test_dock_y_pais_enfocado_no_tapan_contenido(browser, wizard, ancho):
-    page = browser.new_page(viewport={"width": ancho, "height": 700})
+@pytest.mark.parametrize("ancho,alto", [(1100, 700), (1440, 900), (1280, 600), (390, 700)])
+def test_dock_y_pais_enfocado_no_tapan_contenido(browser, wizard, ancho, alto):
+    page = browser.new_page(viewport={"width": ancho, "height": alto})
     try:
         abrir_local(page, wizard())
-        assert page.locator(".tabbar").is_visible() == (ancho == 390)
+        assert page.locator(".tabbar").is_visible()
+        dock = page.locator(".tabbar").bounding_box()
+        contenido = page.locator(".main-inner").bounding_box()
+        if ancho > 900:
+            assert dock["x"] >= contenido["x"] + contenido["width"]
+            assert 0 <= dock["y"] and dock["y"] + dock["height"] <= alto
+            assert page.locator(".tabbar").evaluate("el => el.scrollHeight <= el.clientHeight")
+            assert page.locator(".tabbar-item:visible").count() == 6
+        else:
+            assert dock["y"] + dock["height"] == pytest.approx(alto, abs=1)
+            assert page.locator(".mobile-bar .burger").is_visible()
         # Abrir Destinatario; la validación del remitente pertenece a otros tests.
         page.locator(".shipment-step-sender").evaluate(
             "sec => sec.querySelectorAll('input, select, textarea').forEach(el => {el.required = false; el.setCustomValidity('');})")
