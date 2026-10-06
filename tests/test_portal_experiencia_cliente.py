@@ -43,6 +43,8 @@ def test_estado_principal_y_filtro_coinciden_sin_reescribir_historia(operacion, 
 def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100, template="portal/envios.html",
             error="", puede_emitir=False, tracking_numero="DEMO-0001"):
     env = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=select_autoescape())
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     env.globals.update(
         dinero_ars=dinero_ars, numero_ars=numero_ars, medida_cm=medida_cm,
         hitos_envio_ui=HITOS_ENVIO_UI,
@@ -120,7 +122,9 @@ def test_listado_sin_ajustes_muestra_un_solo_costo_final():
     assert 'Ver desglose' not in html
     assert 'envio-price-initial' not in html
     assert 'Total registrado · ARS' not in html
-    assert html.count('$ 125,00') == 2  # fila + total de la página
+    # fila + total de la página + monto activo del período (mismo formato en todo el portal)
+    assert html.count('$ 125,00') == 3
+    assert html.count('class="shipment-price') == 1
 
 
 def test_listado_prioriza_datos_concretos_y_deja_el_visor_en_el_detalle():

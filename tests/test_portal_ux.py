@@ -16,9 +16,12 @@ def _template(nombre: str) -> str:
 
 def test_home_prioriza_nuevo_envio_y_cotizar_sin_onboarding_generico():
     html = _template("home.html")
-    assert 'href="/portal/envios/nuevo"' in html
-    assert 'href="/portal/cotizar"' in html
-    assert "home-primary-actions" in html
+    base = (RAIZ / "templates" / "base.html").read_text(encoding="utf-8")
+    # Leandro pidió quitar la botonera de arriba: Nuevo envío y Cotizar
+    # quedan en el menú flotante de la derecha y en la barra lateral.
+    assert 'href="/portal/envios/nuevo"' in base
+    assert 'href="/portal/cotizar"' in base
+    assert "home-primary-actions" not in html
     assert "checklist" not in html
     assert "arranque" not in html
     assert "Cargá tu primer producto" not in html

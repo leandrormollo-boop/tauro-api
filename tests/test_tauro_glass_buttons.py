@@ -26,5 +26,4 @@ def test_light_theme_has_glass_for_cards_and_dark_glass_on_home_hero():
 
 
 def test_home_keeps_primary_semantics_for_main_actions():
-    assert 'href="/portal/envios/nuevo" class="btn btn-primary"' in HOME
     assert 'class="btn btn-primary">Rastrear</button>' in HOME

@@ -236,6 +236,8 @@ def test_admin_y_portal_no_recortan_el_motivo(monkeypatch):
 def test_mensaje_en_html_escapa_datos_y_separa_observaciones():
     env = Environment(loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"),
                       autoescape=select_autoescape())
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     html = env.get_template("_error_operacion.html").render(
         mensaje_error="Ciudad del destinatario: revisá el código postal.\n<script>alert(1)</script>")
     assert 'role="alert"' in html and html.count("<p ") == 2
@@ -245,6 +247,8 @@ def test_mensaje_en_html_escapa_datos_y_separa_observaciones():
 def test_admin_muestra_el_rechazo_una_sola_vez():
     env = Environment(loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"),
                       autoescape=select_autoescape())
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     env.globals.update(pendientes_admin=lambda: 0, alertas_guias_reemplazadas=lambda: 0)
     request = Request({"type": "http", "method": "GET", "path": "/admin/pedidos", "headers": [],
                        "state": {"csp_nonce": "test"}})
