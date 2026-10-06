@@ -7,6 +7,7 @@
 <header class="business-heading"><div><div class="eyebrow"><a href="/admin/operadores">Proveedores</a></div><h1>{{ op.nombre(courier) }}</h1><p>Envíos, facturas y pagos de este proveedor.</p></div>{{ op.logo(courier) }}</header>
 {% include 'admin/proveedor_nav.html' %}
 {% include 'admin/operador_mensajes.html' %}
+{% if courier in ('OCA','DHL') %}<div class="op-actions"><a href="/admin/precios-web" class="btn btn-ghost">Precios de la web</a></div>{% endif %}
 {% if vista=='cuenta' %}
 {{ op.resumen(resumen) }}
 <div class="op-actions"><a href="/admin/conciliacion-couriers?courier={{ courier }}" class="btn btn-ghost">Cargar / conciliar documentos</a>{% if courier=='DHL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer PDF DHL</a>{% endif %}</div>

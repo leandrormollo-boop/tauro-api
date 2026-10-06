@@ -39,3 +39,51 @@ El preflight de Tiendanube exige ahora fulfillment_ready de OCA además de capac
 
 ## IVA de la tarifa contractual
 El usuario confirmó que el tarifario OCA es neto. El portal agrega 21% de IVA una sola vez al costo y al precio de venta, después del margen neto. WAIMAO: neto OCA × 1,20 × 1,21. El costo persistido incluye IVA para compararlo con el importe final cobrado. La huella de configuración invalida cotizaciones previas sin IVA; no se reescriben cargos históricos. Las integraciones ajenas al portal conservan su política actual.
+
+## Cotizador nacional de la web pública
+
+La web incorpora la opción Nacional. `POST /cotizar-web/nacional` consulta
+`Tarifar_Envio_Corporativo` para puerta a puerta, con CP de origen/destino,
+cantidad de bultos iguales, peso y dimensiones por bulto y valor declarado
+total en ARS enteros. Acepta CPA y lo normaliza a CP4. La búsqueda pública
+`GET /cotizar-web/ubicaciones` usa la misma base argentina del portal:
+autocompleta coincidencias exactas únicas y ofrece opciones cuando hay varias.
+Un CP completo también permite cotizar sin inventar una localidad.
+
+En Admin → Configuración → **Precios de la web** (`/admin/precios-web`),
+el administrador activa OCA y define su markup sobre el costo. Se guardan
+`WEB_OCA_PUBLICA_HABILITADA` y `WEB_MARKUP_PCT_OCA` en la tabla `config`;
+su ausencia mantiene el canal apagado. No hay markup inicial, herencia de un
+cliente ni fallback al margen internacional. Guardar requiere sesión y CSRF,
+y registra precio y auditoría en una misma transacción. La pantalla genérica
+de configuración no permite editar estas claves.
+
+El precio conserva la política neta contractual documentada arriba:
+tarifa OCA × (1 + markup / 100), redondeada a centavos, y luego IVA × 1,21
+una sola vez. Se calcula con Decimal y se entrega como texto con dos decimales.
+La respuesta pública sólo contiene precio final ARS, servicio y plazo informado
+por OCA. Nunca devuelve costo, markup, CUIT, operativa ni respuesta XML.
+No se acepta un precio inferior al costo. Los precios acordados por cliente
+continúan en `cliente_courier_config` y no cambian con este ajuste.
+
+La consulta exige configuración productiva aprobada para cotización, sin
+credenciales QA ni logística inversa. No exige habilitar emisión. Tiene límites
+durables PostgreSQL de 30 consultas por IP y 120 globales cada 5 minutos;
+el global conserva el tope aunque cambien encabezados/IP. Un fallo de base
+bloquea la consulta antes de contactar OCA. El lookup tiene su propio límite.
+Los topes de tamaño/peso del formulario son defensivos, no una certificación
+de cobertura o admisibilidad contractual de cada paquete.
+
+Esta versión no emite guías ni guarda cotizaciones nacionales en la tabla
+internacional `cotizaciones_web`. “Continuar en el portal” abre el cotizador
+nacional autenticado, donde se aplican los permisos y precios de esa cuenta.
+Correo Argentino y Andreani no se ofrecen hasta integrar sus tarifas.
+
+El 06/10/2026 se verificó una consulta real de tarifa contra OCA productivo
+sin crear envíos ni modificar la configuración comercial: respondió precio
+y plazo. La vista local usa esa respuesta grabada, identificada como prueba,
+con markup de demostración. Activar la web en producción requiere definir
+el markup comercial y autorizar su publicación.
+
+Referencias primarias: [OCA Developers e-Pak](https://developers.oca.com.ar/epak.html)
+y [contrato del método Tarifar_Envio_Corporativo](https://webservice.oca.com.ar/ePak_tracking/Oep_TrackEPak.asmx?op=Tarifar_Envio_Corporativo).
