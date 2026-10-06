@@ -10,7 +10,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 <div class="account-history-head">
     <div>
         <h2 id="account-ledger-title">{% if inicio_cuenta|default(none) %}Movimientos desde septiembre{% else %}Todos tus movimientos{% endif %}</h2>
-        <p>{% if inicio_cuenta|default(none) %}Desde el {{ inicio_cuenta.strftime('%d/%m/%Y') }}. El historial previo está agrupado en el saldo anterior.{% else %}Envíos, facturas, pagos y ajustes en orden de fecha.{% endif %}</p>
+        <p>{% if inicio_cuenta|default(none) %}Desde el {{ inicio_cuenta.strftime('%d/%m/%Y') }}. El historial previo está agrupado en el saldo anterior.{% else %}Envíos, pagos y ajustes en orden de fecha.{% endif %}</p>
     </div>
     {% if movimientos.total_resultados %}<p class="account-results-count">{{ movimientos.pagina_desde }}–{{ movimientos.pagina_hasta }} de {{ movimientos.total_resultados }}</p>{% endif %}
 </div>
@@ -37,7 +37,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         <label>
             <span>Tipo</span>
             <select name="tipo">
-                {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos y facturas"), ("costos", "Cargos y ajustes"), ("pagos", "Pagos"), ("diferencias", "Ajustes"), ("revision", "En revisión")) %}
+                {% for clave, etiqueta in (("todos", "Todos"), ("cargos", "Envíos"), ("costos", "Cargos y ajustes"), ("pagos", "Pagos"), ("diferencias", "Ajustes"), ("revision", "En revisión")) %}
                 <option value="{{ clave }}" {% if tipo_filtro == clave %}selected{% endif %}>{{ etiqueta }}</option>
                 {% endfor %}
             </select>
@@ -105,7 +105,8 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% elif m.tipo == 'PAGO' %}
                             <span class="badge ok">Pago confirmado</span>
                         {% elif m.tipo == 'PENDIENTE_FACTURA' %}
-                            <span class="badge warn">Pendiente de factura</span>
+                            {# La facturación pendiente es un dato interno de TAURO (admin). #}
+                            <span class="badge">Envío</span>
                         {% elif m.tipo == 'TAX' %}
                             <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">TAX</span>
                         {% elif m.tipo == 'DIFERENCIA' %}
@@ -113,7 +114,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% elif m.tipo == 'AJUSTE_PRECIO' %}
                             <span class="badge {% if m.haber_ars %}ok{% else %}warn{% endif %}">{{ "Descuento TAURO" if m.haber_ars else "Ajuste de precio" }}</span>
                         {% else %}
-                            <span class="badge">Facturado</span>
+                            <span class="badge">Envío</span>
                         {% endif %}
                         {% if m.tipo in ('FC', 'PENDIENTE_FACTURA') and m.diferencia_detalle %}
                             <span class="badge {% if m.diferencia_detalle.es_credito %}ok{% else %}warn{% endif %}">{{ "Crédito de flete" if m.diferencia_detalle.es_credito else "Con diferencia" }}</span>
@@ -182,7 +183,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if m.numero_factura %}<small>FC {{ m.numero_factura }}</small>{% endif %}
                         {% if not m.numero_guia and not m.numero_factura %}<span>—</span>{% endif %}
                         <span class="account-document-actions">
-                            {% if m.pago_id and m.tipo != "PAGO_RECHAZADO" %}<a href="/portal/pagos/{{ m.pago_id }}/imputar">Ver / imputar pago</a>{% endif %}
+                            {% if m.pago_id and m.tipo != "PAGO_RECHAZADO" %}<a href="/portal/pagos/{{ m.pago_id }}/imputar">Ver envíos del pago</a>{% endif %}
                             {% if m.solicitud_id %}<a href="/portal/envios/{{ m.solicitud_id }}">Ver envío</a>{% endif %}
                         </span>
                         {% if m.archivo_url %}

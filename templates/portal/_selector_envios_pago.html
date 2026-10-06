@@ -2,7 +2,7 @@
 {% macro selector_envios(destinos_pago, seleccion='') -%}
 <section class="account-document-selection" id="payment-documents" aria-labelledby="payment-selection-title">
   <div class="account-selection-heading"><h3 id="payment-selection-title">¿Qué envíos estás pagando?</h3><span id="payment-selected-count" aria-live="polite"></span></div>
-  <p class="account-payment-notice">Elegí uno o varios. Lo que no asignes queda a cuenta.<span data-help="Imputación del pago">Si el envío ya está facturado, elegí su factura. Vincular el pago no lo descuenta dos veces del saldo. Un pago nuevo requiere aprobación de TAURO.</span></p>
+  <p class="account-payment-notice">Elegí uno o varios. Lo que no asignes queda a cuenta.<span data-help="Imputación del pago">Si varios envíos ya se facturaron juntos, aparecen agrupados en una sola línea. Asignar el pago no lo descuenta dos veces del saldo. Un pago nuevo requiere aprobación de TAURO.</span></p>
   <div class="account-document-tools"><label for="payment-document-search">Buscar envío o factura<input type="search" id="payment-document-search" placeholder="Destinatario, guía o factura" autocomplete="off"></label><button type="button" class="btn btn-ghost btn-sm" id="payment-clear-documents" hidden>Quitar selección</button></div>
   <fieldset class="account-allocation-options">
     <legend class="sr-only">Envíos y facturas disponibles</legend>
