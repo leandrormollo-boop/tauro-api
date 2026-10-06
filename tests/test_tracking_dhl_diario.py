@@ -44,7 +44,18 @@ def test_normaliza_entregado_por_el_evento_mas_reciente():
         "estado": "ENTREGADO",
         "estado_courier": "OK",
         "descripcion": "Shipment delivered",
+        # Sin GMTOffset no adivinamos la hora del evento.
+        "evento_at": None,
     }
+
+
+def test_guarda_la_fecha_real_del_evento_con_su_zona():
+    resultado = tracking.normalizar_respuesta_dhl(_respuesta({
+        "date": "2026-10-01", "time": "18:40:00", "GMTOffset": "+08:00",
+        "typeCode": "PU", "description": "Shipment picked up",
+    }))
+
+    assert resultado["evento_at"].isoformat() == "2026-10-01T18:40:00+08:00"
 
 
 def test_retenido_no_se_confunde_con_actualizacion_aduanera_normal():
@@ -292,6 +303,85 @@ def test_postgres_persiste_entrega_y_luego_la_excluye(monkeypatch):
         assert guardado["tracking_estado_courier"] == "OK"
         assert guardado["tracking_finalizado_at"] is not None
         assert guardado["tracking_error"] is None
+    finally:
+        with admin.cursor() as cur:
+            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        admin.close()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="requiere TAURO_TEST_DATABASE_URL aislada",
+)
+def test_postgres_repetir_el_mismo_evento_no_simula_un_movimiento(monkeypatch):
+    schema = f"test_tracking_{uuid.uuid4().hex}"
+    schema_sql = (RAIZ / "sql" / "schema.sql").read_text(encoding="utf-8")
+    admin = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    admin.set_client_encoding("UTF8")
+    admin.autocommit = True
+    try:
+        with admin.cursor() as cur:
+            cur.execute(f'CREATE SCHEMA "{schema}"')
+            cur.execute(f'SET search_path TO "{schema}"')
+            cur.execute(schema_sql)
+
+        @contextmanager
+        def conexion():
+            conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+            conn.set_client_encoding("UTF8")
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(f'SET search_path TO "{schema}"')
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
+
+        monkeypatch.setattr(tracking, "get_conn", conexion)
+        with conexion() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO clientes (cliente_id, email, nombre)
+                               VALUES ('TRACK_REP', 'rep@example.invalid', 'REP')""")
+                cur.execute("""
+                    INSERT INTO solicitudes_guia (
+                        cliente_id, producto_alias, destino_pais, dest_nombre,
+                        dest_direccion, dest_ciudad, dest_zip, courier,
+                        tracking, estado, coti_id, precio_tauro_ars
+                    ) VALUES ('TRACK_REP', 'Producto', 'MX', 'Destinatario',
+                              'Calle 1', 'CDMX', '11540', 'DHL', '2413493235',
+                              'DESPACHADO', 'COTI-REP', 10000) RETURNING id""")
+                solicitud_id = int(cur.fetchone()["id"])
+
+        class DHL:
+            def track(self, _numero):
+                return _respuesta({
+                    "date": "2026-10-01", "time": "18:40:00", "GMTOffset": "+08:00",
+                    "typeCode": "PU", "description": "Shipment picked up",
+                })
+
+        def leer():
+            with conexion() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""SELECT tracking_evento_at, tracking_cambio_at,
+                                          tracking_actualizado_at
+                                   FROM solicitudes_guia WHERE id=%s""", (solicitud_id,))
+                    return cur.fetchone()
+
+        tracking.actualizar_tracking_dhl(solicitud_id, cliente_dhl=DHL())
+        primero = leer()
+        with conexion() as conn:
+            with conn.cursor() as cur:
+                # Simulamos que pasaron días: la consulta siguiente trae lo mismo.
+                cur.execute("""UPDATE solicitudes_guia
+                               SET tracking_cambio_at = tracking_cambio_at - INTERVAL '5 days'
+                               WHERE id=%s""", (solicitud_id,))
+        tracking.actualizar_tracking_dhl(solicitud_id, cliente_dhl=DHL())
+        segundo = leer()
+
+        from datetime import datetime as _dt, timezone as _tz
+        assert primero["tracking_evento_at"] == _dt(2026, 10, 1, 10, 40, tzinfo=_tz.utc)
+        assert segundo["tracking_cambio_at"] == primero["tracking_cambio_at"] - __import__("datetime").timedelta(days=5)
+        assert segundo["tracking_actualizado_at"] >= primero["tracking_actualizado_at"]
     finally:
         with admin.cursor() as cur:
             cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')

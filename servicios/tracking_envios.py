@@ -118,6 +118,31 @@ def _ultimo_evento(respuesta: dict) -> dict:
     return max(enumerate(eventos), key=_clave_evento)[1]
 
 
+def instante_evento(evento: dict) -> Optional[datetime]:
+    """Fecha y hora real del evento informado por DHL, con zona horaria.
+
+    Sin offset no sabemos en qué país ocurrió: preferimos no mostrar una hora
+    equivocada antes que inventarla.
+    """
+    if not isinstance(evento, dict):
+        return None
+    crudo = _texto(
+        evento.get("timestamp") or evento.get("dateTime")
+        or evento.get("gmtDateTime"), 80,
+    )
+    if not crudo:
+        fecha = _texto(evento.get("date"), 20)
+        hora = _texto(evento.get("time"), 20)
+        if not fecha:
+            return None
+        crudo = f"{fecha}T{hora or '00:00:00'}{_texto(evento.get('GMTOffset'), 10)}"
+    try:
+        instante = datetime.fromisoformat(crudo.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return instante if instante.tzinfo else None
+
+
 def _detalle_evento(evento: dict) -> str:
     partes = [
         evento.get("typeCode"),
@@ -184,6 +209,7 @@ def normalizar_respuesta_dhl(respuesta: dict) -> dict:
         "estado": estado,
         "estado_courier": codigo,
         "descripcion": descripcion,
+        "evento_at": instante_evento(evento),
     }
 
 
@@ -251,6 +277,18 @@ def actualizar_tracking_dhl(
                         tracking_descripcion = %s,
                         tracking_consultado_at = NOW(),
                         tracking_actualizado_at = NOW(),
+                        -- Fecha real del último evento del courier y momento
+                        -- en que vimos cambiar el mensaje. tracking_actualizado_at
+                        -- sigue siendo "último dato confirmado" para el admin.
+                        tracking_evento_at = COALESCE(%s, tracking_evento_at),
+                        tracking_cambio_at = CASE
+                            WHEN tracking_cambio_at IS NULL
+                                 OR tracking_estado IS DISTINCT FROM %s
+                                 OR tracking_estado_courier IS DISTINCT FROM %s
+                                 OR tracking_descripcion IS DISTINCT FROM %s
+                                THEN NOW()
+                            ELSE tracking_cambio_at
+                        END,
                         tracking_vigilancia_desde = CASE WHEN %s = 'RETENIDO'
                             THEN COALESCE(tracking_vigilancia_desde, NOW())
                             ELSE tracking_vigilancia_desde END,
@@ -272,6 +310,10 @@ def actualizar_tracking_dhl(
                     (
                         normalizado["estado"],
                         normalizado["estado"],
+                        normalizado["estado"],
+                        normalizado.get("estado_courier") or "",
+                        normalizado.get("descripcion") or "",
+                        normalizado.get("evento_at"),
                         normalizado["estado"],
                         normalizado.get("estado_courier") or "",
                         normalizado.get("descripcion") or "",

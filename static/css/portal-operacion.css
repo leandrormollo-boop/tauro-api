@@ -353,6 +353,9 @@ html[data-theme="light"] .portal-operacion .envio-service-cell .track-link { col
 .portal-operacion .envios-table .row-actions .btn-sm { font-size: 12px; min-height: 36px; }
 .portal-operacion .envios-table .row-actions > a { white-space: normal; text-align: center; }
 .portal-operacion .tracking-sync-note { color: var(--fg-3); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+.portal-operacion .tracking-event-time { color: var(--fg-2); font-size: 12.5px; }
+.portal-operacion .tracking-original { color: var(--fg-3); font-size: 12px; }
+.portal-operacion .tracking-stalled { margin-top: 10px; }
 
 /* Formularios cómodos: crecer verticalmente antes que comprimir el texto. */
 html[data-theme="light"] .portal-operacion .wizard-compacto form > .card,
