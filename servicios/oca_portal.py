@@ -162,6 +162,12 @@ def request_cotizacion(cliente, payload, ident):
 def cotizar(cliente, form):
     config, adapter = adapter_cliente(cliente)
     payload = preparar(form, config)
+    cotizacion_origen_id = form.get("cotizacion_origen_id")
+    if cotizacion_origen_id:
+        from servicios.cotizaciones_portal import referencia
+        if not referencia(cliente, cotizacion_origen_id):
+            raise ValueError("La cotización venció o no pertenece a tu cuenta. Volvé a cotizar.")
+        payload["_cotizacion_origen_id"] = cotizacion_origen_id
     ident = uuid.uuid4().hex
     result = adapter.quote(request_cotizacion(cliente, payload, ident))[0]
     if (

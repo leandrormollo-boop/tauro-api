@@ -1608,7 +1608,7 @@ CREATE TABLE IF NOT EXISTS cotizaciones_reseller (
     cliente_id              TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
     ruta                    TEXT NOT NULL,
     bultos                  JSONB NOT NULL DEFAULT '[]'::jsonb,
-    peso_facturable_kg      NUMERIC(12,3) NOT NULL,
+    peso_facturable_kg      NUMERIC(12,3),
     tiempo_estimado         TEXT NOT NULL,
     precio_base_ars         NUMERIC(14,2) NOT NULL,
     courier                 TEXT NOT NULL,
@@ -1618,6 +1618,9 @@ CREATE TABLE IF NOT EXISTS cotizaciones_reseller (
 );
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_reseller_cliente_vigencia
     ON cotizaciones_reseller(cliente_id, vigente_hasta DESC);
+
+-- Las cotizaciones nacionales pueden no informar peso facturable.
+ALTER TABLE cotizaciones_reseller ALTER COLUMN peso_facturable_kg DROP NOT NULL;
 
 -- ── Solicitudes de guía desde portal ────────────────────────
 CREATE TABLE IF NOT EXISTS solicitudes_guia (

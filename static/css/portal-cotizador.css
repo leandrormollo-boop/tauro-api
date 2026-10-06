@@ -180,3 +180,10 @@ html[data-theme="dark"] :is(.unified-quote,.national-shipment,.client-dialog)
 .uq-scopes a svg.scope-symbol{width:28px;height:28px;opacity:1;filter:none}
 .uq-scopes a.is-active .scope-symbol--nacional{filter:drop-shadow(0 0 4px rgba(139,107,247,.24))}
 .uq-scopes a.is-active .scope-symbol--internacional{filter:drop-shadow(0 0 4px rgba(139,107,247,.24))}
+
+.uq-conditions { margin: 10px 0 16px; font-size: 12px; color: var(--fg-2); }
+.uq-conditions > div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.uq-conditions dt { flex: 1; }
+.uq-conditions dd { flex: 1; margin: 0; text-align: right; overflow-wrap: anywhere; }
+.uq-client-download { margin-top: 10px; }
+.quote-comparison p { margin: 4px 0; font-size: 12px; line-height: 1.4; }

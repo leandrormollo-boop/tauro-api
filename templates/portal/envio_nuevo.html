@@ -138,6 +138,7 @@
     <input type="hidden" name="intl_courier" id="intl_courier" value="{{ form.intl_courier or '' }}">
     {# Importe que el cliente VIO y aceptó. El servidor vuelve a cotizar y,
        si cambió, no crea la solicitud hasta que confirme el nuevo valor. #}
+    <input type="hidden" name="cotizacion_origen_id" id="cotizacion_origen_id" value="{{ form.cotizacion_origen_id or '' }}">
     <input type="hidden" name="precio_cotizado_ars" id="precio_cotizado_ars" value="{{ form.precio_cotizado_ars or '' }}">
     <div class="card">
         <div class="form-section shipment-step shipment-step-sender">
@@ -1086,7 +1087,7 @@
   let priceSeq = 0;
 
   function fmtARS(n) {
-    return "$ " + Math.round(n).toLocaleString("es-AR");
+    return "$ " + Number(n).toLocaleString("es-AR", {minimumFractionDigits:2, maximumFractionDigits:2});
   }
 
   function renderLivePrice(state, data) {
@@ -1172,6 +1173,15 @@
         "<span class='moneda'>ARS · " + op.nombre + "</span>" +
       "</div>" +
       "<span class='precio-detalle'>" + t + "</span>" + fuera;
+    var comparacion = op.comparacion_cotizacion;
+    if (comparacion) {
+      var aviso = document.createElement("div");
+      aviso.className = "msg warn quote-comparison";
+      [comparacion.texto, comparacion.diferencia, comparacion.motivo].forEach(function (texto) {
+        var linea = document.createElement("p"); linea.textContent = texto; aviso.appendChild(linea);
+      });
+      liveBox.appendChild(aviso);
+    }
   }
 
   document.querySelectorAll("#courier-btns [data-courier]").forEach(function (btn) {
@@ -1226,6 +1236,7 @@
         // devuelve el courier. Sin esto el preview muestra un precio que
         // después no es el que factura el courier.
         body: JSON.stringify({
+          cotizacion_origen_id: (document.getElementById("cotizacion_origen_id") || {}).value || "",
           destino: destino,
           bultos: bultos,
           dest_zip: (document.getElementById("dest_zip") || {}).value || "",
