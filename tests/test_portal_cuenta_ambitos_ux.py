@@ -1,6 +1,7 @@
 """Contrato del portal para la cuenta por ámbito y el aviso de pagos."""
 
 import asyncio
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,23 +10,48 @@ import pytest
 
 import endpoints.portal_cliente as portal
 import servicios.cuenta_corriente as cuenta
+from servicios import periodo_visual_cuenta as periodo_visual
 
 
 RAIZ = Path(__file__).resolve().parent.parent
 IDEMPOTENCY_KEY = "a" * 43
+HOY = date(2026, 10, 6)
 
 
 def _template_cuenta_completo():
     return "\n".join(
         (RAIZ / "templates" / "portal" / nombre).read_text(encoding="utf-8")
-        for nombre in ("cuenta.html", "cuenta_movimientos.html", "_selector_envios_pago.html")
+        for nombre in (
+            "cuenta.html", "cuenta_movimientos.html", "cuenta_apertura.html",
+            "cuenta_pagos.html", "cuenta_parcial.html", "_selector_envios_pago.html",
+        )
     )
 
 
 @pytest.fixture(autouse=True)
 def _detalles_cuenta_aislados(monkeypatch):
     monkeypatch.setattr(portal, "listar_destinos_pago", lambda _cliente: [])
-    monkeypatch.setattr(portal, "obtener_experiencia_cuenta", lambda _cliente, _resumen: None)
+    monkeypatch.setattr(
+        portal, "obtener_experiencia_cuenta",
+        lambda _cliente, _resumen, **_kwargs: {
+            "pagos": [],
+            "pagos_paginacion": {
+                "pagina_actual": 1, "total_paginas": 1, "total": 0,
+                "pagina_desde": 0, "pagina_hasta": 0,
+            },
+        },
+    )
+    monkeypatch.setattr(portal, "obtener_periodo_cuenta", lambda _cliente, inicio: {
+        "saldo_anterior_ars": Decimal("0"), "cargos_desde_ars": Decimal("1200"),
+        "creditos_desde_ars": Decimal("0"), "pagos_desde_ars": Decimal("700"),
+        "neto_desde_ars": Decimal("500"), "saldo_total_ars": Decimal("500"),
+        "redondeo_ars": Decimal("0"), "fecha_inicio": inicio.isoformat(),
+        "fecha_inicio_visible": inicio.strftime("%d/%m/%Y"),
+        "hay_movimientos_anteriores": False, "sin_fecha_cantidad": 0,
+        "criterio": "Datos de prueba.", "advertencia_sin_fecha": "",
+    })
+    monkeypatch.setattr(periodo_visual, "_hoy_argentina", lambda: HOY)
+    monkeypatch.setattr(periodo_visual, "inicio_cuenta_cliente", lambda _cliente: None)
 
 
 def _resumen():
@@ -89,8 +115,8 @@ def test_cuenta_usa_solo_cliente_de_sesion_y_normaliza_filtros(monkeypatch):
     monkeypatch.setattr(portal, "resumen_cuenta_por_ambito", lambda cliente: (
         llamadas.append(("resumen", cliente)) or _resumen()
     ))
-    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args: (
-        llamadas.append(("movimientos", *args)) or _movimientos()
+    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args, **kwargs: (
+        llamadas.append(("movimientos", args, kwargs)) or _movimientos()
     ))
     monkeypatch.setattr(portal.templates, "TemplateResponse", lambda **kwargs: kwargs)
 
@@ -101,7 +127,9 @@ def test_cuenta_usa_solo_cliente_de_sesion_y_normaliza_filtros(monkeypatch):
 
     assert llamadas == [
         ("resumen", "CLIENTE_SESION"),
-        ("movimientos", "CLIENTE_SESION", "nacional", "pagos", 3, 6),
+        ("movimientos", ("CLIENTE_SESION", "nacional", "pagos", 3, 6), {
+            "q": "", "desde": "2026-01-01", "hasta": "2026-12-31",
+        }),
     ]
     assert respuesta["context"]["ambito_filtro"] == "nacional"
     assert respuesta["context"]["saldo"]["saldo_pendiente_ars"] == Decimal("500")
@@ -113,8 +141,8 @@ def test_cuenta_usa_solo_cliente_de_sesion_y_normaliza_filtros(monkeypatch):
 def test_query_manipulada_vuelve_a_consolidado_y_pagina_uno(monkeypatch):
     recibidos = []
     monkeypatch.setattr(portal, "resumen_cuenta_por_ambito", lambda _cliente: _resumen())
-    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args: (
-        recibidos.append(args) or _movimientos()
+    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args, **kwargs: (
+        recibidos.append((args, kwargs)) or _movimientos()
     ))
     monkeypatch.setattr(portal.templates, "TemplateResponse", lambda **kwargs: kwargs)
 
@@ -123,14 +151,16 @@ def test_query_manipulada_vuelve_a_consolidado_y_pagina_uno(monkeypatch):
         cliente="CLIENTE_SESION",
     )
 
-    assert recibidos == [("CLIENTE_SESION", "consolidado", "todos", 1, 6)]
+    assert recibidos == [(('CLIENTE_SESION', 'consolidado', 'todos', 1, 6), {
+        "q": "", "desde": "2026-01-01", "hasta": "2026-12-31",
+    })]
 
 
 def test_diferencias_usan_tres_filas_para_conservar_la_vista_compacta(monkeypatch):
     recibidos = []
     monkeypatch.setattr(portal, "resumen_cuenta_por_ambito", lambda _cliente: _resumen())
-    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args: (
-        recibidos.append(args) or _movimientos()
+    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *args, **kwargs: (
+        recibidos.append((args, kwargs)) or _movimientos()
     ))
     monkeypatch.setattr(portal.templates, "TemplateResponse", lambda **kwargs: kwargs)
 
@@ -139,13 +169,17 @@ def test_diferencias_usan_tres_filas_para_conservar_la_vista_compacta(monkeypatc
     )
 
     assert recibidos == [
-        ("CLIENTE_SESION", "consolidado", "diferencias", 1, 3),
+        (("CLIENTE_SESION", "consolidado", "diferencias", 1, 3), {
+            "q": "", "desde": "2026-01-01", "hasta": "2026-12-31",
+        }),
     ]
 
 
 def test_cuenta_genera_clave_opaca_nueva_por_render(monkeypatch):
     monkeypatch.setattr(portal, "resumen_cuenta_por_ambito", lambda _cliente: _resumen())
-    monkeypatch.setattr(portal, "movimientos_cuenta_paginados", lambda *_args: _movimientos())
+    monkeypatch.setattr(
+        portal, "movimientos_cuenta_paginados", lambda *_args, **_kwargs: _movimientos(),
+    )
     monkeypatch.setattr(portal.templates, "TemplateResponse", lambda **kwargs: kwargs)
 
     primera = portal.cuenta_corriente(SimpleNamespace(), cliente="CLIENTE_SESION")
@@ -245,7 +279,7 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
     script = (RAIZ / "static" / "js" / "portal-cuenta.js").read_text(encoding="utf-8")
 
     for texto in (
-        "Saldo total", "Nacional", "Internacional", "Todos tus movimientos",
+        "Saldo total", "Nacional", "Internacional", "Tus movimientos",
         "Facturado", "Pagos aprobados", "A facturar", "Pagos por vincular",
         "¿Qué envíos estás pagando?", "El pago se descuenta del saldo cuando TAURO aprueba el comprobante",
     ):
@@ -259,6 +293,18 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
     assert "movimientos.paginas_visibles" in html
     assert "cuenta_url(pagina=numero)" in html
     assert "account-unified-filters" in html
+    assert "data-account-window" in html
+    assert 'data-account-window-field="mes"' in html
+    assert 'data-account-window-field="rango"' in html
+    assert "data-account-opening" in html
+    assert "data-account-payments" in html
+    assert "data-account-payment-page" in html
+    assert "{% if periodo.hay_movimientos_anteriores %}" in html
+    assert "input.required = active" in script
+    assert 'parsed.querySelector("[data-account-payments]")' in script
+    assert 'parsed.querySelector("[data-account-opening]")' in script
+    assert "paymentCurrent.replaceWith" in script
+    assert "openingCurrent.replaceWith" in script
     assert "vista=facturas" not in html
     assert "account-tabs" not in html
 

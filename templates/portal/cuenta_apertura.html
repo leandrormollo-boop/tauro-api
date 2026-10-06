@@ -1,0 +1,12 @@
+<div data-account-opening>
+{% set periodo = periodo_cuenta|default(none) %}
+{% if periodo %}
+<dl class="account-opening">
+{% if periodo.hay_movimientos_anteriores %}<div><dt>Saldo anterior{% if periodo.saldo_anterior_ars < 0 %} a favor{% endif %} al {{ periodo.fecha_inicio_visible }}<span data-help="Saldo anterior">Incluye los movimientos anteriores de ambos ámbitos. Los pagos sin fecha original confirmada se muestran aparte. Ya forma parte del saldo total.</span></dt><dd>{{ dinero(periodo.saldo_anterior_ars|abs) }}</dd></div>{% endif %}
+{% if periodo.pagos_sin_fecha_original_ars %}<div><dt>Pagos sin fecha original confirmada<span data-help="Fecha contable">Reducen el saldo total, pero no se atribuyen al saldo anterior ni a un período histórico.</span></dt><dd>− {{ dinero(periodo.pagos_sin_fecha_original_ars) }}</dd></div>{% endif %}
+{% if periodo.redondeo_ars %}<div><dt>Redondeo de presentación<span data-help="Redondeo">Diferencia entre los importes mostrados a dos decimales y el saldo calculado con su precisión original.</span></dt><dd>{{ dinero(periodo.redondeo_ars) }}</dd></div>{% endif %}
+</dl>
+{% if periodo.advertencia_pagos_fecha_original %}<p class="account-opening-note">{{ periodo.advertencia_pagos_fecha_original }}</p>{% endif %}
+{% if periodo.advertencia_sin_fecha %}<p class="account-opening-note">{{ periodo.advertencia_sin_fecha }}</p>{% endif %}
+{% elif periodo_error|default('') %}<p role="status">{{ periodo_error }}</p>{% endif %}
+</div>
