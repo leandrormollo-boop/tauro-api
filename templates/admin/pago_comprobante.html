@@ -1,0 +1,38 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Comprobante del pago #{{ pago.id }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/admin-pago-comprobante.css?v=1">
+{% set cuenta_url = '/admin/clientes/' ~ (pago.cliente_id|urlencode) ~ '?vista=pagos#pago-' ~ pago.id %}
+{% set volver_url = '/admin/pagos/pendientes' if volver == 'pendientes' else cuenta_url %}
+<section class="admin-payment-receipt">
+  <a class="receipt-back" href="{{ volver_url }}">← {{ 'Pagos por verificar' if volver == 'pendientes' else 'Pagos de ' ~ pago.cliente_id }}</a>
+  <div class="page-title">
+    <h1>{{ 'Comprobante del pago' if pago.tiene_comprobante else 'Adjuntar comprobante' }}</h1>
+    <p>Pago #{{ pago.id }} · <a href="{{ cuenta_url }}">{{ pago.cliente_id }}</a> · {{ pago.fecha }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</p>
+  </div>
+  {% if request.query_params.get('error') %}<div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>{% endif %}
+  {% if pago.tiene_comprobante and request.query_params.get('adjuntado') %}<div class="msg ok" role="status">Comprobante adjuntado al pago #{{ pago.id }}.</div>{% endif %}
+  <div class="card receipt-summary">
+    <div><span>Importe del pago registrado</span><strong>{{ dinero_ars(pago.monto_ars) }}</strong><span>{{ pago.estado_label }}</span></div>
+    <div><span>Imputación</span><p>{{ pago.imputacion_label }}</p></div>
+  </div>
+  {% if pago.tiene_comprobante %}
+    <div class="receipt-actions">
+      <a class="btn btn-primary" href="/admin/pagos/{{ pago.id }}/comprobante" target="_blank" rel="noopener">Ver comprobante</a>
+      <a class="btn btn-ghost" href="/admin/pagos/{{ pago.id }}/comprobante" download>Descargar</a>
+      <a class="btn btn-ghost" href="{{ volver_url }}">Volver a pagos</a>
+    </div>
+  {% else %}
+    <form class="card receipt-form" action="/admin/pagos/{{ pago.id }}/adjuntar-comprobante{% if volver == 'pendientes' %}?volver=pendientes{% endif %}" method="post" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_comprobante" value="{{ csrf_comprobante }}">
+      <div class="form-group">
+        <label for="admin-payment-receipt-file">Comprobante</label>
+        <input id="admin-payment-receipt-file" name="comprobante" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" aria-describedby="receipt-help" required>
+        <small id="receipt-help">PDF, JPG o PNG · Máximo 8 MB.</small>
+      </div>
+      <p class="receipt-note">Se agrega a este pago. El importe, el estado y la imputación se mantienen.</p>
+      <div class="receipt-actions"><button class="btn btn-primary" type="submit">Guardar comprobante</button><a class="btn btn-ghost" href="{{ volver_url }}">Cancelar</a></div>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

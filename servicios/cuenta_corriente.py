@@ -2444,13 +2444,17 @@ def get_comprobante(pago_id: int, cliente_id: Optional[str] = None):
 
 
 @_conflictos_como_valueerror
-def adjuntar_comprobante_pago(
+def _adjuntar_comprobante_pago(
     cliente_id: str,
     pago_id: int,
     contenido: bytes,
     nombre: str,
+    *,
+    audit_event: str,
+    actor_type: str,
+    actor_ref: str,
 ) -> bool:
-    """Adjunta evidencia faltante a un pago propio sin alterar su contabilidad.
+    """Núcleo transaccional para adjuntar evidencia sin alterar contabilidad.
 
     La fila del pago y el lock documental global serializan el doble click y
     los intentos concurrentes de asociar el mismo archivo a pagos distintos.
@@ -2533,9 +2537,9 @@ def adjuntar_comprobante_pago(
                 raise RuntimeError("No se pudo adjuntar el comprobante al pago.")
             registrar_evento_con_cursor(
                 cur,
-                event="cuenta.adjuntar_comprobante_pago",
-                actor_type="cliente",
-                actor_ref=cliente,
+                event=audit_event,
+                actor_type=actor_type,
+                actor_ref=actor_ref,
                 ip=None,
                 method=None,
                 path=None,
@@ -2550,6 +2554,48 @@ def adjuntar_comprobante_pago(
                 },
             )
             return True
+
+
+def adjuntar_comprobante_pago(
+    cliente_id: str,
+    pago_id: int,
+    contenido: bytes,
+    nombre: str,
+) -> bool:
+    """Adjunta un comprobante faltante desde la cuenta del propio cliente."""
+    cliente = str(cliente_id or "").strip().upper()
+    return _adjuntar_comprobante_pago(
+        cliente,
+        pago_id,
+        contenido,
+        nombre,
+        audit_event="cuenta.adjuntar_comprobante_pago",
+        actor_type="cliente",
+        actor_ref=cliente,
+    )
+
+
+def adjuntar_comprobante_pago_admin(
+    cliente_id: str,
+    pago_id: int,
+    contenido: bytes,
+    nombre: str,
+    *,
+    admin_user: str,
+) -> bool:
+    """Adjunta un comprobante faltante con identidad admin auditable."""
+    responsable = " ".join(str(admin_user or "").strip().split())
+    if not responsable:
+        raise ValueError("Falta identificar al administrador.")
+    return _adjuntar_comprobante_pago(
+        cliente_id,
+        pago_id,
+        contenido,
+        nombre,
+        audit_event="admin.adjuntar_comprobante_pago",
+        actor_type="admin",
+        actor_ref=responsable,
+    )
 
 
 @_conflictos_como_valueerror

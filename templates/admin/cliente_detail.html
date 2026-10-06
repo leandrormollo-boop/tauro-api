@@ -309,7 +309,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
           <td class="mono" id="pago-{{ p.id }}">{{ p.fecha.strftime("%d/%m/%Y") if p.fecha else "—" }}</td>
           <td class="mono" style="color:var(--{{ 'warn' if fecha_en_revision else 'ok' }})">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
           <td>{{ p.metodo }}</td>
-          <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}{% if p.tiene_comprobante %}<small><a href="/admin/pagos/{{ p.id }}/comprobante">Ver comprobante ↗</a></small>{% endif %}</td>
+          <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}{% if p.tiene_comprobante %}<small><a href="/admin/pagos/{{ p.id }}/comprobante">Ver comprobante ↗</a></small>{% else %}<small><a class="btn btn-ghost btn-sm" href="/admin/pagos/{{ p.id }}/adjuntar-comprobante">Adjuntar comprobante</a></small>{% endif %}</td>
           <td>
             {% if fecha_en_revision %}<a href="/admin/pagos/nuevo">Revisar fecha</a><small>Imputaciones registradas sin efecto en el saldo.</small>{% endif %}
             {% for a in p.aplicaciones|default([]) %}

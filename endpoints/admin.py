@@ -4936,6 +4936,84 @@ def admin_pagos_pendientes(request: Request, admin_token: Optional[str] = Cookie
     )
 
 
+def _pago_comprobante_admin(pago_id: int) -> dict | None:
+    """Resuelve la cuenta desde el pago, nunca desde un campo del formulario."""
+    from servicios.experiencia_cuenta import obtener_pago_cliente
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT cliente_id FROM pagos WHERE id=%s", (pago_id,))
+            fila = cur.fetchone()
+    if not fila:
+        return None
+    pago = obtener_pago_cliente(fila["cliente_id"], pago_id)
+    if pago:
+        pago["cliente_id"] = fila["cliente_id"]
+    return pago
+
+
+@router.get("/pagos/{pago_id}/adjuntar-comprobante", response_class=HTMLResponse)
+def admin_comprobante_pago_form(
+    request: Request, pago_id: int, volver: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    pago = _pago_comprobante_admin(pago_id)
+    if not pago:
+        return Response("Pago no disponible", status_code=404)
+    volver = "pendientes" if volver == "pendientes" else ""
+    return templates.TemplateResponse(
+        request=request, name="admin/pago_comprobante.html",
+        context={"seccion": "pagos_pendientes" if volver else "clientes",
+                 "pago": pago, "volver": volver,
+                 "csrf_comprobante": _csrf_dhl(f"pago-comprobante:{pago_id}:{pago['cliente_id']}")},
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/pagos/{pago_id}/adjuntar-comprobante")
+async def admin_adjuntar_comprobante_pago(
+    request: Request, pago_id: int, volver: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    pago = _pago_comprobante_admin(pago_id)
+    if not pago:
+        return Response("Pago no disponible", status_code=404)
+    destino = f"/admin/pagos/{pago_id}/adjuntar-comprobante"
+    parametros = {"volver": "pendientes"} if volver == "pendientes" else {}
+
+    def resultado(**valores):
+        return RedirectResponse(destino + "?" + urlencode({**parametros, **valores}), status_code=303)
+
+    if not check_rate("admin:pago_comprobante", max_attempts=30, window_seconds=600):
+        return resultado(error="Hiciste varios intentos. Esperá unos minutos y volvé a probar.")
+    from servicios.cuenta_corriente import (
+        adjuntar_comprobante_pago_admin, leer_comprobante_con_tope,
+    )
+    try:
+        async with request.form(max_files=1, max_fields=4) as form:
+            if not _csrf_dhl_valido(form.get("csrf_comprobante"), f"pago-comprobante:{pago_id}:{pago['cliente_id']}"):
+                return resultado(error="La sesión del formulario venció. Recargá y volvé a adjuntar el comprobante.")
+            archivo = form.get("comprobante")
+            contenido = await leer_comprobante_con_tope(archivo)
+            if not contenido:
+                raise ValueError("Seleccioná un comprobante en PDF, JPG o PNG.")
+            adjuntar_comprobante_pago_admin(
+                pago["cliente_id"], pago_id, contenido,
+                getattr(archivo, "filename", "") or "", admin_user="admin",
+            )
+    except LookupError:
+        return Response("Pago no disponible", status_code=404)
+    except ValueError as exc:
+        return resultado(error=str(exc))
+    except Exception as exc:
+        print(f"[admin] adjuntar_comprobante falló: {type(exc).__name__}")
+        return resultado(error="No pudimos guardar el comprobante. Volvé a intentarlo.")
+    return resultado(adjuntado="1")
+
+
 @router.get("/pagos/{pago_id}/comprobante")
 def admin_ver_comprobante(pago_id: int, admin_token: Optional[str] = Cookie(None)):
     if not _is_auth(admin_token):
