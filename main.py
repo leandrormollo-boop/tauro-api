@@ -16,7 +16,7 @@ import secrets
 from dotenv import load_dotenv
 from typing import Optional
 
-from servicios.carriers import cotizar_carriers
+from servicios.carriers import cotizar_carriers_web as cotizar_carriers
 from core.email_sender import enviar_email_pedido
 from core.database import init_db
 from endpoints.portal_cliente import router as portal_router

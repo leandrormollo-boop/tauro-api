@@ -4,10 +4,45 @@
 {% block content %}
 <div class="page-title">
   <h1>Precios de la web</h1>
-  <p>Definí el precio que ve una persona que cotiza sin iniciar sesión. Los precios por cliente se configuran desde cada cuenta.</p>
+  <p>Definí los precios del cotizador público. Los precios por cliente se configuran desde cada cuenta.</p>
 </div>
 
-<div class="card" style="max-width:620px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:20px;max-width:1100px;align-items:start;">
+{% set dhl = configuracion_dhl|default({}) %}
+<section class="card" style="margin:0;">
+  <h2 style="font-size:20px;margin:0 0 20px;">DHL · Internacional</h2>
+  <form method="POST" action="/admin/precios-web/dhl" data-web-price-dhl>
+    <input type="hidden" name="csrf_precio_dhl" value="{{ csrf_precio_dhl }}">
+    <div class="form-group">
+      <label for="dhl-modo">Cómo calcular la ganancia<span data-help="Ganancia de DHL">Se aplica una sola regla: porcentaje sobre el costo o un monto fijo en pesos. Cambia las nuevas cotizaciones de la web; no modifica el portal ni el checkout de tiendas.</span></label>
+      <select id="dhl-modo" name="dhl_modo" data-dhl-mode>
+        <option value="PCT" {% if dhl.modo == 'PCT' %}selected{% endif %}>Porcentaje sobre costo</option>
+        <option value="FIJO_ARS" {% if dhl.modo == 'FIJO_ARS' %}selected{% endif %}>Ganancia fija en pesos</option>
+      </select>
+    </div>
+    <div class="form-group" data-dhl-rule="PCT" {% if dhl.modo == 'FIJO_ARS' %}hidden{% endif %}>
+      <label for="dhl-markup-pct">Markup DHL (%)</label>
+      <input id="dhl-markup-pct" name="dhl_markup_pct" type="text" inputmode="decimal"
+             data-numero="decimal" value="{{ dhl.markup_texto }}" placeholder="Ej.: 20"
+             {% if dhl.modo == 'FIJO_ARS' %}disabled{% else %}required{% endif %}>
+      <small>Precio = costo DHL + este porcentaje.</small>
+    </div>
+    <div class="form-group" data-dhl-rule="FIJO_ARS" {% if dhl.modo != 'FIJO_ARS' %}hidden{% endif %}>
+      <label for="dhl-margen-fijo">Ganancia por envío (ARS)</label>
+      <input id="dhl-margen-fijo" name="dhl_margen_fijo_ars" type="text" inputmode="decimal"
+             data-numero="importe" value="{{ numero_ars(dhl.margen_fijo_ars) if not dhl.error and dhl.margen_fijo_ars is defined and dhl.margen_fijo_ars is not none else dhl.fijo_texto }}" placeholder="Ej.: 100.000"
+             {% if dhl.modo != 'FIJO_ARS' %}disabled{% else %}required{% endif %}>
+      <small>Precio = costo DHL + este importe en pesos.</small>
+    </div>
+    <div class="msg {{ 'warn' if dhl.error else 'ok' }}" style="margin:14px 0;">
+      {{ dhl.estado }}
+    </div>
+    <button type="submit" class="btn btn-primary">Guardar precio DHL</button>
+  </form>
+</section>
+
+<section class="card" style="margin:0;">
+  <h2 style="font-size:20px;margin:0 0 20px;">OCA · Nacional</h2>
   <form method="POST" action="/admin/precios-web">
     <input type="hidden" name="csrf_precio_web" value="{{ csrf_precio_web }}">
     <div class="form-group">
@@ -29,7 +64,9 @@
       {{ configuracion.estado }}
     </div>
 
-    <button type="submit" class="btn btn-primary">Guardar precio web</button>
+    <button type="submit" class="btn btn-primary">Guardar precio OCA</button>
   </form>
+</section>
 </div>
+<script src="/static/js/admin-precios-web.js?v=1" defer></script>
 {% endblock %}

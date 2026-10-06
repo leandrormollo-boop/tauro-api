@@ -140,6 +140,13 @@ jobs:
             tests/test_precios_web_nacional.py \
             tests/test_precios_web_nacional_postgres.py \
             tests/test_admin_precios_web.py \
+            tests/test_admin_precio_web_dhl.py \
+            tests/test_precios_web_dhl.py \
+            tests/test_precios_web_dhl_postgres.py \
+            tests/test_pricing_carriers.py \
+            tests/test_numeros_config_carriers_integracion.py \
+            tests/test_portal_cotizador_multicourier.py \
+            tests/test_snapshot_reemision_dhl.py \
             tests/test_oca_adapter.py \
             tests/test_quote_result_experience.py \
             tests/test_integraciones_contacto.py \
@@ -181,6 +188,7 @@ jobs:
           tests/js/shipment-location-confirmation.test.cjs
           tests/js/web-quote-presentation.test.cjs
           tests/js/web-quote-national.test.cjs
+          tests/js/admin-precios-web.test.cjs
           tests/js/quote-route-map.test.cjs
           tests/js/hs-assistant.test.cjs
           tests/js/invoice-totales.test.cjs

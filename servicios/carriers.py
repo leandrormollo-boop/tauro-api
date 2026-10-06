@@ -108,8 +108,9 @@ def _pricing_configurado() -> dict:
     que no hace nada — que es exactamente el problema que tenía WEB_MARKUP_PCT
     hasta hoy: estaba en la tabla y el código leía el entorno.
 
-    Ante cualquier problema de base devuelve {} y todo cae a las variables de
-    entorno: que no se pueda leer un margen no puede dejar la web sin cotizar.
+    Ante cualquier problema de base los canales históricos conservan su
+    fallback. El cotizador web nuevo de DHL recibe además una marca privada y
+    falla cerrado: no puede cambiar de precio porque la DB dejó de responder.
     """
     try:
         with get_conn() as conn:
@@ -119,15 +120,31 @@ def _pricing_configurado() -> dict:
                     "WHERE parametro LIKE 'WEB_MARKUP_PCT%%' "
                     "   OR parametro LIKE 'WEB_MARGEN_FIJO_%%' "
                     "   OR parametro LIKE 'WEB_ADICIONAL_%%' "
-                    "   OR parametro = 'WEB_DESC_FEDEX_PCT'"
+                    "   OR parametro = 'WEB_DESC_FEDEX_PCT' "
+                    "   OR parametro IN ("
+                    "       'WEB_DHL_PRICING_MODE', "
+                    "       'WEB_DHL_MARKUP_PCT', "
+                    "       'WEB_DHL_MARGEN_FIJO_ARS'"
+                    "   )"
                 )
                 filas = cur.fetchall()
     except Exception as e:
         print(f"[carriers] no pude leer las perillas de precio de config: {e}")
-        return {}
+        from servicios.precios_web_dhl import ERROR_DB_CONFIG_KEY
+        return {ERROR_DB_CONFIG_KEY: True}
 
-    valores = {}
+    from servicios.precios_web_dhl import (
+        FILAS_CONFIG_KEY,
+        PARAMETRO_FIJO_ARS,
+        PARAMETRO_MARKUP_PCT,
+        PARAMETRO_MODO,
+    )
+    valores = {FILAS_CONFIG_KEY: [dict(f) for f in filas]}
     for f in filas:
+        if f["parametro"] in {
+            PARAMETRO_MODO, PARAMETRO_MARKUP_PCT, PARAMETRO_FIJO_ARS,
+        }:
+            continue
         numero = _numero_config(f["parametro"], f["valor"])
         if numero is None:
             print(f"[carriers] {f['parametro']}={f['valor']!r} no es un número; se ignora")
@@ -489,9 +506,10 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
     return salida
 
 
-def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
-                     dolar: float, markup_pct: float,
-                     paquetes: list = None) -> list[dict]:
+def _cotizar_carriers(origen: dict, destino: dict, paquete: dict,
+                      dolar: float, markup_pct: float,
+                      paquetes: list = None,
+                      *, pricing_dhl_web: bool = False) -> list[dict]:
     """
     PRECIO DE VIDRIERA (web pública taurosolutions.ar).
 
@@ -504,6 +522,18 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
 
     # Una sola lectura de config por cotización, no una por carrier.
     pricing = _pricing_configurado()
+    regla_dhl_web = None
+    error_dhl_web = False
+    if pricing_dhl_web:
+        try:
+            from servicios.precios_web_dhl import pricing_publico_dhl
+            regla_dhl_web = pricing_publico_dhl(pricing)
+        except Exception as exc:
+            print(
+                "[carriers] precio público DHL no disponible: "
+                f"{type(exc).__name__}"
+            )
+            error_dhl_web = True
 
     for crudo in costos_carriers(origen, destino, paquete, paquetes):
         base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
@@ -519,6 +549,31 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
             "costo_lista": crudo.get("costo_lista"),
         }
         servicio = crudo["servicio"]
+
+        if c["id"] == "dhl" and pricing_dhl_web:
+            if error_dhl_web or not regla_dhl_web:
+                salida.append({**base, "estado": "sin_tarifa"})
+                continue
+            try:
+                from servicios.precios_web_dhl import calcular_precio_publico_dhl
+                precio_dhl = calcular_precio_publico_dhl(
+                    resultado, dolar, regla_dhl_web
+                )
+            except Exception as exc:
+                print(
+                    "[carriers] no pude aplicar el precio público DHL: "
+                    f"{type(exc).__name__}"
+                )
+                salida.append({**base, "estado": "sin_tarifa"})
+                continue
+            salida.append({
+                **base,
+                "estado": "cotizado",
+                "servicio": servicio,
+                "dias_estimados": crudo["dias_estimados"],
+                **precio_dhl,
+            })
+            continue
 
         # FedEx sale con descuento sobre su tarifa de lista (WEB_DESC_FEDEX_PCT,
         # tunable en Railway → Variables sin tocar código; 0 = sin descuento).
@@ -567,6 +622,35 @@ def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
         })
 
     return salida
+
+
+def cotizar_carriers(origen: dict, destino: dict, paquete: dict,
+                     dolar: float, markup_pct: float,
+                     paquetes: list = None) -> list[dict]:
+    """Motor histórico compartido por Shopify y la caché de tarifas."""
+    return _cotizar_carriers(
+        origen, destino, paquete, dolar, markup_pct, paquetes,
+        pricing_dhl_web=False,
+    )
+
+
+def cotizar_carriers_web(origen: dict, destino: dict, paquete: dict,
+                         dolar: float, markup_pct: float,
+                         paquetes: list = None) -> list[dict]:
+    """Cotización internacional pública con regla DHL aislada por canal."""
+    resultados = _cotizar_carriers(
+        origen, destino, paquete, dolar, markup_pct, paquetes,
+        pricing_dhl_web=True,
+    )
+    permitidas = {
+        "id", "nombre", "logo", "estado", "servicio", "dias_estimados",
+        "precio_ars", "precio_usd", "precio_lista_ars", "precio_lista_usd",
+        "descuento_pct",
+    }
+    return [
+        {clave: valor for clave, valor in resultado.items() if clave in permitidas}
+        for resultado in resultados
+    ]
 
 
 def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,

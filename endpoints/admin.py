@@ -308,14 +308,19 @@ def _get_clientes_lista():
     return clientes
 
 
+def _parametros_precio_web_reservados():
+    from servicios.precios_web_nacional import PARAMETROS_RESERVADOS as oca
+    from servicios.precios_web_dhl import PARAMETROS_RESERVADOS as dhl
+    return oca | dhl
+
+
 def _get_config():
-    from servicios.precios_web_nacional import PARAMETROS_RESERVADOS
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT * FROM config WHERE NOT (parametro = ANY(%s)) "
                 "ORDER BY parametro",
-                (list(PARAMETROS_RESERVADOS),),
+                (list(_parametros_precio_web_reservados()),),
             )
             return [dict(r) for r in cur.fetchall()]
 
@@ -5237,6 +5242,24 @@ def admin_referencia(request: Request, admin_token: Optional[str] = Cookie(None)
 
 # ── Config ───────────────────────────────────────────────────
 
+def _contexto_precios_web(*, configuracion_oca=None, configuracion_dhl=None):
+    from servicios.precios_web_nacional import leer_configuracion_oca
+    from servicios.precios_web_dhl import leer_configuracion_dhl
+    return {
+        "seccion": "precios_web",
+        "configuracion": (
+            configuracion_oca if configuracion_oca is not None
+            else leer_configuracion_oca()
+        ),
+        "configuracion_dhl": (
+            configuracion_dhl if configuracion_dhl is not None
+            else leer_configuracion_dhl()
+        ),
+        "csrf_precio_web": _csrf_dhl("precios-web:oca"),
+        "csrf_precio_dhl": _csrf_dhl("precios-web:dhl"),
+    }
+
+
 @router.get("/precios-web", response_class=HTMLResponse)
 def admin_precios_web(
     request: Request,
@@ -5246,15 +5269,15 @@ def admin_precios_web(
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    from servicios.precios_web_nacional import leer_configuracion_oca
     return templates.TemplateResponse(
         request=request,
         name="admin/precios_web.html",
         context={
-            "seccion": "precios_web",
-            "configuracion": leer_configuracion_oca(),
-            "csrf_precio_web": _csrf_dhl("precios-web:oca"),
-            "flash_ok": "Precio de la web guardado." if ok else None,
+            **_contexto_precios_web(),
+            "flash_ok": (
+                "Precio web de DHL guardado." if ok == "dhl"
+                else "Precio de la web guardado." if ok else None
+            ),
         },
         headers={"Cache-Control": "private, no-store"},
     )
@@ -5302,9 +5325,7 @@ async def admin_precios_web_guardar(
             request=request,
             name="admin/precios_web.html",
             context={
-                "seccion": "precios_web",
-                "configuracion": configuracion,
-                "csrf_precio_web": _csrf_dhl("precios-web:oca"),
+                **_contexto_precios_web(configuracion_oca=configuracion),
                 "flash_error": str(exc),
             },
             status_code=422,
@@ -5324,9 +5345,7 @@ async def admin_precios_web_guardar(
             request=request,
             name="admin/precios_web.html",
             context={
-                "seccion": "precios_web",
-                "configuracion": configuracion,
-                "csrf_precio_web": _csrf_dhl("precios-web:oca"),
+                **_contexto_precios_web(configuracion_oca=configuracion),
                 "flash_error": configuracion["error"],
             },
             status_code=503,
@@ -5334,6 +5353,60 @@ async def admin_precios_web_guardar(
         )
 
     return RedirectResponse(url="/admin/precios-web?ok=1", status_code=303)
+
+
+@router.post("/precios-web/dhl", response_class=HTMLResponse)
+async def admin_precio_web_dhl_guardar(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    form = await request.form()
+    if not _csrf_dhl_valido(form.get("csrf_precio_dhl"), "precios-web:dhl"):
+        return Response(
+            "Formulario vencido o inválido. Volvé a abrir Precios de la web.",
+            status_code=403,
+        )
+
+    from servicios.precios_web_dhl import (
+        guardar_configuracion_dhl,
+        leer_configuracion_dhl,
+    )
+    modo = str(form.get("dhl_modo") or "").strip().upper()
+    markup = str(form.get("dhl_markup_pct") or "").strip()
+    fijo = str(form.get("dhl_margen_fijo_ars") or "").strip()
+    try:
+        guardar_configuracion_dhl(
+            request=request, modo=modo,
+            markup_pct=markup, margen_fijo_ars=fijo,
+        )
+    except Exception as exc:
+        status = 422 if isinstance(exc, ValueError) else 503
+        mensaje = (
+            str(exc) if status == 422
+            else "No pudimos guardar el precio de DHL. Probá de nuevo."
+        )
+        if status == 503:
+            print(f"[admin] no pude guardar precio web DHL: {type(exc).__name__}")
+        configuracion = leer_configuracion_dhl()
+        if modo in {"PCT", "FIJO_ARS"}:
+            configuracion["modo"] = modo
+        if "dhl_markup_pct" in form:
+            configuracion["markup_texto"] = markup
+        if "dhl_margen_fijo_ars" in form:
+            configuracion["fijo_texto"] = fijo
+        configuracion.update(estado=mensaje, error=mensaje)
+        return templates.TemplateResponse(
+            request=request, name="admin/precios_web.html",
+            context={
+                **_contexto_precios_web(configuracion_dhl=configuracion),
+                "flash_error": mensaje,
+            },
+            status_code=status,
+            headers={"Cache-Control": "private, no-store"},
+        )
+    return RedirectResponse("/admin/precios-web?ok=dhl", status_code=303)
 
 
 @router.get("/config", response_class=HTMLResponse)
@@ -5374,14 +5447,14 @@ async def admin_config_save(
     nuevo_param = data.pop("_nuevo_parametro", "").strip()
     nuevo_valor = data.pop("_nuevo_valor", "").strip()
 
-    from servicios.precios_web_nacional import PARAMETROS_RESERVADOS
+    parametros_reservados = _parametros_precio_web_reservados()
     claves_enviadas = {
         str(parametro or "").strip().upper() for parametro in data
     }
     nuevo_param_normalizado = nuevo_param.upper()
     if (
-        claves_enviadas.intersection(PARAMETROS_RESERVADOS)
-        or nuevo_param_normalizado in PARAMETROS_RESERVADOS
+        claves_enviadas.intersection(parametros_reservados)
+        or nuevo_param_normalizado in parametros_reservados
     ):
         from servicios.leads import estado_entregas_email
         return templates.TemplateResponse(
@@ -5392,7 +5465,7 @@ async def admin_config_save(
                 "config_items": _get_config(),
                 "email_status": estado_entregas_email(),
                 "flash_error": (
-                    "El precio público de OCA se edita desde Precios de la web."
+                    "Los precios públicos por operador se editan desde Precios de la web."
                 ),
             },
             status_code=422,
