@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% from 'portal/_selector_envios_pago.html' import dinero %}
+{% from 'portal/_documentos.html' import tarjeta_documento %}
+{% block title %}Comprobante del pago #{{ pago.id }}{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-cuenta.css?v=9">{% endblock %}
+{% block content %}
+<section class="account-page account-client account-imputation-page">
+    <a class="account-text-action" href="/portal/cuenta#pago-{{ pago.id }}">← Mi cuenta</a>
+    <div class="account-title tauro-branded-heading">
+        <div>
+            <h1>{{ 'Comprobante del pago' if pago.tiene_comprobante else 'Adjuntar comprobante' }}</h1>
+            <p>Pago #{{ pago.id }} · {{ pago.fecha }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</p>
+        </div>
+        {% include 'portal/_brand_badge.html' %}
+    </div>
+    {% if request.query_params.get('error') %}<div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>{% endif %}
+    {% if pago.tiene_comprobante and request.query_params.get('adjuntado') %}<div class="msg ok" role="status">Comprobante adjuntado al pago #{{ pago.id }}.</div>{% endif %}
+    <div class="account-imputation-position">
+        <div><span>Importe del pago registrado</span><strong>{{ dinero(pago.monto_ars) }}</strong><span class="account-status">{{ pago.estado_label }}</span></div>
+        <div><span>Imputación</span><span>{{ pago.imputacion_label }}</span></div>
+    </div>
+    {% if pago.tiene_comprobante %}
+        {{ tarjeta_documento('pago', pago.id, 'Comprobante de pago', '/portal/pagos/' ~ pago.id ~ '/comprobante', compacto=True) }}
+        <div class="account-imputation-actions"><a href="/portal/cuenta#pago-{{ pago.id }}" class="btn btn-primary">Volver a Mi cuenta</a></div>
+    {% else %}
+    <form action="/portal/pagos/{{ pago.id }}/adjuntar-comprobante" method="post" enctype="multipart/form-data" class="account-receipt-form">
+        <div class="form-group">
+            <label for="payment-receipt-file">Comprobante</label>
+            <input id="payment-receipt-file" type="file" name="comprobante" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" aria-describedby="payment-receipt-help" required>
+            <small id="payment-receipt-help">PDF, JPG o PNG · Máximo 8 MB.</small>
+        </div>
+        <p class="account-payment-notice">Se agrega a este pago. El importe, el estado y la imputación se mantienen.</p>
+        <div class="account-imputation-actions">
+            <button type="submit" class="btn btn-primary">Guardar comprobante</button>
+            <a href="/portal/cuenta#pago-{{ pago.id }}" class="btn btn-ghost">Cancelar</a>
+        </div>
+    </form>
+    {% endif %}
+</section>
+{% endblock %}

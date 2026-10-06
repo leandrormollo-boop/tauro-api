@@ -322,7 +322,7 @@ def _presentar_pago(fila: dict) -> dict:
         "puede_imputar": (not fecha_bloqueada and disponible > 0
                            and estado in ("PENDIENTE", "APROBADO")),
         "pasos": [
-            {"label": "Comprobante recibido" if fila.get("tiene_comprobante") else "Pago registrado",
+            {"label": "Pago registrado",
              "fecha": registro, "completo": True, "actual": False},
             {"label": etiqueta, "fecha": "", "completo": not fecha_bloqueada and estado != "PENDIENTE", "actual": True},
         ],
