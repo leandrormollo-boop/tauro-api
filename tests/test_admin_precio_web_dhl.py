@@ -114,7 +114,12 @@ def test_get_exige_admin_y_muestra_la_regla_dhl_separada(monkeypatch):
     assert '<option value="RANGOS_USD"' in html
     assert 'name="dhl_margen_fijo_ars"' in html
     assert 'name="dhl_rango_desde"' in html
-    assert "Hasta, sin incluir (USD)" in html
+    assert "Ganancia por rangos de costo" in html
+    assert "Costo que cobra DHL (USD)" in html
+    assert "Ganancia que sumás" in html
+    assert "Ganancia (USD)" in html
+    assert "Último «Hasta» vacío = sin límite." in html
+    assert "Ganancia sobre el costo OCA (%)" in html
     assert 'value="135.000,00"' in html
     assert "no modifica el portal ni el checkout de tiendas" in html
 

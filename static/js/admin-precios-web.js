@@ -22,7 +22,21 @@
     function bindRow(row) {
       var type = row.querySelector('[name="dhl_rango_tipo"]');
       var amount = row.querySelector('[name="dhl_rango_valor"]');
-      function unit() { amount.dataset.numero = type.value === 'PCT' ? 'decimal' : 'importe'; }
+      var label = row.querySelector('[data-dhl-gain-label]');
+      var unitText = row.querySelector('[data-dhl-gain-unit]');
+      var example = row.querySelector('[data-dhl-gain-example]');
+      var descriptions = {
+        FIJO_USD: { unit: 'USD', example: 'Se suma este importe fijo en dólares.' },
+        PCT: { unit: '%', example: 'Se suma este porcentaje sobre el costo DHL.' },
+        FIJO_ARS: { unit: 'ARS', example: 'Se suma este importe fijo en pesos.' }
+      };
+      function unit() {
+        var selected = descriptions[type.value] || descriptions.FIJO_USD;
+        amount.dataset.numero = type.value === 'PCT' ? 'decimal' : 'importe';
+        label.textContent = 'Ganancia (' + selected.unit + ')';
+        unitText.textContent = selected.unit;
+        example.textContent = selected.example;
+      }
       type.addEventListener('change', unit);
       row.querySelector('[data-dhl-remove-range]').addEventListener('click', function () {
         row.remove();
