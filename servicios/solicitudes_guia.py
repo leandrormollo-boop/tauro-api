@@ -616,7 +616,7 @@ def _validar_cancelacion_desde_fila(fila: dict) -> dict:
     if estado != "GUIA_LISTA" or not tracking:
         return {
             "ok": False,
-            "error": "Sólo se puede cancelar una guía DHL lista y todavía no despachada.",
+            "error": "Solo se cancelan guías que todavía no salieron.",
         }
     if fila.get("tracking_estado"):
         return {

@@ -189,6 +189,8 @@ def test_remitente_explicito_respeta_propietario_sin_fallback(monkeypatch, clien
 
 def test_elegir_ambito_conserva_ambos_contactos(monkeypatch):
     _preparar_form(monkeypatch, _destinatario())
+    monkeypatch.setattr(pc, "courier_default_cliente", lambda _: "")
+    monkeypatch.setattr(pc, "listar_solicitudes_cliente", lambda *_, **__: [])
     response = pc.envio_nuevo_form(_request(), cliente="MELCIOR", remitente_id=77, destinatario_id=88)
     for key in ("nacional_url", "internacional_url"):
         assert "remitente_id=77" in response['context'][key]

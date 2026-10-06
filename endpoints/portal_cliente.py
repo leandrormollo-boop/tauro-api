@@ -130,7 +130,8 @@ templates = Jinja2Templates(directory="templates")
 # de tracking y la división nacional/internacional salen de un solo lugar.
 from servicios.borradores import confirmar_borrador
 from servicios.couriers_urls import ambito_envio, es_nacional, nombre_courier, url_tracking
-from servicios.presentacion import dinero_ars, numero_ars
+from servicios.presentacion import dinero_ars, numero_ars, medida_cm
+from servicios.estados_envio import HITOS_ENVIO_UI
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
 templates.env.globals["ambito_envio"] = ambito_envio
@@ -138,6 +139,20 @@ templates.env.globals["nombre_courier"] = nombre_courier
 templates.env.globals["nombre_pais"] = nombre_pais
 templates.env.globals["dinero_ars"] = dinero_ars
 templates.env.globals["numero_ars"] = numero_ars
+templates.env.globals["medida_cm"] = medida_cm
+templates.env.globals["hitos_envio_ui"] = HITOS_ENVIO_UI
+
+
+def _es_admin_request(request: Request) -> bool:
+    token = getattr(request, "cookies", {}).get("admin_token")
+    if not token:
+        return False
+    # admin también importa helpers del portal: evitar el ciclo al cargar.
+    from endpoints.admin import _is_auth
+    return _is_auth(token)
+
+
+templates.env.globals["es_admin_request"] = _es_admin_request
 templates.env.globals["descriptor_documento"] = descriptor_documento
 
 
@@ -2273,12 +2288,13 @@ async def api_invoice_leer(request: Request, cliente: str = Depends(cliente_actu
 @router.post("/api/parsear-pedido")
 async def api_parsear_pedido(
     request: Request,
-    cliente: str = Depends(cliente_actual),
 ):
     """
     Recibe el texto de un pedido tal como llega por mail y devuelve los
     campos detectados para precargar el form de nuevo envío.
     """
+    if not _es_admin_request(request):
+        return JSONResponse({"ok": False, "motivo": "solo_admin"}, status_code=403)
     from servicios.parser_pedidos import parsear_pedido
     try:
         body = await request.json()
@@ -2382,21 +2398,6 @@ def envios_view(
         retiro_activo = retiro.get("estado") in {
             "AGENDANDO", "AGENDADA", "CANCELANDO", "VERIFICAR_COURIER",
         }
-        if (solicitud.get("estado_cliente_ui", {}).get("codigo") == "GUIA_LISTA"
-                and not solicitud.get("tracking_estado")):
-            solicitud["estado_cliente_ui"] = {
-                "codigo": "ESPERA_RECOLECCION",
-                "label": "Espera de recolección",
-                "clase": "accent",
-            }
-        elif solicitud.get("estado_cliente_ui", {}).get("codigo") in {
-            "PROCESO_ENTREGA", "DESPACHADO",
-        }:
-            solicitud["estado_cliente_ui"] = {
-                "codigo": solicitud["estado_cliente_ui"]["codigo"],
-                "label": "Proceso de entrega",
-                "clase": "warn",
-            }
         solicitud["puede_corregir_lista"] = bool(
             (solicitud.get("courier") or "").upper() == "DHL"
             and solicitud.get("estado") == "GUIA_LISTA"
@@ -2689,6 +2690,24 @@ def _precargar_envio_existente(origen: dict, *, corregir_id: int | None = None):
     return form, remitente
 
 
+def _prefiere_envio_internacional(cliente: str) -> bool:
+    """Entrar directo a internacional solo si la cuenta nunca hizo nacionales.
+
+    Un cliente mixto sigue eligiendo; uno 100 % internacional (o sin historial
+    pero con courier internacional configurado, como WAIMAO → DHL) se ahorra
+    el paso. Ante cualquier error, mostramos el selector como siempre.
+    """
+    try:
+        ambitos = {ambito_envio(s) for s in listar_solicitudes_cliente(cliente, limite=None)}
+    except Exception:
+        return False
+    if "nacional" in ambitos:
+        return False
+    if "internacional" in ambitos:
+        return True
+    return str(courier_default_cliente(cliente) or "").lower() in {"dhl", "fedex", "ups"}
+
+
 @router.get("/envios/nuevo", response_class=HTMLResponse)
 def envio_nuevo_form(
     request: Request,
@@ -2739,6 +2758,11 @@ def envio_nuevo_form(
                     ("destinatario_id", destinatario_id)) if v}
         return RedirectResponse("/portal/oca/nuevo" + ("?" + urlencode(contactos) if contactos else ""), status_code=303)
     if not ambito:
+        if _prefiere_envio_internacional(cliente):
+            return RedirectResponse(
+                str(request.url.include_query_params(ambito="internacional")),
+                status_code=303,
+            )
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={

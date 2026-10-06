@@ -16,3 +16,12 @@ def numero_ars(valor) -> str:
 
 def dinero_ars(valor) -> str:
     return f"$ {numero_ars(valor)}"
+
+
+def medida_cm(valor) -> str:
+    """Medidas sin ceros decimales superfluos, conservando las fracciones."""
+    numero = Decimal(str(valor or 0))
+    texto = format(numero, "f")
+    if "." in texto:
+        texto = texto.rstrip("0").rstrip(".")
+    return texto.replace(".", ",")

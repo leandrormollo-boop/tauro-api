@@ -6,6 +6,7 @@
 <link rel="stylesheet" href="/static/css/invoice-compact.css?v=1">
 <link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
 <script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>
+<script src="/static/js/shipment-focus.js?v=1" defer></script>
 {% endblock %}
 
 {% block content %}
@@ -31,7 +32,8 @@
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
+        <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete y factura comercial.{% endif %}</p>
+        {% if not form.editar_solicitud_id and not reemision_origen and not repeticion_origen %}<a class="shipment-scope-switch" href="/portal/envios/nuevo?ambito=nacional">¿Es un envío nacional?</a>{% endif %}
     </div>
     <div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a></div>
 </div>
@@ -69,14 +71,10 @@
     <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>USD {{ "{:,.2f}".format(form.valor_total_cotizado_usd).replace(",", "_").replace(".", ",").replace("_", ".") }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
 {% endif %}
 
-{# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
-   (es un atajo, no el camino principal) y ni aparece cuando el envío ya
-   viene de una venta de la tienda: ahí no hay nada que pegar. #}
-{% if not pedido_tienda and not reemision_origen and not repeticion_origen %}
-<details class="card" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
-    <summary style="cursor:pointer;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:10px;font-size:13.5px;">
-        ⚡ Atajo: ¿te llegó el pedido por mail? Pegalo y te completo el formulario
-    </summary>
+{# Atajo exclusivo para operadores con sesión administrativa validada. #}
+{% if es_admin_request(request) and not pedido_tienda and not reemision_origen and not repeticion_origen %}
+<section class="card shipment-admin-paste" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
+    <label for="pedido-pegado">Pegar pedido recibido por mail (solo TAURO)</label>
     <div style="margin-top:14px;">
         <textarea id="pedido-pegado" rows="7" placeholder="Pegá el texto del pedido tal como te llegó (cajas, medidas, quien envía, quien recibe...)"></textarea>
         <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
@@ -84,7 +82,7 @@
             <span id="parse-status" style="font-size:12.5px;color:var(--fg-3);"></span>
         </div>
     </div>
-</details>
+</section>
 {% endif %}
 
 <!-- Cuatro pantallas independientes: cada tema se completa sin mezclar datos. -->
@@ -103,7 +101,7 @@
     </div>
     <div class="step">
         <span>4</span>
-        <label>Invoice</label>
+        <label>Factura comercial</label>
     </div>
 </div>
 
@@ -430,7 +428,7 @@
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
             <div class="shipment-step-heading">
                 <div>
-                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Ingresá cantidad y valor total de cada artículo.</span></h4>
+                    <h4><span class="n">4</span> Factura comercial <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Ingresá cantidad y valor total de cada artículo.</span></h4>
 
                 </div>
                 <span class="shipment-step-counter">Valores en USD</span>
@@ -440,7 +438,7 @@
                 {% for f in filas %}
                 <article class="bulto-row shipment-invoice-card" data-invoice-bulto data-bulto-index="{{ loop.index0 }}">
                     <div class="shipment-box-head">
-                        <div><span>Invoice comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
+                        <div><span>Factura comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
                         <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
                         <button type="button" class="btn btn-ghost btn-sm invoice-item-add">Agregar artículo</button>
                     </div>

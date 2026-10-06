@@ -207,7 +207,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                     <th>Fecha</th>
                     <th>Destinatario / recorrido</th>
                     <th>Tracking</th>
-                    <th aria-label="Precio del envío">Precio del envío</th>
+                    <th>Precio del envío (ARS)</th>
                     <th>Estado</th>
                     <th>Guía / opciones</th>
                 </tr>
@@ -231,16 +231,16 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                             <a href="{{ turl }}" target="_blank" rel="noopener" class="shipment-tracking mono">{{ s.tracking }}</a>
                         {% else %}<span class="shipment-empty">—</span>{% endif %}
                         {% if s.numero_guia_tauro %}<small class="mono">TAURO {{ s.numero_guia_tauro }}</small>{% endif %}
-                        {% if s.estado == 'REEMPLAZADO' and s.tracking_vigente %}<small>Reemplazado por {{ s.tracking_vigente }}</small>{% elif s.reemplaza_solicitud_id and s.tracking_anterior %}<small>Corrige {{ s.tracking_anterior }}</small>{% endif %}
+                        {% if s.estado == 'REEMPLAZADO' and s.tracking_vigente %}<small>Reemplazado por {{ s.tracking_vigente }}</small>{% elif s.reemplaza_solicitud_id and s.tracking_anterior %}<small>Reemplaza a la guía {{ s.tracking_anterior }}</small>{% endif %}
                     </td>
-                    <td class="mono envio-price-cell" data-label="Precio del envío">
+                    <td class="mono envio-price-cell" data-label="Precio del envío (ARS)">
                         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
                             <strong class="shipment-no-charge">Sin cargo</strong>
                         {% elif s.precio_inicial_cliente_ars or s.precio_tauro_ars %}
                             {% set tiene_ajuste = s.diferencia_flete_ars or s.tax_cliente_ars or s.ajuste_comercial_ars or (s.precio_inicial_cliente_ars or s.precio_tauro_ars) != (s.precio_final_cliente_ars or s.precio_tauro_ars) %}
                             {% if tiene_ajuste %}
                             <span class="envio-price-initial"><small>Cotizado</small>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</span>
-                            <span class="envio-price-final"><small>Total registrado · ARS</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
+                            <span class="envio-price-final"><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
                             <details class="envio-price-breakdown">
                             <summary>Ver desglose</summary>
                             {% if s.diferencia_flete_ars %}
@@ -254,13 +254,13 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                             {% endif %}
                             </details>
                             {% else %}
-                            <span class="envio-price-final"><small>Total registrado · ARS</small><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
+                            <span class="envio-price-final"><span class="shipment-price portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</span></span>
                             {% endif %}
                         {% else %}—{% endif %}
                     </td>
                     <td data-label="Estado" class="envio-status-cell">
-                        <span class="badge {{ 'shipment-cancelled-badge' if es_baja else s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado if es_baja else s.estado_cliente_ui.label }}</span>
-                        {% if s.recoleccion and s.recoleccion.estado == 'AGENDADA' and s.estado_cliente_ui.codigo == 'ESPERA_RECOLECCION' %}<small class="tracking-updated">Recolección programada</small>{% endif %}
+                        <span class="badge {{ 'shipment-cancelled-badge' if es_baja else s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
+                        {% if s.recoleccion and s.recoleccion.estado == 'AGENDADA' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' %}<small class="tracking-updated">Recolección programada</small>{% endif %}
                         {% if s.seguimiento_sin_actualizaciones and not es_baja %}<small class="tracking-alert">Entrega aún no confirmada.</small>{% endif %}
                     </td>
                     <td data-label="Guía / opciones" class="shipment-actions-cell">
@@ -294,7 +294,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                                 <button type="submit" class="shipment-action shipment-action-danger">Cancelar envío</button>
                             </form>
                             {% endif %}
-                            {% if s.tiene_label and s._ambito_portal == 'internacional' and ((s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA') or (s.estado_cliente_ui.codigo == 'ESPERA_RECOLECCION' and (s.courier or '')|upper != 'ENVIA')) %}
+                            {% if s.tiene_label and s._ambito_portal == 'internacional' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' and (s.courier or '')|upper != 'ENVIA' %}
                                 {% if s.recoleccion_error %}
                                 <a href="/portal/recolecciones?envio={{ s.id }}" class="shipment-action">Consultar recolección</a>
                                 {% elif s.recoleccion and s.recoleccion.estado != 'CANCELADA' %}

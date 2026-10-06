@@ -25,16 +25,16 @@
       document.getElementById("portal-theme-color").content = tema === "light" ? "#f8f7fc" : "#0c0a14";
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/tauro.css?v=49">
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=8">{% endif %}
+    <link rel="stylesheet" href="/static/css/tauro.css?v=50">
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=9">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=3">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/documentos.css?v=3">
     <script src="/static/js/documentos.js?v=3" defer></script>{% endif %}
-    <link rel="stylesheet" href="/static/css/portal-cotizador.css?v=7">
+    <link rel="stylesheet" href="/static/css/portal-cotizador.css?v=8">
     <link rel="stylesheet" href="/static/css/quote-route-map.css?v=3">
     <link rel="stylesheet" href="/static/css/portal-claro.css?v=1">
     {% block extra_css %}{% endblock %}
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-dock.css?v=2">
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-dock.css?v=3">
     <link rel="stylesheet" href="/static/css/portal-sprites.css?v=1">
     <link rel="stylesheet" href="/static/css/portal-brand.css?v=2">{% endif %}
     <link rel="stylesheet" href="/static/css/info-ayuda.css?v=1">
@@ -109,11 +109,11 @@
             <span class="side-saldo-lbl">{% if sal.a_favor_ars %}A favor · total{% elif sal.al_dia %}Cuenta total{% else %}Saldo total{% endif %}</span>
             <span class="side-saldo-n {% if not sal.al_dia %}portal-balance-metal{% endif %}">
                 {% if sal.a_favor_ars %}
-                    $ {{ "{:,.0f}".format(sal.a_favor_ars).replace(",", ".") }}
+                    $ {{ "{:,.2f}".format(sal.a_favor_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
                 {% elif sal.al_dia %}
                     Al día
                 {% else %}
-                    $ {{ "{:,.0f}".format(sal.pendiente_ars).replace(",", ".") }}
+                    $ {{ "{:,.2f}".format(sal.pendiente_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
                 {% endif %}
             </span>
         </a>

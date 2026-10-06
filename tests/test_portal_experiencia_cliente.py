@@ -8,7 +8,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.requests import Request
 
 from servicios.couriers_urls import ambito_envio, nombre_courier, url_tracking
-from servicios.estados_envio import presentar_estados_envio
+from servicios.estados_envio import HITOS_ENVIO_UI, presentar_estados_envio
+from servicios.presentacion import dinero_ars, numero_ars, medida_cm
 from servicios.panel_cliente import preparar_historial_envios
 from servicios.periodos_envios import normalizar_periodo
 
@@ -43,6 +44,8 @@ def _render(parcial=False, estado="DESPACHADO", tracking="ENTREGADO", precio=100
             error="", puede_emitir=False, tracking_numero="DEMO-0001"):
     env = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=select_autoescape())
     env.globals.update(
+        dinero_ars=dinero_ars, numero_ars=numero_ars, medida_cm=medida_cm,
+        hitos_envio_ui=HITOS_ENVIO_UI,
         url_tracking=url_tracking, nombre_courier=nombre_courier,
         ambito_envio=ambito_envio, nombre_pais=lambda p: p or "",
         saldo_menu=lambda *_: None, pendientes_menu=lambda *_: {},
@@ -116,7 +119,7 @@ def test_listado_sin_ajustes_muestra_un_solo_costo_final():
     html = _render(parcial=True, precio=125)
     assert 'Ver desglose' not in html
     assert 'envio-price-initial' not in html
-    assert 'Total registrado · ARS' in html
+    assert 'Total registrado · ARS' not in html
     assert html.count('$ 125,00') == 2  # fila + total de la página
 
 
@@ -126,7 +129,7 @@ def test_listado_prioriza_datos_concretos_y_deja_el_visor_en_el_detalle():
 
     for encabezado in (
         "Fecha", "Destinatario / recorrido", "Tracking",
-        "Precio del envío", "Estado", "Guía / opciones",
+        "Precio del envío (ARS)", "Estado", "Guía / opciones",
     ):
         assert f">{encabezado}<" in listado
     assert 'class="document-card' not in listado
@@ -172,7 +175,7 @@ def test_baja_no_muestra_costos_aunque_conserve_importes_historicos(estado, temp
     assert '987.654' not in html
     assert '1.975.308' not in html
     assert 'Sin cargo' in html
-    assert estado in html
+    assert presentar_estados_envio({"estado": estado})["estado_cliente_ui"]["label"] in html
     assert '/portal/envios/1/guia.pdf' not in html
 
 
