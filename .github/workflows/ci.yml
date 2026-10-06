@@ -136,6 +136,11 @@ jobs:
             tests/test_numeros_operativos_fail_closed.py \
             tests/test_dhl_financial_safety.py \
             tests/test_cotizador_publico_ambito.py \
+            tests/test_cotizador_publico_nacional.py \
+            tests/test_precios_web_nacional.py \
+            tests/test_precios_web_nacional_postgres.py \
+            tests/test_admin_precios_web.py \
+            tests/test_oca_adapter.py \
             tests/test_quote_result_experience.py \
             tests/test_integraciones_contacto.py \
             tests/test_operator_catalog_ui.py \
@@ -175,6 +180,7 @@ jobs:
           tests/js/quote-locations.test.cjs
           tests/js/shipment-location-confirmation.test.cjs
           tests/js/web-quote-presentation.test.cjs
+          tests/js/web-quote-national.test.cjs
           tests/js/quote-route-map.test.cjs
           tests/js/hs-assistant.test.cjs
           tests/js/invoice-totales.test.cjs

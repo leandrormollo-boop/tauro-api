@@ -1,0 +1,35 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Precios de la web{% endblock %}
+
+{% block content %}
+<div class="page-title">
+  <h1>Precios de la web</h1>
+  <p>Definí el precio que ve una persona que cotiza sin iniciar sesión. Los precios por cliente se configuran desde cada cuenta.</p>
+</div>
+
+<div class="card" style="max-width:620px;">
+  <form method="POST" action="/admin/precios-web">
+    <input type="hidden" name="csrf_precio_web" value="{{ csrf_precio_web }}">
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:10px;">
+        <input type="checkbox" name="oca_habilitada" value="1" {% if configuracion.habilitada %}checked{% endif %}>
+        Cotización pública de OCA
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label for="oca-markup-pct">Markup / ganancia sobre costo (%)</label>
+      <input id="oca-markup-pct" type="text" name="oca_markup_pct"
+             value="{{ configuracion.markup_texto }}" inputmode="decimal"
+             data-numero="decimal" placeholder="Ej.: 20">
+      <small>Tarifa OCA + markup + IVA. Este valor no modifica los precios acordados con clientes.</small>
+    </div>
+
+    <div class="msg {{ 'ok' if configuracion.publicable else 'warn' }}" style="margin:14px 0;">
+      {{ configuracion.estado }}
+    </div>
+
+    <button type="submit" class="btn btn-primary">Guardar precio web</button>
+  </form>
+</div>
+{% endblock %}

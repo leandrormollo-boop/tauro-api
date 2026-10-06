@@ -309,9 +309,14 @@ def _get_clientes_lista():
 
 
 def _get_config():
+    from servicios.precios_web_nacional import PARAMETROS_RESERVADOS
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM config ORDER BY parametro")
+            cur.execute(
+                "SELECT * FROM config WHERE NOT (parametro = ANY(%s)) "
+                "ORDER BY parametro",
+                (list(PARAMETROS_RESERVADOS),),
+            )
             return [dict(r) for r in cur.fetchall()]
 
 
@@ -5232,6 +5237,105 @@ def admin_referencia(request: Request, admin_token: Optional[str] = Cookie(None)
 
 # ── Config ───────────────────────────────────────────────────
 
+@router.get("/precios-web", response_class=HTMLResponse)
+def admin_precios_web(
+    request: Request,
+    ok: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    from servicios.precios_web_nacional import leer_configuracion_oca
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/precios_web.html",
+        context={
+            "seccion": "precios_web",
+            "configuracion": leer_configuracion_oca(),
+            "csrf_precio_web": _csrf_dhl("precios-web:oca"),
+            "flash_ok": "Precio de la web guardado." if ok else None,
+        },
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/precios-web", response_class=HTMLResponse)
+async def admin_precios_web_guardar(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    form = await request.form()
+    if not _csrf_dhl_valido(
+        form.get("csrf_precio_web"), "precios-web:oca"
+    ):
+        return Response(
+            "Formulario vencido o inválido. Volvé a abrir Precios de la web.",
+            status_code=403,
+        )
+
+    habilitada = form.get("oca_habilitada") == "1"
+    markup_crudo = str(form.get("oca_markup_pct") or "").strip()
+    from servicios.precios_web_nacional import (
+        guardar_configuracion_oca,
+        leer_configuracion_oca,
+    )
+    try:
+        guardar_configuracion_oca(
+            request=request,
+            habilitada=habilitada,
+            markup_pct=markup_crudo,
+        )
+    except ValueError as exc:
+        configuracion = leer_configuracion_oca()
+        configuracion.update({
+            "habilitada": habilitada,
+            "markup_texto": markup_crudo,
+            "publicable": False,
+            "estado": str(exc),
+            "error": str(exc),
+        })
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/precios_web.html",
+            context={
+                "seccion": "precios_web",
+                "configuracion": configuracion,
+                "csrf_precio_web": _csrf_dhl("precios-web:oca"),
+                "flash_error": str(exc),
+            },
+            status_code=422,
+            headers={"Cache-Control": "private, no-store"},
+        )
+    except Exception as exc:
+        print(f"[admin] no pude guardar el precio web OCA: {type(exc).__name__}")
+        configuracion = leer_configuracion_oca()
+        configuracion.update({
+            "habilitada": habilitada,
+            "markup_texto": markup_crudo,
+            "publicable": False,
+            "estado": "No pudimos guardar el precio. Probá de nuevo.",
+            "error": "No pudimos guardar el precio. Probá de nuevo.",
+        })
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/precios_web.html",
+            context={
+                "seccion": "precios_web",
+                "configuracion": configuracion,
+                "csrf_precio_web": _csrf_dhl("precios-web:oca"),
+                "flash_error": configuracion["error"],
+            },
+            status_code=503,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    return RedirectResponse(url="/admin/precios-web?ok=1", status_code=303)
+
+
 @router.get("/config", response_class=HTMLResponse)
 def admin_config(
     request: Request,
@@ -5270,6 +5374,30 @@ async def admin_config_save(
     nuevo_param = data.pop("_nuevo_parametro", "").strip()
     nuevo_valor = data.pop("_nuevo_valor", "").strip()
 
+    from servicios.precios_web_nacional import PARAMETROS_RESERVADOS
+    claves_enviadas = {
+        str(parametro or "").strip().upper() for parametro in data
+    }
+    nuevo_param_normalizado = nuevo_param.upper()
+    if (
+        claves_enviadas.intersection(PARAMETROS_RESERVADOS)
+        or nuevo_param_normalizado in PARAMETROS_RESERVADOS
+    ):
+        from servicios.leads import estado_entregas_email
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/config.html",
+            context={
+                "seccion": "config",
+                "config_items": _get_config(),
+                "email_status": estado_entregas_email(),
+                "flash_error": (
+                    "El precio público de OCA se edita desde Precios de la web."
+                ),
+            },
+            status_code=422,
+        )
+
     try:
         normalizados = {}
         for param, valor in data.items():
@@ -5279,7 +5407,7 @@ async def admin_config_save(
             normalizados[param] = crudo
         data = normalizados
 
-        nuevo_param = nuevo_param.upper()
+        nuevo_param = nuevo_param_normalizado
         if nuevo_param and nuevo_valor and politica_configuracion_numerica(nuevo_param):
             nuevo_valor = decimal_a_texto(
                 parse_configuracion_numerica(nuevo_param, nuevo_valor)
