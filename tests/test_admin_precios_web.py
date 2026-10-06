@@ -57,7 +57,7 @@ def test_get_requiere_admin_y_renderiza_precio_separado(monkeypatch):
     html = respuesta.body.decode()
     assert respuesta.status_code == 200
     assert "Precios de la web" in html
-    assert "Markup / ganancia sobre costo (%)" in html
+    assert "Ganancia sobre el costo OCA (%)" in html
     assert "precios por cliente" in html
 
 
