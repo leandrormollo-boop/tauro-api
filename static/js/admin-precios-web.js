@@ -33,6 +33,7 @@
       function unit() {
         var selected = descriptions[type.value] || descriptions.FIJO_USD;
         amount.dataset.numero = type.value === 'PCT' ? 'decimal' : 'importe';
+        amount.setAttribute('aria-label', 'Ganancia que suma TAURO (' + selected.unit + ')');
         label.textContent = 'Ganancia (' + selected.unit + ')';
         unitText.textContent = selected.unit;
         example.textContent = selected.example;

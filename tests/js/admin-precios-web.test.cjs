@@ -17,7 +17,10 @@ function setup(initialMode) {
     querySelectorAll: () => [input],
   }));
   const rangeType = {name:'dhl_rango_tipo',tagName:'SELECT',value:'FIJO_USD',addEventListener:(name,fn) => {rangeEvents[name]=fn;}};
-  const rangeAmount = {name:'dhl_rango_valor',tagName:'INPUT',dataset:{}};
+  const rangeAmount = {
+    name:'dhl_rango_valor',tagName:'INPUT',dataset:{},attributes:{},
+    setAttribute(name,value){this.attributes[name]=value;},
+  };
   const rangeInputs = [
     {name:'dhl_rango_desde',tagName:'INPUT'},
     {name:'dhl_rango_hasta',tagName:'INPUT'},
@@ -114,6 +117,7 @@ test('la unidad y la explicación siguen el tipo de ganancia elegido', () => {
   assert.equal(ui.gainLabel.textContent, 'Ganancia (USD)');
   assert.equal(ui.gainUnit.textContent, 'USD');
   assert.equal(ui.rangeAmount.dataset.numero, 'importe');
+  assert.equal(ui.rangeAmount.attributes['aria-label'], 'Ganancia que suma TAURO (USD)');
   assert.equal(ui.gainExample.textContent, 'Se suma este importe fijo en dólares.');
 
   ui.rangeType.value = 'PCT';
@@ -121,6 +125,7 @@ test('la unidad y la explicación siguen el tipo de ganancia elegido', () => {
   assert.equal(ui.gainLabel.textContent, 'Ganancia (%)');
   assert.equal(ui.gainUnit.textContent, '%');
   assert.equal(ui.rangeAmount.dataset.numero, 'decimal');
+  assert.equal(ui.rangeAmount.attributes['aria-label'], 'Ganancia que suma TAURO (%)');
   assert.equal(ui.gainExample.textContent, 'Se suma este porcentaje sobre el costo DHL.');
 
   ui.rangeType.value = 'FIJO_ARS';
@@ -128,5 +133,6 @@ test('la unidad y la explicación siguen el tipo de ganancia elegido', () => {
   assert.equal(ui.gainLabel.textContent, 'Ganancia (ARS)');
   assert.equal(ui.gainUnit.textContent, 'ARS');
   assert.equal(ui.rangeAmount.dataset.numero, 'importe');
+  assert.equal(ui.rangeAmount.attributes['aria-label'], 'Ganancia que suma TAURO (ARS)');
   assert.equal(ui.gainExample.textContent, 'Se suma este importe fijo en pesos.');
 });
