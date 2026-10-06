@@ -218,7 +218,7 @@ $ {{ (valor or 0)|numero_ars }} ARS
     <div class="card">
         <div class="card-head">
             <div>
-                <h3 class="portal-sprite-heading">{{ portal_sprite("seguimiento") }}Tracking{% if courier_codigo == 'DHL' %}<span data-help="Actualización del tracking">El portal consulta DHL una vez al día. El seguimiento oficial puede tener movimientos posteriores.</span>{% endif %}</h3>
+                <h3 class="portal-sprite-heading">{{ portal_sprite("seguimiento") }}Tracking{% if courier_codigo in ('DHL', 'FEDEX') %}<span data-help="Actualización del tracking">El portal consulta {{ courier_nombre }} todos los días hasta que el envío figure entregado. El seguimiento oficial puede tener movimientos posteriores.</span>{% endif %}</h3>
                 <p>Seguimiento oficial en la red de {{ courier_nombre }}.</p>
             </div>
         </div>
@@ -243,7 +243,7 @@ $ {{ (valor or 0)|numero_ars }} ARS
             </div>
             {% endif %}
             <p class="tracking-sync-note">
-                {% if tu.consulta_label %}Consultamos a {{ courier_nombre }} por última vez el {{ tu.consulta_label }} (hora de Argentina).{% elif s.tracking_actualizado_at %}Consultamos a {{ courier_nombre }} por última vez el {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M") }}.{% else %}Todavía no recibimos una actualización del courier.{% endif %}
+                {% if tu.consulta_label %}Consultamos a {{ courier_nombre }} por última vez el {{ tu.consulta_label }} (hora de Argentina).{% elif s.tracking_actualizado_at %}Consultamos a {{ courier_nombre }} por última vez el {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M") }}.{% elif s.tracking_error %}{{ courier_nombre }} todavía no devuelve datos de esta guía. Seguimos consultando todos los días hasta que figure entregada.{% else %}Todavía no recibimos una actualización del courier. Consultamos todos los días hasta que figure entregada.{% endif %}
             </p>
             <a href="{{ track_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Seguir envío →</a>
         {% else %}

@@ -488,6 +488,16 @@ def actualizar_trackings_diarios_seguro() -> dict:
         reemplazadas = {"ok": False, "error": type(exc).__name__}
 
     try:
+        # FedEx comparte la ronda diaria: hasta ahora sus guías nunca se
+        # actualizaban solas y quedaban "en tránsito" aunque estuvieran
+        # entregadas. El job se omite sin credenciales de producción.
+        from servicios.tracking_fedex_portal import actualizar_trackings_fedex_seguro
+        fedex = actualizar_trackings_fedex_seguro()
+    except Exception as exc:
+        print(f"[tracking-fedex] job diario falló: {type(exc).__name__}")
+        fedex = {"ok": False, "error": type(exc).__name__}
+
+    try:
         print(
             "[tracking-dhl] diario: "
             f"consultados={resultado.get('consultados', 0)} "
@@ -506,11 +516,12 @@ def actualizar_trackings_diarios_seguro() -> dict:
             f"errores={reemplazadas.get('errores', 0)} "
             f"omitido={reemplazadas.get('motivo', '')}"
         )
-        return {**resultado, "reemplazadas": reemplazadas}
+        return {**resultado, "reemplazadas": reemplazadas, "fedex": fedex}
     except Exception as exc:
         print(f"[tracking-dhl] registro del job falló: {type(exc).__name__}")
         return {
             **resultado,
             "reemplazadas": reemplazadas,
+            "fedex": fedex,
             "error_log": type(exc).__name__,
         }

@@ -20,7 +20,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
    {% if ambito_filtro == clave %}aria-current="page"{% endif %}>
     <span>{{ nombre }}</span>
     <strong>{{ dinero(ledger.saldo_ars|abs) }}</strong>
-    <small>{{ estado_saldo(ledger.saldo_ars) }} · Facturado {{ dinero(ledger.facturado_ars) }} · A facturar {{ dinero(ledger.pendiente_facturacion_ars) }}</small>
+    <small>{{ estado_saldo(ledger.saldo_ars) }}</small>
 </a>
 {%- endmacro %}
 
@@ -41,12 +41,11 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <div class="page-title-row tauro-account-heading">
         <div>
             <h1>Cuenta corriente</h1>
-            <p>{% if inicio %}Movimientos desde septiembre de 2026.{% else %}Saldo, vencimientos y el detalle de tu operación.{% endif %}</p>
+            <p>{% if inicio %}Movimientos desde septiembre de 2026.{% else %}Saldo, pagos y el detalle de tus envíos.{% endif %}</p>
         </div>
         {% include 'portal/_brand_badge.html' %}
         <div class="account-title-actions">
             <a href="#movimientos" class="btn btn-ghost">Ver movimientos</a>
-            <a href="#pagos" class="btn btn-ghost">Asignar un pago a envíos</a>
             <a href="#informar-pago" class="btn btn-primary" data-open-payment>Informar un pago</a>
             <a href="{{ cuenta_url(exportar=true, pagina=None) }}" class="btn btn-ghost" download data-account-export aria-label="Descargar movimientos filtrados en Excel"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg> Descargar Excel</a>
         </div>
@@ -61,12 +60,11 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
 {% endif %}
 
 {% if experiencia_error|default('') %}<div class="msg warn" role="status">{{ experiencia_error }}</div>{% endif %}
-<div class="account-position" aria-label="Saldo y próximos vencimientos">
+<div class="account-position" aria-label="Saldo y próximo paso">
     <article class="account-balance">
         <span class="account-kicker">Saldo de tu cuenta · ARS</span><span data-help="Saldo total">Incluye cargos, ajustes y pagos aprobados de tu cuenta nacional e internacional. Los pagos en revisión aún no se descuentan.</span>
         <strong class="account-balance-value">{{ dinero(total.saldo_ars|abs) }}</strong>
         <span class="account-balance-state">{{ estado_saldo(total.saldo_ars) }}</span>
-        {% if total.saldo_ars > 0 and total.pendiente_facturacion_ars > 0 %}<p class="account-balance-unbilled">{% if total.pendiente_facturacion_ars >= total.saldo_ars %}Todo este saldo corresponde a envíos que todavía no facturamos.{% else %}Incluye {{ dinero(total.pendiente_facturacion_ars) }} de envíos que todavía no facturamos.{% endif %}</p>{% endif %}
         {% if periodo %}
         <dl class="account-opening"><div><dt>Saldo anterior{% if periodo.saldo_anterior_ars < 0 %} a favor{% endif %} al {{ periodo.fecha_inicio_visible }}<span data-help="Saldo anterior">Agrupa los cargos, ajustes y pagos registrados antes de esa fecha.</span></dt><dd>{{ dinero(periodo.saldo_anterior_ars|abs) }}</dd></div><div><dt>Movimientos desde el {{ periodo.fecha_inicio_visible }}</dt><dd>{{ dinero(periodo.neto_desde_ars) }}</dd></div>{% if periodo.pagos_sin_fecha_original_ars %}<div><dt>Pagos sin fecha original confirmada<span data-help="Fecha contable">Reducen el saldo acumulado, pero no se atribuyen al saldo anterior ni al cobrado desde el corte.</span></dt><dd>− {{ dinero(periodo.pagos_sin_fecha_original_ars) }}</dd></div>{% endif %}{% if periodo.redondeo_ars %}<div><dt>Redondeo</dt><dd>{{ dinero(periodo.redondeo_ars) }}</dd></div>{% endif %}</dl>
         {% if periodo.advertencia_pagos_fecha_original %}<p class="account-opening-note">{{ periodo.advertencia_pagos_fecha_original }}</p>{% endif %}
@@ -75,32 +73,32 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         {% endif %}
         <details class="account-balance-breakdown">
             <summary>Cómo se compone tu saldo</summary>
-            <dl><div><dt>Cargos y ajustes</dt><dd>{{ dinero(total.debe_ars) }}</dd></div><div><dt>Pagos aprobados</dt><dd>− {{ dinero(total.pagos_aprobados_ars) }}</dd></div>{% if total.haber_ars > total.pagos_aprobados_ars %}<div><dt>Ajustes a favor</dt><dd>− {{ dinero(total.haber_ars - total.pagos_aprobados_ars) }}</dd></div>{% endif %}</dl><p class="account-balance-documents">Facturado {{ dinero(total.facturado_ars) }} · A facturar {{ dinero(total.pendiente_facturacion_ars) }}</p>
+            <dl><div><dt>Cargos y ajustes</dt><dd>{{ dinero(total.debe_ars) }}</dd></div><div><dt>Pagos aprobados</dt><dd>− {{ dinero(total.pagos_aprobados_ars) }}</dd></div>{% if total.haber_ars > total.pagos_aprobados_ars %}<div><dt>Ajustes a favor</dt><dd>− {{ dinero(total.haber_ars - total.pagos_aprobados_ars) }}</dd></div>{% endif %}</dl>
         </details>
     </article>
     <section class="account-due" aria-labelledby="account-due-title">
         <div class="account-section-heading">
-            <div><span class="account-kicker">Próxima acción</span><h2 id="account-due-title">Tus vencimientos</h2></div>
-            {% if exp and exp.vencimientos.cantidad_vencida %}<span class="account-status is-attention">{{ exp.vencimientos.cantidad_vencida }} vencida{% if exp.vencimientos.cantidad_vencida != 1 %}s{% endif %}</span>{% endif %}
+            <div><span class="account-kicker">Próximo paso</span><h2 id="account-due-title">{% if total.saldo_ars > 0 %}Saldo a pagar{% elif total.saldo_ars < 0 %}Saldo a favor{% else %}Cuenta al día{% endif %}</h2></div>
+            {% if exp and exp.vencimientos.total_vencido_ars %}<span class="account-status is-attention">Hay saldo vencido</span>{% endif %}
         </div>
-        {% if exp and exp.vencimientos['items'] %}
-        <div class="account-due-list">
-            {% for v in exp.vencimientos['items'] %}
-            <div class="account-due-row">
-                <div class="account-due-document"><strong>{{ v.numero_visible }}</strong><span class="{% if v.estado == 'VENCIDA' %}account-attention{% endif %}">{{ v.estado_label }}{% if v.fecha_vencimiento %} · <time datetime="{{ v.fecha_vencimiento_iso }}">{{ v.fecha_vencimiento }}</time>{% endif %}{% if v.parcial %} · Pago parcial{% endif %}</span></div>
-                <div class="account-due-amount"><strong>{{ dinero(v.saldo_ars) }}</strong><span>Pendiente{% if v.en_revision_ars %} · {{ dinero(v.en_revision_ars) }} en revisión{% endif %}</span></div>
-                {% if v.disponible_pago_ars > 0 %}<a href="{{ cuenta_url(pagar=v.destino_pago, pagina=None) }}#informar-pago" class="account-text-action" data-open-payment data-payment-destination="{{ v.destino_pago }}">Informar pago <span aria-hidden="true">↗</span></a>{% else %}<span class="account-status is-attention">En revisión</span>{% endif %}
-            </div>
-            {% endfor %}
-        </div>
-        <p class="account-due-note">{% if exp.vencimientos.cantidad > exp.vencimientos["items"]|length %}Mostrando {{ exp.vencimientos["items"]|length }} de {{ exp.vencimientos.cantidad }} facturas pendientes · {% endif %}Pendiente de facturas: <strong>{{ dinero(exp.vencimientos.total_pendiente_ars) }}</strong>{% if exp.vencimientos.total_vencido_ars %} · Vencido: <strong class="account-attention">{{ dinero(exp.vencimientos.total_vencido_ars) }}</strong>{% endif %}</p>
-        {% elif exp %}<div class="account-quiet-state"><div><strong>Todavía no tenés facturas con vencimiento.</strong>{% if total.pendiente_facturacion_ars > 0 %}<p>Tenés {{ dinero(total.pendiente_facturacion_ars) }} en envíos sin facturar. Ya suman a tu saldo; cuando emitamos la factura vas a ver acá el importe y la fecha de vencimiento. Si querés adelantar un pago, informalo y lo aplicamos a esos envíos.</p><a href="#movimientos" class="account-text-action">Ver envíos sin facturar</a> <a href="#informar-pago" class="account-text-action" data-open-payment>Informar un pago</a>{% else %}<p>Acá vas a ver las facturas, su vencimiento y tus pagos.</p>{% endif %}</div></div>
-        {% else %}<p class="account-inline-empty">Los vencimientos no están disponibles en este momento.</p>{% endif %}
+        <div class="account-quiet-state"><div>
+            {% if total.saldo_ars > 0 %}
+            <strong>{{ dinero(total.saldo_ars) }}</strong>
+            <p>Cuando transfieras, informá el pago y elegí qué envíos estás pagando. Lo que no asignes queda a cuenta.</p>
+            {% if exp and exp.vencimientos.total_vencido_ars %}<p class="account-attention">Vencido: {{ dinero(exp.vencimientos.total_vencido_ars) }}</p>{% endif %}
+            <a href="#informar-pago" class="btn btn-primary btn-sm" data-open-payment>Informar un pago</a>
+            {% elif total.saldo_ars < 0 %}
+            <strong>{{ dinero(total.saldo_ars|abs) }}</strong>
+            <p>Se descuenta automáticamente de tus próximos envíos.</p>
+            {% else %}
+            <p>No tenés saldo pendiente. Acá vas a ver lo que haya que pagar.</p>
+            {% endif %}
+        </div></div>
     </section>
     <details class="account-position-extra"><summary>Pagos y límite de cuenta</summary>
     <dl class="account-payment-totals">
         <div><dt>Pagos en revisión<span data-help="Pagos en revisión">Comprobantes recibidos que TAURO todavía no aprobó. No se descuentan del saldo.</span></dt><dd>{{ dinero(resumen_cuenta.pagos_pendientes_ars|default(0)) }}</dd></div>
-        <div><dt>Pagos por vincular<span data-help="Pagos por vincular">Pagos aprobados, ya descontados del saldo total, que aún no se vincularon a una factura o cargo.</span></dt><dd>{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd></div>
+        <div><dt>Pagos por vincular<span data-help="Pagos por vincular">Pagos aprobados, ya descontados del saldo total, que todavía no asignaste a envíos.</span></dt><dd>{{ dinero(resumen_cuenta.credito_sin_imputar_ars) }}</dd></div>
         {% if exp and exp.cupo.configurado %}<div class="account-capacity"><dt>Disponible para nuevos envíos</dt><dd>{{ dinero(exp.cupo.disponible_ars) }}</dd><small>De un límite de {{ dinero(exp.cupo.tope_ars) }}{% if exp.cupo.reservado_ars %} · {{ dinero(exp.cupo.reservado_ars) }} reservado{% endif %} · Se vuelve a verificar al emitir</small><details class="account-capacity-detail"><summary>Cómo se calcula el disponible</summary><p>El disponible considera cargos, ajustes aplicados, pagos aprobados y reservas de emisión.</p><p>Cargos menos pagos: {{ dinero(exp.cupo.deuda_ars|default(0)) }} · Reservas: {{ dinero(exp.cupo.reservado_ars) }}. Un saldo a favor no amplía el límite.</p></details></div>{% endif %}
     </dl>
     </details>
@@ -141,7 +139,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
         {% for pago in exp.pagos %}
         <article class="account-payment-item" id="pago-{{ pago.id }}">
         <div class="account-payment-header"><span class="account-payment-record-title"><strong>{{ dinero(pago.monto_ars) }}</strong><span>{{ pago.fecha or 'Fecha sin informar' }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</span></span><span class="account-status {% if pago.estado == 'PENDIENTE' %}is-attention{% elif pago.estado == 'RECHAZADO' %}is-rejected{% else %}is-confirmed{% endif %}">{{ pago.estado_label }}</span></div>
-        <div class="account-imputation-row"><div><strong>{{ pago.imputacion_label|default("Sin envíos asignados") }}</strong>{% if pago.puede_imputar %}<small>{{ dinero(pago.sin_imputar_ars) }} disponibles para imputar</small>{% endif %}</div><a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/imputar">{{ "Elegir envíos" if pago.puede_imputar else "Ver imputación" }}</a></div>
+        <div class="account-imputation-row"><div><strong>{{ pago.imputacion_label|default("Sin envíos asignados") }}</strong>{% if pago.puede_imputar %}<small>{{ dinero(pago.sin_imputar_ars) }} sin asignar a envíos</small>{% endif %}</div><a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/imputar">{{ "Asignar envíos" if pago.puede_imputar else "Ver envíos asignados" }}</a></div>
         <details class="account-payment-record">
             <summary><span>Ver detalle{% if pago.tiene_comprobante %} y comprobante{% endif %}</span><span class="account-detail-chevron" aria-hidden="true"></span></summary>
             <div class="account-payment-record-body">
@@ -166,7 +164,7 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
     <summary>
         <span>
             <strong>Informar un pago</strong>
-            <small>Informá el monto transferido y adjuntá su comprobante</small>
+            <small>Monto, comprobante y los envíos que estás pagando</small>
         </span>
         <span class="account-payment-action">Cargar comprobante</span>
     </summary>

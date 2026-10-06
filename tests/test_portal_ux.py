@@ -257,8 +257,9 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     html = _template("cuenta.html")
     assert "El saldo se actualiza cuando TAURO aprueba el pago" in html
     assert "Los pagos en revisión aún no se descuentan" in html
-    assert "Facturado" in html
-    assert "A facturar" in html
+    # Lo pendiente de facturar es interno de TAURO: el cliente no lo ve.
+    assert "Facturado" not in html
+    assert "A facturar" not in html
     assert "Envíos" in _template("cuenta_movimientos.html")
     assert "Pagos" in html
     assert "A favor" in html
