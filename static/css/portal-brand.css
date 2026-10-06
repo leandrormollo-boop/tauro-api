@@ -42,6 +42,20 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+.portal-operacion .tauro-brand-badge .tauro-brand-mark-light { display: none; }
+/* En blanco, una superficie perlada: el relieve acompaña al resto del portal. */
+html[data-theme="light"] .portal-operacion .tauro-brand-badge {
+  border-color: #d4c8e7;
+  background: linear-gradient(175deg, #fff 0%, #faf8ff 48%, #eee8f5 100%);
+  box-shadow: 0 2px 6px rgba(55, 32, 86, .07),
+    inset 0 1px 0 #fff, inset 0 -1px 0 rgba(112, 69, 206, .06);
+}
+html[data-theme="light"] .portal-operacion .tauro-brand-badge > span {
+  color: #653db9;
+  background-image: linear-gradient(105deg, #4e2d8e 0%, #7045ce 48%, #53318f 100%);
+}
+html[data-theme="light"] .portal-operacion .tauro-brand-badge .tauro-brand-mark-dark { display: none; }
+html[data-theme="light"] .portal-operacion .tauro-brand-badge .tauro-brand-mark-light { display: block; }
 .portal-operacion .tauro-branded-heading {
   display: flex;
   flex-direction: row;
