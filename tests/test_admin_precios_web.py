@@ -40,7 +40,7 @@ def _config(**cambios):
         "markup_texto": "",
         "configuracion_completa": False,
         "publicable": False,
-        "estado": "Falta cargar el markup de OCA.",
+        "estado": "Falta cargar el porcentaje de ganancia de OCA.",
         "error": None,
     }
     return {**base, **cambios}

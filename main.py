@@ -977,6 +977,7 @@ def cotizar_web_nacional(body: CotizarWebNacionalRequest, request: Request):
     no puede verificarlos, el cotizador falla cerrado con 503.
     """
     from servicios.cotizador_publico_nacional import (
+        CotizacionPublicaDesactivada,
         CotizacionPublicaNoConfigurada,
         CotizacionPublicaNoDisponible,
         cotizar_publico_nacional,
@@ -1017,10 +1018,36 @@ def cotizar_web_nacional(body: CotizarWebNacionalRequest, request: Request):
         resultado = cotizar_publico_nacional(**body.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    except CotizacionPublicaDesactivada as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "code": "oca_public_quote_disabled",
+                "detail": str(exc),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
     except CotizacionPublicaNoConfigurada as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from None
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "code": "oca_public_quote_unavailable",
+                "detail": str(exc),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
     except CotizacionPublicaNoDisponible as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from None
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": "error",
+                "code": "oca_quote_unavailable",
+                "detail": str(exc),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
     except Exception as exc:
         # El cliente nunca recibe CUIT, operativa, pricing ni respuesta XML.
         print(f"[cotweb-nacional] error: {type(exc).__name__}")

@@ -46,14 +46,17 @@ def _db(monkeypatch, filas=()):
 
 def test_pricing_publico_exige_activacion_y_markup_explicitos(monkeypatch):
     _db(monkeypatch, [])
-    with pytest.raises(precios.PrecioWebNoDisponible):
+    with pytest.raises(precios.PrecioWebNoDisponible) as error:
         precios.pricing_publico_oca()
+    assert error.value.motivo == precios.MotivoPrecioWebNoDisponible.CANAL_DESACTIVADO
 
     _db(monkeypatch, [
         {"parametro": precios.PARAMETRO_HABILITADO, "valor": "1"},
     ])
-    with pytest.raises(precios.PrecioWebNoDisponible):
+    with pytest.raises(precios.PrecioWebNoDisponible) as error:
         precios.pricing_publico_oca()
+    assert error.value.motivo == precios.MotivoPrecioWebNoDisponible.PRECIO_NO_CONFIGURADO
+    assert str(error.value) == "Falta cargar el porcentaje de ganancia de OCA."
 
 
 def test_pricing_publico_devuelve_decimal_sin_fallback(monkeypatch):
@@ -79,8 +82,23 @@ def test_markup_invalido_falla_cerrado(monkeypatch, valor):
         {"parametro": precios.PARAMETRO_HABILITADO, "valor": "1"},
         {"parametro": precios.PARAMETRO_MARKUP_PCT, "valor": valor},
     ])
-    with pytest.raises(precios.PrecioWebNoDisponible):
+    with pytest.raises(precios.PrecioWebNoDisponible) as error:
         precios.pricing_publico_oca()
+    assert error.value.motivo == precios.MotivoPrecioWebNoDisponible.CONFIGURACION_INVALIDA
+
+
+def test_falla_de_db_tiene_motivo_tecnico_estable(monkeypatch):
+    monkeypatch.setattr(
+        precios,
+        "get_conn",
+        lambda: (_ for _ in ()).throw(RuntimeError("detalle privado")),
+    )
+
+    with pytest.raises(precios.PrecioWebNoDisponible) as error:
+        precios.pricing_publico_oca()
+
+    assert error.value.motivo == precios.MotivoPrecioWebNoDisponible.LECTURA_CONFIG
+    assert "detalle privado" not in str(error.value)
 
 
 def test_guardado_y_auditoria_comparten_transaccion(monkeypatch):

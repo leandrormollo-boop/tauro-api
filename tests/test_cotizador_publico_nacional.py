@@ -229,8 +229,68 @@ def test_configuracion_incompleta_falla_antes_de_oca(monkeypatch):
         "OCAAdapter",
         lambda *args, **kwargs: pytest.fail("no debe crear el adapter"),
     )
-    with pytest.raises(publico.CotizacionPublicaNoConfigurada):
+    with pytest.raises(publico.CotizacionPublicaNoConfigurada) as error:
         publico.cotizar_publico_nacional(**datos())
+    assert type(error.value) is publico.CotizacionPublicaNoConfigurada
+    assert str(error.value) == "no disponible"
+
+
+@pytest.mark.parametrize(
+    "motivo",
+    [
+        "CANAL_DESACTIVADO",
+        "PRECIO_NO_CONFIGURADO",
+        "CONFIGURACION_INVALIDA",
+    ],
+)
+def test_pricing_no_publicable_informa_canal_sin_llamar_adapter(monkeypatch, motivo):
+    from servicios import precios_web_nacional as precios
+
+    monkeypatch.setattr(publico, "_configuracion_productiva", lambda: object())
+
+    def pricing_no_disponible():
+        raise precios.PrecioWebNoDisponible(
+            "detalle de administración",
+            motivo=getattr(precios.MotivoPrecioWebNoDisponible, motivo),
+        )
+
+    monkeypatch.setattr(precios, "pricing_publico_oca", pricing_no_disponible)
+    monkeypatch.setattr(
+        publico,
+        "OCAAdapter",
+        lambda *args, **kwargs: pytest.fail("no debe crear el adapter"),
+    )
+
+    with pytest.raises(publico.CotizacionPublicaDesactivada) as error:
+        publico.cotizar_publico_nacional(**datos())
+
+    assert str(error.value) == "La cotización nacional todavía no está habilitada."
+    assert "administración" not in str(error.value)
+
+
+def test_falla_lectura_pricing_es_tecnica_y_no_llama_adapter(monkeypatch):
+    from servicios import precios_web_nacional as precios
+
+    monkeypatch.setattr(publico, "_configuracion_productiva", lambda: object())
+
+    def pricing_no_disponible():
+        raise precios.PrecioWebNoDisponible(
+            "detalle privado",
+            motivo=precios.MotivoPrecioWebNoDisponible.LECTURA_CONFIG,
+        )
+
+    monkeypatch.setattr(precios, "pricing_publico_oca", pricing_no_disponible)
+    monkeypatch.setattr(
+        publico,
+        "OCAAdapter",
+        lambda *args, **kwargs: pytest.fail("no debe crear el adapter"),
+    )
+
+    with pytest.raises(publico.CotizacionPublicaNoConfigurada) as error:
+        publico.cotizar_publico_nacional(**datos())
+
+    assert type(error.value) is publico.CotizacionPublicaNoConfigurada
+    assert str(error.value) == "El cotizador nacional no está disponible en este momento."
 
 
 @pytest.mark.parametrize(
@@ -262,8 +322,10 @@ def test_configuracion_publica_rechaza_qa_muestras_y_modalidad_incorrecta(
         "from_env",
         lambda: SimpleNamespace(**config),
     )
-    with pytest.raises(publico.CotizacionPublicaNoConfigurada):
+    with pytest.raises(publico.CotizacionPublicaNoConfigurada) as error:
         publico._configuracion_productiva()
+    assert type(error.value) is publico.CotizacionPublicaNoConfigurada
+    assert str(error.value) == "El cotizador nacional no está disponible en este momento."
 
 
 def test_modelo_publico_rechaza_campos_personales_y_no_trunca_cantidad():
@@ -281,7 +343,6 @@ def test_modelo_publico_rechaza_campos_personales_y_no_trunca_cantidad():
 
 def test_endpoint_mapea_configuracion_y_disponibilidad_sin_filtrar(monkeypatch):
     import main
-    from fastapi import HTTPException
     from servicios import rate_limit
 
     request = SimpleNamespace(headers={}, client=SimpleNamespace(host="127.0.0.1"))
@@ -292,13 +353,34 @@ def test_endpoint_mapea_configuracion_y_disponibilidad_sin_filtrar(monkeypatch):
         publico,
         "cotizar_publico_nacional",
         lambda **kwargs: (_ for _ in ()).throw(
-            publico.CotizacionPublicaNoConfigurada("cotizador apagado")
+            publico.CotizacionPublicaDesactivada(
+                "La cotización nacional todavía no está habilitada."
+            )
         ),
     )
-    with pytest.raises(HTTPException) as error:
-        main.cotizar_web_nacional(body, request)
-    assert error.value.status_code == 503
-    assert error.value.detail == "cotizador apagado"
+    respuesta = main.cotizar_web_nacional(body, request)
+    assert respuesta.status_code == 503
+    assert json.loads(respuesta.body) == {
+        "status": "error",
+        "code": "oca_public_quote_disabled",
+        "detail": "La cotización nacional todavía no está habilitada.",
+    }
+    assert respuesta.headers["cache-control"] == "no-store"
+
+    monkeypatch.setattr(
+        publico,
+        "cotizar_publico_nacional",
+        lambda **kwargs: (_ for _ in ()).throw(
+            publico.CotizacionPublicaNoConfigurada("temporal")
+        ),
+    )
+    respuesta = main.cotizar_web_nacional(body, request)
+    assert respuesta.status_code == 503
+    assert json.loads(respuesta.body) == {
+        "status": "error",
+        "code": "oca_public_quote_unavailable",
+        "detail": "temporal",
+    }
 
     monkeypatch.setattr(
         publico,
@@ -307,10 +389,13 @@ def test_endpoint_mapea_configuracion_y_disponibilidad_sin_filtrar(monkeypatch):
             publico.CotizacionPublicaNoDisponible("OCA no respondió")
         ),
     )
-    with pytest.raises(HTTPException) as error:
-        main.cotizar_web_nacional(body, request)
-    assert error.value.status_code == 502
-    assert error.value.detail == "OCA no respondió"
+    respuesta = main.cotizar_web_nacional(body, request)
+    assert respuesta.status_code == 502
+    assert json.loads(respuesta.body) == {
+        "status": "error",
+        "code": "oca_quote_unavailable",
+        "detail": "OCA no respondió",
+    }
 
 
 def test_endpoint_aplica_limite_durable_por_ip_y_global_antes_de_oca(monkeypatch):

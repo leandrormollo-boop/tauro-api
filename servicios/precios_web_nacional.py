@@ -7,6 +7,7 @@ escribe las dos perillas globales reservadas para la web.
 from __future__ import annotations
 
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Iterable
 
 from core.database import get_conn
@@ -19,8 +20,26 @@ PARAMETROS_RESERVADOS = frozenset({PARAMETRO_HABILITADO, PARAMETRO_MARKUP_PCT})
 _MAX_MARKUP_PCT = Decimal("300")
 
 
+class MotivoPrecioWebNoDisponible(str, Enum):
+    """Motivo estable para decidir qué estado puede mostrarse fuera de ADMIN."""
+
+    CANAL_DESACTIVADO = "canal_desactivado"
+    PRECIO_NO_CONFIGURADO = "precio_no_configurado"
+    CONFIGURACION_INVALIDA = "configuracion_invalida"
+    LECTURA_CONFIG = "lectura_config"
+
+
 class PrecioWebNoDisponible(ValueError):
     """La web no tiene una regla OCA explícita y publicable."""
+
+    def __init__(
+        self,
+        mensaje: str,
+        *,
+        motivo: MotivoPrecioWebNoDisponible = MotivoPrecioWebNoDisponible.LECTURA_CONFIG,
+    ):
+        super().__init__(mensaje)
+        self.motivo = motivo
 
 
 def _parsear_markup(valor: Any) -> Decimal | None:
@@ -31,14 +50,14 @@ def _parsear_markup(valor: Any) -> Decimal | None:
         numero = parse_numero_humano(texto)
     except ValueError:
         raise ValueError(
-            "El markup de OCA debe ser un porcentaje válido, por ejemplo 20 o 20,5."
+            "El porcentaje de ganancia de OCA debe ser válido, por ejemplo 20 o 20,5."
         ) from None
     if numero is None or not numero.is_finite() or numero < 0:
-        raise ValueError("El markup de OCA no puede ser negativo.")
+        raise ValueError("El porcentaje de ganancia de OCA no puede ser negativo.")
     if numero > _MAX_MARKUP_PCT:
-        raise ValueError("El markup de OCA no puede superar 300%.")
+        raise ValueError("El porcentaje de ganancia de OCA no puede superar 300%.")
     if numero.as_tuple().exponent < -4:
-        raise ValueError("El markup de OCA admite hasta cuatro decimales.")
+        raise ValueError("El porcentaje de ganancia de OCA admite hasta cuatro decimales.")
     return numero
 
 
@@ -58,7 +77,7 @@ def _desde_filas(filas: Iterable[dict]) -> dict:
     if error:
         estado = "La configuración comercial de OCA es inválida."
     elif markup is None:
-        estado = "Falta cargar el markup de OCA."
+        estado = "Falta cargar el porcentaje de ganancia de OCA."
     elif not habilitada:
         estado = "La cotización pública de OCA está desactivada."
     else:
@@ -117,10 +136,17 @@ def pricing_publico_oca() -> dict:
         configuracion = _desde_filas(_leer_filas())
     except Exception:
         raise PrecioWebNoDisponible(
-            "No se pudo verificar el precio público de OCA."
+            "No se pudo verificar el precio público de OCA.",
+            motivo=MotivoPrecioWebNoDisponible.LECTURA_CONFIG,
         ) from None
     if not configuracion["publicable"]:
-        raise PrecioWebNoDisponible(configuracion["estado"])
+        if not configuracion["habilitada"]:
+            motivo = MotivoPrecioWebNoDisponible.CANAL_DESACTIVADO
+        elif configuracion["error"]:
+            motivo = MotivoPrecioWebNoDisponible.CONFIGURACION_INVALIDA
+        else:
+            motivo = MotivoPrecioWebNoDisponible.PRECIO_NO_CONFIGURADO
+        raise PrecioWebNoDisponible(configuracion["estado"], motivo=motivo)
     return {
         "tipo": "PCT",
         "valor": configuracion["markup_pct"],
@@ -142,7 +168,9 @@ def guardar_configuracion_oca(
     """
     markup = _parsear_markup(markup_pct)
     if habilitada and markup is None:
-        raise ValueError("Cargá el markup de OCA antes de activar la cotización pública.")
+        raise ValueError(
+            "Cargá el porcentaje de ganancia de OCA antes de activar la cotización pública."
+        )
 
     with get_conn() as conn:
         with conn.cursor() as cur:
