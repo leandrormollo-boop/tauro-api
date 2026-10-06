@@ -364,3 +364,195 @@ def test_valida_tamano_formato_y_sanitiza_nombre(cuenta_db):
             assert nombres[pago_chino] == "comprobante.pdf"
             assert nombres[pago_emoji] == "PDF.pdf"
             assert all(nombre.isascii() for nombre in nombres.values())
+
+
+def test_admin_adjunta_pdf_con_actor_real_sin_modificar_pago_ni_aplicacion(cuenta_db):
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            _crear_cliente(cur, "CLIENTE")
+            pago_id = _crear_pago(cur, "CLIENTE")
+            cur.execute(
+                """
+                INSERT INTO envios (
+                    cliente_id,fecha,monto_ars,estado,tracking,ambito
+                ) VALUES ('CLIENTE',CURRENT_DATE,1250.50,'ACTIVO',
+                          'TRACK-ADMIN-PDF','INTERNACIONAL')
+                RETURNING id
+                """
+            )
+            envio_id = int(cur.fetchone()["id"])
+            cur.execute(
+                """
+                INSERT INTO pagos_aplicaciones (
+                    pago_id,ambito,monto_ars,estado,envio_id
+                ) VALUES (%s,'INTERNACIONAL',1250.50,'APLICADA',%s)
+                """,
+                (pago_id, envio_id),
+            )
+            cur.execute(
+                """
+                SELECT fecha,monto_ars,metodo,referencia,nota,estado,
+                       fecha_original_conocida,fecha_revision_requerida
+                  FROM pagos WHERE id=%s
+                """,
+                (pago_id,),
+            )
+            pago_antes = dict(cur.fetchone())
+            cur.execute(
+                """
+                SELECT pago_id,ambito,monto_ars,estado,factura_id,envio_id
+                  FROM pagos_aplicaciones WHERE pago_id=%s
+                """,
+                (pago_id,),
+            )
+            aplicacion_antes = dict(cur.fetchone())
+
+    total_antes = cc.total_pagado("CLIENTE")
+    assert cc.adjuntar_comprobante_pago_admin(
+        "cliente", pago_id, PDF, "respaldo.exe", admin_user="  admin  ",
+    ) is True
+    assert cc.adjuntar_comprobante_pago_admin(
+        "CLIENTE", pago_id, PDF, "otro-nombre.pdf", admin_user="admin",
+    ) is False
+    assert cc.total_pagado("CLIENTE") == total_antes
+
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT fecha,monto_ars,metodo,referencia,nota,estado,
+                       fecha_original_conocida,fecha_revision_requerida,
+                       comprobante,comprobante_tipo,comprobante_nombre
+                  FROM pagos WHERE id=%s
+                """,
+                (pago_id,),
+            )
+            pago_despues = dict(cur.fetchone())
+            assert {
+                clave: pago_despues[clave] for clave in pago_antes
+            } == pago_antes
+            assert bytes(pago_despues["comprobante"]) == PDF
+            assert pago_despues["comprobante_tipo"] == "application/pdf"
+            assert pago_despues["comprobante_nombre"] == "respaldo.pdf"
+            cur.execute(
+                """
+                SELECT pago_id,ambito,monto_ars,estado,factura_id,envio_id
+                  FROM pagos_aplicaciones WHERE pago_id=%s
+                """,
+                (pago_id,),
+            )
+            assert dict(cur.fetchone()) == aplicacion_antes
+            cur.execute(
+                """
+                SELECT event,actor_type,actor_ref,metadata
+                  FROM security_audit
+                 WHERE event='admin.adjuntar_comprobante_pago'
+                """
+            )
+            [evento] = cur.fetchall()
+            assert evento["actor_type"] == "admin"
+            assert evento["actor_ref"] == "admin"
+            assert evento["metadata"] == {
+                "pago_id": pago_id,
+                "cliente_id": "CLIENTE",
+                "tipo": "application/pdf",
+                "bytes": len(PDF),
+            }
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM security_audit "
+                "WHERE event='cuenta.adjuntar_comprobante_pago'"
+            )
+            assert cur.fetchone()["n"] == 0
+
+
+def test_admin_exige_identidad_y_admite_los_formatos_comunes(cuenta_db):
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            _crear_cliente(cur, "CLIENTE")
+            pago_id = _crear_pago(cur, "CLIENTE")
+            pago_png = _crear_pago(
+                cur, "CLIENTE", referencia="REF-ADMIN-PNG",
+            )
+            pago_jpg = _crear_pago(
+                cur, "CLIENTE", referencia="REF-ADMIN-JPG",
+            )
+            pago_invalido = _crear_pago(
+                cur, "CLIENTE", referencia="REF-ADMIN-INVALIDO",
+            )
+
+    with pytest.raises(ValueError, match="administrador"):
+        cc.adjuntar_comprobante_pago_admin(
+            "CLIENTE", pago_id, PDF, "recibo.pdf", admin_user=" \t ",
+        )
+    assert cc.adjuntar_comprobante_pago_admin(
+        "CLIENTE", pago_png, b"\x89PNG\r\n\x1a\nadmin", "foto.png",
+        admin_user="admin",
+    )
+    assert cc.adjuntar_comprobante_pago_admin(
+        "CLIENTE", pago_jpg, b"\xff\xd8\xff\xe0admin", "foto.jpg",
+        admin_user="admin",
+    )
+    with pytest.raises(ValueError, match="foto.*PDF"):
+        cc.adjuntar_comprobante_pago_admin(
+            "CLIENTE", pago_invalido, b"GIF89a", "foto.gif",
+            admin_user="admin",
+        )
+
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT comprobante FROM pagos WHERE id=%s", (pago_id,))
+            assert cur.fetchone()["comprobante"] is None
+            cur.execute(
+                """
+                SELECT id,comprobante_tipo FROM pagos
+                 WHERE id IN (%s,%s,%s) ORDER BY id
+                """,
+                (pago_png, pago_jpg, pago_invalido),
+            )
+            tipos = {fila["id"]: fila["comprobante_tipo"] for fila in cur.fetchall()}
+            assert tipos == {
+                pago_png: "image/png",
+                pago_jpg: "image/jpeg",
+                pago_invalido: None,
+            }
+
+
+def test_fallo_de_auditoria_admin_revierte_documento_y_preserva_pago(
+    cuenta_db, monkeypatch,
+):
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            _crear_cliente(cur, "CLIENTE")
+            pago_id = _crear_pago(cur, "CLIENTE", "PENDIENTE")
+
+    def fallar_auditoria(*args, **kwargs):
+        assert kwargs["event"] == "admin.adjuntar_comprobante_pago"
+        assert kwargs["actor_type"] == "admin"
+        assert kwargs["actor_ref"] == "admin"
+        raise RuntimeError("auditoría admin indisponible")
+
+    monkeypatch.setattr(cc, "registrar_evento_con_cursor", fallar_auditoria)
+    with pytest.raises(RuntimeError, match="auditoría admin indisponible"):
+        cc.adjuntar_comprobante_pago_admin(
+            "CLIENTE", pago_id, PDF, "recibo.pdf", admin_user="admin",
+        )
+
+    with cuenta_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT comprobante,comprobante_tipo,comprobante_nombre,
+                       comprobante_sha256,monto_ars,estado,referencia
+                  FROM pagos WHERE id=%s
+                """,
+                (pago_id,),
+            )
+            assert dict(cur.fetchone()) == {
+                "comprobante": None,
+                "comprobante_tipo": None,
+                "comprobante_nombre": None,
+                "comprobante_sha256": None,
+                "monto_ars": Decimal("1250.50"),
+                "estado": "PENDIENTE",
+                "referencia": "REF-ORIGINAL",
+            }
