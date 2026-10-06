@@ -32,6 +32,10 @@ class CotizacionPublicaNoConfigurada(RuntimeError):
     """La web o la cuenta OCA no tienen una configuración publicable."""
 
 
+class CotizacionPublicaDesactivada(CotizacionPublicaNoConfigurada):
+    """El canal público todavía no fue habilitado con una regla válida."""
+
+
 class CotizacionPublicaNoDisponible(RuntimeError):
     """OCA no pudo devolver una tarifa pública utilizable."""
 
@@ -98,13 +102,22 @@ def _pricing_publico() -> dict:
     # Import tardío: este módulo no debe volver obligatoria la DB al importar
     # ``main`` ni convertir un fallo de pricing en un error de arranque.
     from servicios.precios_web_nacional import (
+        MotivoPrecioWebNoDisponible,
         PrecioWebNoDisponible,
         pricing_publico_oca,
     )
 
     try:
         return dict(pricing_publico_oca())
-    except PrecioWebNoDisponible:
+    except PrecioWebNoDisponible as exc:
+        if exc.motivo in {
+            MotivoPrecioWebNoDisponible.CANAL_DESACTIVADO,
+            MotivoPrecioWebNoDisponible.PRECIO_NO_CONFIGURADO,
+            MotivoPrecioWebNoDisponible.CONFIGURACION_INVALIDA,
+        }:
+            raise CotizacionPublicaDesactivada(
+                "La cotización nacional todavía no está habilitada."
+            ) from None
         raise CotizacionPublicaNoConfigurada(
             "El cotizador nacional no está disponible en este momento."
         ) from None
