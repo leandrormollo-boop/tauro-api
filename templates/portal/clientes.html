@@ -105,11 +105,12 @@
 <dialog class="client-dialog" id="client-dialog" aria-labelledby="client-form-title"
         data-open-on-load="{{ 'true' if request.query_params.get('nuevo') else 'false' }}">
 <section class="card client-form-card" id="cliente-form">
-    <div class="card-head">
+    <div class="card-head tauro-branded-dialog-head">
         <div>
             <h3 id="client-form-title">Agregar contacto</h3>
             <p id="client-form-copy">Completá los datos que querés reutilizar en futuros envíos.</p>
         </div>
+        {% include 'portal/_brand_badge.html' %}
         <button type="button" id="client-form-cancel" class="btn btn-ghost btn-sm" aria-label="Cerrar formulario">Cerrar</button>
     </div>
 

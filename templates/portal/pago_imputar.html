@@ -5,7 +5,7 @@
 {% block content %}
 <section class="account-page account-client account-imputation-page">
   <a class="account-text-action" href="/portal/cuenta#pagos">← Mi cuenta</a>
-  <div class="account-title"><div><div class="eyebrow">Mi cuenta · Pago #{{ pago.id }}</div><h1>{{ 'Imputar pago' if pago.puede_imputar else 'Imputación del pago' }}</h1><p>{{ pago.fecha }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</p></div></div>
+  <div class="account-title tauro-branded-heading"><div><div class="eyebrow">Mi cuenta · Pago #{{ pago.id }}</div><h1>{{ 'Imputar pago' if pago.puede_imputar else 'Imputación del pago' }}</h1><p>{{ pago.fecha }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</p></div>{% include 'portal/_brand_badge.html' %}</div>
   {% if request.query_params.get('error') %}<div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>{% endif %}
   {% if request.query_params.get('guardado') %}<div class="msg ok" role="status">{{ 'Imputación guardada. El pago sigue en revisión.' if pago.estado == 'PENDIENTE' else 'Imputación guardada.' }}</div>{% endif %}
   <div class="account-imputation-position"><div><span>Total del pago</span><strong>{{ dinero(pago.monto_ars) }}</strong><span class="account-status">{{ pago.estado_label }}</span></div><div><span>Disponible para imputar</span><strong>{{ dinero(pago.sin_imputar_ars) }}</strong></div></div>

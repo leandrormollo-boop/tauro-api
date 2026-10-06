@@ -353,11 +353,12 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 <dialog class="shipment-verification-dialog" id="shipment-verification-dialog"
         aria-labelledby="shipment-verification-title">
     <div class="shipment-verification-panel">
-        <header class="shipment-verification-head">
+        <header class="shipment-verification-head tauro-branded-dialog-head">
             <div>
                 <span>Control posterior a la emisión</span>
                 <h2 id="shipment-verification-title">Verificar envío</h2>
             </div>
+            {% include 'portal/_brand_badge.html' %}
             <button type="button" class="shipment-verification-close" data-verificar-cerrar aria-label="Cerrar verificación">×</button>
         </header>
         <div class="shipment-verification-content" data-verificar-contenido>

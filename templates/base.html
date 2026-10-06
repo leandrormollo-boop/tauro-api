@@ -35,7 +35,8 @@
     <link rel="stylesheet" href="/static/css/portal-claro.css?v=1">
     {% block extra_css %}{% endblock %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-dock.css?v=2">
-    <link rel="stylesheet" href="/static/css/portal-sprites.css?v=1">{% endif %}
+    <link rel="stylesheet" href="/static/css/portal-sprites.css?v=1">
+    <link rel="stylesheet" href="/static/css/portal-brand.css?v=1">{% endif %}
     <link rel="stylesheet" href="/static/css/info-ayuda.css?v=1">
     <link rel="stylesheet" href="/static/css/rutas-frecuentes.css?v=1">
     <script src="/static/js/form-draft.js?v=1"></script>
@@ -300,12 +301,13 @@
 <dialog class="quote-window-dialog" id="quote-window-dialog"
         aria-labelledby="quote-window-title" aria-describedby="quote-window-description">
     <section class="quote-window-panel">
-        <header class="quote-window-head">
+        <header class="quote-window-head tauro-branded-dialog-head">
             <div>
                 <span>Cotización rápida</span>
                 <h2 id="quote-window-title">Cotizá tu envío</h2>
                 <p id="quote-window-description">Completá los datos y compará tus tarifas.</p>
             </div>
+            {% include 'portal/_brand_badge.html' %}
             <div class="quote-window-head-actions">
                 <button type="button" class="shipment-verification-close" data-cotizar-cerrar
                         aria-label="Cerrar cotizador">×</button>
@@ -318,7 +320,7 @@
 </dialog>
 {% if not gestion_embebida %}
 <dialog id="shipment-manager-dialog" class="shipment-manager-dialog" aria-labelledby="shipment-manager-title">
-    <header><h2 id="shipment-manager-title">Gestionar envío</h2><button type="button" data-manager-close aria-label="Cerrar gestión del envío">×</button></header>
+    <header class="tauro-branded-dialog-head"><h2 id="shipment-manager-title">Gestionar envío</h2>{% include 'portal/_brand_badge.html' %}<button type="button" data-manager-close aria-label="Cerrar gestión del envío">×</button></header>
     <iframe title="Revisión, guía y recolección del envío" data-manager-frame></iframe>
 </dialog>
 {% endif %}

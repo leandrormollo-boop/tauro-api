@@ -11,8 +11,11 @@
             <span class="badge {{ s.estado_cliente_ui.clase }}">{{ s.estado_cliente_ui.label }}</span>
             {% if s.tracking %}<span class="shipment-hub-tracking">Guía <strong>{{ s.tracking }}</strong></span>{% endif %}
         </div>
-        <div class="shipment-hub-price"><span>Precio del envío · ARS</span><strong>{{ ars(s.precio_final_cliente_ars if s.tracking else s.precio_tauro_ars) }}</strong>
-            <small>{{ 'Consultá cargos y pagos en Mi cuenta.' if s.tracking else 'Todavía no se emitió la guía.' }}</small>
+        <div class="tauro-brand-tools">
+            {% include 'portal/_brand_badge.html' %}
+            <div class="shipment-hub-price"><span>Precio del envío · ARS</span><strong>{{ ars(s.precio_final_cliente_ars if s.tracking else s.precio_tauro_ars) }}</strong>
+                <small>{{ 'Consultá cargos y pagos en Mi cuenta.' if s.tracking else 'Todavía no se emitió la guía.' }}</small>
+            </div>
         </div>
     </header>
     {% if request.query_params.get('error') %}<div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>{% endif %}

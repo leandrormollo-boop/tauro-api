@@ -5,13 +5,13 @@
 {% set vista_previa_recolecciones = vista_previa_recolecciones|default(false) %}
 <section class="pickups-page">
 <div class="page-title pickup-page-title">
-    <div class="page-title-row">
+    <div class="page-title-row tauro-branded-heading">
         <div>
             <div class="eyebrow">Operaciones</div>
             <h1>Recolecciones</h1>
             <p>Revisá tus retiros y programá el próximo desde una guía.</p>
         </div>
-        <a class="btn btn-primary" href="#programar-recoleccion">Programar nueva recolección</a>
+        <div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<a class="btn btn-primary" href="#programar-recoleccion">Programar nueva recolección</a></div>
     </div>
 </div>
 
