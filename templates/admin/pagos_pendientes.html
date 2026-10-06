@@ -36,7 +36,7 @@
               <a href="/admin/pagos/{{ p.id }}/comprobante" target="_blank"
                  class="btn btn-ghost btn-sm">Ver comprobante</a>
             {% else %}
-              <span style="color:var(--fg-3);">sin adjunto</span>
+              <a href="/admin/pagos/{{ p.id }}/adjuntar-comprobante?volver=pendientes" class="btn btn-ghost btn-sm">Adjuntar comprobante</a>
             {% endif %}
           </td>
           {% set monto_fmt = (p.monto_ars)|numero_ars %}

@@ -438,10 +438,18 @@ html[data-theme="light"] .shell .account-client .btn-primary:not(.is-loading):ho
 .account-client .account-imputation-label { font-size:17px; margin:20px 0; }
 .account-client .account-imputation-actions { display:flex; flex-wrap:wrap; gap:12px; margin:20px 0; }
 .account-client .account-imputation-actions button:disabled { opacity:.5; cursor:default; }
+.account-client .account-payment-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.account-client .account-receipt-form { max-width:640px; }
+.account-client .account-receipt-form label { font-family:var(--font-body); font-size:13px; letter-spacing:normal; text-transform:none; }
+.account-client .account-receipt-form input[type=file] { width:100%; min-width:0; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--bg-elev); color:var(--fg); font:13px var(--font-body); }
+.account-client .account-receipt-form input[type=file]::file-selector-button { margin-right:12px; padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--fg); font:inherit; cursor:pointer; }
+.account-client .account-receipt-form input[type=file]:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.account-client .account-receipt-form small { display:block; margin-top:8px; color:var(--account-muted); font-size:12px; }
 @media(max-width:600px) {
  .account-client .account-payment-header { flex-wrap:wrap; }
  .account-client .account-imputation-row { align-items:flex-start; flex-direction:column; gap:12px; }
  .account-client .account-imputation-row .btn { width:100%; }
+ .account-client .account-payment-actions { width:100%; }
  .account-client .account-document-selection { padding:14px; }
  .account-client .account-selection-heading { align-items:flex-start; flex-direction:column; gap:6px; }
 }

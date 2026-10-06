@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import functools
 import hashlib
 import re
+import unicodedata
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 from zoneinfo import ZoneInfo
 
@@ -1550,10 +1551,33 @@ def validar_comprobante(contenido: bytes) -> str:
     """Devuelve el content-type real, o lanza ValueError si no es JPG/PNG/PDF."""
     if not contenido:
         raise ValueError("El archivo llegó vacío.")
+    if len(contenido) > COMPROBANTE_MAX_BYTES:
+        raise ValueError("El archivo supera el máximo de 8 MB.")
     for firma, tipo in _FIRMAS_COMPROBANTE.items():
         if contenido.startswith(firma):
             return tipo
     raise ValueError("El comprobante tiene que ser una foto (JPG/PNG) o un PDF.")
+
+
+def _nombre_comprobante_seguro(nombre: Any, tipo: str) -> str:
+    """Conserva un nombre legible sin permitir rutas ni cabeceras inyectadas."""
+    extensiones = {
+        "application/pdf": ".pdf",
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+    }
+    original = str(nombre or "").replace("\\", "/").split("/")[-1]
+    original = re.sub(r"[\x00-\x1f\x7f]+", " ", original)
+    ascii_nombre = unicodedata.normalize("NFKD", original).encode(
+        "ascii", "ignore"
+    ).decode("ascii")
+    ascii_nombre = re.sub(r"[^A-Za-z0-9 ._()-]+", "", ascii_nombre)
+    ascii_nombre = " ".join(ascii_nombre.strip().split())
+    base = ascii_nombre.rsplit(".", 1)[0].lstrip(".").rstrip(" .")
+    if not base:
+        base = "comprobante"
+    extension = extensiones[tipo]
+    return base[: 160 - len(extension)].rstrip(" .") + extension
 
 
 def listar_destinos_pago(cliente_id: str) -> List[Dict[str, Any]]:
@@ -2417,6 +2441,161 @@ def get_comprobante(pago_id: int, cliente_id: Optional[str] = None):
         return None
     return (bytes(row["comprobante"]), row["comprobante_tipo"] or "application/octet-stream",
             row["comprobante_nombre"] or f"comprobante_{pago_id}")
+
+
+@_conflictos_como_valueerror
+def _adjuntar_comprobante_pago(
+    cliente_id: str,
+    pago_id: int,
+    contenido: bytes,
+    nombre: str,
+    *,
+    audit_event: str,
+    actor_type: str,
+    actor_ref: str,
+) -> bool:
+    """Núcleo transaccional para adjuntar evidencia sin alterar contabilidad.
+
+    La fila del pago y el lock documental global serializan el doble click y
+    los intentos concurrentes de asociar el mismo archivo a pagos distintos.
+    Un reintento byte a byte idéntico es exitoso e idempotente, pero no vuelve
+    a escribir el nombre ni genera otra auditoría.
+    """
+    cliente = str(cliente_id or "").strip().upper()
+    try:
+        identificador = int(pago_id)
+    except (TypeError, ValueError):
+        raise LookupError("El pago no existe.") from None
+    if identificador <= 0:
+        raise LookupError("El pago no existe.")
+    if not isinstance(contenido, (bytes, bytearray, memoryview)):
+        raise ValueError("El comprobante no es un archivo válido.")
+    archivo = bytes(contenido)
+    tipo = validar_comprobante(archivo)
+    nombre_seguro = _nombre_comprobante_seguro(nombre, tipo)
+    hash_comprobante = hashlib.sha256(archivo).hexdigest()
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, comprobante, comprobante_sha256
+                  FROM pagos
+                 WHERE id=%s AND cliente_id=%s
+                 FOR UPDATE
+                """,
+                (identificador, cliente),
+            )
+            pago = cur.fetchone()
+            if not pago:
+                # La misma respuesta para un ID inexistente y uno ajeno evita
+                # revelar a un cliente qué pagos pertenecen a otra cuenta.
+                raise LookupError("El pago no existe.")
+
+            if pago["comprobante"] is not None:
+                hash_existente = pago.get("comprobante_sha256") or hashlib.sha256(
+                    bytes(pago["comprobante"])
+                ).hexdigest()
+                if hash_existente == hash_comprobante:
+                    return False
+                raise ValueError("El pago ya tiene otro comprobante adjunto.")
+
+            # Es el mismo lock que toma el trigger de pagos. Se adquiere antes
+            # del control explícito para incluir también pagos RECHAZADO, que
+            # la regla histórica del trigger excluye de su deduplicación.
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ("tauro:pagos-clientes",),
+            )
+            cur.execute(
+                """
+                SELECT id
+                  FROM pagos
+                 WHERE id<>%s AND comprobante_sha256=%s
+                 LIMIT 1
+                """,
+                (identificador, hash_comprobante),
+            )
+            if cur.fetchone():
+                raise ValueError("El comprobante ya está asociado a otro pago.")
+
+            cur.execute(
+                """
+                UPDATE pagos
+                   SET comprobante=%s,
+                       comprobante_tipo=%s,
+                       comprobante_nombre=%s
+                 WHERE id=%s AND cliente_id=%s AND comprobante IS NULL
+                RETURNING id
+                """,
+                (
+                    psycopg2.Binary(archivo), tipo, nombre_seguro,
+                    identificador, cliente,
+                ),
+            )
+            if cur.fetchone() is None:
+                raise RuntimeError("No se pudo adjuntar el comprobante al pago.")
+            registrar_evento_con_cursor(
+                cur,
+                event=audit_event,
+                actor_type=actor_type,
+                actor_ref=actor_ref,
+                ip=None,
+                method=None,
+                path=None,
+                status_code=200,
+                success=True,
+                request_id=None,
+                metadata={
+                    "pago_id": identificador,
+                    "cliente_id": cliente,
+                    "tipo": tipo,
+                    "bytes": len(archivo),
+                },
+            )
+            return True
+
+
+def adjuntar_comprobante_pago(
+    cliente_id: str,
+    pago_id: int,
+    contenido: bytes,
+    nombre: str,
+) -> bool:
+    """Adjunta un comprobante faltante desde la cuenta del propio cliente."""
+    cliente = str(cliente_id or "").strip().upper()
+    return _adjuntar_comprobante_pago(
+        cliente,
+        pago_id,
+        contenido,
+        nombre,
+        audit_event="cuenta.adjuntar_comprobante_pago",
+        actor_type="cliente",
+        actor_ref=cliente,
+    )
+
+
+def adjuntar_comprobante_pago_admin(
+    cliente_id: str,
+    pago_id: int,
+    contenido: bytes,
+    nombre: str,
+    *,
+    admin_user: str,
+) -> bool:
+    """Adjunta un comprobante faltante con identidad admin auditable."""
+    responsable = " ".join(str(admin_user or "").strip().split())
+    if not responsable:
+        raise ValueError("Falta identificar al administrador.")
+    return _adjuntar_comprobante_pago(
+        cliente_id,
+        pago_id,
+        contenido,
+        nombre,
+        audit_event="admin.adjuntar_comprobante_pago",
+        actor_type="admin",
+        actor_ref=responsable,
+    )
 
 
 @_conflictos_como_valueerror
