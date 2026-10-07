@@ -14,7 +14,7 @@
 {% for name,label,value,maximum in [('weight','Peso (kg)','1','30'),('length','Largo (cm)','10','100'),('width','Ancho (cm)','10','100'),('height','Alto (cm)','10','100')] %}<label>{{label}}<input name="{{name}}" type="number" min="0.01" max="{{maximum}}" step="0.01" value="{{value}}" required></label>{% endfor %}
 </div><p class="qa-muted">Un bulto · operativa QA 64665 · sin seguro. Las tarifas de QA son de prueba.</p><button class="btn btn-primary">Cotizar con OCA QA</button></form></section>
 <section class="qa-card"><h2>2. Resultado y guía</h2>{% if row %}
-<p class="qa-status" role="status">{{row.state}}</p><div class="qa-price">$ {{row.price}} <small>ARS</small></div><p class="qa-muted">Importe de prueba. Cotización válida por 15 minutos.</p>
+<p class="qa-status" role="status">{{row.state}}</p><div class="qa-price">{{ (row.price)|dinero_ars }} <small>ARS</small></div><p class="qa-muted">Importe de prueba. Cotización válida por 15 minutos.</p>
 {% if row.tracking %}<p class="qa-details"><strong>Guía QA:</strong> {{row.tracking}}<br><strong>Orden:</strong> {{row.external_id}}</p>{% endif %}
 {% if row.error %}<p class="qa-errors" role="alert">{{row.error}}</p>{% endif %}
 <div class="qa-actions">

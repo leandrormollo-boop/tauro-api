@@ -74,6 +74,11 @@
         postal.value = preserve ? enteredPostal : option.postal_code;
         reference.value = '1'; paired = true;
         applying = false; status.hidden = true; hide(); notify();
+        // Si el cliente ya está parado en el campo que completamos, dejamos el
+        // valor seleccionado: lo próximo que tipee lo reemplaza en vez de
+        // pegarse al final (evita "322000322000").
+        var filled = mode === 'city' ? postal : city;
+        if (document.activeElement === filled && filled.select) filled.select();
       }
       function show(data, snapshot) {
         status.hidden = true;
@@ -133,8 +138,16 @@
         input.addEventListener('input', function () {
           if (applying) return;
           var opposite = input === city ? postal : city;
-          if (paired || reference.value === '1') opposite.value = '';
+          // Nunca borramos lo que el cliente ya cargó en el otro campo: si
+          // estaban emparejados, solo avisamos que conviene revisarlos.
+          var estabaEmparejado = paired || reference.value === '1';
           paired = false; reference.value = ''; note.hidden = true; hide(); status.hidden = true;
+          if (estabaEmparejado && opposite.value.trim()) {
+            status.textContent = input === city
+              ? 'Cambiaste la ciudad: revisá que el código postal corresponda.'
+              : 'Cambiaste el código postal: revisá que la ciudad corresponda.';
+            status.hidden = false;
+          }
           lookup(input);
         });
         input.addEventListener('focus', function () { if (input.value && !(input === city ? postal : city).value) lookup(input); });

@@ -1608,7 +1608,7 @@ CREATE TABLE IF NOT EXISTS cotizaciones_reseller (
     cliente_id              TEXT NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,
     ruta                    TEXT NOT NULL,
     bultos                  JSONB NOT NULL DEFAULT '[]'::jsonb,
-    peso_facturable_kg      NUMERIC(12,3) NOT NULL,
+    peso_facturable_kg      NUMERIC(12,3),
     tiempo_estimado         TEXT NOT NULL,
     precio_base_ars         NUMERIC(14,2) NOT NULL,
     courier                 TEXT NOT NULL,
@@ -1618,6 +1618,9 @@ CREATE TABLE IF NOT EXISTS cotizaciones_reseller (
 );
 CREATE INDEX IF NOT EXISTS idx_cotizaciones_reseller_cliente_vigencia
     ON cotizaciones_reseller(cliente_id, vigente_hasta DESC);
+
+-- Las cotizaciones nacionales pueden no informar peso facturable.
+ALTER TABLE cotizaciones_reseller ALTER COLUMN peso_facturable_kg DROP NOT NULL;
 
 -- ── Solicitudes de guía desde portal ────────────────────────
 CREATE TABLE IF NOT EXISTS solicitudes_guia (
@@ -1865,6 +1868,13 @@ ALTER TABLE IF EXISTS solicitudes_guia
 UPDATE solicitudes_guia
 SET tracking_vigilancia_desde=COALESCE(tracking_actualizado_at, NOW())
 WHERE tracking_estado='RETENIDO' AND tracking_vigilancia_desde IS NULL;
+-- Fecha real del último evento del courier (con su zona horaria) y momento en
+-- que el portal vio cambiar el mensaje. Permiten avisar "sin movimientos hace
+-- N días" sin confundir la consulta diaria con un avance real.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_evento_at TIMESTAMPTZ;
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS tracking_cambio_at TIMESTAMPTZ;
 
 DO $$
 BEGIN

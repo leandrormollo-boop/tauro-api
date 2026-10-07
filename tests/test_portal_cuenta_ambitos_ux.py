@@ -280,10 +280,12 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
 
     for texto in (
         "Saldo total", "Nacional", "Internacional", "Tus movimientos",
-        "Facturado", "Pagos aprobados", "A facturar", "Pagos por vincular",
+        "Pagos aprobados", "Pagos por vincular",
         "¿Qué envíos estás pagando?", "El pago se descuenta del saldo cuando TAURO aprueba el comprobante",
     ):
         assert texto in html
+    # Lo pendiente de facturar es interno de TAURO: vive en el admin.
+    assert "A facturar" not in html and "Facturado" not in html
     assert 'id="payment-documents"' in html
     assert "Si no elegís documentos, el pago se registra a cuenta" in html
     assert 'name="idempotency_key" value="{{ idempotency_key }}"' in html
@@ -312,7 +314,7 @@ def test_template_muestra_vista_unificada_paginacion_y_copy_seguro():
 def test_columna_cuenta_conserva_cargos_y_pagos_contables_con_copy_claro():
     html = _template_cuenta_completo()
 
-    assert "{{ dinero(total.facturado_ars) }}" in html
+    assert "{{ dinero(total.facturado_ars) }}" not in html
     assert '{{ dinero(total.pagos_aprobados_ars) }}' in html
     assert '<th scope="col" class="amount-column account-col-account">Tu cuenta</th>' in html
     assert 'data-label="Tu cuenta"' in html

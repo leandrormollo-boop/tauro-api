@@ -106,6 +106,13 @@ jobs:
             tests/test_carrier_http_performance.py \
             tests/test_cotizador_concurrencia.py \
             tests/test_portal_quote_stream.py \
+            tests/test_portal_tanda1.py \
+            tests/test_portal_tanda3.py \
+            tests/test_portal_tanda3_postgres.py \
+            tests/test_portal_ronda4.py \
+            tests/test_cuenta_claridad_cliente.py \
+            tests/test_tracking_fedex_portal.py \
+            tests/test_tracking_presentacion.py \
             tests/test_cotizar_sentido.py \
             tests/test_portal_experiencia_cliente.py \
             tests/test_accesos_directos.py \
@@ -131,6 +138,7 @@ jobs:
             tests/test_pickup_dhl.py \
             tests/test_edicion_solicitud_postgres.py \
             tests/test_envio_gestion.py \
+            tests/test_envio_externo_fecha.py \
             tests/test_portal_mis_clientes.py \
             tests/test_estadisticas_contactos.py \
             tests/test_portal_home_panorama.py \
@@ -193,6 +201,10 @@ jobs:
           tests/js/pago-preview.test.cjs
           tests/js/quote-request.test.cjs
           tests/js/quote-locations.test.cjs
+          tests/js/quote-comparison.test.cjs
+          tests/js/presentacion-portal.test.cjs
+          tests/js/shipment-focus.test.cjs
+          tests/js/dropdown-dismiss.test.cjs
           tests/js/shipment-location-confirmation.test.cjs
           tests/js/web-quote-presentation.test.cjs
           tests/js/web-quote-national.test.cjs

@@ -54,6 +54,12 @@ def guardar_opciones(
     if not opciones or not cliente_es_reseller(cliente_id):
         return opciones or []
 
+    return _guardar_opciones(cliente_id, ruta=ruta, bultos=bultos,
+                             peso_facturable_kg=peso_facturable_kg, opciones=opciones)
+
+
+def _guardar_opciones(cliente_id, *, ruta, bultos, peso_facturable_kg, opciones):
+    """Almacena sólo datos comerciales visibles; el llamador define el permiso."""
     salida = []
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -71,7 +77,7 @@ def guardar_opciones(
                     (
                         quote_id, cliente_id, str(ruta or "")[:160],
                         json.dumps(bultos or [], ensure_ascii=False),
-                        peso_facturable_kg,
+                        opcion.get("peso_usado_kg", peso_facturable_kg),
                         str(opcion.get("dias_estimados") or "A confirmar")[:60],
                         opcion.get("precio_final_ars"),
                         str(opcion.get("carrier_nombre") or "")[:60],
@@ -116,6 +122,10 @@ def generar_pdf(cliente_id: str, quote_id: str, precio_mostrado) -> tuple[bytes,
     if precio < base:
         raise ValueError("El precio reseller puede mantenerse o subir, pero no bajar.")
 
+    return _render_pdf(cotizacion, precio)
+
+
+def _render_pdf(cotizacion, precio):
     bultos = cotizacion.get("bultos") or []
     if isinstance(bultos, str):
         bultos = json.loads(bultos)
@@ -139,8 +149,8 @@ def generar_pdf(cliente_id: str, quote_id: str, precio_mostrado) -> tuple[bytes,
         ["Referencia", cotizacion["quote_id"]],
         ["Ruta", cotizacion["ruta"]],
         ["Courier / servicio", f"{cotizacion['courier']} · {cotizacion['servicio']}"],
-        ["Peso facturable", f"{cotizacion['peso_facturable_kg']} kg"],
-        ["Tiempo estimado", str(cotizacion["tiempo_estimado"])],
+        ["Peso facturable", f"{cotizacion['peso_facturable_kg']} kg" if cotizacion.get("peso_facturable_kg") is not None else "Se confirma al emitir"],
+        ["Tiempo estimado", str(cotizacion["tiempo_estimado"]) if cotizacion.get("tiempo_estimado") not in (None, "", "A confirmar") else "Se confirma al emitir"],
         ["PRECIO", f"{_dinero(precio)} ARS"],
     ]
     tabla = Table(datos, colWidths=[48 * mm, 102 * mm])

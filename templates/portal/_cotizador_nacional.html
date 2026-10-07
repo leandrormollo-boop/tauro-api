@@ -157,8 +157,8 @@
             <div class="national-ready-summary">
                 <div><span>Origen</span><strong>{{ resultado_nacional.origen.provincia_nombre }}</strong><small>{{ resultado_nacional.origen.localidad_input }} · {{ resultado_nacional.origen.cp_input }}</small></div>
                 <div><span>Destino</span><strong>{{ resultado_nacional.destino.provincia_nombre }}</strong><small>{{ resultado_nacional.destino.localidad_input }} · {{ resultado_nacional.destino.cp_input }}</small></div>
-                <div><span>Bultos</span><strong>{{ resultado_nacional.totales.cantidad_bultos }} · {{ resultado_nacional.totales.peso_kg }} kg</strong><small>{{ resultado_nacional.bultos[0].largo_cm }}×{{ resultado_nacional.bultos[0].ancho_cm }}×{{ resultado_nacional.bultos[0].alto_cm }} cm c/u</small></div>
-                <div><span>Pesos real / volumétrico / facturable</span><strong>{{ resultado_nacional.totales.peso_real_kg }} / {{ resultado_nacional.totales.peso_volumetrico_kg }} / {{ resultado_nacional.totales.peso_facturable_kg }} kg</strong><small>{% if resultado_nacional.totales.cobra_por_volumen %}Se cobra por volumen{% else %}Se cobra por peso real{% endif %}</small></div>
+                <div><span>Bultos</span><strong>{{ resultado_nacional.totales.cantidad_bultos }} · {{ (resultado_nacional.totales.peso_kg)|kg }}</strong><small>{{ resultado_nacional.bultos[0].largo_cm|medida_cm }} × {{ resultado_nacional.bultos[0].ancho_cm|medida_cm }} × {{ resultado_nacional.bultos[0].alto_cm|medida_cm }} cm c/u</small></div>
+                <div><span>Pesos real / volumétrico / facturable</span><strong>{{ resultado_nacional.totales.peso_real_kg|numero_ars }} / {{ resultado_nacional.totales.peso_volumetrico_kg|numero_ars }} / {{ (resultado_nacional.totales.peso_facturable_kg)|kg }}</strong><small>{% if resultado_nacional.totales.cobra_por_volumen %}Se cobra por volumen{% else %}Se cobra por peso real{% endif %}</small></div>
                 <div><span>Modalidad</span><strong>{{ 'Domicilio' if resultado_nacional.modalidad.origen == 'domicilio' else 'Sucursal' }} → {{ 'Domicilio' if resultado_nacional.modalidad.destino == 'domicilio' else 'Sucursal' }}</strong><small>Se confirmará según contrato</small></div>
             </div>
 
@@ -197,7 +197,7 @@
     }
 
     function formatWeight(value) {
-        return value.toLocaleString("es-AR", {minimumFractionDigits: 0, maximumFractionDigits: 2}) + " kg";
+        return value.toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " kg";
     }
 
     function syncNationalWeights() {

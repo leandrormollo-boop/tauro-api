@@ -136,7 +136,9 @@ templates = Jinja2Templates(directory="templates")
 # de tracking y la división nacional/internacional salen de un solo lugar.
 from servicios.borradores import confirmar_borrador
 from servicios.couriers_urls import ambito_envio, es_nacional, nombre_courier, url_tracking
-from servicios.presentacion import dinero_ars, numero_ars
+from servicios.presentacion import registrar_filtros, dinero_ars, numero_ars, medida_cm, condiciones_cotizacion
+registrar_filtros(templates.env)
+from servicios.estados_envio import HITOS_ENVIO_UI
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
 templates.env.globals["ambito_envio"] = ambito_envio
@@ -144,6 +146,11 @@ templates.env.globals["nombre_courier"] = nombre_courier
 templates.env.globals["nombre_pais"] = nombre_pais
 templates.env.globals["dinero_ars"] = dinero_ars
 templates.env.globals["numero_ars"] = numero_ars
+templates.env.globals["medida_cm"] = medida_cm
+templates.env.globals["condiciones_cotizacion"] = condiciones_cotizacion
+templates.env.globals["hitos_envio_ui"] = HITOS_ENVIO_UI
+
+
 templates.env.globals["descriptor_documento"] = descriptor_documento
 
 
@@ -1796,11 +1803,11 @@ def _renderizar_cotizacion(request: Request, contexto: dict):
 
 def _stream_cotizacion_internacional(
     request: Request, *, cliente: str, parametros: dict, form: dict,
-    paquetes: list, es_reseller: bool,
+    paquetes: list, es_reseller: bool, tax_paga_cotizacion: str | None = None,
 ):
     """Entrega sólo HTML público de cada resultado; nunca transporta costos."""
     from servicios.cotizador import iterar_cotizar_referencia_couriers
-    from servicios.cotizaciones_reseller import guardar_opciones
+    from servicios.cotizaciones_portal import guardar_opciones
 
     template = templates.get_template("portal/_quote_results.html")
     cancelado = threading.Event()
@@ -1808,6 +1815,7 @@ def _stream_cotizacion_internacional(
         "request": request, "cliente": cliente, "ambito": "internacional",
         "form": form, "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
         "destino_sel": form["destino_pais"], "es_reseller": es_reseller,
+        "tax_paga_cotizacion": tax_paga_cotizacion,
         "opciones": [], "no_disponibles": [], "resultado": None, "error": None,
     }
 
@@ -1828,19 +1836,20 @@ def _stream_cotizacion_internacional(
             for comparacion in comparaciones:
                 opciones = comparacion["opciones"]
                 resumen = comparacion["resumen"]
-                # Un snapshot reseller por courier, aunque la respuesta parcial
-                # se vuelva a renderizar cuando termina el próximo operador.
-                if es_reseller:
-                    nuevas = [o for o in opciones if o["carrier_id"] not in guardadas]
-                    if nuevas:
-                        guardadas.update({
-                            o["carrier_id"]: o for o in guardar_opciones(
-                                cliente, ruta=resumen["ruta"], bultos=paquetes,
-                                peso_facturable_kg=resumen["peso_usado_kg"],
-                                opciones=nuevas,
-                            )
-                        })
-                    opciones = [guardadas[o["carrier_id"]] for o in opciones]
+                # Un snapshot por courier, aunque la respuesta parcial se vuelva
+                # a renderizar cuando termina el próximo operador. Si falla la
+                # persistencia, el servicio devuelve la tarifa sin IDs: puede
+                # mostrarse, pero no habilita PDF ni handoff con precio original.
+                nuevas = [o for o in opciones if o["carrier_id"] not in guardadas]
+                if nuevas:
+                    guardadas.update({
+                        o["carrier_id"]: o for o in guardar_opciones(
+                            cliente, ruta=resumen["ruta"], bultos=paquetes,
+                            peso_facturable_kg=resumen["peso_usado_kg"],
+                            opciones=nuevas,
+                        )
+                    })
+                opciones = [guardadas[o["carrier_id"]] for o in opciones]
                 completo = bool(comparacion.get("completo"))
                 contexto.update(
                     opciones=opciones, resultado=resumen,
@@ -2003,6 +2012,16 @@ def cotizar_post(
             resultado_nacional = cotizar_referencia_nacional(
                 cliente, origen_referencia=origen_referencia == "1",
                 destino_referencia=destino_referencia == "1", **form_nacional)
+            from servicios.cotizaciones_portal import guardar_opciones
+            opciones_nacionales = guardar_opciones(
+                cliente, ruta=resultado_nacional["resumen"]["ruta"],
+                bultos=[dict(cantidad=cantidad_bultos, peso_kg=peso_kg,
+                             largo_cm=largo_cm, ancho_cm=ancho_cm, alto_cm=alto_cm)],
+                peso_facturable_kg=None, opciones=resultado_nacional["opciones"])
+            for op in opciones_nacionales:
+                if op.get("portal_quote_id"):
+                    op["continuar_url"] += "&cotizacion_origen_id=" + op["portal_quote_id"]
+            resultado_nacional["opciones"] = opciones_nacionales
             if not resultado_nacional["opciones"] and not resultado_nacional["no_disponibles"]:
                 error_nacional = "Tu cuenta todavía no tiene operadores nacionales habilitados para cotizar."
         except ValueError as exc:
@@ -2033,7 +2052,8 @@ def cotizar_post(
     no_disponibles = []
     resumen = None
     paquetes = []
-    from servicios.cotizaciones_reseller import cliente_es_reseller, guardar_opciones
+    from servicios.cotizaciones_reseller import cliente_es_reseller
+    from servicios.cotizaciones_portal import guardar_opciones
     es_reseller = cliente_es_reseller(cliente)
     filas_bultos_form = [{
         "cantidad": "1", "peso_kg": peso_kg, "largo_cm": largo_cm,
@@ -2107,12 +2127,13 @@ def cotizar_post(
             return _stream_cotizacion_internacional(
                 request, cliente=cliente, parametros=parametros_cotizacion,
                 form=form_internacional, paquetes=paquetes, es_reseller=es_reseller,
+                tax_paga_cotizacion=tax_paga_cliente(cliente),
             )
         comparacion = cotizar_referencia_couriers(**parametros_cotizacion)
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
         resumen = comparacion["resumen"]
-        if es_reseller and opciones:
+        if opciones:
             opciones = guardar_opciones(
                 cliente,
                 ruta=resumen["ruta"],
@@ -2156,7 +2177,20 @@ def cotizar_post(
             "destino_sel": destino_pais,
             "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
             "es_reseller": es_reseller,
+            "tax_paga_cotizacion": tax_paga_cliente(cliente),
         })
+
+
+@router.post("/cotizaciones/cliente.pdf")
+def descargar_cotizacion_cliente(quote_id: str = Form(...), cliente: str = Depends(cliente_actual)):
+    from servicios.cotizaciones_portal import generar_pdf
+    try:
+        contenido, nombre = generar_pdf(cliente, quote_id)
+    except ValueError as exc:
+        return Response(content=str(exc), status_code=422, media_type="text/plain")
+    return Response(content=contenido, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{nombre}"',
+        "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow"})
 
 
 @router.post("/cotizaciones/reseller.pdf")
@@ -2333,6 +2367,8 @@ async def api_precio_envio_multi(
     # Las claves se eligen a mano: nunca costo ni margen (test_no_fuga_costo).
     # `opciones` viene ordenada de más barata a más cara.
     opciones = precio.get("opciones") or []
+    from servicios.cotizaciones_portal import referencia, comparar
+    original = referencia(cliente, body.get("cotizacion_origen_id"))
     return JSONResponse({
         "ok": True,
         "opciones": [
@@ -2344,6 +2380,7 @@ async def api_precio_envio_multi(
                 "precio_ars": o["precio_ars"],
                 "precio_usd": o["precio_usd"],
                 "dias": o.get("dias_estimados"),
+                "comparacion_cotizacion": comparar(original, o["precio_ars"]),
             }
             for o in opciones
         ],
@@ -2551,21 +2588,6 @@ def envios_view(
         retiro_activo = retiro.get("estado") in {
             "AGENDANDO", "AGENDADA", "CANCELANDO", "VERIFICAR_COURIER",
         }
-        if (solicitud.get("estado_cliente_ui", {}).get("codigo") == "GUIA_LISTA"
-                and not solicitud.get("tracking_estado")):
-            solicitud["estado_cliente_ui"] = {
-                "codigo": "ESPERA_RECOLECCION",
-                "label": "Espera de recolección",
-                "clase": "accent",
-            }
-        elif solicitud.get("estado_cliente_ui", {}).get("codigo") in {
-            "PROCESO_ENTREGA", "DESPACHADO",
-        }:
-            solicitud["estado_cliente_ui"] = {
-                "codigo": solicitud["estado_cliente_ui"]["codigo"],
-                "label": "Proceso de entrega",
-                "clase": "warn",
-            }
         solicitud["puede_corregir_lista"] = bool(
             (solicitud.get("courier") or "").upper() == "DHL"
             and solicitud.get("estado") == "GUIA_LISTA"
@@ -2869,6 +2891,7 @@ def envio_nuevo_form(
     ambito: str = "",
     courier: str = "",
     quote_id: str = "",
+    cotizacion_origen_id: str = "",
     cajas: str = "",
     valor_cotizado: str = "",
     origen_ciudad: str = "",
@@ -2900,8 +2923,16 @@ def envio_nuevo_form(
         "destino": destino,
         "courier": courier,
         "quote_id": quote_id,
+        "cotizacion_origen_id": cotizacion_origen_id,
         "cajas": cajas,
         "valor_cotizado": valor_cotizado,
+        "origen_ciudad": origen_ciudad,
+        "origen_cp": origen_cp,
+        "destino_ciudad": destino_ciudad,
+        "destino_cp": destino_cp,
+        "origen_referencia": origen_referencia,
+        "destino_referencia": destino_referencia,
+        "ventana": request.query_params.get("ventana", ""),
     }
     if ambito == "nacional":
         contactos = {k: v for k, v in (("remitente_id", remitente_id),
@@ -2998,6 +3029,7 @@ def envio_nuevo_form(
                 "destino_pais": cotizacion_web["destino"],
                 "intl_courier": recomendada["id"],
                 "precio_cotizado_ars": recomendada["precio_ars"],
+                "cotizacion_origen_id": quote_id,
                 "observaciones": f"Cotización web {cotizacion_web['referencia']}",
                 "bultos": [{
                     "producto": "",
@@ -3017,6 +3049,13 @@ def envio_nuevo_form(
             courier = courier or recomendada["id"]
         else:
             error = "La cotización venció o ya no está disponible. Cotizá nuevamente."
+    if cotizacion_origen_id and not (quote_id or pedido_tienda or corregir or repetir or editar):
+        from servicios.cotizaciones_portal import referencia
+        original = referencia(cliente, cotizacion_origen_id)
+        if original:
+            form["cotizacion_origen_id"] = cotizacion_origen_id
+        else:
+            error = "La cotización venció o no pertenece a tu cuenta. Volvé a cotizar."
     if cajas and not quote_id and not pedido_tienda:
         try:
             form["bultos"] = _precargar_cajas_cotizadas(cajas)
@@ -3209,6 +3248,7 @@ def envio_nuevo_post(
     # Precio que estaba visible al confirmar. No se usa para cobrar (el
     # servidor recotiza); sólo prueba consentimiento al importe vigente.
     precio_cotizado_ars: str = Form(""),
+    cotizacion_origen_id: str = Form(""),
     # Quién paga los impuestos de destino EN ESTE envío. Viene con el default
     # del cliente ya seleccionado; acá se guarda lo que quedó elegido.
     tax_paga: str = Form(""),
@@ -3491,6 +3531,7 @@ def envio_nuevo_post(
         "observaciones": observaciones,
         "intl_courier": intl_courier,
         "precio_cotizado_ars": precio_cotizado_ars,
+        "cotizacion_origen_id": cotizacion_origen_id if isinstance(cotizacion_origen_id, str) else "",
         "tax_paga": tax_paga,
         "asegurar_carga": asegurar_carga,
         # BUG corregido: sin esto, un error de validación re-renderizaba el

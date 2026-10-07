@@ -55,7 +55,7 @@
             {% else %}<span class="badge">{{ r.estado|title }}</span>{% endif %}
           </td>
           <td class="mono">{{ r.ready_time }}–{{ r.close_time }}</td>
-          <td class="mono">{{ r.bultos }} × {{ '%g'|format(r.peso_kg) }} kg</td>
+          <td class="mono">{{ r.bultos }} × {{ ((r.peso_kg))|kg }}</td>
           <td style="font-size:13px;max-width:280px;">
             {{ r.direccion or '—' }}
             {% if r.instrucciones %}<br><small style="color:var(--fg-3);">{{ r.instrucciones }}</small>{% endif %}

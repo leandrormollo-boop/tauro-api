@@ -29,10 +29,9 @@ ESTADOS_OPERACION_UI = {
     "EMITIENDO": ("Solicitado", "warn"),
     "VERIFICAR_COURIER": ("Solicitado", "warn"),
     "GUIA_LISTA": ("Guía lista", "accent"),
-    # El código interno permanece estable para no romper integraciones ni
-    # filtros. Para el cliente, el hito correcto es que el courier ya lo
-    # recolectó; se distingue en violeta de la entrega final en verde.
-    "DESPACHADO": ("Recolectado", "accent"),
+    # El código interno conserva el hito de despacho; la etiqueta del portal
+    # coincide con la de tracking mientras no haya entrega confirmada.
+    "DESPACHADO": ("En tránsito", "warn"),
     "ENTREGADO": ("Entregado", "ok"),
     "CANCELADO": ("Cancelado", "muted"),
     "REEMPLAZADO": ("Reemplazado", "muted"),
@@ -43,6 +42,11 @@ ESTADOS_TRACKING_UI = {
     "RETENIDO": ("Retenido", "error"),
     "ENTREGADO": ("Entregado", "ok"),
 }
+
+HITOS_ENVIO_UI = tuple(
+    {"codigo": codigo, "label": ESTADOS_OPERACION_UI[codigo][0]}
+    for codigo in ("SOLICITADO", "GUIA_LISTA", "DESPACHADO", "ENTREGADO")
+)
 
 
 def estado_principal_envio(estado: Any, tracking_estado: Any = None) -> str:

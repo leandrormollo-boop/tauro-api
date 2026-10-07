@@ -33,7 +33,8 @@ def test_portal_resume_el_total_y_mantiene_el_desglose_en_el_detalle():
     )
 
     # El #41 rediseñó la lista: el total registrado del envío es el costo final.
-    assert "Total registrado · ARS" in listado
+    assert "Total registrado · ARS" not in listado
+    assert "Precio del envío (ARS)" in listado
     assert "Ver desglose" in listado
     assert "envio-price-extra diferencia" in listado
     assert "envio-price-extra tax" in listado

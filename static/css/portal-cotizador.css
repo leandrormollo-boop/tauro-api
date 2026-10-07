@@ -141,9 +141,8 @@
  .quote-window-head{padding-top:11px;padding-bottom:8px}.quote-window-content{padding-top:10px;padding-bottom:12px}
  .uq-section-title{margin-bottom:6px}.uq-packages{padding-top:12px;padding-bottom:12px}.uq-package-grid{margin-top:6px}
 }
-.uq-route-tools .draft-bar{display:flex;flex:1;margin:0;gap:10px;min-width:0;justify-content:flex-start}.uq-route-tools .draft-status{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.uq-route-tools .draft-reset{flex-shrink:0}
-@media(min-width:780px){.uq-route-tools .draft-status{max-width:170px}.uq-route-tools{gap:8px}.uq-frequent summary,.uq-reverse{font-size:10px;padding-left:10px;padding-right:10px}}
-@media(min-width:780px) and (max-width:1100px){.uq-route-tools .draft-status{display:none}}
+.uq-route-tools .draft-bar{display:flex;flex:1;margin:0;gap:10px;min-width:0;justify-content:flex-start}.uq-route-tools .draft-status{white-space:normal;overflow-wrap:anywhere}.uq-route-tools .draft-reset{flex-shrink:0}
+@media(min-width:780px){.uq-route-tools{gap:8px}.uq-frequent summary,.uq-reverse{font-size:10px;padding-left:10px;padding-right:10px}}
 @media(max-width:779px){.uq-route-tools{flex-wrap:wrap;row-gap:8px}.uq-route-tools .draft-bar{flex-basis:100%;justify-content:space-between}.uq-route-tools .draft-status{font-size:9px}}
 .uq-section-title>.uq-box-tabs{flex:1;min-width:0;padding:0;margin-left:7px;align-items:center}.uq-box-tabs .uq-box-remove{padding:2px 7px;font-size:18px;border:0;background:none}.uq-section-title>.uq-add{flex-shrink:0}
 @media(max-width:779px){.uq-section-title>.uq-box-tabs{gap:3px;margin-left:0}.uq-box-tabs button{padding:5px 7px;font-size:10px}.uq-box-tabs .uq-box-remove{padding:2px 5px}.uq-section-title h2{font-size:13px}.uq-add{font-size:9px;padding:5px 8px}}
@@ -181,3 +180,10 @@ html[data-theme="dark"] :is(.unified-quote,.national-shipment,.client-dialog)
 .uq-scopes a svg.scope-symbol{width:28px;height:28px;opacity:1;filter:none}
 .uq-scopes a.is-active .scope-symbol--nacional{filter:drop-shadow(0 0 4px rgba(139,107,247,.24))}
 .uq-scopes a.is-active .scope-symbol--internacional{filter:drop-shadow(0 0 4px rgba(139,107,247,.24))}
+
+.uq-conditions { margin: 10px 0 16px; font-size: 12px; color: var(--fg-2); }
+.uq-conditions > div { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.uq-conditions dt { flex: 1; }
+.uq-conditions dd { flex: 1; margin: 0; text-align: right; overflow-wrap: anywhere; }
+.uq-client-download { margin-top: 10px; }
+.quote-comparison p { margin: 4px 0; font-size: 12px; line-height: 1.4; }

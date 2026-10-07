@@ -43,7 +43,7 @@
     <button type="button" class="btn btn-ghost" data-add>+ Agregar rango</button>
   </section>
   {% endfor %}
-  {% if simulacion %}<div class="msg">Precio ARS {{ '{:,.2f}'.format(simulacion.precio) }} · Ganancia ARS {{ '{:,.2f}'.format(simulacion.ganancia) }}</div>{% endif %}
+  {% if simulacion %}<div class="msg">Precio $ {{ (simulacion.precio)|numero_ars }} · Ganancia $ {{ (simulacion.ganancia)|numero_ars }}</div>{% endif %}
   <section class="tarifas-section">
     <h2>Simulación de rangos</h2>
     <div class="form-grid-2">

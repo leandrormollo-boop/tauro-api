@@ -23,6 +23,8 @@ def render_account(balance, movement=None):
     )
     empty = {key: 0 for key in ledger}
     env = Environment(loader=FileSystemLoader(ROOT / "templates"), autoescape=select_autoescape())
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     env.globals.update(
         saldo_menu=lambda *_: dict(al_dia=balance == 0, a_favor_ars=max(-balance, 0), pendiente_ars=max(balance, 0)),
         pendientes_menu=lambda *_: dict(envios=0, tienda=0),

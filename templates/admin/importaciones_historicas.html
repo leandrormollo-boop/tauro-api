@@ -47,35 +47,35 @@
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px;">
       <div class="stat-card"><div class="stat-label">Saldo portal antes</div>
-        <div class="stat-value" style="font-size:18px;">$ {{ r.saldo_portal_antes.saldo_ars }}</div></div>
+        <div class="stat-value" style="font-size:18px;">{{ (r.saldo_portal_antes.saldo_ars)|dinero_ars }}</div></div>
       <div class="stat-card"><div class="stat-label">Saldo portal después</div>
-        <div class="stat-value" style="font-size:18px;">$ {{ r.saldo_portal_despues.saldo_ars }}</div></div>
+        <div class="stat-value" style="font-size:18px;">{{ (r.saldo_portal_despues.saldo_ars)|dinero_ars }}</div></div>
       <div class="stat-card"><div class="stat-label">Saldo según planilla</div>
-        <div class="stat-value" style="font-size:18px;">$ {{ r.saldo_planilla_completa_ars }}</div>
-        <small>No cargado por decisión: $ {{ r.no_cargado_por_decision_ars }}</small></div>
+        <div class="stat-value" style="font-size:18px;">{{ (r.saldo_planilla_completa_ars)|dinero_ars }}</div>
+        <small>No cargado por decisión: {{ (r.no_cargado_por_decision_ars)|dinero_ars }}</small></div>
       <div class="stat-card"><div class="stat-label">Diferencia sin explicar</div>
-        <div class="stat-value" style="font-size:18px;">$ {{ r.diferencia_no_explicada_ars }}</div>
+        <div class="stat-value" style="font-size:18px;">{{ (r.diferencia_no_explicada_ars)|dinero_ars }}</div>
         <small>Debe ser 0</small></div>
     </div>
     <div style="font-size:13px;color:var(--fg-3);line-height:1.6;margin-bottom:12px;">
       Acciones: {% for k, v in r.acciones.items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}<br>
-      Agregado por mes: {% for k, v in r.agregado_por_mes_ars.items() %}{{ k.title() }} $ {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}<br>
+      Agregado por mes: {% for k, v in r.agregado_por_mes_ars.items() %}{{ k.title() }} {{ (v)|dinero_ars }}{% if not loop.last %} · {% endif %}{% endfor %}<br>
       Saldo 2025: {{ r.saldo_2025 }} · Pagos nuevos: {{ r.pagos.nuevos | length }} · Pagos existentes: {{ r.pagos.existentes }}
-      {% if r.movimientos_portal_fuera_de_planilla_ars != "0.00" %}<br>Movimientos del portal que no están en la planilla: $ {{ r.movimientos_portal_fuera_de_planilla_ars }}{% endif %}
+      {% if r.movimientos_portal_fuera_de_planilla_ars != "0.00" %}<br>Movimientos del portal que no están en la planilla: {{ (r.movimientos_portal_fuera_de_planilla_ars)|dinero_ars }}{% endif %}
     </div>
     {% if r.conflictos or r.pagos.conflictos %}
     <div class="stat-label">Conflictos (no se tocaron)</div>
     <table class="table" style="font-size:12px;margin-bottom:12px;">
       <tr><th>Fila</th><th>Tracking</th><th>Destinatario</th><th>Planilla</th><th>Motivo</th></tr>
-      {% for c in r.conflictos %}<tr><td>{{ c.source_key }}</td><td>{{ c.tracking or "" }}</td><td>{{ c.destinatario or "" }}</td><td>{{ c.total_planilla_ars or "" }}</td><td>{{ c.motivo }}</td></tr>{% endfor %}
-      {% for c in r.pagos.conflictos %}<tr><td>{{ c.source_key }}</td><td></td><td>Pago</td><td>{{ c.monto_ars or "" }}</td><td>{{ c.motivo }}</td></tr>{% endfor %}
+      {% for c in r.conflictos %}<tr><td>{{ c.source_key }}</td><td>{{ c.tracking or "" }}</td><td>{{ c.destinatario or "" }}</td><td>{{ c.total_planilla_ars|dinero_ars if c.total_planilla_ars is not none else "" }}</td><td>{{ c.motivo }}</td></tr>{% endfor %}
+      {% for c in r.pagos.conflictos %}<tr><td>{{ c.source_key }}</td><td></td><td>Pago</td><td>{{ c.monto_ars|dinero_ars if c.monto_ars is not none else "" }}</td><td>{{ c.motivo }}</td></tr>{% endfor %}
     </table>
     {% endif %}
     {% if r.repetidos_no_cargados %}
     <div class="stat-label">Filas repetidas en la planilla (no se cargaron)</div>
     <table class="table" style="font-size:12px;margin-bottom:12px;">
       <tr><th>Fila</th><th>Tracking</th><th>Destinatario</th><th>Planilla</th><th>Motivo</th></tr>
-      {% for c in r.repetidos_no_cargados %}<tr><td>{{ c.source_key }}</td><td>{{ c.tracking }}</td><td>{{ c.destinatario }}</td><td>{{ c.total_planilla_ars }}</td><td>{{ c.motivo }}</td></tr>{% endfor %}
+      {% for c in r.repetidos_no_cargados %}<tr><td>{{ c.source_key }}</td><td>{{ c.tracking }}</td><td>{{ c.destinatario }}</td><td>{{ c.total_planilla_ars|dinero_ars }}</td><td>{{ c.motivo }}</td></tr>{% endfor %}
     </table>
     {% endif %}
     <details><summary style="cursor:pointer;font-size:12px;">Informe completo</summary>

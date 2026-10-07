@@ -163,7 +163,7 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-bar-fill {
   position: absolute; left: 0; right: 0; bottom: 0; height: var(--p, 0%);
   border-radius: 0 0 8px 8px;
-  background: linear-gradient(180deg, #b99bff, #6f45cf);
+  background: var(--accent-soft);
   transform-origin: bottom; transform: scaleY(0);
   animation: home-bar-rise .9s cubic-bezier(.3,1.35,.45,1) var(--d, 0ms) forwards,
              home-bar-bob 4.6s ease-in-out calc(var(--d, 0ms) + 1s) infinite;
@@ -172,10 +172,10 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-bar-fill::before,
 .portal-operacion .home-bar-fill::after {
   content: ""; position: absolute; top: 0; left: 50%; width: 46px; height: 46px;
-  translate: -50% -50%; background: #b99bff; border-radius: 42% 46% 44% 48%; opacity: .85;
+  translate: -50% -50%; background: var(--accent-soft); border-radius: 42% 46% 44% 48%;
   animation: home-bar-liquid 5.2s linear infinite;
 }
-.portal-operacion .home-bar-fill::after { background: #a07ff2; opacity: .5; border-radius: 47% 42% 49% 43%; animation-duration: 7.4s; animation-direction: reverse; }
+.portal-operacion .home-bar-fill::after { background: var(--accent-soft); border-radius: 47% 42% 49% 43%; animation-duration: 7.4s; animation-direction: reverse; }
 .portal-operacion .home-monthly-bar:hover .home-bar-fill { filter: brightness(1.14) drop-shadow(0 0 7px rgba(167,139,250,.35)); }
 .portal-operacion .home-monthly-bar:hover .home-bar-fill::before { animation-duration: 1.8s; }
 .portal-operacion .home-monthly-bar:hover .home-bar-fill::after { animation-duration: 2.6s; }
@@ -353,6 +353,9 @@ html[data-theme="light"] .portal-operacion .envio-service-cell .track-link { col
 .portal-operacion .envios-table .row-actions .btn-sm { font-size: 12px; min-height: 36px; }
 .portal-operacion .envios-table .row-actions > a { white-space: normal; text-align: center; }
 .portal-operacion .tracking-sync-note { color: var(--fg-3); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+.portal-operacion .tracking-event-time { color: var(--fg-2); font-size: 12.5px; }
+.portal-operacion .tracking-original { color: var(--fg-3); font-size: 12px; }
+.portal-operacion .tracking-stalled { margin-top: 10px; }
 
 /* Formularios cómodos: crecer verticalmente antes que comprimir el texto. */
 html[data-theme="light"] .portal-operacion .wizard-compacto form > .card,

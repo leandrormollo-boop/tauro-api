@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from endpoints import portal_cliente as portal
-from servicios import cotizador, cotizaciones_reseller, rate_limit
+from servicios import cotizador, cotizaciones_portal, cotizaciones_reseller, rate_limit
 
 
 HEADERS = {'X-Requested-With': 'TauroQuoteWindow', 'Accept': 'application/x-ndjson'}
@@ -38,6 +38,9 @@ def comparison(options=(), complete=True):
 def client(monkeypatch):
     monkeypatch.setattr(rate_limit, 'check_rate', lambda *a, **k: True)
     monkeypatch.setattr(cotizaciones_reseller, 'cliente_es_reseller', lambda _: False)
+    monkeypatch.setattr(portal, 'tax_paga_cliente', lambda _: 'DESTINATARIO')
+    monkeypatch.setattr(cotizaciones_portal, 'guardar_opciones',
+                        lambda cliente, *, opciones, **kwargs: opciones)
     # AJAX/stream must not pay for (or expose) full-page data.
     def forbidden(*a, **k):
         raise AssertionError('Un resultado parcial no consulta contexto de página')
@@ -112,14 +115,63 @@ def test_reseller_no_repite_snapshot_de_la_tarifa_parcial(client, monkeypatch):
     written = []
     def save(cliente, *, opciones, **kwargs):
         written.extend((cliente, o['carrier_id']) for o in opciones)
-        return [{**o, 'reseller_quote_id': 'RQ-' + o['carrier_id']} for o in opciones]
-    monkeypatch.setattr(cotizaciones_reseller, 'guardar_opciones', save)
+        return [{**o, 'reseller_quote_id': 'RQ-' + o['carrier_id'],
+                 'portal_quote_id': 'RQ-' + o['carrier_id']} for o in opciones]
+    monkeypatch.setattr(cotizaciones_portal, 'guardar_opciones', save)
     set_stream(monkeypatch, lambda **k: iter([
         comparison([option()], False), comparison([option(), option('otro')], True),
     ]))
     response = client.post('/portal/cotizar', data=FORM, headers=HEADERS)
     assert written == [('CLIENTE_SESION', 'dhl'), ('CLIENTE_SESION', 'otro')]
     assert all('RQ-dhl' in json.loads(line)['html'] for line in response.text.splitlines())
+    assert '/portal/cotizaciones/reseller.pdf' in response.text
+
+
+def test_cliente_comun_conserva_snapshot_pdf_y_handoff_entre_parciales(client, monkeypatch):
+    written = []
+    def save(cliente, *, opciones, **kwargs):
+        written.extend((cliente, o['carrier_id']) for o in opciones)
+        return [{**o, 'reseller_quote_id': 'RQ-' + o['carrier_id'],
+                 'portal_quote_id': 'RQ-' + o['carrier_id']} for o in opciones]
+    monkeypatch.setattr(cotizaciones_portal, 'guardar_opciones', save)
+    set_stream(monkeypatch, lambda **k: iter([
+        comparison([option()], False), comparison([option(), option('otro')], True),
+    ]))
+
+    response = client.post('/portal/cotizar', data=FORM, headers=HEADERS)
+    chunks = [json.loads(line) for line in response.text.splitlines()]
+
+    assert written == [('CLIENTE_SESION', 'dhl'), ('CLIENTE_SESION', 'otro')]
+    assert all('name="quote_id" value="RQ-dhl"' in chunk['html'] for chunk in chunks)
+    assert all('cotizacion_origen_id=RQ-dhl' in chunk['html'] for chunk in chunks)
+    assert all('/portal/cotizaciones/cliente.pdf' in chunk['html'] for chunk in chunks)
+    assert all('/portal/cotizaciones/reseller.pdf' not in chunk['html'] for chunk in chunks)
+
+
+def test_stream_degrada_sin_pdf_ni_handoff_si_no_hay_snapshot(client, monkeypatch):
+    monkeypatch.setattr(cotizaciones_portal, 'guardar_opciones',
+                        lambda cliente, *, opciones, **kwargs: opciones)
+    set_stream(monkeypatch, lambda **k: iter([comparison([option()], True)]))
+
+    response = client.post('/portal/cotizar', data=FORM, headers=HEADERS)
+    html = json.loads(response.text)['html']
+
+    assert response.status_code == 200
+    assert 'class="uq-price"' in html
+    assert '/portal/cotizaciones/cliente.pdf' not in html
+    assert '/portal/cotizaciones/reseller.pdf' not in html
+    assert 'cotizacion_origen_id=' not in html
+
+
+def test_stream_conserva_quien_paga_impuestos_configurado(client, monkeypatch):
+    monkeypatch.setattr(portal, 'tax_paga_cliente', lambda _: 'CLIENTE')
+    set_stream(monkeypatch, lambda **k: iter([comparison([option()], True)]))
+
+    response = client.post('/portal/cotizar', data=FORM, headers=HEADERS)
+    html = json.loads(response.text)['html']
+
+    assert 'Los pagás vos; se suman a tu cuenta' in html
+    assert 'Los paga quien recibe' not in html
 
 
 def test_ajax_html_conserva_fallback_y_evitar_contexto_innecesario(client, monkeypatch):

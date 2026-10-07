@@ -153,10 +153,10 @@
                 </div>
                 <div class="form-grid-2 pickup-package-summary">
                     <div><span>Paquetes</span><strong>{{ envio_pre.bultos }} bulto{{ '' if envio_pre.bultos == 1 else 's' }}</strong></div>
-                    <div><span>Peso total</span><strong>{{ '%g'|format(envio_pre.peso_kg) }} kg</strong></div>
+                    <div><span>Peso total</span><strong>{{ ((envio_pre.peso_kg))|kg }}</strong></div>
                 </div>
                 <input type="hidden" name="bultos" value="{{ envio_pre.bultos }}">
-                <input type="hidden" name="peso_kg" value="{{ '%g'|format(envio_pre.peso_kg) }}">
+                <input type="hidden" name="peso_kg" value="{{ (envio_pre.peso_kg)|numero_maquina }}">
                 <div class="form-group">
                     <label for="rec-obs">Indicaciones para el chofer</label>
                     <input type="text" name="instrucciones" id="rec-obs" placeholder="Timbre 3B · preguntar por Ana · portón del fondo">

@@ -74,7 +74,7 @@
                         <div style="font-size:13px;">{{ it.cantidad }}x {{ it.titulo }}</div>
                     {% endfor %}
                 </td>
-                <td class="mono">{% if p.valor_total %}{{ p.moneda or '' }} {{ p.valor_total }}{% else %}—{% endif %}</td>
+                <td class="mono">{% if p.valor_total %}{{ (p.moneda or '')|simbolo_moneda }} {{ p.valor_total|numero_ars }}{% else %}—{% endif %}</td>
             </tr>
         {% endfor %}
         </tbody>

@@ -88,7 +88,7 @@
           <label style="display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);padding:10px;border-radius:8px;">
             <input type="checkbox" name="destinos" value="{{ d.clave }}" data-saldo="{{ d.disponible }}">
             <span><strong>{{ d.descripcion }}</strong>{% if d.tracking %} · {{ d.tracking }}{% endif %}<br>
-              <small>{{ d.fecha.strftime('%d/%m/%Y') }} · {{ d.ambito|title }} · saldo $ {{ "{:,.2f}".format(d.saldo).replace(',', 'X').replace('.', ',').replace('X', '.') }}</small>
+              <small>{{ d.fecha.strftime('%d/%m/%Y') }} · {{ d.ambito|title }} · saldo $ {{ (d.saldo)|numero_ars }}</small>
             </span>
           </label>
           {% endfor %}

@@ -14,12 +14,12 @@
   <div class="stat-card">
     <div class="label">{{ nombre }}</div>
     <div class="value {% if ledger.saldo_ars > 0 %}warn{% elif ledger.saldo_ars < 0 %}ok{% endif %}">
-      $ {{ "{:,.2f}".format(ledger.saldo_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
+      $ {{ (ledger.saldo_ars)|numero_ars }}
     </div>
     <small style="display:block;color:var(--fg-4);margin-top:8px;line-height:1.5;">
-      Cargos $ {{ "{:,.2f}".format(ledger.debe_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
-      Pagos y créditos $ {{ "{:,.2f}".format(ledger.haber_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br>
-      Facturado $ {{ "{:,.2f}".format(ledger.facturado_ars).replace(",", "X").replace(".", ",").replace("X", ".") }} · pendiente de FC $ {{ "{:,.2f}".format(ledger.pendiente_facturacion_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
+      Cargos $ {{ (ledger.debe_ars)|numero_ars }}<br>
+      Pagos y créditos $ {{ (ledger.haber_ars)|numero_ars }}<br>
+      Facturado $ {{ (ledger.facturado_ars)|numero_ars }} · pendiente de FC $ {{ (ledger.pendiente_facturacion_ars)|numero_ars }}
     </small>
   </div>
   {% endfor %}
@@ -29,12 +29,12 @@
 <div class="card-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:24px;">
   <div class="stat-card">
     <div class="label">Crédito sin imputar</div>
-    <div class="value ok">$ {{ "{:,.2f}".format(cuenta_ambitos.credito_sin_imputar_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+    <div class="value ok">$ {{ (cuenta_ambitos.credito_sin_imputar_ars)|numero_ars }}</div>
     <small style="color:var(--fg-4);">Pago aprobado todavía no asignado a Nacional o Internacional.</small>
   </div>
   <div class="stat-card">
     <div class="label">Cargos sin clasificar</div>
-    <div class="value {% if cuenta_ambitos.cargos_sin_clasificar_ars > 0 %}warn{% endif %}">$ {{ "{:,.2f}".format(cuenta_ambitos.cargos_sin_clasificar_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</div>
+    <div class="value {% if cuenta_ambitos.cargos_sin_clasificar_ars > 0 %}warn{% endif %}">$ {{ (cuenta_ambitos.cargos_sin_clasificar_ars)|numero_ars }}</div>
     <small style="color:var(--fg-4);">Pendientes de asignar a Nacional o Internacional.</small>
   </div>
 </div>
@@ -95,7 +95,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
 });
 </script>
 
-<div class="business-filters business-account-summary"><span>{{ periodo.etiqueta }}</span><span>{{ resumen_periodo.vigentes }} cargos vigentes</span><a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas/nueva">{{ resumen_periodo.pendientes_fc }} pendientes de facturar</a><strong>ARS {{ "{:,.2f}".format(resumen_periodo.total_ars).replace(",", "_").replace(".", ",").replace("_", ".") }}</strong></div>
+<div class="business-filters business-account-summary"><span>{{ periodo.etiqueta }}</span><span>{{ resumen_periodo.vigentes }} cargos vigentes</span><a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas/nueva">{{ resumen_periodo.pendientes_fc }} pendientes de facturar</a><strong>$ {{ (resumen_periodo.total_ars)|numero_ars }}</strong></div>
 
 <!-- Facturas y cargos -->
 <div id="envios-cliente" class="card" style="margin-bottom:16px;scroll-margin-top:20px;">
@@ -140,15 +140,15 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
           </td>
           <td class="mono admin-shipment-value" data-label="Saldo inicial / final">
             {% if e.estado == 'CANCELADO' or e.solicitud_estado in ('CANCELADO','REEMPLAZADO') %}
-            <span class="admin-shipment-amount"><small>Inicial</small>$ {{ "{:,.2f}".format(e.monto_ars or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+            <span class="admin-shipment-amount"><small>Inicial</small>$ {{ (e.monto_ars or 0)|numero_ars }}</span>
             <span class="admin-shipment-amount is-final"><small>Final</small>$ 0,00</span>
             {% if e.estado=='ACTIVO' and e.monto_ars %}<small class="business-status error">Revisar cargo activo</small>{% else %}<small>Sin cargo vigente</small>{% endif %}
             {% else %}
-            <span class="admin-shipment-amount"><small>Inicial</small>$ {{ "{:,.2f}".format(e.monto_ars or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
-            <span class="admin-shipment-amount is-final"><small>Final</small>$ {{ "{:,.2f}".format(e.precio_final_ars or e.monto_ars or 0).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+            <span class="admin-shipment-amount"><small>Inicial</small>$ {{ (e.monto_ars or 0)|numero_ars }}</span>
+            <span class="admin-shipment-amount is-final"><small>Final</small>$ {{ (e.precio_final_ars or e.monto_ars or 0)|numero_ars }}</span>
             {% if e.ajuste_comercial_ars %}
             <small style="display:block;color:{% if e.ajuste_comercial_ars < 0 %}var(--ok){% else %}var(--warn){% endif %};">
-              Ajuste ADMIN {{ "+" if e.ajuste_comercial_ars > 0 else "−" }} $ {{ "{:,.2f}".format(e.ajuste_comercial_ars|abs).replace(",", "X").replace(".", ",").replace("X", ".") }}
+              Ajuste ADMIN {{ "+" if e.ajuste_comercial_ars > 0 else "−" }} $ {{ (e.ajuste_comercial_ars|abs)|numero_ars }}
             </small>
             {% endif %}
             {% if e.factura_cliente_id or e.nro_fc %}<small class="business-status ok">Facturado</small>{% else %}<small class="business-status warn">A facturar</small>{% endif %}
@@ -242,7 +242,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
                 <label style="font-size:11px;color:var(--fg-3);">
                   Nuevo precio final (ARS)
                   <input type="text" name="nuevo_precio_ars" required inputmode="decimal"
-                         value="{{ '{:.2f}'.format(e.precio_final_ars).replace('.', ',') }}"
+                         value="{{ (e.precio_final_ars)|numero_ars }}"
                          aria-label="Nuevo precio final en pesos">
                 </label>
                 <label style="font-size:11px;color:var(--fg-3);">
@@ -251,7 +251,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
                             rows="2" placeholder="Ej.: descuento comercial acordado"></textarea>
                 </label>
                 <small style="color:var(--fg-4);line-height:1.35;">
-                  Vigente: $ {{ "{:,.2f}".format(e.precio_final_ars).replace(",", "X").replace(".", ",").replace("X", ".") }} · original: $ {{ "{:,.2f}".format(e.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}
+                  Vigente: $ {{ (e.precio_final_ars)|numero_ars }} · original: $ {{ (e.monto_ars)|numero_ars }}
                 </small>
                 <button type="submit" class="btn btn-sm btn-primary">Aplicar nuevo precio</button>
               </form>
@@ -307,7 +307,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
         {% set fecha_en_revision = p.fecha_revision_requerida|default(false) and p.estado != 'RECHAZADO' %}
         <tr>
           <td class="mono" id="pago-{{ p.id }}">{{ p.fecha.strftime("%d/%m/%Y") if p.fecha else "—" }}</td>
-          <td class="mono" style="color:var(--{{ 'warn' if fecha_en_revision else 'ok' }})">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
+          <td class="mono" style="color:var(--{{ 'warn' if fecha_en_revision else 'ok' }})">$ {{ (p.monto_ars)|numero_ars }}</td>
           <td>{{ p.metodo }}</td>
           <td class="mono" style="font-size:12px">{{ p.referencia or "—" }}{% if p.tiene_comprobante %}<small><a href="/admin/pagos/{{ p.id }}/comprobante">Ver comprobante ↗</a></small>{% else %}<small><a class="btn btn-ghost btn-sm" href="/admin/pagos/{{ p.id }}/adjuntar-comprobante">Adjuntar comprobante</a></small>{% endif %}</td>
           <td>
@@ -317,20 +317,20 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% if a.factura_id %}<a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/facturas#factura-{{ a.factura_id }}">FC {{ '%04d'|format(a.punto_venta) }}-{{ '%08d'|format(a.numero) }}</a>
             {% elif a.solicitud_id %}<a href="/admin/pedidos/{{ a.solicitud_id }}/editar">{{ a.tracking or ('Envío #' ~ a.solicitud_id) }}</a>
             {% elif a.envio_id %}<a href="/admin/clientes/{{ cliente.cliente_id|urlencode }}#cargo-{{ a.envio_id }}">Cargo #{{ a.envio_id }}</a>{% else %}{{ a.ambito }} · sin documento{% endif %}
-            <small>ARS {{ '{:,.2f}'.format(a.monto_ars).replace(',','_').replace('.',',').replace('_','.') }}{% if a.estado=='SOLICITADA' %} · por aprobar{% endif %}</small></div>
+            <small>$ {{ (a.monto_ars)|numero_ars }}{% if a.estado=='SOLICITADA' %} · por aprobar{% endif %}</small></div>
             {% endfor %}
             {% if p.estado == 'RECHAZADO' %}
               <span style="color:var(--fg-4);">No aplica</span>
             {% elif not fecha_en_revision %}
               {% if p.monto_nacional > 0 %}
-                <span class="badge ok">N $ {{ "{:,.2f}".format(p.monto_nacional).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+                <span class="badge ok">N $ {{ (p.monto_nacional)|numero_ars }}</span>
               {% endif %}
               {% if p.monto_internacional > 0 %}
-                <span class="badge">I $ {{ "{:,.2f}".format(p.monto_internacional).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+                <span class="badge">I $ {{ (p.monto_internacional)|numero_ars }}</span>
               {% endif %}
               {% set remanente = p.monto_ars - p.monto_nacional - p.monto_internacional %}
               {% if remanente > 0 %}
-                <span class="badge warn">SIN IMPUTAR $ {{ "{:,.2f}".format(remanente).replace(",", "X").replace(".", ",").replace("X", ".") }}</span>
+                <span class="badge warn">SIN IMPUTAR $ {{ (remanente)|numero_ars }}</span>
               {% endif %}
             {% endif %}
           </td>

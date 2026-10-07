@@ -618,7 +618,7 @@ def _validar_cancelacion_desde_fila(fila: dict) -> dict:
     if estado != "GUIA_LISTA" or not tracking:
         return {
             "ok": False,
-            "error": "Sólo se puede cancelar una guía DHL lista y todavía no despachada.",
+            "error": "Solo se cancelan guías que todavía no salieron.",
         }
     if fila.get("tracking_estado"):
         return {
@@ -1852,7 +1852,8 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
     resultado = _sin_label(dict(row))
     resultado["diferencia_detalle"] = presentar_diferencia(resultado)
     resultado["resumen_pesos"] = pesos_de_solicitud(resultado)
-    return presentar_estados_envio(resultado)
+    from servicios.tracking_presentacion import presentar_tracking
+    return presentar_tracking(presentar_estados_envio(resultado))
 
 
 def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[bytes]:

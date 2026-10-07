@@ -52,14 +52,14 @@
                     <article>
                         <span>Caja {{ loop.index }}</span>
                         <strong>{{ b.cantidad or 1 }} caja{{ "s" if (b.cantidad or 1)|int != 1 else "" }}</strong>
-                        <small>{{ b.largo_cm or "—" }} × {{ b.ancho_cm or "—" }} × {{ b.alto_cm or "—" }} cm · {{ b.peso_kg or "—" }} kg por caja{% if b.valor_declarado_caja_usd %} · USD {{ b.valor_declarado_caja_usd }} declarados por caja{% endif %}</small>
+                        <small>{{ (b.largo_cm)|medida_cm if b.largo_cm else "—" }} × {{ (b.ancho_cm)|medida_cm if b.ancho_cm else "—" }} × {{ (b.alto_cm)|medida_cm if b.alto_cm else "—" }} cm · {{ (b.peso_kg or "—")|kg }} por caja{% if b.valor_declarado_caja_usd %} · {{ (b.valor_declarado_caja_usd)|dinero_usd }} declarados por caja{% endif %}</small>
                     </article>
                     {% endfor %}
                 {% else %}
-                    <article><span>Paquete</span><strong>{{ s.cantidad or 1 }} caja{{ "s" if (s.cantidad or 1)|int != 1 else "" }}</strong><small>{{ s.largo_cm or "—" }} × {{ s.ancho_cm or "—" }} × {{ s.alto_cm or "—" }} cm · {{ s.peso_kg or "—" }} kg</small></article>
+                    <article><span>Paquete</span><strong>{{ s.cantidad or 1 }} caja{{ "s" if (s.cantidad or 1)|int != 1 else "" }}</strong><small>{{ (s.largo_cm)|medida_cm if s.largo_cm else "—" }} × {{ (s.ancho_cm)|medida_cm if s.ancho_cm else "—" }} × {{ (s.alto_cm)|medida_cm if s.alto_cm else "—" }} cm · {{ (s.peso_kg or "—")|kg }}</small></article>
                 {% endif %}
             </div>
-            <div class="shipment-check-total"><span>Peso total informado</span><strong>{{ s.peso_kg or "—" }} kg</strong></div>
+            <div class="shipment-check-total"><span>Peso total informado</span><strong>{{ (s.peso_kg or "—")|kg }}</strong></div>
         </section>
 
         <section data-check-page="3" hidden>
@@ -72,15 +72,15 @@
                     <article>
                         <span>Caja {{ caja_numero }} · Ítem {{ loop.index }}{% if item.hs_code %} · HS {{ item.hs_code }}{% else %} · Sin HS code{% endif %}</span>
                         <strong>{{ item.descripcion_en or b.producto_alias or s.producto_alias or "Mercadería" }}</strong>
-                        <small>{{ item.unidades_aduana or b.cantidad or 1 }} unidad{{ "es" if (item.unidades_aduana or b.cantidad or 1)|int != 1 else "" }} {% if item.valor_total_usd is defined %}· Total USD {{ '%.2f'|format(item.valor_total_usd) }}{% else %}× USD {{ item.valor_unitario_usd or "—" }}{% endif %}{% if item.peso_neto_kg %} · {{ item.peso_neto_kg }} kg netos{% endif %}</small>
+                        <small>{{ item.unidades_aduana or b.cantidad or 1 }} unidad{{ "es" if (item.unidades_aduana or b.cantidad or 1)|int != 1 else "" }} {% if item.valor_total_usd is defined %}· Total {{ ((item.valor_total_usd))|dinero_usd }}{% else %}× {{ (item.valor_unitario_usd or "—")|dinero_usd }}{% endif %}{% if item.peso_neto_kg %} · {{ (item.peso_neto_kg)|kg }} netos{% endif %}</small>
                     </article>
                     {% endfor %}
                     {% endfor %}
                 {% else %}
-                    <article><span>Contenido</span><strong>{{ s.producto_alias or "Mercadería" }}</strong><small>Valor declarado total: USD {{ s.valor_declarado_usd or "—" }}</small></article>
+                    <article><span>Contenido</span><strong>{{ s.producto_alias or "Mercadería" }}</strong><small>Valor declarado total: {{ (s.valor_declarado_usd or "—")|dinero_usd }}</small></article>
                 {% endif %}
             </div>
-            <div class="shipment-check-total"><span>Valor declarado total</span><strong>USD {{ s.valor_declarado_usd or "—" }}</strong></div>
+            <div class="shipment-check-total"><span>Valor declarado total</span><strong>{{ (s.valor_declarado_usd or "—")|dinero_usd }}</strong></div>
             <div class="shipment-check-total"><span>Protección de carga</span><strong>{{ "Asegurada" if s.asegurar_carga else "Sin seguro" }}</strong></div>
         </section>
 

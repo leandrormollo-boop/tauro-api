@@ -27,13 +27,13 @@
   {% set f = entrada.extraccion %}
   <div class="card" style="margin-bottom:20px;"><h3>Datos extraídos · {{ f.tipo_documento }} {{ f.numero }}</h3>
     <div class="form-grid-3"><p>Emisión<br><strong>{{ f.fecha_emision }}</strong></p><p>Vencimiento<br><strong>{{ f.fecha_vencimiento or '—' }}</strong></p><p>Moneda<br><strong>{{ f.moneda }}</strong></p></div>
-    <div class="form-grid-3"><p>Subtotal<br><strong>{{ f.subtotal }}</strong></p><p>Impuestos<br><strong>{{ f.impuestos }}</strong></p><p>Total documental<br><strong>{{ f.moneda }} {{ f.total }}</strong></p></div>
+    <div class="form-grid-3"><p>Subtotal<br><strong>{{ f.subtotal|numero_ars }}</strong></p><p>Impuestos<br><strong>{{ f.impuestos|numero_ars }}</strong></p><p>Total documental<br><strong>{{ (f.moneda)|simbolo_moneda }} {{ f.total|numero_ars }}</strong></p></div>
     <p>Los importes de esta lectura usan punto decimal, sin separador de miles.</p>
     <div class="table-wrap"><table><thead><tr><th>Línea / guía</th><th>Concepto</th><th>Peso facturado</th><th>Importe ({{ f.moneda }})</th><th>TC documental ARS</th></tr></thead><tbody>
     {% for i in f['items'] %}<tr><td>{{ i.linea_numero }} · <span class="mono">{{ i.tracking or 'Sin asignar' }}</span></td>
       <td>{{ i.concepto_tipo }}<br><small>{{ i.descripcion or i.concepto_codigo or '' }}</small></td>
-      <td>{{ i.peso_facturado_kg or '—' }}{% if i.peso_facturado_kg %} kg{% endif %}<br><small>{{ (i.peso_base or 'NO_INFORMADO').replace('_',' ')|title }}</small></td>
-      <td class="mono">{{ i.importe }}</td><td class="mono">{{ i.tipo_cambio_ars }}</td></tr>{% endfor %}
+      <td>{{ i.peso_facturado_kg|kg }}<br><small>{{ (i.peso_base or 'NO_INFORMADO').replace('_',' ')|title }}</small></td>
+      <td class="mono">{{ i.importe|numero_ars }}</td><td class="mono">{{ i.tipo_cambio_ars|numero_ars }}</td></tr>{% endfor %}
     </tbody></table></div>
   </div>
   <div class="card" style="margin-bottom:20px;"><h3>Puntos a revisar</h3>

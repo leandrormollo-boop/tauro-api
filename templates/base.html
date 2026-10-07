@@ -25,18 +25,19 @@
       document.getElementById("portal-theme-color").content = tema === "light" ? "#f8f7fc" : "#0c0a14";
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/tauro.css?v=49">
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=8">{% endif %}
+    <link rel="stylesheet" href="/static/css/tauro.css?v=50">
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=9">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=3">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/documentos.css?v=3">
     <script src="/static/js/documentos.js?v=3" defer></script>{% endif %}
-    <link rel="stylesheet" href="/static/css/portal-cotizador.css?v=7">
+    <link rel="stylesheet" href="/static/css/portal-cotizador.css?v=9">
     <link rel="stylesheet" href="/static/css/quote-route-map.css?v=3">
     <link rel="stylesheet" href="/static/css/portal-claro.css?v=1">
     {% block extra_css %}{% endblock %}
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-dock.css?v=2">
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-dock.css?v=4">
     <link rel="stylesheet" href="/static/css/portal-sprites.css?v=1">
     <link rel="stylesheet" href="/static/css/portal-brand.css?v=2">{% endif %}
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-responsive.css?v=1">{% endif %}
     <link rel="stylesheet" href="/static/css/info-ayuda.css?v=1">
     <link rel="stylesheet" href="/static/css/rutas-frecuentes.css?v=1">
     <script src="/static/js/form-draft.js?v=1"></script>
@@ -45,11 +46,11 @@
     <script src="/static/js/tauro-numeros.js?v=1"></script>
     <script src="/static/js/tauro-ui.js?v=11" defer></script>
     <script src="/static/js/rutas-frecuentes.js?v=2" defer></script>
-    <script src="/static/js/quote-locations.js?v=3" defer></script>
+    <script src="/static/js/quote-locations.js?v=4" defer></script>
     <script src="/static/js/quote-route.js?v=1" defer></script>
     <script src="/static/js/quote-route-map.js?v=1" defer></script>
     <script src="/static/js/quote-globe-portal.js?v=2" defer></script>
-    <script src="/static/js/portal-cotizador.js?v=12" defer></script>
+    <script src="/static/js/portal-cotizador.js?v=13" defer></script>
     <script src="/static/js/portal-theme.js?v=2" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png?v=2">
     <link rel="apple-touch-icon" href="/static/img/favicon-180.png">
@@ -110,11 +111,11 @@
             <span class="side-saldo-lbl">{% if sal.a_favor_ars %}A favor · total{% elif sal.al_dia %}Cuenta total{% else %}Saldo total{% endif %}</span>
             <span class="side-saldo-n {% if not sal.al_dia %}portal-balance-metal{% endif %}">
                 {% if sal.a_favor_ars %}
-                    $ {{ "{:,.0f}".format(sal.a_favor_ars).replace(",", ".") }}
+                    $ {{ sal.a_favor_ars|numero_ars }}
                 {% elif sal.al_dia %}
                     Al día
                 {% else %}
-                    $ {{ "{:,.0f}".format(sal.pendiente_ars).replace(",", ".") }}
+                    $ {{ sal.pendiente_ars|numero_ars }}
                 {% endif %}
             </span>
         </a>
@@ -251,28 +252,28 @@
 {# Accesos comunes: barra móvil y dock de escritorio. Sólo en el portal
    autenticado; los contactos se suman al dock amplio de PC. #}
 <nav class="tabbar" aria-label="Accesos rápidos del portal">
-    <a href="/portal/home" class="tabbar-item{% if path.endswith('/home') %} active{% endif %}"{% if path.endswith('/home') %} aria-current="page"{% endif %}>
+    <a href="/portal/home" class="tabbar-item{% if path.endswith('/home') %} active{% endif %}"{% if path.endswith('/home') %} aria-current="page"{% endif %} aria-label="Inicio">
         <svg class="tabbar-ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/></svg>
         <span class="tabbar-lbl">Inicio</span>
     </a>
-    <a href="/portal/cotizar" data-cotizar-ventana class="tabbar-item{% if '/cotizar' in path %} active{% endif %}"{% if '/cotizar' in path %} aria-current="page"{% endif %}>
+    <a href="/portal/cotizar" data-cotizar-ventana class="tabbar-item{% if '/cotizar' in path %} active{% endif %}"{% if '/cotizar' in path %} aria-current="page"{% endif %} aria-label="Cotizar">
         {{ portal_sprite("cotizar", "tabbar-ico") }}
         <span class="tabbar-lbl">Cotizar</span>
     </a>
-    <a href="/portal/envios/nuevo" class="tabbar-item tabbar-cta{% if '/envios/nuevo' in path or '/oca/nuevo' in path or '/oca/cotizacion/' in path %} active{% endif %}"{% if '/envios/nuevo' in path or '/oca/nuevo' in path or '/oca/cotizacion/' in path %} aria-current="page"{% endif %}>
+    <a href="/portal/envios/nuevo" class="tabbar-item tabbar-cta{% if '/envios/nuevo' in path or '/oca/nuevo' in path or '/oca/cotizacion/' in path %} active{% endif %}"{% if '/envios/nuevo' in path or '/oca/nuevo' in path or '/oca/cotizacion/' in path %} aria-current="page"{% endif %} aria-label="Nuevo envío">
         <span class="tabbar-cta-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
         <span class="tabbar-lbl">Nuevo envío</span>
     </a>
-    <a href="/portal/envios" class="tabbar-item{% if '/envios' in path and '/envios/nuevo' not in path %} active{% endif %}"{% if '/envios' in path and '/envios/nuevo' not in path %} aria-current="page"{% endif %}>
+    <a href="/portal/envios" class="tabbar-item{% if '/envios' in path and '/envios/nuevo' not in path %} active{% endif %}"{% if '/envios' in path and '/envios/nuevo' not in path %} aria-current="page"{% endif %} aria-label="Mis envíos">
         {{ portal_sprite("envios", "tabbar-ico") }}
         <span class="tabbar-lbl">Mis envíos</span>
         {% if pend.envios %}<span class="tabbar-badge" aria-label="{{ pend.envios }} guía(s) lista(s) para descargar">{{ pend.envios }}</span>{% endif %}
     </a>
-    <a href="/portal/clientes" class="tabbar-item tabbar-desktop{% if '/clientes' in path or '/direcciones' in path %} active{% endif %}"{% if '/clientes' in path or '/direcciones' in path %} aria-current="page"{% endif %}>
+    <a href="/portal/clientes" class="tabbar-item tabbar-desktop{% if '/clientes' in path or '/direcciones' in path %} active{% endif %}"{% if '/clientes' in path or '/direcciones' in path %} aria-current="page"{% endif %} aria-label="Mis clientes">
         {{ portal_sprite("clientes", "tabbar-ico") }}
         <span class="tabbar-lbl">Mis clientes</span>
     </a>
-    <a href="/portal/cuenta" class="tabbar-item{% if '/cuenta' in path %} active{% endif %}"{% if '/cuenta' in path %} aria-current="page"{% endif %}>
+    <a href="/portal/cuenta" class="tabbar-item{% if '/cuenta' in path %} active{% endif %}"{% if '/cuenta' in path %} aria-current="page"{% endif %} aria-label="Cuenta">
         {{ portal_sprite("cuenta", "tabbar-ico") }}
         <span class="tabbar-lbl">Cuenta</span>
     </a>

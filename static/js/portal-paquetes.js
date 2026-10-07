@@ -9,8 +9,9 @@
   const recipes = state.combinaciones.filter(r => r.activo);
   const product = id => products.find(p => String(p.id) === String(id));
   const box = id => state.paquetes.find(p => String(p.id) === String(id));
-  const num = n => new Intl.NumberFormat('es-AR', {maximumFractionDigits:3}).format(Number(n));
-  const money = n => new Intl.NumberFormat('es-AR', {style:'currency',currency:'ARS',maximumFractionDigits:2}).format(Number(n));
+  const num = n => new Intl.NumberFormat('es-AR', {minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(n));
+  const medida = n => new Intl.NumberFormat('es-AR', {maximumFractionDigits:20}).format(Number(n));
+  const money = n => '$ ' + num(n);
   const node = (tag, text, cls) => { const el = document.createElement(tag); if (text != null) el.textContent = text; if (cls) el.className = cls; return el; };
   const action = (label, fn, cls = 'btn btn-ghost') => { const b = node('button', label, cls); b.type = 'button'; b.addEventListener('click', fn); return b; };
   const text = (parent, tag, content, cls) => { const e = node(tag,content,cls); parent.append(e); return e; };
@@ -64,14 +65,14 @@
   }
   boxes.forEach(b => {
     const card = node('article',null,'pkg-box'); text(card,'span','◇','pkg-box-icon').setAttribute('aria-hidden','true'); text(card,'h3',b.nombre);
-    const dims = text(card,'div',`${num(b.largo_cm)} × ${num(b.ancho_cm)} × ${num(b.alto_cm)} `,'pkg-dims'); text(dims,'small','cm');
+    const dims = text(card,'div',`${medida(b.largo_cm)} × ${medida(b.ancho_cm)} × ${medida(b.alto_cm)} `,'pkg-dims'); text(dims,'small','cm');
     const meta = text(card,'div',null,'pkg-meta');
     [['Caja vacía',b.tara_kg],['Protección',b.proteccion_kg],['Máximo caja llena',b.max_kg]].forEach(([label,n]) => { const line = text(meta,'div'); text(line,'span',label); text(line,'strong',num(n)+' kg'); });
     const actions = text(card,'div',null,'pkg-box-actions'); actions.append(action('Editar',() => openBox(b)),action('Archivar',() => archive('paquete',b.id))); $('pkg-boxes').append(card);
   });
   if (!boxes.length) { const empty = text($('pkg-boxes'),'div',null,'pkg-empty'); text(empty,'h3','Guardá tu primer embalaje'); text(empty,'p','Por ejemplo, una caja de 15 × 15 × 10 cm para un reel. Usá tus medidas y pesos reales.'); empty.append(action('+ Nuevo embalaje',() => openBox(), 'btn btn-primary')); }
   all('.pkg-product-select').forEach(s => options(s,products,p => title(p)+' · '+p.alias_interno,'Elegí un producto'));
-  all('.pkg-box-select').forEach(s => options(s,boxes,b => `${b.nombre} · ${num(b.largo_cm)}×${num(b.ancho_cm)}×${num(b.alto_cm)} cm`,'Elegí un embalaje'));
+  all('.pkg-box-select').forEach(s => options(s,boxes,b => `${b.nombre} · ${medida(b.largo_cm)} × ${medida(b.ancho_cm)} × ${medida(b.alto_cm)} cm`,'Elegí un embalaje'));
   function line(container) {
     const row = node('div',null,'pkg-line'); const select = node('select'); select.required = true; select.name = 'producto_id'; select.setAttribute('aria-label','Producto');
     options(select,products,p => title(p),'Elegí un producto'); const qty = node('input'); qty.type = 'number'; qty.name='cantidad'; qty.min='1';qty.max='100';qty.value='1';qty.required=true;qty.setAttribute('aria-label','Cantidad de unidades');
@@ -139,7 +140,7 @@
     busy(f,async () => { const target=$('pkg-quote-result');target.replaceChildren(node('p','Calculando cajas y consultando transportistas…','pkg-muted')); const r=await post('cotizar',body);target.replaceChildren();
       text(target,'span',r.ambito==='nacional'?'ENVÍO NACIONAL':'ENVÍO INTERNACIONAL','pkg-eyebrow');text(target,'h3',`${r.plan.cajas_total} ${r.plan.cajas_total===1?'caja':'cajas'} para ${r.plan.unidades_total} ${r.plan.unidades_total===1?'unidad':'unidades'}`);
       text(target,'p',`Peso real: ${num(r.plan.peso_total_kg)} kg · Peso facturable estimado: ${num(r.plan.peso_facturable_kg)} kg`,'pkg-muted');
-      r.plan.bultos.forEach((b,i) => {const row=text(target,'div',null,'pkg-plan-box');text(row,'strong',`${i+1}. ${b.nombre} · ${num(b.largo_cm)} × ${num(b.ancho_cm)} × ${num(b.alto_cm)} cm`);text(row,'span',b.contenido.map(c => `${c.cantidad} × ${c.alias}`).join(' + ')+` · ${num(b.peso_kg)} kg`);});
+      r.plan.bultos.forEach((b,i) => {const row=text(target,'div',null,'pkg-plan-box');text(row,'strong',`${i+1}. ${b.nombre} · ${medida(b.largo_cm)} × ${medida(b.ancho_cm)} × ${medida(b.alto_cm)} cm`);text(row,'span',b.contenido.map(c => `${c.cantidad} × ${c.alias}`).join(' + ')+` · ${num(b.peso_kg)} kg`);});
       if(!r.encontrado) text(target,'p',r.motivo,'pkg-note');
       r.opciones.forEach(o => { const row=text(target,'div',null,'pkg-price');const info=text(row,'div');text(info,'b',o.servicio);text(info,'small','Tu tarifa TAURO: '+money(o.precio_tauro_ars));const amount=text(row,'div');text(amount,'strong',Number(o.precio_comprador_ars)===0?'Gratis':money(o.precio_comprador_ars));text(amount,'small','Precio para el comprador'); });
       text(target,'p',r.checkout_habilitado?'El piloto de Tiendanube tiene el medio nacional habilitado para esta tienda. Verificá el resultado también en la tienda demo.':'Esta prueba no activa tarifas en una tienda. Sirve para validar cajas y precios dentro del portal TAURO.','pkg-note');

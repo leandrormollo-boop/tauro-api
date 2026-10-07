@@ -432,9 +432,9 @@ def test_css_tabbar_respeta_safe_area_touch_print_y_escritorio():
 
 def test_base_html_versiona_el_css_nuevo():
     base = BASE_HTML_PATH.read_text(encoding="utf-8")
-    assert "tauro.css?v=49" in base
-    assert "portal-cotizador.js?v=11" in base
-    assert "portal-dock.css?v=2" in base
+    assert "tauro.css?v=50" in base
+    assert "portal-cotizador.js?v=13" in base
+    assert "portal-dock.css?v=4" in base
     # El manifest y el SW viven en el head compartido de TODO el portal
     # (login incluido); la tabbar queda adentro del bloque autenticado.
     assert base.index("{% if cliente %}") < base.index('class="tabbar"')

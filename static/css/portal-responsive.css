@@ -1,0 +1,51 @@
+/* Ajustes de uso en celular; conservan colores, superficies y navegación. */
+.portal-operacion .shipment-paste > summary { cursor: pointer; font-weight: 600; }
+.portal-operacion .shipment-paste[open] > summary { margin-bottom: 12px; }
+@media (max-width: 600px) {
+  .portal-operacion .main-inner { overflow-wrap: anywhere; }
+  .portal-operacion .main-inner,
+  .portal-operacion .main-inner > *,
+  .portal-operacion .card,
+  .portal-operacion .form-group { min-width: 0; max-width: 100%; }
+  .portal-operacion :is(button, .btn, [role="button"], summary, .tabbar-item, .burger, .shipment-action) {
+    /* También cubre los controles compactos de invoice definidos con ID. */
+    min-height: 44px !important;
+    min-width: 44px !important;
+    box-sizing: border-box;
+  }
+  .portal-operacion .envios-table .shipment-row .shipment-actions-cell > .btn,
+  .portal-operacion .shipment-more > summary { min-height: 44px; }
+  .portal-operacion :is(.btn, summary, .shipment-step-help, .shipment-box-head small, .shipment-step-heading p) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+  }
+  .portal-operacion .shipment-step-heading p { display: block; }
+  .portal-operacion .shipment-step-heading { flex-wrap: wrap; }
+  .portal-operacion .shipment-box-head { flex-wrap: wrap; }
+  .portal-operacion .shipment-box-head > div { min-width: 0; }
+  .portal-operacion .shipment-box-head small { overflow: visible; max-width: 100%; }
+  .portal-operacion .home-shipment-state { min-width: 0; flex-shrink: 1; }
+  .portal-operacion .home-shipment-state .badge { white-space: normal; overflow: visible; }
+  .portal-operacion :is(.home-panel-head, .home-scope-head, .page-title, .uq-section-title) { flex-wrap: wrap; }
+  .portal-operacion :is(.home-shipment-copy, .home-shipment-state) > :is(strong, small) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .portal-operacion .envios-table .shipment-tracking {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .portal-operacion .uq-scopes a { min-width: 0; padding-inline: 10px; }
+  .portal-operacion .uq-scopes a span { min-width: 0; overflow-wrap: anywhere; }
+  .portal-operacion .uq-route-tools { flex-wrap: wrap; }
+  .portal-operacion .uq-mobile-actions { bottom: calc(var(--tabbar-h, 62px) + env(safe-area-inset-bottom, 0px) + 8px); }
+  .portal-operacion .uq-box-tabs { flex-wrap: wrap; }
+  .portal-operacion :is(.stepper, .uq-step-nav) button { height: auto; }
+  .portal-operacion :is(input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, .tselect-btn) { min-height: 44px; }
+  .portal-operacion .shipment-paste > summary { display: flex; align-items: center; }
+  .portal-operacion .shipment-paste > div { min-width: 0; }
+}

@@ -1,5 +1,5 @@
     <section class="account-payment-tracking" id="pagos" data-account-payments tabindex="-1" aria-labelledby="account-payments-title">
-        <div class="account-section-heading"><div><span class="account-kicker">Tus pagos</span><h2 id="account-payments-title">Pagos e imputaciones</h2></div><a class="account-text-action" href="{{ cuenta_url(tipo='pagos', pagina=None) }}#movimientos" data-account-link="pagos">Ver movimientos <span aria-hidden="true">↗</span></a></div>
+        <div class="account-section-heading"><div><span class="account-kicker">Tus pagos</span><h2 id="account-payments-title">Tus pagos y a qué se aplicaron</h2></div><a class="account-text-action" href="{{ cuenta_url(tipo='pagos', pagina=None) }}#movimientos" data-account-link="pagos">Ver movimientos <span aria-hidden="true">↗</span></a></div>
         {% set exp = experiencia|default(none) %}
         {% set pp = exp.pagos_paginacion if exp else none %}
         <p class="account-due-note">{{ ventana_label }}{% if pp %} · {{ pp.total }} {{ 'pago' if pp.total == 1 else 'pagos' }}{% endif %}</p>
@@ -7,7 +7,7 @@
         {% for pago in exp.pagos if exp %}
         <article class="account-payment-item" id="pago-{{ pago.id }}">
         <div class="account-payment-header"><span class="account-payment-record-title"><strong>{{ dinero(pago.monto_ars) }}</strong><span>{{ pago.fecha or 'Fecha sin informar' }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</span></span><span class="account-status {% if pago.estado == 'PENDIENTE' %}is-attention{% elif pago.estado == 'RECHAZADO' %}is-rejected{% else %}is-confirmed{% endif %}">{{ pago.estado_label }}</span></div>
-        <div class="account-imputation-row"><div><strong>{{ pago.imputacion_label|default("Sin envíos asignados") }}</strong>{% if pago.puede_imputar %}<small>{{ dinero(pago.sin_imputar_ars) }} disponibles para imputar</small>{% endif %}</div><div class="account-payment-actions"><a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/imputar">{{ "Elegir envíos" if pago.puede_imputar else "Ver imputación" }}</a>{% if not pago.tiene_comprobante %}<a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/adjuntar-comprobante">Adjuntar comprobante</a>{% endif %}</div></div>
+        <div class="account-imputation-row"><div><strong>{{ pago.imputacion_label|default("Sin envíos asignados") }}</strong>{% if pago.puede_imputar %}<small>{{ dinero(pago.sin_imputar_ars) }} sin asignar a envíos</small>{% endif %}</div><div class="account-payment-actions"><a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/imputar">{{ "Asignar envíos" if pago.puede_imputar else "Ver envíos asignados" }}</a>{% if not pago.tiene_comprobante %}<a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/adjuntar-comprobante">Adjuntar comprobante</a>{% endif %}</div></div>
         <details class="account-payment-record">
             <summary><span>Ver detalle{% if pago.tiene_comprobante %} y comprobante{% endif %}</span><span class="account-detail-chevron" aria-hidden="true"></span></summary>
             <div class="account-payment-record-body">

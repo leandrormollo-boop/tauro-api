@@ -28,7 +28,7 @@
         <tr>
           <td class="mono">{{ p.created_at.strftime('%d/%m/%Y %H:%M') if p.created_at else '—' }}</td>
           <td><a class="business-primary" href="/admin/clientes/{{ p.cliente_id|urlencode }}">{{ p.cliente_id }}</a></td>
-          <td class="num mono">$ {{ "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</td>
+          <td class="num mono">$ {{ (p.monto_ars)|numero_ars }}</td>
           <td>{{ p.metodo }}</td>
           <td class="mono">{{ p.referencia or '—' }}</td>
           <td>
@@ -39,7 +39,7 @@
               <a href="/admin/pagos/{{ p.id }}/adjuntar-comprobante?volver=pendientes" class="btn btn-ghost btn-sm">Adjuntar comprobante</a>
             {% endif %}
           </td>
-          {% set monto_fmt = "{:,.2f}".format(p.monto_ars).replace(",", "X").replace(".", ",").replace("X", ".") %}
+          {% set monto_fmt = (p.monto_ars)|numero_ars %}
           <td style="min-width:300px;">
             <form method="POST" action="/admin/pagos/{{ p.id }}/resolver"
                   data-confirm="¿Aprobar el pago de {{ p.cliente_id }} por $ {{ monto_fmt }}? Entra al saldo al instante.">
@@ -48,7 +48,7 @@
               {% if p.detalle_aplicaciones %}
               <ul style="margin:0 0 8px;padding-left:18px;">
                 {% for app in p.detalle_aplicaciones %}
-                <li><small>{{ app.documento }} · {{ app.ambito|title }} · $ {{ "{:,.2f}".format(app.monto).replace(',', 'X').replace('.', ',').replace('X', '.') }}</small></li>
+                <li><small>{{ app.documento }} · {{ app.ambito|title }} · $ {{ (app.monto)|numero_ars }}</small></li>
                 {% endfor %}
               </ul>
               {% else %}<small style="display:block;color:var(--fg-4);margin-bottom:8px;">Todo el monto quedará como crédito a favor sin imputar.</small>{% endif %}

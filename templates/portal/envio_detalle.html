@@ -5,12 +5,10 @@
 {% set ambito = ambito_envio(s) %}
 {% block title %}Envío #{{ s.id }}{% endblock %}
 {% macro dinero_ars(valor) -%}
-$ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X", ".") }} ARS
+$ {{ (valor or 0)|numero_ars }} ARS
 {%- endmacro %}
 
 {% block content %}
-{% set estados_orden = ["SOLICITADO", "GUIA_LISTA", "DESPACHADO", "ENTREGADO"] %}
-{% set estados_labels = {"SOLICITADO": "Solicitado", "GUIA_LISTA": "Guía lista", "DESPACHADO": "Recolectado", "ENTREGADO": "Entregado"} %}
 {% set idx_por_estado = {"SOLICITADO": 0, "EN_PROCESO": 0, "EMITIENDO": 0, "VERIFICAR_COURIER": 0, "GUIA_LISTA": 1, "DESPACHADO": 2, "PROCESO_ENTREGA": 2, "RETENIDO": 2, "ENTREGADO": 3} %}
 {% set idx_actual = idx_por_estado.get(s.estado_cliente_ui.codigo, -1) %}
 
@@ -24,7 +22,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <a href="/portal/envios/{{ s.id }}/gestion" data-shipment-manage class="btn btn-primary btn-sm">Gestionar envío</a>
         <span class="badge {{ s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
         {% if ambito == 'internacional' %}<a href="/portal/envios/nuevo?repetir={{ s.id }}" class="btn btn-primary btn-sm">Repetir envío</a>{% endif %}
-        <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos {{ ambito if ambito != 'sin_clasificar' else '' }}</a>
+        <a href="/portal/envios{% if ambito in ('nacional', 'internacional') %}?tipo={{ ambito }}{% endif %}" class="btn btn-ghost btn-sm">← Mis envíos{% if ambito == 'internacional' %} internacionales{% elif ambito == 'nacional' %} nacionales{% endif %}</a>
     </div>
 </div>
 
@@ -86,7 +84,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <p>{{ s.tracking_descripcion or 'El courier todavía no informó el motivo de la retención.' }}</p>
     <p>Consultá a TAURO con la guía {{ s.tracking }} para confirmar qué falta y quién debe resolverlo. El aviso por sí solo no confirma que exista un impuesto a pagar.</p>
     <div class="shipment-incident-actions"><a class="btn btn-primary btn-sm" href="{{ ayuda().whatsapp_url or ayuda().mail_url }}">Consultar incidencia</a><a class="btn btn-ghost btn-sm" href="{{ url_tracking(s.courier, s.tracking) }}" target="_blank" rel="noopener">Ver aviso del courier ↗</a></div>
-    {% if s.tracking_actualizado_at %}<small>Última consulta al courier: {{ s.tracking_actualizado_at.strftime('%d/%m/%Y %H:%M %Z') }}</small>{% endif %}
+    {% if s.tracking_ui is defined and s.tracking_ui.consulta_label %}<small>Última consulta al courier: {{ s.tracking_ui.consulta_label }} (hora de Argentina)</small>{% elif s.tracking_actualizado_at %}<small>Última consulta al courier: {{ s.tracking_actualizado_at.strftime('%d/%m/%Y %H:%M') }}</small>{% endif %}
 </aside>
 {% endif %}
 {% if s.seguimiento_sin_actualizaciones %}
@@ -95,10 +93,10 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
 <!-- ── Timeline de estado (stepper del design system) ───── -->
 <div class="card" style="margin-bottom:16px;">
     <div class="stepper" style="margin:6px 0 8px;">
-        {% for e in estados_orden %}
+        {% for hito in hitos_envio_ui %}
         <div class="step {% if loop.index0 < idx_actual %}done{% elif loop.index0 == idx_actual %}active{% endif %}">
             <span>{% if loop.index0 < idx_actual %}✓{% else %}{{ loop.index }}{% endif %}</span>
-            <label>{{ estados_labels[e] }}</label>
+            <label>{{ hito.label }}</label>
         </div>
         {% endfor %}
     </div>
@@ -138,7 +136,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--error);border-color:color-mix(in srgb,var(--error) 45%,var(--line));">Cancelar envío</button>
         </form>
         {% elif s.estado not in ('CANCELADO', 'REEMPLAZADO', 'ENTREGADO') and cancelar_bloqueo %}
-        <span title="{{ cancelar_bloqueo }}" style="font-size:12px;color:var(--fg-4);max-width:360px;">No cancelable: {{ cancelar_bloqueo }}</span>
+        <span title="{{ cancelar_bloqueo }}" style="font-size:12px;color:var(--fg-4);max-width:360px;">No se puede cancelar. {{ cancelar_bloqueo }}</span>
         {% endif %}
     </div>
 </div>
@@ -220,7 +218,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     <div class="card">
         <div class="card-head">
             <div>
-                <h3 class="portal-sprite-heading">{{ portal_sprite("seguimiento") }}Tracking{% if courier_codigo == 'DHL' %}<span data-help="Actualización del tracking">El portal consulta DHL una vez al día. El seguimiento oficial puede tener movimientos posteriores.</span>{% endif %}</h3>
+                <h3 class="portal-sprite-heading">{{ portal_sprite("seguimiento") }}Tracking{% if courier_codigo in ('DHL', 'FEDEX') %}<span data-help="Actualización del tracking">El portal consulta {{ courier_nombre }} todos los días hasta que el envío figure entregado. El seguimiento oficial puede tener movimientos posteriores.</span>{% endif %}</h3>
                 <p>Seguimiento oficial en la red de {{ courier_nombre }}.</p>
             </div>
         </div>
@@ -230,14 +228,22 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
             <div class="mono" style="font-size:17px;margin-bottom:12px;">
                 <a href="{{ track_url }}" target="_blank" rel="noopener" class="track-link">{{ s.tracking }}</a>
             </div>
+            {% set tu = s.tracking_ui|default({}) %}
             {% if s.tracking_descripcion %}
             <div class="msg{% if s.estado_cliente_ui.codigo == 'RETENIDO' %} error{% endif %}">
-                <strong>Último mensaje de {{ courier_nombre }}</strong><br>{{ s.tracking_descripcion }}
+                <strong>Último movimiento</strong><br>{{ tu.mensaje or s.tracking_descripcion }}
+                {% if tu.evento_label %}<br><small class="tracking-event-time">{{ tu.evento_label }} · hora de Argentina</small>{% endif %}
+                {% if tu.original %}<br><small class="tracking-original">Mensaje de {{ courier_nombre }}: {{ tu.original }}</small>{% endif %}
+            </div>
+            {% endif %}
+            {% if tu.alerta_sin_avance %}
+            <div class="msg warn tracking-stalled" role="status">
+                <strong>Sin movimientos hace {{ tu.dias_sin_movimiento }} días.</strong>
+                Puede ser una demora normal en aduana o en un centro de {{ courier_nombre }}. Ya lo estamos revisando; si te urge, escribinos con la guía {{ s.tracking }}.
             </div>
             {% endif %}
             <p class="tracking-sync-note">
-                {% if s.tracking_actualizado_at %}Última sincronización: {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M %Z") }}.{% else %}Todavía no recibimos una actualización del courier.{% endif %}
-
+                {% if tu.consulta_label %}Consultamos a {{ courier_nombre }} por última vez el {{ tu.consulta_label }} (hora de Argentina).{% elif s.tracking_actualizado_at %}Consultamos a {{ courier_nombre }} por última vez el {{ s.tracking_actualizado_at.strftime("%d/%m/%Y %H:%M") }}.{% elif s.tracking_error %}{{ courier_nombre }} todavía no devuelve datos de esta guía. Seguimos consultando todos los días hasta que figure entregada.{% else %}Todavía no recibimos una actualización del courier. Consultamos todos los días hasta que figure entregada.{% endif %}
             </p>
             <a href="{{ track_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Seguir envío →</a>
         {% else %}
@@ -274,16 +280,16 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if loop.first and b.embalaje %}<div class="badge">{{ b.embalaje.nombre }}</div>{% endif %}
                         <div><strong>{{ item.descripcion_en or b.producto_alias }}</strong>
                         {% if item.hs_code %}<br><small class="mono" style="color:var(--fg-3)">HS {{ item.hs_code }}</small>{% endif %}
-                        {% if b.items_invoice %}<br><small>{{ item.unidades_aduana }} unidades {% if item.valor_total_usd is defined %}· Total USD {{ '%.2f'|format(item.valor_total_usd) }}{% else %}× USD {{ item.valor_unitario_usd }}{% endif %} · {{ item.peso_neto_kg }} kg netos</small>{% endif %}</div>
+                        {% if b.items_invoice %}<br><small>{{ item.unidades_aduana }} unidades {% if item.valor_total_usd is defined %}· Total {{ (item.valor_total_usd)|dinero_usd }}{% else %}× {{ (item.valor_unitario_usd)|dinero_usd }}{% endif %} · {{ (item.peso_neto_kg)|kg }} netos</small>{% endif %}</div>
                     {% endfor %}</td>
                     <td class="mono">x{{ b.cantidad }}</td>
-                    <td class="mono">{{ b.largo_cm }}×{{ b.ancho_cm }}×{{ b.alto_cm }} cm</td>
-                    <td class="mono">{{ b.peso_kg }} kg</td>
+                    <td class="mono">{{ medida_cm(b.largo_cm) }} × {{ medida_cm(b.ancho_cm) }} × {{ medida_cm(b.alto_cm) }} cm</td>
+                    <td class="mono">{{ (b.peso_kg)|kg }}</td>
                     <td class="num">
                         {% if courier_codigo == "OCA" %}Incluido en el total declarado{% elif b.valor_declarado_caja_usd %}
-                            USD {{ b.valor_declarado_caja_usd }} por caja
+                            {{ (b.valor_declarado_caja_usd)|dinero_usd }} por caja
                         {% else %}
-                            USD {{ b.valor_unitario_usd }} por unidad
+                            {{ (b.valor_unitario_usd)|dinero_usd }} por unidad
                         {% endif %}
                     </td>
                 </tr>
@@ -292,9 +298,9 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                 <tr>
                     <td><strong>{{ s.producto_alias }}</strong></td>
                     <td class="mono">x{{ s.cantidad }}</td>
-                    <td class="mono">{{ s.largo_cm }}×{{ s.ancho_cm }}×{{ s.alto_cm }} cm</td>
-                    <td class="mono">{{ s.peso_kg }} kg</td>
-                    <td class="num">USD {{ s.valor_declarado_usd }}</td>
+                    <td class="mono">{{ medida_cm(s.largo_cm) }} × {{ medida_cm(s.ancho_cm) }} × {{ medida_cm(s.alto_cm) }} cm</td>
+                    <td class="mono">{{ (s.peso_kg)|kg }}</td>
+                    <td class="num">{{ (s.valor_declarado_usd)|dinero_usd }}</td>
                 </tr>
             {% endif %}
             </tbody>
@@ -302,19 +308,19 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
     </div>
     <div class="mini-row" style="margin-top:10px;">
         <span>Peso real total</span>
-        <strong>{{ s.resumen_pesos.real_total_kg }} kg</strong>
+        <strong>{{ (s.resumen_pesos.real_total_kg)|kg }}</strong>
     </div>
     <div class="mini-row">
-        <span>Peso volumétrico total · divisor {{ s.resumen_pesos.divisor }}</span>
-        <strong>{{ s.resumen_pesos.volumetrico_total_kg }} kg</strong>
+        <span>Peso por volumen (largo × ancho × alto ÷ {{ s.resumen_pesos.divisor }})</span>
+        <strong>{{ (s.resumen_pesos.volumetrico_total_kg)|kg }}</strong>
     </div>
     <div class="mini-row">
         <span>Peso facturable total</span>
-        <strong>{{ s.resumen_pesos.facturable_total_kg }} kg{% if s.resumen_pesos.cobra_por_volumen %} · <span class="badge warn">Se cobra por volumen</span>{% endif %}</strong>
+        <strong>{{ (s.resumen_pesos.facturable_total_kg)|kg }}{% if s.resumen_pesos.cobra_por_volumen %} · <span class="badge warn">Se cobra por volumen</span>{% endif %}</strong>
     </div>
     <div class="mini-row">
         <span>Valor declarado total</span>
-        <strong>{% if courier_codigo == "OCA" %}{{ dinero_ars(s.valor_declarado_ars) if s.valor_declarado_ars else "Pendiente de revisión" }}{% else %}USD {{ s.valor_declarado_usd }}{% endif %}</strong>
+        <strong>{% if courier_codigo == "OCA" %}{{ dinero_ars(s.valor_declarado_ars) if s.valor_declarado_ars else "Pendiente de revisión" }}{% else %}{{ (s.valor_declarado_usd)|dinero_usd }}{% endif %}</strong>
     </div>
     <div class="mini-row">
         <span>Protección de carga</span>
@@ -384,15 +390,15 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
         <hr class="divider">
         <div class="mini-row">
             <span>Peso cotizado</span>
-            <strong>{{ d.peso_inicial_kg }} kg</strong>
+            <strong>{{ (d.peso_inicial_kg)|kg }}</strong>
         </div>
         <div class="mini-row">
             <span>Peso facturado por el courier</span>
-            <strong>{{ d.peso_facturado_kg }} kg · {{ (d.base_peso or 'otro').replace('_', ' ')|title }}</strong>
+            <strong>{{ (d.peso_facturado_kg)|kg }} · {{ (d.base_peso or 'otro').replace('_', ' ')|title }}</strong>
         </div>
         <div class="mini-row">
             <span>Diferencia de peso</span>
-            <strong>{{ d.diferencia_peso_kg }} kg</strong>
+            <strong>{{ (d.diferencia_peso_kg)|kg }}</strong>
         </div>
         <div class="mini-row">
             <span>Motivo</span>

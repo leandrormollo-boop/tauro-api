@@ -319,7 +319,7 @@
         });
         summary.hidden = !complete;
         if (complete) [["real",real],["volume",volume],["billable",billable]].forEach(function (item) {
-          summary.querySelector('[data-weight-' + item[0] + ']').textContent = item[1].toLocaleString('es-AR',{maximumFractionDigits:2}) + ' kg';
+          summary.querySelector('[data-weight-' + item[0] + ']').textContent = item[1].toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' kg';
         });
       }
       function ready() {

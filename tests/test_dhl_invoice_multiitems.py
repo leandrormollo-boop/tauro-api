@@ -234,6 +234,8 @@ def test_repetir_y_recotizar_conservan_todos_los_articulos(portal):
 
 def test_resumen_de_verificacion_muestra_todos_y_escapa_texto():
     env = Environment(loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"), autoescape=True)
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     b = caja()
     b["items_invoice"][1]["descripcion_en"] = '<img src=x onerror="alert(1)">'
     html = env.get_template("portal/_envio_verificacion.html").render(s={"bultos": [b]})
