@@ -184,6 +184,28 @@
       </p>
     </div>
 
+    {# Diferencias contra la factura del operador (Leandro, 07/10/2026): la
+       diferencia de flete se cobra sólo si DHL o FedEx cobraron más que el
+       costo cotizado. El TAX facturado se traslada siempre. #}
+    <div class="form-group">
+      <label>Diferencias contra la factura del operador</label>
+      <select name="regla_diferencia_courier">
+        <option value="COBRAR_SOLO_SI_MAYOR"
+                {% if not cliente or cliente.regla_diferencia_courier != 'COBRAR_SIEMPRE' %}selected{% endif %}>
+          Cobrar la diferencia sólo si el operador cobró más
+        </option>
+        <option value="COBRAR_SIEMPRE"
+                {% if cliente and cliente.regla_diferencia_courier == 'COBRAR_SIEMPRE' %}selected{% endif %}>
+          Cobrar o acreditar siempre la diferencia
+        </option>
+      </select>
+      <p style="color:var(--fg-4);font-size:12px;margin-top:6px;">
+        Con la primera opción, si el operador cobró menos que lo cotizado el ahorro queda para Tauro y el envío se cierra sin diferencia.
+        Con la segunda, el cliente también recibe crédito cuando el operador cobró menos.
+        Los impuestos que trae la factura se le trasladan al cliente en los dos casos.
+      </p>
+    </div>
+
     <div class="form-group">
       <label>Notas internas</label>
       <textarea name="notas" rows="2" placeholder="Observaciones...">{{ cliente.notas if cliente else '' }}</textarea>

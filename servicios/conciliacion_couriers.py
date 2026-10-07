@@ -1321,6 +1321,8 @@ def matchear_items_exactos(
                     """,
                     (int(factura_id),),
                 )
+                # Deriva OBSERVADA/CERRADA si corresponde (cuadres y bandejas).
+                _actualizar_estado_factura(cur, int(factura_id))
     return {"propuestos": propuestos, "sin_match": sin_match}
 
 
@@ -2780,7 +2782,8 @@ def listar_facturas_courier_control(
                        COALESCE(band.resueltas, 0) AS bandejas_resueltas,
                        COALESCE(band.detalle, '{{}}'::jsonb) AS bandejas_detalle,
                        COALESCE(ren.suma, 0) AS suma_renglones,
-                       (ren.suma IS NOT NULL AND ABS(ren.suma - f.total) <= 0.02) AS cuadra_documento
+                       (ren.suma IS NOT NULL AND ABS(ren.suma - f.total) <= 0.02
+                        AND (f.subtotal <= 0 OR ABS(f.subtotal + f.impuestos - f.total) <= 0.02)) AS cuadra_documento
                 FROM facturas_courier f
                 LEFT JOIN facturas_courier_items i ON i.factura_id = f.id
                 LEFT JOIN factura_courier_item_matches m ON m.item_id = i.id
@@ -3162,6 +3165,7 @@ def obtener_control_envio(solicitud_id: int) -> dict[str, Any] | None:
                        c.diferencia_flete_ars, c.tax_cliente_ars,
                        c.peso_cotizado_kg, c.peso_final_facturado_kg,
                        c.peso_base_facturado, c.motivo_diferencia,
+                       c.ahorro_tauro_ars, c.regla_aplicada,
                        c.evidencia_completa, c.calculado_por,
                        c.calculado_at, c.aprobado_por, c.aprobado_at,
                        a.id AS ajuste_id, a.tipo AS ajuste_tipo,
