@@ -141,3 +141,93 @@ def test_fecha_futura_no_crea_nada(envio_db):
             assert cur.fetchone()["n"] == 0
             cur.execute("SELECT COUNT(*) AS n FROM envios")
             assert cur.fetchone()["n"] == 0
+
+
+def _guia_historica(conexion, *, cliente="WAIMAO", estado="ENTREGADO", tracking="5377135584"):
+    with conexion() as conn:
+        with conn.cursor() as cur:
+            if cliente != "WAIMAO":
+                cur.execute(
+                    "INSERT INTO clientes (cliente_id,email) VALUES (%s,%s) "
+                    "ON CONFLICT DO NOTHING",
+                    (cliente, f"{cliente.lower()}@example.invalid"),
+                )
+            cur.execute(
+                """
+                INSERT INTO solicitudes_guia (
+                    cliente_id, producto_alias, remitente_pais, destino_pais,
+                    dest_nombre, dest_direccion, dest_ciudad, dest_zip, estado,
+                    tracking, ambito, courier, visible_cliente, cargo_pendiente,
+                    created_at
+                ) VALUES (
+                    %s, 'Envio historico WAIMAO 2026', 'CN', 'AR', 'BERAJATEX SRL',
+                    '', '', '', %s, %s, 'INTERNACIONAL', 'DHL', FALSE, FALSE,
+                    '2026-08-29 12:00:00-03'
+                ) RETURNING id
+                """,
+                (cliente, estado, tracking),
+            )
+            return cur.fetchone()["id"]
+
+
+def test_completa_guia_existente_sin_cargo(envio_db):
+    hoy = _hoy()
+    fecha = hoy - timedelta(days=30)
+    sid = _guia_historica(envio_db)
+    resultado = _cargar(
+        tracking="5377135584", precio_tauro_ars=1028160.0,
+        costo_courier_estimado_ars=930393.0, producto="Gorras (muestras)",
+        fecha_envio=fecha, label_pdf=b"%PDF-1.4\n%%EOF\n",
+    )
+    assert resultado == {"ok": True, "solicitud_id": sid, "completada": True}
+    with envio_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM solicitudes_guia")
+            assert cur.fetchone()["n"] == 1
+            cur.execute(
+                "SELECT fecha, monto_ars, estado FROM envios WHERE solicitud_id=%s", (sid,)
+            )
+            cargo = cur.fetchone()
+            cur.execute(
+                "SELECT precio_tauro_ars, visible_cliente, producto_alias, estado, "
+                "cargo_pendiente, label_pdf IS NOT NULL AS tiene_label "
+                "FROM solicitudes_guia WHERE id=%s",
+                (sid,),
+            )
+            sol = cur.fetchone()
+    assert cargo["fecha"] == fecha
+    assert float(cargo["monto_ars"]) == 1028160.0
+    assert cargo["estado"] == "ACTIVO"
+    assert float(sol["precio_tauro_ars"]) == 1028160.0
+    assert sol["visible_cliente"] is True
+    assert sol["producto_alias"] == "Gorras (muestras)"
+    assert sol["estado"] == "ENTREGADO"
+    assert sol["cargo_pendiente"] is False
+    assert sol["tiene_label"] is True
+
+    # Una segunda carga ya no completa nada: la guía tiene cargo.
+    otra = _cargar(tracking="5377135584", precio_tauro_ars=1.0, fecha_envio=fecha)
+    assert not otra["ok"]
+    assert "ya está cargado" in otra["error"]
+
+
+def test_sin_fecha_conserva_la_fecha_original_de_la_guia(envio_db):
+    sid = _guia_historica(envio_db, tracking="4164037172")
+    resultado = _cargar(tracking="4164037172", precio_tauro_ars=626700.0)
+    assert resultado["ok"], resultado
+    with envio_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT fecha FROM envios WHERE solicitud_id=%s", (sid,))
+            assert cur.fetchone()["fecha"] == date(2026, 8, 29)
+
+
+@pytest.mark.parametrize("cliente,estado", [("OTRO", "ENTREGADO"), ("WAIMAO", "CANCELADO")])
+def test_no_completa_guia_de_otro_cliente_ni_cancelada(envio_db, cliente, estado):
+    _guia_historica(envio_db, cliente=cliente, estado=estado)
+    resultado = _cargar(tracking="5377135584", precio_tauro_ars=1028160.0)
+    assert not resultado["ok"]
+    assert "ya está cargado" in resultado["error"]
+    with envio_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM envios")
+            assert cur.fetchone()["n"] == 0

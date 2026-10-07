@@ -2424,12 +2424,35 @@ def cargar_envio_externo(
             return {"ok": False, "error": error_fecha}
 
     # Mismo tracking ya cargado = doble click o doble carga: no duplicar.
+    # Excepción: una guía del mismo cliente que entró sin precio ni cargo
+    # (p. ej. vinculada desde una factura del courier) se completa en vez de
+    # duplicarse.
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM solicitudes_guia WHERE tracking = %s LIMIT 1",
-                        (tracking,))
-            if cur.fetchone():
-                return {"ok": False, "error": f"El tracking {tracking} ya está cargado."}
+            cur.execute(
+                """
+                SELECT s.id, s.cliente_id, s.estado, s.precio_tauro_ars,
+                       EXISTS (SELECT 1 FROM envios e WHERE e.solicitud_id=s.id)
+                           AS tiene_cargo
+                FROM solicitudes_guia s
+                WHERE s.tracking = %s
+                ORDER BY s.id
+                """,
+                (tracking,),
+            )
+            existentes = [dict(f) for f in cur.fetchall()]
+    if existentes:
+        completable = _guia_sin_cargo_completable(existentes, cliente_id)
+        if completable is None:
+            return {"ok": False, "error": f"El tracking {tracking} ya está cargado."}
+        return _completar_guia_sin_cargo(
+            completable["id"],
+            precio_tauro_ars=precio_tauro_ars,
+            costo_courier_estimado_ars=costo_courier_estimado_ars,
+            label_pdf=label_pdf,
+            producto=producto,
+            fecha_envio=fecha_envio,
+        )
 
     from servicios.cotizador import DolarNoConfigurado
     try:
@@ -2496,6 +2519,102 @@ def validar_fecha_envio_externo(fecha_envio: date) -> str:
     if (hoy - fecha_envio).days > _DIAS_MAXIMOS_ENVIO_EXTERNO:
         return "La fecha del envío es de hace más de un año: revisala."
     return ""
+
+
+def _guia_sin_cargo_completable(existentes: list[dict], cliente_id: str) -> Optional[dict]:
+    """La única guía de ese tracking, del mismo cliente, viva, sin precio ni cargo."""
+    if len(existentes) != 1:
+        return None
+    fila = existentes[0]
+    if str(fila.get("cliente_id") or "").strip().upper() != (cliente_id or "").strip().upper():
+        return None
+    if str(fila.get("estado") or "").upper() in ("CANCELADO", "REEMPLAZADO"):
+        return None
+    if Decimal(str(fila.get("precio_tauro_ars") or 0)) > 0 or fila.get("tiene_cargo"):
+        return None
+    return fila
+
+
+def _completar_guia_sin_cargo(
+    solicitud_id: int,
+    *,
+    precio_tauro_ars: float,
+    costo_courier_estimado_ars: Optional[float],
+    label_pdf: Optional[bytes],
+    producto: str,
+    fecha_envio: Optional[date],
+) -> dict:
+    """Pone precio a una guía ya existente sin cargo, la muestra y genera el cargo.
+
+    No re-emite ni toca el tracking ni el estado operativo: sólo completa lo
+    que faltaba para la cuenta corriente del cliente.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE solicitudes_guia
+                SET precio_tauro_ars=%s,
+                    label_pdf=COALESCE(%s, label_pdf),
+                    producto_alias=CASE
+                        WHEN COALESCE(BTRIM(producto_alias), '') = ''
+                          OR producto_alias ILIKE 'Envio historico%%'
+                        THEN %s ELSE producto_alias END,
+                    visible_cliente=TRUE,
+                    updated_at=NOW()
+                WHERE id=%s
+                  AND COALESCE(precio_tauro_ars, 0) = 0
+                  AND estado NOT IN ('CANCELADO', 'REEMPLAZADO')
+                  AND NOT EXISTS (SELECT 1 FROM envios e WHERE e.solicitud_id=%s)
+                RETURNING *
+                """,
+                (
+                    float(precio_tauro_ars),
+                    psycopg2.Binary(label_pdf) if label_pdf else None,
+                    (producto or "Mercadería")[:120],
+                    solicitud_id,
+                    solicitud_id,
+                ),
+            )
+            fila = cur.fetchone()
+            if not fila:
+                return {"ok": False,
+                        "error": "La guía cambió mientras la completabas. Revisala antes de reintentar."}
+            if costo_courier_estimado_ars is not None:
+                _congelar_cotizacion_aceptada_con_cursor(
+                    cur, dict(fila),
+                    costo_estimado_manual_ars=costo_courier_estimado_ars,
+                )
+            fecha_original = fila.get("created_at")
+    try:
+        from servicios.cuenta_corriente import cargar_guia_emitida
+        if cargar_guia_emitida(solicitud_id) is not True:
+            raise RuntimeError("No se pudo garantizar el cargo")
+    except Exception as exc:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE solicitudes_guia SET cargo_pendiente=TRUE, cargo_error=%s, "
+                    "updated_at=NOW() WHERE id=%s",
+                    (str(exc)[:500], solicitud_id),
+                )
+        return {"ok": False, "error": f"La guía quedó con precio pero el cargo falló: {exc}"}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE solicitudes_guia SET cargo_pendiente=FALSE, cargo_error=NULL, "
+                "updated_at=NOW() WHERE id=%s",
+                (solicitud_id,),
+            )
+    fecha = fecha_envio
+    if fecha is None and isinstance(fecha_original, datetime):
+        instante = fecha_original if fecha_original.tzinfo else fecha_original.replace(tzinfo=_ZONA_AR)
+        fecha = instante.astimezone(_ZONA_AR).date()
+    if fecha is not None:
+        _fechar_envio_externo(solicitud_id, fecha)
+    print(f"[solicitudes] guía sin cargo completada: solicitud {solicitud_id} · "
+          f"ARS {precio_tauro_ars:,.0f}")
+    return {"ok": True, "solicitud_id": solicitud_id, "completada": True}
 
 
 def _fechar_envio_externo(solicitud_id: int, fecha_envio: date) -> None:
