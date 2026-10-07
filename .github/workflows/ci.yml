@@ -42,6 +42,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      # Los fixtures usan CURRENT_DATE; debe ser el mismo día operativo que
+      # los controles de pagos de TAURO, incluso entre 00:00 y 03:00 UTC.
+      TZ: America/Argentina/Buenos_Aires
+      PGTZ: America/Argentina/Buenos_Aires
       TAURO_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tauro_test
       PGHOST: 127.0.0.1
       PGPORT: "5432"
@@ -99,6 +103,9 @@ jobs:
             tests/test_fedex_emision_recuperacion.py \
             tests/test_dhl_emision.py \
             tests/test_dhl_client.py \
+            tests/test_carrier_http_performance.py \
+            tests/test_cotizador_concurrencia.py \
+            tests/test_portal_quote_stream.py \
             tests/test_cotizar_sentido.py \
             tests/test_portal_experiencia_cliente.py \
             tests/test_accesos_directos.py \

@@ -26,9 +26,23 @@ test('cerrar o cambiar de ámbito impide el autocompletado pendiente', async () 
   c.search(query('CABA')); await wait(5); c.cancel(); resolve('CABA'); await wait(1);
   assert.equal(rendered,false); assert.equal(c.pending(),false);
 });
+test('aceptar ciudad y CP manuales libera de inmediato la búsqueda auxiliar', async () => {
+  let signal;
+  const c = make({delay:0,fetch:(_query,currentSignal)=>{signal=currentSignal;return new Promise(()=>{});},result:()=>{},error:()=>{}});
+  c.search(query('CABA')); await wait(5); assert.equal(c.pending(),true);
+  c.acceptManual(); assert.equal(c.pending(),false); assert.equal(signal.aborted,true);
+});
 test('si falla la búsqueda no bloquea la carga manual', async () => {
   let failed = false;
   const c = make({delay:0,fetch:async()=>{throw Error('offline');},result:()=>{},error:()=>failed=true});
   c.search(query('CABA')); await wait(5);
   assert.equal(failed,true); assert.equal(c.pending(),false);
+});
+test('el timeout de un lookup abortado no cancela la búsqueda nueva', async () => {
+  const old = new AbortController(), current = new AbortController();
+  const expired = [];
+  make.armDeadline(old.signal, () => expired.push('old'), 5);
+  const clearCurrent = make.armDeadline(current.signal, () => expired.push('current'), 8);
+  old.abort(); await wait(15); clearCurrent();
+  assert.deepEqual(expired, ['current']);
 });

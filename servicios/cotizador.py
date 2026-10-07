@@ -4,6 +4,7 @@
 
 import math
 import os
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -90,10 +91,21 @@ def _pricing_courier_cliente(cliente: str, courier: str) -> dict:
 
     Sin regla propia ni general se falla cerrado: no hay 25 % implícito.
     """
+    from servicios.carrier_contract import (
+        Ambito,
+        Capacidad,
+        operation_implemented,
+    )
     from servicios.configuracion_couriers_cliente import configuracion_cotizacion
 
-    acceso = configuracion_cotizacion(cliente)
     courier = (courier or "").strip().lower()
+    if not operation_implemented(
+        courier, Capacidad.COTIZAR, ambito=Ambito.INTERNACIONAL,
+    ):
+        raise ValueError(
+            f"{courier.upper()} todavía no está disponible para cotizar."
+        )
+    acceso = configuracion_cotizacion(cliente)
     if courier not in acceso["couriers_habilitados"]:
         raise ValueError(
             f"{courier.upper()} no está habilitado para cotizar en esta cuenta."
@@ -236,7 +248,7 @@ def cotizar_opciones(
     return opciones
 
 
-def cotizar_referencia_couriers(
+def _iterar_cotizar_referencia_couriers(
     cliente: str,
     origen_pais: str,
     destino_pais: str,
@@ -248,8 +260,11 @@ def cotizar_referencia_couriers(
     paquetes: list[dict] | None = None,
     origen_ubicacion: dict | None = None,
     destino_ubicacion: dict | None = None,
-) -> dict:
-    """Compara una opción principal por courier para el cotizador rápido.
+    *,
+    _progresivo: bool,
+    _cancel_event: threading.Event | None = None,
+):
+    """Prepara una sola vez y produce comparaciones del cotizador rápido.
 
     Esta pantalla ya exige ciudad, CP, peso, medidas y valor declarado, pero
     todavía no tiene la dirección completa ni la descripción aduanera. Para
@@ -262,7 +277,10 @@ def cotizar_referencia_couriers(
     ``cotizaciones``: esa tabla histórica tiene columnas FedEx-específicas y
     guardar ahí un costo DHL falsearía la auditoría.
     """
-    from servicios.carriers import cotizar_carriers_cliente
+    from servicios.carriers import (
+        cotizar_carriers_cliente,
+        iterar_cotizar_carriers_cliente,
+    )
     from servicios.configuracion_couriers_cliente import configuracion_cotizacion
     from servicios.paises import normalizar_iso2, referencia
 
@@ -379,85 +397,161 @@ def cotizar_referencia_couriers(
     destino = ubicacion_cotizacion(destino_iso, destino_ubicacion, "destino")
 
     acceso_couriers = configuracion_cotizacion(cliente)
-    tarjetas = cotizar_carriers_cliente(
-        origen=origen,
-        destino=destino,
-        paquete=piezas[0],
-        paquetes=piezas if len(piezas) > 1 else None,
-        dolar=_get_dolar_ars(),
-        pricing_cliente=acceso_couriers["pricing_general"],
-        pricing_por_courier=acceso_couriers["pricing_por_courier"],
-        couriers_habilitados=acceso_couriers["couriers_habilitados"],
+    parametros_carriers = {
+        "origen": origen,
+        "destino": destino,
+        "paquete": piezas[0],
+        "paquetes": piezas if len(piezas) > 1 else None,
+        "dolar": _get_dolar_ars(),
+        "pricing_cliente": acceso_couriers["pricing_general"],
+        "pricing_por_courier": acceso_couriers["pricing_por_courier"],
+        "couriers_habilitados": acceso_couriers["couriers_habilitados"],
+    }
+    if _progresivo:
+        iteraciones = iterar_cotizar_carriers_cliente(
+            **parametros_carriers,
+            _cancel_event=_cancel_event,
+        )
+    else:
+        iteraciones = ((cotizar_carriers_cliente(**parametros_carriers), True),)
+
+    for tarjetas, completo in iteraciones:
+        opciones = []
+        no_disponibles = []
+        for tarjeta in tarjetas:
+            if tarjeta.get("id") not in acceso_couriers["couriers_habilitados"]:
+                continue
+            if tarjeta.get("estado") != "cotizado":
+                # No exponer el error crudo: puede contener nombres de cuentas o
+                # variables internas. Sí distinguir un problema de autenticación
+                # productiva para que el cliente sepa que TAURO debe resolverlo.
+                error_interno = str(tarjeta.get("error") or "").lower()
+                if "http 401" in error_interno or "credenciales productivas" in error_interno:
+                    motivo = "La conexión productiva necesita revisión de TAURO."
+                elif tarjeta.get("estado") == "no_habilitado":
+                    motivo = "No está habilitado para tu cuenta."
+                elif tarjeta.get("estado") == "sin_pricing":
+                    motivo = "TAURO debe configurar el precio de tu cuenta para este operador."
+                elif tarjeta.get("estado") == "proximamente":
+                    motivo = "La integración todavía no está disponible."
+                elif tarjeta.get("estado") == "sin_multibulto":
+                    motivo = "No cotiza esta cantidad de bultos."
+                elif "día hábil de retiro" in error_interno:
+                    motivo = (
+                        "DHL no encontró una fecha de retiro disponible para esta ruta. "
+                        "Probá nuevamente más tarde."
+                    )
+                else:
+                    motivo = "No devolvió tarifa para esta referencia."
+                no_disponibles.append({
+                    "id": tarjeta["id"],
+                    "nombre": tarjeta["nombre"],
+                    "estado": tarjeta.get("estado") or "sin_tarifa",
+                    "motivo": motivo,
+                })
+                continue
+
+            servicio = tarjeta.get("servicio") or "Servicio internacional"
+            opciones.append({
+                "carrier_id": tarjeta["id"],
+                "carrier_nombre": tarjeta["nombre"],
+                "carrier_logo": tarjeta.get("logo"),
+                "servicio": servicio,
+                "servicio_nombre": f"{tarjeta['nombre']} · {servicio}",
+                "precio_final_ars": tarjeta["precio_ars"],
+                "precio_final_usd": tarjeta["precio_usd"],
+                "dias_estimados": tarjeta.get("dias_estimados") or "A confirmar",
+                "tarifa_lista_ars": None,
+                "peso_usado_kg": peso_usado,
+                "peso_real_kg": peso_real,
+                "peso_volumetrico_kg": peso_volumetrico,
+                "ruta": f"{origen_iso} → {destino_iso}",
+            })
+
+        opciones.sort(key=lambda opcion: opcion["precio_final_ars"])
+        resultado = {
+            "encontrado": bool(opciones),
+            "opciones": opciones,
+            "no_disponibles": no_disponibles,
+            "resumen": {
+                "ruta": f"{origen_iso} → {destino_iso}",
+                "peso_usado_kg": peso_usado,
+                "peso_real_kg": peso_real,
+                "peso_volumetrico_kg": peso_volumetrico,
+                "cobra_por_volumen": peso_usado > peso_real,
+                "valor_declarado_usd": valor_declarado,
+                "cantidad_bultos": len(piezas),
+                "couriers_consultados": len(tarjetas),
+            },
+        }
+        resultado["completo"] = completo
+        yield resultado
+
+
+def iterar_cotizar_referencia_couriers(
+    cliente: str,
+    origen_pais: str,
+    destino_pais: str,
+    peso_kg: float,
+    largo_cm: float,
+    ancho_cm: float,
+    alto_cm: float,
+    valor_declarado_usd: float,
+    paquetes: list[dict] | None = None,
+    origen_ubicacion: dict | None = None,
+    destino_ubicacion: dict | None = None,
+    _cancel_event: threading.Event | None = None,
+):
+    """Entrega comparaciones acumulativas; el último snapshot es completo."""
+    yield from _iterar_cotizar_referencia_couriers(
+        cliente=cliente,
+        origen_pais=origen_pais,
+        destino_pais=destino_pais,
+        peso_kg=peso_kg,
+        largo_cm=largo_cm,
+        ancho_cm=ancho_cm,
+        alto_cm=alto_cm,
+        valor_declarado_usd=valor_declarado_usd,
+        paquetes=paquetes,
+        origen_ubicacion=origen_ubicacion,
+        destino_ubicacion=destino_ubicacion,
+        _progresivo=True,
+        _cancel_event=_cancel_event,
     )
 
-    opciones = []
-    no_disponibles = []
-    for tarjeta in tarjetas:
-        if tarjeta.get("id") not in acceso_couriers["couriers_habilitados"]:
-            continue
-        if tarjeta.get("estado") != "cotizado":
-            # No exponer el error crudo: puede contener nombres de cuentas o
-            # variables internas. Sí distinguir un problema de autenticación
-            # productiva para que el cliente sepa que TAURO debe resolverlo.
-            error_interno = str(tarjeta.get("error") or "").lower()
-            if "http 401" in error_interno or "credenciales productivas" in error_interno:
-                motivo = "La conexión productiva necesita revisión de TAURO."
-            elif tarjeta.get("estado") == "no_habilitado":
-                motivo = "No está habilitado para tu cuenta."
-            elif tarjeta.get("estado") == "sin_pricing":
-                motivo = "TAURO debe configurar el precio de tu cuenta para este operador."
-            elif tarjeta.get("estado") == "proximamente":
-                motivo = "La integración todavía no está disponible."
-            elif tarjeta.get("estado") == "sin_multibulto":
-                motivo = "No cotiza esta cantidad de bultos."
-            elif "día hábil de retiro" in error_interno:
-                motivo = (
-                    "DHL no encontró una fecha de retiro disponible para esta ruta. "
-                    "Probá nuevamente más tarde."
-                )
-            else:
-                motivo = "No devolvió tarifa para esta referencia."
-            no_disponibles.append({
-                "id": tarjeta["id"],
-                "nombre": tarjeta["nombre"],
-                "estado": tarjeta.get("estado") or "sin_tarifa",
-                "motivo": motivo,
-            })
-            continue
 
-        servicio = tarjeta.get("servicio") or "Servicio internacional"
-        opciones.append({
-            "carrier_id": tarjeta["id"],
-            "carrier_nombre": tarjeta["nombre"],
-            "carrier_logo": tarjeta.get("logo"),
-            "servicio": servicio,
-            "servicio_nombre": f"{tarjeta['nombre']} · {servicio}",
-            "precio_final_ars": tarjeta["precio_ars"],
-            "precio_final_usd": tarjeta["precio_usd"],
-            "dias_estimados": tarjeta.get("dias_estimados") or "A confirmar",
-            "tarifa_lista_ars": None,
-            "peso_usado_kg": peso_usado,
-            "peso_real_kg": peso_real,
-            "peso_volumetrico_kg": peso_volumetrico,
-            "ruta": f"{origen_iso} → {destino_iso}",
-        })
+def cotizar_referencia_couriers(
+    cliente: str,
+    origen_pais: str,
+    destino_pais: str,
+    peso_kg: float,
+    largo_cm: float,
+    ancho_cm: float,
+    alto_cm: float,
+    valor_declarado_usd: float,
+    paquetes: list[dict] | None = None,
+    origen_ubicacion: dict | None = None,
+    destino_ubicacion: dict | None = None,
+) -> dict:
+    """Contrato síncrono histórico, sin la marca privada del stream."""
+    resultado = next(_iterar_cotizar_referencia_couriers(
+        cliente=cliente,
+        origen_pais=origen_pais,
+        destino_pais=destino_pais,
+        peso_kg=peso_kg,
+        largo_cm=largo_cm,
+        ancho_cm=ancho_cm,
+        alto_cm=alto_cm,
+        valor_declarado_usd=valor_declarado_usd,
+        paquetes=paquetes,
+        origen_ubicacion=origen_ubicacion,
+        destino_ubicacion=destino_ubicacion,
+        _progresivo=False,
+        _cancel_event=None,
+    ))
+    resultado.pop("completo", None)
+    return resultado
 
-    opciones.sort(key=lambda opcion: opcion["precio_final_ars"])
-    return {
-        "encontrado": bool(opciones),
-        "opciones": opciones,
-        "no_disponibles": no_disponibles,
-        "resumen": {
-            "ruta": f"{origen_iso} → {destino_iso}",
-            "peso_usado_kg": peso_usado,
-            "peso_real_kg": peso_real,
-            "peso_volumetrico_kg": peso_volumetrico,
-            "cobra_por_volumen": peso_usado > peso_real,
-            "valor_declarado_usd": valor_declarado,
-            "cantidad_bultos": len(piezas),
-            "couriers_consultados": len(tarjetas),
-        },
-    }
 
 
 def _destino_para_cotizar(ruta, destino_real: dict = None) -> dict:

@@ -14,13 +14,33 @@ from __future__ import annotations
 
 import math
 import os
+import threading
+import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from decimal import Decimal, ROUND_HALF_UP
 
 from core.database import get_conn
+from core.quote_observability import quote_logger
 from core.fedex_client import FedExClient
 from core.ups_client import UPSClient
 from core.dhl_client import DHLClient
 from servicios.numeros_humanos import parse_configuracion_numerica
+from servicios.carrier_contract import (
+    Ambito,
+    Capacidad,
+    carrier_spec,
+    operation_implemented,
+)
+
+
+_LOGGER = quote_logger
+_QUOTE_WORKERS = 4
+_QUOTE_CAPACITY = 8
+_QUOTE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_QUOTE_WORKERS,
+    thread_name_prefix="tauro-carrier-quote",
+)
+_QUOTE_SLOTS = threading.BoundedSemaphore(_QUOTE_CAPACITY)
 
 # Orden = orden de aparición en la web.
 CARRIERS = [
@@ -82,6 +102,12 @@ def carrier_activo(carrier: dict) -> bool:
     DHL_ACCOUNT_NUMBER_EXPO o el nombre viejo DHL_ACCOUNT_NUMBER): en ese caso
     alcanza con que esté cargada una.
     """
+    spec = carrier_spec(carrier.get("id", ""))
+    if spec is not None and not operation_implemented(
+        spec.id, Capacidad.COTIZAR, ambito=Ambito.INTERNACIONAL,
+    ):
+        return False
+
     def presente(req) -> bool:
         nombres = (req,) if isinstance(req, str) else req
         return any(os.getenv(n) for n in nombres)
@@ -386,6 +412,210 @@ def _precios(resultado: dict, dolar: float, markup_pct: float,
     return {"precio_ars": precio_ars, "precio_usd": precio_usd}
 
 
+def _base_courier(carrier: dict) -> dict:
+    return {
+        "id": carrier["id"],
+        "nombre": carrier["nombre"],
+        "logo": carrier["logo"],
+        "servicio": carrier["servicio"],
+    }
+
+
+def _consultar_costo_courier(
+    carrier: dict,
+    origen: dict,
+    destino: dict,
+    paquete: dict,
+    paquetes: list | None,
+) -> dict:
+    """Ejecuta una sola consulta y devuelve únicamente el contrato interno."""
+    base = _base_courier(carrier)
+    inicio = time.monotonic()
+    estado = "sin_tarifa"
+    try:
+        try:
+            cliente = carrier["cliente"]()
+        except Exception:
+            return {**base, "estado": estado}
+
+        multi = paquetes is not None and len(paquetes) > 1
+        if multi and not getattr(cliente, "MULTIBULTO", False):
+            estado = "sin_multibulto"
+            return {
+                **base,
+                "estado": estado,
+                "error": (
+                    f"{carrier['nombre']} todavía no cotiza envíos de varias cajas"
+                ),
+            }
+
+        try:
+            if paquetes is not None:
+                resultado = cliente.get_rates(origen, destino, paquetes=paquetes)
+            else:
+                resultado = cliente.get_rates(origen, destino, paquete)
+        except Exception:
+            # El detalle del proveedor puede contener cuentas o request IDs.
+            # Se conserva sólo un estado neutro y el resto de los couriers sigue.
+            return {**base, "estado": estado}
+
+        if not resultado.get("encontrado"):
+            return {
+                **base,
+                "estado": estado,
+                "error": resultado.get("error"),
+            }
+
+        moneda = str(resultado.get("moneda") or "USD").strip().upper()
+        if moneda not in {"USD", "ARS"}:
+            return {
+                **base,
+                "estado": estado,
+                "error": "El courier devolvió una moneda que TAURO todavía no convierte.",
+            }
+
+        try:
+            costo = float(resultado.get("costo"))
+        except (TypeError, ValueError):
+            costo = 0.0
+        if not math.isfinite(costo) or costo <= 0:
+            return {
+                **base,
+                "estado": estado,
+                "error": "El courier devolvió un importe inválido.",
+            }
+
+        costo_lista = resultado.get("costo_lista")
+        try:
+            costo_lista = float(costo_lista) if costo_lista is not None else None
+        except (TypeError, ValueError):
+            costo_lista = None
+        if costo_lista is not None and (
+            not math.isfinite(costo_lista) or costo_lista <= 0
+        ):
+            costo_lista = None
+
+        estado = "cotizado"
+        return {
+            **base,
+            "estado": estado,
+            "servicio": (
+                resultado.get("servicio") or carrier["servicio"]
+            ).replace("_", " ").title(),
+            "dias_estimados": str(
+                resultado.get("dias_estimados") or "A confirmar"
+            ),
+            "costo": costo,
+            "moneda": moneda,
+            "costo_lista": costo_lista,
+        }
+    finally:
+        duracion_ms = max(0, round((time.monotonic() - inicio) * 1000))
+        _LOGGER.info(
+            "carrier_quote carrier=%s estado=%s duracion_ms=%d",
+            carrier.get("id", "desconocido"),
+            estado,
+            duracion_ms,
+        )
+
+
+def _submit_costo_courier(*args) -> Future | None:
+    """Reserva un cupo global antes de usar el executor de cola interna."""
+    if not _QUOTE_SLOTS.acquire(blocking=False):
+        return None
+    try:
+        futuro = _QUOTE_EXECUTOR.submit(_consultar_costo_courier, *args)
+    except Exception:
+        _QUOTE_SLOTS.release()
+        return None
+    futuro.add_done_callback(lambda _futuro: _QUOTE_SLOTS.release())
+    return futuro
+
+
+def _iterar_costos_carriers(
+    origen: dict,
+    destino: dict,
+    paquete: dict,
+    paquetes: list | None = None,
+    couriers_habilitados: set[str] | None = None,
+    *,
+    incluir_no_habilitados: bool = True,
+    cancel_event: threading.Event | None = None,
+):
+    """Entrega ``(posición, resultado)`` sin esperar al resto de proveedores."""
+    habilitados = (
+        {str(c).strip().lower() for c in couriers_habilitados}
+        if couriers_habilitados is not None else None
+    )
+    inmediatos: list[tuple[int, dict]] = []
+    pendientes: dict[Future, tuple[int, dict]] = {}
+
+    for posicion, carrier in enumerate(CARRIERS):
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        base = _base_courier(carrier)
+        carrier_id = carrier["id"]
+
+        # El permiso efectivo se verifica antes de construir un cliente.
+        if habilitados is not None and carrier_id not in habilitados:
+            if incluir_no_habilitados:
+                inmediatos.append((posicion, {**base, "estado": "no_habilitado"}))
+            continue
+
+        # Las credenciales nunca pueden activar código declarado pendiente.
+        spec = carrier_spec(carrier_id)
+        if spec is not None and not operation_implemented(
+            carrier_id, Capacidad.COTIZAR, ambito=Ambito.INTERNACIONAL,
+        ):
+            inmediatos.append((posicion, {**base, "estado": "proximamente"}))
+            continue
+
+        if not carrier_activo(carrier):
+            inmediatos.append((posicion, {**base, "estado": "proximamente"}))
+            continue
+
+        futuro = _submit_costo_courier(
+            carrier, origen, destino, paquete, paquetes,
+        )
+        if futuro is None:
+            inmediatos.append((posicion, {
+                **base,
+                "estado": "sin_tarifa",
+                "error": "El cotizador está ocupado. Probá nuevamente.",
+            }))
+        else:
+            pendientes[futuro] = (posicion, base)
+
+    try:
+        for inmediato in inmediatos:
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            yield inmediato
+
+        while pendientes:
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            terminados, _ = wait(
+                tuple(pendientes),
+                timeout=0.1 if cancel_event is not None else None,
+                return_when=FIRST_COMPLETED,
+            )
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            for futuro in terminados:
+                posicion, base = pendientes.pop(futuro)
+                try:
+                    resultado = futuro.result()
+                except Exception:
+                    resultado = {**base, "estado": "sin_tarifa"}
+                yield posicion, resultado
+    finally:
+        # No se espera a trabajos en red cuando el consumidor cierra el stream.
+        # Los que ya corren terminan bajo los timeouts del cliente HTTP.
+        for futuro in pendientes:
+            futuro.cancel()
+
+
 def costos_carriers(origen: dict, destino: dict, paquete: dict,
                     paquetes: list = None,
                     couriers_habilitados: set[str] | None = None) -> list[dict]:
@@ -408,105 +638,15 @@ def costos_carriers(origen: dict, destino: dict, paquete: dict,
     Cada item: {id, nombre, logo, servicio, estado} y, si estado=="cotizado",
     además {costo, moneda, dias_estimados}.
     """
-    salida: list[dict] = []
-    habilitados = (
-        {str(c).strip().lower() for c in couriers_habilitados}
-        if couriers_habilitados is not None else None
-    )
-
-    for c in CARRIERS:
-        base = {
-            "id": c["id"],
-            "nombre": c["nombre"],
-            "logo": c["logo"],
-            "servicio": c["servicio"],
-        }
-
-        # El permiso se controla ANTES de construir el cliente o tocar la API.
-        # Ocultarlo sólo en HTML permitiría saltarlo con un POST manual.
-        if habilitados is not None and c["id"] not in habilitados:
-            salida.append({**base, "estado": "no_habilitado"})
-            continue
-
-        if not carrier_activo(c):
-            salida.append({**base, "estado": "proximamente"})
-            continue
-
-        # Envío de VARIAS cajas distintas: sólo cotizan los couriers que
-        # saben tarifar N piezas. Al que no puede se lo marca y se lo saca
-        # del comparador — NO se le manda la suma de los pesos, porque cada
-        # caja paga por su propio peso volumétrico y sumarlas cotiza de
-        # menos. Un precio de menos hoy es una pérdida al facturar.
-        multi = paquetes is not None and len(paquetes) > 1
-        try:
-            cliente = c["cliente"]()
-        except Exception:
-            salida.append({**base, "estado": "sin_tarifa"})
-            continue
-        if multi and not getattr(cliente, "MULTIBULTO", False):
-            salida.append({
-                **base,
-                "estado": "sin_multibulto",
-                "error": f"{c['nombre']} todavía no cotiza envíos de varias cajas",
-            })
-            continue
-
-        try:
-            if paquetes is not None:
-                resultado = cliente.get_rates(origen, destino, paquetes=paquetes)
-            else:
-                resultado = cliente.get_rates(origen, destino, paquete)
-        except Exception as e:  # una caída de un carrier no tumba a los otros
-            print(f"[carriers] {c['id']} get_rates excepción: {e}")
-            resultado = {"encontrado": False}
-
-        if not resultado.get("encontrado"):
-            salida.append({**base, "estado": "sin_tarifa", "error": resultado.get("error")})
-            continue
-
-        moneda = str(resultado.get("moneda") or "USD").strip().upper()
-        if moneda not in {"USD", "ARS"}:
-            print(f"[carriers] {c['id']} devolvió moneda no soportada {moneda}; "
-                  "se descarta la tarifa")
-            salida.append({
-                **base, "estado": "sin_tarifa",
-                "error": "El courier devolvió una moneda que TAURO todavía no convierte.",
-            })
-            continue
-
-        try:
-            costo = float(resultado.get("costo"))
-        except (TypeError, ValueError):
-            costo = 0.0
-        if not math.isfinite(costo) or costo <= 0:
-            print(f"[carriers] {c['id']} devolvió un costo inválido; se descarta la tarifa")
-            salida.append({
-                **base, "estado": "sin_tarifa",
-                "error": "El courier devolvió un importe inválido.",
-            })
-            continue
-        costo_lista = resultado.get("costo_lista")
-        try:
-            costo_lista = float(costo_lista) if costo_lista is not None else None
-        except (TypeError, ValueError):
-            costo_lista = None
-        if costo_lista is not None and (
-            not math.isfinite(costo_lista) or costo_lista <= 0
-        ):
-            costo_lista = None
-
-        # "INTERNATIONAL_PRIORITY" → "International Priority" (prolijo para la web)
-        salida.append({
-            **base,
-            "estado": "cotizado",
-            "servicio": (resultado.get("servicio") or c["servicio"]).replace("_", " ").title(),
-            "dias_estimados": str(resultado.get("dias_estimados") or "A confirmar"),
-            "costo": costo,
-            "moneda": moneda,
-            "costo_lista": costo_lista,
-        })
-
-    return salida
+    por_posicion = dict(_iterar_costos_carriers(
+        origen,
+        destino,
+        paquete,
+        paquetes,
+        couriers_habilitados,
+        incluir_no_habilitados=True,
+    ))
+    return [por_posicion[i] for i in sorted(por_posicion)]
 
 
 def _cotizar_carriers(origen: dict, destino: dict, paquete: dict,
@@ -656,124 +796,184 @@ def cotizar_carriers_web(origen: dict, destino: dict, paquete: dict,
     ]
 
 
+def _tarjeta_cliente_desde_costo(
+    crudo: dict,
+    *,
+    dolar: float,
+    pricing_cliente: dict,
+    pricing_por_courier: dict[str, dict] | None,
+    paquete: dict,
+    paquetes: list | None,
+    incluir_base_interna: bool,
+) -> dict:
+    from servicios.pricing import aplicar_pricing
+
+    base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
+    if crudo["estado"] != "cotizado":
+        return {**base, "estado": crudo["estado"], "error": crudo.get("error")}
+
+    moneda = str(crudo.get("moneda") or "USD").strip().upper()
+    if moneda not in {"USD", "ARS"}:
+        return {
+            **base,
+            "estado": "sin_tarifa",
+            "error": "Moneda del courier no soportada.",
+        }
+
+    es_usd = moneda == "USD"
+    costo_ars = round(crudo["costo"] * dolar) if es_usd else round(crudo["costo"])
+    costo_usd = crudo["costo"] if es_usd else round(crudo["costo"] / dolar, 2)
+    pricing_efectivo = (
+        (pricing_por_courier or {}).get(crudo["id"])
+        or pricing_cliente
+    )
+    if not pricing_efectivo:
+        return {
+            **base,
+            "estado": "sin_pricing",
+            "error": "La cuenta no tiene una regla de precio para este operador.",
+        }
+    if pricing_efectivo.get("tipo") == "RANGOS":
+        costo_exacto = Decimal(str(crudo["costo"]))
+        if es_usd:
+            costo_exacto *= Decimal(str(dolar))
+        costo_ars = float(
+            costo_exacto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        )
+    precio = aplicar_pricing(
+        costo_usd=costo_usd,
+        costo_ars=costo_ars,
+        dolar=dolar,
+        pricing=pricing_efectivo,
+    )
+
+    # Sólo se copian precios finales; la respuesta pública no permite despejar
+    # el costo o la ganancia de TAURO.
+    tarjeta = {
+        **base,
+        "estado": "cotizado",
+        "servicio": crudo["servicio"],
+        "dias_estimados": crudo["dias_estimados"],
+        "precio_ars": precio["precio_final_ars"],
+        "precio_usd": precio["precio_final_usd"],
+    }
+    if incluir_base_interna:
+        cambio = Decimal(str(dolar)) if es_usd else Decimal("1")
+        costo_nativo = Decimal(str(crudo["costo"]))
+        costo_exacto_ars = costo_nativo * cambio
+        precio_ars = Decimal(str(precio["precio_final_ars"]))
+        piezas = paquetes if paquetes is not None else [paquete]
+        peso_real = sum(
+            Decimal(str((pieza or {}).get("peso_kg") or 0))
+            for pieza in piezas
+        )
+        peso_volumetrico = sum(
+            (
+                Decimal(str((pieza or {}).get("largo_cm") or 0))
+                * Decimal(str((pieza or {}).get("ancho_cm") or 0))
+                * Decimal(str((pieza or {}).get("alto_cm") or 0))
+                / Decimal("5000")
+            )
+            for pieza in piezas
+        )
+        peso_facturable = sum(
+            max(
+                Decimal(str((pieza or {}).get("peso_kg") or 0)),
+                (
+                    Decimal(str((pieza or {}).get("largo_cm") or 0))
+                    * Decimal(str((pieza or {}).get("ancho_cm") or 0))
+                    * Decimal(str((pieza or {}).get("alto_cm") or 0))
+                    / Decimal("5000")
+                ),
+            )
+            for pieza in piezas
+        )
+        tarjeta["_base_interna"] = {
+            "moneda_courier": moneda,
+            "tipo_cambio_ars": str(cambio),
+            "costo_courier_estimado": str(costo_nativo),
+            "costo_courier_estimado_ars": str(costo_exacto_ars),
+            "precio_cliente_inicial_ars": str(precio_ars),
+            "margen_tauro_protegido_ars": str(precio_ars - costo_exacto_ars),
+            "markup_tipo": precio["markup_tipo"],
+            "markup_valor": str(precio["markup_valor"]),
+            "peso_real_cotizado_kg": str(peso_real),
+            "peso_volumetrico_cotizado_kg": str(peso_volumetrico),
+            "peso_facturable_cotizado_kg": str(peso_facturable),
+        }
+    return tarjeta
+
+
+def iterar_cotizar_carriers_cliente(
+    origen: dict,
+    destino: dict,
+    paquete: dict,
+    dolar: float,
+    pricing_cliente: dict,
+    paquetes: list = None,
+    pricing_por_courier: dict[str, dict] | None = None,
+    couriers_habilitados: set[str] | None = None,
+    incluir_base_interna: bool = False,
+    _cancel_event: threading.Event | None = None,
+):
+    """Entrega tarjetas acumuladas al terminar cada courier permitido."""
+    habilitados = {
+        str(c).strip().lower() for c in (couriers_habilitados or set())
+    }
+    esperados = sum(1 for carrier in CARRIERS if carrier["id"] in habilitados)
+    if esperados == 0:
+        yield [], True
+        return
+    resultados = _iterar_costos_carriers(
+        origen,
+        destino,
+        paquete,
+        paquetes,
+        habilitados,
+        incluir_no_habilitados=False,
+        cancel_event=_cancel_event,
+    )
+    acumulados: dict[int, dict] = {}
+    completados = 0
+    try:
+        for posicion, crudo in resultados:
+            acumulados[posicion] = _tarjeta_cliente_desde_costo(
+                crudo,
+                dolar=dolar,
+                pricing_cliente=pricing_cliente,
+                pricing_por_courier=pricing_por_courier,
+                paquete=paquete,
+                paquetes=paquetes,
+                incluir_base_interna=incluir_base_interna,
+            )
+            completados += 1
+            yield (
+                [acumulados[i] for i in sorted(acumulados)],
+                completados == esperados,
+            )
+    finally:
+        resultados.close()
+
+
 def cotizar_carriers_cliente(origen: dict, destino: dict, paquete: dict,
                              dolar: float, pricing_cliente: dict,
                              paquetes: list = None,
                              pricing_por_courier: dict[str, dict] | None = None,
                              couriers_habilitados: set[str] | None = None,
                              incluir_base_interna: bool = False) -> list[dict]:
-    """
-    PRECIO DEL PORTAL: los 3 couriers con la regla de ESE cliente.
-
-    `pricing_cliente` es lo que devuelve pricing.get_pricing_config(cliente):
-    {"tipo": "FIJO_ARS", "valor": 95000.0} para WAIMAO, por ejemplo.
-
-    Por defecto devuelve SÓLO precios finales. ``incluir_base_interna`` está
-    reservado al control previo a emitir: agrega una clave privada que nunca
-    debe cruzar un endpoint y permite congelar el costo exacto del courier.
-    Lo vigila tests/test_no_fuga_costo.py.
-    """
-    from servicios.pricing import aplicar_pricing
-
+    """Calcula el precio del portal con la regla comercial del cliente."""
     salida: list[dict] = []
-
-    for crudo in costos_carriers(
-        origen, destino, paquete, paquetes,
+    for tarjetas, _completo in iterar_cotizar_carriers_cliente(
+        origen=origen,
+        destino=destino,
+        paquete=paquete,
+        dolar=dolar,
+        pricing_cliente=pricing_cliente,
+        paquetes=paquetes,
+        pricing_por_courier=pricing_por_courier,
         couriers_habilitados=couriers_habilitados,
+        incluir_base_interna=incluir_base_interna,
+        _cancel_event=None,
     ):
-        base = {k: crudo[k] for k in ("id", "nombre", "logo", "servicio")}
-
-        if crudo["estado"] != "cotizado":
-            salida.append({**base, "estado": crudo["estado"], "error": crudo.get("error")})
-            continue
-
-        moneda = str(crudo.get("moneda") or "USD").strip().upper()
-        if moneda not in {"USD", "ARS"}:
-            salida.append({**base, "estado": "sin_tarifa",
-                           "error": "Moneda del courier no soportada."})
-            continue
-
-        es_usd = moneda == "USD"
-        costo_ars = round(crudo["costo"] * dolar) if es_usd else round(crudo["costo"])
-        costo_usd = crudo["costo"] if es_usd else round(crudo["costo"] / dolar, 2)
-
-        pricing_efectivo = (
-            (pricing_por_courier or {}).get(crudo["id"])
-            or pricing_cliente
-        )
-        if not pricing_efectivo:
-            # Sin regla no hay precio: jamás se publica el costo del courier
-            # ni un margen inventado. El admin debe cargar la ganancia.
-            salida.append({
-                **base, "estado": "sin_pricing",
-                "error": "La cuenta no tiene una regla de precio para este operador.",
-            })
-            continue
-        if pricing_efectivo.get("tipo") == "RANGOS":
-            costo_exacto = Decimal(str(crudo["costo"]))
-            if es_usd:
-                costo_exacto *= Decimal(str(dolar))
-            costo_ars = float(costo_exacto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-        precio = aplicar_pricing(
-            costo_usd=costo_usd, costo_ars=costo_ars,
-            dolar=dolar, pricing=pricing_efectivo,
-        )
-
-        # Las claves se eligen a mano: aplicar_pricing devuelve además
-        # markup_valor y markup_pct_equivalente, y con eso el cliente despeja
-        # nuestro costo con una resta.
-        tarjeta = {
-            **base,
-            "estado": "cotizado",
-            "servicio": crudo["servicio"],
-            "dias_estimados": crudo["dias_estimados"],
-            "precio_ars": precio["precio_final_ars"],
-            "precio_usd": precio["precio_final_usd"],
-        }
-        if incluir_base_interna:
-            cambio = Decimal(str(dolar)) if es_usd else Decimal("1")
-            costo_nativo = Decimal(str(crudo["costo"]))
-            costo_exacto_ars = costo_nativo * cambio
-            precio_ars = Decimal(str(precio["precio_final_ars"]))
-            piezas = paquetes if paquetes is not None else [paquete]
-            peso_real = sum(
-                Decimal(str((pieza or {}).get("peso_kg") or 0))
-                for pieza in piezas
-            )
-            peso_volumetrico = sum(
-                (
-                    Decimal(str((pieza or {}).get("largo_cm") or 0))
-                    * Decimal(str((pieza or {}).get("ancho_cm") or 0))
-                    * Decimal(str((pieza or {}).get("alto_cm") or 0))
-                    / Decimal("5000")
-                )
-                for pieza in piezas
-            )
-            peso_facturable = sum(
-                max(
-                    Decimal(str((pieza or {}).get("peso_kg") or 0)),
-                    (
-                        Decimal(str((pieza or {}).get("largo_cm") or 0))
-                        * Decimal(str((pieza or {}).get("ancho_cm") or 0))
-                        * Decimal(str((pieza or {}).get("alto_cm") or 0))
-                        / Decimal("5000")
-                    ),
-                )
-                for pieza in piezas
-            )
-            tarjeta["_base_interna"] = {
-                "moneda_courier": moneda,
-                "tipo_cambio_ars": str(cambio),
-                "costo_courier_estimado": str(costo_nativo),
-                "costo_courier_estimado_ars": str(costo_exacto_ars),
-                "precio_cliente_inicial_ars": str(precio_ars),
-                "margen_tauro_protegido_ars": str(precio_ars - costo_exacto_ars),
-                "markup_tipo": precio["markup_tipo"],
-                "markup_valor": str(precio["markup_valor"]),
-                "peso_real_cotizado_kg": str(peso_real),
-                "peso_volumetrico_cotizado_kg": str(peso_volumetrico),
-                "peso_facturable_cotizado_kg": str(peso_facturable),
-            }
-        salida.append(tarjeta)
-
+        salida = tarjetas
     return salida

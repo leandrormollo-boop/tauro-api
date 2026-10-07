@@ -11,6 +11,7 @@ from zoneinfo import TZPATH, ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from dotenv import load_dotenv
+from core.carrier_http import QuoteBudget, quote_session
 from core.fedex_client import CarrierBase
 from core.dhl_errors import error_dhl_publico
 from servicios.impuestos import incoterm as incoterm_de
@@ -159,6 +160,16 @@ class DHLClient(CarrierBase):
         if not (self.api_key and self.api_secret):
             return "Faltan credenciales de DHL."
         return None
+
+    @staticmethod
+    def _rate_request(
+        method: str, url: str, *, quote_budget: QuoteBudget | None = None,
+        **kwargs,
+    ) -> requests.Response:
+        """HTTP persistente y acotado, sólo para consultas de tarifa."""
+        budget = quote_budget or QuoteBudget.start()
+        kwargs.setdefault("timeout", budget.timeout())
+        return quote_session().request(method, url, **kwargs)
 
     @staticmethod
     def _zona_origen(pais: str) -> tuple[ZoneInfo | None, str | None]:
@@ -392,13 +403,15 @@ class DHLClient(CarrierBase):
 
     def _proximo_dia_habil_rates(
         self, origen: dict, destino: dict, paquete: dict, cuenta: str,
-        zona_origen: ZoneInfo,
+        zona_origen: ZoneInfo, quote_budget: QuoteBudget | None = None,
     ) -> str:
         """Pregunta a DHL la próxima fecha operativa sin inventar feriados."""
         referencia = str(uuid.uuid4())
         try:
-            respuesta = requests.get(
+            respuesta = self._rate_request(
+                "GET",
                 f"{self.base_url}/rates",
+                quote_budget=quote_budget,
                 params=self._parametros_rates_una_pieza(
                     origen, destino, paquete, cuenta, zona_origen,
                 ),
@@ -408,7 +421,6 @@ class DHLClient(CarrierBase):
                     "x-version": self.API_VERSION,
                     "Message-Reference": referencia,
                 },
-                timeout=30,
             )
             if respuesta.status_code != 200:
                 return ""
@@ -479,7 +491,10 @@ class DHLClient(CarrierBase):
             bloque["provinceCode"] = codigo_estado
         return bloque
 
-    def get_rates_multibulto(self, origen: dict, destino: dict, paquetes: list) -> dict:
+    def get_rates_multibulto(
+        self, origen: dict, destino: dict, paquetes: list,
+        _quote_budget: QuoteBudget | None = None,
+    ) -> dict:
         """
         POST /rates — cotiza N cajas DISTINTAS en un mismo envío.
 
@@ -493,6 +508,7 @@ class DHLClient(CarrierBase):
         """
         if error_config := self._error_configuracion():
             return {"encontrado": False, "error": error_config}
+        quote_budget = _quote_budget or QuoteBudget.start()
         if not paquetes:
             return {"encontrado": False, "error": "Sin bultos para cotizar"}
         if len(paquetes) > MAX_DHL_PACKAGES:
@@ -561,8 +577,10 @@ class DHLClient(CarrierBase):
             }]
 
         try:
-            resp = requests.post(
+            resp = self._rate_request(
+                "POST",
                 f"{self.base_url}/rates",
+                quote_budget=quote_budget,
                 json=cuerpo,
                 auth=(self.api_key, self.api_secret),
                 headers={
@@ -571,7 +589,6 @@ class DHLClient(CarrierBase):
                     "x-version": self.API_VERSION,
                     "Message-Reference": msg_ref,
                 },
-                timeout=30,
             )
             # El POST multibulto no tiene el query ``nextBusinessDay`` del
             # GET. En feriados DHL responde HTTP 404 con código de negocio
@@ -584,14 +601,17 @@ class DHLClient(CarrierBase):
             ):
                 dia_habil = self._proximo_dia_habil_rates(
                     origen, destino, paquetes[0], str(cuenta), zona_origen,
+                    quote_budget,
                 )
                 if dia_habil:
                     cuerpo["plannedShippingDateAndTime"] = self._fecha_envio(
                         origen.get("country", "AR"), dia_habil,
                     )
                     msg_ref = str(uuid.uuid4())
-                    resp = requests.post(
+                    resp = self._rate_request(
+                        "POST",
                         f"{self.base_url}/rates",
+                        quote_budget=quote_budget,
                         json=cuerpo,
                         auth=(self.api_key, self.api_secret),
                         headers={
@@ -600,7 +620,6 @@ class DHLClient(CarrierBase):
                             "x-version": self.API_VERSION,
                             "Message-Reference": msg_ref,
                         },
-                        timeout=30,
                     )
             if resp.status_code != 200:
                 codigo = self._codigos_error(resp)
@@ -634,6 +653,8 @@ class DHLClient(CarrierBase):
             "dias_estimados": str,
         }
         """
+        quote_budget = QuoteBudget.start()
+
         # Varias cajas o seguro → POST /rates. El GET no permite enviar el
         # valor monetario que exige el servicio de protección II.
         seguro_solicitado = bool(paquetes) and any(
@@ -642,7 +663,9 @@ class DHLClient(CarrierBase):
             for p in paquetes
         )
         if paquetes is not None and (len(paquetes) > 1 or seguro_solicitado):
-            return self.get_rates_multibulto(origen, destino, paquetes)
+            return self.get_rates_multibulto(
+                origen, destino, paquetes, _quote_budget=quote_budget,
+            )
         if paquetes:
             paquete = paquetes[0]
 
@@ -669,8 +692,10 @@ class DHLClient(CarrierBase):
                 origen, destino, paquete, cuenta, zona_origen,
             )
 
-            resp = requests.get(
+            resp = self._rate_request(
+                "GET",
                 url,
+                quote_budget=quote_budget,
                 params=params,
                 auth=(self.api_key, self.api_secret),
                 headers={
@@ -683,7 +708,6 @@ class DHLClient(CarrierBase):
                     "x-version": self.API_VERSION,
                     "Message-Reference": msg_ref,
                 },
-                timeout=30,
             )
 
             if resp.status_code != 200:
