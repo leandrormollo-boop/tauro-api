@@ -29,8 +29,8 @@
     <a href="{{ enlace(vista='facturas', estado='GUIAS_SIN_MATCH') }}" data-control-nav><span>Guías sin identificar</span><strong>{{ metricas.guias_sin_match }}</strong><small>dentro de las facturas del operador</small></a>
     <a href="{{ enlace(vista='conciliacion', estado='REQUIERE_ACCION') }}" data-control-nav><span>Envíos por revisar</span><strong>{{ requieren_revision }}</strong><small>requieren una decisión de TAURO</small></a>
     <a href="{{ enlace(vista='diferencias') }}" data-control-nav><span>Diferencias por aprobar</span><strong>{{ metricas.diferencias }}</strong><small>todavía no impactaron saldos</small></a>
-    <a href="{{ enlace(vista='facturas', estado='BANDEJAS_PENDIENTES') }}" data-control-nav><span>Guías en bandeja</span><strong>{{ metricas.bandejas_pendientes|default(0) }}</strong><small>canceladas, reemplazadas, sin dueño o ya facturadas</small></a>
-    <a href="{{ enlace(vista='conciliacion', estado='REQUIERE_ACCION') }}" data-control-nav><span>Envíos en alerta</span><strong>{{ metricas.envios_alerta|default(0) }}</strong><small>sin factura a 30 días o facturados tras cancelar{% if metricas.facturas_no_cuadran %} · {{ metricas.facturas_no_cuadran }} facturas no cuadran{% endif %}</small></a>
+    <a href="{{ enlace(vista='facturas', estado='BANDEJAS_PENDIENTES') }}" data-control-nav><span>Guías en bandeja</span><strong>{{ metricas_control.bandejas_pendientes|default(0) }}</strong><small>canceladas, reemplazadas, sin dueño o ya facturadas</small></a>
+    <a href="{{ enlace(vista='conciliacion', estado='REQUIERE_ACCION') }}" data-control-nav><span>Envíos en alerta</span><strong>{{ metricas_control.envios_alerta|default(0) }}</strong><small>sin factura a 30 días o facturados tras cancelar{% if metricas_control.facturas_no_cuadran %} · {{ metricas_control.facturas_no_cuadran }} facturas no cuadran{% endif %}</small></a>
   </div>
   <div class="finance-overview">
     <section class="finance-card"><div class="finance-card-head"><h2>Tu próxima revisión</h2><p>Avanzá por los pendientes de cada etapa.</p></div>

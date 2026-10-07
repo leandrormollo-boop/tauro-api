@@ -4344,6 +4344,9 @@ def _render_facturas_admin(
             for factura in facturas
         ),
         "diferencias": len(ajustes),
+    }
+    # Control de facturas de operadores (bandejas, cuadres y alertas).
+    metricas_control = {
         "bandejas_pendientes": sum(
             int(factura.get("bandejas_pendientes") or 0) for factura in facturas
         ),
@@ -4373,6 +4376,7 @@ def _render_facturas_admin(
             "couriers_disponibles": couriers_disponibles,
             "vista": vista_normalizada,
             "metricas": metricas,
+            "metricas_control": metricas_control,
             **presentacion,
             "control": control,
             "facturas": facturas,

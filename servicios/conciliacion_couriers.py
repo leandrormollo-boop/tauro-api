@@ -1362,15 +1362,31 @@ def _actualizar_estado_factura(cur, factura_id: int) -> str:
     estado = fila["estado"]
     if estado != "ANULADA":
         # Cierre de control (07/10/2026): la factura queda CERRADA sólo si los
-        # renglones cuadran con el total, cada guía tiene destino y no hay
-        # bandejas pendientes. Si el documento no cuadra, queda OBSERVADA.
+        # renglones cuadran con el total, cada guía tiene destino, no hay
+        # bandejas pendientes y, si el circuito lo exige, el tipo de cambio
+        # ya fue aprobado. Si el documento no cuadra, queda OBSERVADA.
         from servicios.control_facturas_operadores import cuadres_factura
         cuadres = cuadres_factura(cur, int(factura_id))
         if cuadres["cantidad_guias"] or cuadres["suma_renglones"]:
             if not cuadres["cuadre_documento_ok"]:
                 estado = "OBSERVADA"
             elif cuadres["cuadre_destinos_ok"] and not cuadres["hay_propuestos"]:
-                estado = "CERRADA"
+                cur.execute(
+                    "SELECT metadatos_origen FROM facturas_courier WHERE id = %s",
+                    (int(factura_id),),
+                )
+                metadatos = (cur.fetchone() or {}).get("metadatos_origen")
+                revision_ok = True
+                if _requiere_revision_financiera(metadatos):
+                    cur.execute(
+                        """SELECT 1 FROM revisiones_financieras_courier r
+                            JOIN facturas_courier f ON f.id = r.factura_id
+                           WHERE r.factura_id = %s AND r.archivo_sha256 = f.archivo_sha256""",
+                        (int(factura_id),),
+                    )
+                    revision_ok = cur.fetchone() is not None
+                if revision_ok:
+                    estado = "CERRADA"
     cur.execute(
         """
         UPDATE facturas_courier

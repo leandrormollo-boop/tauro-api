@@ -31,12 +31,21 @@
     </form>
     {% if factura.tiene_evidencia %}<a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/pdf" target="_blank" class="btn btn-ghost">Ver PDF</a>{% endif %}
     {% if ns.hay_activos and not financiera_pendiente %}
-      {% for c in factura.clientes|default([]) if c.propuestas %}
-      <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar las guías de {{ c.cliente_id }} y calcular sus envíos? Las guías en bandeja no se tocan. Las diferencias quedan pendientes de aprobación; nada se cobra en este paso.">
-        <input type="hidden" name="cliente_id" value="{{ c.cliente_id }}">
-        <button class="btn btn-primary">Confirmar {{ c.cliente_id }} ({{ c.propuestas }}{% if c.confirmadas %} · {{ c.confirmadas }} ya confirmadas{% endif %})</button>
-      </form>
-      {% endfor %}
+      {% set clientes_factura = factura.clientes|default([]) %}
+      {% if clientes_factura|length > 1 %}
+        {# Factura de varios clientes: se confirma un cliente por vez. #}
+        {% for c in clientes_factura if c.propuestas %}
+        <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar las guías de {{ c.cliente_id }} y calcular sus envíos? Las guías en bandeja no se tocan. Las diferencias quedan pendientes de aprobación; nada se cobra en este paso.">
+          <input type="hidden" name="cliente_id" value="{{ c.cliente_id }}">
+          <button class="btn btn-primary">Confirmar y calcular · {{ c.cliente_id }} ({{ c.propuestas }})</button>
+        </form>
+        {% endfor %}
+      {% else %}
+        <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar los matches y calcular los envíos vinculados? Las guías en bandeja no se tocan. Si hay borradores anteriores a la aprobación financiera se anularán conservando su historial. Las nuevas diferencias quedarán pendientes de aprobación.">
+          {% if clientes_factura %}<input type="hidden" name="cliente_id" value="{{ clientes_factura[0].cliente_id }}">{% endif %}
+          <button class="btn btn-primary">Confirmar y calcular</button>
+        </form>
+      {% endif %}
     {% endif %}
   </div>
 </div>
