@@ -8,8 +8,10 @@ import json
 import re
 import unicodedata
 import uuid
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import psycopg2
 from pypdf import PdfReader, PdfWriter
@@ -2388,6 +2390,7 @@ def cargar_envio_externo(
     origen_pais: str = "AR",
     remitente_nombre: str = "",
     costo_courier_estimado_ars: Optional[float] = None,
+    fecha_envio: Optional[date] = None,
 ) -> dict:
     """
     Alta de un envío YA REALIZADO por un canal externo (hoy: los que salen
@@ -2402,6 +2405,10 @@ def cargar_envio_externo(
 
     Idempotencia del cargo: la da el índice único por solicitud de
     cargar_guia_emitida, igual que en la emisión propia.
+
+    ``fecha_envio`` permite cargar tarde un envío que salió antes: el envío y
+    su cargo quedan con la fecha real, para que la cuenta corriente y la
+    imputación de pagos respeten el orden cronológico. Sin fecha, es hoy.
     """
     from servicios.cotizador import dolar_ars
 
@@ -2410,6 +2417,10 @@ def cargar_envio_externo(
         return {"ok": False, "error": "Falta el tracking."}
     if precio_tauro_ars <= 0:
         return {"ok": False, "error": "El precio al cliente tiene que ser mayor a cero."}
+    if fecha_envio is not None:
+        error_fecha = validar_fecha_envio_externo(fecha_envio)
+        if error_fecha:
+            return {"ok": False, "error": error_fecha}
 
     # Mismo tracking ya cargado = doble click o doble carga: no duplicar.
     with get_conn() as conn:
@@ -2465,9 +2476,61 @@ def cargar_envio_externo(
         sid, tracking, label_pdf,
         courier=(courier or "FEDEX").strip().upper(),
     )
+    if fecha_envio is not None:
+        _fechar_envio_externo(sid, fecha_envio)
     print(f"[solicitudes] envío externo cargado: solicitud {sid} · {cliente_id} · "
           f"{tracking} · ARS {precio_tauro_ars:,.0f}")
     return {"ok": True, "solicitud_id": sid}
+
+
+_ZONA_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+_DIAS_MAXIMOS_ENVIO_EXTERNO = 400
+
+
+def validar_fecha_envio_externo(fecha_envio: date) -> str:
+    """Devuelve el error a mostrar, o "" si la fecha sirve."""
+    hoy = datetime.now(_ZONA_AR).date()
+    if fecha_envio > hoy:
+        return "La fecha del envío no puede ser futura."
+    if (hoy - fecha_envio).days > _DIAS_MAXIMOS_ENVIO_EXTERNO:
+        return "La fecha del envío es de hace más de un año: revisala."
+    return ""
+
+
+def _fechar_envio_externo(solicitud_id: int, fecha_envio: date) -> None:
+    """Lleva el envío recién cargado y su cargo a la fecha real.
+
+    Sólo toca el cargo que se acaba de crear: activo, sin factura ni pagos
+    imputados. Si el cargo no quedó así, no se mueve nada y queda con la
+    fecha de hoy, que es lo que ya ve el cliente.
+    """
+    instante = datetime.combine(fecha_envio, time(hour=12), _ZONA_AR)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE envios e SET fecha=%s
+                WHERE e.solicitud_id=%s AND e.estado='ACTIVO'
+                  AND NOT EXISTS (SELECT 1 FROM pagos_aplicaciones pa
+                                  WHERE pa.envio_id=e.id)
+                  AND NOT EXISTS (SELECT 1 FROM facturas_cliente_items fi
+                                  WHERE fi.envio_id=e.id)
+                RETURNING e.id
+                """,
+                (fecha_envio, solicitud_id),
+            )
+            if cur.fetchone() is None:
+                print(f"[solicitudes] envío externo {solicitud_id}: el cargo no "
+                      "quedó libre para fecharlo; queda con la fecha de hoy")
+                return
+            cur.execute(
+                """
+                UPDATE solicitudes_guia
+                SET created_at=%s, guia_generada_at=%s, updated_at=NOW()
+                WHERE id=%s
+                """,
+                (instante, instante, solicitud_id),
+            )
 
 
 def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str, *, revision: str | None = None) -> dict:
