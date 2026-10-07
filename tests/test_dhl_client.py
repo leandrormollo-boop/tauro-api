@@ -18,7 +18,7 @@ Los tres bugs que atrapan estaban todos en producción latente:
 """
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -108,12 +108,26 @@ def test_normaliza_cpa_argentino_para_rates_y_direcciones():
 
 
 def test_la_fecha_de_envio_va_y_es_futura_y_sin_hora():
-    _, kw = _llamar([_producto("P", 120.0)])
+    # En este instante UTC ya es 7/10, pero en el origen argentino todavía es
+    # 6/10. La fecha de DHL debe calcularse respecto del origen de la quote.
+    instante_utc = datetime(2026, 10, 7, 1, 30, tzinfo=timezone.utc)
+
+    class DatetimeFijo(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return instante_utc.replace(tzinfo=None)
+            return instante_utc.astimezone(tz)
+
+    with mock.patch("core.dhl_client.datetime", DatetimeFijo):
+        _, kw = _llamar([_producto("P", 120.0)])
     fecha = kw["params"]["plannedShippingDate"]
     assert "T" not in fecha, f"la spec pide YYYY-MM-DD, no ISO con hora: {fecha}"
-    assert date.fromisoformat(fecha) > date.today(), (
-        f"DHL no cotiza contra una fecha pasada: {fecha}"
-    )
+    zona_origen, error = _cliente()._zona_origen(ORIGEN["country"])
+    assert error is None
+    hoy_origen = instante_utc.astimezone(zona_origen).date()
+    assert hoy_origen == date(2026, 10, 6)  # cubre el límite UTC/Argentina
+    assert date.fromisoformat(fecha) == hoy_origen + timedelta(days=1)
 
 
 def test_manda_el_header_de_version():
