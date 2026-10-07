@@ -5,6 +5,7 @@
 # El admin carga los datos desde el panel.
 # ============================================================
 
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import functools
@@ -2845,7 +2846,7 @@ def cancelar_envio(
             return resultado
 
 
-def cargar_guia_emitida(solicitud_id: int) -> bool:
+def cargar_guia_emitida(solicitud_id: int, *, conexion=None) -> bool:
     """
     Débito automático: al emitirse una guía, el cargo entra solo a la cuenta
     corriente del cliente por `precio_tauro_ars` (lo que TAURO le cobra, con
@@ -2861,8 +2862,12 @@ def cargar_guia_emitida(solicitud_id: int) -> bool:
     Devuelve True cuando el cargo quedó garantizado (nuevo o preexistente).
     Si falta solicitud/precio, lanza: la guía ya existe y el caller debe
     conservar una tarea persistente de conciliación.
+
+    Si el caller pasa ``conexion``, esta función participa de esa transacción:
+    no confirma ni cierra la conexión; el caller decide commit o rollback.
     """
-    with get_conn() as conn:
+    contexto_conexion = nullcontext(conexion) if conexion is not None else get_conn()
+    with contexto_conexion as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT s.cliente_id, s.estado, s.precio_tauro_ars, s.tracking,
