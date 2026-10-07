@@ -30,7 +30,7 @@
             {% if scope == 'nacional' %}<input type="hidden" name="origen_pais" value="AR"><input type="hidden" name="destino_pais" value="AR">{% endif %}
             <div class="uq-route-tools" data-quote-route-section>
             {% if scope == 'internacional' %}
-            <details class="uq-frequent" data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-popover"><div class="uq-frequent-head"><span>Tus últimos destinos</span></div>
+            <details class="uq-frequent" data-dropdown data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-popover"><div class="uq-frequent-head"><span>Tus últimos destinos</span></div>
             {% if rutas_frecuentes %}<div class="quote-frequent-list">{% for ruta in rutas_frecuentes %}<button type="button" class="quote-frequent-route" data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}" aria-pressed="false">{{ ruta.origen_nombre }} <span aria-hidden="true">→</span> {{ ruta.destino_nombre }}</button>{% endfor %}</div>{% endif %}</div></details>
             {% endif %}
             <button type="button" class="uq-reverse" data-quote-reverse aria-label="Invertir origen y destino"><span aria-hidden="true">⇄</span> Invertir</button></div>
