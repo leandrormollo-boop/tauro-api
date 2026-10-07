@@ -180,7 +180,7 @@
                 {% set det = r.detalle or {} %}
                 <small style="display:block;margin-top:4px;">
                   {% if r.bandeja == 'REEMPLAZADA' %}La guía fue corregida{% if det.tracking_nuevo %} y reemplazada por <span class="mono">{{ det.tracking_nuevo }}</span>{% if det.solicitud_nueva_id %} (#{{ det.solicitud_nueva_id }}){% endif %}{% endif %}. {% if det.nueva_facturada %}<strong>La nueva también fue facturada: reclamá al operador.</strong>{% elif det.nueva_facturada is sameas false %}La nueva no fue facturada: podés trasladar el costo a #{{ det.solicitud_nueva_id }}.{% endif %}
-                  {% elif r.bandeja == 'CANCELADA' %}TAURO anuló esta guía y el operador la facturó igual. Riesgo: {{ (det.riesgo_estado or 'sin dato')|lower }}{% if det.tracking_estado %} · tracking {{ det.tracking_estado|lower }}{% endif %}{% if det.tracking_descripcion %} · {{ det.tracking_descripcion }}{% endif %}. Sin movimiento, se reclama; con movimiento, alguien la usó.
+                  {% elif r.bandeja == 'CANCELADA' %}TAURO anuló esta guía y el operador la facturó igual. Riesgo: {{ (det.riesgo_estado or 'sin dato')|lower }}{% if det.tracking_estado %} · tracking {{ det.tracking_estado|lower }}{% endif %}{% if det.tracking_descripcion %} · {{ det.tracking_descripcion }}{% endif %}. Sin movimiento, se reclama. Con movimiento, la guía se usó: vuelve a entregada, su cargo se reactiva y se le cobra al cliente como cualquier envío.
                   {% elif r.bandeja == 'SIN_DUENO' %}{% if det.causa == 'GUIA_OCULTA' %}Sólo coincide con una guía histórica oculta, sin precio ni cargo{% if det.cliente_id %} de {{ det.cliente_id }}{% endif %}. {{ det.ayuda }}{% elif det.causa == 'AMBIGUO' %}Coincide con más de un envío: {% for c in det.candidatos %}#{{ c.solicitud_id }} {{ c.cliente_id }} ({{ c.estado|lower }}){% if not loop.last %}, {% endif %}{% endfor %}.{% elif det.causa == 'CLIENTE_DISTINTO' %}TAURO 2026 la atribuye a {{ det.cliente_referencia }}, pero en el portal es de {% for c in det.candidatos %}{{ c.cliente_id }} (#{{ c.solicitud_id }}){% if not loop.last %}, {% endif %}{% endfor %}.{% else %}El tracking no existe en el portal. Buscalo en la planilla y en los chats antes de decidir.{% endif %}
                   {% elif r.bandeja == 'YA_FACTURADO' %}El flete de esta guía ya está en <a href="/admin/conciliacion-couriers/facturas/{{ det.factura_anterior_id }}">{{ det.factura_anterior_tipo }} {{ det.factura_anterior_numero }}</a>. Si es un re-pesaje legítimo, aceptalo; si no, reclamá el doble cobro.
                   {% endif %}
@@ -191,7 +191,8 @@
                     <div class="form-group"><label>Destino del renglón</label>
                       <select name="destino" required>
                         <option value="">Elegir</option>
-                        <option value="CLIENTE">{% if r.bandeja == 'REEMPLAZADA' %}Trasladar a la guía vigente del cliente{% else %}Cuenta de un cliente (envío vigente){% endif %}</option>
+                        {% if r.bandeja == 'CANCELADA' %}<option value="REACTIVAR_GUIA">La guía se usó igual: cobrar al cliente y pasarla a entregada</option>{% endif %}
+                        <option value="CLIENTE">{% if r.bandeja == 'REEMPLAZADA' %}Trasladar a la guía vigente del cliente{% elif r.bandeja == 'CANCELADA' %}Cobrar a otro envío vigente del cliente{% else %}Cuenta de un cliente (envío vigente){% endif %}</option>
                         <option value="RECLAMO_OPERADOR">Reclamo al operador</option>
                         {% if r.bandeja == 'YA_FACTURADO' %}<option value="ES_CORRECTO">Cobro correcto: sumar al envío</option>{% endif %}
                         <option value="ABSORBE_TAURO">Lo absorbe TAURO</option>

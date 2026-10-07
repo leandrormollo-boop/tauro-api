@@ -321,6 +321,54 @@ def test_guia_cancelada_facturada_queda_bloqueada_y_se_reclama(conciliacion_db):
     assert _estado_factura(db, fc["id"]) == "CERRADA"
 
 
+def test_guia_cancelada_usada_se_reactiva_y_se_cobra_al_cliente(conciliacion_db):
+    db = conciliacion_db
+    _cliente(db, "WAIMAO")
+    sid = _envio(db, "WAIMAO", "3200000011", precio="50000", costo="40000")
+    _cancelar(db, sid)
+    fc = _factura("1700A00000316", [("3200000011", "FLETE", "43000")], total="43000", sha="7")
+    conciliacion.matchear_items_exactos(fc["id"])
+    res = _resoluciones(db, fc["id"])["3200000011"]
+    assert res["bandeja"] == "CANCELADA"
+    # Sólo una cancelada se reactiva.
+    reemplazada = _envio(db, "WAIMAO", "3200000012", precio="50000", costo="40000")
+    _reemplazar(db, reemplazada, "3200000013")
+    fc2 = _factura("1700A00000317", [("3200000012", "FLETE", "43000")], total="43000", sha="8")
+    conciliacion.matchear_items_exactos(fc2["id"])
+    with pytest.raises(conciliacion.ConciliacionCourierError, match="sólo aplica a una guía cancelada"):
+        control.resolver_bandeja(_resoluciones(db, fc2["id"])["3200000012"]["id"], actor="admin@test",
+                                 destino="REACTIVAR_GUIA", motivo="Intento sobre reemplazada")
+
+    ok = control.resolver_bandeja(
+        res["id"], actor="admin@test", destino="REACTIVAR_GUIA",
+        motivo="El tracking muestra entrega: el cliente usó la etiqueta igual",
+    )
+    assert ok["solicitud_id"] == sid and ok["cliente_id"] == "WAIMAO" and len(ok["match_ids"]) == 1
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT estado, visible_cliente FROM solicitudes_guia WHERE id=%s", (sid,))
+        s = cur.fetchone()
+        assert s["estado"] == "ENTREGADO" and s["visible_cliente"] is True
+        cur.execute("SELECT estado, monto_ars FROM envios WHERE solicitud_id=%s", (sid,))
+        e = cur.fetchone()
+        assert e["estado"] == "ACTIVO" and e["monto_ars"] == D("50000")
+        cur.execute("SELECT riesgo_estado, riesgo_resuelto_nota FROM solicitudes_guia_reemisiones WHERE solicitud_anterior_id=%s", (sid,))
+        r = cur.fetchone()
+        assert r["riesgo_estado"] == "CERRADA" and "facturada" in r["riesgo_resuelto_nota"]
+        cur.execute("SELECT COUNT(*) AS n FROM auditoria_facturas_courier WHERE evento='GUIA_CANCELADA_REACTIVADA' AND solicitud_id=%s", (sid,))
+        assert cur.fetchone()["n"] == 1
+    # Ya no es alerta: sigue el circuito normal (vinculación por confirmar).
+    envios = conciliacion.listar_control_envios(cliente="WAIMAO", pagina=1)
+    estados = {e["solicitud_id"]: e["control_estado"] for e in envios["items"]}
+    assert estados[sid] == "MATCH_PENDIENTE"
+    _confirmar_todos(db, sid)
+    calculo = conciliacion.calcular_conciliacion_envio(sid, actor="admin@test")
+    assert calculo["ajuste_cliente_ars"] == D("3000")
+    assert _ajuste(db, sid)["tipo"] == "DEBITO"
+    # Idempotencia: la bandeja ya está resuelta.
+    with pytest.raises(conciliacion.ConciliacionCourierError, match="ya fue resuelta"):
+        control.resolver_bandeja(res["id"], actor="admin@test", destino="RECLAMO_OPERADOR", motivo="Segundo intento")
+
+
 # ── 4: guía reemplazada, con la nueva facturada o no ─────────────────────────
 
 def test_guia_reemplazada_traslada_el_costo_solo_si_la_nueva_no_fue_facturada(conciliacion_db):

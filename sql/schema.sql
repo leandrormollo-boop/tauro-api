@@ -3927,7 +3927,7 @@ CREATE TABLE IF NOT EXISTS factura_courier_guia_resoluciones (
     CONSTRAINT ck_guia_resolucion_estado CHECK (estado IN ('PENDIENTE','RESUELTA')),
     CONSTRAINT ck_guia_resolucion_destino CHECK (
         destino IS NULL
-        OR destino IN ('CLIENTE','RECLAMO_OPERADOR','ABSORBE_TAURO','ES_CORRECTO')
+        OR destino IN ('CLIENTE','RECLAMO_OPERADOR','ABSORBE_TAURO','ES_CORRECTO','REACTIVAR_GUIA')
     ),
     CONSTRAINT ck_guia_resolucion_resuelta CHECK (
         estado <> 'RESUELTA'
@@ -3937,10 +3937,25 @@ CREATE TABLE IF NOT EXISTS factura_courier_guia_resoluciones (
             AND resuelto_at IS NOT NULL)
     ),
     CONSTRAINT ck_guia_resolucion_cliente CHECK (
-        destino IS DISTINCT FROM 'CLIENTE'
+        destino NOT IN ('CLIENTE','REACTIVAR_GUIA')
         OR (cliente_id IS NOT NULL AND solicitud_id IS NOT NULL)
     )
 );
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'factura_courier_guia_resoluciones'::regclass
+           AND conname = 'ck_guia_resolucion_destino'
+           AND pg_get_constraintdef(oid) NOT LIKE '%REACTIVAR_GUIA%'
+    ) THEN
+        ALTER TABLE factura_courier_guia_resoluciones DROP CONSTRAINT ck_guia_resolucion_destino;
+        ALTER TABLE factura_courier_guia_resoluciones ADD CONSTRAINT ck_guia_resolucion_destino CHECK (
+            destino IS NULL
+            OR destino IN ('CLIENTE','RECLAMO_OPERADOR','ABSORBE_TAURO','ES_CORRECTO','REACTIVAR_GUIA')
+        );
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS ix_guia_resolucion_pendiente
     ON factura_courier_guia_resoluciones (factura_id, estado, bandeja);
 CREATE INDEX IF NOT EXISTS ix_guia_resolucion_referencia

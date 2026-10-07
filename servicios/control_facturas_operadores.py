@@ -38,7 +38,7 @@ from servicios.conciliacion_couriers import (
 
 BANDEJAS = ("VIGENTE", "REEMPLAZADA", "CANCELADA", "SIN_DUENO", "YA_FACTURADO")
 BANDEJAS_BLOQUEADAS = frozenset({"REEMPLAZADA", "CANCELADA", "SIN_DUENO", "YA_FACTURADO"})
-DESTINOS = ("CLIENTE", "RECLAMO_OPERADOR", "ABSORBE_TAURO", "ES_CORRECTO")
+DESTINOS = ("CLIENTE", "RECLAMO_OPERADOR", "ABSORBE_TAURO", "ES_CORRECTO", "REACTIVAR_GUIA")
 ESTADOS_ENVIO_NO_VIGENTES = ("CANCELADO", "REEMPLAZADO")
 # Un envío vigente sin factura después de este plazo es una alerta: o no
 # salió, o el operador lo facturó en otra cuenta.
@@ -56,6 +56,7 @@ ETIQUETAS_DESTINO = {
     "RECLAMO_OPERADOR": "Reclamo al operador",
     "ABSORBE_TAURO": "Lo absorbe TAURO",
     "ES_CORRECTO": "Cobro correcto",
+    "REACTIVAR_GUIA": "Guía usada: se cobra al cliente",
 }
 
 
@@ -546,6 +547,104 @@ def _proponer_matches_del_grupo(
     return match_ids
 
 
+def _reactivar_guia_cancelada(
+    cur, *, solicitud_id: int, actor: str, motivo: str, factura_id: int,
+) -> dict[str, Any]:
+    """Vuelve a la vida una guía cancelada que el operador entregó y facturó.
+
+    Reactiva el mismo cargo (no crea otro), pasa la solicitud a ENTREGADO y
+    cierra la vigilancia del tracking viejo con la nota. Falla si el cargo
+    ya tiene factura emitida o nota de crédito.
+    """
+    cur.execute(
+        """
+        SELECT s.id, s.cliente_id, s.estado, s.tracking, s.precio_tauro_ars,
+               s.visible_cliente
+          FROM solicitudes_guia s
+         WHERE s.id = %s
+         FOR UPDATE
+        """,
+        (int(solicitud_id),),
+    )
+    solicitud = cur.fetchone()
+    if not solicitud:
+        raise ConciliacionCourierError("La guía cancelada no existe.")
+    solicitud = dict(solicitud)
+    if solicitud["estado"] != "CANCELADO":
+        raise ConciliacionCourierError("La guía ya no está cancelada.")
+    cur.execute(
+        """
+        SELECT e.id, e.estado, e.monto_ars, e.nro_fc,
+               EXISTS (
+                   SELECT 1 FROM facturas_cliente_items fi
+                   JOIN facturas_cliente fc ON fc.id = fi.factura_id
+                   WHERE fi.envio_id = e.id AND fc.estado = 'EMITIDA'
+               ) AS facturado_al_cliente
+          FROM envios e
+         WHERE e.solicitud_id = %s
+         ORDER BY e.id DESC
+         LIMIT 1
+         FOR UPDATE
+        """,
+        (int(solicitud_id),),
+    )
+    cargo = cur.fetchone()
+    if not cargo:
+        raise ConciliacionCourierError(
+            "La guía cancelada no tiene cargo histórico. Cargala con 'Cargar envío realizado'."
+        )
+    cargo = dict(cargo)
+    if cargo["estado"] == "NC" or cargo.get("facturado_al_cliente"):
+        raise ConciliacionCourierError(
+            "El cargo ya tiene factura o nota de crédito emitida; no se reactiva solo."
+        )
+    if cargo["estado"] == "CANCELADO":
+        cur.execute(
+            "UPDATE envios SET estado = 'ACTIVO' WHERE id = %s AND estado = 'CANCELADO' RETURNING id",
+            (int(cargo["id"]),),
+        )
+        if not cur.fetchone():
+            raise ConciliacionCourierError("El cargo cambió mientras se reactivaba.")
+    cur.execute(
+        """
+        UPDATE solicitudes_guia
+           SET estado = 'ENTREGADO', visible_cliente = TRUE,
+               tracking_estado = COALESCE(tracking_estado, 'ENTREGADO'),
+               updated_at = NOW()
+         WHERE id = %s AND estado = 'CANCELADO'
+        RETURNING id
+        """,
+        (int(solicitud_id),),
+    )
+    if not cur.fetchone():
+        raise ConciliacionCourierError("La guía cambió mientras se reactivaba.")
+    cur.execute(
+        """
+        UPDATE solicitudes_guia_reemisiones
+           SET riesgo_estado = 'CERRADA', riesgo_resuelto_at = NOW(),
+               riesgo_resuelto_nota = %s
+         WHERE solicitud_anterior_id = %s AND operacion = 'CANCELACION'
+           AND riesgo_estado <> 'CERRADA'
+        """,
+        (f"Guía usada y facturada por el operador (FC #{int(factura_id)}). {motivo}"[:500],
+         int(solicitud_id)),
+    )
+    _registrar_auditoria(
+        cur,
+        evento="GUIA_CANCELADA_REACTIVADA",
+        actor=actor,
+        factura_id=int(factura_id),
+        solicitud_id=int(solicitud_id),
+        metadata={
+            "cargo_id": int(cargo["id"]),
+            "cargo_estado_anterior": cargo["estado"],
+            "monto_ars": str(cargo["monto_ars"]),
+            "motivo": motivo,
+        },
+    )
+    return solicitud
+
+
 def resolver_bandeja(
     resolucion_id: int,
     *,
@@ -563,6 +662,11 @@ def resolver_bandeja(
     ``RECLAMO_OPERADOR`` y ``ABSORBE_TAURO`` cierran el renglón sin cliente.
     ``ES_CORRECTO`` sólo aplica a YA_FACTURADO: acepta el segundo cobro y lo
     vincula al envío de referencia.
+    ``REACTIVAR_GUIA`` sólo aplica a CANCELADA (Leandro, 07/10/2026): la guía
+    se usó igual, el operador la entregó y la facturó, así que vuelve a
+    ENTREGADO, su cargo vuelve a estar activo con el precio original, el
+    cliente la ve otra vez y el costo se vincula a ella. Después se confirma
+    y se calcula la diferencia como con cualquier guía.
     """
     actor = _texto(actor)
     motivo = _texto(motivo)
@@ -603,7 +707,23 @@ def resolver_bandeja(
             cliente_id = None
             solicitud_destino_id = None
             match_ids: list[int] = []
-            if destino == "ES_CORRECTO":
+            if destino == "REACTIVAR_GUIA":
+                if bandeja != "CANCELADA":
+                    raise ConciliacionCourierError(
+                        "'Guía usada' sólo aplica a una guía cancelada que el operador facturó."
+                    )
+                envio = _reactivar_guia_cancelada(
+                    cur, solicitud_id=int(resolucion["solicitud_referencia_id"]),
+                    actor=actor, motivo=motivo, factura_id=factura_id,
+                )
+                cliente_id = envio["cliente_id"]
+                solicitud_destino_id = int(envio["id"])
+                match_ids = _proponer_matches_del_grupo(
+                    cur, factura_id=factura_id, tracking=tracking,
+                    solicitud_id=solicitud_destino_id, actor=actor, metodo="MANUAL",
+                    evidencia=f"admin://bandeja/{int(resolucion_id)}", lineas=lineas,
+                )
+            elif destino == "ES_CORRECTO":
                 if bandeja != "YA_FACTURADO":
                     raise ConciliacionCourierError(
                         "'Cobro correcto' sólo aplica a una guía ya facturada en otra factura."
