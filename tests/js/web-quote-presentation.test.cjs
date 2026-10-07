@@ -34,8 +34,11 @@ test('el catálogo público real no se confunde con permisos del cliente', () =>
     assert.equal(operatorStatusCopy(item).label, 'Según cuenta');
   }
   const fedex = operatorStatusCopy(catalog.find(operator => operator.id === 'fedex'));
-  assert.equal(fedex.label, 'Cotización estimada');
-  assert.match(fedex.help, /referencia de precio/);
+  assert.equal(fedex.label, 'No disponible aquí');
+  assert.equal(catalog.find(operator => operator.id === 'fedex').capacidades.length, 0);
+  const tarifarioLegado = operatorStatusCopy({estado:'tarifario_publico'});
+  assert.equal(tarifarioLegado.label, 'Cotización estimada');
+  assert.match(tarifarioLegado.help, /referencia de precio/);
   assert.equal(operatorStatusCopy({estado:'desconocido'}).label, 'No disponible aquí');
 });
 

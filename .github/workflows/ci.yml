@@ -99,6 +99,9 @@ jobs:
             tests/test_fedex_emision_recuperacion.py \
             tests/test_dhl_emision.py \
             tests/test_dhl_client.py \
+            tests/test_carrier_http_performance.py \
+            tests/test_cotizador_concurrencia.py \
+            tests/test_portal_quote_stream.py \
             tests/test_cotizar_sentido.py \
             tests/test_portal_experiencia_cliente.py \
             tests/test_accesos_directos.py \

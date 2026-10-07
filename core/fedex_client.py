@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import math
 import os
+import threading
 import time
+import weakref
+from collections import OrderedDict
 from datetime import date
 import requests
 from abc import ABC, abstractmethod
 
+from core.carrier_http import (
+    QuoteBudget, QuoteDeadlineExceeded, quote_session,
+)
 from servicios.impuestos import paga_el_remitente
 
 try:
@@ -67,6 +75,18 @@ class FedExClient(CarrierBase):
     SANDBOX_URL = "https://apis-sandbox.fedex.com"
     PROD_URL = "https://apis.fedex.com"
 
+    # Caché de proceso: los clientes se crean por cotización, por eso un caché
+    # de instancia desperdicia un OAuth por courier/request. La clave sólo
+    # conserva un hash del ambiente y las credenciales, nunca los secretos.
+    _TOKEN_CACHE_MAX = 32
+    _TOKEN_EXPIRY_MARGIN_SECONDS = 60
+    _token_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
+    # Este lock protege únicamente los mapas en memoria. La red OAuth corre
+    # bajo un single-flight por clave, para que una cuenta lenta no bloquee a
+    # otra con credenciales diferentes.
+    _token_cache_lock = threading.RLock()
+    _token_key_locks = weakref.WeakValueDictionary()
+
     def __init__(self):
         self.api_key = os.getenv("FEDEX_API_KEY")
         self.secret_key = os.getenv("FEDEX_SECRET_KEY")
@@ -74,39 +94,131 @@ class FedExClient(CarrierBase):
         self.environment = os.getenv("FEDEX_ENVIRONMENT", "sandbox").lower()
         self.base_url = self.SANDBOX_URL if self.environment == "sandbox" else self.PROD_URL
 
-        # Cache del token OAuth2
-        self._token: str | None = None
-        self._token_expires_at: float = 0
+    def _token_cache_key(self) -> str:
+        material = "\0".join((
+            self.environment or "",
+            self.base_url or "",
+            self.api_key or "",
+            self.secret_key or "",
+        )).encode("utf-8")
+        return hashlib.sha256(material).hexdigest()
 
-    def _get_token(self) -> str:
+    @classmethod
+    def _clear_token_cache_for_tests(cls) -> None:
+        with cls._token_cache_lock:
+            cls._token_cache.clear()
+            cls._token_key_locks.clear()
+
+    @classmethod
+    def _token_lock_for_key(cls, cache_key: str):
+        with cls._token_cache_lock:
+            lock = cls._token_key_locks.get(cache_key)
+            if lock is None:
+                lock = threading.Lock()
+                cls._token_key_locks[cache_key] = lock
+            return lock
+
+    @classmethod
+    def _cached_token(
+        cls, cache_key: str, *, stale_token: str | None = None,
+    ) -> str | None:
+        """Lee/LRU/invalida con una sección global corta y sin hacer red."""
+        now = time.monotonic()
+        with cls._token_cache_lock:
+            cached = cls._token_cache.get(cache_key)
+            if not cached:
+                return None
+            token, expires_at = cached
+            vigente = now < expires_at - cls._TOKEN_EXPIRY_MARGIN_SECONDS
+            if vigente and (stale_token is None or token != stale_token):
+                cls._token_cache.move_to_end(cache_key)
+                return token
+            cls._token_cache.pop(cache_key, None)
+            return None
+
+    def _invalidate_cached_token(self, rejected_token: str) -> None:
+        """Quita sólo el bearer rechazado; no pisa una renovación concurrente."""
+        cache_key = self._token_cache_key()
+        with self._token_cache_lock:
+            cached = self._token_cache.get(cache_key)
+            if cached and cached[0] == rejected_token:
+                self._token_cache.pop(cache_key, None)
+
+    def _get_token(
+        self, *, quote_read: bool = False, stale_token: str | None = None,
+        quote_budget: QuoteBudget | None = None,
+    ) -> str:
         """
         Obtiene token OAuth2 de FedEx con caché.
         No hace una llamada nueva si el token sigue vigente.
         """
-        if self._token and time.time() < self._token_expires_at - 60:
-            return self._token
+        cache_key = self._token_cache_key()
+        if quote_budget:
+            quote_budget.ensure_remaining()
+        cached = self._cached_token(cache_key, stale_token=stale_token)
+        if cached:
+            return cached
 
-        url = f"{self.base_url}/oauth/token"
-        payload = {
-            "grant_type": "client_credentials",
-            "client_id": self.api_key,
-            "client_secret": self.secret_key,
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        # Dos instancias con la misma clave comparten la renovación; cuentas
+        # distintas usan locks distintos y pueden autenticar en paralelo.
+        lock = self._token_lock_for_key(cache_key)
+        if quote_budget:
+            acquired = lock.acquire(timeout=quote_budget.ensure_remaining())
+            if not acquired:
+                raise QuoteDeadlineExceeded(
+                    "Se agotó el tiempo total de consulta de tarifa."
+                )
+        else:
+            lock.acquire()
+            acquired = True
+        try:
+            # El lock pudo quedar libre justo al final del presupuesto.
+            if quote_budget:
+                quote_budget.ensure_remaining()
+            cached = self._cached_token(cache_key, stale_token=stale_token)
+            if cached:
+                # Tras un 401, otro thread puede haber renovado mientras éste
+                # esperaba el single-flight. En ese caso reutilizamos el nuevo.
+                return cached
 
-        resp = self._request_with_retry("POST", url, data=payload, headers=headers, auth_call=True)
-        data = resp.json()
-        access_token = data.get("access_token")
-        if not access_token:
-            codigo = self._codigos_errores_fedex(data)
-            raise RuntimeError(
-                f"[fedex] No se pudo obtener token OAuth en ambiente {self.environment}. "
-                f"HTTP {resp.status_code}; código={codigo}"
+            url = f"{self.base_url}/oauth/token"
+            payload = {
+                "grant_type": "client_credentials",
+                "client_id": self.api_key,
+                "client_secret": self.secret_key,
+            }
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            resp = self._request_with_retry(
+                "POST", url, data=payload, headers=headers, auth_call=True,
+                quote_read=quote_read, quote_budget=quote_budget,
             )
+            data = resp.json()
+            access_token = data.get("access_token")
+            if not access_token:
+                codigo = self._codigos_errores_fedex(data)
+                raise RuntimeError(
+                    f"[fedex] No se pudo obtener token OAuth en ambiente {self.environment}. "
+                    f"HTTP {resp.status_code}; código={codigo}"
+                )
 
-        self._token = access_token
-        self._token_expires_at = time.time() + data.get("expires_in", 3600)
-        return self._token
+            try:
+                expires_in = float(data.get("expires_in", 3600))
+                if not math.isfinite(expires_in):
+                    expires_in = 3600.0
+                expires_in = max(expires_in, 0.0)
+            except (TypeError, ValueError):
+                expires_in = 3600.0
+            with self._token_cache_lock:
+                self._token_cache[cache_key] = (
+                    str(access_token), time.monotonic() + expires_in,
+                )
+                self._token_cache.move_to_end(cache_key)
+                while len(self._token_cache) > self._TOKEN_CACHE_MAX:
+                    self._token_cache.popitem(last=False)
+            return str(access_token)
+        finally:
+            if acquired:
+                lock.release()
 
     def _request_with_retry(
         self,
@@ -114,33 +226,74 @@ class FedExClient(CarrierBase):
         url: str,
         max_retries: int = 3,
         auth_call: bool = False,
+        quote_read: bool = False,
+        quote_budget: QuoteBudget | None = None,
         **kwargs,
     ) -> requests.Response:
         """
         Ejecuta un request HTTP con retry exponencial.
         Reinicia en errores 5xx o de red.
         """
+        stale_token = None
+        retried_401 = False
+        if quote_read and quote_budget is None:
+            quote_budget = QuoteBudget.start()
         for intento in range(max_retries):
             try:
-                if not auth_call:
-                    token = self._get_token()
-                    headers = kwargs.pop("headers", {})
-                    headers["Authorization"] = f"Bearer {token}"
-                    headers["Content-Type"] = "application/json"
-                    kwargs["headers"] = headers
+                while True:
+                    request_kwargs = dict(kwargs)
+                    if not auth_call:
+                        token = self._get_token(
+                            quote_read=quote_read, stale_token=stale_token,
+                            quote_budget=quote_budget,
+                        )
+                        stale_token = None
+                        headers = dict(request_kwargs.pop("headers", {}))
+                        headers["Authorization"] = f"Bearer {token}"
+                        headers["Content-Type"] = "application/json"
+                        request_kwargs["headers"] = headers
 
-                resp = requests.request(method, url, timeout=30, **kwargs)
+                    requester = quote_session() if quote_read else requests
+                    timeout = quote_budget.timeout() if quote_budget else 30
+                    resp = requester.request(
+                        method, url, timeout=timeout, **request_kwargs,
+                    )
+
+                    # Sólo Rate API puede repetir de forma segura tras renovar
+                    # el bearer. No consume un retry de red/5xx.
+                    if (
+                        quote_read and not auth_call and resp.status_code == 401
+                        and not retried_401
+                    ):
+                        retried_401 = True
+                        stale_token = token
+                        continue
+                    if not auth_call and resp.status_code == 401:
+                        # Ship/pickup/cancel jamás se repiten. Invalidar el
+                        # bearer hace que la próxima operación autentique de
+                        # nuevo, sin borrar un token que otro thread ya renovó.
+                        self._invalidate_cached_token(token)
+                    break
 
                 if resp.status_code < 500:
                     return resp
 
-                print(f"[fedex] Error {resp.status_code} en intento {intento + 1}. Reintentando...")
-                time.sleep(2 ** intento)
+                print(f"[fedex] Error {resp.status_code} en intento {intento + 1}.")
+                if intento < max_retries - 1:
+                    if quote_budget:
+                        quote_budget.sleep_before_retry(2 ** intento)
+                    else:
+                        time.sleep(2 ** intento)
 
             except requests.exceptions.RequestException as e:
                 print(f"[fedex] Error de red en intento {intento + 1}: {e}")
+                if isinstance(e, QuoteDeadlineExceeded):
+                    raise
                 if intento < max_retries - 1:
-                    time.sleep(2 ** intento)
+                    if quote_budget:
+                        quote_budget.sleep_before_retry(2 ** intento)
+                    else:
+                        time.sleep(2 ** intento)
                 else:
                     raise
 
@@ -325,7 +478,11 @@ class FedExClient(CarrierBase):
             payload["requestedShipment"]["serviceType"] = "INTERNATIONAL_PRIORITY"
 
         try:
-            resp = self._request_with_retry("POST", url, json=payload)
+            quote_budget = QuoteBudget.start()
+            resp = self._request_with_retry(
+                "POST", url, json=payload, quote_read=True,
+                quote_budget=quote_budget,
+            )
 
             if resp.status_code != 200:
                 try:

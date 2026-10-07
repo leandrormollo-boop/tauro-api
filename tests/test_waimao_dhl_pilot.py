@@ -64,8 +64,10 @@ def test_una_caja_se_cotiza_con_las_medidas_reales_del_wizard():
         "totalPrice": [{"price": 100, "priceCurrency": "USD"}],
         "deliveryCapabilities": {"totalTransitDays": 3},
     }]
-    with mock.patch("core.dhl_client.requests.get",
-                    return_value=_respuesta({"products": productos})) as get:
+    with mock.patch.object(
+        DHLClient, "_rate_request",
+        return_value=_respuesta({"products": productos}),
+    ) as get:
         salida = _dhl().get_rates(
             {"country": "CN", "city": "YIWU", "postal_code": "322000"},
             {"country": "AR", "city": "CABA", "postal_code": "1000"},

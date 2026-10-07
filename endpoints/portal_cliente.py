@@ -17,6 +17,8 @@ import json
 import os
 import re
 import secrets
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import quote, urlencode, urlparse
@@ -26,8 +28,11 @@ from typing import Optional, Annotated
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
+    StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
+import anyio
+from core.quote_observability import quote_logger
 
 from servicios.auth import (
     generar_token, validar_token, revocar_token,
@@ -1760,6 +1765,170 @@ def ubicaciones_cotizador(pais: str = "", q: str = "", tipo: str = "city",
         return {"suggestions": [], "automatic": None, "unavailable": True}
 
 
+def _cotizacion_fragmento(request: Request) -> bool:
+    return getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow"
+
+
+def _renderizar_cotizacion(request: Request, contexto: dict):
+    """Un resultado AJAX no vuelve a consultar datos de la página completa."""
+    fragmento = _cotizacion_fragmento(request)
+    if not fragmento:
+        contexto.update(
+            provincias=opciones_provincias(),
+            paises_origen=_paises_con_nacional(),
+            paises_destino=_paises_con_nacional(),
+            rutas_frecuentes=obtener_rutas_frecuentes(contexto["cliente"]),
+        )
+        if contexto["ambito"] == "internacional":
+            contexto.update(
+                referencias_paises=referencias_paises_formulario(),
+                operadores_internacionales=_operadores_cliente(
+                    contexto["cliente"], Ambito.INTERNACIONAL,
+                ),
+            )
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/_quote_results.html" if fragmento else "portal/cotizar.html",
+        context=contexto,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+def _stream_cotizacion_internacional(
+    request: Request, *, cliente: str, parametros: dict, form: dict,
+    paquetes: list, es_reseller: bool,
+):
+    """Entrega sólo HTML público de cada resultado; nunca transporta costos."""
+    from servicios.cotizador import iterar_cotizar_referencia_couriers
+    from servicios.cotizaciones_reseller import guardar_opciones
+
+    template = templates.get_template("portal/_quote_results.html")
+    cancelado = threading.Event()
+    contexto = {
+        "request": request, "cliente": cliente, "ambito": "internacional",
+        "form": form, "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
+        "destino_sel": form["destino_pais"], "es_reseller": es_reseller,
+        "opciones": [], "no_disponibles": [], "resultado": None, "error": None,
+    }
+
+    def linea(completo):
+        return json.dumps({
+            "html": template.render(**contexto), "complete": completo,
+        }, ensure_ascii=False) + "\n"
+
+    def generar():
+        inicio = time.monotonic()
+        comparaciones = None
+        guardadas = {}
+        finalizado = False
+        try:
+            comparaciones = iterar_cotizar_referencia_couriers(
+                **parametros, _cancel_event=cancelado,
+            )
+            for comparacion in comparaciones:
+                opciones = comparacion["opciones"]
+                resumen = comparacion["resumen"]
+                # Un snapshot reseller por courier, aunque la respuesta parcial
+                # se vuelva a renderizar cuando termina el próximo operador.
+                if es_reseller:
+                    nuevas = [o for o in opciones if o["carrier_id"] not in guardadas]
+                    if nuevas:
+                        guardadas.update({
+                            o["carrier_id"]: o for o in guardar_opciones(
+                                cliente, ruta=resumen["ruta"], bultos=paquetes,
+                                peso_facturable_kg=resumen["peso_usado_kg"],
+                                opciones=nuevas,
+                            )
+                        })
+                    opciones = [guardadas[o["carrier_id"]] for o in opciones]
+                completo = bool(comparacion.get("completo"))
+                contexto.update(
+                    opciones=opciones, resultado=resumen,
+                    no_disponibles=comparacion["no_disponibles"],
+                    error=("Ningún courier devolvió una tarifa para esa referencia."
+                           if completo and not comparacion["encontrado"] else None),
+                )
+                # El navegador cierra el reader apenas recibe ``complete``.
+                # Marcarlo antes del yield mantiene correcta la telemetría aun
+                # si ASGI cancela el iterador sin pedir el siguiente elemento.
+                if completo:
+                    finalizado = True
+                yield linea(completo)
+                if completo:
+                    break
+            if not finalizado:
+                raise RuntimeError("Cotización incompleta")
+        except Exception:
+            # Mantener una tarifa ya recibida si otro operador no pudo terminar.
+            contexto["error"] = "No pudimos completar la consulta. Volvé a consultar las tarifas."
+            yield linea(True)
+        finally:
+            cerrar = getattr(comparaciones, "close", None)
+            if cerrar:
+                cerrar()
+            quote_logger.info(
+                "portal_quote_stream duration_ms=%d complete=%s options=%d",
+                round((time.monotonic() - inicio) * 1000), finalizado,
+                len(contexto["opciones"]),
+            )
+
+    async def enviar():
+        eventos = generar()
+        terminado = object()
+        estado_lock = threading.Lock()
+        en_worker = False
+        cerrado = False
+
+        def siguiente():
+            """El mismo worker que avanza el generador lo cierra al cancelar."""
+            nonlocal en_worker, cerrado
+            with estado_lock:
+                en_worker = True
+            try:
+                try:
+                    return next(eventos)
+                except StopIteration:
+                    return terminado
+            finally:
+                cerrar = False
+                with estado_lock:
+                    en_worker = False
+                    if cancelado.is_set() and not cerrado:
+                        cerrado = True
+                        cerrar = True
+                if cerrar:
+                    eventos.close()
+
+        try:
+            while True:
+                evento = await anyio.to_thread.run_sync(
+                    siguiente, abandon_on_cancel=True,
+                )
+                if evento is terminado:
+                    break
+                yield evento
+        finally:
+            # Una llamada HTTP de requests que ya empezó no puede interrumpirse.
+            # El evento permite que el backend deje de esperar y cancele la cola;
+            # el worker activo cerrará el generador cuando vuelva de la red.
+            cancelado.set()
+            cerrar = False
+            with estado_lock:
+                if not en_worker and not cerrado:
+                    cerrado = True
+                    cerrar = True
+            if cerrar:
+                eventos.close()
+
+    return StreamingResponse(
+        enviar(), media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "private, no-store", "X-Accel-Buffering": "no",
+            "Vary": "Accept, X-Requested-With",
+        },
+    )
+
+
 @router.post("/cotizar", response_class=HTMLResponse)
 def cotizar_post(
     request: Request,
@@ -1843,24 +2012,16 @@ def cotizar_post(
 
         form_nacional.update(origen_referencia="1" if origen_referencia == "1" else "",
                              destino_referencia="1" if destino_referencia == "1" else "")
-        return templates.TemplateResponse(
-            request=request,
-            name=("portal/_quote_results.html" if getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow" else "portal/cotizar.html"),
-            context={
-                "cliente": cliente,
-                "ambito": "nacional",
-                "provincias": opciones_provincias(),
-                "resultado_nacional": resultado_nacional,
-                "opciones": (resultado_nacional or {}).get("opciones", []),
-                "no_disponibles": (resultado_nacional or {}).get("no_disponibles", []),
-                "resultado": (resultado_nacional or {}).get("resumen"),
-                "paises_origen": _paises_con_nacional(),
-                "paises_destino": _paises_con_nacional(),
-                "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
-                "error": error_nacional,
-                "form": form_nacional,
-            },
-        )
+        return _renderizar_cotizacion(request, {
+            "cliente": cliente,
+            "ambito": "nacional",
+            "resultado_nacional": resultado_nacional,
+            "opciones": (resultado_nacional or {}).get("opciones", []),
+            "no_disponibles": (resultado_nacional or {}).get("no_disponibles", []),
+            "resultado": (resultado_nacional or {}).get("resumen"),
+            "error": error_nacional,
+            "form": form_nacional,
+        })
 
     # Un ámbito manipulado no puede caer accidentalmente en los carriers
     # internacionales: vuelve al selector sin consultar ninguna API.
@@ -1893,6 +2054,16 @@ def cotizar_post(
         destino_cp_internacional.strip()
         if isinstance(destino_cp_internacional, str) else ""
     )
+    form_internacional = {
+        "origen_pais": origen_pais, "destino_pais": destino_pais,
+        "origen_ciudad": origen_ciudad,
+        "origen_cp_internacional": origen_cp_internacional,
+        "destino_ciudad_internacional": destino_ciudad_internacional,
+        "destino_cp_internacional": destino_cp_internacional,
+        "origen_referencia": "1" if origen_referencia == "1" else "",
+        "destino_referencia": "1" if destino_referencia == "1" else "",
+        "valor_declarado_usd": valor_declarado_usd,
+    }
 
     try:
         paquetes, filas_bultos_form = _bultos_cotizador_internacional(
@@ -1910,7 +2081,7 @@ def cotizar_post(
         valor_usd_num = _numero_form(
             valor_declarado_usd, "Valor declarado", importe=True, minimo=0.01,
         )
-        comparacion = cotizar_referencia_couriers(
+        parametros_cotizacion = dict(
             cliente=cliente,
             origen_pais=origen_pais,
             destino_pais=destino_pais,
@@ -1929,6 +2100,15 @@ def cotizar_post(
                 "postal_code": destino_cp_internacional,
             },
         )
+        if (
+            _cotizacion_fragmento(request)
+            and "application/x-ndjson" in request.headers.get("accept", "")
+        ):
+            return _stream_cotizacion_internacional(
+                request, cliente=cliente, parametros=parametros_cotizacion,
+                form=form_internacional, paquetes=paquetes, es_reseller=es_reseller,
+            )
+        comparacion = cotizar_referencia_couriers(**parametros_cotizacion)
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
         resumen = comparacion["resumen"]
@@ -1956,46 +2136,27 @@ def cotizar_post(
     except Exception:
         error = "No pudimos consultar las tarifas. Intentá nuevamente."
 
-    return templates.TemplateResponse(
-        request=request, name=("portal/_quote_results.html" if getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow" else "portal/cotizar.html"),
-        context={
+    form_internacional.update({
+        "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
+        "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
+        "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),
+        "alto_cm": filas_bultos_form[0].get("alto_cm", ""),
+        "bultos": filas_bultos_form,
+    })
+    return _renderizar_cotizacion(request, {
             "cliente": cliente,
             "ambito": "internacional",
-            "provincias": opciones_provincias(),
-            "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
-            "paises_origen": _paises_con_nacional(),
-            "paises_destino": _paises_con_nacional(),
-            "referencias_paises": referencias_paises_formulario(),
             "opciones": opciones,
             "resultado": resumen,
             "no_disponibles": no_disponibles,
-            "operadores_internacionales": _operadores_cliente(
-                cliente, Ambito.INTERNACIONAL
-            ),
             "error": error,
-            "form": {
-                "origen_pais": origen_pais,
-                "destino_pais": destino_pais,
-                "origen_ciudad": origen_ciudad,
-                "origen_cp_internacional": origen_cp_internacional,
-                "destino_ciudad_internacional": destino_ciudad_internacional,
-                "destino_cp_internacional": destino_cp_internacional,
-                "origen_referencia": "1" if origen_referencia == "1" else "",
-                "destino_referencia": "1" if destino_referencia == "1" else "",
-                "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
-                "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
-                "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),
-                "alto_cm": filas_bultos_form[0].get("alto_cm", ""),
-                "bultos": filas_bultos_form,
-                "valor_declarado_usd": valor_declarado_usd,
-            },
+            "form": form_internacional,
             # Para que cada tarjeta de opción linkee a "crear envío" con el
             # destino ya elegido.
             "destino_sel": destino_pais,
             "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
             "es_reseller": es_reseller,
-        },
-    )
+        })
 
 
 @router.post("/cotizaciones/reseller.pdf")

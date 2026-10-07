@@ -119,6 +119,8 @@ def _carriers_falsos(costo_usd=130.18):
 
 def _cotizar(fn, **kw):
     from servicios import carriers as C
+    if fn is C.cotizar_carriers_cliente:
+        kw.setdefault("couriers_habilitados", {"dhl"})
     with mock.patch.dict(os.environ, {"FAKE_KEY": "1"}, clear=True), \
          mock.patch.object(C, "CARRIERS", _carriers_falsos()), \
          mock.patch.object(C, "_pricing_configurado", return_value={}):
@@ -220,6 +222,7 @@ def test_moneda_no_soportada_falla_cerrado_y_no_calcula_precio():
             origen={"country": "CN"}, destino={"country": "AR"},
             paquete={"peso_kg": 1}, dolar=1500,
             pricing_cliente={"tipo": "FIJO_ARS", "valor": 95000},
+            couriers_habilitados={"dhl"},
         )
 
     assert costos[0]["estado"] == "sin_tarifa"
@@ -247,6 +250,7 @@ def test_costo_cero_negativo_o_nan_falla_antes_del_pricing():
                 origen={"country": "CN"}, destino={"country": "AR"},
                 paquete={"peso_kg": 1}, dolar=1500,
                 pricing_cliente={"tipo": "FIJO_ARS", "valor": 95000},
+                couriers_habilitados={"dhl"},
             )
 
         assert salida[0]["estado"] == "sin_tarifa"
@@ -268,7 +272,7 @@ def test_la_web_y_el_portal_dan_precios_distintos():
 # ── Multi-bulto: quién sabe cotizar N cajas ──────────────────
 
 def _carriers_mixtos():
-    """FedEx sabe multi-bulto; DHL (todavía) no."""
+    """Un adapter operativo sintético sabe multi-bulto; el otro no."""
     class ConMulti:
         MULTIBULTO = True
         def get_rates(self, o, d, paquete=None, paquetes=None):
@@ -282,7 +286,7 @@ def _carriers_mixtos():
             raise AssertionError("no se le puede pedir multi-bulto a este courier")
 
     return [
-        {"id": "fedex", "nombre": "FedEx", "servicio": "Priority",
+        {"id": "alpha", "nombre": "Alpha", "servicio": "Priority",
          "logo": "/f.svg", "requisitos": ("FAKE_KEY",), "cliente": ConMulti},
         {"id": "dhl", "nombre": "DHL Express", "servicio": "Worldwide",
          "logo": "/d.svg", "requisitos": ("FAKE_KEY",), "cliente": SinMulti},
@@ -304,7 +308,7 @@ def test_con_varias_cajas_el_que_no_sabe_queda_afuera():
     """
     r = _costos(origen={"country": "AR"}, destino={"country": "US"},
                 paquete=None, paquetes=[{"peso_kg": 1.4}, {"peso_kg": 3.0}])
-    assert r["fedex"]["estado"] == "cotizado"
+    assert r["alpha"]["estado"] == "cotizado"
     assert r["dhl"]["estado"] == "sin_multibulto"
     assert "varias cajas" in r["dhl"]["error"]
 
@@ -324,7 +328,7 @@ def test_con_una_sola_caja_cotizan_los_dos():
         r = {c["id"]: c for c in C.costos_carriers(
             origen={"country": "AR"}, destino={"country": "US"},
             paquete=None, paquetes=[{"peso_kg": 1.4}])}
-    assert r["fedex"]["estado"] == "cotizado"
+    assert r["alpha"]["estado"] == "cotizado"
     assert r["dhl"]["estado"] == "cotizado"
 
 
@@ -332,5 +336,5 @@ def test_el_camino_de_un_bulto_sigue_igual():
     """La web pública manda `paquete` singular: no se puede haber roto."""
     r = _costos(origen={"country": "AR"}, destino={"country": "US"},
                 paquete={"peso_kg": 1.4})
-    assert r["fedex"]["estado"] == "cotizado"
-    assert r["fedex"]["costo"] == 100.0
+    assert r["alpha"]["estado"] == "cotizado"
+    assert r["alpha"]["costo"] == 100.0

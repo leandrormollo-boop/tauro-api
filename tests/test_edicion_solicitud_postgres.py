@@ -149,7 +149,11 @@ def test_wizard_real_sin_coti_id_guarda_revision_y_nunca_expone_base(conciliacio
     monkeypatch.setattr(carriers, 'cotizar_carriers_cliente', cotizador_real)
     raw = dict(id='dhl', nombre='DHL', logo='', servicio='P', estado='cotizado',
                costo=100, moneda='USD', dias_estimados=4)
-    monkeypatch.setattr(carriers, 'costos_carriers', lambda *a, **kw: [raw])
+    monkeypatch.setattr(
+        carriers,
+        '_iterar_costos_carriers',
+        lambda *a, **kw: ((pos, fila) for pos, fila in [(0, dict(raw))]),
+    )
     monkeypatch.setattr('servicios.configuracion_couriers_cliente.configuracion_cotizacion', lambda *a: {
         'pricing_general': {'tipo':'FIJO_ARS','valor':95000},
         'pricing_por_courier':{}, 'couriers_habilitados':{'dhl'}})

@@ -261,7 +261,7 @@ def test_cada_courier_aplica_su_ganancia_sin_exponerla():
     registro = [
         {"id": courier, "nombre": courier.upper(), "logo": "/x.svg",
          "servicio": "Express", "requisitos": ("FAKE",), "cliente": Tarifa}
-        for courier in ("fedex", "dhl")
+        for courier in ("alpha", "dhl")
     ]
     with mock.patch.object(carriers, "CARRIERS", registro), \
          mock.patch.dict(os.environ, {"FAKE": "1"}, clear=True):
@@ -270,14 +270,14 @@ def test_cada_courier_aplica_su_ganancia_sin_exponerla():
             paquete={"peso_kg": 1}, dolar=1_000,
             pricing_cliente={"tipo": "PCT", "valor": 25},
             pricing_por_courier={
-                "fedex": {"tipo": "FIJO_ARS", "valor": 50_000},
+                "alpha": {"tipo": "FIJO_ARS", "valor": 50_000},
                 "dhl": {"tipo": "FIJO_ARS", "valor": 14_000},
             },
-            couriers_habilitados={"fedex", "dhl"},
+            couriers_habilitados={"alpha", "dhl"},
         )
 
     por_id = {r["id"]: r for r in resultado}
-    assert por_id["fedex"]["precio_ars"] == 150_000
+    assert por_id["alpha"]["precio_ars"] == 150_000
     assert por_id["dhl"]["precio_ars"] == 114_000
     assert not any(
         clave.startswith(("costo", "margen", "markup"))

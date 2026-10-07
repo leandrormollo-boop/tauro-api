@@ -86,10 +86,6 @@ CARRIER_SPECS: Tuple[CarrierSpec, ...] = (
         logo="/static/img/carriers/fedex.svg",
         capacidades=CAPACIDADES_INTERNACIONALES_COMPLETAS,
         implementacion="pendiente",
-        # La web conserva un cotizador legado de FedEx. Esto no habilita la
-        # integración por cliente, la emisión ni los retiros.
-        oferta_publica="tarifario_publico",
-        capacidades_publicas=CAPACIDADES_SOLO_COTIZACION,
         variables_requeridas=(
             "FEDEX_API_KEY",
             "FEDEX_SECRET_KEY",
@@ -164,6 +160,36 @@ def capability_supported(carrier_id: str, capacidad: Capacidad | str) -> bool:
     return capacidad in spec.capacidades
 
 
+def operation_implemented(
+    carrier_id: str,
+    capacidad: Capacidad | str,
+    *,
+    ambito: Ambito | str | None = None,
+) -> bool:
+    """Autoriza sólo operaciones cuyo código fue declarado operativo.
+
+    Este control no mira credenciales ni permisos comerciales. Es el primer
+    gate del runtime: una integración pendiente no puede tocar su API aunque
+    existan variables de entorno o configuraciones antiguas en la base.
+    """
+    spec = carrier_spec(carrier_id)
+    if not spec or spec.pendiente:
+        return False
+    try:
+        capacidad = Capacidad(str(capacidad).lower())
+    except ValueError:
+        return False
+    if capacidad not in spec.capacidades:
+        return False
+    if ambito is None:
+        return True
+    try:
+        ambito = Ambito(str(ambito).upper())
+    except ValueError:
+        return False
+    return ambito in spec.ambitos
+
+
 def public_catalog(
     ambito: Ambito | str | None = None,
     *,
@@ -172,23 +198,26 @@ def public_catalog(
     """Catálogo seguro para UI pública, sin estado de credenciales ni cuentas.
 
     ``canal="publico"`` describe exactamente la oferta que puede mostrarse en
-    la web. En particular, FedEx publica sólo un tarifario legado: no hereda
-    las capacidades de emisión del contrato futuro. ``canal="cuenta"`` sirve
-    como base para el portal autenticado y sólo publica capacidades de una
-    integración cuyo código está preparado. Ningún canal comprueba
-    credenciales, UAT ni permisos de cliente.
+    la web. ``canal="cuenta"`` sirve como base para el portal autenticado.
+    Ambos publican capacidades sólo cuando la integración está preparada;
+    ninguno comprueba credenciales, UAT ni permisos de cliente.
     """
     if canal not in {"publico", "cuenta"}:
         raise ValueError("Canal de catálogo desconocido.")
     specs = CARRIER_SPECS if ambito is None else carriers_for(ambito)
 
     def publicar(spec: CarrierSpec) -> dict:
-        if canal == "publico" and spec.oferta_publica == "tarifario_publico":
+        if spec.pendiente:
+            estado = "integracion_pendiente"
+            estado_label = "Integración pendiente"
+            estado_corto = "Pendiente"
+            capacidades = frozenset()
+        elif canal == "publico" and spec.oferta_publica == "tarifario_publico":
             estado = "tarifario_publico"
             estado_label = "Tarifario público; emisión no habilitada"
             estado_corto = "Tarifario"
             capacidades = spec.capacidades_publicas or frozenset()
-        elif spec.implementacion == "operativa":
+        else:
             estado = "integracion_preparada"
             estado_label = "Integración preparada; sujeta a habilitación"
             estado_corto = "Preparada"
@@ -197,11 +226,6 @@ def public_catalog(
                 if canal == "publico" and spec.capacidades_publicas is not None
                 else spec.capacidades
             )
-        else:
-            estado = "integracion_pendiente"
-            estado_label = "Integración pendiente"
-            estado_corto = "Pendiente"
-            capacidades = frozenset()
         return {
             "id": spec.id,
             "nombre": spec.nombre,
