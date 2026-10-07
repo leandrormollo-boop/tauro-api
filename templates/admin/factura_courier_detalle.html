@@ -130,7 +130,7 @@
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Guía</th><th>Costo facturado</th><th>Peso facturado</th><th style="min-width:410px;">Bandeja y destino</th></tr></thead>
+      <thead><tr><th>Guía</th><th>Costo facturado</th><th>Peso inicial → facturado<span data-help="Peso">El peso inicial de la guía es el mayor entre el real declarado y el volumétrico de sus cajas, como al cotizar. Si el operador facturó más kilos, se marca.</span></th><th style="min-width:410px;">Bandeja y destino</th></tr></thead>
       <tbody>
       {% for guia in factura.envios_facturados %}
         <tr>
@@ -152,7 +152,11 @@
           <td class="mono"><strong>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(guia.total_importe) }}</strong><br><small>$ {{ dinero(guia.total_importe_ars) }}{% if factura.revision_financiera_requerida %} documental{% endif %}</small>
             {% if factura.revision_financiera %}<br><small>$ {{ dinero(guia.total_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
             <br>{% if guia.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(guia.remanente) }}</span>{% else %}<span class="badge ok">Guía asignada completa</span>{% endif %}</td>
-          <td>{{ (guia.peso_facturado_kg or '—')|kg }}<br><small>{{ (guia.peso_base or '').replace('_',' ')|title }}</small></td>
+          <td>{% set pi = guia.peso_inicial %}{% if pi %}<span class="mono">{{ pi.facturable_kg|kg }}</span> → <strong class="mono">{{ (guia.peso_facturado_kg or '—')|kg }}</strong>
+            <br><small>Inicial: real {{ (pi.real_kg or '—')|kg }}{% if pi.volumetrico_kg %} · vol. {{ pi.volumetrico_kg|kg }}{% endif %}{% if pi.cobra_por_volumen %} · por volumen{% endif %}</small>
+            <br><small>Facturado: {{ (guia.peso_base or 'no informado').replace('_',' ')|lower }}</small>
+            {% if pi.facturado_mayor %}<br><span class="badge warn">+{{ pi.excedente_kg|kg }} facturados de más</span>{% elif pi.facturado_kg is not none %}<br><span class="badge ok">Peso dentro de lo cotizado</span>{% endif %}
+          {% else %}<strong class="mono">{{ (guia.peso_facturado_kg or '—')|kg }}</strong><br><small>{{ (guia.peso_base or 'no informado').replace('_',' ')|lower }}</small>{% if guia.tracking_normalizado %}<br><small>Sin peso inicial: la guía no está vinculada.</small>{% endif %}{% endif %}</td>
           <td>
             {% if guia.referencias_tauro_2026 %}
               <div style="padding:9px 10px;margin-bottom:9px;border:1px solid rgba(65,210,150,.28);border-radius:10px;background:rgba(65,210,150,.07);">

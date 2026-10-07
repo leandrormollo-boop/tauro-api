@@ -2502,6 +2502,25 @@ def parsear_lineas_factura_texto(
     return items
 
 
+def pesos_iniciales_guia(solicitud: dict[str, Any]) -> dict[str, Any]:
+    """Peso real, volumétrico y facturable (el mayor) de una guía.
+
+    Regla de Leandro (07/10/2026): el peso que queda asociado a la guía es
+    el mayor entre el real declarado y el volumétrico de sus bultos.
+    """
+    from servicios.pesos_envio import pesos_de_solicitud
+    resumen = pesos_de_solicitud(solicitud)
+    declarado = _decimal(solicitud.get("peso_kg") or 0, "Peso declarado")
+    real = resumen["real_total_kg"] if resumen["real_total_kg"] > 0 else declarado
+    volumetrico = resumen["volumetrico_total_kg"]
+    facturable = max(resumen["facturable_total_kg"], declarado, real)
+    return {
+        "real": real if real > 0 else None,
+        "volumetrico": volumetrico if volumetrico > 0 else None,
+        "facturable": facturable if facturable > 0 else None,
+    }
+
+
 def registrar_snapshot_manual_ars(
     solicitud_id: int,
     *,
@@ -2515,7 +2534,7 @@ def registrar_snapshot_manual_ars(
             cur.execute(
                 """
                 SELECT id, coti_id, courier, servicio_courier,
-                       precio_tauro_ars, peso_kg, bultos
+                       precio_tauro_ars, peso_kg, bultos, largo_cm, ancho_cm, alto_cm
                 FROM solicitudes_guia WHERE id = %s
                 """,
                 (int(solicitud_id),),
@@ -2528,6 +2547,7 @@ def registrar_snapshot_manual_ars(
         raise ConciliacionCourierError(
             "El costo estimado supera el precio aceptado; revisá la base histórica."
         )
+    pesos = pesos_iniciales_guia(dict(solicitud))
     return registrar_snapshot_cotizacion(
         solicitud_id=int(solicitud_id),
         coti_id=solicitud.get("coti_id"),
@@ -2538,8 +2558,9 @@ def registrar_snapshot_manual_ars(
         costo_courier_estimado=costo,
         precio_cliente_inicial_ars=precio,
         margen_tauro_protegido_ars=precio - costo,
-        peso_real_cotizado_kg=solicitud.get("peso_kg"),
-        peso_facturable_cotizado_kg=solicitud.get("peso_kg"),
+        peso_real_cotizado_kg=pesos["real"],
+        peso_volumetrico_cotizado_kg=pesos["volumetrico"],
+        peso_facturable_cotizado_kg=pesos["facturable"],
         bultos=solicitud.get("bultos") or [],
         origen_calculo={"fuente": "admin_base_historica"},
         actor=actor,
@@ -2609,6 +2630,8 @@ def listar_control_envios(
                        snap.id AS snapshot_id,
                        snap.costo_courier_estimado_ars,
                        snap.margen_tauro_protegido_ars,
+                       snap.peso_real_cotizado_kg, snap.peso_volumetrico_cotizado_kg,
+                       snap.peso_facturable_cotizado_kg,
                        COALESCE(mc.confirmados, 0) AS matches_confirmados,
                        COALESCE(mc.propuestos, 0) AS matches_propuestos,
                        con.id AS conciliacion_id,
@@ -2992,6 +3015,44 @@ def _agrupar_documentos_del_envio(
     return resultado
 
 
+def comparar_pesos_guia(match: dict[str, Any] | None, peso_facturado: Any) -> dict[str, Any] | None:
+    """Peso inicial (real, volumétrico, facturable) contra el facturado.
+
+    ``excedente_kg`` > 0 significa que el operador facturó más kilos que los
+    cotizados: el aviso que pide Leandro para mirar la diferencia.
+    """
+    if not match:
+        return None
+    facturable = match.get("peso_facturable_cotizado_kg")
+    if facturable is None:
+        facturable = match.get("peso_declarado_kg")
+    if facturable is None:
+        return None
+    facturable = _decimal(facturable, "Peso facturable").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    real = match.get("peso_real_cotizado_kg")
+    volumetrico = match.get("peso_volumetrico_cotizado_kg")
+    facturado = (
+        _decimal(peso_facturado, "Peso facturado").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if peso_facturado is not None else None
+    )
+    excedente = (facturado - facturable) if facturado is not None else None
+    return {
+        "facturable_kg": facturable,
+        "real_kg": _decimal(real, "Peso real").quantize(Decimal("0.01")) if real is not None else None,
+        "volumetrico_kg": (
+            _decimal(volumetrico, "Peso volumétrico").quantize(Decimal("0.01"))
+            if volumetrico is not None else None
+        ),
+        "cobra_por_volumen": (
+            volumetrico is not None and real is not None
+            and _decimal(volumetrico, "v") > _decimal(real, "r")
+        ),
+        "facturado_kg": facturado,
+        "excedente_kg": excedente.quantize(Decimal("0.01")) if excedente is not None else None,
+        "facturado_mayor": bool(excedente is not None and excedente > Decimal("0.009")),
+    }
+
+
 def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -3045,10 +3106,13 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                        m.evidencia_uri, i.signo AS item_signo,
                        m.solicitud_id, m.motivo_rechazo,
                        m.creado_por, m.confirmado_por, m.confirmado_at,
-                       s.cliente_id, s.tracking
+                       s.cliente_id, s.tracking, s.peso_kg AS peso_declarado_kg,
+                       snap.peso_real_cotizado_kg, snap.peso_volumetrico_cotizado_kg,
+                       snap.peso_facturable_cotizado_kg
                   FROM factura_courier_item_matches m
                   JOIN facturas_courier_items i ON i.id = m.item_id
                   JOIN solicitudes_guia s ON s.id = m.solicitud_id
+                  LEFT JOIN envio_cotizacion_snapshots snap ON snap.solicitud_id = s.id
                  WHERE i.factura_id = %s
                  ORDER BY i.linea_numero, m.id
                 """,
@@ -3097,6 +3161,13 @@ def obtener_factura_courier_control(factura_id: int) -> dict[str, Any] | None:
                 else:
                     grupo["bandeja"] = None
                     grupo["bandeja_pendiente"] = False
+                # Peso inicial de la guía (el mayor entre real y volumétrico al
+                # emitirse) contra el facturado por el operador.
+                grupo["peso_inicial"] = comparar_pesos_guia(
+                    next((m for m in grupo["matches"]
+                          if m["match_estado"] in ("PROPUESTO", "CONFIRMADO")), None),
+                    grupo.get("peso_facturado_kg"),
+                )
             resultado["cuadres"] = cuadres_factura(cur, int(factura_id))
             resultado["posibles_duplicadas"] = posibles_duplicadas(cur, int(factura_id))
             resultado["bandejas_pendientes"] = sum(
@@ -3373,6 +3444,7 @@ def cerrar_sin_costo_inicial(
                 """
                 SELECT s.id, s.cliente_id, s.courier, s.coti_id, s.servicio_courier,
                        s.precio_tauro_ars, s.peso_kg, s.bultos, s.estado,
+                       s.largo_cm, s.ancho_cm, s.alto_cm,
                        e.estado AS cargo_estado, e.monto_ars AS cargo_monto_ars,
                        (SELECT id FROM envio_cotizacion_snapshots WHERE solicitud_id = s.id) AS snapshot_id
                   FROM solicitudes_guia s
@@ -3438,6 +3510,7 @@ def cerrar_sin_costo_inicial(
             f"El costo real (${costo_real:,.2f}) supera el precio cobrado (${precio:,.2f}). "
             "Cargá el costo inicial a mano y decidí la diferencia."
         )
+    pesos = pesos_iniciales_guia(dict(solicitud))
     snapshot = registrar_snapshot_cotizacion(
         solicitud_id=int(solicitud_id),
         coti_id=solicitud.get("coti_id"),
@@ -3448,8 +3521,9 @@ def cerrar_sin_costo_inicial(
         costo_courier_estimado=costo_real,
         precio_cliente_inicial_ars=precio,
         margen_tauro_protegido_ars=precio - costo_real,
-        peso_real_cotizado_kg=solicitud.get("peso_kg"),
-        peso_facturable_cotizado_kg=solicitud.get("peso_kg"),
+        peso_real_cotizado_kg=pesos["real"],
+        peso_volumetrico_cotizado_kg=pesos["volumetrico"],
+        peso_facturable_cotizado_kg=pesos["facturable"],
         bultos=solicitud.get("bultos") or [],
         origen_calculo={"fuente": "admin_sin_costo_inicial", "motivo": motivo, "actor": actor},
         actor=actor,

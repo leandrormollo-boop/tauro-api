@@ -632,3 +632,82 @@ def test_envio_vigente_sin_factura_alerta_al_dia_31(conciliacion_db):
     conciliacion.matchear_items_exactos(fc["id"])
     despues = conciliacion.listar_control_envios(cliente="WAIMAO", pagina=1, hoy=hoy)
     assert {e["solicitud_id"]: e["control_estado"] for e in despues["items"]}[viejo] == "MATCH_PENDIENTE"
+
+
+# ── Peso inicial vs facturado ────────────────────────────────────────────────
+
+def test_peso_inicial_es_el_mayor_entre_real_y_volumetrico_en_caminos_manuales(conciliacion_db):
+    db = conciliacion_db
+    _cliente(db, "WAIMAO")
+    # Caja liviana y grande: 2 kg reales, 60×40×30 → 14,4 kg volumétricos.
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO solicitudes_guia (
+                cliente_id, producto_alias, destino_pais, dest_nombre, dest_direccion,
+                dest_ciudad, dest_zip, courier, tracking, coti_id, precio_tauro_ars,
+                estado, peso_kg, largo_cm, ancho_cm, alto_cm
+            ) VALUES ('WAIMAO','Ropa','US','Dest','Calle 1','Miami','33101','DHL',
+                      '4100000001','COTI-VOL',100000,'DESPACHADO',2,60,40,30)
+            RETURNING id
+            """
+        )
+        sid = int(cur.fetchone()["id"])
+    _crear_cargo_activo(db, sid, monto="100000")
+    pesos = conciliacion.pesos_iniciales_guia({"peso_kg": 2, "largo_cm": 60, "ancho_cm": 40, "alto_cm": 30, "courier": "DHL"})
+    assert pesos["real"] == D("2.00") and pesos["volumetrico"] == D("14.40") and pesos["facturable"] == D("14.40")
+    # Base histórica manual: congela 14,4 kg como peso inicial, no 2 kg.
+    conciliacion.registrar_snapshot_manual_ars(sid, costo_estimado_ars="60000", actor="admin@test")
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT peso_real_cotizado_kg, peso_volumetrico_cotizado_kg, peso_facturable_cotizado_kg FROM envio_cotizacion_snapshots WHERE solicitud_id=%s", (sid,))
+        snap = cur.fetchone()
+    assert snap["peso_real_cotizado_kg"] == D("2.000")
+    assert snap["peso_volumetrico_cotizado_kg"] == D("14.400")
+    assert snap["peso_facturable_cotizado_kg"] == D("14.400")
+
+    # La factura trae 16 kg: la ficha compara 14,4 → 16 y marca el excedente.
+    fc = conciliacion.registrar_factura_courier(
+        courier="DHL", tipo_documento="FC", numero="1700A00000318", moneda="ARS",
+        total="70000", actor="parser@test", archivo_sha256="9" * 64,
+        items=[{"linea_numero": 1, "tracking": "4100000001", "concepto_tipo": "FLETE",
+                "importe": "70000", "peso_real_kg": "2", "peso_volumetrico_kg": "16",
+                "peso_facturado_kg": "16", "peso_base": "VOLUMETRICO"}],
+    )
+    conciliacion.matchear_items_exactos(fc["id"])
+    detalle = conciliacion.obtener_factura_courier_control(fc["id"])
+    pi = detalle["envios_facturados"][0]["peso_inicial"]
+    assert pi["facturable_kg"] == D("14.40") and pi["cobra_por_volumen"] is True
+    assert pi["facturado_kg"] == D("16.00") and pi["excedente_kg"] == D("1.60") and pi["facturado_mayor"] is True
+    control_envios = conciliacion.listar_control_envios(cliente="WAIMAO", pagina=1)
+    fila = control_envios["items"][0]
+    assert fila["peso_facturable_cotizado_kg"] == D("14.400")
+
+    # Sin medidas, el peso inicial es el declarado y nunca menor.
+    assert conciliacion.pesos_iniciales_guia({"peso_kg": 3, "courier": "DHL"}) == {
+        "real": D("3.00"), "volumetrico": None, "facturable": D("3.00"),
+    }
+    # Caja pesada y chica: manda el real.
+    assert conciliacion.pesos_iniciales_guia({"peso_kg": 20, "largo_cm": 20, "ancho_cm": 20, "alto_cm": 20, "courier": "DHL"})["facturable"] == D("20.00")
+
+
+def test_cargar_envio_externo_con_medidas_congela_el_peso_volumetrico(conciliacion_db, monkeypatch):
+    db = conciliacion_db
+    _cliente(db, "WAIMAO")
+    from servicios import solicitudes_guia as sg
+    monkeypatch.setattr(sg, "get_conn", db)
+    monkeypatch.setattr(sg, "dolar_ars", lambda: 1500.0, raising=False)
+    import servicios.cotizador as cotizador
+    monkeypatch.setattr(cotizador, "dolar_ars", lambda: 1500.0, raising=False)
+    resultado = sg.cargar_envio_externo(
+        cliente_id="WAIMAO", dest_nombre="Dest", dest_ciudad="Miami", destino_pais="US",
+        producto="Ropa", cantidad=1, peso_kg=2, tracking="4200000001", precio_tauro_ars=100000,
+        courier="DHL", costo_courier_estimado_ars=60000, largo_cm=60, ancho_cm=40, alto_cm=30,
+    )
+    assert resultado.get("ok"), resultado
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT peso_real_cotizado_kg, peso_volumetrico_cotizado_kg, peso_facturable_cotizado_kg FROM envio_cotizacion_snapshots WHERE solicitud_id=%s", (resultado["solicitud_id"],))
+        snap = cur.fetchone()
+    assert snap is not None
+    assert snap["peso_facturable_cotizado_kg"] == D("14.400")
+    assert snap["peso_volumetrico_cotizado_kg"] == D("14.400")
+    assert snap["peso_real_cotizado_kg"] == D("2.000")

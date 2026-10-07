@@ -3918,6 +3918,9 @@ async def admin_envio_realizado_post(
     producto: str = Form(...),
     cantidad: str = Form("1"),
     peso_kg: str = Form("1"),
+    largo_cm: str = Form(""),
+    ancho_cm: str = Form(""),
+    alto_cm: str = Form(""),
     tracking: str = Form(...),
     precio_ars: str = Form(...),
     costo_courier_estimado_ars: str = Form(...),
@@ -3946,6 +3949,17 @@ async def admin_envio_realizado_post(
     try:
         cantidad_num = _entero_form(cantidad, "Cajas", minimo=1)
         peso_num = _numero_form(peso_kg, "Peso", minimo=0.01)
+        # Medidas opcionales: las tres o ninguna. Con ellas el peso inicial
+        # de la guía es el mayor entre el real y el volumétrico.
+        medidas = [str(v or "").strip() for v in (largo_cm, ancho_cm, alto_cm)]
+        if any(medidas) and not all(medidas):
+            raise ValueError("Cargá las tres medidas de la caja (largo, ancho y alto) o ninguna.")
+        largo_num, ancho_num, alto_num = (
+            (_numero_form(largo_cm, "Largo", minimo=0.1),
+             _numero_form(ancho_cm, "Ancho", minimo=0.1),
+             _numero_form(alto_cm, "Alto", minimo=0.1))
+            if all(medidas) else (0, 0, 0)
+        )
         precio_num = _numero_form(
             precio_ars, "Precio al cliente", importe=True, minimo=0.01
         )
@@ -3980,6 +3994,7 @@ async def admin_envio_realizado_post(
             remitente_nombre=remitente_nombre,
             costo_courier_estimado_ars=costo_estimado_num,
             fecha_envio=fecha_real,
+            largo_cm=largo_num, ancho_cm=ancho_num, alto_cm=alto_num,
         )
     except Exception as e:
         resultado = {"ok": False, "error": str(e)}

@@ -34,6 +34,24 @@ class IdempotencyConflictError(ValueError):
     """La misma clave externa intentó crear dos pedidos distintos."""
 
 
+def _pesos_iniciales(solicitud: dict) -> dict:
+    """Peso real, volumétrico y facturable (el mayor) de la guía al emitirse.
+
+    Usa los bultos con medidas si los hay; si no, el peso declarado. Nunca
+    devuelve un facturable menor al peso declarado.
+    """
+    resumen = pesos_de_solicitud(solicitud)
+    declarado = Decimal(str(solicitud.get("peso_kg") or 0))
+    real = resumen["real_total_kg"] if resumen["real_total_kg"] > 0 else declarado
+    volumetrico = resumen["volumetrico_total_kg"]
+    facturable = max(resumen["facturable_total_kg"], declarado, real)
+    return {
+        "real": real if real > 0 else None,
+        "volumetrico": volumetrico if volumetrico > 0 else None,
+        "facturable": facturable if facturable > 0 else None,
+    }
+
+
 def _congelar_cotizacion_aceptada_con_cursor(
     cur,
     solicitud: dict,
@@ -103,9 +121,13 @@ def _congelar_cotizacion_aceptada_con_cursor(
         moneda = "USD"
         markup_tipo = cotizacion.get("markup_tipo")
         markup_valor = cotizacion.get("markup_valor")
-        peso_real = cotizacion.get("peso_kg")
-        peso_volumetrico = None
-        peso_facturable = cotizacion.get("peso_usado_kg")
+        pesos = _pesos_iniciales(solicitud)
+        peso_real = cotizacion.get("peso_kg") or pesos["real"]
+        peso_volumetrico = pesos["volumetrico"]
+        # El peso que queda asociado a la guía es el mayor entre el real y
+        # el volumétrico (Leandro, 07/10/2026). La cotización ya lo trae;
+        # si no, sale de los bultos declarados.
+        peso_facturable = cotizacion.get("peso_usado_kg") or pesos["facturable"]
         fuente = "cotizaciones"
     elif costo_estimado_manual_ars is not None:
         costo_nativo = Decimal(str(costo_estimado_manual_ars))
@@ -114,9 +136,10 @@ def _congelar_cotizacion_aceptada_con_cursor(
         moneda = "ARS"
         markup_tipo = None
         markup_valor = None
-        peso_real = solicitud.get("peso_kg")
-        peso_volumetrico = None
-        peso_facturable = solicitud.get("peso_kg")
+        pesos = _pesos_iniciales(solicitud)
+        peso_real = pesos["real"]
+        peso_volumetrico = pesos["volumetrico"]
+        peso_facturable = pesos["facturable"]
         fuente = origen_costo
     else:
         return False
@@ -2393,6 +2416,9 @@ def cargar_envio_externo(
     remitente_nombre: str = "",
     costo_courier_estimado_ars: Optional[float] = None,
     fecha_envio: Optional[date] = None,
+    largo_cm: float = 0,
+    ancho_cm: float = 0,
+    alto_cm: float = 0,
 ) -> dict:
     """
     Alta de un envío YA REALIZADO por un canal externo (hoy: los que salen
@@ -2494,7 +2520,11 @@ def cargar_envio_externo(
             dest_zip="",
             observaciones=(observaciones or "")[:400],
             peso_kg=max(float(peso_kg or 0.5), 0.1),
-            largo_cm=0, ancho_cm=0, alto_cm=0,
+            # Medidas opcionales: con ellas el peso inicial de la guía es el
+            # mayor entre el real y el volumétrico, como al cotizar.
+            largo_cm=max(float(largo_cm or 0), 0),
+            ancho_cm=max(float(ancho_cm or 0), 0),
+            alto_cm=max(float(alto_cm or 0), 0),
             valor_declarado_usd=0,
             ruta_id=(
                 f"{(origen_pais or 'AR').strip().upper()[:2]}-"
