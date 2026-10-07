@@ -21,6 +21,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlencode
+from zoneinfo import ZoneInfo
 
 from fastapi import (
     APIRouter, BackgroundTasks, Request, Form, Cookie, Depends, File, UploadFile,
@@ -3890,6 +3891,7 @@ def admin_envio_realizado_form(
         context={
             "seccion": "envio_realizado", "clientes": _get_clientes_lista(),
             "form": form,
+            "today": datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date().isoformat(),
         },
     )
 
@@ -3913,6 +3915,7 @@ async def admin_envio_realizado_post(
     remitente_nombre: str = Form(""),
     borrador_token: str = Form(""),
     observaciones: str = Form(""),
+    fecha_envio: str = Form(""),
     guia_pdf: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
@@ -3941,6 +3944,12 @@ async def admin_envio_realizado_post(
             importe=True,
             minimo=0,
         )
+        fecha_real = None
+        if str(fecha_envio or "").strip():
+            try:
+                fecha_real = date.fromisoformat(str(fecha_envio).strip())
+            except ValueError:
+                raise ValueError("La fecha del envío no es válida.") from None
         pdf = await leer_comprobante_con_tope(guia_pdf)
         resultado = cargar_envio_externo(
             cliente_id=cliente_id,
@@ -3959,6 +3968,7 @@ async def admin_envio_realizado_post(
             origen_pais=origen_pais,
             remitente_nombre=remitente_nombre,
             costo_courier_estimado_ars=costo_estimado_num,
+            fecha_envio=fecha_real,
         )
     except Exception as e:
         resultado = {"ok": False, "error": str(e)}
