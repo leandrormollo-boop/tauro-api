@@ -15,7 +15,7 @@ _MOTIVOS = {
     "RECARGO": "Recargo del courier",
     "DESCUENTO": "Descuento del courier",
     "AJUSTE_COMERCIAL": "Ajuste comercial de TAURO",
-    "OTRO": "Diferencia del courier",
+    "OTRO": "Diferencia entre lo cotizado y lo facturado por el courier",
 }
 
 
@@ -89,6 +89,8 @@ def presentar_diferencia(datos: Mapping[str, Any] | None) -> dict[str, Any]:
         "leyenda": (
             "TAURO aplicó este cambio comercial sin modificar la cotización original."
             if origen == "AJUSTE_COMERCIAL_ADMIN"
-            else "TAURO traslada la diferencia del courier sin agregar margen."
+            else "TAX de importación de esta guía, según la liquidación del courier."
+            if motivo == "IMPUESTOS"
+            else "Diferencia entre lo cotizado y lo facturado por el courier, trasladada sin margen."
         ),
     }

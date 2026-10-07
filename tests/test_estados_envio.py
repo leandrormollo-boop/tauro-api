@@ -46,14 +46,14 @@ def test_colores_de_tracking_siguen_la_regla_operativa():
         assert presentado["estado_tracking_ui"]["clase"] == clase
 
 
-def test_recolectado_es_violeta_y_entregado_permanece_verde():
+def test_transito_es_ambar_y_entregado_permanece_verde():
     recolectado = presentar_estados_envio({"estado": "DESPACHADO"})
     entregado = presentar_estados_envio({"estado": "ENTREGADO"})
 
     assert recolectado["estado_operacion_ui"] == {
         "codigo": "DESPACHADO",
-        "label": "Recolectado",
-        "clase": "accent",
+        "label": "En tránsito",
+        "clase": "warn",
     }
     assert entregado["estado_operacion_ui"] == {
         "codigo": "ENTREGADO",
@@ -89,17 +89,21 @@ def test_plantillas_no_duplican_mapas_de_estados():
     for relativo in (
         "templates/portal/home.html",
         "templates/portal/envios.html",
+        "templates/portal/envio_detalle.html",
     ):
         contenido = (ROOT / relativo).read_text()
         assert "set estados =" not in contenido
         assert "estado_cliente_ui" in contenido
 
 
-def test_detalle_nombra_recolectado_sin_exponer_despachado():
-    contenido = (ROOT / "templates/portal/envio_detalle.html").read_text()
-
-    assert '"DESPACHADO": "Recolectado"' in contenido
-    assert '"DESPACHADO": "Despachado"' not in contenido
+def test_stepper_usa_los_hitos_canonicos():
+    from servicios.estados_envio import HITOS_ENVIO_UI
+    assert [hito['label'] for hito in HITOS_ENVIO_UI] == [
+        'Solicitado', 'Guía lista', 'En tránsito', 'Entregado',
+    ]
+    contenido = (ROOT / 'templates/portal/envio_detalle.html').read_text()
+    assert 'for hito in hitos_envio_ui' in contenido
+    assert 'estados_labels' not in contenido
 
 
 def test_schema_restringe_estados_operativos():

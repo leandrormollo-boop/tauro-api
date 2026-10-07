@@ -31,8 +31,8 @@
           <td><strong>{{ p.alias_interno }}</strong></td>
           <td style="color:var(--fg-3)">{{ p.nombre_invoice }}</td>
           <td class="mono">{{ p.hs_code }}</td>
-          <td class="mono">{{ p.peso_kg }}</td>
-          <td class="mono">$ {{ p.valor_usd_default }}</td>
+          <td class="mono">{{ p.peso_kg|kg }}</td>
+          <td class="mono">{{ p.valor_usd_default|dinero_usd }}</td>
           <td class="mono" style="font-size:11px">{{ p.created_at.strftime("%d/%m %H:%M") if p.created_at else "—" }}</td>
           <td style="display:flex;gap:6px;">
             <form method="POST" action="/admin/productos/{{ p.id }}/aprobar" style="display:inline;">
@@ -72,8 +72,8 @@
           <td><strong>{{ p.alias_interno }}</strong></td>
           <td style="color:var(--fg-3)">{{ p.nombre_invoice }}</td>
           <td class="mono">{{ p.hs_code }}</td>
-          <td class="mono" style="font-size:11px">{{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }}</td>
-          <td class="mono">{{ p.peso_kg }}</td>
+          <td class="mono" style="font-size:11px">{{ (p.largo_cm)|medida_cm }} × {{ (p.ancho_cm)|medida_cm }} × {{ (p.alto_cm)|medida_cm }} cm</td>
+          <td class="mono">{{ p.peso_kg|kg }}</td>
           <td>
             <span class="badge {% if p.activo %}ok{% else %}warn{% endif %}">
               {{ "Aprobado" if p.activo else "Pendiente" }}

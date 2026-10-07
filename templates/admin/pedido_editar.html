@@ -78,20 +78,20 @@
     <div class="form-grid-3">
       <div class="form-group">
         <label>Peso total (kg)</label>
-        <input type="text" name="peso_kg" inputmode="decimal" data-numero="decimal" value="{{ '%g'|format(s.peso_kg or 0) }}">
+        <input type="text" name="peso_kg" inputmode="decimal" data-numero="decimal" value="{{ (s.peso_kg or 0)|medida_cm }}">
       </div>
       <div class="form-group">
         <label>Largo × Ancho × Alto (cm)</label>
         <div style="display:flex;gap:6px;">
-          <input type="text" name="largo_cm" inputmode="decimal" data-numero="decimal" value="{{ '%g'|format(s.largo_cm or 0) }}">
-          <input type="text" name="ancho_cm" inputmode="decimal" data-numero="decimal" value="{{ '%g'|format(s.ancho_cm or 0) }}">
-          <input type="text" name="alto_cm" inputmode="decimal" data-numero="decimal" value="{{ '%g'|format(s.alto_cm or 0) }}">
+          <input type="text" name="largo_cm" inputmode="decimal" data-numero="decimal" value="{{ (s.largo_cm or 0)|medida_cm }}">
+          <input type="text" name="ancho_cm" inputmode="decimal" data-numero="decimal" value="{{ (s.ancho_cm or 0)|medida_cm }}">
+          <input type="text" name="alto_cm" inputmode="decimal" data-numero="decimal" value="{{ (s.alto_cm or 0)|medida_cm }}">
         </div>
       </div>
       <div class="form-group">
         <label>Valor declarado (USD)</label>
         <input type="text" name="valor_declarado_usd" inputmode="decimal" data-numero="monto"
-               value="{{ '%g'|format(s.valor_declarado_usd or 0) }}">
+               value="{{ (s.valor_declarado_usd or 0)|numero_ars }}">
       </div>
     </div>
     <p style="color:var(--fg-4);font-size:12px;margin:2px 0 18px;">

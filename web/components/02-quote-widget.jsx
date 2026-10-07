@@ -97,11 +97,87 @@ const PAISES_FALLBACK = [
   { value: "ES", label: "España" },
 ];
 
-const MENSAJE_COTIZACION_NACIONAL =
-  "Este formulario todavía no cotiza envíos nacionales. OCA está preparada para cuentas habilitadas; solicitá la activación desde el portal. Andreani continúa pendiente.";
-
 function normalizeCountry(value) {
   return String(value ?? "").trim().toUpperCase();
+}
+
+const ACCOUNT_SERVICES_HELP =
+  "La cotización y la emisión dependen de los servicios habilitados en tu cuenta.";
+const ESTIMATED_RATE_HELP =
+  "Es una referencia de precio. La emisión de guías no está habilitada para esta opción.";
+
+function operatorStatusCopy(operator) {
+  if (operator.estado === "tarifario_publico") {
+    return {
+      label: "Cotización estimada",
+      help: ESTIMATED_RATE_HELP,
+    };
+  }
+  if (
+    operator.estado === "disponible_segun_cuenta" ||
+    operator.estado === "integracion_preparada"
+  ) {
+    return {
+      label: "Según cuenta",
+      help: ACCOUNT_SERVICES_HELP,
+    };
+  }
+  return {
+    label: "No disponible aquí",
+    help: "Este operador todavía no ofrece cotizaciones en esta web.",
+  };
+}
+
+function estimatedDeliveryLabel(value) {
+  const match = String(value ?? "").trim().match(
+    /^(\d+)(?:\s*(?:-|–|a)\s*(\d+))?\s*(?:d[ií]as?)?$/i,
+  );
+  if (!match) return "Plazo a confirmar";
+  const inicio = Number(match[1]);
+  const fin = match[2] ? Number(match[2]) : null;
+  if (inicio <= 0 || (fin !== null && (fin <= 0 || fin < inicio))) {
+    return "Plazo a confirmar";
+  }
+  const plazo = `${inicio}${fin !== null ? `–${fin}` : ""}`;
+  return `${plazo} ${inicio === 1 && fin === null ? "día" : "días"}`;
+}
+
+function quotedCountryLabel(value) {
+  const label = String(value ?? "");
+  return /\(FK\)\s*$/i.test(label) ? "Islas Malvinas" : label;
+}
+
+function publicApiError(data, fallback) {
+  const detail = data && typeof data.detail === "string" ? data.detail.trim() : "";
+  return detail || fallback;
+}
+
+function normalizeArgentinaPostalCode(value) {
+  const code = String(value ?? "").trim().toUpperCase().replace(/\s+/g, "");
+  return /^(?:\d{4}|[A-Z]\d{4}(?:[A-Z]{3})?)$/.test(code) ? code : "";
+}
+
+function effectiveArgentinaPostalCode(value) {
+  const code = normalizeArgentinaPostalCode(value);
+  return /^\d{4}$/.test(code) ? code : code.slice(1, 5);
+}
+
+function locationLookupMode(value) {
+  return /^[A-Z]?\d/i.test(String(value ?? "").trim()) ? "postal" : "city";
+}
+
+function nationalLocationLabel(location) {
+  if (!location) return "";
+  const city = String(location.city || "").trim();
+  const postal = String(location.postal_code || "").trim();
+  return city && postal ? `${city} · ${postal}` : city || postal || String(location.input || "").trim();
+}
+
+function formatArs(value) {
+  const amount = Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(amount)
+    ? amount.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : String(value ?? "");
 }
 
 function OperatorStatus() {
@@ -129,15 +205,16 @@ function OperatorStatus() {
     }}>
       {groups.map(([label, operators]) => (
         <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span style={{ minWidth: 74, color: "var(--fg-4)", fontFamily: "var(--font-mono)", fontSize: 9, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</span>
+          <span style={{ minWidth: 74, color: "#AAA3B5", fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: ".06em" }}>{label}</span>
           {operators.map((operator) => {
             const ready = operator.estado === "disponible_segun_cuenta";
             const prepared = operator.estado === "integracion_preparada";
+            const status = operatorStatusCopy(operator);
             return (
-              <span key={operator.id} title={operator.estado_label} style={{
+              <span key={operator.id} style={{
                 display: "inline-flex", alignItems: "center", gap: 5,
                 padding: "3px 7px", border: "1px solid var(--line-soft)",
-                borderRadius: 99, color: "var(--fg-3)", fontSize: 10,
+                borderRadius: 99, color: "#AAA3B5", fontSize: 10,
               }}>
                 <i aria-hidden="true" style={{
                   width: 6, height: 6, borderRadius: 99,
@@ -146,11 +223,12 @@ function OperatorStatus() {
                 }}/>
                 {operator.nombre}
                 <small style={{
-                  color: "var(--fg-4)", fontFamily: "var(--font-mono)",
-                  fontSize: 7, letterSpacing: ".03em", textTransform: "uppercase",
+                  color: "#AAA3B5", fontFamily: "var(--font-mono)",
+                  fontSize: 10, letterSpacing: ".03em", textTransform: "uppercase",
                 }}>
-                  {operator.estado_corto || operator.estado_label}
+                  {status.label}
                 </small>
+                <InfoAyuda label={`${operator.nombre}: ${status.label}`} text={status.help} />
               </span>
             );
           })}
@@ -161,13 +239,12 @@ function OperatorStatus() {
 }
 
 function QuoteWidget({ compact = false }) {
-  // Cotizador internacional en ambos sentidos y entre terceros países:
-  // AR→CN, CN→AR y CN→IN. AR→AR va por el circuito nacional OCA/Andreani
-  // y se bloquea también acá, antes del request. Los botones son atajos;
-  // los dos combos siguen siendo la fuente de verdad.
+  const [ambito, setAmbito] = useStateQ("internacional");
   const [origen, setOrigen] = useStateQ("AR");
   const [destino, setDestino] = useStateQ("US");
   const [paises, setPaises] = useStateQ(PAISES_FALLBACK);
+  const [origenNacional, setOrigenNacional] = useStateQ({ input: "", city: "", postal_code: "", province: "" });
+  const [destinoNacional, setDestinoNacional] = useStateQ({ input: "", city: "", postal_code: "", province: "" });
 
   useEffectQ(() => {
     let vivo = true;
@@ -185,40 +262,102 @@ function QuoteWidget({ compact = false }) {
   const [largo, setLargo] = useStateQ(30);
   const [ancho, setAncho] = useStateQ(20);
   const [alto, setAlto] = useStateQ(10);
-  const [valor, setValor] = useStateQ(100);
+  const [valorInternacional, setValorInternacional] = useStateQ(100);
+  const [valorNacional, setValorNacional] = useStateQ(100);
+  const [cantidadBultos, setCantidadBultos] = useStateQ(1);
   const [step, setStep] = useStateQ("form");
   const [result, setResult] = useStateQ(null);
   const [error, setError] = useStateQ(null);
+  const quoteRequestRef = useRefQ(null);
+
+  useEffectQ(() => () => quoteRequestRef.current?.abort(), []);
+
+  const invalidateQuote = () => {
+    quoteRequestRef.current?.abort();
+    quoteRequestRef.current = null;
+    setStep("form");
+    setResult(null);
+    setError(null);
+  };
+
+  const changeAmbito = (next) => {
+    if (next === ambito) return;
+    invalidateQuote();
+    setAmbito(next);
+  };
+
+  const updateField = (setter) => (value) => {
+    invalidateQuote();
+    setter(value);
+  };
+
+  const updateNationalLocation = (setter, current) => (next) => {
+    const previousPostal = effectiveArgentinaPostalCode(current?.postal_code || current?.input);
+    const nextPostal = effectiveArgentinaPostalCode(next?.postal_code || next?.input);
+    if (previousPostal !== nextPostal) invalidateQuote();
+    setter(next);
+  };
+
+  const invertNationalRoute = () => {
+    invalidateQuote();
+    const previousOrigin = origenNacional;
+    setOrigenNacional(destinoNacional);
+    setDestinoNacional(previousOrigin);
+  };
 
   const calculate = async () => {
     setError(null);
+    const controller = new AbortController();
+    quoteRequestRef.current?.abort();
+    quoteRequestRef.current = controller;
     try {
-      const origenIso = normalizeCountry(origen);
-      const destinoIso = normalizeCountry(destino);
-      const paisesValidos = new Set(paises.map((pais) => normalizeCountry(pais.value)));
-      if (!paisesValidos.has(origenIso) || !paisesValidos.has(destinoIso)) {
-        throw new Error("Elegí países válidos para origen y destino.");
-      }
-      if (origenIso === "AR" && destinoIso === "AR") {
-        throw new Error(MENSAJE_COTIZACION_NACIONAL);
-      }
-
       const parsed = {
         peso: parseHumanNumber(peso),
         largo: parseHumanNumber(largo),
         ancho: parseHumanNumber(ancho),
         alto: parseHumanNumber(alto),
-        valor: parseHumanNumber(valor, { money: true }),
+        valor: parseHumanNumber(ambito === "nacional" ? valorNacional : valorInternacional, { money: true }),
       };
       if (Object.values(parsed).some((n) => !Number.isFinite(n) || n <= 0)) {
         throw new Error("Revisá peso, medidas y valor. Podés usar coma o punto.");
       }
       if (parsed.peso > 70) throw new Error("El peso máximo por caja es 70 kg.");
+      const cantidad = Number(cantidadBultos);
+      if (ambito === "nacional" && (!Number.isInteger(cantidad) || cantidad <= 0)) {
+        throw new Error("Ingresá una cantidad válida de bultos.");
+      }
       setStep("calculating");
-      const resp = await fetch(`${API_URL}/cotizar-web`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let endpoint;
+      let payload;
+      if (ambito === "nacional") {
+        const origenCp = normalizeArgentinaPostalCode(origenNacional.postal_code || origenNacional.input);
+        const destinoCp = normalizeArgentinaPostalCode(destinoNacional.postal_code || destinoNacional.input);
+        if (!origenCp || !destinoCp) {
+          throw new Error("Ingresá un código postal válido para origen y destino.");
+        }
+        endpoint = `${API_URL}/cotizar-web/nacional`;
+        payload = {
+          origen_cp: origenCp,
+          destino_cp: destinoCp,
+          cantidad_bultos: cantidad,
+          peso_kg: parsed.peso,
+          largo_cm: parsed.largo,
+          ancho_cm: parsed.ancho,
+          alto_cm: parsed.alto,
+          valor_declarado_ars: parsed.valor,
+        };
+      } else {
+        const origenIso = normalizeCountry(origen);
+        const destinoIso = normalizeCountry(destino);
+        const paisesValidos = new Set(paises.map((pais) => normalizeCountry(pais.value)));
+        if (!paisesValidos.has(origenIso) || !paisesValidos.has(destinoIso)) {
+          throw new Error("Elegí países válidos para origen y destino.");
+        }
+        if (origenIso === "AR" && destinoIso === "AR") {
+          throw new Error("Elegí Nacional para cotizar un envío dentro de Argentina.");
+        }
+        endpoint = `${API_URL}/cotizar-web`;
+        payload = {
           origen_pais: origenIso,
           destino_pais: destinoIso,
           peso_kg: parsed.peso,
@@ -226,19 +365,46 @@ function QuoteWidget({ compact = false }) {
           ancho_cm: parsed.ancho,
           alto_cm: parsed.alto,
           valor_declarado_usd: parsed.valor,
-        }),
+        };
+      }
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "Error al cotizar");
+      let data = null;
+      try { data = await resp.json(); } catch (_) { /* respuesta inválida */ }
+      if (!resp.ok) throw new Error(publicApiError(data, "No pudimos cotizar. Revisá los datos y probá de nuevo."));
+      if (!data || !Array.isArray(data.carriers)) {
+        throw new Error("No pudimos leer la cotización. Probá de nuevo.");
+      }
+      if (ambito === "nacional") {
+        const invalidNational = normalizeCountry(data.ambito) !== "NACIONAL" ||
+          normalizeCountry(data.moneda) !== "ARS" ||
+          data.carriers.length !== 1 || data.carriers[0]?.id !== "oca" ||
+          data.carriers.some((carrier) => (
+            normalizeCountry(carrier.moneda) !== "ARS" ||
+            !Number.isFinite(Number(carrier.precio_ars)) || Number(carrier.precio_ars) <= 0
+          ));
+        if (invalidNational) {
+          throw new Error("No pudimos validar la tarifa nacional. Probá de nuevo.");
+        }
+      }
+      if (quoteRequestRef.current !== controller) return;
       setResult(data);
       setStep("result");
     } catch (e) {
-      setError(e.message);
+      if (e?.name === "AbortError" || quoteRequestRef.current !== controller) return;
+      setError(e instanceof Error ? e.message : "No pudimos cotizar. Probá de nuevo.");
       setStep("form");
+    } finally {
+      if (quoteRequestRef.current === controller) quoteRequestRef.current = null;
     }
   };
 
   const reset = () => { setStep("form"); setResult(null); setError(null); };
+  const resultIsNational = normalizeCountry(result?.ambito) === "NACIONAL";
 
   return (
     <div id="cotizador" style={{ position: "relative", scrollMarginTop: 88 }}>
@@ -278,42 +444,74 @@ function QuoteWidget({ compact = false }) {
         )}
       </div>
 
-      <OperatorStatus />
+      <div className="tweb-sentido" role="group" aria-label="Tipo de envío">
+        {[["nacional", "Nacional"], ["internacional", "Internacional"]].map(([value, label]) => (
+          <button key={value} type="button" aria-pressed={ambito === value}
+                  className={`btn ${ambito === value ? "btn-primary" : "btn-ghost"}`}
+                  onClick={() => changeAmbito(value)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <PublicQuoteGlobe
+        mode={ambito}
+        origin={origen}
+        destination={destino}
+        countries={paises}
+        nationalOrigin={origenNacional}
+        nationalDestination={destinoNacional}
+        compact={step === "result"}
+        busy={step === "calculating"}
+      />
 
       {step !== "result" && (
-        <>
-          {/* Atajos del cotizador internacional: setean ambos combos. Los
-              combos siguen libres para rutas entre terceros países. */}
-          <div className="tweb-sentido" role="group" aria-label="Atajos de sentido">
-            <button type="button"
-                    className={`btn ${origen === "AR" && destino !== "AR" ? "btn-primary" : "btn-ghost"}`}
-                    onClick={() => { setOrigen("AR"); if (destino === "AR") setDestino("US"); }}>
-              Exportar
-            </button>
-            <button type="button"
-                    className={`btn ${destino === "AR" && origen !== "AR" ? "btn-primary" : "btn-ghost"}`}
-                    onClick={() => { setDestino("AR"); if (origen === "AR") setOrigen("CN"); }}>
-              Importar
-            </button>
-          </div>
+        <fieldset className="public-quote-fields" disabled={step === "calculating"}>
+          {ambito === "internacional" ? (
+            <>
+              <div className="tweb-sentido" role="group" aria-label="Atajos de sentido">
+                <button type="button"
+                        className={`btn ${origen === "AR" && destino !== "AR" ? "btn-primary" : "btn-ghost"}`}
+                        onClick={() => { updateField(setOrigen)("AR"); if (destino === "AR") setDestino("US"); }}>
+                  Exportar
+                </button>
+                <button type="button"
+                        className={`btn ${destino === "AR" && origen !== "AR" ? "btn-primary" : "btn-ghost"}`}
+                        onClick={() => { updateField(setDestino)("AR"); if (origen === "AR") setOrigen("CN"); }}>
+                  Importar
+                </button>
+              </div>
+              <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
+                <SelectField label="Origen" value={origen} onChange={updateField(setOrigen)} options={paises} />
+                <SelectField label="Destino" value={destino} onChange={updateField(setDestino)} options={paises} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 8 }}>
+                <NationalLocationField label="Origen en Argentina" value={origenNacional} onChange={updateNationalLocation(setOrigenNacional, origenNacional)} />
+                <NationalLocationField label="Destino en Argentina" value={destinoNacional} onChange={updateNationalLocation(setDestinoNacional, destinoNacional)} />
+              </div>
+              <button type="button" className="btn-link" onClick={invertNationalRoute}
+                      style={{ marginBottom: 14, fontSize: 12 }}>
+                Invertir ruta
+              </button>
+            </>
+          )}
 
-          <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
-            <SelectField label="Origen" value={origen} onChange={setOrigen} options={paises} />
-            <SelectField label="Destino" value={destino} onChange={setDestino} options={paises} />
-          </div>
-
-          <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
-            <Field label="Peso (kg)" help="Peso de la caja cerrada, con mercadería y embalaje. La tarifa también considera el peso volumétrico." value={peso} onChange={setPeso} inputMode="decimal" />
-            <Field label="Valor declarado (USD)" help="Valor total de la mercadería que enviás, expresado en dólares. Debe coincidir con la factura comercial." value={valor} onChange={setValor} inputMode="decimal" money />
+          <div className="tweb-campos-2" style={{ display: "grid", gridTemplateColumns: ambito === "nacional" ? "repeat(3, minmax(0,1fr))" : "minmax(0,1fr) minmax(0,1fr)", gap: 10, marginBottom: 12 }}>
+            {ambito === "nacional" && <Field label="Cantidad de bultos" value={cantidadBultos} onChange={updateField(setCantidadBultos)} inputMode="numeric" />}
+            <Field label={ambito === "nacional" ? "Peso por bulto (kg)" : "Peso (kg)"} help="Peso de la caja cerrada, con mercadería y embalaje. La tarifa también considera el peso volumétrico." value={peso} onChange={updateField(setPeso)} inputMode="decimal" />
+            <Field label={`Valor declarado total (${ambito === "nacional" ? "ARS" : "USD"})`} help={ambito === "nacional" ? "Valor total de la mercadería de todos los bultos, expresado en pesos." : "Valor total de la mercadería que enviás, expresado en dólares. Debe coincidir con la factura comercial."} value={ambito === "nacional" ? valorNacional : valorInternacional} onChange={updateField(ambito === "nacional" ? setValorNacional : setValorInternacional)} inputMode="decimal" money />
           </div>
 
           <div style={{ marginBottom: 6, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Dimensiones (cm)
+            Dimensiones por bulto (cm)
           </div>
           <div className="tweb-campos-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8, marginBottom: 20 }}>
-            <Field label="Largo" value={largo} onChange={setLargo} inputMode="decimal" />
-            <Field label="Ancho" value={ancho} onChange={setAncho} inputMode="decimal" />
-            <Field label="Alto" value={alto} onChange={setAlto} inputMode="decimal" />
+            <Field label="Largo" value={largo} onChange={updateField(setLargo)} inputMode="decimal" />
+            <Field label="Ancho" value={ancho} onChange={updateField(setAncho)} inputMode="decimal" />
+            <Field label="Alto" value={alto} onChange={updateField(setAlto)} inputMode="decimal" />
           </div>
 
           {error && (
@@ -336,42 +534,53 @@ function QuoteWidget({ compact = false }) {
           </button>
 
           <div style={{ marginTop: 14, fontSize: 11, color: "var(--fg-3)", fontFamily: "var(--font-mono)", textAlign: "center" }}>
-            Mostramos las opciones habilitadas para la ruta ingresada
+            {ambito === "nacional"
+              ? "La ubicación del mapa es orientativa y no confirma cobertura."
+              : "Mostramos las opciones habilitadas para la ruta ingresada"}
           </div>
-        </>
+        </fieldset>
       )}
 
       {step === "result" && result && (
-        <div className="fade-up" role="status" aria-live="polite">
+        <div className="public-quote-results" role="status" aria-live="polite">
           <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 600, marginBottom: 2 }}>
             Tus opciones de envío
           </div>
           <div style={{ color: "var(--fg-3)", marginBottom: 18, fontSize: 12, fontFamily: "var(--font-mono)" }}>
-            {peso}kg · {result.origen} → {result.destino} · opciones disponibles
+            {resultIsNational
+              ? `${result.cantidad_bultos} ${Number(result.cantidad_bultos) === 1 ? "bulto" : "bultos"} · ${result.peso_kg} kg por bulto · CP ${result.origen_cp || result.origen} → CP ${result.destino_cp || result.destino}`
+              : `${peso}kg · ${quotedCountryLabel(result.origen)} → ${quotedCountryLabel(result.destino)} · opciones disponibles`}
           </div>
 
           <div style={{ display: "grid", gap: 10, marginBottom: 20 }}>
             {result.carriers.map((c) => (
-              <CarrierCard key={c.id} carrier={c} recomendado={c.id === result.recomendado} />
+              <CarrierCard key={c.id} carrier={c} recomendado={c.id === result.recomendado} nacional={resultIsNational} />
             ))}
           </div>
 
-          {/* Captura de contacto DESPUÉS del precio, en el momento de máximo
-              interés. El cotizador sigue gratis y sin login: esto es una
-              oferta, no un peaje. */}
-          <EmailCapture
-            quoteId={result.quote_id}
-            referencia={result.referencia}
-          />
-
-          <a className="btn btn-primary" style={{ width: "100%" }}
-             href={`/portal/login?quote_id=${encodeURIComponent(result.quote_id)}`}>
-            Crear este envío en el portal <ArrowRight size={14}/>
-          </a>
-          <a className="btn btn-ghost" style={{ width: "100%", marginTop: 10 }}
-             href="mailto:cotizaciones@taurosolutions.ar?subject=Quiero%20una%20cuenta%20en%20el%20portal%20Tauro">
-            Todavía no tengo cuenta
-          </a>
+          {resultIsNational ? (
+            <>
+              <a className="btn btn-primary" style={{ width: "100%" }} href="/portal/cotizar?ambito=nacional">
+                Continuar en el portal <ArrowRight size={14}/>
+              </a>
+              <a className="btn btn-ghost" style={{ width: "100%", marginTop: 10 }}
+                 href="mailto:cotizaciones@taurosolutions.ar?subject=Quiero%20una%20cuenta%20en%20el%20portal%20Tauro">
+                Todavía no tengo cuenta
+              </a>
+            </>
+          ) : (
+            <>
+              <EmailCapture quoteId={result.quote_id} referencia={result.referencia} />
+              <a className="btn btn-primary" style={{ width: "100%" }}
+                 href={`/portal/login?quote_id=${encodeURIComponent(result.quote_id)}`}>
+                Crear este envío en el portal <ArrowRight size={14}/>
+              </a>
+              <a className="btn btn-ghost" style={{ width: "100%", marginTop: 10 }}
+                 href="mailto:cotizaciones@taurosolutions.ar?subject=Quiero%20una%20cuenta%20en%20el%20portal%20Tauro">
+                Todavía no tengo cuenta
+              </a>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -493,9 +702,9 @@ function InfoAyuda({ label, text }) {
 function Field({ label, help, value, onChange, type = "text", inputMode, money = false }) {
   const id = React.useId();
   return (
-    <div>
-      <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-        <label htmlFor={id}>{label}</label>{help && <InfoAyuda label={label} text={help} />}
+    <div style={{ display: "flex", flexDirection: "column", alignSelf: "stretch" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 4, flex: "1 1 auto", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+        <label htmlFor={id} style={{ flex: 1 }}>{label}</label>{help && <InfoAyuda label={label} text={help} />}
       </div>
       <input
         id={id}
@@ -526,6 +735,156 @@ function Field({ label, help, value, onChange, type = "text", inputMode, money =
   );
 }
 
+function NationalLocationField({ label, value, onChange }) {
+  const id = React.useId();
+  const listId = `${id}-options`;
+  const [suggestions, setSuggestions] = useStateQ([]);
+  const [open, setOpen] = useStateQ(false);
+  const [activeIndex, setActiveIndex] = useStateQ(0);
+  const [loading, setLoading] = useStateQ(false);
+  const requestRef = useRefQ(null);
+  const focusRef = useRefQ(false);
+  const query = String(value?.input || "");
+
+  useEffectQ(() => {
+    requestRef.current?.abort();
+    const trimmed = query.trim();
+    if (value?.city && value?.postal_code && trimmed === nationalLocationLabel(value)) {
+      setSuggestions([]);
+      setOpen(false);
+      setLoading(false);
+      return undefined;
+    }
+    const mode = locationLookupMode(trimmed);
+    const minimum = mode === "postal" ? 3 : 2;
+    if (trimmed.length < minimum) {
+      setSuggestions([]);
+      setOpen(false);
+      setLoading(false);
+      return undefined;
+    }
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ q: trimmed, tipo: mode });
+        const response = await fetch(`${API_URL}/cotizar-web/ubicaciones?${params}`, {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        let data = null;
+        try { data = await response.json(); } catch (_) { /* respuesta inválida */ }
+        if (!response.ok) throw new Error(publicApiError(data, "No pudimos buscar esa ubicación."));
+        if (requestRef.current !== controller) return;
+        const rows = Array.isArray(data?.suggestions) ? data.suggestions : [];
+        setSuggestions(rows);
+        setActiveIndex(0);
+        setOpen(focusRef.current && (rows.length > 1 || (rows.length === 1 && !data?.automatic)));
+        if (data?.automatic) {
+          onChange({ ...data.automatic, input: trimmed });
+          setOpen(false);
+        }
+      } catch (error) {
+        if (error?.name !== "AbortError" && requestRef.current === controller) {
+          setSuggestions([]);
+          setOpen(false);
+        }
+      } finally {
+        if (requestRef.current === controller) {
+          requestRef.current = null;
+          setLoading(false);
+        }
+      }
+    }, 240);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
+
+  useEffectQ(() => () => requestRef.current?.abort(), []);
+
+  const edit = (next) => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setSuggestions([]);
+    setActiveIndex(0);
+    setOpen(false);
+    const postal = normalizeArgentinaPostalCode(next);
+    onChange({ input: next, city: "", postal_code: postal, province: "" });
+  };
+
+  const choose = (option) => {
+    if (!option) return;
+    onChange({ ...option, input: nationalLocationLabel(option) });
+    setSuggestions([]);
+    setOpen(false);
+  };
+
+  const onKeyDown = (event) => {
+    if (!open || !suggestions.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((current) => (current + direction + suggestions.length) % suggestions.length);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      choose(suggestions[activeIndex]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className="tweb-select" style={{ position: "relative" }}>
+      <label htmlFor={id} style={{ display: "block", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+        {label}
+      </label>
+      <input
+        id={id}
+        className="tweb-select-search"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-activedescendant={open ? `${listId}-${activeIndex}` : undefined}
+        autoComplete="off"
+        inputMode={locationLookupMode(query) === "postal" ? "text" : "search"}
+        value={query}
+        placeholder="Ciudad o código postal"
+        onChange={(event) => edit(event.target.value)}
+        onFocus={() => { focusRef.current = true; if (suggestions.length) setOpen(true); }}
+        onBlur={() => { focusRef.current = false; window.setTimeout(() => setOpen(false), 100); }}
+        onKeyDown={onKeyDown}
+      />
+      <small style={{ display: "block", minHeight: 17, marginTop: 4, color: "var(--fg-3)", fontSize: 10 }}>
+        {loading ? "Buscando…" : value?.city && value?.postal_code ? `${value.city} · CP ${value.postal_code}` : value?.postal_code ? `CP ${value.postal_code}` : "Elegí una opción o ingresá un CP completo."}
+      </small>
+      {open && (
+        <div className="tweb-select-panel" style={{ display: "block", top: "calc(100% - 12px)" }}>
+          <div id={listId} className="tweb-select-options" role="listbox" aria-label={`Opciones para ${label}`}>
+            {suggestions.map((option, index) => (
+              <div key={`${option.province}-${option.postal_code}-${option.city}`}
+                   id={`${listId}-${index}`}
+                   role="option"
+                   aria-selected={index === activeIndex}
+                   className={`tweb-select-opt${index === activeIndex ? " active" : ""}`}
+                   onMouseDown={(event) => event.preventDefault()}
+                   onClick={() => choose(option)}>
+                <span className="tweb-select-check" aria-hidden="true">✓</span>
+                <span>{option.city}<small style={{ display: "block" }}>{option.region || "Argentina"}</small></span>
+                <small>CP {option.postal_code}</small>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* Combobox inteligente TAURO. Busca por nombre o ISO, prioriza coincidencias
    al comienzo, permite recorrer sin confirmar y recién aplica con Enter/click. */
 function SelectField({ label, value, onChange, options }) {
@@ -539,8 +898,13 @@ function SelectField({ label, value, onChange, options }) {
   const searchRef = useRefQ(null);
   const listIdRef = useRefQ(null);
   if (!listIdRef.current) listIdRef.current = `tweb-select-${++selectFieldSeq}`;
-  const seleccionada = options.find((o) => o.value === value) || options[0];
-  const filtered = rankedSelectOptions(options, query);
+  const visibleOptions = options.map((option) => (
+    normalizeCountry(option.value) === "FK"
+      ? { ...option, label: "Islas Malvinas" }
+      : option
+  ));
+  const seleccionada = visibleOptions.find((o) => o.value === value) || visibleOptions[0];
+  const filtered = rankedSelectOptions(visibleOptions, query);
 
   const close = (focusButton = false) => {
     setOpen(false);
@@ -680,7 +1044,12 @@ function SelectField({ label, value, onChange, options }) {
             transition: "border-color .15s, box-shadow .15s",
           }}
         >
-          <span id={`${listIdRef.current}-value`}>{seleccionada ? seleccionada.label : "Seleccionar"}</span>
+          <span id={`${listIdRef.current}-value`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {seleccionada && normalizeCountry(seleccionada.value) === "FK" && (
+              <img src="/static/img/flags/ar.svg" alt="" aria-hidden="true" style={{ width: 16, height: 11, objectFit: "cover", flexShrink: 0 }} />
+            )}
+            {seleccionada ? seleccionada.label : "Seleccionar"}
+          </span>
           <svg width="11" height="7" viewBox="0 0 10 6" fill="none" aria-hidden="true"
                style={{ color: open ? "var(--accent-soft)" : "var(--fg-3)", transform: open ? "rotate(180deg)" : "none", transition: "transform .22s cubic-bezier(.2,.7,.3,1), color .15s", flexShrink: 0 }}>
             <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
@@ -714,6 +1083,7 @@ function SelectField({ label, value, onChange, options }) {
               {filtered.length ? filtered.map((o, index) => {
                 const sel = o.value === value;
                 const active = index === activeIndex;
+                const isMalvinas = normalizeCountry(o.value) === "FK";
                 return (
                   <div
                     id={`${listIdRef.current}-option-${index}`}
@@ -725,8 +1095,13 @@ function SelectField({ label, value, onChange, options }) {
                     className={`tweb-select-opt${active ? " active" : ""}${sel ? " selected" : ""}`}
                   >
                     <span className="tweb-select-check" aria-hidden="true">✓</span>
-                    <span>{o.label}</span>
-                    <small>{o.value}</small>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {isMalvinas && (
+                        <img src="/static/img/flags/ar.svg" alt="" aria-hidden="true" style={{ width: 16, height: 11, objectFit: "cover", flexShrink: 0 }} />
+                      )}
+                      {o.label}
+                    </span>
+                    {!isMalvinas && <small>{o.value}</small>}
                   </div>
                 );
               }) : (
@@ -743,8 +1118,9 @@ function SelectField({ label, value, onChange, options }) {
 /* Tarjeta de courier del comparador: logo real de la empresa + precio.
    estados: "cotizado" (precio en vivo) · "proximamente" (acuerdo en cierre,
    se muestra igual con su logo) · "sin_tarifa" (sin cobertura en la ruta). */
-function CarrierCard({ carrier, recomendado }) {
+function CarrierCard({ carrier, recomendado, nacional = false }) {
   const cotizado = carrier.estado === "cotizado";
+  const logo = carrier.logo || (carrier.id === "oca" ? "/static/img/carriers/oca.png" : "");
   const logoSize = {
     fedex: { width: 66, height: 28 },
     ups: { width: 32, height: 34 },
@@ -762,7 +1138,7 @@ function CarrierCard({ carrier, recomendado }) {
       opacity: 1,
       position: "relative",
     }}>
-      {recomendado && (
+      {recomendado && !nacional && (
         <div style={{
           position: "absolute", top: -9, right: 12,
           background: "var(--accent)", color: "#fff",
@@ -770,7 +1146,7 @@ function CarrierCard({ carrier, recomendado }) {
           letterSpacing: "0.06em", textTransform: "uppercase",
           padding: "2px 8px", borderRadius: 99,
         }}>
-          Menor tarifa disponible
+          Menor precio cotizado
         </div>
       )}
 
@@ -781,18 +1157,18 @@ function CarrierCard({ carrier, recomendado }) {
         padding: "5px 7px", boxSizing: "border-box",
         boxShadow: "inset 0 0 0 1px rgba(0,0,0,.06)",
       }}>
-        <img src={carrier.logo} alt={carrier.nombre}
+        {logo ? <img src={logo} alt={carrier.nombre}
              style={{
                width: logoSize.width,
                height: logoSize.height,
                objectFit: "contain",
                display: "block",
-             }} />
+             }} /> : <strong style={{ color: "#17131d", fontSize: 15 }}>{carrier.nombre}</strong>}
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {carrier.nombre}
+          {!nacional && carrier.nombre}
           {/* Una respuesta de tarifa no demuestra emisión ni retiro. El rótulo
               comercial viene del contrato publicado por el backend. */}
           {cotizado && (
@@ -806,21 +1182,35 @@ function CarrierCard({ carrier, recomendado }) {
                 boxShadow: "0 0 8px rgba(46,194,126,.8)", flexShrink: 0,
               }}/>
               {carrier.estado_publicacion === "tarifario_publico"
-                ? "Tarifario público"
+                ? "Tarifa estimada"
                 : "Tarifa disponible"}
+              {carrier.estado_publicacion === "tarifario_publico" && (
+                <InfoAyuda label="Tarifa estimada" text={ESTIMATED_RATE_HELP} />
+              )}
             </span>
           )}
         </div>
         <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {cotizado
-            ? `${carrier.servicio} · ${carrier.dias_estimados ? `${carrier.dias_estimados} días` : "Plazo a confirmar"}`
+            ? `${carrier.servicio} · ${estimatedDeliveryLabel(carrier.dias_estimados)}`
             : carrier.servicio}
         </div>
       </div>
 
       <div className="tweb-carrier-precio" style={{ textAlign: "right", flexShrink: 0 }}>
         {cotizado ? (
-          <>
+          nacional ? (
+            <>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 700, lineHeight: 1.1 }}>
+                <span className="tweb-price-metal">
+                  $ {formatArs(carrier.precio_ars)} <span style={{ fontSize: 11, fontWeight: 400 }}>ARS</span>
+                </span>
+              </div>
+              <div style={{ marginTop: 3, color: "var(--fg-3)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
+                {carrier.iva_incluido === true ? "IVA incluido" : "IVA a confirmar"}
+              </div>
+            </>
+          ) : <>
             {carrier.precio_lista_usd && (
               <div style={{ fontSize: 10.5, color: "var(--fg-4)", fontFamily: "var(--font-mono)", textDecoration: "line-through" }}>
                 ${carrier.precio_lista_usd.toLocaleString("es-AR")} USD

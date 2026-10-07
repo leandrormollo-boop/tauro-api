@@ -12,6 +12,8 @@ def _render_pago(*, en_revision):
         loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"),
         autoescape=select_autoescape(),
     )
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     return env.get_template("admin/cliente_detail.html").render(
         request=SimpleNamespace(
             url=SimpleNamespace(path="/admin/clientes/DEMO"),

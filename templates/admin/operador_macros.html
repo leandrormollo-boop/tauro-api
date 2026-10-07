@@ -3,7 +3,7 @@
 {% set archivo={'DHL':'dhl.svg','FEDEX':'fedex.svg','ANDREANI':'andreani.svg','OCA':'oca.png'}.get(courier) %}
 {% if archivo %}<span class="op-logo op-logo-{{ courier|lower }}" aria-hidden="true"><img src="/static/img/carriers/{{ archivo }}" alt="" width="120" height="60" decoding="async"></span>{% elif courier=='CORREO_ARGENTINO' %}<span class="op-wordmark">{{ nombre(courier) }}</span>{% endif %}
 {%- endmacro %}
-{% macro dinero(v) -%}{% set d=v|default(0,true) %}{{ ('{:,.2f}' if (d*100)%1==0 else '{:,.4f}').format(d).replace(',','_').replace('.',',').replace('_','.') }}{%- endmacro %}
+{% macro dinero(v) -%}{{ v|numero_ars }}{%- endmacro %}
 {% macro fecha(v) -%}{{ v.strftime('%d/%m/%Y') if v else 'Sin informar' }}{%- endmacro %}
 {% macro estado(f) -%}
 <span class="op-badge {{ 'ok' if f.estado_pago in ('CANCELADA','CREDITO_DISPONIBLE') else 'danger' if f.dias_mora and f.saldo>0 else '' }}">{{ {'SIN_VERIFICAR':'Sin verificar','IMPAGA':'Impaga','PARCIAL':'Pago parcial','CANCELADA':'Saldada','CREDITO_DISPONIBLE':'Crédito disponible','CREDITO_SIN_VERIFICAR':'Crédito sin verificar','CREDITO_AGOTADO':'Crédito aplicado','ANULADA':'Anulada'}[f.estado_pago] }}</span>
@@ -12,9 +12,9 @@
 {% macro resumen(filas) -%}
 <div class="op-grid">
 {% for r in filas %}<div class="card op-summary"><div class="eyebrow">{{ r.moneda }} · saldo verificado</div>
-  <h3>{{ dinero(r.pendiente) }} pendiente</h3>
-  <p>Vencido: {{ dinero(r.vencido) }} · Crédito disponible: {{ dinero(r.credito) }}</p>
-  {% if r.sin_verificar %}<small class="op-danger">{{ r.sin_verificar }} documentos por verificar · {{ r.moneda }} {{ dinero(r.importe_bruto_sin_verificar) }} brutos</small><span data-help="Historial pendiente">Importe nominal de documentos sin revisar: puede incluir pagos y notas de crédito pendientes de identificar. No es deuda confirmada.</span>{% endif %}
+  <h3>{{ r.moneda|simbolo_moneda }} {{ dinero(r.pendiente) }} pendiente</h3>
+  <p>Vencido: {{ r.moneda|simbolo_moneda }} {{ dinero(r.vencido) }} · Crédito disponible: {{ r.moneda|simbolo_moneda }} {{ dinero(r.credito) }}</p>
+  {% if r.sin_verificar %}<small class="op-danger">{{ r.sin_verificar }} documentos por verificar · {{ (r.moneda)|simbolo_moneda }} {{ dinero(r.importe_bruto_sin_verificar) }} brutos</small><span data-help="Historial pendiente">Importe nominal de documentos sin revisar: puede incluir pagos y notas de crédito pendientes de identificar. No es deuda confirmada.</span>{% endif %}
 </div>{% endfor %}
 </div>
 {%- endmacro %}
@@ -42,12 +42,12 @@
   <td><a href="/admin/operadores/{{ i.courier }}/facturas/{{ i.factura_id }}">{{ i.tipo_documento }} {{ i.numero }}</a><small>Línea {{ i.linea_numero }} · <a href="/admin/operadores/{{ i.courier }}">{{ nombre(i.courier) }}</a></small></td>
   <td>{% if i.cliente_id %}<a href="/admin/clientes/{{ i.cliente_id|urlencode }}">{{ i.cliente_id }}</a>{% else %}<strong>Sin asignar</strong>{% endif %}<small>{% if i.solicitud_id %}<a href="/admin/pedidos/{{ i.solicitud_id }}/editar">{{ i.tracking_raw or 'Ver envío' }}</a>{% else %}{{ i.tracking_raw or 'Sin tracking' }}{% endif %}</small></td>
   <td>{{ i.concepto_tipo }}</td>
-  <td>{% if i.importe_asignado is not none %}{{ i.moneda }} {{ dinero(i.importe_asignado*i.signo) }}{% else %}Pendiente de match<small>Línea: {{ i.moneda }} {{ dinero(i.importe*i.signo) }}</small>{% endif %}</td>
-  <td>{{ i.peso_kg if i.peso_kg is not none else '—' }} → {{ i.peso_facturado_kg if i.peso_facturado_kg is not none else '—' }} kg</td>
+  <td>{% if i.importe_asignado is not none %}{{ (i.moneda)|simbolo_moneda }} {{ dinero(i.importe_asignado*i.signo) }}{% else %}Pendiente de match<small>Línea: {{ (i.moneda)|simbolo_moneda }} {{ dinero(i.importe*i.signo) }}</small>{% endif %}</td>
+  <td>{{ i.peso_kg|kg }} → {{ (i.peso_facturado_kg if i.peso_facturado_kg is not none else '—')|kg }}</td>
   <td>{% if i.solicitud_id %}
     {% if i.solicitud_id not in ns.vistos %}
       {% set ns.vistos=ns.vistos+[i.solicitud_id] %}
-      {% if i.ajuste_cliente_ars is not none %}ARS {{ dinero(i.ajuste_cliente_ars) }}<small>{{ i.ajuste_estado or i.conciliacion_estado }}</small>{% else %}Pendiente de cálculo{% endif %}
+      {% if i.ajuste_cliente_ars is not none %}$ {{ dinero(i.ajuste_cliente_ars) }}<small>{{ i.ajuste_estado or i.conciliacion_estado }}</small>{% else %}Pendiente de cálculo{% endif %}
     {% else %}<small>Mismo envío; no sumar otra vez</small>{% endif %}
     <a href="/admin/conciliacion-couriers/envios/{{ i.solicitud_id }}">Revisar envío</a>
   {% else %}Sin cliente confirmado{% endif %}</td>

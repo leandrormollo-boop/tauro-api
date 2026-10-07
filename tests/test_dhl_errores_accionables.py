@@ -132,8 +132,7 @@ def test_multiples_rechazos_de_emision_no_inventan_tracking_y_llegan_completos()
 ])
 @pytest.mark.parametrize("cantidad", [1, 2])
 def test_error_de_tarifa_explicito_y_sin_detalles_de_la_conexion(exc, esperado, cantidad):
-    with mock.patch("core.dhl_client.requests.post", side_effect=exc), \
-            mock.patch("core.dhl_client.requests.get", side_effect=exc):
+    with mock.patch.object(DHLClient, "_rate_request", side_effect=exc):
         result = _cliente().get_rates(
             {"country": "AR", "city": "CABA", "postal_code": "1000"},
             {"country": "US", "city": "Seattle", "postal_code": "98136"},
@@ -178,16 +177,15 @@ def test_rechazo_dhl_via_tarifa_llega_al_cliente_sin_emitir(monkeypatch):
     monkeypatch.setattr("servicios.configuracion_couriers_cliente.configuracion_cotizacion", lambda *_: {
         "couriers_habilitados": ["dhl"], "pricing_general": {}, "pricing_por_courier": {},
     })
-    post = mock.Mock(return_value=respuesta({"additionalDetails": [
+    request = mock.Mock(return_value=respuesta({"additionalDetails": [
         "#/customerDetails/receiverDetails/postalAddress/cityName: city not found",
     ]}))
-    monkeypatch.setattr("core.dhl_client.requests.post", post)
-    monkeypatch.setattr("core.dhl_client.requests.get", post)
+    monkeypatch.setattr(DHLClient, "_rate_request", request)
     salida = sg.emitir_guia_como_cliente(44, "WAIMAO")
     assert not salida["ok"]
     assert "Ciudad del destinatario" in salida["error"] and "no encontró" in salida["error"]
     assert "No emitimos ni cobramos nada" in salida["error"]
-    assert post.call_count == 1 and post.call_args.args[0].endswith("/rates")
+    assert request.call_count == 1 and request.call_args.args[1].endswith("/rates")
     liberar.assert_called_once_with(44)
     emitir.assert_not_called()
 
@@ -236,6 +234,8 @@ def test_admin_y_portal_no_recortan_el_motivo(monkeypatch):
 def test_mensaje_en_html_escapa_datos_y_separa_observaciones():
     env = Environment(loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"),
                       autoescape=select_autoescape())
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     html = env.get_template("_error_operacion.html").render(
         mensaje_error="Ciudad del destinatario: revisá el código postal.\n<script>alert(1)</script>")
     assert 'role="alert"' in html and html.count("<p ") == 2
@@ -245,6 +245,8 @@ def test_mensaje_en_html_escapa_datos_y_separa_observaciones():
 def test_admin_muestra_el_rechazo_una_sola_vez():
     env = Environment(loader=FileSystemLoader(Path(__file__).resolve().parents[1] / "templates"),
                       autoescape=select_autoescape())
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     env.globals.update(pendientes_admin=lambda: 0, alertas_guias_reemplazadas=lambda: 0)
     request = Request({"type": "http", "method": "GET", "path": "/admin/pedidos", "headers": [],
                        "state": {"csp_nonce": "test"}})

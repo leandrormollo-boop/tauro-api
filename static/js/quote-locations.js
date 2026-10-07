@@ -1,5 +1,9 @@
 /* Local postal references; deliberately separate from shipment addresses. */
 (function (factory) {
+  factory.armDeadline = function (signal, callback, delay) {
+    var timer = setTimeout(function () { if (!signal.aborted) callback(); }, delay);
+    return function () { clearTimeout(timer); };
+  };
   if (typeof module === 'object' && module.exports) module.exports = factory;
   else window.TauroLocationRequest = factory;
 })(function (io) {
@@ -21,7 +25,8 @@
       }
     }, io.delay === undefined ? 400 : io.delay);
   }
-  return {search: search, cancel: cancel, pending: function () { return pending; }};
+  return {search: search, cancel: cancel, acceptManual: cancel,
+    pending: function () { return pending; }};
 });
 
 (function () {
@@ -69,6 +74,11 @@
         postal.value = preserve ? enteredPostal : option.postal_code;
         reference.value = '1'; paired = true;
         applying = false; status.hidden = true; hide(); notify();
+        // Si el cliente ya está parado en el campo que completamos, dejamos el
+        // valor seleccionado: lo próximo que tipee lo reemplaza en vez de
+        // pegarse al final (evita "322000322000").
+        var filled = mode === 'city' ? postal : city;
+        if (document.activeElement === filled && filled.select) filled.select();
       }
       function show(data, snapshot) {
         status.hidden = true;
@@ -100,12 +110,14 @@
         fetch: async function (snapshot, signal) {
           var params = new URLSearchParams({pais:snapshot.country, q:snapshot.query, tipo:snapshot.mode, provincia:snapshot.province});
           // Bound latency, including failures. Manual entry always remains available.
-          var timeout = setTimeout(function () { control.cancel(); hide(); status.textContent='Completá la ubicación manualmente.'; status.hidden=false; notify(); }, 12000);
+          var clearDeadline = window.TauroLocationRequest.armDeadline(signal, function () {
+            control.cancel(); hide(); status.textContent='Completá la ubicación manualmente.'; status.hidden=false; notify();
+          }, 12000);
           try {
             var response = await fetch('/portal/cotizar/ubicaciones?' + params, {credentials:'same-origin', signal:signal});
             if (!response.ok || response.redirected) throw new Error('lookup unavailable');
             return await response.json();
-          } finally { clearTimeout(timeout); }
+          } finally { clearDeadline(); }
         },
         result: show,
         error: function () { hide(); status.textContent = 'Podés completar la ubicación manualmente.'; status.hidden = false; notify(); }
@@ -114,7 +126,9 @@
         selectedInput = input;
         control.search({country:country.value, query:input.value, mode:input === city ? 'city' : 'postal', province:province ? province.value : ''});
       }
-      controls.push({pending:control.pending, cancel:function () {control.cancel(); hide();},
+      controls.push({pending:control.pending,
+        complete:function () {return Boolean(city.value.trim() && postal.value.trim());},
+        cancel:function () {control.cancel(); hide();},
         refresh:function () {control.cancel(); hide(); status.hidden=true; paired=Boolean(city.value && postal.value); note.hidden=reference.value !== '1';},
         resume:function () {if (city.value && !postal.value) lookup(city); else if (postal.value && !city.value) lookup(postal);}});
       [city, postal].forEach(function (input) {
@@ -124,8 +138,16 @@
         input.addEventListener('input', function () {
           if (applying) return;
           var opposite = input === city ? postal : city;
-          if (paired || reference.value === '1') opposite.value = '';
+          // Nunca borramos lo que el cliente ya cargó en el otro campo: si
+          // estaban emparejados, solo avisamos que conviene revisarlos.
+          var estabaEmparejado = paired || reference.value === '1';
           paired = false; reference.value = ''; note.hidden = true; hide(); status.hidden = true;
+          if (estabaEmparejado && opposite.value.trim()) {
+            status.textContent = input === city
+              ? 'Cambiaste la ciudad: revisá que el código postal corresponda.'
+              : 'Cambiaste el código postal: revisá que la ciudad corresponda.';
+            status.hidden = false;
+          }
           lookup(input);
         });
         input.addEventListener('focus', function () { if (input.value && !(input === city ? postal : city).value) lookup(input); });
@@ -150,6 +172,10 @@
       note.hidden = reference.value !== '1';
     });
     return {pending:function () {return controls.some(function (c) {return c.pending();});},
+      acceptManual:function () {
+        if (!controls.every(function (c) {return c.complete();})) return false;
+        controls.forEach(function (c) {c.cancel();}); return true;
+      },
       refresh:function () {controls.forEach(function (c) {c.refresh();});},
       resume:function () {controls.forEach(function (c) {c.resume();});},
       cancel:function () {controls.forEach(function (c) {c.cancel();});}};

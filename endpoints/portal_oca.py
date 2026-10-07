@@ -43,19 +43,26 @@ def nuevo(request: Request, cliente: str = Depends(cliente_actual)):
             "largo_cm", "ancho_cm", "alto_cm", "valor_declarado_ars",
             "origen_referencia", "destino_referencia"
         ) if key in request.query_params}
+        cotizacion_origen_id = request.query_params.get("cotizacion_origen_id", "")
+        if cotizacion_origen_id:
+            from servicios.cotizaciones_portal import referencia
+            if referencia(cliente, cotizacion_origen_id):
+                form["cotizacion_origen_id"] = cotizacion_origen_id
         error = None
         from servicios.direcciones import obtener_direccion
-        for param, prefix, tipo in [("remitente_id", "origen", "REMITENTE"),
-                                    ("destinatario_id", "destino", "DESTINATARIO")]:
+        for param, prefix in [("remitente_id", "origen"),
+                              ("destinatario_id", "destino")]:
             ident = request.query_params.get(param)
             if not ident:
                 continue
-            row = obtener_direccion(cliente, int(ident), tipo) if ident.isdigit() else None
+            row = obtener_direccion(cliente, int(ident)) if ident.isdigit() else None
             contact = proyectar(row) if row else None
             if not contact:
                 error = "Ese contacto nacional no está disponible en tu cuenta."
                 continue
             form.update({prefix + "_" + key: value for key, value in contact["fields"].items()})
+            if prefix == "origen":
+                form["origen_nombre"] = row.get("nombre") or contact["fields"]["nombre"]
             form[prefix + "_agenda_id"] = contact["id"]
             form.pop(prefix + "_referencia", None)
         return pantalla(request, cliente, disponible=True, asegurada=config.insured_operation,
@@ -91,12 +98,15 @@ def cotizacion(request: Request, ident: str, cliente: str = Depends(cliente_actu
         row["expires_at"] = row["expires_at"].astimezone(
             ZoneInfo("America/Argentina/Buenos_Aires")
         )
+        from servicios.cotizaciones_portal import referencia, comparar
+        comparacion = comparar(referencia(cliente, row["payload"].get("_cotizacion_origen_id")), row["precio_ars"])
         # Sólo precio al cliente y direcciones: costo/margen nunca llegan al HTML.
         return pantalla(
             request,
             cliente,
             disponible=True,
             tarifa={k: row[k] for k in ("id", "precio_ars", "payload", "expires_at")},
+            comparacion_cotizacion=comparacion,
         )
     except oca.OCAPortalError:
         return RedirectResponse("/portal/oca/nuevo", 303)
@@ -135,7 +145,7 @@ def editar(request: Request, ident: str, cliente: str = Depends(cliente_actual))
     except oca.OCAPortalError:
         return RedirectResponse("/portal/oca/nuevo", 303)
     payload = row["payload"]
-    form = {}
+    form = {"cotizacion_origen_id": payload.get("_cotizacion_origen_id", "")}
     for side, prefix in [("origin", "origen"), ("destination", "destino")]:
         address = payload[side]
         for key, source in [("nombre", "contacto"), ("calle", "calle"), ("numero", "nro"),

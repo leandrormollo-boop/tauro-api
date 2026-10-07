@@ -7,7 +7,8 @@
   function fields(scope) {
     return { description: scope.querySelector('[data-hs-description]'),
       code: scope.querySelector('[data-hs-input]'), details: scope.querySelector('[data-hs-details]'),
-      status: scope.querySelector('[data-hs-status]'), results: scope.querySelector('[data-hs-results]') };
+      status: scope.querySelector('[data-hs-status]'), results: scope.querySelector('[data-hs-results]'),
+      panel: scope.querySelector('[data-hs-panel]'), summary: scope.querySelector('[data-hs-summary]') };
   }
   function init(scope) {
     if (states.has(scope)) return states.get(scope);
@@ -18,6 +19,8 @@
     if (f.results) f.results.replaceChildren();
     if (f.status) f.status.textContent = '';
     if (f.details) f.details.value = '';
+    if (f.panel) f.panel.open = false;
+    if (f.summary) f.summary.textContent = 'Buscar código aduanero';
     return state;
   }
   function node(tag, text) {
@@ -28,6 +31,7 @@
     s.sequence++; clearTimeout(s.timer);
     if (s.controller) s.controller.abort();
     f.results.replaceChildren(); f.status.textContent = '';
+    f.summary.textContent = 'Buscar código aduanero';
     if (s.selected && f.code.value === s.selected) {
       f.code.value = ''; f.code.dispatchEvent(new Event('input', { bubbles: true }));
       f.status.textContent = 'Cambió la descripción. Volvé a elegir el código correspondiente.';
@@ -46,6 +50,7 @@
     s.controller = controller;
     var timeout = setTimeout(function () { controller.abort(); }, 12000);
     f.status.textContent = 'Buscando en la referencia HS…';
+    f.summary.textContent = 'Buscando códigos…';
     f.results.replaceChildren();
     try {
       var response = await fetch('/portal/api/hs-code', {
@@ -62,7 +67,6 @@
         var questions = node('ul', '');
         data.questions.forEach(function (question) { questions.appendChild(node('li', question)); });
         f.results.appendChild(questions);
-        scope.querySelector('.hs-assistant details').open = true;
       }
       (data.candidates || []).forEach(function (candidate) {
         var card = node('article', ''); card.className = 'hs-candidate';
@@ -80,7 +84,10 @@
           f.code.dispatchEvent(new Event('change', { bubbles: true }));
           s.selected = candidate.formatted;
           f.status.textContent = 'HS ' + candidate.formatted + ' seleccionado. Verificá que describa tu producto y los requisitos del destino.';
-          f.results.replaceChildren(); f.code.focus();
+          f.results.replaceChildren();
+          f.summary.textContent = 'HS ' + candidate.formatted + ' · Cambiar';
+          f.panel.open = false;
+          f.code.focus();
         });
         card.appendChild(choose); f.results.appendChild(card);
       });
@@ -89,9 +96,12 @@
         source.href = 'https://www.usitc.gov/harmonized_tariff_information'; source.target = '_blank'; source.rel = 'noopener noreferrer';
         f.results.appendChild(source);
       }
+      var count = (data.candidates || []).length;
+      f.summary.textContent = count ? 'Ver ' + count + ' código' + (count === 1 ? ' sugerido' : 's sugeridos') : 'Afinar búsqueda del código';
     } catch (error) {
       if (turn !== s.sequence || !scope.isConnected) return;
       f.status.textContent = error.name === 'AbortError' ? 'La búsqueda tardó demasiado. Podés reintentar o ingresar el código manualmente.' : (error.message || 'No pudimos buscar ahora.');
+      f.summary.textContent = 'Reintentar búsqueda del código';
     } finally { clearTimeout(timeout); }
   }
   document.addEventListener('input', function (event) {

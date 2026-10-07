@@ -97,7 +97,7 @@
                     </div>
                     {% endif %}
                 </td>
-                <td class="mono">{% if p.valor_total %}{{ p.moneda or '' }} {{ p.valor_total }}{% else %}—{% endif %}</td>
+                <td class="mono">{% if p.valor_total %}{{ (p.moneda or '')|simbolo_moneda }} {{ p.valor_total }}{% else %}—{% endif %}</td>
                 <td style="white-space:nowrap;">
                     <a class="btn btn-primary btn-sm" href="/portal/envios/nuevo?pedido_tienda={{ p.id }}">Preparar envío →</a>
                     <form method="POST" action="/portal/tienda/pedidos/descartar" style="display:inline;"

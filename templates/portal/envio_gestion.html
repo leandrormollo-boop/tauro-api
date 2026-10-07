@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% from 'portal/_documentos.html' import tarjeta_documento %}
+{% from 'portal/_recoleccion_resumen.html' import comprobante_retiro with context %}
+{% block title %}Gestionar envío #{{ s.id }}{% endblock %}
+{% macro ars(valor) %}$ {{ (valor or 0)|numero_ars }}{% endmacro %}
+{% block content %}
+<section class="shipment-hub" data-shipment-hub>
+    <header class="shipment-hub-summary">
+        <div><h1>{{ s.etiqueta_cliente or s.dest_nombre or ('Envío #' ~ s.id) }}</h1>
+            <p>{{ nombre_courier(s.courier) }} · Solicitud #{{ s.id }} · {{ s.created_at.strftime('%d/%m/%Y') if s.created_at else '' }}</p>
+            <span class="badge {{ s.estado_cliente_ui.clase }}">{{ s.estado_cliente_ui.label }}</span>
+            {% if s.tracking %}<span class="shipment-hub-tracking">Guía <strong>{{ s.tracking }}</strong></span>{% endif %}
+        </div>
+        <div class="tauro-brand-tools">
+            {% include 'portal/_brand_badge.html' %}
+            <div class="shipment-hub-price"><span>Precio del envío · ARS</span><strong>{{ ars(s.precio_final_cliente_ars if s.tracking else s.precio_tauro_ars) }}</strong>
+                <small>{{ 'Consultá cargos y pagos en Mi cuenta.' if s.tracking else 'Todavía no se emitió la guía.' }}</small>
+            </div>
+        </div>
+    </header>
+    {% if request.query_params.get('error') %}<div class="msg error" role="alert">{{ request.query_params.get('error') }}</div>{% endif %}
+    {% if request.query_params.get('ok') == 'editado' %}<div class="msg ok" role="status">Cambios guardados. Revisá los datos y el precio antes de emitir.</div>{% endif %}
+    {% if s.estado in ('EMITIENDO', 'VERIFICAR_COURIER') %}
+        <div class="msg warn" role="status">Estamos verificando la emisión. No vuelvas a emitir ni a crear otra solicitud para este envío.</div>
+    {% elif s.estado in ('CANCELADO', 'REEMPLAZADO') %}
+        <div class="msg warn">Esta guía no está vigente. No debe usarse para entregar paquetes.</div>
+    {% endif %}
+
+    {% if s.tiene_label and s.estado not in ('CANCELADO', 'REEMPLAZADO') %}
+    <div class="shipment-hub-docs">
+        {{ tarjeta_documento('guia', s.id, 'Guía del envío', '/portal/envios/' ~ s.id ~ '/guia.pdf', s.tracking or '', texto_descarga='Descargar PDF') }}
+        <a class="btn btn-primary" href="/portal/envios/{{ s.id }}/guia.pdf" download>Descargar PDF</a>
+        {% if s.tiene_factura_comercial %}<a class="btn btn-ghost" href="/portal/envios/{{ s.id }}/factura-comercial.pdf" download>Descargar invoice</a>{% endif %}
+    </div>
+    {% endif %}
+
+    <nav class="shipment-hub-tabs" aria-label="Información del envío">
+        <button type="button" data-hub-tab="datos" aria-pressed="true">Revisar datos</button>
+        <button type="button" data-hub-tab="contenido" aria-pressed="false">Cajas e invoice</button>
+        {% if s.tracking %}<button type="button" data-hub-tab="retiro" aria-pressed="false">Recolección</button>{% endif %}
+    </nav>
+    <div class="shipment-hub-panel" data-hub-panel="datos">
+        <div class="shipment-hub-parties">
+            {% for titulo,prefijo,pais in [('Remitente','remitente_',s.remitente_pais),('Destinatario','dest_',s.destino_pais)] %}
+            <section><h2>{{ titulo }}</h2><strong>{{ s[prefijo ~ 'nombre'] or 'Sin nombre' }}</strong>
+                {% if s[prefijo ~ 'contacto'] %}<p>{{ s[prefijo ~ 'contacto'] }}</p>{% endif %}
+                <p>{{ s[prefijo ~ 'direccion'] }}<br>{{ s[prefijo ~ 'ciudad'] }}, {{ s[prefijo ~ 'estado'] or '' }} · {{ s[prefijo ~ 'zip'] }}<br>{{ nombre_pais(pais) }}</p>
+                <p>{{ s[prefijo ~ 'telefono'] or 'Sin teléfono' }}<br>{{ s[prefijo ~ 'email'] or 'Sin email' }}</p>
+                <small>Documento fiscal: {{ s[prefijo ~ 'documento'] or 'Sin informar' }}</small>
+            </section>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="shipment-hub-panel" data-hub-panel="contenido" hidden>
+        <div class="shipment-hub-content-list">
+        {% for b in s.bultos or [] %}
+            <section><h2>Caja {{ loop.index }} · {{ b.cantidad or 1 }} bulto{{ 's' if (b.cantidad or 1) != 1 else '' }}</h2>
+                <p>{{ (b.peso_kg)|kg }} por caja · {{ (b.largo_cm)|medida_cm }} × {{ (b.ancho_cm)|medida_cm }} × {{ (b.alto_cm)|medida_cm }} cm</p>
+                {% for item in b.items_invoice or [b] %}<p class="shipment-hub-item"><strong>{{ item.descripcion_en or s.producto_alias }}</strong><span>{{ item.unidades_aduana or b.cantidad or 1 }} unidades · HS {{ item.hs_code or 'sin informar' }}{% if item.valor_total_usd is defined %} · {{ ((item.valor_total_usd))|dinero_usd }} total{% else %} · {{ (item.valor_unitario_usd or 0)|dinero_usd }} por unidad{% endif %}<br>Fabricación: {{ nombre_pais(item.pais_origen) if item.pais_origen else 'sin informar' }}{% if item.peso_neto_kg %} · Peso neto {{ (item.peso_neto_kg)|kg }}{% endif %}</span></p>{% endfor %}
+            </section>
+        {% else %}<p>{{ s.cantidad }} bultos · {{ (s.peso_kg)|kg }} · {{ s.producto_alias }}</p>{% endfor %}
+        </div>
+        <p class="shipment-hub-declared">Valor declarado total <strong>{{ ((s.valor_declarado_usd or 0))|dinero_usd }}</strong> · {{ 'Con protección de carga' if s.asegurar_carga else 'Sin protección de carga' }}</p>
+        <p>Pagador de impuestos: {{ (s.tax_paga or 'DESTINATARIO')|lower }}.</p>
+    </div>
+    {% if s.tracking %}
+    <div class="shipment-hub-panel" data-hub-panel="retiro" hidden>
+        {% if recoleccion_error %}
+            <div class="msg warn">No pudimos verificar el retiro. Consultá a TAURO antes de pedir otro para evitar duplicados.</div>
+        {% elif recoleccion and recoleccion.estado != 'CANCELADA' %}
+            <p>Fecha de recolección: <strong>{{ recoleccion.fecha.strftime('%d/%m/%Y') if recoleccion.fecha else 'Pendiente de confirmar' }}</strong></p>
+            {{ comprobante_retiro(recoleccion) }}
+        {% elif retiro_form %}
+            <p class="shipment-hub-pickup-address">Retiran en <strong>{{ retiro_form.origen.calle }}, {{ retiro_form.origen.ciudad }}</strong><br>{{ retiro_form.bultos }} bulto{{ 's' if retiro_form.bultos != 1 else '' }} · {{ ((retiro_form.peso_kg))|kg }} · Guía {{ s.tracking }}</p>
+            <form method="POST" action="/portal/recolecciones/nueva" data-hub-operation>
+                <input type="hidden" name="gestion_ventana" value="1"><input type="hidden" name="solicitud_id" value="{{ s.id }}">
+                <input type="hidden" name="courier" value="{{ s.courier }}"><input type="hidden" name="bultos" value="{{ retiro_form.bultos }}"><input type="hidden" name="peso_kg" value="{{ retiro_form.peso_kg }}">
+                <div class="shipment-hub-pickup-fields">
+                    <label>Fecha<input type="date" name="fecha" required min="{{ retiro_form.fecha_sugerida }}" max="{{ retiro_form.fecha_max }}" value="{{ retiro_form.fecha_sugerida }}"></label>
+                    <label>Listos desde<input type="time" name="ready_time" required value="09:00"></label>
+                    <label>Disponibles hasta<input type="time" name="close_time" required value="17:00"></label>
+                </div>
+                <label>Indicaciones para el chofer<input type="text" name="instrucciones" maxlength="300" placeholder="Timbre, acceso o persona de contacto"></label>
+                <div class="shipment-hub-footer"><small>Horario del origen. Dejá al menos 2 horas.</small><button type="submit" class="btn btn-primary">Confirmar recolección</button></div>
+            </form>
+        {% else %}<p>La recolección no está disponible para el estado actual de esta guía o los permisos de tu cuenta.</p>{% endif %}
+    </div>
+    {% endif %}
+    {% if puede_editar or (puede_emitir and s.estado == 'SOLICITADO' and not s.tracking) %}
+    <div class="shipment-hub-footer">
+        {% if puede_editar %}<a class="btn btn-ghost" href="/portal/envios/nuevo?editar={{ s.id }}&amp;ventana=1">Editar envío</a>{% endif %}
+        {% if puede_emitir %}
+        <form method="POST" action="/portal/envios/{{ s.id }}/emitir" data-hub-operation>
+            <input type="hidden" name="gestion_ventana" value="1"><input type="hidden" name="revision_envio" value="{{ s.updated_at.isoformat() if s.updated_at else '' }}">
+            <label class="shipment-hub-consent"><input type="checkbox" required> Revisé los datos y el precio.</label>
+            <button type="submit" class="btn btn-primary">Confirmar y emitir guía</button>
+        </form>
+        {% else %}<p>La emisión está pendiente de habilitación para tu cuenta. Podés revisar y editar la solicitud.</p>{% endif %}
+    </div>
+    <p class="shipment-hub-note">Al emitir se genera la guía real y se registra el cargo en tu cuenta corriente.</p>
+    {% elif s.estado == 'GUIA_LISTA' and s.tracking and retiro_form %}
+    <div class="shipment-hub-footer" data-hub-pickup-cta><span>Tu guía está lista para imprimir.</span><button type="button" class="btn btn-primary" data-hub-tab="retiro">Programar recolección</button></div>
+    {% endif %}
+</section>
+{% endblock %}

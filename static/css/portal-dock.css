@@ -2,7 +2,7 @@
 .tabbar-desktop { display: none; }
 
 @media (min-width: 901px) {
-  .portal-operacion { --dock-clearance: 16px; --dock-rail: 108px; }
+  .portal-operacion { --dock-clearance: 16px; --dock-rail: 108px; --dock-item: clamp(48px, 7vh, 60px); --dock-icon: clamp(32px, 4.5vh, 40px); }
   .portal-operacion .shell { padding-right: var(--dock-rail); }
   html:has(.portal-operacion) { scroll-padding-bottom: 24px; }
   .portal-operacion .shell .main-inner { padding-bottom: var(--dock-clearance); }
@@ -19,10 +19,10 @@
     transform: translateY(-50%);
     flex-direction: column;
     max-height: calc(100dvh - 32px);
-    overflow-y: auto;
+    overflow: visible;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: clamp(2px, .55vh, 5px);
     width: max-content;
     max-width: 82px;
     padding: 8px 10px;
@@ -39,7 +39,7 @@
     flex: 0 0 auto;
     width: 60px;
     min-width: 0;
-    min-height: 60px;
+    min-height: var(--dock-item);
     flex-direction: column;
     align-items: center;
     justify-content: center;
@@ -54,8 +54,8 @@
   .portal-operacion .tabbar-ico,
   .portal-operacion .tabbar-cta-ico {
     box-sizing: border-box;
-    width: 40px;
-    height: 40px;
+    width: var(--dock-icon);
+    height: var(--dock-icon);
     padding: 9px;
     border: 1px solid rgba(167,139,250,.20);
     border-radius: 14px;
@@ -97,6 +97,20 @@
     box-shadow: inset 0 1px 0 #fff,0 12px 38px rgba(64,43,102,.14),0 0 24px rgba(124,92,246,.05);
   }
   html[data-theme="light"] .portal-operacion .tabbar-ico { color: var(--accent-deep); border-color: rgba(118,85,215,.22); background: linear-gradient(145deg,#fff,#e9e0fa); }
+}
+/* El carril compacto conserva la separación del contenido y todos los accesos. */
+@media (min-width: 901px) and (max-width: 1280px), (min-width: 901px) and (max-height: 719px) {
+  .portal-operacion { --dock-rail: 76px; --dock-item: clamp(32px, 8vh, 48px); --dock-icon: clamp(26px, 6vh, 36px); }
+  .portal-operacion .tabbar { right: 10px; max-width: 58px; padding: clamp(3px, 1vh, 8px) 6px; gap: clamp(0px, .45vh, 4px); }
+  .portal-operacion .tabbar-item { width: 44px; padding: 0; gap: 0; }
+  .portal-operacion .tabbar-lbl { display: none; }
+  .portal-operacion .tabbar-item.active::after { bottom: 1px; }
+}
+/* Ventanas muy bajas: reducir cada acceso en proporción al alto disponible. */
+@media (min-width: 901px) and (max-height: 360px) {
+  .portal-operacion { --dock-item: calc((100dvh - 28px) / 6); --dock-icon: min(26px, calc((100dvh - 36px) / 6)); }
+  .portal-operacion .tabbar { padding-block: 2px; gap: 0; }
+  .portal-operacion .tabbar-ico, .portal-operacion .tabbar-cta-ico { padding: 4px; border-radius: 8px; }
 }
 @media (min-width: 901px) and (hover: hover) and (pointer: fine) {
   .portal-operacion .tabbar-item:hover { color: var(--fg); }

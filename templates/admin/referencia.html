@@ -6,7 +6,7 @@
     <h1>Lo que Boxfly nos cobró</h1>
     <p>420 envíos reales del portal de Boxfly (extraído 07/08/2026). Es el precio de
        mercado DEMOSTRADO de un revendedor de FedEx — la vara contra la que calibrar
-       nuestros precios de venta{% if dolar %} · dólar {{ "%.0f"|format(dolar) }}{% endif %}.</p>
+       nuestros precios de venta{% if dolar %} · dólar {{ (dolar)|numero_ars }}{% endif %}.</p>
 </div>
 
 <div class="msg warn" style="margin-bottom:16px;">
@@ -33,7 +33,7 @@
                     <td class="mono">{{ f.escalon }}</td>
                     <td class="mono">{{ dinero_ars(f.desde) }} – {{ dinero_ars(f.hasta) }}</td>
                     <td class="mono"><b>{{ dinero_ars(f.mediana) }}</b></td>
-                    {% if dolar %}<td class="mono">{{ f.mediana_usd }}</td>{% endif %}
+                    {% if dolar %}<td class="mono">{{ f.mediana_usd|dinero_usd }}</td>{% endif %}
                     <td class="mono">{{ f.envios }}</td>
                 </tr>
             {% endfor %}
@@ -47,7 +47,7 @@
     <ul style="margin:0;padding-left:20px;line-height:2;">
     {% for c in calibracion %}
         {% if c.ref %}
-        <li><b>{{ c.ref }}</b> · {{ c.pais }} · {{ c.peso_kg }} kg ({{ c.dims }} cm)
+        <li><b>{{ c.ref }}</b> · {{ c.pais }} · {{ (c.peso_kg)|kg }} ({{ c.dims|replace("×", " × ") }} cm)
             → {{ dinero_ars(c.ars) }}</li>
         {% else %}
         <li style="color:var(--fg-3)">{{ c.nota }}</li>

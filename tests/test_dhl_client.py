@@ -18,7 +18,7 @@ Los tres bugs que atrapan estaban todos en producción latente:
 """
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -73,7 +73,7 @@ def _llamar(productos, capturar=None):
     """Ejecuta get_rates() con una respuesta falsa y devuelve (resultado, kwargs)."""
     resp = mock.Mock(status_code=200)
     resp.json.return_value = {"products": productos}
-    with mock.patch("core.dhl_client.requests.get", return_value=resp) as get:
+    with mock.patch.object(DHLClient, "_rate_request", return_value=resp) as get:
         out = _cliente().get_rates(ORIGEN, DESTINO, PAQUETE)
     return out, get.call_args.kwargs
 
@@ -90,7 +90,7 @@ def test_normaliza_cpa_argentino_para_rates_y_direcciones():
     origen = dict(ORIGEN, postal_code="C1043ABC")
     resp = mock.Mock(status_code=200)
     resp.json.return_value = {"products": [_producto("P", 120.0)]}
-    with mock.patch("core.dhl_client.requests.get", return_value=resp) as get:
+    with mock.patch.object(DHLClient, "_rate_request", return_value=resp) as get:
         _cliente().get_rates(origen, DESTINO, PAQUETE)
 
     assert get.call_args.kwargs["params"]["originPostalCode"] == "1043"
@@ -108,12 +108,26 @@ def test_normaliza_cpa_argentino_para_rates_y_direcciones():
 
 
 def test_la_fecha_de_envio_va_y_es_futura_y_sin_hora():
-    _, kw = _llamar([_producto("P", 120.0)])
+    # En este instante UTC ya es 7/10, pero en el origen argentino todavía es
+    # 6/10. La fecha de DHL debe calcularse respecto del origen de la quote.
+    instante_utc = datetime(2026, 10, 7, 1, 30, tzinfo=timezone.utc)
+
+    class DatetimeFijo(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return instante_utc.replace(tzinfo=None)
+            return instante_utc.astimezone(tz)
+
+    with mock.patch("core.dhl_client.datetime", DatetimeFijo):
+        _, kw = _llamar([_producto("P", 120.0)])
     fecha = kw["params"]["plannedShippingDate"]
     assert "T" not in fecha, f"la spec pide YYYY-MM-DD, no ISO con hora: {fecha}"
-    assert date.fromisoformat(fecha) > date.today(), (
-        f"DHL no cotiza contra una fecha pasada: {fecha}"
-    )
+    zona_origen, error = _cliente()._zona_origen(ORIGEN["country"])
+    assert error is None
+    hoy_origen = instante_utc.astimezone(zona_origen).date()
+    assert hoy_origen == date(2026, 10, 6)  # cubre el límite UTC/Argentina
+    assert date.fromisoformat(fecha) == hoy_origen + timedelta(days=1)
 
 
 def test_manda_el_header_de_version():
@@ -199,7 +213,7 @@ def _cliente_con(env):
 def _cuenta_usada(cli, origen, destino):
     resp = mock.Mock(status_code=200)
     resp.json.return_value = {"products": [_producto("P", 120.0)]}
-    with mock.patch("core.dhl_client.requests.get", return_value=resp) as get:
+    with mock.patch.object(DHLClient, "_rate_request", return_value=resp) as get:
         out = cli.get_rates(origen, destino, PAQUETE)
     if not get.called:
         return None, out
@@ -244,7 +258,7 @@ def test_un_envio_nacional_usa_la_de_expo():
 
 def test_un_error_de_dhl_no_lanza_excepcion():
     resp = mock.Mock(status_code=400, text="Bad request: missing parameter")
-    with mock.patch("core.dhl_client.requests.get", return_value=resp):
+    with mock.patch.object(DHLClient, "_rate_request", return_value=resp):
         out = _cliente().get_rates(ORIGEN, DESTINO, PAQUETE)
     assert not out["encontrado"]
     assert "HTTP 400" in out["error"]
@@ -298,7 +312,7 @@ def _post(origen=None, destino=None, bultos=None, env=None):
     resp = mock.Mock(status_code=200)
     resp.json.return_value = {"products": [_producto("P", 240.0)]}
     with mock.patch.dict(os.environ, base, clear=True), \
-         mock.patch("core.dhl_client.requests.post", return_value=resp) as post:
+         mock.patch.object(DHLClient, "_rate_request", return_value=resp) as post:
         out = DHLClient().get_rates(
             origen or ORIGEN, destino or DESTINO, paquetes=bultos or BULTOS)
     return out, (post.call_args.kwargs if post.called else None)
@@ -316,6 +330,62 @@ def test_varias_cajas_van_por_post_con_una_entrada_cada_una():
     assert pk[0]["weight"] == 1.4
     assert pk[0]["dimensions"] == {"length": 33.0, "width": 33.0, "height": 22.0}
     assert pk[1]["dimensions"]["length"] == 40.0
+
+
+def test_multibulto_reintenta_con_la_fecha_habil_que_informa_dhl():
+    """El código 996 es un feriado, no falta de cobertura multibulto."""
+    feriado = mock.Mock(status_code=404)
+    feriado.json.return_value = {
+        "status": "404", "title": "Product not found",
+        "detail": "996: The requested product(s) not available for the requested pickup date.",
+    }
+    disponible = mock.Mock(status_code=200)
+    disponible.json.return_value = {"products": [_producto("P", 240.0)]}
+    producto_fecha = _producto("P", 120.0)
+    producto_fecha["pickupCapabilities"] = {
+        "localCutoffDateAndTime": "2099-10-06T17:00:00",
+    }
+    proximo_dia = mock.Mock(status_code=200)
+    proximo_dia.json.return_value = {"products": [producto_fecha]}
+
+    entorno = {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_EXPO": "741622792",
+    }
+    with mock.patch.dict(os.environ, entorno, clear=True), \
+         mock.patch.object(
+             DHLClient, "_rate_request",
+             side_effect=[feriado, proximo_dia, disponible],
+         ) as request:
+        out = DHLClient().get_rates(ORIGEN, DESTINO, paquetes=BULTOS)
+
+    assert out["encontrado"]
+    assert [call.args[0] for call in request.call_args_list] == ["POST", "GET", "POST"]
+    budgets = [call.kwargs["quote_budget"] for call in request.call_args_list]
+    assert budgets[0] is budgets[1] is budgets[2]
+    segundo_body = request.call_args_list[2].kwargs["json"]
+    assert segundo_body["plannedShippingDateAndTime"].startswith(
+        "2099-10-06T08:00:00GMT"
+    )
+    assert len(segundo_body["packages"]) == 2
+
+
+def test_multibulto_no_reintenta_un_rechazo_que_no_es_feriado():
+    rechazo = mock.Mock(status_code=404)
+    rechazo.json.return_value = {
+        "status": "404", "title": "Product not found",
+        "detail": "999: Process failure occurred.",
+    }
+    entorno = {
+        "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
+        "DHL_ACCOUNT_NUMBER_EXPO": "741622792",
+    }
+    with mock.patch.dict(os.environ, entorno, clear=True), \
+         mock.patch.object(DHLClient, "_rate_request", return_value=rechazo) as request:
+        out = DHLClient().get_rates(ORIGEN, DESTINO, paquetes=BULTOS)
+
+    assert not out["encontrado"]
+    request.assert_called_once()
 
 
 def test_la_cuenta_va_en_accounts_no_en_la_raiz():
@@ -369,11 +439,11 @@ def test_una_sola_caja_sigue_yendo_por_el_GET():
     with mock.patch.dict(os.environ, {
         "DHL_API_KEY": "k", "DHL_API_SECRET": "s",
         "DHL_ACCOUNT_NUMBER_EXPO": "741622792"}, clear=True), \
-         mock.patch("core.dhl_client.requests.get", return_value=resp) as get, \
-         mock.patch("core.dhl_client.requests.post") as post:
+         mock.patch.object(DHLClient, "_rate_request", return_value=resp) as request:
         out = DHLClient().get_rates(ORIGEN, DESTINO, paquetes=[BULTOS[0]])
     assert out["encontrado"]
-    assert get.called and not post.called
+    request.assert_called_once()
+    assert request.call_args.args[0] == "GET"
 
 
 def test_seguro_fuerza_post_rates_y_envia_valor_total_ii():

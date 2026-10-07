@@ -153,11 +153,8 @@ def test_conteo_y_remanente_no_se_truncan_en_24_envios(datos):
     ip.imputar_pago_cliente('DEMO',id,[f'E:{i}' for i in ids],'300')
     detalle = ec.obtener_pago_cliente('DEMO',id)
     assert len(detalle['aplicaciones']) == 26
-    with conn() as db:
-        with db.cursor() as cur:
-            cur.execute(ec._PAGOS_SQL, ('DEMO',None,None,None,None))
-            tarjeta = ec._presentar_pago(dict(cur.fetchone()))
-    assert len(tarjeta['aplicaciones']) == 24
+    tarjeta = next(p for p in ec.obtener_experiencia_cuenta('DEMO', {})['pagos'] if p['id'] == id)
+    assert len(tarjeta['aplicaciones']) == 26
     assert tarjeta['cantidad_envios'] == 26
     assert tarjeta['sin_imputar_ars'] == Decimal('40')
     assert tarjeta['imputacion_label'] == 'Pago imputado a 26 envíos'

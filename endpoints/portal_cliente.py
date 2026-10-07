@@ -17,7 +17,9 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime, timedelta, timezone
+import threading
+import time
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from urllib.parse import quote, urlencode, urlparse
 
@@ -26,8 +28,11 @@ from typing import Optional, Annotated
 from fastapi import APIRouter, Request, Form, Cookie, HTTPException, Depends
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response,
+    StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
+import anyio
+from core.quote_observability import quote_logger
 
 from servicios.auth import (
     generar_token, validar_token, revocar_token,
@@ -50,7 +55,7 @@ from servicios.cuenta_corriente import (
     saldo, total_pagado, get_facturado_real, get_facturas_recientes,
     movimientos, resumir_facturacion, resumen_cuenta_por_ambito,
     movimientos_cuenta_paginados, listar_destinos_pago,
-    normalizar_periodo_mensual_cuenta, resumen_mensual_cuenta,
+    resumen_mensual_cuenta,
 )
 from servicios.facturacion_clientes import (
     get_factura_cliente_pdf,
@@ -60,8 +65,9 @@ from servicios.documentos_portal import (
 )
 from servicios.experiencia_cuenta import obtener_experiencia_cuenta, obtener_pago_cliente
 from servicios.imputacion_pagos_portal import imputar_pago_cliente
-from servicios.periodo_cuenta import inicio_cuenta_cliente, obtener_periodo_cuenta
+from servicios.periodo_cuenta import obtener_periodo_cuenta
 from servicios.filtros_cuenta import normalizar_filtros_cuenta
+from servicios.periodo_visual_cuenta import normalizar_ventana_cuenta
 from servicios.ubicaciones_envio import validar_ubicacion_cotizada
 from servicios.export_cuenta import generar_excel_cuenta
 from servicios.api_b2b import (
@@ -79,6 +85,7 @@ from servicios.solicitudes_guia import (
     cancelar_solicitud_cliente, periodos_solicitudes_cliente,
 )
 from servicios.periodos_envios import normalizar_periodo
+from servicios.edicion_solicitud import puede_editar_solicitud, editar_solicitud_cliente
 from servicios.rutas_frecuentes import obtener_rutas_frecuentes
 from servicios.carriers import courier_default_cliente
 from servicios.carrier_contract import Ambito, public_catalog
@@ -94,7 +101,11 @@ from servicios.paises import (
     referencias_formulario as referencias_paises_formulario,
 )
 from servicios.provincias import opciones as opciones_provincias
-from servicios.panel_cliente import embudo_envios, preparar_historial_envios
+from servicios.panel_cliente import (
+    embudo_envios,
+    preparar_historial_envios,
+    resumen_inicio_cliente,
+)
 from servicios.integraciones_tienda import (
     conectar_tienda, listar_tiendas, desconectar_tienda,
     reiniciar_integracion_shopify_cliente,
@@ -125,7 +136,9 @@ templates = Jinja2Templates(directory="templates")
 # de tracking y la división nacional/internacional salen de un solo lugar.
 from servicios.borradores import confirmar_borrador
 from servicios.couriers_urls import ambito_envio, es_nacional, nombre_courier, url_tracking
-from servicios.presentacion import dinero_ars, numero_ars
+from servicios.presentacion import registrar_filtros, dinero_ars, numero_ars, medida_cm, condiciones_cotizacion
+registrar_filtros(templates.env)
+from servicios.estados_envio import HITOS_ENVIO_UI
 templates.env.globals["url_tracking"] = url_tracking
 templates.env.globals["es_nacional"] = es_nacional
 templates.env.globals["ambito_envio"] = ambito_envio
@@ -133,6 +146,11 @@ templates.env.globals["nombre_courier"] = nombre_courier
 templates.env.globals["nombre_pais"] = nombre_pais
 templates.env.globals["dinero_ars"] = dinero_ars
 templates.env.globals["numero_ars"] = numero_ars
+templates.env.globals["medida_cm"] = medida_cm
+templates.env.globals["condiciones_cotizacion"] = condiciones_cotizacion
+templates.env.globals["hitos_envio_ui"] = HITOS_ENVIO_UI
+
+
 templates.env.globals["descriptor_documento"] = descriptor_documento
 
 
@@ -280,6 +298,14 @@ def _pendientes_menu(cliente_id: str) -> dict:
 templates.env.globals["pendientes_menu"] = _pendientes_menu
 
 
+def _invoice_asistente_habilitado() -> bool:
+    from servicios.invoice_asistente import habilitado
+    return habilitado()
+
+
+templates.env.globals["invoice_asistente_habilitado"] = _invoice_asistente_habilitado
+
+
 def _saldo_menu(cliente_id: str, ya_calculado: Optional[dict] = None) -> Optional[dict]:
     """
     Saldo para la barra lateral: visible en TODAS las pantallas del portal,
@@ -371,6 +397,13 @@ def cliente_actual(token: Optional[str] = Cookie(None)) -> str:
     if not cliente:
         raise HTTPException(status_code=303, headers={"Location": "/portal/login"})
     return cliente
+
+
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+def acceso_portal():
+    """Acceso compartible; el inicio conserva la validación de sesión."""
+    return RedirectResponse(url="/portal/home", status_code=303)
 
 
 # ── Login ───────────────────────────────────────────────────
@@ -847,6 +880,15 @@ def offline_pwa(request: Request):
     )
 
 
+# ── Raíz del portal ─────────────────────────────────────────
+# taurosolutions.ar/portal respondía 404: el portal vive en /portal/home y el
+# login en /portal/login. La raíz sólo redirige; /portal/home ya exige sesión.
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+def portal_raiz():
+    return RedirectResponse(url="/portal/home", status_code=303)
+
+
 # ── Home ────────────────────────────────────────────────────
 @router.get("/home", response_class=HTMLResponse)
 def home(request: Request, cliente: str = Depends(cliente_actual)):
@@ -863,6 +905,7 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
         solicitud for solicitud in historial
         if ambito_envio(solicitud) == "internacional"
     ][:3]
+    embudo = embudo_envios(cliente)
 
     return templates.TemplateResponse(
         request=request, name="portal/home.html",
@@ -871,8 +914,26 @@ def home(request: Request, cliente: str = Depends(cliente_actual)):
             "saldo": saldo_data,
             "solicitudes_nacionales": solicitudes_nacionales,
             "solicitudes_internacionales": solicitudes_internacionales,
-            # Sólo alimenta recordatorios compactos de acciones reales.
-            "embudo": embudo_envios(cliente),
+            # El resumen y los recordatorios parten de la misma foto para que
+            # una cifra nunca contradiga el filtro que abre el cliente.
+            "embudo": embudo,
+            "resumen_inicio": resumen_inicio_cliente(historial, embudo),
+        },
+    )
+
+
+@router.get("/estadisticas", response_class=HTMLResponse)
+def estadisticas(request: Request, cliente: str = Depends(cliente_actual)):
+    """Panorama operativo real del cliente, sin mezclar datos de cuenta."""
+    historial = listar_solicitudes_cliente(cliente, limite=None)
+    embudo = embudo_envios(cliente)
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/estadisticas.html",
+        context={
+            "cliente": cliente,
+            "embudo": embudo,
+            "resumen_inicio": resumen_inicio_cliente(historial, embudo),
         },
     )
 
@@ -980,6 +1041,32 @@ def recolecciones_view(
         if permisos_pickup.get(c["id"].lower(), False)
     ]
 
+    # La recolección nace desde una guía real. Ofrecemos las guías listas de
+    # ESTA cuenta, internacionales y sin otro retiro vigente. Una guía vieja
+    # sigue disponible mientras continúe lista para despachar; una cancelada,
+    # reemplazada o ya asociada no vuelve a aparecer como opción engañosa.
+    guias_recoleccion = []
+    guias_recoleccion_error = False
+    try:
+        envios_con_retiro = {
+            int(r["solicitud_id"])
+            for r in recolecciones
+            if r.get("solicitud_id") and r.get("estado") != "CANCELADA"
+        }
+        for solicitud in listar_solicitudes_cliente(cliente, limite=None):
+            courier = str(solicitud.get("courier") or "").strip().upper()
+            if (
+                solicitud.get("tracking")
+                and solicitud.get("estado") == "GUIA_LISTA"
+                and ambito_envio(solicitud) == "internacional"
+                and permisos_pickup.get(courier.lower(), False)
+                and int(solicitud["id"]) not in envios_con_retiro
+            ):
+                guias_recoleccion.append(solicitud)
+    except Exception as exc:
+        guias_recoleccion_error = True
+        print(f"[portal] no pude listar guías para retiro: {type(exc).__name__}")
+
     envio_pre = None
     envio_pre_error = None
     if envio:
@@ -1049,6 +1136,8 @@ def recolecciones_view(
                  "envio_pre_error": envio_pre_error,
                  "puede_recolectar": puede_recolectar,
                  "dhl_requiere_envio": dhl_requiere_envio,
+                 "guias_recoleccion": guias_recoleccion,
+                 "guias_recoleccion_error": guias_recoleccion_error,
                  "couriers_recoleccion": couriers_recoleccion,
                  "courier_default": (courier_default_cliente(cliente) or "fedex").upper(),
                  "fecha_sugerida": sugerida.strftime("%Y-%m-%d"),
@@ -1067,6 +1156,7 @@ def recoleccion_nueva(
     courier: str = Form("FEDEX"),
     solicitud_id: str = Form(""),
     cliente: str = Depends(cliente_actual),
+    gestion_ventana: str = Form(""),
 ):
     from servicios.recolecciones import crear
 
@@ -1088,12 +1178,17 @@ def recoleccion_nueva(
         r = {"ok": False, "error": "No pudimos confirmar el retiro. Revisá su estado o escribinos antes de volver a pedirlo."}
 
     parametros = {"envio": solicitud_id_num} if solicitud_id_num else {}
+    if gestion_ventana == "1" and solicitud_id_num:
+        resultado_url = "ok=recoleccion" if r.get("ok") else "error=" + quote(str(r.get("error") or "No pudimos confirmar el retiro"))
+        return RedirectResponse(url=f"/portal/envios/{solicitud_id_num}/gestion?ventana=1&retiro=1&{resultado_url}", status_code=303)
     if r.get("ok"):
         parametros.update(ok="1", recoleccion=r["id"])
         return RedirectResponse(
             url="/portal/recolecciones?" + urlencode(parametros) + f"#recoleccion-{r['id']}",
             status_code=303)
     parametros["error"] = str(r.get("error") or "Error")
+    if r.get("recoleccion_conflicto_id"):
+        parametros["recoleccion"] = int(r["recoleccion_conflicto_id"])
     return RedirectResponse(
         url="/portal/recolecciones?" + urlencode(parametros),
         status_code=303)
@@ -1125,79 +1220,60 @@ def cuenta_corriente(
     hasta: str = "",
     periodo: str = "",
     pagar: str = "",
+    ventana: str = "",
+    pagina_pagos: str = "1",
 ):
-    """
-    Timeline completo de facturas y pagos. La spec lo pide explícito: el
-    cliente administra su cuenta corriente con TAURO desde el portal, no
-    preguntando el saldo por WhatsApp.
-    """
+    """Historial propio por período; el saldo real no depende de estos filtros."""
     ambito = _ambito_cuenta(ambito)
     tipo = _tipo_movimiento_cuenta(tipo)
     pagina_numero = _pagina_cuenta(pagina)
-    inicio_cuenta = inicio_cuenta_cliente(cliente)
+    pagina_pagos_numero = _pagina_cuenta(pagina_pagos)
     filtros_error = ""
-    periodo_filtro = ""
-    periodo_info = None
     try:
-        periodo_info = normalizar_periodo_mensual_cuenta(periodo)
-        if periodo_info["clave"]:
-            periodo_filtro = periodo_info["clave"]
-            desde, hasta = periodo_info["desde"], periodo_info["hasta"]
-        filtros = normalizar_filtros_cuenta(q, desde, hasta, inicio=inicio_cuenta)
+        ventana_info = normalizar_ventana_cuenta(
+            cliente, ventana=ventana, periodo=periodo, desde=desde, hasta=hasta,
+        )
+        filtros = normalizar_filtros_cuenta(q, ventana_info["desde"], ventana_info["hasta"])
     except ValueError as exc:
-        filtros = normalizar_filtros_cuenta(inicio=inicio_cuenta)
-        # Si el mes pedido queda fuera del período visible (por ejemplo,
-        # anterior al corte de una cuenta), no conservarlo para el resumen ni
-        # para los enlaces. El historial ya volvió al rango permitido y ambos
-        # bloques deben describir exactamente la misma consulta.
-        periodo_filtro = ""
-        periodo_info = None
-        filtros_error = (f"{exc} Se muestra la cuenta desde su fecha de inicio."
-                          if inicio_cuenta else f"{exc} Se muestran los movimientos sin búsqueda ni filtro de fechas.")
-        pagina_numero = 1
+        ventana_info = normalizar_ventana_cuenta(cliente)
+        filtros = normalizar_filtros_cuenta("", ventana_info["desde"], ventana_info["hasta"])
+        filtros_error = f"{exc} Se muestra el año en curso."
+        pagina_numero = pagina_pagos_numero = 1
+    periodo_filtro = ventana_info["periodo"]
 
     def cuenta_url(**cambios):
         exportar = cambios.pop("exportar", False)
-        parametros = {"ambito": ambito, "tipo": tipo, "q": filtros["q"]}
+        parametros = {"ambito": ambito, "tipo": tipo, "q": filtros["q"],
+                      "ventana": ventana_info["ventana"], "pagina_pagos": pagina_pagos_numero}
         if periodo_filtro:
             parametros["periodo"] = periodo_filtro
-        else:
+        elif ventana_info["ventana"] == "rango":
             parametros.update({"desde": filtros["desde"], "hasta": filtros["hasta"]})
         parametros.update({k: v for k, v in cambios.items() if k in {
             "ambito", "tipo", "q", "desde", "hasta", "periodo", "pagina", "pagar",
+            "ventana", "pagina_pagos",
         }})
         if "periodo" in cambios:
+            parametros["ventana"] = "mes" if cambios["periodo"] else "anio"
             parametros.pop("desde", None)
             parametros.pop("hasta", None)
-        parametros = {k: v for k, v in parametros.items() if v is not None and v != ""}
+            parametros.pop("pagina_pagos", None)
+        if "pagina_pagos" in cambios and "pagina" not in cambios:
+            parametros["pagina"] = movs["pagina_actual"]
         if exportar:
-            parametros.pop("pagina", None)
-            parametros.pop("pagar", None)
-            # El exportador conserva el contrato por rango de fechas. El mes
-            # visible se traduce acá para que el Excel coincida con la pantalla.
-            if periodo_info and periodo_info["clave"]:
-                parametros.pop("periodo", None)
-                parametros["desde"] = periodo_info["desde"]
-                parametros["hasta"] = periodo_info["hasta"]
+            for clave in ("pagina", "pagina_pagos", "pagar"):
+                parametros.pop(clave, None)
+        parametros = {k: v for k, v in parametros.items() if v is not None and v != ""}
         path = "/portal/cuenta/exportar.xlsx" if exportar else "/portal/cuenta"
         return path + ("?" + urlencode(parametros) if parametros else "")
-    # `vista` queda en la firma por compatibilidad con enlaces anteriores.
-    # La cuenta nueva unifica facturas, pendientes y pagos en el mismo historial.
-    vista = "movimientos"
 
-    # Las dos consultas reciben exclusivamente el cliente autenticado. Ningún
-    # query param o campo del form puede elegir la cuenta de otra persona.
     parcial_cuenta = getattr(request, "headers", {}).get("X-Tauro-Partial") == "cuenta"
     resumen = None if parcial_cuenta else resumen_cuenta_por_ambito(cliente)
     movimientos_por_pagina = (
-        DIFERENCIAS_CUENTA_POR_PAGINA
-        if tipo == "diferencias"
-        else MOVIMIENTOS_CUENTA_POR_PAGINA
+        DIFERENCIAS_CUENTA_POR_PAGINA if tipo == "diferencias" else MOVIMIENTOS_CUENTA_POR_PAGINA
     )
-    argumentos_busqueda = filtros if any(filtros.values()) else {}
     movs = movimientos_cuenta_paginados(
-        cliente, ambito, tipo, pagina_numero, movimientos_por_pagina,
-        **argumentos_busqueda,
+        cliente, ambito, tipo, pagina_numero, movimientos_por_pagina, **filtros,
     )
     resumen_mensual = None
     resumen_mensual_error = ""
@@ -1207,89 +1283,64 @@ def cuenta_corriente(
         except Exception as exc:
             print(f"[portal-cuenta] resumen mensual no disponible: {type(exc).__name__}")
             resumen_mensual_error = "No pudimos calcular el resumen de este mes. Los movimientos siguen disponibles."
+    periodo_cuenta = None
+    periodo_error = ""
+    try:
+        periodo_cuenta = obtener_periodo_cuenta(cliente, date.fromisoformat(filtros["desde"]))
+        if resumen and periodo_cuenta["saldo_total_ars"] != resumen["consolidado"]["saldo_ars"]:
+            raise ValueError("La cuenta cambió durante la lectura")
+    except Exception as exc:
+        print(f"[portal-cuenta] apertura no disponible: {type(exc).__name__}")
+        periodo_cuenta = None
+        periodo_error = "No pudimos actualizar el saldo anterior. Recargá para volver a intentarlo."
+    experiencia = None
+    experiencia_error = ""
+    try:
+        experiencia = obtener_experiencia_cuenta(
+            cliente, resumen or {}, desde=filtros["desde"], hasta=filtros["hasta"],
+            pagina_pagos=pagina_pagos_numero,
+        )
+        if experiencia:
+            pagina_pagos_numero = experiencia.get("pagos_paginacion", {}).get(
+                "pagina_actual", pagina_pagos_numero,
+            )
+    except Exception as exc:
+        print(f"[portal-cuenta] detalle no disponible: {type(exc).__name__}")
+        experiencia_error = "No pudimos actualizar los pagos. Recargá para volver a intentarlo."
     contexto_historial = {
         "cliente": cliente, "movimientos": movs,
         "ambito_filtro": ambito, "tipo_filtro": tipo,
         "q_filtro": filtros["q"], "desde_filtro": filtros["desde"],
         "hasta_filtro": filtros["hasta"], "filtros_error": filtros_error,
         "periodo_filtro": periodo_filtro,
-        "periodo_filtro_label": periodo_info["label"] if periodo_info and periodo_filtro else "",
-        "resumen_mensual": resumen_mensual,
-        "resumen_mensual_error": resumen_mensual_error,
-        "cuenta_url": cuenta_url,
-        "inicio_cuenta": inicio_cuenta,
+        "periodo_filtro_label": ventana_info["label"] if periodo_filtro else "",
+        "ventana_filtro": ventana_info["ventana"], "ventana_label": ventana_info["label"],
+        "resumen_mensual": resumen_mensual, "resumen_mensual_error": resumen_mensual_error,
+        "cuenta_url": cuenta_url, "experiencia": experiencia, "experiencia_error": experiencia_error,
+        "periodo_cuenta": periodo_cuenta, "periodo_error": periodo_error,
     }
     if parcial_cuenta:
         return templates.TemplateResponse(
-            request=request, name="portal/cuenta_movimientos.html",
-            context=contexto_historial,
+            request=request, name="portal/cuenta_parcial.html", context=contexto_historial,
             headers={"X-Tauro-Partial": "cuenta", "Cache-Control": "private, no-store"},
         )
     consolidado = resumen["consolidado"]
-    # Compatibilidad con el saldo del menú lateral: reutiliza el total ya
-    # calculado y evita otra consulta a la base.
     saldo_data = {
-        "facturado_ars": consolidado["debe_ars"],
-        "pagado_ars": consolidado["haber_ars"],
+        "facturado_ars": consolidado["debe_ars"], "pagado_ars": consolidado["haber_ars"],
         "saldo_pendiente_ars": consolidado["saldo_ars"],
     }
     try:
         destinos_pago = listar_destinos_pago(cliente)
     except RuntimeError:
-        # Mantiene renderizable la página durante readiness/migración; el
-        # saldo principal ya tiene su propio circuito de diagnóstico.
         destinos_pago = []
-
-    experiencia = None
-    experiencia_error = ""
-    periodo_cuenta = None
-    periodo_error = ""
-    if inicio_cuenta:
-        try:
-            periodo_cuenta = obtener_periodo_cuenta(cliente, inicio_cuenta)
-            if periodo_cuenta["saldo_total_ars"] != consolidado["saldo_ars"]:
-                raise ValueError("La cuenta cambió durante la lectura")
-        except Exception as exc:
-            print(f"[portal-cuenta] inicio no disponible: {type(exc).__name__}")
-            periodo_cuenta = None
-            periodo_error = "El saldo total incluye movimientos anteriores. Recargá para ver su composición desde septiembre."
-    try:
-        experiencia = obtener_experiencia_cuenta(cliente, resumen)
-    except Exception as exc:
-        # La cuenta ya calculada sigue visible. Un fallo no representa cero
-        # deuda/vencimientos ni capacidad ilimitada para operar.
-        print(f"[portal-cuenta] detalle no disponible: {type(exc).__name__}")
-        experiencia_error = "No pudimos actualizar vencimientos, pagos y costos. Recargá la página para volver a intentarlo."
     destino_preseleccionado = next((
         d for d in destinos_pago
         if d.get("clave") == pagar and Decimal(str(d.get("disponible") or 0)) > 0
     ), None)
-
     return templates.TemplateResponse(
         request=request, name="portal/cuenta.html",
-        context={
-            "cliente": cliente,
-            "saldo": saldo_data,
-            "movimientos": movs,
-            "resumen_cuenta": resumen,
-            "ambito_filtro": ambito,
-            "tipo_filtro": tipo,
-            "vista_cuenta": vista,
-            "destinos_pago": destinos_pago,
-            "q_filtro": filtros["q"],
-            "desde_filtro": filtros["desde"],
-            "hasta_filtro": filtros["hasta"],
-            "filtros_error": filtros_error,
-            "periodo_filtro": periodo_filtro,
-            "periodo_filtro_label": periodo_info["label"] if periodo_info and periodo_filtro else "",
-            "resumen_mensual": resumen_mensual,
-            "resumen_mensual_error": resumen_mensual_error,
-            "cuenta_url": cuenta_url,
-            "experiencia": experiencia,
-            "experiencia_error": experiencia_error,
-            "inicio_cuenta": inicio_cuenta,
-            "periodo_cuenta": periodo_cuenta,
-            "periodo_error": periodo_error,
+        context={**contexto_historial, "saldo": saldo_data, "resumen_cuenta": resumen,
+            "vista_cuenta": "movimientos", "destinos_pago": destinos_pago,
             "pago_preseleccionado": destino_preseleccionado["clave"] if destino_preseleccionado else "",
             "pago_monto_preseleccionado": str(destino_preseleccionado["disponible"]) if destino_preseleccionado else "",
             "today": datetime.now(timezone(timedelta(hours=-3))).date().isoformat(),
@@ -1300,19 +1351,15 @@ def cuenta_corriente(
 
 @router.get("/cuenta/exportar.xlsx")
 def exportar_cuenta(
-    ambito: str = "consolidado",
-    tipo: str = "todos",
-    q: str = "",
-    desde: str = "",
-    hasta: str = "",
-    periodo: str = "",
+    ambito: str = "consolidado", tipo: str = "todos", q: str = "",
+    desde: str = "", hasta: str = "", periodo: str = "", ventana: str = "",
     cliente: str = Depends(cliente_actual),
 ):
     try:
-        periodo_info = normalizar_periodo_mensual_cuenta(periodo)
-        if periodo_info["clave"]:
-            desde, hasta = periodo_info["desde"], periodo_info["hasta"]
-        filtros = normalizar_filtros_cuenta(q, desde, hasta, inicio=inicio_cuenta_cliente(cliente))
+        rango = normalizar_ventana_cuenta(
+            cliente, ventana=ventana, periodo=periodo, desde=desde, hasta=hasta,
+        )
+        filtros = normalizar_filtros_cuenta(q, rango["desde"], rango["hasta"])
         contenido = generar_excel_cuenta(
             cliente, _ambito_cuenta(ambito), _tipo_movimiento_cuenta(tipo), **filtros
         )
@@ -1322,10 +1369,8 @@ def exportar_cuenta(
     return Response(
         content=contenido,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f'attachment; filename="TAURO_cuenta_{fecha}.xlsx"',
-            "Cache-Control": "private, no-store",
-        },
+        headers={"Content-Disposition": f'attachment; filename="TAURO_cuenta_{fecha}.xlsx"',
+                 "Cache-Control": "private, no-store"},
     )
 
 
@@ -1432,6 +1477,63 @@ def ver_imputacion_pago(request: Request, pago_id: int, cliente: str = Depends(c
                 if d['clave'] not in vinculados and d['disponible'] > 0] if pago['puede_imputar'] else []
     return templates.TemplateResponse(request=request, name="portal/pago_imputar.html",
         context={"cliente":cliente,"pago":pago,"destinos_pago":destinos})
+
+
+@router.get("/pagos/{pago_id}/adjuntar-comprobante")
+def formulario_comprobante_pago(
+    request: Request, pago_id: int, cliente: str = Depends(cliente_actual),
+):
+    pago = obtener_pago_cliente(cliente, pago_id)
+    if not pago:
+        raise HTTPException(status_code=404, detail="Pago no disponible")
+    return templates.TemplateResponse(
+        request=request, name="portal/pago_comprobante.html",
+        context={"cliente": cliente, "pago": pago},
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/pagos/{pago_id}/adjuntar-comprobante")
+async def guardar_comprobante_pago(
+    request: Request, pago_id: int, cliente: str = Depends(cliente_actual),
+):
+    from servicios.cuenta_corriente import (
+        adjuntar_comprobante_pago, leer_comprobante_con_tope,
+    )
+
+    # Comprobar dueño antes de procesar el archivo. El servicio vuelve a
+    # comprobarlo bajo bloqueo: un formulario abierto no autoriza escrituras.
+    if not obtener_pago_cliente(cliente, pago_id):
+        raise HTTPException(status_code=404, detail="Pago no disponible")
+    volver = f"/portal/pagos/{pago_id}/adjuntar-comprobante"
+    if not check_rate(f"pago_comprobante:{cliente}", max_attempts=20, window_seconds=600):
+        return RedirectResponse(
+            f"{volver}?error={quote('Hiciste varios intentos. Esperá unos minutos y volvé a probar.')}",
+            status_code=303,
+        )
+    try:
+        async with request.form(max_files=1, max_fields=2) as form:
+            archivo = form.get("comprobante")
+            contenido = await leer_comprobante_con_tope(archivo)
+            if not contenido:
+                raise ValueError("Seleccioná un comprobante en PDF, JPG o PNG.")
+            adjuntar_comprobante_pago(
+                cliente, pago_id, contenido,
+                getattr(archivo, "filename", "") or "",
+            )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Pago no disponible")
+    except ValueError as exc:
+        return RedirectResponse(f"{volver}?error={quote(str(exc))}", status_code=303)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[portal] adjuntar_comprobante falló: {type(exc).__name__}")
+        return RedirectResponse(
+            f"{volver}?error={quote('No pudimos guardar el comprobante. Volvé a intentarlo.')}",
+            status_code=303,
+        )
+    return RedirectResponse(f"{volver}?adjuntado=1", status_code=303)
 
 
 @router.post("/pagos/{pago_id}/imputar")
@@ -1670,6 +1772,172 @@ def ubicaciones_cotizador(pais: str = "", q: str = "", tipo: str = "city",
         return {"suggestions": [], "automatic": None, "unavailable": True}
 
 
+def _cotizacion_fragmento(request: Request) -> bool:
+    return getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow"
+
+
+def _renderizar_cotizacion(request: Request, contexto: dict):
+    """Un resultado AJAX no vuelve a consultar datos de la página completa."""
+    fragmento = _cotizacion_fragmento(request)
+    if not fragmento:
+        contexto.update(
+            provincias=opciones_provincias(),
+            paises_origen=_paises_con_nacional(),
+            paises_destino=_paises_con_nacional(),
+            rutas_frecuentes=obtener_rutas_frecuentes(contexto["cliente"]),
+        )
+        if contexto["ambito"] == "internacional":
+            contexto.update(
+                referencias_paises=referencias_paises_formulario(),
+                operadores_internacionales=_operadores_cliente(
+                    contexto["cliente"], Ambito.INTERNACIONAL,
+                ),
+            )
+    return templates.TemplateResponse(
+        request=request,
+        name="portal/_quote_results.html" if fragmento else "portal/cotizar.html",
+        context=contexto,
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+def _stream_cotizacion_internacional(
+    request: Request, *, cliente: str, parametros: dict, form: dict,
+    paquetes: list, es_reseller: bool, tax_paga_cotizacion: str | None = None,
+):
+    """Entrega sólo HTML público de cada resultado; nunca transporta costos."""
+    from servicios.cotizador import iterar_cotizar_referencia_couriers
+    from servicios.cotizaciones_portal import guardar_opciones
+
+    template = templates.get_template("portal/_quote_results.html")
+    cancelado = threading.Event()
+    contexto = {
+        "request": request, "cliente": cliente, "ambito": "internacional",
+        "form": form, "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
+        "destino_sel": form["destino_pais"], "es_reseller": es_reseller,
+        "tax_paga_cotizacion": tax_paga_cotizacion,
+        "opciones": [], "no_disponibles": [], "resultado": None, "error": None,
+    }
+
+    def linea(completo):
+        return json.dumps({
+            "html": template.render(**contexto), "complete": completo,
+        }, ensure_ascii=False) + "\n"
+
+    def generar():
+        inicio = time.monotonic()
+        comparaciones = None
+        guardadas = {}
+        finalizado = False
+        try:
+            comparaciones = iterar_cotizar_referencia_couriers(
+                **parametros, _cancel_event=cancelado,
+            )
+            for comparacion in comparaciones:
+                opciones = comparacion["opciones"]
+                resumen = comparacion["resumen"]
+                # Un snapshot por courier, aunque la respuesta parcial se vuelva
+                # a renderizar cuando termina el próximo operador. Si falla la
+                # persistencia, el servicio devuelve la tarifa sin IDs: puede
+                # mostrarse, pero no habilita PDF ni handoff con precio original.
+                nuevas = [o for o in opciones if o["carrier_id"] not in guardadas]
+                if nuevas:
+                    guardadas.update({
+                        o["carrier_id"]: o for o in guardar_opciones(
+                            cliente, ruta=resumen["ruta"], bultos=paquetes,
+                            peso_facturable_kg=resumen["peso_usado_kg"],
+                            opciones=nuevas,
+                        )
+                    })
+                opciones = [guardadas[o["carrier_id"]] for o in opciones]
+                completo = bool(comparacion.get("completo"))
+                contexto.update(
+                    opciones=opciones, resultado=resumen,
+                    no_disponibles=comparacion["no_disponibles"],
+                    error=("Ningún courier devolvió una tarifa para esa referencia."
+                           if completo and not comparacion["encontrado"] else None),
+                )
+                # El navegador cierra el reader apenas recibe ``complete``.
+                # Marcarlo antes del yield mantiene correcta la telemetría aun
+                # si ASGI cancela el iterador sin pedir el siguiente elemento.
+                if completo:
+                    finalizado = True
+                yield linea(completo)
+                if completo:
+                    break
+            if not finalizado:
+                raise RuntimeError("Cotización incompleta")
+        except Exception:
+            # Mantener una tarifa ya recibida si otro operador no pudo terminar.
+            contexto["error"] = "No pudimos completar la consulta. Volvé a consultar las tarifas."
+            yield linea(True)
+        finally:
+            cerrar = getattr(comparaciones, "close", None)
+            if cerrar:
+                cerrar()
+            quote_logger.info(
+                "portal_quote_stream duration_ms=%d complete=%s options=%d",
+                round((time.monotonic() - inicio) * 1000), finalizado,
+                len(contexto["opciones"]),
+            )
+
+    async def enviar():
+        eventos = generar()
+        terminado = object()
+        estado_lock = threading.Lock()
+        en_worker = False
+        cerrado = False
+
+        def siguiente():
+            """El mismo worker que avanza el generador lo cierra al cancelar."""
+            nonlocal en_worker, cerrado
+            with estado_lock:
+                en_worker = True
+            try:
+                try:
+                    return next(eventos)
+                except StopIteration:
+                    return terminado
+            finally:
+                cerrar = False
+                with estado_lock:
+                    en_worker = False
+                    if cancelado.is_set() and not cerrado:
+                        cerrado = True
+                        cerrar = True
+                if cerrar:
+                    eventos.close()
+
+        try:
+            while True:
+                evento = await anyio.to_thread.run_sync(
+                    siguiente, abandon_on_cancel=True,
+                )
+                if evento is terminado:
+                    break
+                yield evento
+        finally:
+            # Una llamada HTTP de requests que ya empezó no puede interrumpirse.
+            # El evento permite que el backend deje de esperar y cancele la cola;
+            # el worker activo cerrará el generador cuando vuelva de la red.
+            cancelado.set()
+            cerrar = False
+            with estado_lock:
+                if not en_worker and not cerrado:
+                    cerrado = True
+                    cerrar = True
+            if cerrar:
+                eventos.close()
+
+    return StreamingResponse(
+        enviar(), media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "private, no-store", "X-Accel-Buffering": "no",
+            "Vary": "Accept, X-Requested-With",
+        },
+    )
+
+
 @router.post("/cotizar", response_class=HTMLResponse)
 def cotizar_post(
     request: Request,
@@ -1744,6 +2012,16 @@ def cotizar_post(
             resultado_nacional = cotizar_referencia_nacional(
                 cliente, origen_referencia=origen_referencia == "1",
                 destino_referencia=destino_referencia == "1", **form_nacional)
+            from servicios.cotizaciones_portal import guardar_opciones
+            opciones_nacionales = guardar_opciones(
+                cliente, ruta=resultado_nacional["resumen"]["ruta"],
+                bultos=[dict(cantidad=cantidad_bultos, peso_kg=peso_kg,
+                             largo_cm=largo_cm, ancho_cm=ancho_cm, alto_cm=alto_cm)],
+                peso_facturable_kg=None, opciones=resultado_nacional["opciones"])
+            for op in opciones_nacionales:
+                if op.get("portal_quote_id"):
+                    op["continuar_url"] += "&cotizacion_origen_id=" + op["portal_quote_id"]
+            resultado_nacional["opciones"] = opciones_nacionales
             if not resultado_nacional["opciones"] and not resultado_nacional["no_disponibles"]:
                 error_nacional = "Tu cuenta todavía no tiene operadores nacionales habilitados para cotizar."
         except ValueError as exc:
@@ -1753,24 +2031,16 @@ def cotizar_post(
 
         form_nacional.update(origen_referencia="1" if origen_referencia == "1" else "",
                              destino_referencia="1" if destino_referencia == "1" else "")
-        return templates.TemplateResponse(
-            request=request,
-            name=("portal/_quote_results.html" if getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow" else "portal/cotizar.html"),
-            context={
-                "cliente": cliente,
-                "ambito": "nacional",
-                "provincias": opciones_provincias(),
-                "resultado_nacional": resultado_nacional,
-                "opciones": (resultado_nacional or {}).get("opciones", []),
-                "no_disponibles": (resultado_nacional or {}).get("no_disponibles", []),
-                "resultado": (resultado_nacional or {}).get("resumen"),
-                "paises_origen": _paises_con_nacional(),
-                "paises_destino": _paises_con_nacional(),
-                "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
-                "error": error_nacional,
-                "form": form_nacional,
-            },
-        )
+        return _renderizar_cotizacion(request, {
+            "cliente": cliente,
+            "ambito": "nacional",
+            "resultado_nacional": resultado_nacional,
+            "opciones": (resultado_nacional or {}).get("opciones", []),
+            "no_disponibles": (resultado_nacional or {}).get("no_disponibles", []),
+            "resultado": (resultado_nacional or {}).get("resumen"),
+            "error": error_nacional,
+            "form": form_nacional,
+        })
 
     # Un ámbito manipulado no puede caer accidentalmente en los carriers
     # internacionales: vuelve al selector sin consultar ninguna API.
@@ -1782,7 +2052,8 @@ def cotizar_post(
     no_disponibles = []
     resumen = None
     paquetes = []
-    from servicios.cotizaciones_reseller import cliente_es_reseller, guardar_opciones
+    from servicios.cotizaciones_reseller import cliente_es_reseller
+    from servicios.cotizaciones_portal import guardar_opciones
     es_reseller = cliente_es_reseller(cliente)
     filas_bultos_form = [{
         "cantidad": "1", "peso_kg": peso_kg, "largo_cm": largo_cm,
@@ -1803,6 +2074,16 @@ def cotizar_post(
         destino_cp_internacional.strip()
         if isinstance(destino_cp_internacional, str) else ""
     )
+    form_internacional = {
+        "origen_pais": origen_pais, "destino_pais": destino_pais,
+        "origen_ciudad": origen_ciudad,
+        "origen_cp_internacional": origen_cp_internacional,
+        "destino_ciudad_internacional": destino_ciudad_internacional,
+        "destino_cp_internacional": destino_cp_internacional,
+        "origen_referencia": "1" if origen_referencia == "1" else "",
+        "destino_referencia": "1" if destino_referencia == "1" else "",
+        "valor_declarado_usd": valor_declarado_usd,
+    }
 
     try:
         paquetes, filas_bultos_form = _bultos_cotizador_internacional(
@@ -1820,7 +2101,7 @@ def cotizar_post(
         valor_usd_num = _numero_form(
             valor_declarado_usd, "Valor declarado", importe=True, minimo=0.01,
         )
-        comparacion = cotizar_referencia_couriers(
+        parametros_cotizacion = dict(
             cliente=cliente,
             origen_pais=origen_pais,
             destino_pais=destino_pais,
@@ -1839,10 +2120,20 @@ def cotizar_post(
                 "postal_code": destino_cp_internacional,
             },
         )
+        if (
+            _cotizacion_fragmento(request)
+            and "application/x-ndjson" in request.headers.get("accept", "")
+        ):
+            return _stream_cotizacion_internacional(
+                request, cliente=cliente, parametros=parametros_cotizacion,
+                form=form_internacional, paquetes=paquetes, es_reseller=es_reseller,
+                tax_paga_cotizacion=tax_paga_cliente(cliente),
+            )
+        comparacion = cotizar_referencia_couriers(**parametros_cotizacion)
         opciones = comparacion["opciones"]
         no_disponibles = comparacion["no_disponibles"]
         resumen = comparacion["resumen"]
-        if es_reseller and opciones:
+        if opciones:
             opciones = guardar_opciones(
                 cliente,
                 ruta=resumen["ruta"],
@@ -1866,46 +2157,40 @@ def cotizar_post(
     except Exception:
         error = "No pudimos consultar las tarifas. Intentá nuevamente."
 
-    return templates.TemplateResponse(
-        request=request, name=("portal/_quote_results.html" if getattr(request, "headers", {}).get("x-requested-with") == "TauroQuoteWindow" else "portal/cotizar.html"),
-        context={
+    form_internacional.update({
+        "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
+        "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
+        "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),
+        "alto_cm": filas_bultos_form[0].get("alto_cm", ""),
+        "bultos": filas_bultos_form,
+    })
+    return _renderizar_cotizacion(request, {
             "cliente": cliente,
             "ambito": "internacional",
-            "provincias": opciones_provincias(),
-            "rutas_frecuentes": obtener_rutas_frecuentes(cliente),
-            "paises_origen": _paises_con_nacional(),
-            "paises_destino": _paises_con_nacional(),
-            "referencias_paises": referencias_paises_formulario(),
             "opciones": opciones,
             "resultado": resumen,
             "no_disponibles": no_disponibles,
-            "operadores_internacionales": _operadores_cliente(
-                cliente, Ambito.INTERNACIONAL
-            ),
             "error": error,
-            "form": {
-                "origen_pais": origen_pais,
-                "destino_pais": destino_pais,
-                "origen_ciudad": origen_ciudad,
-                "origen_cp_internacional": origen_cp_internacional,
-                "destino_ciudad_internacional": destino_ciudad_internacional,
-                "destino_cp_internacional": destino_cp_internacional,
-                "origen_referencia": "1" if origen_referencia == "1" else "",
-                "destino_referencia": "1" if destino_referencia == "1" else "",
-                "peso_kg": filas_bultos_form[0].get("peso_kg", ""),
-                "largo_cm": filas_bultos_form[0].get("largo_cm", ""),
-                "ancho_cm": filas_bultos_form[0].get("ancho_cm", ""),
-                "alto_cm": filas_bultos_form[0].get("alto_cm", ""),
-                "bultos": filas_bultos_form,
-                "valor_declarado_usd": valor_declarado_usd,
-            },
+            "form": form_internacional,
             # Para que cada tarjeta de opción linkee a "crear envío" con el
             # destino ya elegido.
             "destino_sel": destino_pais,
             "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
             "es_reseller": es_reseller,
-        },
-    )
+            "tax_paga_cotizacion": tax_paga_cliente(cliente),
+        })
+
+
+@router.post("/cotizaciones/cliente.pdf")
+def descargar_cotizacion_cliente(quote_id: str = Form(...), cliente: str = Depends(cliente_actual)):
+    from servicios.cotizaciones_portal import generar_pdf
+    try:
+        contenido, nombre = generar_pdf(cliente, quote_id)
+    except ValueError as exc:
+        return Response(content=str(exc), status_code=422, media_type="text/plain")
+    return Response(content=contenido, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{nombre}"',
+        "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow"})
 
 
 @router.post("/cotizaciones/reseller.pdf")
@@ -2082,6 +2367,8 @@ async def api_precio_envio_multi(
     # Las claves se eligen a mano: nunca costo ni margen (test_no_fuga_costo).
     # `opciones` viene ordenada de más barata a más cara.
     opciones = precio.get("opciones") or []
+    from servicios.cotizaciones_portal import referencia, comparar
+    original = referencia(cliente, body.get("cotizacion_origen_id"))
     return JSONResponse({
         "ok": True,
         "opciones": [
@@ -2093,6 +2380,7 @@ async def api_precio_envio_multi(
                 "precio_ars": o["precio_ars"],
                 "precio_usd": o["precio_usd"],
                 "dias": o.get("dias_estimados"),
+                "comparacion_cotizacion": comparar(original, o["precio_ars"]),
             }
             for o in opciones
         ],
@@ -2130,6 +2418,60 @@ async def api_hs_code(request: Request, cliente: str = Depends(cliente_actual)):
         return JSONResponse({"error": mensaje}, status_code=422, headers=headers)
     except (OSError, KeyError):
         return JSONResponse({"error": "El asistente HS no está disponible. Podés ingresar el código manualmente."}, status_code=503, headers=headers)
+    return JSONResponse(resultado, headers=headers)
+
+
+# ── API: asistente para cargar la invoice desde archivo o texto ──
+@router.post("/api/invoice/leer")
+async def api_invoice_leer(request: Request, cliente: str = Depends(cliente_actual)):
+    """Lee una invoice y devuelve artículos para revisar. No guarda nada.
+
+    El archivo vive en memoria durante el request: no se persiste ni se
+    loguea. Solo quedan métricas (tipo, cantidad de ítems y duración).
+    """
+    import time
+    from starlette.concurrency import run_in_threadpool
+    from servicios import invoice_asistente as asistente
+    from servicios.agentes_comerciales import SalidaAgenteInvalida
+
+    if not asistente.habilitado():
+        raise HTTPException(status_code=404)
+    headers = {"Cache-Control": "private, no-store"}
+    if not check_rate(f"invoice_leer:{cliente}", max_attempts=20, window_seconds=3600):
+        return JSONResponse({"error": "Leíste muchas invoices en la última hora. Esperá un rato o cargá los artículos a mano."},
+                            status_code=429, headers={**headers, "Retry-After": "600"})
+    inicio = time.monotonic()
+    try:
+        form = await request.form(max_files=1, max_fields=5)
+    except Exception:
+        return JSONResponse({"error": "No pudimos recibir el archivo. Probá otra vez."}, status_code=400, headers=headers)
+    try:
+        archivo = form.get("archivo")
+        nombre, contenido = None, None
+        if archivo is not None and not isinstance(archivo, str) and getattr(archivo, "filename", ""):
+            nombre = archivo.filename
+            contenido = await archivo.read(asistente.MAX_BYTES + 1)
+        texto = form.get("texto")
+        texto = texto if isinstance(texto, str) else ""
+        if len(texto) > asistente.MAX_TEXTO:
+            return JSONResponse({"error": "El texto pegado es demasiado largo. Subí el archivo."}, status_code=413, headers=headers)
+        pais = form.get("pais_origen_envio")
+        pais = pais[:60] if isinstance(pais, str) else ""
+        resultado = await run_in_threadpool(asistente.leer_invoice, nombre, contenido, texto, pais)
+    except asistente.InvoiceAsistenteError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422, headers=headers)
+    except asistente.AsistenteNoDisponible as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503, headers=headers)
+    except SalidaAgenteInvalida:
+        return JSONResponse({"error": "No pudimos interpretar la invoice. Probá otra vez o cargá los artículos a mano."},
+                            status_code=502, headers=headers)
+    except Exception as exc:
+        print(f"[invoice_asistente] error {type(exc).__name__}")
+        return JSONResponse({"error": asistente.MENSAJE_NO_DISPONIBLE}, status_code=503, headers=headers)
+    finally:
+        await form.close()
+    ms = int((time.monotonic() - inicio) * 1000)
+    print(f"[invoice_asistente] tipo={resultado['tipo']} fuente={resultado['fuente']} items={len(resultado['items'])} ms={ms}")
     return JSONResponse(resultado, headers=headers)
 
 
@@ -2218,6 +2560,16 @@ def envios_view(
         pagina=pagina,
         buscar=busqueda_global,
     )
+    # El contador del inicio también incluye ventas sin convertir en envío.
+    # Se muestran aparte: todavía no son solicitudes ni filas del historial.
+    pedidos_por_armar = 0
+    pedidos_por_armar_error = False
+    if vista["paso_filtro"] == "requieren_accion":
+        embudo = embudo_envios(cliente)
+        pedidos_por_armar_error = not embudo
+        pedidos_por_armar = next(
+            (p["cantidad"] for p in embudo if p["clave"] == "por_armar"), 0,
+        )
     # El período puede no tener filas aunque el cliente sí tenga historia. La
     # pantalla debe decir "sin envíos en agosto", no "nunca hiciste envíos".
     vista["tiene_historial"] = periodo["tiene_actividad_historica"]
@@ -2236,21 +2588,6 @@ def envios_view(
         retiro_activo = retiro.get("estado") in {
             "AGENDANDO", "AGENDADA", "CANCELANDO", "VERIFICAR_COURIER",
         }
-        if (solicitud.get("estado_cliente_ui", {}).get("codigo") == "GUIA_LISTA"
-                and not solicitud.get("tracking_estado")):
-            solicitud["estado_cliente_ui"] = {
-                "codigo": "ESPERA_RECOLECCION",
-                "label": "Espera de recolección",
-                "clase": "accent",
-            }
-        elif solicitud.get("estado_cliente_ui", {}).get("codigo") in {
-            "PROCESO_ENTREGA", "DESPACHADO",
-        }:
-            solicitud["estado_cliente_ui"] = {
-                "codigo": solicitud["estado_cliente_ui"]["codigo"],
-                "label": "Proceso de entrega",
-                "clase": "warn",
-            }
         solicitud["puede_corregir_lista"] = bool(
             (solicitud.get("courier") or "").upper() == "DHL"
             and solicitud.get("estado") == "GUIA_LISTA"
@@ -2301,6 +2638,8 @@ def envios_view(
             "parcial": request.headers.get("X-Tauro-Partial") == "envios",
             "periodo": periodo,
             "periodo_query": urlencode(periodo_parametros),
+            "pedidos_por_armar": pedidos_por_armar,
+            "pedidos_por_armar_error": pedidos_por_armar_error,
             "puede_emitir": puede_emitir,
             "flash_ok": (
                 ("Solicitud creada. Podés emitir la guía vos mismo desde el botón "
@@ -2552,6 +2891,7 @@ def envio_nuevo_form(
     ambito: str = "",
     courier: str = "",
     quote_id: str = "",
+    cotizacion_origen_id: str = "",
     cajas: str = "",
     valor_cotizado: str = "",
     origen_ciudad: str = "",
@@ -2562,11 +2902,14 @@ def envio_nuevo_form(
     destino_referencia: str = "",
     corregir: Optional[int] = None,
     repetir: Optional[int] = None,
+    editar: Optional[int] = None,
     cliente: str = Depends(cliente_actual),
 ):
+    if editar:
+        corregir = repetir = None
     if corregir:
         repetir = None
-    if corregir or repetir:
+    if corregir or repetir or editar:
         ambito = "internacional"
     quote_id = _quote_id_portal(quote_id)
     if quote_id and not (ambito or "").strip():
@@ -2575,15 +2918,26 @@ def envio_nuevo_form(
     selector_valores = {
         "pedido_tienda": pedido_tienda,
         "destinatario_id": destinatario_id,
+        "remitente_id": remitente_id,
         "origen": origen,
         "destino": destino,
         "courier": courier,
         "quote_id": quote_id,
+        "cotizacion_origen_id": cotizacion_origen_id,
         "cajas": cajas,
         "valor_cotizado": valor_cotizado,
+        "origen_ciudad": origen_ciudad,
+        "origen_cp": origen_cp,
+        "destino_ciudad": destino_ciudad,
+        "destino_cp": destino_cp,
+        "origen_referencia": origen_referencia,
+        "destino_referencia": destino_referencia,
+        "ventana": request.query_params.get("ventana", ""),
     }
     if ambito == "nacional":
-        return RedirectResponse("/portal/oca/nuevo" + (f"?destinatario_id={destinatario_id}" if destinatario_id else ""), status_code=303)
+        contactos = {k: v for k, v in (("remitente_id", remitente_id),
+                    ("destinatario_id", destinatario_id)) if v}
+        return RedirectResponse("/portal/oca/nuevo" + ("?" + urlencode(contactos) if contactos else ""), status_code=303)
     if not ambito:
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
@@ -2604,7 +2958,8 @@ def envio_nuevo_form(
     error = None
     reemision_origen = None
     repeticion_origen = None
-    origen_existente_id = corregir or repetir
+    origen_existente_id = editar or corregir or repetir
+    contactos_guardados = listar_direcciones(cliente)
     if origen_existente_id:
         origen_existente = obtener_solicitud_de_cliente(
             origen_existente_id, cliente
@@ -2620,6 +2975,8 @@ def envio_nuevo_form(
                      "Repetir+env%C3%ADos+nacionales+se+habilitar%C3%A1+con+OCA+y+Andreani"),
                 status_code=303,
             )
+        if editar and not puede_editar_solicitud(origen_existente):
+            return RedirectResponse(url=f"/portal/envios/{editar}/gestion?ventana=1&error=Este+envío+ya+no+se+puede+editar", status_code=303)
         if corregir:
             reemision_origen = origen_existente
             elegible = validar_reemision_cliente(corregir, cliente)
@@ -2632,12 +2989,14 @@ def envio_nuevo_form(
                          f"{quote(str(elegible.get('error') or 'No se puede corregir'))}"),
                     status_code=303,
                 )
-        else:
+        elif not editar:
             repeticion_origen = origen_existente
 
         form, remitente_precargado = _precargar_envio_existente(
             origen_existente, corregir_id=corregir
         )
+        if editar:
+            form.update(editar_solicitud_id=str(editar), editar_version=origen_existente["updated_at"].isoformat())
         return templates.TemplateResponse(
             request=request, name="portal/envio_nuevo.html",
             context={
@@ -2645,8 +3004,8 @@ def envio_nuevo_form(
                 "productos": get_productos(cliente),
                 "paises_destino": _paises_con_nacional(),
                 "remitente": remitente_precargado,
-                "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
-                "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+                "remitentes": contactos_guardados,
+                "destinatarios": contactos_guardados,
                 "form": form, "pedido_tienda": None, "cotizacion_web": None,
                 "reemision_origen": reemision_origen,
                 "repeticion_origen": repeticion_origen,
@@ -2670,6 +3029,7 @@ def envio_nuevo_form(
                 "destino_pais": cotizacion_web["destino"],
                 "intl_courier": recomendada["id"],
                 "precio_cotizado_ars": recomendada["precio_ars"],
+                "cotizacion_origen_id": quote_id,
                 "observaciones": f"Cotización web {cotizacion_web['referencia']}",
                 "bultos": [{
                     "producto": "",
@@ -2689,6 +3049,13 @@ def envio_nuevo_form(
             courier = courier or recomendada["id"]
         else:
             error = "La cotización venció o ya no está disponible. Cotizá nuevamente."
+    if cotizacion_origen_id and not (quote_id or pedido_tienda or corregir or repetir or editar):
+        from servicios.cotizaciones_portal import referencia
+        original = referencia(cliente, cotizacion_origen_id)
+        if original:
+            form["cotizacion_origen_id"] = cotizacion_origen_id
+        else:
+            error = "La cotización venció o no pertenece a tu cuenta. Volvé a cotizar."
     if cajas and not quote_id and not pedido_tienda:
         try:
             form["bultos"] = _precargar_cajas_cotizadas(cajas)
@@ -2727,7 +3094,7 @@ def envio_nuevo_form(
     # se resuelve junto con el cliente autenticado, así una cuenta no puede
     # precargar un destinatario perteneciente a otra.
     if destinatario_id and not pedido_tienda:
-        destinatario = obtener_direccion(cliente, destinatario_id, TIPO_DESTINATARIO)
+        destinatario = obtener_direccion(cliente, destinatario_id)
         if destinatario:
             form.update({
                 "destinatario_id": str(destinatario["id"]),
@@ -2791,7 +3158,7 @@ def envio_nuevo_form(
         form["intl_courier"] = courier
     remitente = obtener_remitente_para_envio(cliente)
     if remitente_id and not (pedido_tienda or corregir or repetir or quote_id):
-        saved = obtener_direccion(cliente, remitente_id, TIPO_REMITENTE)
+        saved = obtener_direccion(cliente, remitente_id)
         if saved:
             remitente = saved
             form["remitente_id"] = str(saved["id"])
@@ -2823,8 +3190,8 @@ def envio_nuevo_form(
             "paises_destino": _paises_con_nacional(),
             "remitente": remitente,
             "remitente_por_completar": remitente_por_completar,
-            "remitentes": listar_direcciones(cliente, TIPO_REMITENTE),
-            "destinatarios": listar_direcciones(cliente, TIPO_DESTINATARIO),
+            "remitentes": contactos_guardados,
+            "destinatarios": contactos_guardados,
             "form": form,
             "pedido_tienda": pedido_info,
             "cotizacion_web": cotizacion_web,
@@ -2881,6 +3248,7 @@ def envio_nuevo_post(
     # Precio que estaba visible al confirmar. No se usa para cobrar (el
     # servidor recotiza); sólo prueba consentimiento al importe vigente.
     precio_cotizado_ars: str = Form(""),
+    cotizacion_origen_id: str = Form(""),
     # Quién paga los impuestos de destino EN ESTE envío. Viene con el default
     # del cliente ya seleccionado; acá se guarda lo que quedó elegido.
     tax_paga: str = Form(""),
@@ -2920,6 +3288,9 @@ def envio_nuevo_post(
     reemplaza_solicitud_id: str = Form(""),
     reemision_motivo: str = Form(""),
     borrador_token: str = Form(""),
+    editar_solicitud_id: str = Form(""),
+    editar_version: str = Form(""),
+    gestion_ventana: str = Form(""),
     origen_referencia: str = Form(""),
     destino_referencia: str = Form(""),
     origen_ubicacion_confirmada: str = Form(""),
@@ -2931,8 +3302,8 @@ def envio_nuevo_post(
 
     productos = get_productos(cliente)
     paises_destino = _paises_con_nacional()
-    remitentes = listar_direcciones(cliente, TIPO_REMITENTE)
-    destinatarios = listar_direcciones(cliente, TIPO_DESTINATARIO)
+    remitentes = destinatarios = listar_direcciones(cliente)
+    editar_id = _id_opt(editar_solicitud_id) if isinstance(editar_solicitud_id, str) else None
     # Algunos tests/consumidores internos invocan la función directamente,
     # fuera del inyector de FastAPI. En ese caso el default sigue siendo un
     # FormInfo, no una lista enviada por el navegador.
@@ -3160,6 +3531,7 @@ def envio_nuevo_post(
         "observaciones": observaciones,
         "intl_courier": intl_courier,
         "precio_cotizado_ars": precio_cotizado_ars,
+        "cotizacion_origen_id": cotizacion_origen_id if isinstance(cotizacion_origen_id, str) else "",
         "tax_paga": tax_paga,
         "asegurar_carga": asegurar_carga,
         # BUG corregido: sin esto, un error de validación re-renderizaba el
@@ -3170,6 +3542,8 @@ def envio_nuevo_post(
         "reemplaza_solicitud_id": reemplaza_solicitud_id,
         "reemision_motivo": reemision_motivo,
         "borrador_token": borrador_token if isinstance(borrador_token, str) else "",
+        "editar_solicitud_id": str(editar_id or (editar_solicitud_id if isinstance(editar_solicitud_id, str) else "")),
+        "editar_version": editar_version if isinstance(editar_version, str) else "",
         "origen_referencia": "1" if origen_referencia == "1" else "",
         "destino_referencia": "1" if destino_referencia == "1" else "",
         "origen_ubicacion_confirmada": "1" if origen_ubicacion_confirmada == "1" else "",
@@ -3185,6 +3559,12 @@ def envio_nuevo_post(
         for error_step, lado in ((1, "origen"), (2, "destino")):
             validar_ubicacion_cotizada(form, lado)
         error_step = 1
+        if isinstance(editar_solicitud_id, str) and editar_solicitud_id.strip() and not editar_id:
+            raise ValueError("No pudimos identificar el envío a editar. Volvé a abrirlo desde Mis envíos.")
+        if editar_id:
+            actual = obtener_solicitud_de_cliente(editar_id, cliente)
+            if not puede_editar_solicitud(actual) or _id_opt(reemplaza_solicitud_id) or str(pedido_tienda_id if isinstance(pedido_tienda_id, str) else "").strip():
+                raise ValueError("Este envío ya no se puede editar. Revisá su estado antes de continuar.")
         reemplaza_id = _id_opt(reemplaza_solicitud_id)
         if reemplaza_id:
             reemision_origen = obtener_solicitud_de_cliente(reemplaza_id, cliente)
@@ -3215,6 +3595,8 @@ def envio_nuevo_post(
             )
 
         remitente = obtener_remitente_para_envio(cliente, _id_opt(remitente_id)) or {}
+        if _id_opt(remitente_id) and not remitente:
+            raise ValueError("Ese cliente guardado no está disponible en tu cuenta.")
         # Lo que el cliente EDITÓ en el form manda sobre la libreta: campo
         # por campo, para que elegir de la libreta y corregir una sola cosa
         # (el CP, el teléfono) no pierda el resto.
@@ -3241,7 +3623,7 @@ def envio_nuevo_post(
         error_step = 2
         if destinatario_id:
             destinatario = obtener_direccion(
-                cliente, _id_opt(destinatario_id) or 0, TIPO_DESTINATARIO
+                cliente, _id_opt(destinatario_id) or 0
             )
             if not destinatario:
                 raise ValueError("Ese cliente guardado no está disponible en tu cuenta.")
@@ -3322,6 +3704,7 @@ def envio_nuevo_post(
                 )
 
         courier_extra = {}
+        base_revision = None
         if legacy_single:
             precio = obtener_precio_envio(
                 cliente, filas[0]["producto"], destino_pais,
@@ -3345,6 +3728,7 @@ def envio_nuevo_post(
                     "estado": remitente.get("estado") or "",
                 },
                 asegurar_carga=asegurar_carga == "SI",
+                **({"incluir_base_interna": True} if editar_id else {}),
             )
             if not multi.get("encontrado"):
                 if asegurar_carga == "SI" and multi.get("motivo") == "sin_cobertura":
@@ -3395,6 +3779,10 @@ def envio_nuevo_post(
             # El courier queda GUARDADO en la solicitud: sin esto el
             # despachador de emisión no sabe por dónde sale y cae al default.
             courier_extra = {"courier": op["id"].upper()}
+            if editar_id:
+                base_revision = op.get("_base_interna")
+                if not isinstance(base_revision, dict) or not base_revision:
+                    raise ValueError("No pudimos confirmar la nueva tarifa. Volvé a cotizar antes de guardar los cambios.")
 
             # ruta_id / coti_id salen de la cotización base (la de trazabilidad
             # que ya se loguea); el precio, del courier elegido.
@@ -3492,7 +3880,11 @@ def envio_nuevo_post(
                 )
                 for b in bultos_detalle
             ), 2) or (precio.get("valor_total_usd") or 100)
-        solicitud_creada = crear_solicitud_guia(
+        guardar_solicitud = crear_solicitud_guia
+        if editar_id:
+            guardar_solicitud = lambda **campos: editar_solicitud_cliente(
+                editar_id, cliente, editar_version, campos, base_interna=base_revision)
+        solicitud_creada = guardar_solicitud(
             cliente_id=cliente,
             producto_alias=alias_display,
             cantidad=total_cajas,
@@ -3590,7 +3982,7 @@ def envio_nuevo_post(
             },
         )
 
-    if pedido_origen:
+    if pedido_origen and not editar_id:
         try:
             marcar_convertido(cliente, pedido_origen["pedido_id"],
                               solicitud_id=solicitud_creada.get("id"))
@@ -3614,8 +4006,10 @@ def envio_nuevo_post(
             status_code=303,
         )
 
+    destino_gestion = (f"/portal/envios/{solicitud_creada['id']}/gestion?ventana=1&ok=editado"
+                       if gestion_ventana == "1" else f"/portal/envios/{solicitud_creada['id']}?gestionar=1")
     return RedirectResponse(
-        url=confirmar_borrador("/portal/envios?tipo=internacional&ok=solicitado", borrador_token),
+        url=confirmar_borrador(destino_gestion, borrador_token),
         status_code=303,
     )
 
@@ -3674,6 +4068,7 @@ def envio_verificacion(
 # OJO: declarado DESPUÉS de /envios/nuevo para que "nuevo" no matchee
 # como {solicitud_id}.
 @router.get("/envios/{solicitud_id}", response_class=HTMLResponse)
+@router.get("/envios/{solicitud_id}/gestion", response_class=HTMLResponse)
 def envio_detalle(
     request: Request,
     solicitud_id: int,
@@ -3713,14 +4108,30 @@ def envio_detalle(
             recoleccion_error = True
             print(f"[portal] no pude consultar retiro: {type(exc).__name__}")
 
+    es_gestion = request.url.path.endswith("/gestion")
+    retiro_form = None
+    if es_gestion and s.get("estado") == "GUIA_LISTA" and not recoleccion_error and (not recoleccion or recoleccion.get("estado") == "CANCELADA"):
+        from servicios.configuracion_couriers_cliente import permiso_courier
+        from servicios.recolecciones import datos_retiro_desde_solicitud
+        from datetime import date, timedelta
+        if ambito_envio(s) == "internacional" and permiso_courier(cliente, s.get("courier") or "", "recolectar"):
+            try:
+                retiro_form = datos_retiro_desde_solicitud(s)
+                sugerida = date.today() + timedelta(days=1)
+                while sugerida.weekday() >= 5:
+                    sugerida += timedelta(days=1)
+                retiro_form.update(fecha_sugerida=sugerida.isoformat(), fecha_max=(date.today() + timedelta(days=14)).isoformat())
+            except ValueError:
+                recoleccion_error = True
     return templates.TemplateResponse(
-        request=request, name="portal/envio_detalle.html",
+        request=request, name="portal/envio_gestion.html" if es_gestion else "portal/envio_detalle.html",
         context={
             "cliente": cliente, "s": s, "puede_emitir": puede_emitir,
             "puede_corregir": puede_corregir,
             "puede_cancelar": bool(cancelacion.get("ok")),
             "cancelar_bloqueo": str(cancelacion.get("error") or ""),
             "recoleccion": recoleccion, "recoleccion_error": recoleccion_error,
+            "puede_editar": puede_editar_solicitud(s), "retiro_form": retiro_form,
         },
     )
 
@@ -3796,6 +4207,8 @@ def emitir_guia_portal(
     request: Request,
     solicitud_id: int,
     cliente: str = Depends(cliente_actual),
+    gestion_ventana: str = Form(""),
+    revision_envio: str = Form(""),
 ):
     """
     El cliente emite su propia guía (spec: "el cliente podrá generar las
@@ -3805,15 +4218,21 @@ def emitir_guia_portal(
     """
     from servicios.solicitudes_guia import emitir_guia_como_cliente
 
-    resultado = emitir_guia_como_cliente(solicitud_id, cliente)
+    if gestion_ventana == "1":
+        if not isinstance(revision_envio, str) or not revision_envio:
+            resultado = {"ok": False, "error": "Volvé a abrir el envío y revisá sus datos antes de emitir."}
+        else:
+            resultado = emitir_guia_como_cliente(solicitud_id, cliente, revision=revision_envio)
+    else:
+        resultado = emitir_guia_como_cliente(solicitud_id, cliente)
     if resultado.get("ok"):
         from servicios.auditoria import registrar_desde_request
         registrar_desde_request(request, event="portal.emitir_guia", actor_type="cliente",
                                 actor_ref=cliente, metadata={"solicitud_id": solicitud_id})
-        return RedirectResponse(url=f"/portal/envios/{solicitud_id}?ok=guia",
+        return RedirectResponse(url=f"/portal/envios/{solicitud_id}" + ("/gestion?ventana=1&ok=guia" if gestion_ventana == "1" else "?gestionar=1&ok=guia"),
                                 status_code=303)
     return RedirectResponse(
-        url=f"/portal/envios/{solicitud_id}?error={quote(str(resultado.get('error') or 'No se pudo emitir'))}",
+        url=f"/portal/envios/{solicitud_id}" + ("/gestion?ventana=1&" if gestion_ventana == "1" else "?gestionar=1&") + f"error={quote(str(resultado.get('error') or 'No se pudo emitir'))}",
         status_code=303)
 
 
@@ -4259,12 +4678,28 @@ def clientes_view(
         flash_ok = "Contacto guardado en tu agenda."
     elif ok == "2":
         flash_ok = "Contacto eliminado de tu agenda."
+    from servicios.estadisticas_contactos import (
+        contar_envios_emitidos_por_contacto, TOOLTIP_ENVIOS_IDENTIFICADOS,
+    )
+    clientes_guardados = listar_direcciones(cliente)
+    estadisticas_clientes = None
+    try:
+        estadisticas_clientes = contar_envios_emitidos_por_contacto(cliente, clientes_guardados)
+    except Exception as exc:
+        print(f"[portal] no pude consultar envíos por contacto: {type(exc).__name__}")
+    clientes_grafico = sorted(
+        [dict(d, **(estadisticas_clientes or {}).get(d["id"], {})) for d in clientes_guardados],
+        key=lambda d: (-d.get("envios_identificados", 0), (d.get("nombre") or "").casefold()),
+    )
     return templates.TemplateResponse(
         request=request, name="portal/clientes.html",
         context={
             "cliente": cliente,
             # listar_direcciones siempre filtra por el cliente de la sesión.
-            "clientes_guardados": listar_direcciones(cliente),
+            "clientes_guardados": clientes_guardados,
+            "clientes_grafico": clientes_grafico,
+            "estadisticas_clientes_error": estadisticas_clientes is None,
+            "ayuda_estadisticas_clientes": TOOLTIP_ENVIOS_IDENTIFICADOS,
             "paises": paises,
             "provincias": opciones(),
             "nombre_provincia": nombre_provincia,

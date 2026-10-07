@@ -21,6 +21,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote, urlencode
+from zoneinfo import ZoneInfo
 
 from fastapi import (
     APIRouter, BackgroundTasks, Request, Form, Cookie, Depends, File, UploadFile,
@@ -65,6 +66,7 @@ from servicios.numeros_humanos import (
     parse_entero_formulario as _entero_form,
     parse_float_formulario as _numero_form,
     parse_importe_humano,
+    parse_numero_humano,
     politica_configuracion_numerica,
 )
 from servicios.configuracion_couriers_cliente import (
@@ -100,7 +102,8 @@ from servicios import admin_sesiones
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory="templates")
 from servicios.couriers_urls import nombre_courier
-from servicios.presentacion import dinero_ars, numero_ars
+from servicios.presentacion import registrar_filtros, dinero_ars, numero_ars
+registrar_filtros(templates.env)
 templates.env.globals["nombre_courier"] = nombre_courier
 templates.env.globals["dinero_ars"] = dinero_ars
 templates.env.globals["numero_ars"] = numero_ars
@@ -308,10 +311,20 @@ def _get_clientes_lista():
     return clientes
 
 
+def _parametros_precio_web_reservados():
+    from servicios.precios_web_nacional import PARAMETROS_RESERVADOS as oca
+    from servicios.precios_web_dhl import PARAMETROS_RESERVADOS as dhl
+    return oca | dhl
+
+
 def _get_config():
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM config ORDER BY parametro")
+            cur.execute(
+                "SELECT * FROM config WHERE NOT (parametro = ANY(%s)) "
+                "ORDER BY parametro",
+                (list(_parametros_precio_web_reservados()),),
+            )
             return [dict(r) for r in cur.fetchall()]
 
 
@@ -396,6 +409,13 @@ def _run_tracking_fedex_job(mode: str, limit: int | None, dry_run: bool, target:
 def json_dumps_pretty(value: dict) -> str:
     import json
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
+
+
+@router.get("", include_in_schema=False)
+@router.get("/", include_in_schema=False)
+def acceso_admin():
+    """Acceso directo; el panel conserva la validación de sesión admin."""
+    return RedirectResponse(url="/admin/home", status_code=303)
 
 
 # ── Login ───────────────────────────────────────────────────
@@ -1353,8 +1373,24 @@ def admin_clientes(request: Request, admin_token: Optional[str] = Cookie(None)):
         cliente["saldo_ars"] = financiero.get("saldo", 0)
     return templates.TemplateResponse(
         request=request, name="admin/clientes.html",
-        context={"seccion": "clientes", "clientes": clientes},
+        context={
+            "seccion": "clientes",
+            "clientes": clientes,
+            "clientes_prueba": _get_clientes_prueba(),
+        },
     )
+
+
+def _get_clientes_prueba():
+    """Cuentas marcadas como prueba: fuera de listados y totales, pero
+    accesibles para poder volverlas reales desde su configuración."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT cliente_id, email, nombre FROM clientes "
+                "WHERE test=TRUE ORDER BY cliente_id"
+            )
+            return [dict(r) for r in cur.fetchall()]
 
 
 @router.get("/bandeja", response_class=HTMLResponse)
@@ -2413,11 +2449,15 @@ def admin_cliente_editar(
     tax_paga: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
+    # Cuenta de prueba: queda fuera de listados, bandeja y totales del
+    # negocio. Se cambia sólo desde acá y queda auditado.
+    cuenta_prueba: str = Form("false"),
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
 
+    es_prueba = cuenta_prueba.strip().lower() == "true"
     try:
         markup_pct_num = _numero_form(markup_pct, "Porcentaje general", minimo=0)
         pricing = parse_pricing_value(
@@ -2437,12 +2477,19 @@ def admin_cliente_editar(
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
+                    "SELECT test FROM clientes WHERE cliente_id=%s FOR UPDATE",
+                    (cliente_id.strip().upper(),),
+                )
+                anterior = cur.fetchone()
+                if anterior is None:
+                    raise ValueError("Cliente inexistente.")
+                cur.execute(
                     """
                     UPDATE clientes SET
                         email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
                         direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s,
                         markup_nac_tipo=%s, markup_nac_valor=%s,
-                        tax_paga=%s
+                        tax_paga=%s, test=%s
                     WHERE cliente_id=%s
                     """,
                     (
@@ -2453,9 +2500,18 @@ def admin_cliente_editar(
                         cp or None, ciudad or None, pais or "AR",
                         telefono or None, notas or None,
                         nac_tipo, nac_valor, normalizar_tax(tax_paga),
+                        es_prueba,
                         cliente_id.strip().upper(),
                     ),
                 )
+                if bool(anterior["test"]) != es_prueba:
+                    from servicios.auditoria import registrar_desde_request_con_cursor
+                    registrar_desde_request_con_cursor(
+                        cur, request,
+                        event="admin.cliente_cuenta_prueba", actor_type="admin",
+                        actor_ref=cliente_id.strip().upper(), status_code=303,
+                        metadata={"antes": bool(anterior["test"]), "despues": es_prueba},
+                    )
     except Exception as e:
         cliente_form = {
             "cliente_id": cliente_id.strip().upper(),
@@ -2475,6 +2531,7 @@ def admin_cliente_editar(
             "tax_paga": normalizar_tax(tax_paga),
             "notas": notas,
             "activo": activo.lower() == "true",
+            "test": es_prueba,
         }
         return templates.TemplateResponse(
             request=request, name="admin/cliente_form.html",
@@ -3834,6 +3891,7 @@ def admin_envio_realizado_form(
         context={
             "seccion": "envio_realizado", "clientes": _get_clientes_lista(),
             "form": form,
+            "today": datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date().isoformat(),
         },
     )
 
@@ -3857,6 +3915,7 @@ async def admin_envio_realizado_post(
     remitente_nombre: str = Form(""),
     borrador_token: str = Form(""),
     observaciones: str = Form(""),
+    fecha_envio: str = Form(""),
     guia_pdf: Optional[UploadFile] = File(None),
     admin_token: Optional[str] = Cookie(None),
 ):
@@ -3885,6 +3944,12 @@ async def admin_envio_realizado_post(
             importe=True,
             minimo=0,
         )
+        fecha_real = None
+        if str(fecha_envio or "").strip():
+            try:
+                fecha_real = date.fromisoformat(str(fecha_envio).strip())
+            except ValueError:
+                raise ValueError("La fecha del envío no es válida.") from None
         pdf = await leer_comprobante_con_tope(guia_pdf)
         resultado = cargar_envio_externo(
             cliente_id=cliente_id,
@@ -3903,6 +3968,7 @@ async def admin_envio_realizado_post(
             origen_pais=origen_pais,
             remitente_nombre=remitente_nombre,
             costo_courier_estimado_ars=costo_estimado_num,
+            fecha_envio=fecha_real,
         )
     except Exception as e:
         resultado = {"ok": False, "error": str(e)}
@@ -4892,6 +4958,84 @@ def admin_pagos_pendientes(request: Request, admin_token: Optional[str] = Cookie
     )
 
 
+def _pago_comprobante_admin(pago_id: int) -> dict | None:
+    """Resuelve la cuenta desde el pago, nunca desde un campo del formulario."""
+    from servicios.experiencia_cuenta import obtener_pago_cliente
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT cliente_id FROM pagos WHERE id=%s", (pago_id,))
+            fila = cur.fetchone()
+    if not fila:
+        return None
+    pago = obtener_pago_cliente(fila["cliente_id"], pago_id)
+    if pago:
+        pago["cliente_id"] = fila["cliente_id"]
+    return pago
+
+
+@router.get("/pagos/{pago_id}/adjuntar-comprobante", response_class=HTMLResponse)
+def admin_comprobante_pago_form(
+    request: Request, pago_id: int, volver: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    pago = _pago_comprobante_admin(pago_id)
+    if not pago:
+        return Response("Pago no disponible", status_code=404)
+    volver = "pendientes" if volver == "pendientes" else ""
+    return templates.TemplateResponse(
+        request=request, name="admin/pago_comprobante.html",
+        context={"seccion": "pagos_pendientes" if volver else "clientes",
+                 "pago": pago, "volver": volver,
+                 "csrf_comprobante": _csrf_dhl(f"pago-comprobante:{pago_id}:{pago['cliente_id']}")},
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/pagos/{pago_id}/adjuntar-comprobante")
+async def admin_adjuntar_comprobante_pago(
+    request: Request, pago_id: int, volver: str = "",
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    pago = _pago_comprobante_admin(pago_id)
+    if not pago:
+        return Response("Pago no disponible", status_code=404)
+    destino = f"/admin/pagos/{pago_id}/adjuntar-comprobante"
+    parametros = {"volver": "pendientes"} if volver == "pendientes" else {}
+
+    def resultado(**valores):
+        return RedirectResponse(destino + "?" + urlencode({**parametros, **valores}), status_code=303)
+
+    if not check_rate("admin:pago_comprobante", max_attempts=30, window_seconds=600):
+        return resultado(error="Hiciste varios intentos. Esperá unos minutos y volvé a probar.")
+    from servicios.cuenta_corriente import (
+        adjuntar_comprobante_pago_admin, leer_comprobante_con_tope,
+    )
+    try:
+        async with request.form(max_files=1, max_fields=4) as form:
+            if not _csrf_dhl_valido(form.get("csrf_comprobante"), f"pago-comprobante:{pago_id}:{pago['cliente_id']}"):
+                return resultado(error="La sesión del formulario venció. Recargá y volvé a adjuntar el comprobante.")
+            archivo = form.get("comprobante")
+            contenido = await leer_comprobante_con_tope(archivo)
+            if not contenido:
+                raise ValueError("Seleccioná un comprobante en PDF, JPG o PNG.")
+            adjuntar_comprobante_pago_admin(
+                pago["cliente_id"], pago_id, contenido,
+                getattr(archivo, "filename", "") or "", admin_user="admin",
+            )
+    except LookupError:
+        return Response("Pago no disponible", status_code=404)
+    except ValueError as exc:
+        return resultado(error=str(exc))
+    except Exception as exc:
+        print(f"[admin] adjuntar_comprobante falló: {type(exc).__name__}")
+        return resultado(error="No pudimos guardar el comprobante. Volvé a intentarlo.")
+    return resultado(adjuntado="1")
+
+
 @router.get("/pagos/{pago_id}/comprobante")
 def admin_ver_comprobante(pago_id: int, admin_token: Optional[str] = Cookie(None)):
     if not _is_auth(admin_token):
@@ -5110,6 +5254,222 @@ def admin_referencia(request: Request, admin_token: Optional[str] = Cookie(None)
 
 # ── Config ───────────────────────────────────────────────────
 
+def _contexto_precios_web(*, configuracion_oca=None, configuracion_dhl=None):
+    from servicios.precios_web_nacional import leer_configuracion_oca
+    from servicios.precios_web_dhl import leer_configuracion_dhl
+    dhl = dict(configuracion_dhl if configuracion_dhl is not None else leer_configuracion_dhl())
+    if not dhl.get("error"):
+        # El servicio persiste decimales canónicos. El formulario usa formato
+        # humano: tres decimales llevan un cero más para evitar leerlos como miles.
+        filas = []
+        for original in dhl.get("rangos_usd", []):
+            fila = dict(original)
+            for campo in ("desde", "hasta", "valor"):
+                valor = fila.get(campo)
+                if valor is not None:
+                    texto = str(valor)
+                    if "." in texto and len(texto.split(".")[1]) == 3:
+                        texto += "0"
+                    fila[campo] = texto.replace(".", ",")
+            filas.append(fila)
+        dhl["rangos_usd"] = filas
+    return {
+        "seccion": "precios_web",
+        "configuracion": (
+            configuracion_oca if configuracion_oca is not None
+            else leer_configuracion_oca()
+        ),
+        "configuracion_dhl": dhl,
+        "csrf_precio_web": _csrf_dhl("precios-web:oca"),
+        "csrf_precio_dhl": _csrf_dhl("precios-web:dhl"),
+    }
+
+
+@router.get("/precios-web", response_class=HTMLResponse)
+def admin_precios_web(
+    request: Request,
+    ok: Optional[str] = None,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/precios_web.html",
+        context={
+            **_contexto_precios_web(),
+            "flash_ok": (
+                "Precio web de DHL guardado." if ok == "dhl"
+                else "Precio de la web guardado." if ok else None
+            ),
+        },
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.post("/precios-web", response_class=HTMLResponse)
+async def admin_precios_web_guardar(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+
+    form = await request.form()
+    if not _csrf_dhl_valido(
+        form.get("csrf_precio_web"), "precios-web:oca"
+    ):
+        return Response(
+            "Formulario vencido o inválido. Volvé a abrir Precios de la web.",
+            status_code=403,
+        )
+
+    habilitada = form.get("oca_habilitada") == "1"
+    markup_crudo = str(form.get("oca_markup_pct") or "").strip()
+    from servicios.precios_web_nacional import (
+        guardar_configuracion_oca,
+        leer_configuracion_oca,
+    )
+    try:
+        guardar_configuracion_oca(
+            request=request,
+            habilitada=habilitada,
+            markup_pct=markup_crudo,
+        )
+    except ValueError as exc:
+        configuracion = leer_configuracion_oca()
+        configuracion.update({
+            "habilitada": habilitada,
+            "markup_texto": markup_crudo,
+            "publicable": False,
+            "estado": str(exc),
+            "error": str(exc),
+        })
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/precios_web.html",
+            context={
+                **_contexto_precios_web(configuracion_oca=configuracion),
+                "flash_error": str(exc),
+            },
+            status_code=422,
+            headers={"Cache-Control": "private, no-store"},
+        )
+    except Exception as exc:
+        print(f"[admin] no pude guardar el precio web OCA: {type(exc).__name__}")
+        configuracion = leer_configuracion_oca()
+        configuracion.update({
+            "habilitada": habilitada,
+            "markup_texto": markup_crudo,
+            "publicable": False,
+            "estado": "No pudimos guardar el precio. Probá de nuevo.",
+            "error": "No pudimos guardar el precio. Probá de nuevo.",
+        })
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/precios_web.html",
+            context={
+                **_contexto_precios_web(configuracion_oca=configuracion),
+                "flash_error": configuracion["error"],
+            },
+            status_code=503,
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    return RedirectResponse(url="/admin/precios-web?ok=1", status_code=303)
+
+
+@router.post("/precios-web/dhl", response_class=HTMLResponse)
+async def admin_precio_web_dhl_guardar(
+    request: Request,
+    admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    form = await request.form()
+    if not _csrf_dhl_valido(form.get("csrf_precio_dhl"), "precios-web:dhl"):
+        return Response(
+            "Formulario vencido o inválido. Volvé a abrir Precios de la web.",
+            status_code=403,
+        )
+
+    from servicios.precios_web_dhl import (
+        guardar_configuracion_dhl,
+        leer_configuracion_dhl,
+    )
+    modo = str(form.get("dhl_modo") or "").strip().upper()
+    markup = str(form.get("dhl_markup_pct") or "").strip()
+    fijo = str(form.get("dhl_margen_fijo_ars") or "").strip()
+    rangos = None
+    try:
+        extra = {}
+        if modo == "RANGOS_USD":
+            columnas = {
+                campo: form.getlist(f"dhl_rango_{campo}")
+                for campo in ("desde", "hasta", "tipo", "valor")
+            }
+            cantidades = {len(valores) for valores in columnas.values()}
+            if len(cantidades) != 1 or not 1 <= next(iter(cantidades)) <= 30:
+                raise ValueError("Completá de 1 a 30 rangos, con todos sus campos.")
+            rangos = [
+                {campo: str(valores[i]).strip() for campo, valores in columnas.items()}
+                for i in range(len(columnas["desde"]))
+            ]
+            normalizados = []
+            for indice, fila in enumerate(rangos, start=1):
+                try:
+                    normalizados.append({
+                        "desde": parse_importe_humano(fila["desde"]),
+                        "hasta": parse_importe_humano(fila["hasta"]),
+                        "tipo": fila["tipo"],
+                        "valor": (
+                            parse_numero_humano(fila["valor"])
+                            if fila["tipo"].upper() == "PCT"
+                            else parse_importe_humano(fila["valor"])
+                        ),
+                    })
+                except ValueError:
+                    raise ValueError(
+                        f"Rango {indice}: revisá los números. Usá coma para decimales; "
+                        "por ejemplo, 150,50."
+                    ) from None
+            extra["rangos_usd"] = normalizados
+        guardar_configuracion_dhl(
+            request=request, modo=modo,
+            markup_pct=markup, margen_fijo_ars=fijo,
+            **extra,
+        )
+    except Exception as exc:
+        status = 422 if isinstance(exc, ValueError) else 503
+        mensaje = (
+            str(exc) if status == 422
+            else "No pudimos guardar el precio de DHL. Probá de nuevo."
+        )
+        if status == 503:
+            print(f"[admin] no pude guardar precio web DHL: {type(exc).__name__}")
+        configuracion = leer_configuracion_dhl()
+        if modo in {"PCT", "FIJO_ARS", "RANGOS_USD"}:
+            configuracion["modo"] = modo
+        if "dhl_markup_pct" in form:
+            configuracion["markup_texto"] = markup
+        if "dhl_margen_fijo_ars" in form:
+            configuracion["fijo_texto"] = fijo
+        if rangos is not None:
+            configuracion["rangos_usd"] = rangos
+        configuracion.update(estado=mensaje, error=mensaje)
+        return templates.TemplateResponse(
+            request=request, name="admin/precios_web.html",
+            context={
+                **_contexto_precios_web(configuracion_dhl=configuracion),
+                "flash_error": mensaje,
+            },
+            status_code=status,
+            headers={"Cache-Control": "private, no-store"},
+        )
+    return RedirectResponse("/admin/precios-web?ok=dhl", status_code=303)
+
+
 @router.get("/config", response_class=HTMLResponse)
 def admin_config(
     request: Request,
@@ -5148,6 +5508,30 @@ async def admin_config_save(
     nuevo_param = data.pop("_nuevo_parametro", "").strip()
     nuevo_valor = data.pop("_nuevo_valor", "").strip()
 
+    parametros_reservados = _parametros_precio_web_reservados()
+    claves_enviadas = {
+        str(parametro or "").strip().upper() for parametro in data
+    }
+    nuevo_param_normalizado = nuevo_param.upper()
+    if (
+        claves_enviadas.intersection(parametros_reservados)
+        or nuevo_param_normalizado in parametros_reservados
+    ):
+        from servicios.leads import estado_entregas_email
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/config.html",
+            context={
+                "seccion": "config",
+                "config_items": _get_config(),
+                "email_status": estado_entregas_email(),
+                "flash_error": (
+                    "Los precios públicos por operador se editan desde Precios de la web."
+                ),
+            },
+            status_code=422,
+        )
+
     try:
         normalizados = {}
         for param, valor in data.items():
@@ -5157,7 +5541,7 @@ async def admin_config_save(
             normalizados[param] = crudo
         data = normalizados
 
-        nuevo_param = nuevo_param.upper()
+        nuevo_param = nuevo_param_normalizado
         if nuevo_param and nuevo_valor and politica_configuracion_numerica(nuevo_param):
             nuevo_valor = decimal_a_texto(
                 parse_configuracion_numerica(nuevo_param, nuevo_valor)
@@ -5397,6 +5781,89 @@ async def admin_importar_melcior_2026(
     return templates.TemplateResponse(
         request=request, name="admin/importaciones_historicas.html", context=contexto,
     )
+
+
+@router.post("/importaciones-historicas/cuenta-cliente", response_class=HTMLResponse)
+async def admin_importar_cuenta_cliente(
+    request: Request,
+    accion: str = Form("previsualizar"),
+    confirmacion: str = Form(""),
+    huella: str = Form(""),
+    manifiesto: UploadFile = File(...),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Completa la cuenta 2026 de MELCIOR / PRETE ROSSO desde su planilla.
+
+    Primero se previsualiza (misma transacción, revertida al final). Para
+    importar hay que volver a subir el mismo archivo, escribir la confirmación
+    y los primeros 12 caracteres de la huella que mostró la vista previa.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.importacion_historica_melcior import PERIODOS
+    from servicios.importacion_cuenta_cliente import (
+        MAX_MANIFEST_BYTES,
+        ImportacionCuentaError,
+        leer_manifiesto,
+        procesar,
+    )
+
+    contexto = {
+        "seccion": "importaciones_historicas",
+        "periodos": PERIODOS,
+        "periodo_seleccionado": "ENERO",
+        "resultado": None,
+        "resultado_waimao": None,
+        "resultado_cuenta": None,
+        "flash_ok": None,
+        "flash_error": None,
+    }
+
+    def _responder(status_code: int = 200):
+        return templates.TemplateResponse(
+            request=request, name="admin/importaciones_historicas.html",
+            context=contexto, status_code=status_code,
+        )
+
+    if not str(manifiesto.filename or "").lower().endswith(".json"):
+        contexto["flash_error"] = "El manifiesto debe ser un archivo .json."
+        return _responder(422)
+    contenido = await manifiesto.read(MAX_MANIFEST_BYTES + 1)
+    try:
+        lote = leer_manifiesto(contenido)
+    except (ImportacionCuentaError, ValueError) as exc:
+        contexto["flash_error"] = str(exc)
+        return _responder(422)
+    cliente = str(lote["cliente_id"]).upper()
+    aplicar = str(accion or "").strip().lower() == "importar"
+    if aplicar:
+        if confirmacion.strip().upper() != f"IMPORTAR {cliente}":
+            contexto["flash_error"] = f'Escribí "IMPORTAR {cliente}" para ejecutar.'
+            return _responder(422)
+        if huella.strip().lower() != lote["manifest_sha256"][:12]:
+            contexto["flash_error"] = (
+                "La huella no coincide con el archivo: volvé a previsualizar y copiá la huella."
+            )
+            return _responder(422)
+    try:
+        informe = procesar(lote, aplicar=aplicar, actor="admin")
+    except (ImportacionCuentaError, ValueError) as exc:
+        contexto["flash_error"] = str(exc)
+        return _responder(422)
+    except Exception as exc:
+        print(f"[admin] importación cuenta cliente: {type(exc).__name__}: {exc}")
+        contexto["flash_error"] = (
+            "La importación se revirtió completa. Revisá los logs antes de reintentar."
+        )
+        return _responder(500)
+    informe["huella_corta"] = lote["manifest_sha256"][:12]
+    contexto["resultado_cuenta"] = informe
+    contexto["flash_ok"] = (
+        f"{cliente}: importación confirmada en una sola transacción."
+        if aplicar else
+        f"{cliente}: vista previa lista. No se escribió nada."
+    )
+    return _responder()
 
 
 @router.post("/importaciones-historicas/waimao-dhl", response_class=HTMLResponse)

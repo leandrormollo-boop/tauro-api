@@ -51,7 +51,8 @@ html[data-theme="light"] .quote-map-current-glow { opacity:.75; }
 .quote-map-brand-dark { display:none; }
 html[data-theme="light"] .quote-map-brand-dark { display:block; }
 html[data-theme="light"] .quote-map-brand-white { display:none; }
-.quote-map-explore-bar { position:absolute; bottom:13px; left:17px; right:14px; display:flex; align-items:center; justify-content:space-between; gap:8px; pointer-events:none; }
+/* Keep the globe unobstructed; drag and keyboard navigation remain available. */
+.quote-map-explore-bar { display:none; }
 .quote-map-drag-hint { color:var(--fg-3); font-size:9px; letter-spacing:.02em; }
 .quote-map-controls { display:flex; align-items:center; gap:1px; padding:3px; border:1px solid var(--line); border-radius:30px; background:var(--bg-elev); box-shadow:0 4px 18px rgba(0,0,0,.13); pointer-events:auto; }
 .quote-map-controls button { display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:50%; background:transparent; color:var(--fg-2); font:18px var(--font-body); cursor:pointer; }
@@ -77,4 +78,21 @@ html[data-theme="light"] .quote-map-brand-white { display:none; }
 .uq-mobile-map{display:none;border:1px solid var(--line);border-radius:18px;margin:0 0 12px;padding:0 12px;background:var(--bg-elev)}
 .uq-mobile-map summary{font:500 11px var(--font-body);color:var(--accent);cursor:pointer;padding:10px 0}
 html[data-theme="light"] .unified-quote .quote-map-art{background:radial-gradient(ellipse at 55% 40%,#eee5ff60,transparent 73%);border-color:#e5dcef}
+/* Con una tarifa disponible, el planeta conserva la ruta sin competir con el precio. */
+.uq-results.has-quote-result:not(.is-map-expanded) [data-quote-map-slot]{display:block;padding:3px 0 11px;margin-bottom:11px;border-bottom:1px solid var(--line);animation:quote-map-settle .2s ease-out both}
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-route-map{display:grid;grid-template-columns:74px minmax(0,1fr);align-items:center;gap:10px}
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-art{width:74px;max-width:74px;border-radius:50%;pointer-events:none}
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-brand,
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-explore-bar,
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-footer,
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-credit{display:none}
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-itinerary{margin:0;padding:0;border:0;gap:4px;grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr)}
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-endpoint strong{font-size:10px}.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-endpoint small{font-size:7px;margin-bottom:3px}.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-endpoint div>span{font-size:8px;margin-top:3px}
+.uq-results.has-quote-result:not(.is-map-expanded) .quote-map-connector{font-size:14px;padding-top:11px}
+.uq-results.has-quote-result:not(.is-map-expanded) .uq-result-route{display:none}
+@media(min-width:780px){
+ .uq-results.is-map-expanded [data-quote-map-slot]{animation:quote-map-settle .2s ease-out both}
+}
+@keyframes quote-map-settle{from{opacity:.35;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:779px){.has-quote-globe .uq-mobile-map{display:block}.unified-quote .uq-mobile-map .quote-map-art{max-width:280px}.unified-quote .uq-mobile-map .quote-map-credit{margin-bottom:10px}}
+@media(prefers-reduced-motion:reduce){.uq-results.has-quote-result [data-quote-map-slot]{animation:none!important}}

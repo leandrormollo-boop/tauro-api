@@ -2,8 +2,8 @@
 {% block title %}Mis productos{% endblock %}
 
 {% block content %}
-<link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
-<script src="/static/js/hs-assistant.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
+<link rel="stylesheet" href="/static/css/hs-assistant.css?v=2">
+<script src="/static/js/hs-assistant.js?v=2" defer nonce="{{ request.state.csp_nonce }}"></script>
 <style nonce="{{ request.state.csp_nonce }}">
 .catalog-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .catalog-sync{margin-bottom:12px!important;padding:14px 18px!important}
@@ -151,10 +151,10 @@
             <tbody>
             {% for p in productos %}
                 <tr data-alias="{{ p.alias_interno }}" data-invoice="{{ p.nombre_invoice }}"
-                    data-hs="{{ p.hs_code }}" data-largo="{{ '%g'|format(p.largo_cm) }}"
-                    data-ancho="{{ '%g'|format(p.ancho_cm) }}" data-alto="{{ '%g'|format(p.alto_cm) }}"
-                    data-peso="{{ '%g'|format(p.peso_kg) }}" data-valor="{{ '%g'|format(p.valor_usd_default) }}"
-                    data-tax="{{ '%g'|format(taxes.get(p.alias_interno, 0)) }}">
+                    data-hs="{{ p.hs_code }}" data-largo="{{ (p.largo_cm)|numero_maquina }}"
+                    data-ancho="{{ (p.ancho_cm)|numero_maquina }}" data-alto="{{ (p.alto_cm)|numero_maquina }}"
+                    data-peso="{{ (p.peso_kg)|numero_maquina }}" data-valor="{{ (p.valor_usd_default)|numero_maquina }}"
+                    data-tax="{{ (taxes.get(p.alias_interno, 0))|numero_maquina }}">
                     <td style="width:31%;min-width:205px;">
                         {% set incompleto = (not p.hs_code) or (p.largo_cm|float <= 0) or (p.valor_usd_default|float <= 0) %}
                         <div style="display:flex;align-items:center;gap:9px;">
@@ -196,9 +196,9 @@
                     <td style="width:34%;min-width:230px;">
                         <div>{{ p.nombre_invoice }}</div>
                         <div class="mono" style="font-size:11px;color:var(--fg-3);">HS {{ p.hs_code or p.hs_code_tienda or '—' }}</div>
-                        <div style="font-size:11px;color:var(--fg-3);">Valor USD {{ '%g'|format(p.valor_usd_default) }} · Envío <span class="precio-unidad" data-prod="{{ p.alias_interno }}" data-aprobado="{{ 1 if p.activo else 0 }}">—</span></div>
+                        <div style="font-size:11px;color:var(--fg-3);">Valor {{ ((p.valor_usd_default))|dinero_usd }} · Envío <span class="precio-unidad" data-prod="{{ p.alias_interno }}" data-aprobado="{{ 1 if p.activo else 0 }}">—</span></div>
                         <div class="mono" style="font-size:11px;color:var(--fg-2);margin-top:3px;">
-                            {{ '%g'|format(p.largo_cm) }}×{{ '%g'|format(p.ancho_cm) }}×{{ '%g'|format(p.alto_cm) }} cm · {{ '%g'|format(p.peso_kg) }} kg
+                            {{ (p.largo_cm)|medida_cm }} × {{ (p.ancho_cm)|medida_cm }} × {{ (p.alto_cm)|medida_cm }} cm · {{ ((p.peso_kg))|kg }}
                         </div>
                     </td>
                     <td style="width:16%;min-width:126px;">
@@ -239,11 +239,12 @@
 
 <dialog class="product-dialog" id="form-producto">
 <div class="product-dialog-panel">
-    <div class="card-head">
+    <div class="card-head tauro-branded-dialog-head">
         <div>
             <h3 id="form-prod-titulo">Agregar producto</h3>
             <p>Completá los datos del producto para tus envíos.</p>
         </div>
+        {% include 'portal/_brand_badge.html' %}
         <button type="button" id="form-prod-cancelar" class="btn btn-ghost btn-sm">Cerrar</button>
     </div>
 
@@ -360,7 +361,7 @@ document.querySelectorAll(".prod-editar").forEach(function (btn) {
     if (!sel) return;
     var nota = document.getElementById("cat-destino-nota");
     var fmt = function (n) {
-        return "$ " + Math.round(n).toLocaleString("es-AR");
+        return "$ " + Number(n).toLocaleString("es-AR", {minimumFractionDigits:2, maximumFractionDigits:2});
     };
 
     sel.addEventListener("change", async function () {
@@ -387,7 +388,7 @@ document.querySelectorAll(".prod-editar").forEach(function (btn) {
                 if (d.ok) {
                     c.innerHTML = "<strong>" + fmt(d.precio_ars) + "</strong>" +
                         '<div style="font-size:11px;color:var(--fg-3);">USD ' +
-                        Number(d.precio_usd).toFixed(0) + "</div>";
+                        Number(d.precio_usd).toLocaleString("es-AR", {minimumFractionDigits:2, maximumFractionDigits:2}) + "</div>";
                 } else {
                     c.innerHTML = '<span style="color:var(--fg-3);font-size:12px;">sin tarifa</span>';
                 }

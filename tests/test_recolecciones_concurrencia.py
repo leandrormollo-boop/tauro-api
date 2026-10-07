@@ -99,7 +99,7 @@ def test_indices_viven_en_schema_y_el_request_no_hace_ddl():
     servicio = (raiz / "servicios" / "recolecciones.py").read_text(encoding="utf-8")
 
     assert "CREATE TABLE IF NOT EXISTS recolecciones" in schema
-    assert "uq_recoleccion_cliente_fecha_abierta_v2" in schema
+    assert "uq_recoleccion_origen_fecha_abierta_v3" in schema
     assert "uq_recoleccion_solicitud_abierta_v2" in schema
     cuerpo_ensure = servicio.split("def _ensure_tabla", 1)[1].split(
         "def _dias_habiles_validos", 1

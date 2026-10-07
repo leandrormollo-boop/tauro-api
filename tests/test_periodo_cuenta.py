@@ -39,6 +39,19 @@ def _grupo(periodo, ambito, clase, importe, **extra):
             "importe": Decimal(importe), **extra}
 
 
+def test_apertura_depende_de_movimientos_previos_aunque_el_neto_sea_cero():
+    solo_actual = [_grupo("DESDE", "INTERNACIONAL", "ENVIO", "100")]
+    assert pc._presentar_periodo(solo_actual, INICIO)["hay_movimientos_anteriores"] is False
+    previo_saldado = [
+        _grupo("ANTERIOR", "INTERNACIONAL", "ENVIO", "25"),
+        _grupo("ANTERIOR", "CONSOLIDADO", "PAGO", "25"),
+    ]
+    resultado = pc._presentar_periodo(previo_saldado + solo_actual, INICIO)
+    assert resultado["hay_movimientos_anteriores"] is True
+    assert resultado["saldo_anterior_ars"] == Decimal("0.00")
+    assert resultado["saldo_total_ars"] == Decimal("100.00")
+
+
 @pytest.mark.parametrize("importe,anterior,neto,total,redondeo", [
     ("0.005", "0.01", "0.01", "0.01", "-0.01"),
     ("0.004", "0.00", "0.00", "0.01", "0.01"),
@@ -170,14 +183,16 @@ def test_particion_sql_reconcilia_con_resumen_real_y_pago_a_envio_anterior(perio
             """)
     r = pc.obtener_periodo_cuenta(" waimao ", INICIO)
     actual = cc.resumen_cuenta_por_ambito("WAIMAO")
-    assert r["saldo_anterior_ars"] == Decimal("83.01")
-    assert r["cargos_desde_ars"] == Decimal("140.01")
-    assert r["creditos_desde_ars"] == Decimal("5.01")
+    # Los ajustes van en la fecha de su envío (todos los de este caso son del
+    # envío 1, de agosto): 100 - 30 + 5.01 + 10.01 - 3.01 + 1 + 7 (envío sin fecha).
+    assert r["saldo_anterior_ars"] == Decimal("90.01")
+    assert r["cargos_desde_ars"] == Decimal("130.00")
+    assert r["creditos_desde_ars"] == Decimal("2.00")
     assert r["pagos_desde_ars"] == Decimal("40.00")
-    assert r["neto_desde_ars"] == Decimal("95.00")
+    assert r["neto_desde_ars"] == Decimal("88.00")
     assert r["redondeo_ars"] == Decimal("-0.01")
     assert r["saldo_total_ars"] == actual["consolidado"]["saldo_ars"] == Decimal("178.00")
-    assert r["sin_fecha_cantidad"] == 2
+    assert r["sin_fecha_cantidad"] == 1
     assert r["saldo_anterior_ars"] + r["neto_desde_ars"] + r["redondeo_ars"] == r["saldo_total_ars"]
     assert pc.obtener_periodo_cuenta("WAIMAO' OR '1'='1", INICIO)["saldo_total_ars"] == 0
 
@@ -258,8 +273,9 @@ def test_dos_ajustes_medios_centavos_concilian_periodo_lista_y_excel(periodo_db)
                     numero_guia_tauro bigint,producto_alias text,cantidad integer DEFAULT 1);
                 CREATE TABLE conciliaciones_envio(id integer,tax_cliente_ars numeric DEFAULT 0,
                     diferencia_flete_ars numeric DEFAULT 0,motivo_diferencia text DEFAULT 'OTRO',
-                    precio_cliente_inicial_ars numeric DEFAULT 100,peso_cotizado_kg numeric,
-                    peso_final_facturado_kg numeric,peso_base_facturado text);
+                    precio_cliente_inicial_ars numeric DEFAULT 100,precio_cliente_final_ars numeric DEFAULT 100,
+                    solicitud_id integer,version integer DEFAULT 1,estado text DEFAULT 'CERRADA',
+                    peso_cotizado_kg numeric,peso_final_facturado_kg numeric,peso_base_facturado text);
                 CREATE TABLE factura_courier_item_matches(solicitud_id integer,item_id integer,estado text);
                 CREATE TABLE facturas_courier_items(id integer,descripcion text,concepto_tipo text);
                 INSERT INTO envios(id,cliente_id,fecha,monto_ars,estado,solicitud_id,ambito)
@@ -272,18 +288,22 @@ def test_dos_ajustes_medios_centavos_concilian_periodo_lista_y_excel(periodo_db)
             """)
     periodo = pc.obtener_periodo_cuenta("WAIMAO", INICIO)
     actual = cc.resumen_cuenta_por_ambito("WAIMAO")
-    lista = cc.movimientos_cuenta_paginados("WAIMAO", desde="2026-09-01")
+    # Los dos medios centavos pertenecen al envío de agosto: la lista y el Excel
+    # los muestran en agosto, cada uno redondeado a un centavo, y el período
+    # los cuenta en el saldo anterior con el mismo redondeo.
+    lista = cc.movimientos_cuenta_paginados("WAIMAO", desde="2026-08-01")
     neto_filas = sum((m["debe_ars"]-m["haber_ars"] for m in lista["items"]), Decimal("0"))
-    libro = load_workbook(BytesIO(generar_excel_cuenta("WAIMAO", desde="2026-09-01")))
+    libro = load_workbook(BytesIO(generar_excel_cuenta("WAIMAO", desde="2026-08-01")))
     filas = list(libro["Movimientos"].values)[1:]
     neto_excel = sum((Decimal(str(f[7]))-Decimal(str(f[8])) for f in filas), Decimal("0"))
-    assert periodo["saldo_anterior_ars"] == Decimal("100.00")
-    assert periodo["cargos_desde_ars"] == periodo["neto_desde_ars"] == neto_filas == neto_excel == Decimal("0.02")
+    assert periodo["saldo_anterior_ars"] == neto_filas == neto_excel == Decimal("100.02")
+    assert periodo["cargos_desde_ars"] == periodo["neto_desde_ars"] == 0
+    assert cc.movimientos_cuenta_paginados("WAIMAO", desde="2026-09-01")["total_resultados"] == 0
     assert periodo["saldo_total_ars"] == actual["consolidado"]["saldo_ars"] == Decimal("100.01")
     assert periodo["redondeo_ars"] == Decimal("-0.01")
     assert periodo["saldo_anterior_ars"] + periodo["neto_desde_ars"] + periodo["redondeo_ars"] == periodo["saldo_total_ars"]
 
-    # La misma regla aplica a los movimientos anteriores, no sólo a los nuevos.
+    # La fecha en que se aplicó el ajuste no cambia el período: manda el envío.
     with periodo_db() as conn:
         with conn.cursor() as cur:
             cur.execute("UPDATE ajustes_cliente SET aplicado_at='2026-08-10 12:00+00'")

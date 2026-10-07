@@ -19,6 +19,15 @@ def test_legacy_no_inventa_calle_numero_ni_apellido():
     assert proyectar({**row, 'pais':'US'}) is None
 
 
+@pytest.mark.parametrize('tipo', ['REMITENTE', 'DESTINATARIO'])
+def test_nombre_proyectado_sirve_para_ambos_roles_sin_duplicar_apellido(tipo):
+    data = proyectar(dict(id=1, tipo=tipo, nombre='Ana Pérez', pais='AR',
+                          datos_nacionales={'nombre': 'Ana', 'apellido': 'Pérez'}))
+    assert data['nombre_completo'] == 'Ana Pérez'
+    assert data['fields']['nombre'] == 'Ana'
+    assert data['fields']['apellido'] == 'Pérez'
+
+
 @pytest.mark.parametrize('changes', [{'numero':'abc'}, {'cp':'C1000ABC','estado':'Buenos Aires'}, {'calle':''}, {'estado':'ZZ'}])
 def test_ficha_nacional_rechaza_domicilio_inconsistente(changes):
     fields=dict(nombre='Ana',apellido='Pérez',calle='Mitre',numero='123',piso='2',depto='A',pais='AR',estado='Buenos Aires',cp='1875')

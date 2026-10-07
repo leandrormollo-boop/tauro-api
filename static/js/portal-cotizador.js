@@ -1,36 +1,160 @@
 /* Una pantalla, dos borradores. Las respuestas pertenecen a la revisión exacta
    de los datos: nunca se puede elegir una tarifa de una edición anterior. */
 (function (factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory;
-  else window.TauroQuoteRequest = factory;
-})(function quoteRequest(io) {
-  var revision = 0, timer, controller, paused = false;
-  function cancel() {
-    revision += 1;
-    clearTimeout(timer);
-    if (controller) controller.abort();
-    controller = null;
+  var request = factory();
+  if (typeof module === 'object' && module.exports) module.exports = request;
+  else {
+    window.TauroQuoteRequest = request;
+    window.TauroQuoteStream = request.readNdjson;
   }
-  async function run() {
-    cancel();
-    if (paused || !io.ready()) return;
-    var current = revision;
-    controller = new AbortController();
-    io.loading();
-    try {
-      var response = await io.fetch(controller.signal);
-      if (current === revision && !paused) io.render(response);
-    } catch (error) {
-      if (current === revision && !paused && error.name !== 'AbortError') io.error(error);
+})(function () {
+  function interrupted() {
+    return new Error('La respuesta se interrumpió. Volvé a consultar las tarifas.');
+  }
+  async function readNdjson(response, onMessage) {
+    var buffer = '', complete = false;
+    function consume(final) {
+      var newline;
+      while ((newline = buffer.indexOf('\n')) !== -1) {
+        var line = buffer.slice(0, newline).trim(); buffer = buffer.slice(newline + 1);
+        if (line) parse(line);
+        if (complete) { buffer = ''; return; }
+      }
+      if (final && buffer.trim()) { parse(buffer.trim()); buffer = ''; }
     }
+    function parse(line) {
+      var event;
+      try { event = JSON.parse(line); } catch (_) { throw interrupted(); }
+      if (!event || typeof event.html !== 'string' || typeof event.complete !== 'boolean') throw interrupted();
+      onMessage(event);
+      if (event.complete) complete = true;
+    }
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      buffer = await response.text(); consume(true);
+    } else {
+      var reader = response.body.getReader(), decoder = new TextDecoder();
+      var failed = false;
+      try {
+        while (true) {
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          if (complete) continue;
+          buffer += decoder.decode(chunk.value, {stream: true}); consume(false);
+        }
+        if (!complete) { buffer += decoder.decode(); consume(true); }
+        if (!complete) throw interrupted();
+      } catch (error) {
+        if (!complete) { failed = true; throw error; }
+      } finally {
+        if (failed) { try { await reader.cancel(); } catch (_) {} }
+        reader.releaseLock();
+      }
+    }
+    if (!complete) throw interrupted();
   }
-  function changed() {
-    cancel();
-    io.invalidate(io.ready());
-    if (!paused && io.ready()) timer = setTimeout(run, io.delay === undefined ? 900 : io.delay);
+  function copyResellerInputs(current, next) {
+    var drafts = new Map(), focusKey = null, selection = null;
+    current.querySelectorAll('.uq-price[data-carrier] .uq-reseller').forEach(function (form) {
+      var card = form.closest('.uq-price[data-carrier]');
+      var quote = form.querySelector('[name="quote_id"]'), price = form.querySelector('[name="precio"]');
+      if (!card || !quote || !price || !quote.value) return;
+      var key = card.dataset.carrier + '\u0000' + quote.value;
+      drafts.set(key, price.value);
+      if (price.ownerDocument.activeElement === price) {
+        focusKey = key; selection = [price.selectionStart, price.selectionEnd];
+      }
+    });
+    var focusTarget = null;
+    next.querySelectorAll('.uq-price[data-carrier] .uq-reseller').forEach(function (form) {
+      var card = form.closest('.uq-price[data-carrier]');
+      var quote = form.querySelector('[name="quote_id"]'), price = form.querySelector('[name="precio"]');
+      if (!card || !quote || !price) return;
+      var key = card.dataset.carrier + '\u0000' + quote.value;
+      if (!drafts.has(key)) return;
+      price.value = drafts.get(key);
+      if (key === focusKey) focusTarget = price;
+    });
+    return function () {
+      if (!focusTarget || !focusTarget.isConnected) return;
+      focusTarget.focus({preventScroll: true});
+      if (selection && selection[0] !== null && typeof focusTarget.setSelectionRange === 'function') {
+        focusTarget.setSelectionRange(selection[0], selection[1]);
+      }
+    };
   }
-  return {changed: changed, run: run, pause: function () { paused = true; cancel(); },
-    resume: function () { paused = false; changed(); }};
+  function armDeadline(signal, callback, delay) {
+    var timer = setTimeout(function () { if (!signal.aborted) callback(); }, delay);
+    return function () { clearTimeout(timer); };
+  }
+  function resultState(block, complete) {
+    var hasPrice = Boolean(block.querySelector('.uq-price'));
+    var hasError = Boolean(block.querySelector('.uq-error'));
+    return {
+      hasPrice: hasPrice,
+      current: hasPrice && !hasError,
+      button: hasPrice && !hasError ? 'Ver tarifas' : 'Volver a consultar',
+      status: !complete ? 'Consultando otros operadores…'
+        : hasError && hasPrice ? 'Podés usar las tarifas recibidas o volver a consultar.'
+        : hasPrice ? 'Tarifas actualizadas.' : 'Revisá el resultado de la consulta.',
+    };
+  }
+  function quoteRequest(io) {
+    var revision = 0, timer, controller, paused = false;
+    var activeFingerprint = null, currentFingerprint = null;
+    function fingerprint() { return io.fingerprint ? io.fingerprint() : null; }
+    function cancel() {
+      revision += 1;
+      clearTimeout(timer); timer = null;
+      if (controller) controller.abort();
+      controller = null; activeFingerprint = null;
+    }
+    async function run(force) {
+      clearTimeout(timer); timer = null;
+      if (paused || !io.ready()) return;
+      var nextFingerprint = fingerprint();
+      if (nextFingerprint !== null && activeFingerprint === nextFingerprint) return;
+      if (!force && nextFingerprint !== null && currentFingerprint === nextFingerprint) return;
+      cancel(); currentFingerprint = null;
+      var current = revision, completed = false;
+      controller = new AbortController(); activeFingerprint = nextFingerprint;
+      var signal = controller.signal;
+      io.loading();
+      function progress(response, complete) {
+        if (current !== revision || paused) return false;
+        io.render(response, Boolean(complete));
+        if (complete) { completed = true; currentFingerprint = nextFingerprint; }
+        return true;
+      }
+      try {
+        var response = await io.fetch(signal, progress);
+        if (current !== revision || paused) return;
+        if (response !== undefined) progress(response, true);
+        else if (!completed) throw interrupted();
+      } catch (error) {
+        if (current === revision && !paused && error.name !== 'AbortError') io.error(error);
+      } finally {
+        if (current === revision) { controller = null; activeFingerprint = null; }
+      }
+    }
+    function changed() {
+      var complete = io.ready();
+      var nextFingerprint = complete ? fingerprint() : null;
+      if (complete && nextFingerprint !== null
+          && (activeFingerprint === nextFingerprint || currentFingerprint === nextFingerprint)) return;
+      cancel(); currentFingerprint = null;
+      io.invalidate(complete);
+      if (!paused && complete) timer = setTimeout(function () { run(false); }, io.delay === undefined ? 350 : io.delay);
+    }
+    return {changed: changed, run: run, pause: function () {
+      paused = true; cancel(); currentFingerprint = null; io.invalidate(false);
+    },
+      resume: function () { paused = false; changed(); }};
+  }
+  quoteRequest.readNdjson = readNdjson;
+  quoteRequest.copyResellerInputs = copyResellerInputs;
+  quoteRequest.armDeadline = armDeadline;
+  quoteRequest.resultState = resultState;
+  return quoteRequest;
 });
 
 (function () {
@@ -56,12 +180,44 @@
     if (error) el.setAttribute('role', 'alert');
     container.replaceChildren(el);
   }
+  function quoteProgress(container) {
+    var box = document.createElement('div');
+    box.className = 'uq-quote-progress'; box.setAttribute('role', 'status');
+    var copy = document.createElement('div');
+    var title = document.createElement('strong'); title.textContent = 'Consultando esta ruta';
+    var detail = document.createElement('span'); detail.textContent = 'Origen, destino y peso listos. Esperando la tarifa.';
+    var track = document.createElement('i'); track.setAttribute('aria-hidden', 'true');
+    copy.append(title, detail); box.append(copy, track); container.replaceChildren(box);
+  }
+  function quoteError(container, text) {
+    if (!container.querySelector('.uq-price')) { message(container, text, true); return false; }
+    var response = container.querySelector('[data-quote-response]') || container;
+    var previous = response.querySelector('[data-quote-stream-error]');
+    if (previous) previous.remove();
+    var warning = document.createElement('p'); warning.className = 'uq-error';
+    warning.dataset.quoteStreamError = ''; warning.setAttribute('role', 'alert');
+    warning.textContent = text; response.appendChild(warning); return true;
+  }
+  function formFingerprint(form) {
+    var fields = [];
+    new FormData(form).forEach(function (value, name) {
+      fields.push([name, typeof value === 'string' ? value : [value.name, value.size, value.type]]);
+    });
+    return JSON.stringify(fields);
+  }
+  function responseBlock(html, scope) {
+    var parsed = new DOMParser().parseFromString(html, 'text/html');
+    var block = parsed.querySelector('[data-quote-response][data-scope="' + scope + '"]');
+    if (!block) throw new Error('No pudimos recuperar las tarifas. Volvé a ingresar al portal.');
+    return document.importNode(block, true);
+  }
   function init(root) {
     if (initialized.has(root)) return initialized.get(root);
     var controls = {}, locationControls = {}, active = root.dataset.quoteActive || 'internacional';
     root.querySelectorAll('[data-unified-form]').forEach(function (form) {
       var scope = form.dataset.unifiedForm, panel = form.closest('[data-quote-panel]');
       var result = panel.querySelector('[data-quote-results]');
+      var resultPanel = result.closest('.uq-results');
       var status = form.querySelector('[data-quote-status]');
       var submit = form.querySelector('[data-quote-submit]'), initial = true, hasCurrentQuote = false;
       var packageList = form.querySelector('#quote-package-list');
@@ -163,7 +319,7 @@
         });
         summary.hidden = !complete;
         if (complete) [["real",real],["volume",volume],["billable",billable]].forEach(function (item) {
-          summary.querySelector('[data-weight-' + item[0] + ']').textContent = item[1].toLocaleString('es-AR',{maximumFractionDigits:2}) + ' kg';
+          summary.querySelector('[data-weight-' + item[0] + ']').textContent = item[1].toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' kg';
         });
       }
       function ready() {
@@ -178,39 +334,66 @@
       }
       var control = window.TauroQuoteRequest({
         ready: ready,
+        fingerprint: function () { return formFingerprint(form); },
         invalidate: function (complete) {
           hasCurrentQuote = false; submit.textContent = 'Consultar tarifas';
           if (initial && !complete) { initial = false; return; }
           initial = false;
+          resultPanel.dataset.quoteState = complete ? 'editing' : 'idle';
+          result.classList.remove('is-revealing');
           result.setAttribute('aria-busy', 'false');
           status.textContent = complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.';
           message(result, complete ? 'Las tarifas se actualizan automáticamente.' : 'Tus opciones aparecerán al completar los datos.');
         },
         loading: function () {
+          resultPanel.dataset.quoteState = 'loading';
+          result.classList.remove('is-revealing');
           result.setAttribute('aria-busy', 'true');
-          status.textContent = 'Consultando tus operadores…';
-          message(result, 'Consultando tarifas disponibles…');
+          status.textContent = 'Consultando la tarifa para esta ruta…';
+          quoteProgress(result);
         },
-        fetch: async function (signal) {
-          var timeout = setTimeout(function () { control.pause(); message(result, 'La consulta demoró demasiado. Volvé a consultar.', true); result.setAttribute('aria-busy','false'); status.textContent='Volvé a consultar las tarifas.'; }, 90000);
+        fetch: async function (signal, onProgress) {
+          var clearDeadline = window.TauroQuoteRequest.armDeadline(signal, function () {
+            control.pause(); message(result, 'La consulta demoró demasiado. Volvé a consultar.', true);
+            result.setAttribute('aria-busy','false'); status.textContent='Volvé a consultar las tarifas.';
+          }, 90000);
           try {
-            var response = await fetch(form.action, {method: 'POST', body: new FormData(form), credentials: 'same-origin', signal: signal, headers: {'X-Requested-With': 'TauroQuoteWindow'}});
+            var headers = {'X-Requested-With': 'TauroQuoteWindow'};
+            if (scope === 'internacional') headers.Accept = 'application/x-ndjson';
+            var response = await fetch(form.action, {method: 'POST', body: new FormData(form), credentials: 'same-origin', signal: signal, headers: headers});
             if (response.redirected && new URL(response.url).pathname.includes('/login')) throw new Error('Tu sesión venció. Volvé a ingresar al portal.');
             if (response.status === 429) throw new Error('Realizaste varias consultas seguidas. Esperá un minuto y volvé a consultar.');
             if (!response.ok) throw new Error('No pudimos consultar las tarifas. Revisá los datos e intentá nuevamente.');
-            var parsed = new DOMParser().parseFromString(await response.text(), 'text/html');
-            var block = parsed.querySelector('[data-quote-response][data-scope="' + scope + '"]');
-            if (!block) throw new Error('No pudimos recuperar las tarifas. Volvé a ingresar al portal.');
-            return document.importNode(block, true);
-          } finally { clearTimeout(timeout); }
+            var contentType = response.headers.get('content-type') || '';
+            if (scope === 'internacional' && contentType.includes('application/x-ndjson')) {
+              await window.TauroQuoteStream(response, function (event) {
+                if (event.complete) clearDeadline();
+                onProgress(responseBlock(event.html, scope), event.complete);
+              });
+              return;
+            }
+            return responseBlock(await response.text(), scope);
+          } finally { clearDeadline(); }
         },
-        render: function (block) {
-          result.replaceChildren(block); result.setAttribute('aria-busy', 'false');
-          hasCurrentQuote = Boolean(block.querySelector('.uq-price'));
-          submit.textContent = hasCurrentQuote ? 'Ver tarifas' : 'Volver a consultar';
-          status.textContent = block.querySelector('.uq-price') ? 'Tarifas actualizadas.' : 'Revisá el resultado de la consulta.';
+        render: function (block, complete) {
+          var restoreResellerFocus = window.TauroQuoteRequest.copyResellerInputs(result, block);
+          var state = window.TauroQuoteRequest.resultState(block, complete);
+          result.classList.remove('is-revealing');
+          result.replaceChildren(block); result.setAttribute('aria-busy', String(!complete));
+          restoreResellerFocus();
+          resultPanel.dataset.quoteState = complete ? 'ready' : 'loading';
+          window.requestAnimationFrame(function () { result.classList.add('is-revealing'); });
+          hasCurrentQuote = state.current; submit.textContent = state.button;
+          status.textContent = state.status;
         },
-        error: function (error) { result.setAttribute('aria-busy', 'false'); message(result, error.message, true); status.textContent = 'Podés volver a consultar.'; }
+        error: function (error) {
+          resultPanel.dataset.quoteState = 'error'; result.setAttribute('aria-busy', 'false');
+          var keptPrice = quoteError(result, error.message); hasCurrentQuote = false;
+          submit.textContent = 'Volver a consultar';
+          status.textContent = keptPrice
+            ? 'Podés usar las tarifas recibidas o volver a consultar.'
+            : 'Podés volver a consultar.';
+        }
       });
       controls[scope] = control;
       form.addEventListener('input', control.changed);
@@ -231,7 +414,8 @@
         event.preventDefault();
         if (hasCurrentQuote) { showStep(3, true); return; }
         if (!validate(form.querySelector('.uq-route-grid')) || !validate(form.querySelector('.uq-packages'))) return;
-        control.resume(); control.run();
+        if (locations) locations.acceptManual();
+        control.resume(); control.run(true);
       });
       form.addEventListener('keydown', function (event) {
         if (mobile.matches && event.key === 'Enter' && event.target.tagName === 'INPUT'

@@ -16,9 +16,12 @@ def _template(nombre: str) -> str:
 
 def test_home_prioriza_nuevo_envio_y_cotizar_sin_onboarding_generico():
     html = _template("home.html")
-    assert 'href="/portal/envios/nuevo"' in html
-    assert 'href="/portal/cotizar"' in html
-    assert "home-primary-actions" in html
+    base = (RAIZ / "templates" / "base.html").read_text(encoding="utf-8")
+    # Leandro pidió quitar la botonera de arriba: Nuevo envío y Cotizar
+    # quedan en el menú flotante de la derecha y en la barra lateral.
+    assert 'href="/portal/envios/nuevo"' in base
+    assert 'href="/portal/cotizar"' in base
+    assert "home-primary-actions" not in html
     assert "checklist" not in html
     assert "arranque" not in html
     assert "Cargá tu primer producto" not in html
@@ -34,7 +37,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=49" in base
+    assert "tauro.css?v=50" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -188,11 +191,11 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     assert "shipment-step-package" in html
     assert "shipment-step-invoice" in html
     assert html.index("shipment-step-package") < html.index("shipment-step-invoice")
-    assert "<label>Invoice</label>" in html
+    assert "<label>Factura comercial</label>" in html
     assert "wizard.dataset.step = String(actual + 1)" in html
     assert "if (i > actual + 1) i = actual + 1" in html
     assert 'data-step]:not([data-step="1"]) > details.card' in css
-    assert ".main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 0; }" in css
+    assert ".main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 96px; }" in css
     assert "shipment-step-recipient .form-grid-2" in css
     assert 'href="/portal/clientes" data-agenda-manage' in html
     assert '{% if not remitente %}disabled{% endif %}' not in html
@@ -261,8 +264,9 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     html = _template("cuenta.html")
     assert "El saldo se actualiza cuando TAURO aprueba el pago" in html
     assert "Los pagos en revisión aún no se descuentan" in html
-    assert "Facturado" in html
-    assert "A facturar" in html
+    # Lo pendiente de facturar es interno de TAURO: el cliente no lo ve.
+    assert "Facturado" not in html
+    assert "A facturar" not in html
     assert "Envíos" in _template("cuenta_movimientos.html")
     assert "Pagos" in html
     assert "A favor" in html
@@ -310,7 +314,7 @@ def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
 
 def test_envios_concentra_acciones_y_no_renderiza_documentos_en_cada_fila():
     html = _template("envios.html")
-    assert '<details class="shipment-actions">' in html
+    assert '<details class="shipment-actions" data-dropdown>' in html
     assert "Ver información completa" in html
     assert "Ver guía en pantalla" in html
     assert "Descargar guía" in html

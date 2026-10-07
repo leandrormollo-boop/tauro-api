@@ -28,7 +28,8 @@ def test_portal_muestra_libro_operativo_y_acciones_seguras():
     assert "s.remitente_nombre" in html
     assert "s.dest_nombre" in html
     assert "Cotizado" in html
-    assert "Total registrado" in html
+    assert "Total registrado" not in html
+    assert "Precio del envío (ARS)" in html
     assert "s.estado_cliente_ui.label" in html
     assert "/portal/envios/{{ s.id }}/guia.pdf" in html
     assert "Editar / reemplazar" in html
@@ -36,8 +37,8 @@ def test_portal_muestra_libro_operativo_y_acciones_seguras():
     assert "El sistema volverá a validar con el courier" in html
 
 
-def test_listados_traducen_transito_a_proceso_de_entrega():
+def test_portal_conserva_el_estado_canonico_sin_override():
     portal = _leer("endpoints/portal_cliente.py")
     admin = _leer("endpoints/admin.py")
-    assert '"label": "Proceso de entrega"' in portal
+    assert '"label": "Proceso de entrega"' not in portal
     assert '"label": "Proceso de entrega"' in admin

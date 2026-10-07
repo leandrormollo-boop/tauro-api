@@ -33,7 +33,7 @@ WITH asientos AS (
     WHERE e.cliente_id=%s AND e.estado NOT IN ('CANCELADO','NC')
       AND (e.monto_ars>0 OR e.monto_ars IS NULL)
     UNION ALL
-    SELECT (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
+    SELECT e.fecha,
            CASE WHEN e.ambito IN ('NACIONAL','INTERNACIONAL')
                 THEN e.ambito ELSE 'SIN_CLASIFICAR' END,
            a.tipo, ABS(a.monto_ars), FALSE
@@ -133,6 +133,7 @@ def _presentar_periodo(filas: list[dict], inicio: date) -> dict:
     )
     return {
         "saldo_anterior_ars": anterior["neto"],
+        "hay_movimientos_anteriores": any(f["periodo"] == "ANTERIOR" for f in filas),
         "cargos_desde_ars": desde["cargos"],
         "creditos_desde_ars": desde["creditos"],
         "pagos_desde_ars": desde["pagos"],

@@ -261,3 +261,43 @@
   .envios-table .shipment-row .envio-status-cell { grid-column: auto; }
   .envios-table .shipment-row .shipment-person-cell { grid-column: 1 / -1; grid-row: 1; }
 }
+
+/* En el celular, los datos secundarios se consultan sin alargar cada fila. */
+.envios-table .shipment-row td.shipment-mobile-more-cell { display: none; }
+@media (max-width: 600px) {
+  .envios-table .shipment-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 10px;
+    padding: 10px 12px;
+  }
+  .envios-table .shipment-row td[data-label]::before { display: none; }
+  .envios-table .shipment-row .shipment-person-cell { grid-column: 1 / -1; grid-row: 1; }
+  .envios-table .shipment-recipient {
+    display: block; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  .envios-table .shipment-row .envio-status-cell { grid-column: 1 / -1; grid-row: 2; }
+  .envios-table .envio-status-cell .badge { white-space: nowrap; padding: 4px 8px; font-size: 10px; }
+  .envios-table .shipment-row .shipment-tracking-cell { grid-column: 1; grid-row: 3; align-self: center; }
+  .envios-table .shipment-tracking { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .envios-table .shipment-row .envio-price-cell { grid-column: 2; grid-row: 3; align-self: center; text-align: right; }
+  .envios-table .shipment-row .shipment-actions-cell { grid-column: 2; grid-row: 4; }
+  .envios-table .shipment-actions-cell > .btn { width: auto; margin: 0; min-height: 36px; }
+  .envios-table .shipment-row td.shipment-date-cell,
+  .envios-table .shipment-person-cell > small,
+  .envios-table .shipment-tracking-cell > small,
+  .envios-table .envio-status-cell > small,
+  .envios-table .envio-price-initial,
+  .shipment-desktop-breakdown,
+  .shipment-desktop-options { display: none; }
+  .envios-table .shipment-row td.shipment-mobile-more-cell { display: block; grid-column: 1; grid-row: 4; align-self: center; }
+  .shipment-more > summary { min-height: 36px; display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--accent-soft); font-size: 12px; }
+  .shipment-more > summary::before { content: '+'; }
+  .shipment-more[open] > summary::before { content: '−'; }
+  .envios-table .shipment-row:has(.shipment-more[open]) .shipment-mobile-more-cell { grid-column: 1 / -1; }
+  .envios-table .shipment-row:has(.shipment-more[open]) .shipment-actions-cell { grid-row: 5; }
+  .shipment-more-content { padding: 4px 0; color: var(--fg-2); }
+  .shipment-more-content p { margin: 6px 0; font-size: 11px; }
+  .shipment-more-content .shipment-actions { margin-top: 10px; }
+  .shipment-more-content .shipment-actions-menu { position: static; width: 100%; box-shadow: none; }
+  .envios-table .envio-price-final { justify-content: flex-end; margin-top: 0; }
+}

@@ -30,9 +30,9 @@
         <tr>
           <td><a class="business-primary" href="/admin/clientes/{{ c.cliente_id|urlencode }}">{{ c.cliente_id }}</a><br><small>{{ c.nombre if c.nombre != c.cliente_id else "" }}</small></td>
           <td style="color:var(--fg-3)">{{ c.email }}</td>
-          <td class="mono">$ {{ "{:,.2f}".format(c.total_cargos_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}<br><small>Envíos + diferencias</small></td>
-          <td class="mono" style="color:var(--ok);"><a href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=pagos">$ {{ "{:,.2f}".format(c.total_pagos_ars).replace(",", "X").replace(".", ",").replace("X", ".") }}</a></td>
-          <td class="mono"><strong style="color:{% if c.saldo_ars > 0 %}var(--warn){% elif c.saldo_ars < 0 %}var(--ok){% else %}var(--fg){% endif %};">$ {{ "{:,.2f}".format(c.saldo_ars|abs).replace(",", "X").replace(".", ",").replace("X", ".") }}</strong><br><small>{{ 'A cobrar' if c.saldo_ars > 0 else ('A favor' if c.saldo_ars < 0 else 'Al día') }}</small></td>
+          <td class="mono">$ {{ (c.total_cargos_ars)|numero_ars }}<br><small>Envíos + diferencias</small></td>
+          <td class="mono" style="color:var(--ok);"><a href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=pagos">$ {{ (c.total_pagos_ars)|numero_ars }}</a></td>
+          <td class="mono"><strong style="color:{% if c.saldo_ars > 0 %}var(--warn){% elif c.saldo_ars < 0 %}var(--ok){% else %}var(--fg){% endif %};">$ {{ (c.saldo_ars|abs)|numero_ars }}</strong><br><small>{{ 'A cobrar' if c.saldo_ars > 0 else ('A favor' if c.saldo_ars < 0 else 'Al día') }}</small></td>
           <td>
             <span class="badge {% if c.activo %}ok{% else %}muted{% endif %}">
               {{ "Activo" if c.activo else "Inactivo" }}
@@ -47,4 +47,15 @@
     </table>
   </div>
 </div>
+{% if clientes_prueba %}
+<div class="card" style="margin-top:16px;">
+  <div class="eyebrow">Cuentas de prueba</div>
+  <p style="color:var(--fg-3);margin:4px 0 8px;">Fuera de la lista, la bandeja y los totales del negocio. Si una es un cliente real, cambiá «Tipo de cuenta» en su configuración.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% for c in clientes_prueba %}
+    <a class="badge warn" href="/admin/clientes/{{ c.cliente_id|urlencode }}/editar">{{ c.cliente_id }}{% if c.email %} · {{ c.email }}{% endif %}</a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 {% endblock %}

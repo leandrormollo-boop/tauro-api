@@ -12,7 +12,7 @@
 {% endmacro %}
 {% block content %}
 <div class="quote-screen unified-quote" data-quote-active="{{ ambito or 'internacional' }}">
-    <header class="uq-heading"><div><span class="eyebrow">TAURO SOLUTIONS</span><h1>Cotizá tu próximo envío</h1></div><span class="uq-live"><i></i>Tarifas de tu cuenta</span></header>
+    <header class="uq-heading tauro-branded-heading"><div><h1>Cotizá tu próximo envío</h1></div><div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<span class="uq-live"><i></i>Tarifas de tu cuenta</span></div></header>
     <nav class="uq-scopes" aria-label="Tipo de envío">
         {% for scope,title,subtitle in [('nacional','Nacional','Dentro de Argentina'),('internacional','Internacional','Entre países')] %}
         <a href="/portal/cotizar?ambito={{ scope }}" data-quote-scope="{{ scope }}" class="{{ 'is-active' if scope == ambito else '' }}" {% if scope == ambito %}aria-current="true"{% endif %}>{{ scope_icon(scope) }}<span><strong>{{ title }}</strong><small>{{ subtitle }}</small></span></a>
@@ -30,7 +30,7 @@
             {% if scope == 'nacional' %}<input type="hidden" name="origen_pais" value="AR"><input type="hidden" name="destino_pais" value="AR">{% endif %}
             <div class="uq-route-tools" data-quote-route-section>
             {% if scope == 'internacional' %}
-            <details class="uq-frequent" data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-popover"><div class="uq-frequent-head"><span>Tus últimos destinos</span></div>
+            <details class="uq-frequent" data-dropdown data-route-shortcuts hidden><summary>Rutas frecuentes <span aria-hidden="true">⌄</span></summary><div class="uq-frequent-popover"><div class="uq-frequent-head"><span>Tus últimos destinos</span></div>
             {% if rutas_frecuentes %}<div class="quote-frequent-list">{% for ruta in rutas_frecuentes %}<button type="button" class="quote-frequent-route" data-route-origin="{{ ruta.origen }}" data-route-destination="{{ ruta.destino }}" aria-pressed="false">{{ ruta.origen_nombre }} <span aria-hidden="true">→</span> {{ ruta.destino_nombre }}</button>{% endfor %}</div>{% endif %}</div></details>
             {% endif %}
             <button type="button" class="uq-reverse" data-quote-reverse aria-label="Invertir origen y destino"><span aria-hidden="true">⇄</span> Invertir</button></div>

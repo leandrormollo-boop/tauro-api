@@ -9,8 +9,9 @@
 # de ESA guía: esencial para importadores con proveedores distintos.
 #
 # OJO: agendar NO es idempotente (dos llamadas = dos visitas del chofer),
-# igual que emitir. Por eso hay reserva por (cliente, fecha): un cliente no
-# puede agendar dos recolecciones el mismo día sin cancelar la anterior.
+# igual que emitir. La reserva distingue cliente, fecha, courier y origen:
+# dos proveedores en países distintos no son el mismo retiro. La misma guía
+# sigue sin admitir más de una recolección abierta.
 # ============================================================
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 import psycopg2
+from psycopg2.extras import Json
 
 from core.database import get_conn
 from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
@@ -98,18 +100,37 @@ def _ensure_tabla() -> None:
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT
-                        to_regclass('public.recolecciones') AS tabla,
-                        to_regclass('public.uq_recoleccion_cliente_fecha_abierta_v2') AS idx_fecha,
-                        to_regclass('public.uq_recoleccion_solicitud_abierta_v2') AS idx_solicitud,
+                        to_regclass('recolecciones') AS tabla,
+                        EXISTS (
+                            SELECT 1 FROM pg_index
+                            WHERE indexrelid=to_regclass('uq_recoleccion_origen_fecha_abierta_v3')
+                              AND indisunique AND indisvalid AND indisready
+                        ) AS idx_origen,
+                        to_regclass('uq_recoleccion_solicitud_abierta_v2') AS idx_solicitud,
+                        to_regclass('uq_recoleccion_cliente_fecha_abierta_v2') IS NULL AS sin_indice_global,
                         EXISTS (
                             SELECT 1 FROM information_schema.columns
-                            WHERE table_schema='public' AND table_name='recolecciones'
+                            WHERE table_schema=current_schema() AND table_name='recolecciones'
                               AND column_name='updated_at'
-                        ) AS columna_updated
+                        ) AS columna_updated,
+                        (
+                            SELECT COUNT(*)=2 FROM information_schema.columns
+                            WHERE table_schema=current_schema() AND table_name='recolecciones'
+                              AND column_name IN ('origen_retiro', 'origen_clave')
+                              AND is_nullable='NO'
+                        ) AS columnas_origen,
+                        EXISTS (
+                            SELECT 1 FROM pg_trigger
+                            WHERE tgrelid=to_regclass('recolecciones')
+                              AND tgname='trg_recoleccion_origen'
+                              AND NOT tgisinternal AND tgenabled IN ('O', 'A')
+                        ) AS trigger_origen
                 """)
                 estado = cur.fetchone() or {}
-                if not all((estado.get("tabla"), estado.get("idx_fecha"),
-                            estado.get("idx_solicitud"), estado.get("columna_updated"))):
+                if not all(estado.get(campo) for campo in (
+                    "tabla", "idx_origen", "idx_solicitud", "sin_indice_global",
+                    "columna_updated", "columnas_origen", "trigger_origen",
+                )):
                     raise RuntimeError(
                         "La migración de recolecciones no está completa; "
                         "se bloqueó la operación para evitar retiros duplicados."
@@ -298,6 +319,81 @@ def datos_retiro_desde_solicitud(sol: dict) -> dict:
     }
 
 
+def _error_reserva_recoleccion() -> dict:
+    return {
+        "ok": False,
+        "error_codigo": "RESERVA_NO_REGISTRADA",
+        "error": (
+            "No pudimos registrar la solicitud de retiro. No se pidió una nueva "
+            "recolección al courier. Escribinos para revisar el registro."
+        ),
+    }
+
+
+def _conflicto_reserva(cliente_id: str, fecha: str, courier: str,
+                      solicitud_id: Optional[int], origen: dict,
+                      constraint: str) -> dict:
+    """Explica sólo conflictos propios, después del rollback de la reserva.
+
+    Un 23505 de la PK o de otro índice no prueba que exista un retiro: no se
+    presenta como duplicado ni se reintenta automáticamente contra el courier.
+    """
+    por_guia = constraint == "uq_recoleccion_solicitud_abierta_v2"
+    por_origen = constraint == "uq_recoleccion_origen_fecha_abierta_v3"
+    por_legado = constraint == "uq_recoleccion_origen_pendiente_v3"
+    if not (por_guia or por_origen or por_legado):
+        return _error_reserva_recoleccion()
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, estado, fecha, confirmation_code
+                FROM recolecciones
+                WHERE cliente_id=%s
+                  AND estado IN ('AGENDANDO','AGENDADA','CANCELANDO','VERIFICAR_COURIER')
+                  AND (
+                    (%s AND solicitud_id=%s)
+                    OR (%s AND fecha=%s AND UPPER(BTRIM(courier))=%s
+                        AND origen_clave=tauro_recoleccion_origen_clave(%s::jsonb))
+                    OR (%s AND fecha=%s AND UPPER(BTRIM(courier))=%s
+                        AND origen_retiro @> '{"_legacy_desconocido": true}'::jsonb)
+                  )
+                ORDER BY id DESC LIMIT 1
+            """, (cliente_id, por_guia, solicitud_id, por_origen, fecha, courier,
+                  Json(origen), por_legado, fecha, courier))
+            existente = cur.fetchone()
+    except Exception as exc:
+        print(f"[recolecciones] no pude consultar conflicto: {type(exc).__name__}")
+        return _error_reserva_recoleccion()
+    if not existente:
+        return {
+            "ok": False,
+            "error": (
+                "El estado de otro retiro cambió mientras enviabas la solicitud. "
+                "Actualizá el historial antes de volver a programar. No se pidió un nuevo retiro."
+            ),
+        }
+    fecha_retiro = existente["fecha"].strftime("%d/%m/%Y")
+    referencia = f"recolección #{existente['id']} del {fecha_retiro}"
+    if por_legado:
+        mensaje = (
+            f"Necesitamos verificar el origen de una {referencia} antes de pedir "
+            "otro retiro para ese día. Escribinos; no hace falta cancelarla."
+        )
+    elif existente["estado"] == "AGENDADA" and existente.get("confirmation_code"):
+        motivo = "esa guía" if por_guia else "ese origen, courier y fecha"
+        mensaje = (
+            f"Ya tenés una {referencia} programada para {motivo}. "
+            "Revisala en el historial. Podés programar retiros desde otros orígenes."
+        )
+    else:
+        mensaje = (
+            f"La {referencia} tiene una operación pendiente de confirmación. "
+            "Todavía no podemos confirmar su estado; Tauro debe verificarla antes "
+            "de que pidas otro retiro para esa guía u origen."
+        )
+    return {"ok": False, "error": mensaje, "recoleccion_conflicto_id": existente["id"]}
+
+
 def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
           bultos: int, peso_kg: float, instrucciones: str = "",
           courier: str = "FEDEX", solicitud_id: Optional[int] = None) -> dict:
@@ -418,44 +514,55 @@ def crear(cliente_id: str, fecha: str, ready_time: str, close_time: str,
         f"tauro-dhl-pick-{uuid.uuid4().hex[:20]}" if courier == "DHL" else None
     )
 
+    # Congelar exactamente el origen que se enviará al courier. La base calcula
+    # la clave normalizada; no depende de nombres/contactos ni de la libreta
+    # editable después de programar el retiro.
+    origen_courier = {
+        "nombre": rem.get("nombre") or cliente_id,
+        "empresa": rem.get("alias") or "",
+        "telefono": rem.get("telefono") or "",
+        "calle": rem.get("direccion") or "",
+        "ciudad": rem.get("ciudad") or "",
+        "estado": rem.get("estado") or "",
+        "zip": rem.get("cp") or "",
+        "pais": rem.get("pais") or "AR",
+    }
+    origen_retiro = {campo: origen_courier[campo]
+                     for campo in ("pais", "estado", "ciudad", "zip", "calle")}
+
     # Reserva ANTES de llamar al courier: si dos pedidos entran juntos, el
     # índice único deja pasar uno solo. Agendar no se puede deshacer solo.
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            try:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO recolecciones
                         (cliente_id, fecha, ready_time, close_time, bultos, peso_kg,
                          direccion, instrucciones, estado, courier, solicitud_id,
-                         courier_message_reference)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'AGENDANDO', %s, %s, %s)
+                         origen_retiro, courier_message_reference)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'AGENDANDO', %s, %s, %s, %s)
                     RETURNING id
                 """, (cliente_id, fecha, ready_time, close_time,
                       bultos, peso_kg,
                       f"{rem.get('direccion','')}, {rem.get('ciudad','')}".strip(", "),
                       (instrucciones or "")[:255], courier,
                       int(solicitud_id) if solicitud_id else None,
+                      Json(origen_retiro),
                       referencia_previa))
                 rec_id = cur.fetchone()["id"]
-            except psycopg2.IntegrityError as e:
-                if e.pgcode != "23505":
-                    raise
-                return {"ok": False, "error":
-                        "Ya hay una recolección abierta para ese día o para ese envío. "
-                        "Cancelala o esperá a que Tauro termine de verificarla."}
+    except psycopg2.IntegrityError as exc:
+        if exc.pgcode == "23505":
+            return _conflicto_reserva(
+                cliente_id, fecha, courier, solicitud_id, origen_retiro,
+                getattr(exc.diag, "constraint_name", "") or "",
+            )
+        if exc.pgcode == "23514":
+            return _error_reserva_recoleccion()
+        raise
 
     try:
         resultado = cliente_api.create_pickup({
-            "origen": {
-                "nombre": rem.get("nombre") or cliente_id,
-                "empresa": rem.get("alias") or "",
-                "telefono": rem.get("telefono") or "",
-                "calle": rem.get("direccion") or "",
-                "ciudad": rem.get("ciudad") or "",
-                "estado": rem.get("estado") or "",
-                "zip": rem.get("cp") or "",
-                "pais": rem.get("pais") or "AR",
-            },
+            "origen": origen_courier,
             "fecha": fecha, "ready_time": ready_time, "close_time": close_time,
             "peso_kg": peso_kg, "bultos": bultos, "instrucciones": instrucciones,
             "paquetes": retiro_envio.get("paquetes") if retiro_envio else None,
@@ -520,9 +627,15 @@ def listar(cliente_id: str, limite: int = 50) -> list[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT r.*, s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                LEFT JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id = %s
                 ORDER BY r.fecha DESC, r.id DESC LIMIT %s
             """, ((cliente_id or "").strip().upper(), limite))
@@ -536,9 +649,15 @@ def obtener(cliente_id: str, rec_id: int) -> Optional[dict]:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT r.*, s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                LEFT JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                LEFT JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id=%s AND r.id=%s
             """,
                         ((cliente_id or "").strip().upper(), int(rec_id)))
@@ -558,9 +677,15 @@ def listar_de_solicitudes(cliente_id: str, solicitudes: list[int]) -> dict[int, 
                        r.id, r.solicitud_id, r.estado, r.confirmation_code,
                        r.courier, r.fecha, r.ready_time, r.close_time,
                        s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id=%s AND r.solicitud_id=ANY(%s)
                 ORDER BY r.solicitud_id, r.created_at DESC, r.id DESC
             """, ((cliente_id or "").strip().upper(), solicitudes))
@@ -587,9 +712,15 @@ def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
                        r.peso_kg, r.direccion, r.instrucciones, r.estado,
                        r.confirmation_code, r.ubicacion, r.created_at,
                        r.updated_at, s.estado AS envio_estado,
-                       s.tracking_estado AS envio_tracking_estado
+                       s.tracking_estado AS envio_tracking_estado,
+                       s.tracking AS envio_tracking,
+                       s.etiqueta_cliente AS envio_etiqueta,
+                       s.dest_nombre AS envio_destinatario,
+                       s.dest_ciudad AS envio_destino_ciudad,
+                       s.destino_pais AS envio_destino_pais
                 FROM recolecciones r
-                JOIN solicitudes_guia s ON s.id=r.solicitud_id
+                JOIN solicitudes_guia s
+                  ON s.id=r.solicitud_id AND s.cliente_id=r.cliente_id
                 WHERE r.cliente_id = %s AND r.solicitud_id = %s
                 ORDER BY r.created_at DESC, r.id DESC
                 LIMIT 1

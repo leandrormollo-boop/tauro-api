@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="/static/css/info-ayuda.css?v=1">
   <script src="/static/js/form-draft.js?v=1"></script>
   <script src="/static/js/info-ayuda.js?v=1" defer></script>
+  <script src="/static/js/tauro-dropdowns.js?v=1" defer></script>
   <script src="/static/js/tauro-numeros.js?v=1"></script>
   <script src="/static/js/tauro-ui.js?v=9" defer></script>
   <style>
@@ -196,9 +197,9 @@
         <a href="/admin/productos">Catálogo</a><a href="/admin/rutas">Rutas</a><a href="/admin/comercial">Prospectos</a><a href="/admin/referencia">Referencia de mercado</a>
         </div>
       </details>
-      <details class="sidebar-more" {% if seccion in ('config','seguridad','shopify_privacidad','tiendanube_privacidad') %}open{% endif %}>
+      <details class="sidebar-more" {% if seccion in ('config','precios_web','seguridad','shopify_privacidad','tiendanube_privacidad') %}open{% endif %}>
         <summary>Configuración</summary><div class="sidebar-more-links">
-        <a href="/admin/config">Configuración general</a><a href="/admin/seguridad">Seguridad</a>
+        <a href="/admin/config">Configuración general</a><a href="/admin/precios-web" {% if seccion=='precios_web' %}class="active"{% endif %}>Precios de la web</a><a href="/admin/seguridad">Seguridad</a>
         <a href="/admin/shopify/privacidad">Privacidad Shopify</a><a href="/admin/tiendanube/privacidad">Privacidad Tiendanube</a>
         </div>
       </details>

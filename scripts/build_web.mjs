@@ -7,6 +7,7 @@ import { build } from "esbuild";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const componentFiles = [
   "01-nav-hero.jsx",
+  "02-quote-globe.jsx",
   "02-quote-widget.jsx",
   "03-services-tracking.jsx",
   "04-stats-contact-footer.jsx",

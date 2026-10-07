@@ -1,0 +1,4 @@
+{% macro dinero(valor) -%}{{ dinero_ars(valor|default(0, true)) }}{%- endmacro %}
+{% include "portal/cuenta_movimientos.html" %}
+{% include "portal/cuenta_apertura.html" %}
+{% include "portal/cuenta_pagos.html" %}

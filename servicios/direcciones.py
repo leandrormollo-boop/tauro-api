@@ -131,9 +131,9 @@ def obtener_direccion(
 
 def obtener_remitente_para_envio(cliente_id: str, remitente_id: Optional[int] = None) -> Optional[dict]:
     if remitente_id:
-        row = obtener_direccion(cliente_id, remitente_id)
-        if row and row["tipo"] == TIPO_REMITENTE:
-            return row
+        # El rol pertenece al envío, no al contacto. Un id explícito inválido
+        # tampoco debe reemplazarse silenciosamente por el remitente habitual.
+        return obtener_direccion(cliente_id, remitente_id)
 
     remitentes = listar_direcciones(cliente_id, TIPO_REMITENTE)
     if remitentes:

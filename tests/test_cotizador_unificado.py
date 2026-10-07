@@ -136,14 +136,16 @@ def test_no_inventa_plazo_y_escapa_contenido():
         'carrier_logo':'/static/img/carriers/oca.png','precio_final_ars':Decimal('15000'),
         'dias_estimados':None,'continuar_url':'/portal/oca/nuevo'}
     html=render_quote(ambito='nacional', opciones=[op])
-    assert 'A confirmar' in html and 'None días' not in html
+    assert 'Se confirma al emitir' in html and 'None días' not in html
     assert '<script>bad</script>' not in html
-    assert 'IVA incluido' in html
+    assert 'Transporte e IVA' not in html
 
 
 @pytest.fixture
 def web(monkeypatch):
-    from servicios import cotizaciones_reseller, rate_limit
+    from servicios import cotizaciones_reseller, cotizaciones_portal, rate_limit
+    monkeypatch.setattr(cotizaciones_portal,'guardar_opciones',lambda *a, **k:k['opciones'])
+    monkeypatch.setattr(portal,'tax_paga_cliente',lambda _:"DESTINATARIO")
     monkeypatch.setattr(cotizaciones_reseller,'cliente_es_reseller',lambda _:False)
     monkeypatch.setattr(portal,'obtener_rutas_frecuentes',lambda _:[])
     monkeypatch.setattr(portal,'_operadores_cliente',lambda *_:[])

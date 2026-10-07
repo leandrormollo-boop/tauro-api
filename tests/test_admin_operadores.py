@@ -54,10 +54,10 @@ def test_reversa_csrf_ata_registro_y_confirma_antes_de_io():
     assert asyncio.run(ui.accion(SimpleNamespace(form=form),'DHL','revertir-pago',admin_token='valido')).status_code==403
 
 
-def test_importe_pequeno_no_se_redondea_visualmente_a_cero():
+def test_importes_del_operador_usan_dos_decimales_compartidos():
     from decimal import Decimal
     macro=admin.templates.get_template('admin/operador_macros.html').module.dinero
-    assert str(macro(Decimal('.0001')))=='0,0001'
+    assert str(macro(Decimal('.0001')))=='0,00'
     assert str(macro(Decimal('1000')))=='1.000,00'
 
 

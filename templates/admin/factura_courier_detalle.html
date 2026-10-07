@@ -2,7 +2,7 @@
 {% block title %}Factura {{ factura.numero }}{% endblock %}
 
 {% macro dinero(valor) -%}
-{{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}
+{{ (valor|default(0, true))|numero_ars }}
 {%- endmacro %}
 
 {% block content %}
@@ -20,7 +20,7 @@
   <div>
     <div class="eyebrow">{{ factura.courier }} · {{ factura.tipo_documento }}</div>
     <h1>{{ factura.numero }}</h1>
-    <p>{{ factura.moneda }} {{ dinero(factura.total) }} · {{ factura.estado|title }} · {{ factura.cantidad_guias|default(factura.envios_facturados|length) }} guías · {{ factura['items']|length }} cargos{% if factura.cantidad_guias_referenciadas_tauro_2026|default(0) %} · {{ factura.cantidad_guias_referenciadas_tauro_2026 }} identificadas en TAURO 2026{% endif %}{% if factura.cantidad_cargos_generales|default(0) %} · {{ factura.cantidad_cargos_generales }} generales sin tracking{% endif %}</p>
+    <p>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(factura.total) }} · {{ factura.estado|title }} · {{ factura.cantidad_guias|default(factura.envios_facturados|length) }} guías · {{ factura['items']|length }} cargos{% if factura.cantidad_guias_referenciadas_tauro_2026|default(0) %} · {{ factura.cantidad_guias_referenciadas_tauro_2026 }} identificadas en TAURO 2026{% endif %}{% if factura.cantidad_cargos_generales|default(0) %} · {{ factura.cantidad_cargos_generales }} generales sin tracking{% endif %}</p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
     <a href="{{ ruta_retorno|default('/admin/facturas-internacionales') }}" class="btn btn-ghost">Volver</a>
@@ -45,7 +45,7 @@
 <div class="card dhl-intake" style="margin-bottom:20px;">
   <h3>Revisión financiera pendiente</h3>
   <p>El cambio impositivo del PDF no acredita el cambio del pago. Hasta aprobar este paso se bloquean la confirmación, el cálculo y la aplicación de diferencias.</p>
-  <p>TC documental leído (solo referencia): <strong>{% for tc in factura.tipos_cambio_documentales %}{{ tc }}{% if not loop.last %} · {% endif %}{% endfor %} ARS por {{ factura.moneda }}</strong>. No se selecciona automáticamente.</p>
+  <p>TC documental leído (solo referencia): <strong>{% for tc in factura.tipos_cambio_documentales %}{{ tc|numero_ars }}{% if not loop.last %} · {% endif %}{% endfor %} ARS por {{ factura.moneda }}</strong>. No se selecciona automáticamente.</p>
   <form method="POST" enctype="multipart/form-data" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/revision-financiera" data-confirm="¿Aprobar este tipo de cambio y su evidencia? Quedará inmutable. Este paso no aplica cargos al cliente.">
     <input type="hidden" name="csrf_financiero" value="{{ csrf_financiero }}">
     <input type="hidden" name="archivo_sha256" value="{{ factura.archivo_sha256 }}">
@@ -64,7 +64,7 @@
   </form>
 </div>
 {% elif factura.revision_financiera %}
-<div class="msg ok">TC aprobado para conciliación: {{ factura.revision_financiera.tipo_cambio_ars }} ARS por {{ factura.moneda }}.
+<div class="msg ok">TC aprobado para conciliación: {{ factura.revision_financiera.tipo_cambio_ars|numero_ars }} ARS por {{ factura.moneda }}.
   El cambio y los importes documentales originales se conservan sin cambios.
   <a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/respaldo-financiero">Descargar respaldo</a>
   <p>{{ factura.revision_financiera.motivo }} · {{ factura.revision_financiera.aprobado_por }}</p>
@@ -93,16 +93,16 @@
                 {% for i in guia['items'] %}
                 <div style="display:grid;grid-template-columns:minmax(130px,1fr) auto;gap:12px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.025);">
                   <span><strong>{{ i.concepto_tipo|title }}</strong><br><small>#{{ i.linea_numero }} · {{ i.descripcion or 'Sin descripción' }}</small></span>
-                  <span class="mono">{% if i.signo|default(1) < 0 %}−{% endif %}{{ i.moneda }} {{ dinero(i.importe) }}</span>
+                  <span class="mono">{% if i.signo|default(1) < 0 %}−{% endif %}{{ (i.moneda)|simbolo_moneda }} {{ dinero(i.importe) }}</span>
                 </div>
                 {% endfor %}
               </div>
             </details>
           </td>
-          <td class="mono"><strong>{{ factura.moneda }} {{ dinero(guia.total_importe) }}</strong><br><small>ARS {{ dinero(guia.total_importe_ars) }}{% if factura.revision_financiera_requerida %} documental{% endif %}</small>
-            {% if factura.revision_financiera %}<br><small>ARS {{ dinero(guia.total_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
+          <td class="mono"><strong>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(guia.total_importe) }}</strong><br><small>$ {{ dinero(guia.total_importe_ars) }}{% if factura.revision_financiera_requerida %} documental{% endif %}</small>
+            {% if factura.revision_financiera %}<br><small>$ {{ dinero(guia.total_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
             <br>{% if guia.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(guia.remanente) }}</span>{% else %}<span class="badge ok">Guía asignada completa</span>{% endif %}</td>
-          <td>{{ guia.peso_facturado_kg or '—' }} kg<br><small>{{ (guia.peso_base or '').replace('_',' ')|title }}</small></td>
+          <td>{{ (guia.peso_facturado_kg or '—')|kg }}<br><small>{{ (guia.peso_base or '').replace('_',' ')|title }}</small></td>
           <td>
             {% if guia.referencias_tauro_2026 %}
               <div style="padding:9px 10px;margin-bottom:9px;border:1px solid rgba(65,210,150,.28);border-radius:10px;background:rgba(65,210,150,.07);">
@@ -125,7 +125,7 @@
                   <span class="badge {% if m.match_estado == 'CONFIRMADO' %}ok{% elif m.match_estado == 'RECHAZADO' %}error{% else %}warn{% endif %}">{{ m.match_estado|title }}</span>
                   <strong>{{ m.cliente_id }}</strong>
                   <a href="/admin/conciliacion-couriers/envios/{{ m.solicitud_id }}" class="mono">envío #{{ m.solicitud_id }}</a>
-                  <small>{{ m.metodo.replace('_',' ')|title }} · {{ m.cantidad_lineas }} cargos · {{ factura.moneda }} {{ dinero(m.monto_asignado) }}</small>
+                  <small>{{ m.metodo.replace('_',' ')|title }} · {{ m.cantidad_lineas }} cargos · {{ (factura.moneda)|simbolo_moneda }} {{ dinero(m.monto_asignado) }}</small>
                 </div>
                 {% if m.match_estado == 'PROPUESTO' %}
                 <div style="display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap;margin-top:7px;">

@@ -1,6 +1,6 @@
 {% extends "admin/base_admin.html" %}
 {% block title %}Facturas de {{ cliente_id }}{% endblock %}
-{% macro dinero(valor) -%}$ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ",").replace("_", ".") }}{%- endmacro %}
+{% macro dinero(valor) -%}$ {{ (valor|default(0, true))|numero_ars }}{%- endmacro %}
 {% block content %}
 <div class="page-title page-title-row"><div><div class="eyebrow">Facturación a clientes</div><h1>{{ cliente_id }}</h1><p>Cabeceras ARCA y cargos incluidos.</p></div>
   <div><a href="/admin/clientes/{{ cliente_id }}" class="btn btn-ghost">Volver al cliente</a> <a href="/admin/clientes/{{ cliente_id }}/facturas/nueva" class="btn btn-primary">Nueva factura</a></div></div>

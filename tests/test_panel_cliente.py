@@ -14,6 +14,7 @@ descubrirse por un cliente que no entiende por qué sus envíos desaparecieron.
 import os
 import sys
 from contextlib import contextmanager
+from datetime import date
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -107,6 +108,38 @@ def test_embudo_vacio_si_la_base_falla():
 
     with mock.patch.object(pc, "get_conn", rota):
         assert pc.embudo_envios("TEST") == []
+
+
+def test_resumen_inicio_usa_historial_real_y_excluye_descartados():
+    historial = [
+        {"created_at": "2026-10-01", "estado": "DESPACHADO", "destino_pais": "US"},
+        {"created_at": "2026-09-12", "estado": "ENTREGADO", "destino_pais": "US"},
+        {"created_at": "2026-09-14", "estado": "GUIA_LISTA", "destino_pais": "CL"},
+        {"created_at": "2026-09-15", "estado": "CANCELADO", "destino_pais": "US"},
+        {"created_at": "2026-08-03", "estado": "REEMPLAZADO", "destino_pais": "BR"},
+    ]
+    embudo = [
+        {"clave": "despachados", "cantidad": 1, "accion_de": None},
+        {"clave": "entregados", "cantidad": 1, "accion_de": None},
+        {"clave": "guia_lista", "cantidad": 1, "accion_de": "cliente"},
+        {"clave": "retenidos", "cantidad": 0, "accion_de": "cliente"},
+    ]
+
+    resumen = pc.resumen_inicio_cliente(historial, embudo, hoy=date(2026, 10, 1))
+
+    assert resumen["envios_total"] == 3
+    assert resumen["envios_mes"] == 1
+    assert resumen["en_seguimiento"] == 1
+    assert resumen["entregados"] == 1
+    assert resumen["requieren_accion"] == 1
+    assert [mes["etiqueta"] for mes in resumen["serie_mensual"]] == [
+        "May", "Jun", "Jul", "Ago", "Sep", "Oct",
+    ]
+    assert [mes["cantidad"] for mes in resumen["serie_mensual"]] == [0, 0, 0, 0, 2, 1]
+    assert resumen["destinos_frecuentes"] == [
+        {"codigo": "US", "cantidad": 2, "porcentaje": 67},
+        {"codigo": "CL", "cantidad": 1, "porcentaje": 33},
+    ]
 
 
 # ── Checklist ────────────────────────────────────────────────

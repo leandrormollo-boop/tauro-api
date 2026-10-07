@@ -8,8 +8,10 @@ import json
 import re
 import unicodedata
 import uuid
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import psycopg2
 from pypdf import PdfReader, PdfWriter
@@ -38,12 +40,15 @@ def _congelar_cotizacion_aceptada_con_cursor(
     costo_estimado_manual_ars: Optional[float] = None,
     origen_costo: str = "carga_manual_admin",
     base_interna: Optional[dict] = None,
+    actualizar_pendiente: bool = False,
 ) -> bool:
     """Congela costo estimado, precio aceptado y margen para conciliar luego.
 
     El snapshot queda ligado a la solicitud y no cambia si el ADMIN modifica
     el markup del cliente en el futuro. Para cargas externas, el costo base
     debe ser informado explícitamente por el operador.
+    Sólo una edición explícita previa a la emisión puede sustituir la tarifa
+    pendiente; el trigger conserva la versión anterior sin modificarla.
     """
     courier = str(solicitud.get("courier") or "").strip().upper()
     coti_id = str(solicitud.get("coti_id") or "").strip()
@@ -130,8 +135,16 @@ def _congelar_cotizacion_aceptada_con_cursor(
     huella = hashlib.sha256(
         json.dumps(huella_payload, sort_keys=True).encode("utf-8")
     ).hexdigest()
+    conflicto = "DO NOTHING"
+    if actualizar_pendiente:
+        # Sólo el editor de solicitudes, bajo el lock de una fila sin emitir.
+        columnas = ("coti_id courier servicio_courier moneda_courier tipo_cambio_ars "
+                    "costo_courier_estimado costo_courier_estimado_ars precio_cliente_inicial_ars "
+                    "margen_tauro_protegido_ars markup_tipo markup_valor peso_real_cotizado_kg "
+                    "peso_volumetrico_cotizado_kg peso_facturable_cotizado_kg bultos origen_calculo aceptado_at").split()
+        conflicto = "DO UPDATE SET " + ", ".join(f"{c}=EXCLUDED.{c}" for c in columnas)
     cur.execute(
-        """
+        f"""
         INSERT INTO envio_cotizacion_snapshots (
             solicitud_id, coti_id, courier, servicio_courier,
             moneda_courier, tipo_cambio_ars,
@@ -145,7 +158,7 @@ def _congelar_cotizacion_aceptada_con_cursor(
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s
         )
-        ON CONFLICT (solicitud_id) DO NOTHING
+        ON CONFLICT (solicitud_id) {conflicto}
         """,
         (
             int(solicitud["id"]), coti_id, courier,
@@ -605,7 +618,7 @@ def _validar_cancelacion_desde_fila(fila: dict) -> dict:
     if estado != "GUIA_LISTA" or not tracking:
         return {
             "ok": False,
-            "error": "Sólo se puede cancelar una guía DHL lista y todavía no despachada.",
+            "error": "Solo se cancelan guías que todavía no salieron.",
         }
     if fila.get("tracking_estado"):
         return {
@@ -1851,7 +1864,8 @@ def obtener_solicitud_de_cliente(solicitud_id: int, cliente_id: str) -> Optional
     resultado = _sin_label(dict(row))
     resultado["diferencia_detalle"] = presentar_diferencia(resultado)
     resultado["resumen_pesos"] = pesos_de_solicitud(resultado)
-    return presentar_estados_envio(resultado)
+    from servicios.tracking_presentacion import presentar_tracking
+    return presentar_tracking(presentar_estados_envio(resultado))
 
 
 def obtener_label_de_cliente(solicitud_id: int, cliente_id: str) -> Optional[bytes]:
@@ -2140,7 +2154,7 @@ def obtener_factura_comercial_pdf(
         with conn.cursor() as cur:
             if cliente_id:
                 cur.execute(
-                    """SELECT s.commercial_invoice_pdf FROM solicitudes_guia s
+                    """SELECT s.commercial_invoice_pdf, s.courier FROM solicitudes_guia s
                        WHERE s.id=%s AND s.cliente_id=%s
                          AND s.test=FALSE
                          AND s.visible_cliente=TRUE
@@ -2168,7 +2182,11 @@ def obtener_factura_comercial_pdf(
             row = cur.fetchone()
     if not row or not row["commercial_invoice_pdf"]:
         return None
-    return bytes(row["commercial_invoice_pdf"])
+    original = bytes(row["commercial_invoice_pdf"])
+    if cliente_id:
+        from servicios.invoice_marca import factura_para_cliente
+        return factura_para_cliente(original, row.get("courier"))
+    return original
 
 
 def _segmento_nombre_pdf(valor: Optional[str], respaldo: str) -> str:
@@ -2250,7 +2268,7 @@ def preparar_documentos_envio_portal(
                 """
                 SELECT s.label_pdf, s.commercial_invoice_pdf,
                        s.cliente_id, s.dest_nombre, s.remitente_pais,
-                       s.numero_guia_tauro
+                       s.numero_guia_tauro, s.courier
                 FROM solicitudes_guia s
                 WHERE s.id=%s AND s.cliente_id=%s
                   AND s.test=FALSE
@@ -2276,6 +2294,7 @@ def preparar_documentos_envio_portal(
             row = cur.fetchone()
             if not row or not row.get("label_pdf"):
                 return None
+            # Valida ambos originales antes de asignar un número histórico.
             pdf = unir_guia_e_invoice_pdf(
                 bytes(row["label_pdf"]),
                 bytes(row["commercial_invoice_pdf"])
@@ -2304,6 +2323,14 @@ def preparar_documentos_envio_portal(
                     numero_guia_tauro=numero,
                 ),
             }
+    # El renderer no retiene una conexión ni un lock de la base. La autorización
+    # ya se comprobó y el original queda guardado como lo entregó el courier.
+    if row.get("commercial_invoice_pdf") and str(row.get("courier") or "").upper() == "DHL":
+        from servicios.invoice_marca import factura_para_cliente
+        original_invoice = bytes(row["commercial_invoice_pdf"])
+        invoice_cliente = factura_para_cliente(original_invoice, row["courier"])
+        if invoice_cliente != original_invoice:
+            documentos["pdf"] = unir_guia_e_invoice_pdf(bytes(row["label_pdf"]), invoice_cliente)
     return documentos
 
 
@@ -2325,6 +2352,7 @@ def cargar_envio_externo(
     origen_pais: str = "AR",
     remitente_nombre: str = "",
     costo_courier_estimado_ars: Optional[float] = None,
+    fecha_envio: Optional[date] = None,
 ) -> dict:
     """
     Alta de un envío YA REALIZADO por un canal externo (hoy: los que salen
@@ -2339,6 +2367,10 @@ def cargar_envio_externo(
 
     Idempotencia del cargo: la da el índice único por solicitud de
     cargar_guia_emitida, igual que en la emisión propia.
+
+    ``fecha_envio`` permite cargar tarde un envío que salió antes: el envío y
+    su cargo quedan con la fecha real, para que la cuenta corriente y la
+    imputación de pagos respeten el orden cronológico. Sin fecha, es hoy.
     """
     from servicios.cotizador import dolar_ars
 
@@ -2347,6 +2379,10 @@ def cargar_envio_externo(
         return {"ok": False, "error": "Falta el tracking."}
     if precio_tauro_ars <= 0:
         return {"ok": False, "error": "El precio al cliente tiene que ser mayor a cero."}
+    if fecha_envio is not None:
+        error_fecha = validar_fecha_envio_externo(fecha_envio)
+        if error_fecha:
+            return {"ok": False, "error": error_fecha}
 
     # Mismo tracking ya cargado = doble click o doble carga: no duplicar.
     with get_conn() as conn:
@@ -2402,12 +2438,64 @@ def cargar_envio_externo(
         sid, tracking, label_pdf,
         courier=(courier or "FEDEX").strip().upper(),
     )
+    if fecha_envio is not None:
+        _fechar_envio_externo(sid, fecha_envio)
     print(f"[solicitudes] envío externo cargado: solicitud {sid} · {cliente_id} · "
           f"{tracking} · ARS {precio_tauro_ars:,.0f}")
     return {"ok": True, "solicitud_id": sid}
 
 
-def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
+_ZONA_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+_DIAS_MAXIMOS_ENVIO_EXTERNO = 400
+
+
+def validar_fecha_envio_externo(fecha_envio: date) -> str:
+    """Devuelve el error a mostrar, o "" si la fecha sirve."""
+    hoy = datetime.now(_ZONA_AR).date()
+    if fecha_envio > hoy:
+        return "La fecha del envío no puede ser futura."
+    if (hoy - fecha_envio).days > _DIAS_MAXIMOS_ENVIO_EXTERNO:
+        return "La fecha del envío es de hace más de un año: revisala."
+    return ""
+
+
+def _fechar_envio_externo(solicitud_id: int, fecha_envio: date) -> None:
+    """Lleva el envío recién cargado y su cargo a la fecha real.
+
+    Sólo toca el cargo que se acaba de crear: activo, sin factura ni pagos
+    imputados. Si el cargo no quedó así, no se mueve nada y queda con la
+    fecha de hoy, que es lo que ya ve el cliente.
+    """
+    instante = datetime.combine(fecha_envio, time(hour=12), _ZONA_AR)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE envios e SET fecha=%s
+                WHERE e.solicitud_id=%s AND e.estado='ACTIVO'
+                  AND NOT EXISTS (SELECT 1 FROM pagos_aplicaciones pa
+                                  WHERE pa.envio_id=e.id)
+                  AND NOT EXISTS (SELECT 1 FROM facturas_cliente_items fi
+                                  WHERE fi.envio_id=e.id)
+                RETURNING e.id
+                """,
+                (fecha_envio, solicitud_id),
+            )
+            if cur.fetchone() is None:
+                print(f"[solicitudes] envío externo {solicitud_id}: el cargo no "
+                      "quedó libre para fecharlo; queda con la fecha de hoy")
+                return
+            cur.execute(
+                """
+                UPDATE solicitudes_guia
+                SET created_at=%s, guia_generada_at=%s, updated_at=NOW()
+                WHERE id=%s
+                """,
+                (instante, instante, solicitud_id),
+            )
+
+
+def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str, *, revision: str | None = None) -> dict:
     """
     Emisión desde el PORTAL, con las tres llaves que definió Leandro:
 
@@ -2436,7 +2524,8 @@ def emitir_guia_como_cliente(solicitud_id: int, cliente_id: str) -> dict:
         if not elegible.get("ok"):
             return elegible
 
-    reserva = _reservar_credito_cliente(solicitud_id, cliente_id)
+    reserva = (_reservar_credito_cliente(solicitud_id, cliente_id, revision=revision)
+               if revision is not None else _reservar_credito_cliente(solicitud_id, cliente_id))
     if not reserva.get("ok"):
         return reserva
 
@@ -2684,7 +2773,7 @@ def _explicar_rechazo_recotizacion_dhl(motivo) -> str:
     return texto
 
 
-def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
+def _reservar_credito_cliente(solicitud_id: int, cliente_id: str, *, revision: str | None = None) -> dict:
     """Autoriza y reserva guía + crédito en una sola sección crítica.
 
     El lock de la fila del cliente serializa emisiones distintas de la misma
@@ -2695,7 +2784,7 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT s.cliente_id, s.tracking, s.estado, s.precio_tauro_ars,
+                SELECT s.cliente_id, s.tracking, s.estado, s.precio_tauro_ars, s.updated_at,
                        s.courier, s.ambito, s.remitente_pais, s.destino_pais,
                        c.activo,
                        r.solicitud_anterior_id,
@@ -2729,6 +2818,8 @@ def _reservar_credito_cliente(solicitud_id: int, cliente_id: str) -> dict:
 
             if not fila or fila["cliente_id"] != cliente_id:
                 return {"ok": False, "error": "Esa solicitud no existe o no es tuya."}
+            if revision is not None and (not fila.get("updated_at") or fila["updated_at"].isoformat() != revision):
+                return {"ok": False, "error": "El envío o su precio cambió. Revisá los datos actualizados antes de confirmar la emisión."}
             if fila["tracking"]:
                 return {"ok": False, "error": "Esa solicitud ya tiene guía emitida."}
             if fila["estado"] == "VERIFICAR_COURIER":

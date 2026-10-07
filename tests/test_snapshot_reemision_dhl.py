@@ -47,6 +47,7 @@ def _cotizar(*, incluir_base_interna=False):
             origen={"country": "CN"}, destino={"country": "UY"},
             paquete=piezas[0], paquetes=piezas, dolar=1535,
             pricing_cliente=pricing, incluir_base_interna=incluir_base_interna,
+            couriers_habilitados={"dhl"},
         )[0]
 
 

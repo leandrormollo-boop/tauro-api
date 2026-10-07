@@ -4155,7 +4155,7 @@ html[data-theme="light"] .account-total-card {
    `:has()` porque .wizard-compacto vive ADENTRO de .main-inner y hay que
    estilar al padre. Si un browser no lo soporta, el wizard sigue andando:
    scrollea un poco más, que es exactamente el estado anterior. */
-.main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 0; }
+.main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 96px; }
 .main:has(.wizard-compacto) > .footer { display: none; }
 .wizard-compacto .card { padding: 18px 22px; }
 .wizard-compacto .stepper { padding: 4px 0 6px; }
@@ -6264,3 +6264,15 @@ html[data-theme="light"] .main:has(> .main-inner > .home-hero) .home-scope-activ
 .draft-bar { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin:0 0 12px; }
 .draft-bar .draft-status { color:var(--fg-3); font-size:12px; }
 .draft-bar .draft-reset { padding:4px 8px; font-size:12px; }
+
+/* Reservar espacio para la botonera al enfocar campos, también con teclado. */
+.wizard-compacto :is(input, select, textarea, .tselect-btn) {
+  scroll-margin-top: 100px;
+  scroll-margin-bottom: 96px;
+}
+.shipment-scope-switch { color: var(--fg-3); font-size: 12px; }
+@media (max-width: 900px) {
+  .wizard-compacto :is(input, select, textarea, .tselect-btn) {
+    scroll-margin-bottom: calc(96px + var(--tabbar-h, 62px) + env(safe-area-inset-bottom, 0px));
+  }
+}

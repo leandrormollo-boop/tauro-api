@@ -21,7 +21,12 @@ def pickup(**changes):
     return dict(dict(id=71,solicitud_id=81,courier='DHL',estado='AGENDADA',
                      confirmation_code='CBJ-DEMO-71',fecha=date(2026,9,18),
                      ready_time='09:00',close_time='17:00',bultos=1,peso_kg=20,
-                     direccion='Dirección de prueba'),**changes)
+                     direccion='Dirección de prueba',
+                     envio_tracking='DEMO-TRACKING',
+                     envio_etiqueta='Reposición otoño',
+                     envio_destinatario='Destinatario DEMO',
+                     envio_destino_ciudad='Buenos Aires',
+                     envio_destino_pais='AR'),**changes)
 
 
 @pytest.fixture
@@ -33,6 +38,11 @@ def page(monkeypatch):
     monkeypatch.setattr(config,'mapa_permisos',lambda *_: {'dhl':True})
     monkeypatch.setattr(pc,'courier_default_cliente',lambda _: 'dhl')
     monkeypatch.setattr(pc,'obtener_remitente_para_envio',lambda *_: None)
+    monkeypatch.setattr(pc,'listar_solicitudes_cliente',lambda *_ ,**__: [{
+        'id':82,'tracking':'GUIA-DISPONIBLE','estado':'GUIA_LISTA','courier':'DHL',
+        'etiqueta_cliente':'Muestras octubre','dest_nombre':'Cliente final',
+        'remitente_pais':'AR','destino_pais':'US',
+    }])
     monkeypatch.setattr(pc,'obtener_solicitud_de_cliente',lambda *_: {
         'id':81,'tracking':'DEMO-TRACKING','estado':'GUIA_LISTA','courier':'DHL',
         'remitente_pais':'CN','destino_pais':'AR'})
@@ -126,11 +136,81 @@ def test_error_de_lectura_bloquea_nuevo_form_sin_decir_que_no_hay_retiro(page,mo
     assert 'action="/portal/recolecciones/nueva"' not in body
 
 
+def test_conflicto_redirige_al_retiro_propietario_y_conserva_guia(monkeypatch):
+    monkeypatch.setattr(rec, 'crear', lambda *args, **kwargs: {
+        'ok': False, 'error': 'Revisá la recolección #71 del historial.',
+        'recoleccion_conflicto_id': 71,
+    })
+    response = pc.recoleccion_nueva(
+        fecha='2026-10-02', ready_time='09:00', close_time='17:00',
+        bultos='1', peso_kg='3,8', instrucciones='', courier='DHL',
+        solicitud_id='81', cliente='DEMO', gestion_ventana='',
+    )
+    destino = urlsplit(response.headers['location'])
+    assert destino.path == '/portal/recolecciones'
+    query = parse_qs(destino.query)
+    assert query['envio'] == ['81']
+    assert query['recoleccion'] == ['71']
+    assert query['error'] == ['Revisá la recolección #71 del historial.']
+    assert 'ok' not in query
+
+
 def test_numero_se_escapa_como_texto(page):
     page['confirmation_code']='<script>no ejecutar</script>'
     body=html()
     assert '&lt;script&gt;no ejecutar&lt;/script&gt;' in body
     assert '<script>no ejecutar</script>' not in body
+
+
+def test_listado_compacto_identifica_guia_y_envio(page):
+    body=html()
+    assert 'Reposición otoño' in body
+    assert 'DEMO-TRACKING' in body
+    assert 'Buenos Aires, AR' in body
+    assert '<summary>Acciones</summary>' in body
+    assert 'Programar nueva recolección' in body
+
+
+def test_selector_ofrece_guia_vigente_y_envio_nuevo(page):
+    page['estado']='CANCELADA'
+    body=html()
+    assert 'Usar una guía existente' in body
+    assert 'GUIA-DISPONIBLE · Muestras octubre · DHL' in body
+    assert 'Crear un envío nuevo' in body
+    assert 'action="/portal/recolecciones"' in body
+
+
+def test_vista_previa_no_ofrece_reservar_ni_cancelar_visitas(page):
+    page['estado'] = 'CANCELADA'
+    response = pc.recolecciones_view(request(), cliente='DEMO', envio=81)
+    preview = pc.templates.TemplateResponse(
+        request=request(), name='portal/recolecciones.html',
+        context={**response.context, 'vista_previa_recolecciones': True},
+    ).body.decode()
+    assert 'Vista previa de diseño.' in preview
+    assert 'desde acá no se reservan ni cancelan retiros' in preview
+    assert 'disabled aria-describedby="pickup-preview-notice"' in preview
+    assert 'Cancelar recolección' not in preview
+    assert 'pickup-preview-notice' not in response.body.decode()
+
+
+def test_vista_previa_oculta_cancelacion_pero_portal_real_la_conserva(page):
+    response = pc.recolecciones_view(request(), cliente='DEMO')
+    preview = pc.templates.TemplateResponse(
+        request=request(), name='portal/recolecciones.html',
+        context={**response.context, 'vista_previa_recolecciones': True},
+    ).body.decode()
+    assert 'Cancelar recolección' in response.body.decode()
+    assert 'Cancelar recolección' not in preview
+
+
+def test_selector_excluye_guia_que_ya_tiene_retiro(page,monkeypatch):
+    monkeypatch.setattr(pc,'listar_solicitudes_cliente',lambda *_ ,**__: [{
+        'id':81,'tracking':'DEMO-TRACKING','estado':'GUIA_LISTA','courier':'DHL',
+        'remitente_pais':'AR','destino_pais':'US',
+    }])
+    body=html()
+    assert '<option value="81">' not in body
 
 
 def create(**extra):
@@ -220,6 +300,35 @@ def test_lecturas_reales_aislan_cuentas_y_eligen_ultima_reserva(guias_db,monkeyp
     assert list(result)==[propia]
     assert result[propia]['confirmation_code']=='VIGENTE'
     assert rec.obtener_de_solicitud('WAIMAO',propia)['solicitud_id']==propia
+    assert rec.obtener_de_solicitud('WAIMAO',ajena) is None
+
+
+def test_join_recoleccion_no_expone_metadatos_de_guia_ajena(guias_db,monkeypatch):
+    conexion,_=guias_db
+    monkeypatch.setattr(rec,'get_conn',conexion)
+    monkeypatch.setattr(rec,'_ensure_tabla',lambda: None)
+    ajena=crear_guia(conexion,cliente='DEMO')
+    with conexion() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''UPDATE solicitudes_guia
+                SET tracking='TRACKING-SECRETO-DEMO',dest_nombre='DESTINATARIO SECRETO DEMO'
+                WHERE id=%s''',(ajena,))
+            cur.execute('''INSERT INTO recolecciones
+                (cliente_id,solicitud_id,fecha,ready_time,close_time,bultos,peso_kg,
+                 courier,estado,confirmation_code)
+                VALUES('WAIMAO',%s,'2026-09-18','09:00','17:00',1,1,'DHL',
+                       'AGENDADA','RESERVA-WAIMAO') RETURNING id''',(ajena,))
+            rec_id=cur.fetchone()['id']
+
+    listado=rec.listar('WAIMAO')
+    assert len(listado)==1
+    assert listado[0]['confirmation_code']=='RESERVA-WAIMAO'
+    assert listado[0]['envio_tracking'] is None
+    assert listado[0]['envio_destinatario'] is None
+    detalle=rec.obtener('WAIMAO',rec_id)
+    assert detalle['envio_tracking'] is None
+    assert detalle['envio_destinatario'] is None
+    assert rec.listar_de_solicitudes('WAIMAO',[ajena])=={}
     assert rec.obtener_de_solicitud('WAIMAO',ajena) is None
 
 

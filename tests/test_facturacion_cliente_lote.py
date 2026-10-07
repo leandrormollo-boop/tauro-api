@@ -52,11 +52,13 @@ def test_numero_visible_preserva_formato_arca():
 
 def test_templates_nuevos_compilan_y_portal_no_muestra_costos_internos():
     env = Environment(loader=FileSystemLoader(str(ROOT / "templates")))
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     env.get_template("admin/factura_cliente_nueva.html")
     env.get_template("admin/facturas_cliente.html")
     env.get_template("portal/cuenta.html")
     portal = (ROOT / "templates" / "portal" / "cuenta.html").read_text()
-    assert "A facturar" in portal
+    assert "A facturar" not in portal  # dato interno de TAURO
     assert "Descargar" in portal
     assert "costo_courier" not in portal
     assert "margen_tauro" not in portal

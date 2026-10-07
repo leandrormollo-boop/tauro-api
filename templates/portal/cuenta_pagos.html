@@ -1,0 +1,34 @@
+    <section class="account-payment-tracking" id="pagos" data-account-payments tabindex="-1" aria-labelledby="account-payments-title">
+        <div class="account-section-heading"><div><span class="account-kicker">Tus pagos</span><h2 id="account-payments-title">Tus pagos y a qué se aplicaron</h2></div><a class="account-text-action" href="{{ cuenta_url(tipo='pagos', pagina=None) }}#movimientos" data-account-link="pagos">Ver movimientos <span aria-hidden="true">↗</span></a></div>
+        {% set exp = experiencia|default(none) %}
+        {% set pp = exp.pagos_paginacion if exp else none %}
+        <p class="account-due-note">{{ ventana_label }}{% if pp %} · {{ pp.total }} {{ 'pago' if pp.total == 1 else 'pagos' }}{% endif %}</p>
+        {% if experiencia_error %}<p role="status">{{ experiencia_error }}</p>{% endif %}
+        {% for pago in exp.pagos if exp %}
+        <article class="account-payment-item" id="pago-{{ pago.id }}">
+        <div class="account-payment-header"><span class="account-payment-record-title"><strong>{{ dinero(pago.monto_ars) }}</strong><span>{{ pago.fecha or 'Fecha sin informar' }}{% if pago.referencia %} · {{ pago.referencia }}{% endif %}</span></span><span class="account-status {% if pago.estado == 'PENDIENTE' %}is-attention{% elif pago.estado == 'RECHAZADO' %}is-rejected{% else %}is-confirmed{% endif %}">{{ pago.estado_label }}</span></div>
+        <div class="account-imputation-row"><div><strong>{{ pago.imputacion_label|default("Sin envíos asignados") }}</strong>{% if pago.puede_imputar %}<small>{{ dinero(pago.sin_imputar_ars) }} sin asignar a envíos</small>{% endif %}</div><div class="account-payment-actions"><a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/imputar">{{ "Asignar envíos" if pago.puede_imputar else "Ver envíos asignados" }}</a>{% if not pago.tiene_comprobante %}<a class="btn btn-sm btn-ghost" href="/portal/pagos/{{ pago.id }}/adjuntar-comprobante">Adjuntar comprobante</a>{% endif %}</div></div>
+        <details class="account-payment-record">
+            <summary><span>Ver detalle{% if pago.tiene_comprobante %} y comprobante{% endif %}</span><span class="account-detail-chevron" aria-hidden="true"></span></summary>
+            <div class="account-payment-record-body">
+                <ol class="account-payment-steps" aria-label="Progreso del comprobante">{% for paso in pago.pasos %}<li{% if paso.completo %} class="is-complete"{% endif %}><span>{{ paso.label }}</span>{% if paso.fecha %}<time>{{ paso.fecha }}</time>{% endif %}</li>{% endfor %}</ol>
+                {% if pago.fecha_futura %}<p class="account-payment-explanation">La fecha informada todavía no ocurrió. El pago no modifica el saldo ni admite imputaciones.</p>{% elif pago.fecha_revision_pendiente %}<p class="account-payment-explanation">La fecha requiere revisión administrativa. El pago sigue sin modificar el saldo ni admitir imputaciones.</p>{% elif pago.estado == 'RECHAZADO' %}<p class="account-payment-explanation">Comprobante rechazado: no modifica el saldo. Consultá a TAURO antes de volver a informarlo.</p>{% elif pago.estado == 'PENDIENTE' %}<p class="account-payment-explanation">Recibimos el comprobante. Se descuenta del saldo cuando TAURO lo aprueba.</p>{% else %}<p class="account-payment-explanation">Pago acreditado en tu cuenta.</p>{% endif %}
+                {% if pago.aplicaciones %}<ul class="account-payment-documents" aria-label="Documentos del pago">{% for aplicacion in pago.aplicaciones %}<li><span>{% if aplicacion.solicitud_id %}<a href="/portal/envios/{{ aplicacion.solicitud_id }}">{{ aplicacion.documento }} ↗</a>{% elif aplicacion.factura_id %}<a href="/portal/facturas/{{ aplicacion.factura_id }}/pdf" target="_blank" rel="noopener">{{ aplicacion.documento }} ↗</a>{% else %}{{ aplicacion.documento }}{% endif %}{% if aplicacion.destinatario %}<small>{{ aplicacion.destinatario }}</small>{% endif %}</span><strong>{{ dinero(aplicacion.monto_ars) }}</strong></li>{% endfor %}</ul>{% endif %}
+                {% if not pago.fecha_original_conocida %}<p class="account-payment-explanation">Fecha original sin confirmar · La fecha mostrada es contable.</p>{% endif %}
+                <div class="account-record-footer"><span>{{ pago.metodo or 'Método sin informar' }}</span></div>
+                {% if pago.tiene_comprobante %}
+                {% from 'portal/_documentos.html' import tarjeta_documento %}
+                {{ tarjeta_documento('pago', pago.id, 'Comprobante de pago', '/portal/pagos/' ~ pago.id ~ '/comprobante', pago.referencia or '', compacto=True) }}
+                {% endif %}
+            </div>
+        </details>
+        </article>
+        {% else %}{% if not experiencia_error %}<p class="account-inline-empty">No hay pagos en este período. Elegí otro período para consultar el historial.</p>{% endif %}{% endfor %}
+        {% if pp and pp.total_paginas > 1 %}
+        <nav class="pagination account-pagination" aria-label="Páginas de pagos">
+            {% if pp.pagina_actual > 1 %}<a href="{{ cuenta_url(pagina_pagos=pp.pagina_actual-1) }}#pagos" data-account-payment-page>Anterior</a>{% endif %}
+            <span>{{ pp.pagina_actual }} de {{ pp.total_paginas }}</span>
+            {% if pp.pagina_actual < pp.total_paginas %}<a href="{{ cuenta_url(pagina_pagos=pp.pagina_actual+1) }}#pagos" data-account-payment-page>Siguiente</a>{% endif %}
+        </nav>
+        {% endif %}
+    </section>

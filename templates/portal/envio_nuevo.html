@@ -1,16 +1,19 @@
 {% extends "base.html" %}
 {% from 'portal/_ubicacion_cotizada.html' import confirmar_ubicacion %}
-{% block title %}{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío') }}{% endblock %}
+{% block title %}{{ 'Editar envío' if form and form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Crear envío')) }}{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
+<link rel="stylesheet" href="/static/css/invoice-compact.css?v=1">
 <link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
 <script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>
+<script src="/static/js/shipment-focus.js?v=1" defer></script>
 {% endblock %}
 
 {% block content %}
-<script src="/static/js/portal-agenda.js?v=1" defer></script>
-<link rel="stylesheet" href="/static/css/hs-assistant.css?v=1">
-<script src="/static/js/hs-assistant.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>
+<script src="/static/js/portal-agenda.js?v=2" defer></script>
+<link rel="stylesheet" href="/static/css/hs-assistant.css?v=2">
+<script src="/static/js/hs-assistant.js?v=2" defer nonce="{{ request.state.csp_nonce }}"></script>
+{% if invoice_asistente_habilitado() %}<script src="/static/js/invoice-asistente.js?v=1" defer nonce="{{ request.state.csp_nonce }}"></script>{% endif %}
 {% if not ambito %}
     {% set flujo = 'crear' %}
     {% include 'portal/_ambito_selector.html' %}
@@ -22,16 +25,16 @@
    UN PASO POR PANTALLA en static/css/tauro.css. #}
 <div class="wizard-compacto" id="shipment-wizard" data-step="1"
      data-initial-step="{{ form.initial_step or 1 }}">
-<div class="page-title page-title-row">
+<div class="page-title page-title-row tauro-branded-heading">
     <div>
-        <div class="eyebrow"><span aria-hidden="true">🌐</span> Envío internacional</div>
-        <h1>{{ 'Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional') }}</h1>
+        {% if form.editar_solicitud_id %}<a class="shipment-edit-back" href="/portal/envios/{{ form.editar_solicitud_id }}/gestion?ventana=1">← Volver a la revisión</a>{% endif %}
+        <h1>{{ 'Editar envío' if form.editar_solicitud_id else ('Corregir guía DHL' if reemision_origen else ('Repetir envío' if repeticion_origen else 'Nuevo envío internacional')) }}</h1>
         {% if form.intl_courier %}
         <span class="selected-carrier-chip">✓ {{ form.intl_courier|upper }} seleccionado</span>
         {% endif %}
-        <p>{% if reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete e invoice comercial.{% endif %}</p>
+        <p>{% if form.editar_solicitud_id %}Corregí los datos de esta solicitud. Al guardar revisamos el precio; todavía no se emite la guía.{% elif reemision_origen %}Revisá los datos precargados. Al confirmar se emite un tracking nuevo y el anterior queda reemplazado.{% elif repeticion_origen %}Copiamos todos los datos del envío anterior. Revisalos: el precio se cotiza nuevamente y el original no cambia.{% else %}Cuatro pasos simples: origen, destino, paquete y factura comercial.{% endif %}</p>
     </div>
-    <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a>
+    <div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Mis clientes ↗</a></div>
 </div>
 
 {% if error %}
@@ -64,18 +67,13 @@
     </div>
 {% endif %}
 {% if form.valor_total_cotizado_usd %}
-    <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>USD {{ "{:,.2f}".format(form.valor_total_cotizado_usd).replace(",", "_").replace(".", ",").replace("_", ".") }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
+    <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>{{ ((form.valor_total_cotizado_usd))|dinero_usd }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
 {% endif %}
 
-{# ⚡ Pegar pedido: atajo para los pedidos que llegan por mail. Va CERRADO
-   (es un atajo, no el camino principal) y ni aparece cuando el envío ya
-   viene de una venta de la tienda: ahí no hay nada que pegar. #}
-{% if not pedido_tienda and not reemision_origen and not repeticion_origen %}
-<details class="card" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
-    <summary style="cursor:pointer;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:10px;font-size:13.5px;">
-        ⚡ Atajo: ¿te llegó el pedido por mail? Pegalo y te completo el formulario
-    </summary>
+<details class="card shipment-paste" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
+    <summary>Pegar pedido recibido por mail</summary>
     <div style="margin-top:14px;">
+        <label for="pedido-pegado">Texto del pedido</label>
         <textarea id="pedido-pegado" rows="7" placeholder="Pegá el texto del pedido tal como te llegó (cajas, medidas, quien envía, quien recibe...)"></textarea>
         <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
             <button type="button" id="btn-parsear" class="btn btn-primary btn-sm">Leer pedido y precargar</button>
@@ -83,7 +81,6 @@
         </div>
     </div>
 </details>
-{% endif %}
 
 <!-- Cuatro pantallas independientes: cada tema se completa sin mezclar datos. -->
 <div class="stepper" id="stepper-envio">
@@ -101,7 +98,7 @@
     </div>
     <div class="step">
         <span>4</span>
-        <label>Invoice</label>
+        <label>Factura comercial</label>
     </div>
 </div>
 
@@ -123,9 +120,12 @@
     </div>
 </div>
 {% endif %}
-<form data-draft-server="{{ 1 if error else 0 }}" method="POST" action="/portal/envios/nuevo"
+<form data-draft-server="{{ 1 if error or form.editar_solicitud_id else 0 }}" method="POST" action="/portal/envios/nuevo{% if request.query_params.get('ventana') == '1' %}?ventana=1{% endif %}"
       {% if reemision_origen %}data-confirm="¿Confirmar la corrección? DHL emitirá un tracking nuevo. La guía anterior quedará reemplazada y sólo la nueva se aplicará a tu cuenta corriente."{% endif %}>
     <input type="hidden" name="borrador_token" value="{{ form.borrador_token or '' }}">
+    <input type="hidden" name="editar_solicitud_id" value="{{ form.editar_solicitud_id or '' }}">
+    <input type="hidden" name="editar_version" value="{{ form.editar_version or '' }}">
+    <input type="hidden" name="gestion_ventana" value="{{ '1' if request.query_params.get('ventana') == '1' else '' }}">
     <input type="hidden" name="ambito" value="internacional">
     <input type="hidden" name="pedido_tienda_id" value="{{ form.pedido_tienda_id or '' }}">
     <input type="hidden" name="reemplaza_solicitud_id" value="{{ form.reemplaza_solicitud_id or '' }}">
@@ -135,6 +135,7 @@
     <input type="hidden" name="intl_courier" id="intl_courier" value="{{ form.intl_courier or '' }}">
     {# Importe que el cliente VIO y aceptó. El servidor vuelve a cotizar y,
        si cambió, no crea la solicitud hasta que confirme el nuevo valor. #}
+    <input type="hidden" name="cotizacion_origen_id" id="cotizacion_origen_id" value="{{ form.cotizacion_origen_id or '' }}">
     <input type="hidden" name="precio_cotizado_ars" id="precio_cotizado_ars" value="{{ form.precio_cotizado_ars or '' }}">
     <div class="card">
         <div class="form-section shipment-step shipment-step-sender">
@@ -147,7 +148,7 @@
                de ORIGEN del envío sale de acá, tampoco se podía cotizar desde
                otro país sin pasar por la libreta. #}
                 <div class="form-group">
-                    <label for="remitente_id">Remitente guardado · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
+                    <label for="remitente_id">Usar un cliente como remitente · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
                     <select data-agenda-role="REMITENTE" name="remitente_id" id="remitente_id" data-searchable data-search-placeholder="Buscar nombre, ciudad o país">
                         <option value="">Cargar remitente nuevo</option>
                         {% for r in remitentes %}
@@ -161,7 +162,7 @@
                                     data-estado="{{ r.estado or '' }}"
                                     data-cp="{{ r.cp }}"
                                     data-pais="{{ r.pais }}"
-                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and r.predeterminada and remitente and not form.rem_nombre) %}selected{% endif %}>
+                                    {% if form.remitente_id|string == r.id|string or (not form.remitente_id and remitente and remitente.id == r.id and not form.rem_nombre) %}selected{% endif %}>
                                 {{ r.label }} · {{ r.ciudad }} {{ r.cp }} · {{ r.pais }}
                             </option>
                         {% endfor %}
@@ -256,7 +257,7 @@
             <h4><span class="n">2</span> Destinatario <span class="badge warn">Entrega</span></h4>
 
                 <div class="form-group">
-                    <label for="destinatario_id">Elegir de Mis clientes · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Administrar ↗</a></label>
+                    <label for="destinatario_id">Usar un cliente como destinatario · <a href="/portal/clientes" data-agenda-manage target="_blank" rel="noopener">Mis clientes ↗</a></label>
                     <select data-agenda-role="DESTINATARIO" name="destinatario_id" id="destinatario_id" data-searchable
                             data-search-placeholder="Buscar cliente, ciudad o país">
                         <option value="">Cargar un destinatario nuevo</option>
@@ -272,7 +273,7 @@
                                     data-cp="{{ d.cp }}"
                                     data-pais="{{ d.pais }}"
                                     {% if form.destinatario_id|string == d.id|string %}selected{% endif %}>
-                                {{ d.label }} · {{ d.nombre }} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
+                                {{ d.label }}{% if d.nombre != d.label %} · {{ d.nombre }}{% endif %} · {{ d.ciudad }} {{ d.cp }} · {{ d.pais }}
                             </option>
                         {% endfor %}
                     </select>
@@ -344,7 +345,7 @@
             <div class="guardar-dest">
             <label class="check-row">
                 <input type="checkbox" name="guardar_destinatario" value="1" {% if form.guardar_destinatario %}checked{% endif %}>
-                <span>Guardar este destinatario para próximos envíos</span>
+                <span>Guardar este cliente para usarlo como remitente o destinatario</span>
             </label>
                 <div class="form-group compact-field">
                 <label for="dest_alias">Alias para guardar</label>
@@ -382,7 +383,7 @@
                                             data-valor="{{ p.valor_usd_default }}"
                                             data-desc="{{ p.nombre_invoice }}" data-hs="{{ p.hs_code }}"
                                             {% if f.producto == p.alias_interno %}selected{% endif %}>
-                                        {{ p.alias_interno }} · {{ p.peso_kg }} kg · {{ p.largo_cm }}×{{ p.ancho_cm }}×{{ p.alto_cm }} cm
+                                        {{ p.alias_interno }} · {{ (p.peso_kg)|kg }} · {{ (p.largo_cm)|medida_cm }} × {{ (p.ancho_cm)|medida_cm }} × {{ (p.alto_cm)|medida_cm }} cm
                                     </option>
                                 {% endfor %}
                             </select>
@@ -425,7 +426,7 @@
         <div class="form-section shipment-step shipment-step-invoice" style="margin-bottom:0;">
             <div class="shipment-step-heading">
                 <div>
-                    <h4><span class="n">4</span> Factura comercial (invoice) <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Ingresá cantidad y valor total de cada artículo.</span></h4>
+                    <h4><span class="n">4</span> Factura comercial <span class="badge warn">Aduana</span><span data-help="Factura comercial">Declaración de la mercadería para aduana. Ingresá cantidad y valor total de cada artículo.</span></h4>
 
                 </div>
                 <span class="shipment-step-counter">Valores en USD</span>
@@ -435,13 +436,15 @@
                 {% for f in filas %}
                 <article class="bulto-row shipment-invoice-card" data-invoice-bulto data-bulto-index="{{ loop.index0 }}">
                     <div class="shipment-box-head">
-                        <div><span>Invoice comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
-                        <small data-package-reference>{% if f.peso_kg %}{{ f.peso_kg }} kg{% else %}Medidas del paso anterior{% endif %}</small>
+                        <div><span>Factura comercial</span><strong>Contenido de la caja <b data-box-number>{{ loop.index }}</b></strong></div>
+                        <small data-package-reference>{% if f.peso_kg %}{{ (f.peso_kg)|kg }}{% else %}Medidas del paso anterior{% endif %}</small>
+                        <button type="button" class="btn btn-ghost btn-sm invoice-item-add">Agregar artículo</button>
                     </div>
+                    {% if invoice_asistente_habilitado() %}{% include 'portal/_invoice_asistente.html' %}{% endif %}
                     <input type="hidden" name="bulto_items_extra" class="invoice-extras" value="{{ (f.items_invoice[1:] if f.items_invoice else [])|tojson|forceescape }}">
                     <div class="invoice-items">
                     <div class="bulto-invoice" data-invoice-item data-hs-scope>
-                        <div class="invoice-item-heading" style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                        <div class="invoice-item-heading">
                             <strong data-item-number>Artículo 1</strong>
                             <button type="button" class="btn btn-ghost btn-sm invoice-item-remove" hidden style="display:none">Quitar artículo</button>
                         </div>
@@ -450,18 +453,17 @@
                             <input type="text" name="bulto_desc_en" class="bulto-desc" data-hs-description maxlength="75" placeholder="Ej: Cotton shirts, knitted" value="{{ f.descripcion_en or '' }}" required>
                         </div>
                         <div class="form-group">
-                            <label>Cantidad de unidades</label>
+                            <label>Unidades</label>
                             <input type="text" name="bulto_unidades_aduana" aria-label="Cantidad de unidades" class="bulto-unidades-aduana" inputmode="numeric" data-numero="entero" min="1" max="9999" value="{{ f.unidades_aduana if f.unidades_aduana is not none else 1 }}" required>
                         </div>
                         <div class="form-group shipment-declared-value">
                             <div class="shipment-field-label"><label>Valor total</label><span data-help="Valor total">Valor de todas las unidades de este artículo, en todas las cajas de esta fila. No hace falta dividirlo por la cantidad.</span></div>
-                            <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_total_usd if f.valor_total_usd is defined else (f.items_invoice[0].valor_total_usd if f.items_invoice and f.items_invoice[0].valor_total_usd is defined else ('%.2f'|format((f.valor_unitario_usd|float) * (f.unidades_aduana|int)) if f.valor_unitario_usd else '')) }}" required></div>
+                            <div class="input-unit input-unit-money"><span>USD</span><input type="text" name="bulto_total_usd" aria-label="Valor total del artículo" class="bulto-valor" inputmode="decimal" data-numero="monto" value="{{ f.valor_total_usd if f.valor_total_usd is defined else (f.items_invoice[0].valor_total_usd if f.items_invoice and f.items_invoice[0].valor_total_usd is defined else (((f.valor_unitario_usd|float) * (f.unidades_aduana|int))|numero_maquina if f.valor_unitario_usd else '')) }}" required></div>
                             <small class="invoice-line-total" data-invoice-line-total></small>
                         </div>
                         <div class="form-group">
                             <label>HS code <span class="field-optional">(opcional)</span></label>
                             <input type="text" name="bulto_hs" class="bulto-hs" data-hs-input placeholder="Ej: 6109.10" value="{{ f.hs_code or '' }}">
-                            {% include 'portal/_hs_assistant.html' %}
                         </div>
                         <div class="form-group">
                             <label>País de fabricación</label>
@@ -473,10 +475,11 @@
                             </select>
                         </div>
                         <div class="form-group invoice-net-weight" {% if not f.items_invoice %}hidden{% endif %}>
-                            <label>Peso neto total de este artículo</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span>
+                            <div class="shipment-field-label"><label>Peso neto total</label><span data-help="Peso neto">Peso de todas las unidades de este artículo, sin embalaje.</span></div>
                             <div class="input-unit"><input type="text" name="bulto_peso_neto" aria-label="Peso neto total del artículo" class="invoice-peso-neto" inputmode="decimal" data-numero="decimal" value="{{ f.items_invoice[0].peso_neto_kg if f.items_invoice else '' }}"><span>kg</span></div>
 
                         </div>
+                        {% include 'portal/_hs_assistant.html' %}
                     </div>
                     </div>
                     <button type="button" class="btn-add-bulto invoice-item-add">+ Agregar otro artículo a esta caja</button>
@@ -582,9 +585,9 @@
             <button type="button" id="wizard-back-final" class="btn btn-ghost">
                 ← Atrás
             </button>
-            <a href="{% if reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">Salir</a>
+            <a href="{% if form.editar_solicitud_id %}/portal/envios/{{ form.editar_solicitud_id }}/gestion?ventana=1{% elif reemision_origen %}/portal/envios/{{ reemision_origen.id }}{% elif repeticion_origen %}/portal/envios/{{ repeticion_origen.id }}{% else %}/portal/envios{% endif %}" class="btn btn-ghost">{{ 'Volver sin guardar' if form.editar_solicitud_id else 'Salir' }}</a>
             <button type="submit" class="btn btn-primary">
-                {{ 'Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud' }}
+                {{ 'Guardar cambios y revisar' if form.editar_solicitud_id else ('Guardar cambios y emitir guía nueva' if reemision_origen else 'Crear solicitud y revisar') }}
             </button>
         </div>
     </div>
@@ -767,8 +770,14 @@
     var cantidad = valor(".bulto-cantidad") || "1";
     var medidas = [valor(".bulto-largo"), valor(".bulto-ancho"), valor(".bulto-alto")];
     var partes = [];
-    if (peso) partes.push(peso + " kg");
-    if (medidas.every(Boolean)) partes.push(medidas.join("×") + " cm");
+    if (peso) {
+      var pesoNumero = numeroInvoice(peso, "decimal");
+      partes.push(Number.isFinite(pesoNumero) ? pesoNumero.toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " kg" : "Revisá el peso");
+    }
+    if (medidas.every(Boolean)) partes.push(medidas.map(function (m) {
+      var n = numeroInvoice(m, "decimal");
+      return Number.isFinite(n) ? n.toLocaleString("es-AR", {maximumFractionDigits: 20}) : "—";
+    }).join(" × ") + " cm");
     partes.push(cantidad + (cantidad === "1" ? " caja" : " cajas iguales"));
     var ref = invoice.querySelector("[data-package-reference]");
     if (ref) ref.textContent = partes.join(" · ");
@@ -849,7 +858,7 @@
       var unidades = numeroInvoice(items[i].unidades_aduana, "entero");
       var valor = numeroInvoice(items[i].valor_total_usd);
       item.querySelector("[data-invoice-line-total]").textContent = unidades > 0 && valor > 0
-        ? "Por unidad: ≈ USD " + (valor / unidades).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 3})
+        ? "Por unidad: ≈ USD " + (valor / unidades).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2})
         : "";
     });
     var total = subtotalArticulos(invoice);
@@ -1081,7 +1090,7 @@
   let priceSeq = 0;
 
   function fmtARS(n) {
-    return "$ " + Math.round(n).toLocaleString("es-AR");
+    return "$ " + Number(n).toLocaleString("es-AR", {minimumFractionDigits:2, maximumFractionDigits:2});
   }
 
   function renderLivePrice(state, data) {
@@ -1167,6 +1176,15 @@
         "<span class='moneda'>ARS · " + op.nombre + "</span>" +
       "</div>" +
       "<span class='precio-detalle'>" + t + "</span>" + fuera;
+    var comparacion = op.comparacion_cotizacion;
+    if (comparacion) {
+      var aviso = document.createElement("div");
+      aviso.className = "msg warn quote-comparison";
+      [comparacion.texto, comparacion.diferencia, comparacion.motivo].forEach(function (texto) {
+        var linea = document.createElement("p"); linea.textContent = texto; aviso.appendChild(linea);
+      });
+      liveBox.appendChild(aviso);
+    }
   }
 
   document.querySelectorAll("#courier-btns [data-courier]").forEach(function (btn) {
@@ -1221,6 +1239,7 @@
         // devuelve el courier. Sin esto el preview muestra un precio que
         // después no es el que factura el courier.
         body: JSON.stringify({
+          cotizacion_origen_id: (document.getElementById("cotizacion_origen_id") || {}).value || "",
           destino: destino,
           bultos: bultos,
           dest_zip: (document.getElementById("dest_zip") || {}).value || "",
@@ -1355,7 +1374,7 @@
           } else if (paquetes.length) {
             var p = paquetes[0];
             aviso += " Elegí el producto del catálogo que corresponda" +
-              (p.peso_kg ? " (el mail dice " + p.peso_kg + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
+              (p.peso_kg ? " (el mail dice " + Number(p.peso_kg).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
           }
           parseStatus.textContent = aviso;
           refreshLivePrice();

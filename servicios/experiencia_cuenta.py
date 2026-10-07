@@ -14,7 +14,7 @@ from typing import Any
 from core.database import get_conn
 from servicios.cuenta_corriente import _decimal_monto
 from servicios.facturacion_clientes import numero_factura_visible
-from servicios.periodo_cuenta import inicio_cuenta_cliente
+from servicios.filtros_cuenta import normalizar_filtros_cuenta
 
 
 _AR = timezone(timedelta(hours=-3), "Argentina")
@@ -68,25 +68,21 @@ ORDER BY fecha_vencimiento ASC NULLS LAST, fecha_emision, id
 LIMIT 6
 """
 
-_PAGOS_SQL = """
-WITH recientes AS (
-    SELECT p.id, p.cliente_id, p.fecha, p.created_at, p.monto_ars,
-           p.metodo, p.referencia, p.fecha_original_conocida,
-           p.fecha > (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha_futura,
-           p.fecha_revision_requerida,
-           COALESCE(p.estado,'APROBADO') AS estado,
-           p.comprobante IS NOT NULL AS tiene_comprobante
-    FROM pagos p WHERE p.cliente_id=%s
-      AND (%s::date IS NULL OR p.fecha>=%s)
-      AND (%s::integer IS NULL OR p.id=%s)
-    ORDER BY p.created_at DESC, p.id DESC LIMIT 8
-)
+_PAGOS_TOTAL_SQL = """
+SELECT COUNT(*) AS total
+FROM pagos p
+WHERE p.cliente_id=%s
+  AND (%s::date IS NULL OR p.fecha>=%s)
+  AND (%s::date IS NULL OR p.fecha<=%s)
+"""
+
+_PAGO_DETALLE_SQL = """
 SELECT p.*, COALESCE(a.detalle,'[]'::jsonb) AS aplicaciones,
        COALESCE(a.cantidad,0) AS cantidad_aplicaciones,
        COALESCE(a.total_vinculado,0) AS total_vinculado,
        COALESCE(a.envios,0) AS cantidad_envios,
        COALESCE(a.facturas,0) AS cantidad_facturas
-FROM recientes p
+FROM pagina p
 LEFT JOIN LATERAL (
     SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
                'documento', d.documento, 'tracking', d.tracking,
@@ -124,11 +120,39 @@ LEFT JOIN LATERAL (
           AND (pa.envio_id IS NULL OR e.id IS NOT NULL)
           AND ((p.estado='APROBADO' AND pa.estado='APLICADA')
                OR (p.estado='PENDIENTE' AND pa.estado='SOLICITADA'))
-        ORDER BY pa.id LIMIT 24
+        ORDER BY pa.id
     ) d
 ) a ON TRUE
-ORDER BY p.created_at DESC, p.id DESC
 """
+
+_PAGOS_SQL = """
+WITH pagina AS (
+    SELECT p.id, p.cliente_id, p.fecha, p.created_at, p.monto_ars,
+           p.metodo, p.referencia, p.fecha_original_conocida,
+           p.fecha > (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha_futura,
+           p.fecha_revision_requerida,
+           COALESCE(p.estado,'APROBADO') AS estado,
+           p.comprobante IS NOT NULL AS tiene_comprobante
+    FROM pagos p WHERE p.cliente_id=%s
+      AND (%s::date IS NULL OR p.fecha>=%s)
+      AND (%s::date IS NULL OR p.fecha<=%s)
+    ORDER BY p.fecha DESC, p.created_at DESC, p.id DESC
+    LIMIT %s OFFSET %s
+)
+""" + _PAGO_DETALLE_SQL + "\nORDER BY p.fecha DESC, p.created_at DESC, p.id DESC"
+
+_PAGO_SQL = """
+WITH pagina AS (
+    SELECT p.id, p.cliente_id, p.fecha, p.created_at, p.monto_ars,
+           p.metodo, p.referencia, p.fecha_original_conocida,
+           p.fecha > (CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date AS fecha_futura,
+           p.fecha_revision_requerida,
+           COALESCE(p.estado,'APROBADO') AS estado,
+           p.comprobante IS NOT NULL AS tiene_comprobante
+    FROM pagos p
+    WHERE p.cliente_id=%s AND p.id=%s
+)
+""" + _PAGO_DETALLE_SQL
 
 # Espejo de la lectura en solicitudes_guia._reservar_credito_cliente.
 # El panel no tiene una guía candidata: incluye todas las reservas vigentes.
@@ -165,13 +189,13 @@ WITH cargos AS (
     WHERE e.cliente_id=%s AND e.estado NOT IN ('CANCELADO','NC')
       AND e.monto_ars>0 AND e.fecha>=%s AND e.fecha<%s
     UNION ALL
-    SELECT (a.aplicado_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date,
-           e.ambito, ROUND(a.monto_ars,2)
+    -- Diferencias y TAX cuentan en el mes del envío, como en la planilla
+    -- del cliente y en la lista de movimientos.
+    SELECT e.fecha, e.ambito, ROUND(a.monto_ars,2)
     FROM ajustes_cliente a
     JOIN envios e ON e.solicitud_id=a.solicitud_id
     WHERE e.cliente_id=%s AND e.estado='ACTIVO' AND a.estado='APLICADO'
-      AND a.aplicado_at >= (%s::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
-      AND a.aplicado_at < (%s::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+      AND e.fecha >= %s AND e.fecha < %s
 )
 SELECT DATE_TRUNC('month',fecha)::date AS mes,
        COALESCE(SUM(monto_ars) FILTER (WHERE ambito='NACIONAL'),0)
@@ -322,7 +346,7 @@ def _presentar_pago(fila: dict) -> dict:
         "puede_imputar": (not fecha_bloqueada and disponible > 0
                            and estado in ("PENDIENTE", "APROBADO")),
         "pasos": [
-            {"label": "Comprobante recibido" if fila.get("tiene_comprobante") else "Pago registrado",
+            {"label": "Pago registrado",
              "fecha": registro, "completo": True, "actual": False},
             {"label": etiqueta, "fecha": "", "completo": not fecha_bloqueada and estado != "PENDIENTE", "actual": True},
         ],
@@ -390,32 +414,65 @@ def _presentar_costos(filas: list[dict], hoy: date, desde: date | None = None) -
     }
 
 
-def obtener_experiencia_cuenta(cliente: str, resumen: dict) -> dict:
+def obtener_experiencia_cuenta(
+    cliente: str,
+    resumen: dict,
+    *,
+    desde: str = "",
+    hasta: str = "",
+    pagina_pagos: int = 1,
+) -> dict:
     """Complementa un resumen ya calculado con hechos del cliente autenticado.
 
-    Cuatro lecturas acotadas en la misma foto de datos. El disponible es
+    Lecturas acotadas en la misma foto de datos. El disponible es
     informativo: emitir vuelve a validar el límite de manera atómica.
     """
     cliente = str(cliente or "").strip().upper()
     if not cliente or len(cliente) > 80:
         raise ValueError("El cliente no es válido.")
     hoy = _hoy_argentina()
-    inicio_cliente = inicio_cuenta_cliente(cliente)
-    inicio_costos = max(_meses(hoy)[0], inicio_cliente or _meses(hoy)[0])
+    fechas_pago = normalizar_filtros_cuenta("", desde, hasta)
+    try:
+        pagina_solicitada = max(1, int(pagina_pagos))
+    except (TypeError, ValueError):
+        raise ValueError("La página de pagos no es válida.") from None
+    inicio_costos = _meses(hoy)[0]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             cur.execute(_VENCIMIENTOS_SQL, (cliente, hoy, hoy))
             vencimientos = _presentar_vencimientos(cur.fetchall(), hoy)
-            cur.execute(_PAGOS_SQL, (cliente, inicio_cliente, inicio_cliente, None, None))
+            parametros_fechas = (
+                cliente,
+                fechas_pago["desde"] or None,
+                fechas_pago["desde"] or None,
+                fechas_pago["hasta"] or None,
+                fechas_pago["hasta"] or None,
+            )
+            cur.execute(_PAGOS_TOTAL_SQL, parametros_fechas)
+            fila_total = cur.fetchone() or {}
+            total_pagos = int(fila_total.get("total") or 0)
+            total_paginas = max(1, (total_pagos + 24) // 25)
+            pagina_actual = min(pagina_solicitada, total_paginas)
+            offset = (pagina_actual - 1) * 25
+            cur.execute(_PAGOS_SQL, parametros_fechas + (25, offset))
             pagos = [_presentar_pago(dict(f)) for f in cur.fetchall()]
             cur.execute(_CUPO_SQL, (cliente,))
             cupo = _presentar_cupo(dict(cur.fetchone() or {}))
             periodo = (cliente, inicio_costos, hoy + timedelta(days=1))
             cur.execute(_COSTOS_SQL, periodo + periodo)
-            costos = _presentar_costos(cur.fetchall(), hoy, desde=inicio_cliente)
+            costos = _presentar_costos(cur.fetchall(), hoy)
+    pagos_desde = offset + 1 if total_pagos else 0
+    pagos_hasta = min(offset + len(pagos), total_pagos)
     return {
         "vencimientos": vencimientos, "pagos": pagos, "cupo": cupo, "costos": costos,
+        "pagos_paginacion": {
+            "pagina_actual": pagina_actual,
+            "total_paginas": total_paginas,
+            "total": total_pagos,
+            "pagina_desde": pagos_desde,
+            "pagina_hasta": pagos_hasta,
+        },
         "actualizado_fecha": _fecha_visible(hoy),
         "pagos_en_revision_ars": _decimal_monto(resumen.get("pagos_pendientes_ars")),
         "credito_sin_imputar_ars": _decimal_monto(resumen.get("credito_sin_imputar_ars")),
@@ -429,7 +486,6 @@ def obtener_pago_cliente(cliente: str, pago_id: int) -> dict | None:
         return None
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(_PAGOS_SQL.replace("ORDER BY pa.id LIMIT 24", "ORDER BY pa.id"),
-                        (cliente, None, None, pago_id, pago_id))
+            cur.execute(_PAGO_SQL, (cliente, pago_id))
             fila = cur.fetchone()
     return _presentar_pago(dict(fila)) if fila else None

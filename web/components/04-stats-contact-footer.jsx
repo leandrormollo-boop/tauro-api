@@ -98,7 +98,7 @@ function Industries() {
               transition: "transform .2s",
               cursor: "default",
             }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = "translateY(-2px)"}
+            onMouseEnter={(e) => { if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) e.currentTarget.style.transform = "translateY(-2px)"; }}
             onMouseLeave={(e) => e.currentTarget.style.transform = "translateY(0)"}
             >
               {i}
@@ -140,7 +140,7 @@ function ContactCTA({ onCotizarClick }) {
               margin: "0 auto 28px",
               letterSpacing: "-0.03em",
             }}>
-              Conectá tu tienda.<br/>
+              Gestioná tus envíos.<br/>
               Centralizá tu operación.
             </h2>
             <p style={{ color: "var(--fg-2)", fontSize: 18, maxWidth: 580, margin: "0 auto 40px" }}>
@@ -148,8 +148,8 @@ function ContactCTA({ onCotizarClick }) {
               cada operación desde el portal de TAURO.
             </p>
             <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
-              <a href={INTEGRACIONES_MAILTO} className="btn btn-primary btn-lg">
-                Solicitar integración <ArrowRight size={16}/>
+              <a href={CUENTA_MAILTO} className="btn btn-primary btn-lg">
+                Solicitar una cuenta <ArrowRight size={16}/>
               </a>
               <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
             </div>
@@ -178,15 +178,15 @@ function Footer() {
               <span>Tauro<span style={{ color: "var(--fg-3)", fontWeight: 400, marginLeft: 4 }}>solutions</span></span>
             </a>
             <p style={{ color: "var(--fg-3)", fontSize: 14, maxWidth: 320, marginTop: 16 }}>
-              Tu logística en un solo portal. Conectá tu tienda o cargá tus envíos manualmente.
+              Cotizaciones, envíos y pagos en tu cuenta. Conectá tu tienda o cargá cada envío manualmente.
             </p>
           </div>
           <div>
             <h4>Servicios</h4>
             <ul>
-              <li><a href={INTEGRACIONES_MAILTO}>Solicitar integración</a></li>
+              <li><a href={CUENTA_MAILTO}>Solicitar una cuenta</a></li>
               <li><a href="#servicios">Centralizar operación</a></li>
-              <li><a href="#servicios">Cotizar envíos</a></li>
+              <li><a href="#cotizador">Cotizar envíos</a></li>
               <li><a href="/portal/login">Crear envíos</a></li>
               <li><a href="#tracking">Seguir envíos</a></li>
             </ul>

@@ -113,6 +113,8 @@ def test_template_render_y_nonce():
     from jinja2 import Environment, FileSystemLoader, select_autoescape
     from pathlib import Path
     env = Environment(loader=FileSystemLoader(Path(__file__).parents[1] / "templates"), autoescape=select_autoescape())
+    from servicios.presentacion import registrar_filtros
+    registrar_filtros(env)
     env.globals.update(pendientes_admin=lambda:0, alertas_guias_reemplazadas=lambda:0)
     html = env.get_template("admin/cliente_tarifas.html").render(
         cliente={"cliente_id":"TEST", "perfil_comercial":"", "pricing_rangos_internacional":rangos()},

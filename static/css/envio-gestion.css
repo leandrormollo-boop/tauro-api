@@ -1,0 +1,65 @@
+.shipment-manager-dialog{width:min(1040px,calc(100vw - 32px));height:min(790px,calc(100dvh - 32px));max-width:none;max-height:none;padding:0;border:1px solid var(--line);border-radius:14px;background:var(--bg-elev);color:var(--fg);overflow:hidden;margin:auto}
+.shipment-manager-dialog::backdrop{background:rgba(7,5,15,.7)}
+.shipment-manager-dialog>header{height:58px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+.shipment-manager-dialog h2{font:600 18px Inter,sans-serif;margin:0}
+.shipment-manager-dialog>header button{height:36px;width:36px;background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:26px}
+.shipment-manager-dialog iframe{display:block;border:0;width:100%;height:calc(100% - 58px);background:var(--bg)}
+body.portal-embedded .sidebar,body.portal-embedded .mobile-bar,body.portal-embedded .tabbar,body.portal-embedded .footer,body.portal-embedded #pwa-banner,body.portal-embedded .side-overlay{display:none!important}
+body.portal-operacion.portal-embedded .shell{display:block!important;min-height:0;padding:0!important}
+body.portal-operacion.portal-embedded .main{margin:0!important;padding:0!important;width:100%;min-width:0}
+body.portal-operacion.portal-embedded .main-inner{max-width:none;margin:0!important;padding:20px!important;min-height:0}
+body.portal-embedded{padding:0!important;background:var(--bg)}
+body.portal-embedded .wizard-compacto .submit-bar{position:sticky;bottom:0;width:auto;left:auto;right:auto}
+.shipment-hub{font-family:Inter,sans-serif;max-width:100%;min-width:0}
+.shipment-edit-back{display:inline-flex;min-height:36px;align-items:center;font:500 12px Inter,sans-serif;color:var(--accent-deep)}
+html[data-theme=dark] .shipment-edit-back{color:var(--accent-soft)}
+.shipment-hub [hidden]{display:none!important}
+.shipment-hub-summary{display:flex;justify-content:space-between;gap:20px;align-items:start;padding-bottom:18px;border-bottom:1px solid var(--line)}
+.shipment-hub h1{font:600 23px 'Space Grotesk',sans-serif;margin:0 0 4px;overflow-wrap:anywhere}
+.shipment-hub-summary p{font-size:12px;color:var(--fg-2);margin:0 0 10px}
+.shipment-hub .badge{font:500 12px Inter,sans-serif;letter-spacing:0;text-transform:none}
+.shipment-hub-price{flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.shipment-hub-price>span,.shipment-hub-price>small{display:block;color:var(--fg-2);font-size:12px}
+.shipment-hub-price>strong{display:block;color:var(--fg);font:600 30px 'Space Grotesk',sans-serif;line-height:1.4}
+.shipment-hub-tracking{margin-left:10px;font-size:12px;color:var(--fg-2)}
+.shipment-hub-tracking strong{font-family:'JetBrains Mono',monospace;color:var(--fg)}
+.shipment-hub-tabs{display:flex;gap:6px;margin:14px 0;flex-wrap:wrap}
+.shipment-hub-tabs button{border:1px solid transparent;background:transparent;color:var(--fg-2);border-radius:8px;font:500 13px Inter,sans-serif;cursor:pointer;min-height:40px;padding:8px 14px}
+.shipment-hub-tabs button[aria-pressed=true]{border-color:var(--accent);color:var(--accent-deep);background:var(--accent-glow)}
+html[data-theme=dark] .shipment-hub-tabs button[aria-pressed=true]{color:var(--accent-soft)}
+.shipment-hub button:focus-visible,.shipment-hub a:focus-visible,.shipment-manager-dialog button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.shipment-hub-parties{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.shipment-hub-parties section{border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0;overflow-wrap:anywhere}
+.shipment-hub h2{font:600 13px Inter,sans-serif;color:var(--fg-2);margin:0 0 10px}
+.shipment-hub-parties strong{font-size:15px}
+.shipment-hub p{line-height:1.5;font-size:13px;margin:8px 0;color:var(--fg-2)}
+.shipment-hub small{font-size:12px;color:var(--fg-2)}
+.shipment-hub-content-list{max-height:330px;overflow-y:auto;scrollbar-width:thin}
+.shipment-hub-content-list section{padding:12px 0;border-bottom:1px solid var(--line)}
+.shipment-hub-item{display:flex;gap:10px;justify-content:space-between;flex-wrap:wrap}
+.shipment-hub-declared{padding:12px 0;border-top:1px solid var(--line)}
+.shipment-hub-docs{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}
+.shipment-hub-docs .document-card{flex:1;min-width:240px;margin:0}
+.shipment-hub-footer{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:16px 0 0}
+.shipment-hub-footer form{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.shipment-hub .shipment-hub-consent{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-2)}
+.shipment-hub-consent input{width:18px;height:18px}
+.shipment-hub-note{font-size:12px!important;text-align:right}
+.shipment-hub-pickup-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0}
+.shipment-hub label{display:block;font:500 12px Inter,sans-serif}
+.shipment-hub label>input:not([type=checkbox]){display:block;width:100%;min-width:0;margin-top:6px}
+.portal-operacion .shipment-hub .pickup-card{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:16px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px}
+.portal-operacion .shipment-hub .pickup-identity,.portal-operacion .shipment-hub .pickup-menu{display:none}
+.portal-operacion .shipment-hub .pickup-schedule,.portal-operacion .shipment-hub .pickup-reservation,.portal-operacion .shipment-hub .pickup-status-note{display:flex}
+.portal-operacion .shipment-hub .pickup-state{grid-column:auto;grid-row:auto}
+.portal-operacion .shipment-hub .pickup-status-note{white-space:normal;-webkit-line-clamp:unset;overflow:visible;font-size:12px}
+@media(max-width:600px){
+ .shipment-manager-dialog{width:calc(100vw - 12px);height:calc(100dvh - 12px);border-radius:12px}
+ .shipment-manager-dialog>header{padding:10px 14px}
+ body.portal-operacion.portal-embedded .main-inner{padding:14px!important}
+ .shipment-hub-summary{flex-direction:column;gap:12px}.shipment-hub-price{text-align:left}
+ .shipment-hub-price>strong{font-size:26px}.shipment-hub-parties{grid-template-columns:1fr;gap:10px}
+ .shipment-hub-parties section{padding:12px}.shipment-hub-tabs{gap:0}
+ .shipment-hub-tabs button{padding:8px 10px}.shipment-hub-footer form{gap:10px}
+ .shipment-hub-pickup-fields{grid-template-columns:1fr 1fr}.shipment-hub-pickup-fields label:first-child{grid-column:1/-1}
+}

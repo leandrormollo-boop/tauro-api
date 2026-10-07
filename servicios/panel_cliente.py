@@ -19,11 +19,15 @@ estructuras vacías y la página sale igual, sin el bloque.
 """
 from __future__ import annotations
 
+from collections import Counter
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import re
+from zoneinfo import ZoneInfo
 
 from core.database import get_conn
 from servicios.estados_envio import estado_principal_envio, presentar_estados_envio
+from servicios.paises import normalizar_iso2
 
 
 # ── Embudo de envíos ─────────────────────────────────────────
@@ -89,10 +93,118 @@ PASOS_EMBUDO = [
 ]
 
 
+# El filtro combinado usa la misma definición que el contador del inicio.
+PASOS_ACCION_CLIENTE = frozenset(
+    paso["clave"] for paso in PASOS_EMBUDO if paso["accion_de"] == "cliente"
+)
+
+
 # Diez filas permiten recorrer el historial sin saltar de página a cada rato.
 # El historial completo sigue disponible: sólo se divide en páginas, nunca se
 # recorta.
 ENVIOS_POR_PAGINA = 10
+
+_MESES_CORTOS = (
+    "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+    "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+)
+
+
+def _fecha_de_operacion(solicitud: dict) -> date | None:
+    """Fecha comparable para estadísticas; jamás inventa una fecha faltante."""
+    valor = solicitud.get("fecha_operacion") or solicitud.get("created_at")
+    if isinstance(valor, datetime):
+        return valor.date()
+    if isinstance(valor, date):
+        return valor
+    texto = str(valor or "").strip()[:10]
+    try:
+        return date.fromisoformat(texto)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mes_anterior(anio: int, mes: int) -> tuple[int, int]:
+    return (anio - 1, 12) if mes == 1 else (anio, mes - 1)
+
+
+def resumen_inicio_cliente(
+    historial: list[dict],
+    embudo: list[dict],
+    *,
+    hoy: date | None = None,
+) -> dict:
+    """Resumen real del escritorio, calculado sobre envíos visibles del cliente.
+
+    No consulta otra vez la base: ``home`` ya necesita el historial para mostrar
+    la actividad reciente. Cancelados y reemplazados siguen en el historial,
+    pero no inflan actividad, meses ni destinos frecuentes.
+    """
+    hoy = hoy or datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date()
+    vigentes = [
+        solicitud for solicitud in historial
+        if str(solicitud.get("estado") or "").upper()
+        not in {"CANCELADO", "REEMPLAZADO"}
+    ]
+    conteos_embudo = {
+        str(paso.get("clave") or ""): int(paso.get("cantidad") or 0)
+        for paso in embudo
+    }
+
+    meses: list[tuple[int, int]] = []
+    cursor = (hoy.year, hoy.month)
+    for _ in range(6):
+        meses.append(cursor)
+        cursor = _mes_anterior(*cursor)
+    meses.reverse()
+    conteos_mes = Counter()
+    for solicitud in vigentes:
+        fecha = _fecha_de_operacion(solicitud)
+        if fecha:
+            conteos_mes[(fecha.year, fecha.month)] += 1
+    serie_mensual = [
+        {
+            "anio": anio,
+            "mes": mes,
+            "etiqueta": _MESES_CORTOS[mes - 1],
+            "cantidad": int(conteos_mes[(anio, mes)]),
+        }
+        for anio, mes in meses
+    ]
+    maximo_mensual = max((m["cantidad"] for m in serie_mensual), default=0)
+
+    destinos = Counter()
+    for solicitud in vigentes:
+        codigo = normalizar_iso2(solicitud.get("destino_pais") or "")
+        if codigo:
+            destinos[codigo] += 1
+    total_destinos = sum(destinos.values())
+    destinos_frecuentes = [
+        {
+            "codigo": codigo,
+            "cantidad": int(cantidad),
+            "porcentaje": round(cantidad * 100 / total_destinos) if total_destinos else 0,
+        }
+        for codigo, cantidad in destinos.most_common(5)
+    ]
+
+    return {
+        "envios_mes": int(conteos_mes[(hoy.year, hoy.month)]),
+        "envios_total": len(vigentes),
+        "en_seguimiento": conteos_embudo.get("despachados", 0),
+        "entregados": conteos_embudo.get("entregados", 0),
+        "guias_listas": conteos_embudo.get("guia_lista", 0),
+        "retenidos": conteos_embudo.get("retenidos", 0),
+        "requieren_accion": sum(
+            int(paso.get("cantidad") or 0)
+            for paso in embudo
+            if paso.get("accion_de") == "cliente"
+        ),
+        "serie_mensual": serie_mensual,
+        "maximo_mensual": maximo_mensual,
+        "destinos_frecuentes": destinos_frecuentes,
+        "paises_total": len(destinos),
+    }
 
 
 def paso_de_estado(estado: str, tracking_estado: str | None = None) -> str | None:
@@ -265,7 +377,13 @@ def preparar_historial_envios(
     ]
 
     paso = (paso or "").strip().lower()
-    if paso in {chip["clave"] for chip in chips}:
+    total_requieren_accion = sum(conteos.get(clave, 0) for clave in PASOS_ACCION_CLIENTE)
+    if paso == "requieren_accion":
+        filtradas = [
+            s for s in filtradas
+            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) in PASOS_ACCION_CLIENTE
+        ]
+    elif paso in {chip["clave"] for chip in chips}:
         filtradas = [
             s for s in filtradas
             if paso_de_estado(s.get("estado"), s.get("tracking_estado")) == paso
@@ -279,6 +397,11 @@ def preparar_historial_envios(
         s.get("estado") == historicos[paso] if paso in historicos
         else s.get("estado") not in ("CANCELADO", "REEMPLAZADO")
     )]
+    if paso == "requieren_accion":
+        historial_del_grupo = [
+            s for s in historial_del_grupo
+            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) in PASOS_ACCION_CLIENTE
+        ]
     por_pagina = max(1, int(por_pagina or ENVIOS_POR_PAGINA))
     total_resultados = len(filtradas)
     total_paginas = max(1, (total_resultados + por_pagina - 1) // por_pagina)
@@ -295,6 +418,7 @@ def preparar_historial_envios(
         "total_sin_filtrar": total_sin_filtrar,
         "total_busqueda": total_busqueda,
         "total_resultados": total_resultados,
+        "total_requieren_accion": total_requieren_accion,
         "pagina_actual": pagina_actual,
         "total_paginas": total_paginas,
         "paginas_visibles": _paginas_visibles(pagina_actual, total_paginas),

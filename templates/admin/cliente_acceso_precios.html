@@ -128,11 +128,11 @@
               <option value="MULTIPLICADOR" {% if c.markup_tipo == 'MULTIPLICADOR' %}selected{% endif %}>× multiplicador</option>
             </select>
             <input id="{{ c.id }}-markup" type="text" name="{{ c.id }}_markup_valor"
-                   value="{% if c.markup_valor is not none %}{{ '%g'|format(c.markup_valor|float) }}{% endif %}"
+                   value="{% if c.markup_valor is not none %}{{ c.markup_valor|numero_ars if c.markup_tipo == 'FIJO_ARS' else c.markup_valor|medida_cm }}{% endif %}"
                    placeholder="{% if c.id == 'dhl' %}14.000{% else %}Valor{% endif %}"
                    inputmode="decimal" data-numero="pricing" data-pricing-select="{{ c.id }}-markup-tipo" {% if not c.integracion_implementada %}disabled{% endif %} aria-label="{{ c.nombre }} — Valor de ganancia">
           </div>
-          {% if c.id == "oca" %}<div class="inherit-note">Tarifa nacional en ARS; no hereda la regla internacional.</div>{% elif not c.markup_tipo %}<div class="inherit-note">{% if not matriz.pricing_general %}Sin regla general: este operador no cotiza ni emite hasta cargar una ganancia.{% elif matriz.pricing_general.tipo == 'RANGOS' %}<a href="/admin/clientes/{{ matriz.cliente_id }}/tarifas">Rangos generales del cliente</a>{% else %}Hereda {{ matriz.pricing_general.tipo }} · {{ '%g'|format(matriz.pricing_general.valor) }}{% endif %}</div>{% endif %}
+          {% if c.id == "oca" %}<div class="inherit-note">Tarifa nacional en ARS; no hereda la regla internacional.</div>{% elif not c.markup_tipo %}<div class="inherit-note">{% if not matriz.pricing_general %}Sin regla general: este operador no cotiza ni emite hasta cargar una ganancia.{% elif matriz.pricing_general.tipo == 'RANGOS' %}<a href="/admin/clientes/{{ matriz.cliente_id }}/tarifas">Rangos generales del cliente</a>{% else %}Hereda {{ matriz.pricing_general.tipo }} · {{ (matriz.pricing_general.valor)|numero_ars }}{% endif %}</div>{% endif %}
           {% if c.id == 'dhl' %}
           <details class="tier-pricing" {% if c.markup_low_max_usd is not none or c.markup_high_min_usd is not none %}open{% endif %}>
             <summary>Tramos opcionales por costo DHL</summary>
@@ -140,25 +140,25 @@
               <div>
                 <label for="dhl-low-max">Si el costo es menor a (USD)</label>
                 <input id="dhl-low-max" type="text" name="dhl_markup_low_max_usd"
-                       value="{% if c.markup_low_max_usd is not none %}{{ '%g'|format(c.markup_low_max_usd|float) }}{% endif %}"
+                       value="{% if c.markup_low_max_usd is not none %}{{ (c.markup_low_max_usd)|numero_ars }}{% endif %}"
                        placeholder="Ej. 100" inputmode="decimal" data-numero="decimal">
               </div>
               <div>
                 <label for="dhl-low-ars">Sumar ganancia (ARS)</label>
                 <input id="dhl-low-ars" type="text" name="dhl_markup_low_ars"
-                       value="{% if c.markup_low_ars is not none %}{{ '%g'|format(c.markup_low_ars|float) }}{% endif %}"
+                       value="{% if c.markup_low_ars is not none %}{{ (c.markup_low_ars)|numero_ars }}{% endif %}"
                        placeholder="Ej. 20.000" inputmode="decimal" data-numero="monto">
               </div>
               <div>
                 <label for="dhl-high-min">Si el costo es mayor a (USD)</label>
                 <input id="dhl-high-min" type="text" name="dhl_markup_high_min_usd"
-                       value="{% if c.markup_high_min_usd is not none %}{{ '%g'|format(c.markup_high_min_usd|float) }}{% endif %}"
+                       value="{% if c.markup_high_min_usd is not none %}{{ (c.markup_high_min_usd)|numero_ars }}{% endif %}"
                        placeholder="Ej. 200" inputmode="decimal" data-numero="decimal">
               </div>
               <div>
                 <label for="dhl-high-usd">Sumar ganancia (USD)</label>
                 <input id="dhl-high-usd" type="text" name="dhl_markup_high_usd"
-                       value="{% if c.markup_high_usd is not none %}{{ '%g'|format(c.markup_high_usd|float) }}{% endif %}"
+                       value="{% if c.markup_high_usd is not none %}{{ (c.markup_high_usd)|numero_ars }}{% endif %}"
                        placeholder="Ej. 100" inputmode="decimal" data-numero="decimal">
               </div>
               <div class="tier-note">Entre ambos límites —y exactamente en los límites— se aplica la regla base elegida arriba. El margen USD se convierte con el dólar vigente de TAURO.</div>

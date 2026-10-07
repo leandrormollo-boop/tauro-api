@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Estadísticas{% endblock %}
+
+{% block content %}
+{% set r = resumen_inicio %}
+<section class="stats-page">
+    <header class="stats-page-head">
+        <div>
+            <h1>Estadísticas de envíos</h1>
+            <p>Actividad, estados y destinos de tus envíos vigentes.</p>
+        </div>
+        <a href="/portal/envios" class="btn btn-ghost">Ver todos mis envíos</a>
+    </header>
+
+    <nav class="stats-summary" aria-label="Resumen de envíos">
+        <a href="/portal/envios">
+            <span>Envíos vigentes</span>
+            <strong>{{ r.envios_total }}</strong>
+            <small>Abrir historial</small>
+        </a>
+        <a href="/portal/envios{% if r.serie_mensual %}?anio={{ r.serie_mensual[-1].anio }}&amp;mes={{ r.serie_mensual[-1].mes }}{% endif %}">
+            <span>Este mes</span>
+            <strong>{{ r.envios_mes }}</strong>
+            <small>Ver el período</small>
+        </a>
+        <a href="#destinos">
+            <span>Países de destino</span>
+            <strong>{{ r.paises_total }}</strong>
+            <small>Ver distribución</small>
+        </a>
+    </nav>
+
+    <div class="stats-layout">
+        <section class="home-panel stats-monthly" aria-labelledby="stats-monthly-title">
+            <header class="home-panel-head">
+                <div>
+                    <span class="eyebrow">Últimos 6 meses</span>
+                    <h2 id="stats-monthly-title">Cantidad de envíos</h2>
+                </div>
+            </header>
+            <div class="home-monthly-chart">
+                {% for mes in r.serie_mensual %}
+                <a href="/portal/envios?anio={{ mes.anio }}&amp;mes={{ mes.mes }}" class="home-monthly-bar stats-month-link" aria-label="Ver {{ mes.etiqueta }}: {{ mes.cantidad }} envíos">
+                    {% set tope = r.maximo_mensual if r.maximo_mensual else 1 %}
+                    <strong>{{ mes.cantidad }}</strong>
+                    <div class="home-bar-track" role="img" aria-label="{{ mes.etiqueta }}: {{ mes.cantidad }} envíos">
+                        <div class="home-bar-fill" style="--p:{{ ((mes.cantidad / tope) * 100) | round(1) }}%;--d:{{ loop.index0 * 70 }}ms"></div>
+                    </div>
+                    <span>{{ mes.etiqueta }}</span>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="home-panel stats-status" aria-labelledby="stats-status-title">
+            <header class="home-panel-head">
+                <div>
+                    <span class="eyebrow">Situación actual</span>
+                    <h2 id="stats-status-title">Estado de tus envíos</h2>
+                </div>
+            </header>
+            <div class="stats-status-list">
+                {% for paso in embudo %}
+                <a href="{{ paso.url }}">
+                    <span><strong>{{ paso.titulo }}</strong><small>{{ paso.detalle }}</small></span>
+                    <b>{{ paso.cantidad }}</b>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="home-panel stats-destinations" id="destinos" aria-labelledby="stats-destinations-title">
+            <header class="home-panel-head">
+                <div>
+                    <span class="eyebrow">Distribución</span>
+                    <h2 id="stats-destinations-title">Destinos de tus envíos</h2>
+                    <p>Incluye importaciones con destino Argentina.</p>
+                </div>
+                <small>{{ r.paises_total }} países</small>
+            </header>
+            {% if r.destinos_frecuentes %}
+            <ol class="home-destinations-list">
+                {% for destino in r.destinos_frecuentes %}
+                <li>
+                    <span class="home-country-code">{{ destino.codigo }}</span>
+                    <div>
+                        <span><strong>{{ nombre_pais(destino.codigo) }}</strong><small>{{ destino.cantidad }} envíos · {{ destino.porcentaje }}%</small></span>
+                        <div class="home-dest-track" role="img" aria-label="{{ nombre_pais(destino.codigo) }}: {{ destino.porcentaje }} por ciento">
+                            <div class="home-dest-fill" style="--p:{{ destino.porcentaje }}%;--d:{{ loop.index0 * 90 }}ms"></div>
+                        </div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ol>
+            {% else %}
+            <div class="home-insight-empty">Los destinos aparecerán cuando generes tus primeros envíos.</div>
+            {% endif %}
+        </section>
+    </div>
+</section>
+{% endblock %}

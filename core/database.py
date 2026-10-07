@@ -233,6 +233,12 @@ SELECT
     ) AS tracking_dhl_estado_controlado,
     TO_REGCLASS('envio_cotizacion_snapshots') IS NOT NULL
         AS envio_cotizacion_snapshots_existe,
+    TO_REGCLASS('solicitud_cotizacion_revisiones') IS NOT NULL
+        AS solicitud_cotizacion_revisiones_existe,
+    EXISTS(SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('solicitud_cotizacion_revisiones')
+          AND t.tgname = 'trg_revision_cotizacion_inmutable'
+          AND t.tgenabled IN ('O', 'A')) AS revisiones_cotizacion_protegidas,
     TO_REGCLASS('facturas_courier') IS NOT NULL
         AS facturas_courier_existe,
     TO_REGCLASS('facturas_courier_items') IS NOT NULL
@@ -387,7 +393,48 @@ SELECT
         WHERE t.tgrelid = TO_REGCLASS('envios')
           AND t.tgname = 'trg_proteger_fc_legacy_envios'
           AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
-    ) AS legado_fc_envios_bloqueado
+    ) AS legado_fc_envios_bloqueado,
+    (
+        SELECT COUNT(*) = 2 AND COALESCE(BOOL_AND(
+            (column_name = 'origen_retiro' AND data_type = 'jsonb'
+                AND is_nullable = 'NO')
+            OR
+            (column_name = 'origen_clave' AND data_type = 'text'
+                AND is_nullable = 'NO')
+        ), FALSE)
+        FROM information_schema.columns
+        WHERE table_schema = CURRENT_SCHEMA()
+          AND table_name = 'recolecciones'
+          AND column_name IN ('origen_retiro', 'origen_clave')
+    ) AS recolecciones_origen_columnas_listas,
+    EXISTS (
+        SELECT 1
+        FROM pg_class indice
+        JOIN pg_index i ON i.indexrelid = indice.oid
+        WHERE indice.oid = TO_REGCLASS(
+            'uq_recoleccion_origen_fecha_abierta_v3'
+        )
+          AND i.indrelid = TO_REGCLASS('recolecciones')
+          AND i.indisunique AND i.indisvalid AND i.indisready
+          AND i.indnkeyatts = 4
+          AND i.indpred IS NOT NULL
+          AND LOWER(PG_GET_INDEXDEF(i.indexrelid)) LIKE '%cliente_id%'
+          AND LOWER(PG_GET_INDEXDEF(i.indexrelid)) LIKE '%fecha%'
+          AND LOWER(PG_GET_INDEXDEF(i.indexrelid)) LIKE '%courier%'
+          AND LOWER(PG_GET_INDEXDEF(i.indexrelid)) LIKE '%origen_clave%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%agendando%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%agendada%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%cancelando%'
+          AND LOWER(PG_GET_EXPR(i.indpred, i.indrelid)) LIKE '%verificar_courier%'
+    ) AS recolecciones_origen_indice_listo,
+    EXISTS (
+        SELECT 1 FROM pg_trigger t
+        WHERE t.tgrelid = TO_REGCLASS('recolecciones')
+          AND t.tgname = 'trg_recoleccion_origen'
+          AND NOT t.tgisinternal AND t.tgenabled IN ('O', 'A')
+    ) AS recolecciones_origen_trigger_listo,
+    TO_REGCLASS('uq_recoleccion_cliente_fecha_abierta_v2') IS NULL
+        AS recolecciones_indice_global_retirado
 """
 
 _READINESS_CONTABLE_CAMPOS = (
@@ -417,6 +464,8 @@ _READINESS_CONTABLE_CAMPOS = (
     "tracking_dhl_estado_controlado",
     "tracking_dhl_indice_pendiente",
     "envio_cotizacion_snapshots_existe",
+    "solicitud_cotizacion_revisiones_existe",
+    "revisiones_cotizacion_protegidas",
     "facturas_courier_existe",
     "facturas_courier_items_existe",
     "factura_courier_item_matches_existe",
@@ -437,6 +486,10 @@ _READINESS_CONTABLE_CAMPOS = (
     "estados_cargos_controlados",
     "estados_pagos_controlados",
     "legado_fc_envios_bloqueado",
+    "recolecciones_origen_columnas_listas",
+    "recolecciones_origen_indice_listo",
+    "recolecciones_origen_trigger_listo",
+    "recolecciones_indice_global_retirado",
 )
 
 

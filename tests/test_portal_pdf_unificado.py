@@ -44,6 +44,66 @@ def test_guia_historica_sin_invoice_conserva_su_pdf_original():
     assert solicitudes_guia.unir_guia_e_invoice_pdf(guia) == guia
 
 
+def test_descarga_y_visor_comparten_invoice_marcada_sin_modificar_originales(monkeypatch):
+    from contextlib import contextmanager
+    from servicios import invoice_marca, documentos_portal
+    from test_invoice_marca import _invoice
+
+    guia = _pdf_con_paginas((100, 200), (110, 210))
+    original_invoice = _invoice(paginas=1)
+    original_row = {"label_pdf": guia, "commercial_invoice_pdf": original_invoice,
+                    "courier": "DHL", "cliente_id": "DEMO", "dest_nombre": "TEST",
+                    "remitente_pais": "AR", "numero_guia_tauro": 50302}
+    consultas = []
+    abierta = False
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def execute(self, sql, parametros):
+            assert sql.strip().startswith("SELECT")
+            consultas.append((sql, parametros))
+        def fetchone(self): return dict(original_row)
+
+    class Conn:
+        def cursor(self): return Cursor()
+
+    @contextmanager
+    def conectar():
+        nonlocal abierta
+        abierta = True
+        try: yield Conn()
+        finally: abierta = False
+
+    original_brand = invoice_marca.factura_para_cliente
+    marcas = []
+
+    def branding(pdf, courier):
+        assert not abierta, "El renderer no debe retener la conexión de la base"
+        resultado = original_brand(pdf, courier)
+        marcas.append(resultado)
+        return resultado
+
+    monkeypatch.setattr(solicitudes_guia, "get_conn", conectar)
+    monkeypatch.setattr(invoice_marca, "factura_para_cliente", branding)
+    resultado = solicitudes_guia.preparar_documentos_envio_portal(5, "demo")
+    visor = documentos_portal.obtener_documento("invoice", 5, "DEMO")
+    assert visor.contenido == marcas[0] == marcas[1]
+    assert visor.contenido != original_invoice
+    assert resultado["filename"] == "TAURO - DEMO - TEST - AR - 50302.pdf"
+    paginas = PdfReader(BytesIO(resultado["pdf"])).pages
+    assert len(paginas) == 3
+    assert [list(p.mediabox) for p in paginas[:2]] == [[0, 0, 100, 200], [0, 0, 110, 210]]
+    assert len(paginas[0].images) == len(paginas[1].images) == 0
+    assert len(paginas[2].images) == 1
+    assert original_row["commercial_invoice_pdf"] == original_invoice
+    assert all(params == (5, "DEMO") for _, params in consultas)
+    assert all("s.cliente_id=%s" in sql for sql, _ in consultas)
+    # El getter del administrador conserva el archivo de origen.
+    assert solicitudes_guia.obtener_factura_comercial_pdf(5) == original_invoice
+    assert len(marcas) == 2
+
+
 def test_invoice_invalida_no_se_oculta_devolviendo_solo_la_guia():
     with pytest.raises(ValueError, match="unificar"):
         solicitudes_guia.unir_guia_e_invoice_pdf(

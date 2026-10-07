@@ -5,6 +5,7 @@ from servicios.carrier_contract import (
     capability_supported,
     carriers_for,
     carrier_spec,
+    operation_implemented,
     public_catalog,
 )
 
@@ -28,6 +29,13 @@ def test_ambitos_no_mezclan_nacionales_e_internacionales():
 
 def test_capacidades_son_declarativas_y_no_dependen_de_credenciales():
     assert capability_supported("dhl", Capacidad.EMITIR) is True
+    assert operation_implemented("dhl", Capacidad.COTIZAR, ambito=Ambito.INTERNACIONAL)
+    assert not operation_implemented(
+        "fedex", Capacidad.COTIZAR, ambito=Ambito.INTERNACIONAL,
+    )
+    assert not operation_implemented(
+        "ups", Capacidad.COTIZAR, ambito=Ambito.INTERNACIONAL,
+    )
     assert capability_supported("oca", "cotizar") is True
     assert capability_supported("oca", "tracking") is True
     assert capability_supported("oca", "recolectar") is False
@@ -48,9 +56,9 @@ def test_catalogo_publico_no_expone_variables_ni_promete_credenciales():
         "cancelar", "cotizar", "emitir", "etiqueta", "tracking",
     )
     fedex = next(item for item in catalogo if item["id"] == "fedex")
-    assert fedex["estado"] == "tarifario_publico"
-    assert fedex["capacidades"] == ("cotizar",)
-    assert "emisión no habilitada" in fedex["estado_label"]
+    assert fedex["estado"] == "integracion_pendiente"
+    assert fedex["capacidades"] == ()
+    assert "pendiente" in fedex["estado_label"].lower()
     assert next(item for item in catalogo if item["id"] == "ups")["capacidades"] == ()
     assert all("variables_requeridas" not in item for item in catalogo)
 

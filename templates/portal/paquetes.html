@@ -3,7 +3,7 @@
 {% block content %}
 <link rel="stylesheet" href="/static/css/portal-paquetes.css?v=2">
 <div class="pkg-page">
-  <div class="page-title"><div><span class="pkg-eyebrow">PREPARÁ UNA VEZ · COTIZÁ CADA VENTA</span><h1>Embalajes y tarifas</h1><p>Tus cajas, tus productos y el envío que verá el comprador.</p></div><a class="btn btn-ghost" href="/portal/tienda">Ir a mis ventas →</a></div>
+  <div class="page-title tauro-branded-heading"><div><span class="pkg-eyebrow">PREPARÁ UNA VEZ · COTIZÁ CADA VENTA</span><h1>Embalajes y tarifas</h1><p>Tus cajas, tus productos y el envío que verá el comprador.</p></div><div class="tauro-brand-tools">{% include 'portal/_brand_badge.html' %}<a class="btn btn-ghost" href="/portal/tienda">Ir a mis ventas →</a></div></div>
   <div class="pkg-stats" id="pkg-stats"></div>
   <div id="pkg-notice" class="msg" role="status" hidden></div>
   <nav class="pkg-tabs" aria-label="Configuración de embalajes">
@@ -71,7 +71,7 @@
   </section>
 </div>
 <dialog id="pkg-dialog" class="pkg-dialog"><form id="pkg-box-form">
-  <div class="pkg-section-head"><h2 id="pkg-dialog-title">Nuevo embalaje</h2><button class="btn btn-ghost" type="button" id="pkg-close" aria-label="Cerrar">✕</button></div>
+  <div class="pkg-section-head tauro-branded-dialog-head"><h2 id="pkg-dialog-title">Nuevo embalaje</h2>{% include 'portal/_brand_badge.html' %}<button class="btn btn-ghost" type="button" id="pkg-close" aria-label="Cerrar">✕</button></div>
   <input type="hidden" name="id"><label>Nombre<input name="nombre" maxlength="80" placeholder="Caja reel individual" required></label>
   <fieldset><legend>Medidas externas de la caja cerrada (cm)</legend><div class="pkg-fields pkg-three"><label>Largo<input name="largo_cm" inputmode="decimal" placeholder="15" required></label><label>Ancho<input name="ancho_cm" inputmode="decimal" placeholder="15" required></label><label>Alto<input name="alto_cm" inputmode="decimal" placeholder="10" required></label></div></fieldset>
   <div class="pkg-fields"><label>Peso de caja vacía (kg)<input name="tara_kg" inputmode="decimal" placeholder="0,080" required></label><label>Peso de protección (kg)<input name="proteccion_kg" inputmode="decimal" placeholder="0,020" required></label></div>
@@ -80,5 +80,5 @@
   <div id="pkg-dialog-error" class="msg error" role="alert" hidden></div><button class="btn btn-primary" type="submit">Guardar embalaje</button>
 </form></dialog>
 <script id="pkg-data" type="application/json" nonce="{{ request.state.csp_nonce }}">{{ paquetes_data | tojson }}</script>
-<script src="/static/js/portal-paquetes.js?v=2" defer></script>
+<script src="/static/js/portal-paquetes.js?v=4" defer></script>
 {% endblock %}

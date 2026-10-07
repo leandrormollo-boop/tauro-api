@@ -51,6 +51,10 @@ def test_pago_publica_solo_hechos_sin_notas_privadas(estado, label):
     assert pago["monto_ars"] == Decimal("10.10")
     assert pago["registrado_at"] == "14/09/2026 · 22:20 (AR)"
     assert len(pago["pasos"]) == 2
+    # El archivo puede haberse adjuntado después: created_at fecha el pago,
+    # no la recepción del comprobante.
+    assert pago["pasos"][0]["label"] == "Pago registrado"
+    assert pago["pasos"][0]["fecha"] == pago["registrado_at"]
     assert pago["pasos"][1]["fecha"] == ""
     assert "nota" not in pago and "rechazo_motivo" not in pago
     assert "Proveedor" not in str(pago)
@@ -257,13 +261,19 @@ def test_lecturas_reales_aislan_cliente_parciales_reservas_y_costos(cuenta_aisla
     assert p2["aplicaciones"][0]["solicitud_id"] == 1
     assert p2["aplicaciones"][0]["destinatario"] == "DESTINO WAIMAO"
     assert "DESTINO PRIVADO" not in str(resultado)
+    assert resultado["pagos_paginacion"] == {
+        "pagina_actual": 1, "total_paginas": 1, "total": 6,
+        "pagina_desde": 1, "pagina_hasta": 6,
+    }
     # El cupo incluye los ajustes aplicados (+20 -5), igual que el libro.
     assert resultado["cupo"]["deuda_ars"] == Decimal("323.00")
     assert resultado["cupo"]["reservado_ars"] == Decimal("100.00")
     assert resultado["cupo"]["disponible_ars"] == Decimal("577.00")
     costos = resultado["costos"]
-    assert costos["total_ars"] == Decimal("185.00")  # Septiembre: 100+20-5+70.
-    assert [m["clave"] for m in costos["meses"]] == ["2026-09"]
+    assert costos["total_ars"] == Decimal("395.00")
+    assert [m["clave"] for m in costos["meses"]] == [
+        "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09",
+    ]
     assert costos["meses"][-1]["nacional_ars"] == Decimal("115.00")
     assert costos["meses"][-1]["sin_clasificar_ars"] == Decimal("70.00")
     assert ec.obtener_experiencia_cuenta("WAIMAO' OR '1'='1", {})["pagos"] == []
@@ -284,10 +294,10 @@ def test_totales_vencimientos_no_se_recortan_al_limitar_seis(cuenta_aislada):
     assert resultado["vencimientos"]["cantidad_vencida"] == 9
     assert resultado["vencimientos"]["total_vencido_ars"] == Decimal("90.09")
     assert not resultado["cupo"]["configurado"]
-    assert len(resultado["costos"]["meses"]) == 1
+    assert len(resultado["costos"]["meses"]) == 6
 
 
-def test_inicio_waimao_filtra_pagos_por_fecha_antes_del_limite_sin_cambiar_deuda(cuenta_aislada):
+def test_historial_de_pagos_ya_no_aplica_el_corte_waimao_y_no_cambia_deuda(cuenta_aislada):
     with cuenta_aislada() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -311,13 +321,18 @@ def test_inicio_waimao_filtra_pagos_por_fecha_antes_del_limite_sin_cambiar_deuda
                 FROM generate_series(10,18) AS n;
             """)
     resultado = ec.obtener_experiencia_cuenta(" waimao ", {"pagos_pendientes_ars": Decimal("10")})
-    assert {p["id"] for p in resultado["pagos"]} == {2, 4, 6}
-    assert {p["fecha"] for p in resultado["pagos"]} == {"01/09/2026", "02/09/2026"}
+    assert {p["id"] for p in resultado["pagos"]} == {
+        1, 2, 3, 4, 6, *range(10, 19),
+    }
+    assert {p["fecha"] for p in resultado["pagos"]} == {
+        "31/08/2026", "01/09/2026", "02/09/2026",
+    }
+    assert resultado["pagos_paginacion"]["total"] == 14
     assert resultado["pagos_en_revision_ars"] == Decimal("10.00")
     assert resultado["vencimientos"]["items"][0]["fecha_vencimiento"] == "31/08/2026"
     assert resultado["cupo"]["deuda_ars"] == Decimal("235.00")
     assert resultado["cupo"]["disponible_ars"] == Decimal("265.00")
-    assert resultado["costos"]["total_ars"] == Decimal("200.00")
+    assert resultado["costos"]["total_ars"] == Decimal("300.00")
     otro = ec.obtener_experiencia_cuenta("OTRO", {})
     assert [p["id"] for p in otro["pagos"]] == [5]
     assert len(otro["costos"]["meses"]) == 6
@@ -327,6 +342,98 @@ def test_inicio_waimao_filtra_pagos_por_fecha_antes_del_limite_sin_cambiar_deuda
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS cantidad FROM pagos WHERE cliente_id='WAIMAO'")
             assert cur.fetchone()["cantidad"] == 14
+
+
+def test_pagos_se_filtran_por_intervalo_y_paginan_veinticinco(cuenta_aislada):
+    with cuenta_aislada() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO clientes VALUES ('WAIMAO',NULL,false),('OTRO',NULL,false)")
+            cur.execute("""
+                INSERT INTO pagos
+                    (id,cliente_id,fecha,created_at,monto_ars,metodo,referencia,estado)
+                SELECT n,'WAIMAO',
+                       CASE WHEN n=1 THEN DATE '2025-12-31' ELSE DATE '2026-01-15' END,
+                       TIMESTAMPTZ '2026-01-15 12:00+00' + n * INTERVAL '1 second',
+                       n,'Transferencia','P-'||n,
+                       CASE n % 3 WHEN 0 THEN 'PENDIENTE' WHEN 1 THEN 'APROBADO' ELSE 'RECHAZADO' END
+                FROM generate_series(1,27) n;
+                INSERT INTO pagos
+                    (id,cliente_id,fecha,created_at,monto_ars,metodo,referencia,estado)
+                SELECT n,'WAIMAO',DATE '2026-02-15',
+                       TIMESTAMPTZ '2026-02-15 12:00+00' + n * INTERVAL '1 second',
+                       n,'Transferencia','FEB-'||n,'APROBADO'
+                FROM generate_series(30,49) n;
+                INSERT INTO pagos
+                    (id,cliente_id,fecha,created_at,monto_ars,metodo,referencia,estado)
+                VALUES (100,'OTRO','2026-01-15','2026-01-15 23:59+00',999,
+                        'Transferencia','PRIVADO','APROBADO');
+            """)
+
+    primera = ec.obtener_experiencia_cuenta(
+        "WAIMAO", {}, desde="2026-01-01", hasta="2026-01-31",
+    )
+    segunda = ec.obtener_experiencia_cuenta(
+        "WAIMAO", {}, desde="2026-01-01", hasta="2026-01-31", pagina_pagos=2,
+    )
+    veinte = ec.obtener_experiencia_cuenta(
+        "WAIMAO", {}, desde="2026-02-01", hasta="2026-02-28",
+    )
+    assert [p["id"] for p in primera["pagos"]] == list(range(27, 2, -1))
+    assert [p["id"] for p in segunda["pagos"]] == [2]
+    assert primera["pagos_paginacion"] == {
+        "pagina_actual": 1, "total_paginas": 2, "total": 26,
+        "pagina_desde": 1, "pagina_hasta": 25,
+    }
+    assert segunda["pagos_paginacion"] == {
+        "pagina_actual": 2, "total_paginas": 2, "total": 26,
+        "pagina_desde": 26, "pagina_hasta": 26,
+    }
+    assert len(veinte["pagos"]) == veinte["pagos_paginacion"]["total"] == 20
+    assert veinte["pagos_paginacion"]["total_paginas"] == 1
+    assert "PRIVADO" not in str(primera) + str(segunda)
+
+
+def test_pago_devuelve_todas_las_guias_propias_sin_limite_oculto(cuenta_aislada):
+    with cuenta_aislada() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO clientes VALUES ('WAIMAO',NULL,false),('OTRO',NULL,false)")
+            cur.execute("""
+                INSERT INTO solicitudes_guia
+                    (id,cliente_id,tracking,estado,dest_nombre)
+                SELECT n,'WAIMAO','GUIA-'||n,'GUIA_LISTA','Destino '||n
+                FROM generate_series(1,26) n;
+                INSERT INTO solicitudes_guia
+                    (id,cliente_id,tracking,estado,dest_nombre)
+                VALUES (100,'OTRO','PRIVADA','GUIA_LISTA','Destino privado');
+                INSERT INTO envios
+                    (id,cliente_id,fecha,monto_ars,estado,tracking,solicitud_id,ambito)
+                SELECT n,'WAIMAO','2026-09-10',10,'ACTIVO','GUIA-'||n,n,'INTERNACIONAL'
+                FROM generate_series(1,26) n;
+                INSERT INTO envios VALUES
+                    (100,'OTRO','2026-09-10',10,'ACTIVO','PRIVADA',100,'INTERNACIONAL');
+                INSERT INTO pagos
+                    (id,cliente_id,fecha,created_at,monto_ars,metodo,estado)
+                VALUES (1,'WAIMAO','2026-09-15','2026-09-15 12:00+00',270,
+                        'Transferencia','APROBADO');
+                INSERT INTO pagos_aplicaciones
+                    (id,pago_id,envio_id,monto_ars,estado,ambito)
+                SELECT n,1,n,10,'APLICADA','INTERNACIONAL'
+                FROM generate_series(1,26) n;
+                INSERT INTO pagos_aplicaciones VALUES
+                    (100,1,NULL,100,10,'APLICADA','INTERNACIONAL');
+            """)
+
+    listado = ec.obtener_experiencia_cuenta(
+        "WAIMAO", {}, desde="2026-09-01", hasta="2026-09-30",
+    )["pagos"][0]
+    detalle = ec.obtener_pago_cliente("WAIMAO", 1)
+    assert listado["cantidad_aplicaciones"] == len(listado["aplicaciones"]) == 26
+    assert detalle["cantidad_aplicaciones"] == len(detalle["aplicaciones"]) == 26
+    assert {a["tracking"] for a in detalle["aplicaciones"]} == {
+        f"GUIA-{n}" for n in range(1, 27)
+    }
+    assert "PRIVADA" not in str(listado) + str(detalle)
+    assert ec.obtener_pago_cliente("OTRO", 1) is None
 
 
 def test_pago_futuro_legacy_es_visible_sin_acreditar_ni_reservar(cuenta_aislada):
@@ -389,6 +496,8 @@ def movimientos_aislados(cuenta_aislada, monkeypatch):
                     id integer PRIMARY KEY, tax_cliente_ars numeric DEFAULT 0,
                     diferencia_flete_ars numeric DEFAULT 0, motivo_diferencia text DEFAULT 'PESO_REAL',
                     precio_cliente_inicial_ars numeric DEFAULT 100,
+                    precio_cliente_final_ars numeric DEFAULT 100,
+                    solicitud_id integer, version integer DEFAULT 1, estado text DEFAULT 'CERRADA',
                     peso_cotizado_kg numeric, peso_final_facturado_kg numeric, peso_base_facturado text);
                 CREATE TABLE factura_courier_item_matches(solicitud_id integer,item_id integer,estado text);
                 CREATE TABLE facturas_courier_items(id integer,descripcion text,concepto_tipo text);
@@ -452,7 +561,9 @@ def test_buscar_pago_por_factura_guia_o_destinatario_no_duplica_haber(movimiento
     assert sum(f[8] for f in filas) == 40
 
 
-def test_costos_asientos_negativos_y_timezone_coinciden_con_lista_y_excel(movimientos_aislados):
+def test_costos_asientos_negativos_en_el_mes_del_envio_coinciden_con_lista_y_excel(movimientos_aislados):
+    """Las diferencias y el TAX cuentan en el mes del envío (como en la
+    planilla del cliente), no en el día en que el courier los informó."""
     from servicios import cuenta_corriente as cc
     from servicios.export_cuenta import generar_excel_cuenta
     from io import BytesIO
@@ -464,27 +575,29 @@ def test_costos_asientos_negativos_y_timezone_coinciden_con_lista_y_excel(movimi
                 INSERT INTO solicitudes_guia(id,cliente_id,tracking)
                     VALUES (1,'CLIENTE_QA','ANTERIOR'),(2,'CLIENTE_QA','ACTUAL');
                 INSERT INTO envios(id,cliente_id,fecha,monto_ars,estado,solicitud_id,ambito)
-                    VALUES (1,'CLIENTE_QA','2026-03-10',100,'ACTIVO',1,'NACIONAL'),
+                    VALUES (1,'CLIENTE_QA','2026-08-10',10,'ACTIVO',1,'NACIONAL'),
                            (2,'CLIENTE_QA','2026-09-10',50,'ACTIVO',2,'INTERNACIONAL');
                 INSERT INTO conciliaciones_envio(id) SELECT generate_series(1,5);
                 INSERT INTO ajustes_cliente(id,solicitud_id,monto_ars,estado,aplicado_at,tipo,conciliacion_id)
                     VALUES (1,1,20,'APLICADO','2026-09-15 01:00+00','DEBITO',1),
                            (2,1,-75,'APLICADO','2026-09-15 01:00+00','CREDITO',2),
-                           (3,1,-7,'APLICADO','2026-08-15 12:00+00','CREDITO',3),
+                           (3,1,-7,'APLICADO','2026-07-15 12:00+00','CREDITO',3),
                            (4,1,0.005,'APLICADO','2026-09-15 01:00+00','DEBITO',4),
                            (5,1,0.005,'APLICADO','2026-09-15 01:00+00','DEBITO',5);
             """)
     costos = ec.obtener_experiencia_cuenta("CLIENTE_QA", {})["costos"]
     agosto, septiembre = costos["meses"][-2:]
-    assert agosto["total_ars"] == Decimal("-7.00")
-    assert septiembre["nacional_ars"] == Decimal("-54.98")
+    # Todos los ajustes son del envío de agosto, aunque se aplicaron en julio y septiembre.
+    assert agosto["nacional_ars"] == Decimal("-51.98")
+    assert agosto["total_ars"] == Decimal("-51.98")
+    assert agosto["negativo_ars"] == Decimal("51.98")
     assert septiembre["internacional_ars"] == Decimal("50.00")
-    assert septiembre["total_ars"] == Decimal("-4.98")
+    assert septiembre["total_ars"] == Decimal("50.00")
     assert septiembre["positivo_ars"] == Decimal("50.00")
-    assert septiembre["negativo_ars"] == Decimal("54.98")
-    assert costos["total_ars"] == Decimal("-11.98")
+    assert septiembre["negativo_ars"] == Decimal("0")
+    assert costos["total_ars"] == Decimal("-1.98")
     assert costos["maximo_positivo_ars"] == Decimal("50.00")
-    assert costos["maximo_negativo_ars"] == Decimal("54.98")
+    assert costos["maximo_negativo_ars"] == Decimal("51.98")
     assert costos["hay_negativos"] is True
     for mes in (agosto, septiembre):
         filtros = {"tipo": "costos", "desde": mes["desde"], "hasta": mes["hasta"]}
@@ -493,7 +606,7 @@ def test_costos_asientos_negativos_y_timezone_coinciden_con_lista_y_excel(movimi
         libro = load_workbook(BytesIO(generar_excel_cuenta("CLIENTE_QA", **filtros)))
         filas = list(libro["Movimientos"].values)[1:]
         assert sum(Decimal(str(f[7]))-Decimal(str(f[8])) for f in filas) == mes["total_ars"]
-    ajustes = cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-09-14", hasta="2026-09-14")
-    assert ajustes["total_resultados"] == 4
-    assert {m["fecha_iso"] for m in ajustes["items"]} == {"2026-09-14"}
-    assert cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-09-15")["total_resultados"] == 0
+    ajustes = cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-08-10", hasta="2026-08-10")
+    assert ajustes["total_resultados"] == 5
+    assert {m["fecha_iso"] for m in ajustes["items"]} == {"2026-08-10"}
+    assert cc.movimientos_cuenta_paginados("CLIENTE_QA", tipo="diferencias", desde="2026-08-11")["total_resultados"] == 0

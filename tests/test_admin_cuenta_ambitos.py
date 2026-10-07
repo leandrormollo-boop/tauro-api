@@ -607,7 +607,7 @@ def test_templates_exponen_ambitos_y_no_mutan_cargos_sin_api():
     assert "Crédito sin imputar" in detalle
     assert "Cargos sin clasificar" in detalle
     assert "SIN CLASIFICAR" in detalle
-    assert '"{:,.2f}".format' in detalle
+    assert "|numero_ars" in detalle or "dinero_ars" in detalle
     assert '"{:,.0f}".format' not in detalle
     assert "clasificación segura todavía no está habilitada" in detalle
     assert "/clasificar" in detalle

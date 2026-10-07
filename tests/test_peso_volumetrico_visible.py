@@ -59,6 +59,6 @@ def test_cotizadores_y_detalle_explican_los_tres_pesos():
     assert "/ 4000" in nacional
     for contenido in (internacional, nacional, detalle):
         assert "Peso real" in contenido
-        assert "Peso volumétrico" in contenido
+        assert ("Peso volumétrico" in contenido) or ("Peso por volumen" in contenido)
         assert "Peso facturable" in contenido
         assert "Se cobra por volumen" in contenido

@@ -10,6 +10,8 @@ from servicios.oca_portal_qa import QAPortalError
 
 ROOT = Path(__file__).resolve().parents[1]
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
+from servicios.presentacion import registrar_filtros
+registrar_filtros(templates.env)
 router = APIRouter(prefix="/portal/nacional/oca", tags=["OCA QA local"])
 OWNER = "TAURO-QA-LOCAL"
 

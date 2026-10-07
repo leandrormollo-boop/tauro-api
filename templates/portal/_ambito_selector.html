@@ -1,9 +1,11 @@
 {% from 'portal/_scope_icons.html' import scope_icon %}
 <section class="scope-screen" aria-labelledby="scope-title">
-    <header class="scope-head">
+    <header class="scope-head tauro-branded-heading">
+        <div>
         <span class="eyebrow">{{ 'Cotizador' if flujo == 'cotizar' else 'Nuevo envío' }}</span>
         <h1 id="scope-title">¿Qué tipo de envío vas a gestionar?</h1>
         <p>Elegí dónde se mueve tu envío para ver las opciones disponibles.</p>
+        </div>{% include 'portal/_brand_badge.html' %}
     </header>
 
     <div class="scope-grid">

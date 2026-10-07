@@ -1,160 +1,227 @@
 {% extends "base.html" %}
+{% from "portal/_scope_icons.html" import scope_icon %}
+{% from "portal/_sprites.html" import portal_sprite %}
 {% block title %}Inicio{% endblock %}
 
-{% block content %}
-<section class="home-hero">
-    <div class="home-hero-content">
-        <div class="eyebrow">Tu operación, conectada</div>
-        <h1>Hola, <span class="t-metal">{{ cliente }}</span></h1>
-        <p>Tus envíos, su seguimiento y tu cuenta. Todo a mano.</p>
-        <div class="home-primary-actions" aria-label="Acciones principales">
-            <a href="/portal/envios/nuevo" class="btn btn-primary">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-                Nuevo envío
-            </a>
-            <a href="/portal/cotizar" data-cotizar-ventana class="btn btn-hero-secondary">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-                Cotizar envío
-            </a>
-        </div>
-    </div>
-</section>
-
-{% if embudo %}
-<nav class="home-flow" aria-label="Resumen de tus envíos">
-    {% for paso in embudo %}
-    {% if paso.clave in ('guia_lista', 'despachados', 'retenidos', 'entregados') %}
-    <a href="{{ paso.url }}" class="home-flow-item{% if paso.clave == 'retenidos' and paso.cantidad %} has-alert{% endif %}">
-        <span>{{ paso.titulo }}</span><strong>{{ paso.cantidad }}</strong>
-        <small>{{ paso.detalle }}</small><span class="home-flow-arrow" aria-hidden="true">↗</span>
-    </a>
-    {% endif %}
-    {% endfor %}
-</nav>
+{% macro icono(nombre) -%}
+{% if nombre == "plus" %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+{% elif nombre == "quote" %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+{% elif nombre == "shipments" %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h13M7 12h13M7 17h13"/><circle cx="3.5" cy="7" r=".8"/><circle cx="3.5" cy="12" r=".8"/><circle cx="3.5" cy="17" r=".8"/></svg>
+{% elif nombre == "search" %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
+{% elif nombre == "tracking" %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5zM12 12l8-4.5M12 12 4 7.5M12 12v9"/></svg>
+{% else %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17h16M6 17V8h12v9M9 8V5h6v3"/></svg>
 {% endif %}
+{%- endmacro %}
 
-<form method="GET" action="/portal/envios" class="home-shipment-search" role="search">
-    <label for="home-buscar">Encontrá tu envío</label>
-    <div>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg>
-        <input id="home-buscar" name="buscar" type="search" maxlength="80" placeholder="Tracking, destinatario o ciudad" autocomplete="off">
-        <button class="btn btn-primary" type="submit">Buscar</button>
-    </div>
-</form>
+{% macro dinero(valor) -%}
+$ {{ (valor|abs)|numero_ars }}
+{%- endmacro %}
 
-{# Sólo mostramos tareas reales del cliente. Los pasos de Tauro y los ceros
-   no ocupan lugar: este bloque es un recordatorio, no otro tablero. #}
-{% set accion = namespace(total=0) %}
-{% for paso in embudo %}
-    {% if paso.cantidad and paso.accion_de == 'cliente' %}
-        {% set accion.total = accion.total + paso.cantidad %}
-    {% endif %}
-{% endfor %}
-{% if accion.total %}
-<aside class="action-reminder" aria-label="Requiere tu acción">
-    <span class="action-reminder-label">Requiere tu acción</span>
-    <div class="action-reminder-items">
-        {% for paso in embudo %}
-            {% if paso.cantidad and paso.accion_de == 'cliente' %}
-            <a href="{{ paso.url }}">
-                <strong>{{ paso.cantidad }} · {{ paso.titulo }}</strong>
-                <span>{{ paso.detalle }}</span>
-                <span aria-hidden="true">→</span>
-            </a>
-            {% endif %}
-        {% endfor %}
-    </div>
-</aside>
-{% endif %}
+{% macro lista_ambito(titulo, ambito, solicitudes) -%}
+<section class="home-scope" aria-labelledby="home-{{ ambito }}-title">
+    <header class="home-scope-head">
+        <a href="/portal/envios?tipo={{ ambito }}" class="home-scope-name">
+            {{ scope_icon(ambito) }}
+            <div>
+                <h3 id="home-{{ ambito }}-title">{{ titulo }}</h3>
+                <span>{{ solicitudes|length }} recientes</span>
+            </div>
+        </a>
+        <a href="/portal/envios?tipo={{ ambito }}">Ver todos</a>
+    </header>
 
-{% macro actividad_ambito(icono, titulo, ambito, solicitudes) %}
-<section class="card home-scope-card{% if not solicitudes %} is-empty{% endif %}">
-    <div class="home-scope-head">
-        <div><span aria-hidden="true">{{ icono }}</span><strong>{{ titulo }}</strong></div>
-        <a href="/portal/envios?tipo={{ ambito }}">Ver historial →</a>
-    </div>
     {% if solicitudes %}
     <div class="home-scope-list">
         {% for s in solicitudes %}
         <a href="/portal/envios/{{ s.id }}" class="home-scope-row">
-            <span class="home-shipment-copy"><strong>{{ s.etiqueta_cliente or s.dest_nombre or s.dest_ciudad or "—" }}</strong><small>{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) or 'Origen' }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) or 'Destino' }}</small><small class="mono">{{ s.tracking or 'Guía pendiente' }} · {{ (s.courier or '—')|upper }}</small></span>
-            <span style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;">
+            <span class="home-shipment-copy">
+                <strong>{{ s.etiqueta_cliente or s.dest_nombre or s.dest_ciudad or "Envío sin etiqueta" }}</strong>
+                <small>{{ s.remitente_ciudad or nombre_pais(s.remitente_pais) or "Origen" }} → {{ s.dest_ciudad or nombre_pais(s.destino_pais) or "Destino" }}</small>
+            </span>
+            <span class="home-shipment-state">
                 <span class="badge {{ s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
+                <small class="mono">{{ s.tracking or "Guía pendiente" }}</small>
             </span>
         </a>
         {% endfor %}
     </div>
     {% else %}
     <div class="home-scope-empty">
-        <span>Sin envíos {{ titulo|lower }} todavía.</span>
-        <a href="/portal/cotizar?ambito={{ ambito }}" data-cotizar-ventana class="btn btn-ghost btn-sm">Cotizar</a>
+        <p>Todavía no hay envíos {{ titulo|lower }}.</p>
+        <a href="/portal/cotizar?ambito={{ ambito }}" data-cotizar-ventana>Cotizar envío</a>
     </div>
     {% endif %}
 </section>
-{% endmacro %}
+{%- endmacro %}
 
-<div class="home-scope-activity" aria-label="Actividad reciente separada por ámbito">
-    <div class="home-section-title"><h2>Actividad reciente</h2><a href="/portal/envios">Todos los envíos →</a></div>
-    {% if solicitudes_internacionales %}
-        {{ actividad_ambito('🌐', 'Internacionales', 'internacional', solicitudes_internacionales) }}
-        {{ actividad_ambito('🇦🇷', 'Nacionales', 'nacional', solicitudes_nacionales) }}
-    {% else %}
-        {{ actividad_ambito('🇦🇷', 'Nacionales', 'nacional', solicitudes_nacionales) }}
-        {{ actividad_ambito('🌐', 'Internacionales', 'internacional', solicitudes_internacionales) }}
-    {% endif %}
-</div>
-<div class="home-overview-grid">
-    <section class="card home-account-card">
-        <div class="card-head">
-            <div>
-                <div class="eyebrow">Cuenta corriente</div>
-                <h3>Tu cuenta, clara</h3>
+{% block content %}
+{% set r = resumen_inicio %}
+{% set balance = saldo.saldo_pendiente_ars %}
+
+<header class="home-workspace-head">
+    <div>
+        <h1>Hola, {{ cliente }}</h1>
+        <p>Tu operación nacional e internacional, en una sola vista.</p>
+    </div>
+</header>
+
+<section class="home-summary-strip" aria-label="Resumen de la operación">
+    <a href="/portal/envios{% if r.serie_mensual %}?anio={{ r.serie_mensual[-1].anio }}&amp;mes={{ r.serie_mensual[-1].mes }}{% endif %}" class="home-summary-item">
+        <span>Envíos este mes</span>
+        <strong>{{ r.envios_mes }}</strong>
+        <small>{{ r.envios_total }} operaciones vigentes</small>
+    </a>
+    <a href="/portal/envios?paso=despachados" class="home-summary-item">
+        <span>En seguimiento</span>
+        <strong>{{ r.en_seguimiento }}</strong>
+        <small>{{ r.entregados }} entregados en total</small>
+    </a>
+    <a href="/portal/envios?paso=requieren_accion" class="home-summary-item{% if r.requieren_accion %} needs-attention{% endif %}">
+        <span>Requiere tu acción</span>
+        <strong>{{ r.requieren_accion }}</strong>
+        <small>{% if r.requieren_accion %}Ver todos los pendientes{% else %}Nada pendiente{% endif %}</small>
+    </a>
+    <a href="/portal/cuenta" class="home-summary-item home-summary-balance{% if balance > 0 %} has-debt{% endif %}">
+        <span>{% if balance > 0 %}Pendiente de pago{% elif balance < 0 %}Saldo a favor{% else %}Cuenta corriente{% endif %}</span>
+        <strong>{% if balance == 0 %}Al día{% else %}{{ dinero(balance) }}{% endif %}</strong>
+        <small>Ver movimientos y comprobantes</small>
+    </a>
+</section>
+
+{% if r.requieren_accion %}
+<aside class="home-action-reminder" aria-label="Pendientes que requieren tu acción">
+    <span>Requiere tu acción</span>
+    <div>
+        {% for paso in embudo %}
+        {% if paso.cantidad and paso.accion_de == 'cliente' %}
+        <a href="{{ paso.url }}"><strong>{{ paso.cantidad }} {{ paso.titulo|lower }}</strong><small>{{ paso.detalle }}</small></a>
+        {% endif %}
+        {% endfor %}
+    </div>
+</aside>
+{% endif %}
+
+<div class="home-dashboard-layout">
+    <main class="home-dashboard-main">
+        <section class="home-panel home-activity-panel">
+            <header class="home-panel-head">
+                <div>
+                    <span class="eyebrow">Actividad reciente</span>
+                    <h2>Tus últimos envíos</h2>
+                </div>
+                <a href="/portal/envios">Ver historial completo</a>
+            </header>
+            <div class="home-activity-scopes">
+                {{ lista_ambito("Nacionales", "nacional", solicitudes_nacionales) }}
+                {{ lista_ambito("Internacionales", "internacional", solicitudes_internacionales) }}
             </div>
-            <a href="/portal/cuenta" class="btn btn-ghost btn-sm">Ver detalle</a>
-        </div>
+        </section>
 
-        {% set balance = saldo.saldo_pendiente_ars %}
-        <div class="home-balance">
-            <span>{% if balance > 0 %}A pagar{% elif balance < 0 %}Saldo a favor{% else %}Estado{% endif %}</span>
-            <strong class="{% if balance != 0 %}portal-balance-metal{% endif %}">
-                {% if balance == 0 %}
-                    Al día
+        <div class="home-insights-grid">
+            <a href="/portal/envios" class="home-panel home-monthly-panel home-panel-link" aria-labelledby="monthly-title">
+                <header class="home-panel-head">
+                    <div>
+                        <span class="eyebrow">Últimos 6 meses</span>
+                        <h2 id="monthly-title">Envíos por mes</h2>
+                    </div>
+                    <span class="home-panel-go">Ver envíos <b aria-hidden="true">→</b></span>
+                </header>
+                <div class="home-monthly-chart">
+                    {% set tope = r.maximo_mensual if r.maximo_mensual else 1 %}
+                    {% for mes in r.serie_mensual %}
+                    <div class="home-monthly-bar">
+                        <strong>{{ mes.cantidad }}</strong>
+                        <div class="home-bar-track" role="img" aria-label="{{ mes.etiqueta }}: {{ mes.cantidad }} envíos">
+                            <div class="home-bar-fill" style="--p:{{ ((mes.cantidad / tope) * 100) | round(1) }}%;--d:{{ loop.index0 * 70 }}ms"></div>
+                        </div>
+                        <span>{{ mes.etiqueta }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </a>
+
+            <a href="/portal/estadisticas" class="home-panel home-destinations-panel home-panel-link" aria-labelledby="destinations-title">
+                <header class="home-panel-head">
+                    <div>
+                        <h2 id="destinations-title">Destinos de tus envíos</h2>
+                        <p>Incluye importaciones con destino Argentina.</p>
+                    </div>
+                    <span class="home-panel-go">Ver estadísticas <b aria-hidden="true">→</b></span>
+                </header>
+                {% if r.destinos_frecuentes %}
+                <ol class="home-destinations-list">
+                    {% for destino in r.destinos_frecuentes %}
+                    <li>
+                        <span class="home-country-code">{{ destino.codigo }}</span>
+                        <div>
+                            <span><strong>{{ nombre_pais(destino.codigo) }}</strong><small>{{ destino.cantidad }} envíos · {{ destino.porcentaje }}%</small></span>
+                            <div class="home-dest-track" role="img" aria-label="{{ nombre_pais(destino.codigo) }}: {{ destino.porcentaje }} por ciento">
+                                <div class="home-dest-fill" style="--p:{{ destino.porcentaje }}%;--d:{{ loop.index0 * 90 }}ms"></div>
+                            </div>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ol>
                 {% else %}
-                    $ {{ "{:,.0f}".format(balance|abs).replace(",", ".") }}
+                <div class="home-insight-empty">Los destinos aparecerán cuando generes tus primeros envíos.</div>
                 {% endif %}
-            </strong>
+            </a>
         </div>
-        <small class="home-currency">Importes en pesos argentinos · ARS</small>
-        <details class="home-account-totals"><summary>Cargos y pagos aplicados</summary>
-        <div class="home-account-breakdown">
-            <div>
-                <span>Cargos aplicados</span>
-                <b>$ {{ "{:,.0f}".format(saldo.facturado_ars).replace(",", ".") }}</b>
-            </div>
-            <div>
-                <span>Pagos aplicados</span>
-                <b class="portal-money-green">$ {{ "{:,.0f}".format(saldo.pagado_ars).replace(",", ".") }}</b>
-            </div>
-        </div>
-        </details>
-        <a href="/portal/cuenta#informar-pago" class="home-text-link">Informar un pago →</a>
-    </section>
+    </main>
 
-    <section class="card home-track-card">
-        <div class="card-head">
-            <div>
-                <div class="eyebrow">Seguimiento</div>
-                <h3>¿Dónde está mi envío?</h3>
-                <p>Pegá el tracking y abrimos el courier correcto.</p>
+    <aside class="home-dashboard-rail" aria-label="Herramientas rápidas">
+        <section class="home-panel home-tools-panel">
+            <header class="home-panel-head">
+                <div>
+                    <span class="eyebrow">Accesos rápidos</span>
+                    <h2>Encontrá y resolvé</h2>
+                </div>
+            </header>
+
+            <form method="GET" action="/portal/envios" class="home-tool" role="search">
+                <span class="home-tool-icon">{{ icono("search") }}</span>
+                <label for="home-buscar">Buscar en mis envíos</label>
+                <small>Tracking, destinatario, etiqueta o ciudad</small>
+                <div><input id="home-buscar" name="buscar" type="search" maxlength="80" placeholder="Escribí para buscar" autocomplete="off"><button type="submit">Buscar</button></div>
+            </form>
+
+            <div class="home-tool">
+                <span class="home-tool-icon home-tool-sprite">{{ portal_sprite("seguimiento") }}</span>
+                <label for="track-input">Rastrear con el courier</label>
+                <small>Consultá el estado oficial de una guía</small>
+                <div><input type="text" id="track-input" placeholder="Número de tracking" autocomplete="off"><button type="button" id="track-submit" class="btn btn-primary">Rastrear</button></div>
             </div>
-        </div>
-        <div class="track-box">
-            <input type="text" id="track-input" placeholder="Número de tracking" autocomplete="off"
-                   aria-label="Número de tracking">
-            <button type="button" id="track-submit" class="btn btn-primary">Rastrear</button>
-        </div>
-        <a href="/portal/envios" class="home-text-link">Ver todos mis envíos →</a>
-    </section>
+
+            <a href="/portal/recolecciones" class="home-pickup-link">
+                <span class="home-pickup-sprite">{{ portal_sprite("recolecciones") }}</span>
+                <div><strong>Recolecciones</strong><small>Solicitá o revisá un retiro</small></div>
+                <b aria-hidden="true">→</b>
+            </a>
+        </section>
+
+        <section class="home-panel home-account-compact home-interactive-panel">
+            <a href="/portal/cuenta" class="home-account-entry">
+                <header class="home-panel-head">
+                    <div>
+                        <span class="eyebrow">Cuenta corriente</span>
+                        <h2>{% if balance > 0 %}Tenés saldo pendiente{% elif balance < 0 %}Tenés saldo a favor{% else %}Tu cuenta está al día{% endif %}</h2>
+                    </div>
+                    <span class="home-panel-go" aria-hidden="true">→</span>
+                </header>
+                <strong class="home-account-value">{% if balance == 0 %}Sin saldo pendiente{% else %}{{ dinero(balance) }} ARS{% endif %}</strong>
+                <dl>
+                    <div><dt>Cargos aplicados</dt><dd>{{ dinero(saldo.facturado_ars) }}</dd></div>
+                    <div><dt>Pagos aplicados</dt><dd>{{ dinero(saldo.pagado_ars) }}</dd></div>
+                </dl>
+            </a>
+            <div class="home-account-actions"><a href="/portal/cuenta">Ver detalle</a><a href="/portal/cuenta#informar-pago">Informar un pago</a></div>
+        </section>
+    </aside>
 </div>
-
 {% endblock %}

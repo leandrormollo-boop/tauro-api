@@ -300,6 +300,19 @@ def _render_shell(path="/portal/home", pendientes=0):
             solicitudes_nacionales=[],
             solicitudes_internacionales=[],
             embudo=[],
+            resumen_inicio={
+                "envios_mes": 0,
+                "envios_total": 0,
+                "en_seguimiento": 0,
+                "entregados": 0,
+                "guias_listas": 0,
+                "retenidos": 0,
+                "requieren_accion": 0,
+                "serie_mensual": [],
+                "maximo_mensual": 0,
+                "destinos_frecuentes": [],
+                "paises_total": 0,
+            },
         )
     finally:
         env.globals.update(originales)
@@ -419,11 +432,11 @@ def test_css_tabbar_respeta_safe_area_touch_print_y_escritorio():
 
 def test_base_html_versiona_el_css_nuevo():
     base = BASE_HTML_PATH.read_text(encoding="utf-8")
-    assert "tauro.css?v=49" in base
-    assert "portal-cotizador.js?v=10" in base
-    assert "portal-dock.css?v=2" in base
-    assert "portal-cotizador.css?v=6" in base
-    assert "quote-locations.js?v=2" in base
+    assert "tauro.css?v=50" in base
+    assert "portal-cotizador.js?v=13" in base
+    assert "portal-dock.css?v=4" in base
+    assert "portal-cotizador.css?v=9" in base
+    assert "quote-locations.js?v=4" in base
     # El manifest y el SW viven en el head compartido de TODO el portal
     # (login incluido); la tabbar queda adentro del bloque autenticado.
     assert base.index("{% if cliente %}") < base.index('class="tabbar"')
