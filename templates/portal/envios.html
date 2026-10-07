@@ -267,7 +267,7 @@ $ {{ "{:,.2f}".format(valor or 0).replace(",", "X").replace(".", ",").replace("X
                         {% if s.tiene_label and not es_baja %}<a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-ghost btn-sm" aria-label="{{ 'Descargar guía + invoice' if s.tiene_factura_comercial else 'Descargar guía' }}">Ver guía</a>
                         {% elif s.guia_url and not es_baja %}<a href="{{ s.guia_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Ver guía</a>
                         {% else %}<span class="shipment-empty">—</span>{% endif %}
-                        <details class="shipment-actions">
+                        <details class="shipment-actions" data-dropdown>
                             <summary>Opciones <span aria-hidden="true">⌄</span></summary>
                             <div class="shipment-actions-menu">
                             <a href="/portal/envios/{{ s.id }}/gestion" data-shipment-manage class="shipment-action">Gestionar envío</a>
