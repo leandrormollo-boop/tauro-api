@@ -197,10 +197,11 @@ def test_detalle_y_saldo_conservan_centavos_y_coma_decimal(monkeypatch):
 
 @pytest.fixture(scope="module")
 def browser():
-    # Chromium requiere SO_PASSCRED para su canal local de procesos.
+    # En Linux Chromium requiere SO_PASSCRED; macOS no expone esa opción.
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as canal:
-            canal.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        if hasattr(socket, "SO_PASSCRED"):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as canal:
+                canal.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
     except PermissionError:
         pytest.skip("El sandbox bloquea sockets de Chromium")
     playwright = pytest.importorskip("playwright.sync_api")

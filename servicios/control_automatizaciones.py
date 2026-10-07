@@ -44,22 +44,29 @@ def clasificar_resultado(resultado):
     if not isinstance(resultado, dict):
         return "SIN_CONFIRMAR"
     estado = str(resultado.get("estado", "")).upper()
-    if (resultado.get("ok") is False or resultado.get("error")
-            or resultado.get("errores") or resultado.get("fallidas")
-            or estado.startswith("ERROR") or estado == "REAUTORIZAR"):
+    omision_explicita = resultado.get("omitido") is True or estado in _ESTADOS_OMITIDOS
+    if (resultado.get("error") or resultado.get("errores") or resultado.get("fallidas")
+            or estado.startswith("ERROR") or estado == "REAUTORIZAR"
+            or (resultado.get("ok") is False and not omision_explicita)):
         return "ERROR"
-    if isinstance(resultado.get("reemplazadas"), dict):
-        anidado = clasificar_resultado(resultado["reemplazadas"])
-        if anidado in {"ERROR", "SIN_CONFIRMAR"}:
-            return anidado
-        if anidado in {"OMITIDA", "PARCIAL"}:
-            return "PARCIAL"
+    anidados = []
+    for clave in ("reemplazadas", "fedex"):
+        if isinstance(resultado.get(clave), dict):
+            anidados.append(clasificar_resultado(resultado[clave]))
+    if "ERROR" in anidados:
+        return "ERROR"
+    if "SIN_CONFIRMAR" in anidados:
+        return "SIN_CONFIRMAR"
+    if any(estado_anidado in {"OMITIDA", "PARCIAL"} for estado_anidado in anidados):
+        return "PARCIAL"
     if "resultados" in resultado:
         anidado = _clasificar_resultados_anidados(resultado["resultados"])
         if anidado is not None:
             return anidado
     if estado in _ESTADOS_OMITIDOS or resultado.get("omitido") or resultado.get("motivo"):
         return "OMITIDA"
+    if resultado.get("ok") is False:
+        return "ERROR"
     if estado == "PAGINACION_PENDIENTE":
         return "PARCIAL"
     if resultado.get("ok") is True or estado == "OK" or resultado.get("guardadas", 0) > 0:

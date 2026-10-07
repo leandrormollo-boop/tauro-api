@@ -1803,11 +1803,11 @@ def _renderizar_cotizacion(request: Request, contexto: dict):
 
 def _stream_cotizacion_internacional(
     request: Request, *, cliente: str, parametros: dict, form: dict,
-    paquetes: list, es_reseller: bool,
+    paquetes: list, es_reseller: bool, tax_paga_cotizacion: str | None = None,
 ):
     """Entrega sólo HTML público de cada resultado; nunca transporta costos."""
     from servicios.cotizador import iterar_cotizar_referencia_couriers
-    from servicios.cotizaciones_reseller import guardar_opciones
+    from servicios.cotizaciones_portal import guardar_opciones
 
     template = templates.get_template("portal/_quote_results.html")
     cancelado = threading.Event()
@@ -1815,6 +1815,7 @@ def _stream_cotizacion_internacional(
         "request": request, "cliente": cliente, "ambito": "internacional",
         "form": form, "cajas_cotizadas": _cajas_para_continuar_cotizacion(paquetes),
         "destino_sel": form["destino_pais"], "es_reseller": es_reseller,
+        "tax_paga_cotizacion": tax_paga_cotizacion,
         "opciones": [], "no_disponibles": [], "resultado": None, "error": None,
     }
 
@@ -1835,19 +1836,20 @@ def _stream_cotizacion_internacional(
             for comparacion in comparaciones:
                 opciones = comparacion["opciones"]
                 resumen = comparacion["resumen"]
-                # Un snapshot reseller por courier, aunque la respuesta parcial
-                # se vuelva a renderizar cuando termina el próximo operador.
-                if es_reseller:
-                    nuevas = [o for o in opciones if o["carrier_id"] not in guardadas]
-                    if nuevas:
-                        guardadas.update({
-                            o["carrier_id"]: o for o in guardar_opciones(
-                                cliente, ruta=resumen["ruta"], bultos=paquetes,
-                                peso_facturable_kg=resumen["peso_usado_kg"],
-                                opciones=nuevas,
-                            )
-                        })
-                    opciones = [guardadas[o["carrier_id"]] for o in opciones]
+                # Un snapshot por courier, aunque la respuesta parcial se vuelva
+                # a renderizar cuando termina el próximo operador. Si falla la
+                # persistencia, el servicio devuelve la tarifa sin IDs: puede
+                # mostrarse, pero no habilita PDF ni handoff con precio original.
+                nuevas = [o for o in opciones if o["carrier_id"] not in guardadas]
+                if nuevas:
+                    guardadas.update({
+                        o["carrier_id"]: o for o in guardar_opciones(
+                            cliente, ruta=resumen["ruta"], bultos=paquetes,
+                            peso_facturable_kg=resumen["peso_usado_kg"],
+                            opciones=nuevas,
+                        )
+                    })
+                opciones = [guardadas[o["carrier_id"]] for o in opciones]
                 completo = bool(comparacion.get("completo"))
                 contexto.update(
                     opciones=opciones, resultado=resumen,
@@ -2125,6 +2127,7 @@ def cotizar_post(
             return _stream_cotizacion_internacional(
                 request, cliente=cliente, parametros=parametros_cotizacion,
                 form=form_internacional, paquetes=paquetes, es_reseller=es_reseller,
+                tax_paga_cotizacion=tax_paga_cliente(cliente),
             )
         comparacion = cotizar_referencia_couriers(**parametros_cotizacion)
         opciones = comparacion["opciones"]

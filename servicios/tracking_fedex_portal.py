@@ -24,6 +24,8 @@ _LOTE = 30
 _CODIGOS_ENTREGA = {"DL"}
 # DE: excepción de entrega · SE: excepción del envío · CD: demora en aduana.
 _CODIGOS_RETENCION = {"DE", "SE", "CD"}
+# OC: FedEx recibió la información de la etiqueta, pero todavía no el paquete.
+_CODIGOS_PRE_RETIRO = {"OC"}
 # Cancelado o sin datos: no es un avance logístico; no tocamos el estado.
 _CODIGOS_SIN_AVANCE = {"CA"}
 
@@ -62,6 +64,10 @@ def normalizar_respuesta_fedex(resultado: dict) -> dict:
         estado = ENTREGADO
     elif codigo in _CODIGOS_RETENCION:
         estado = RETENIDO
+    elif codigo in _CODIGOS_PRE_RETIRO:
+        # Es una respuesta válida para guardar y volver a consultar, pero no
+        # demuestra que FedEx haya recibido físicamente el paquete.
+        estado = None
     else:
         estado = PROCESO_ENTREGA
 

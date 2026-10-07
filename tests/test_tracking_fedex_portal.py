@@ -42,6 +42,15 @@ def test_en_transito_usa_el_ultimo_escaneo():
     assert r["evento_at"] == datetime(2026, 7, 15, 15, 20, tzinfo=timezone.utc)
 
 
+def test_etiqueta_informada_no_simula_retiro_de_fedex():
+    r = fedex.normalizar_respuesta_fedex(
+        _resultado("OC", "Información del envío enviada a FedEx")
+    )
+    assert r["ok"] is True
+    assert r["estado"] is None
+    assert r["estado_courier"] == "OC"
+
+
 def test_excepcion_es_retenido_y_cancelado_o_error_no_cambian_estado():
     assert fedex.normalizar_respuesta_fedex(_resultado("DE", "Excepción de entrega"))["estado"] == "RETENIDO"
     assert fedex.normalizar_respuesta_fedex(_resultado("CA", "Cancelado"))["ok"] is False
@@ -70,7 +79,7 @@ def test_el_job_diario_tambien_corre_fedex():
 
 
 @pytest.mark.skipif(not DATABASE_URL, reason="requiere TAURO_TEST_DATABASE_URL aislada")
-def test_postgres_actualiza_hasta_entregado_y_despues_no_consulta(monkeypatch):
+def test_postgres_conserva_pre_retiro_y_avanza_hasta_entregado(monkeypatch):
     schema = f"test_fedex_{uuid.uuid4().hex}"
     admin = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     admin.autocommit = True
@@ -85,7 +94,7 @@ def test_postgres_actualiza_hasta_entregado_y_despues_no_consulta(monkeypatch):
                                dest_nombre, dest_direccion, dest_ciudad, dest_zip, courier,
                                tracking, estado, coti_id, precio_tauro_ars)
                            VALUES ('FDX','Lana','US','Cliente','Calle 1','Austin','78701','FEDEX',
-                                   '874423560428','DESPACHADO','COTI-FDX',1000) RETURNING id""")
+                                   '874423560428','GUIA_LISTA','COTI-FDX',1000) RETURNING id""")
             solicitud_id = int(cur.fetchone()["id"])
 
         @contextmanager
@@ -107,18 +116,42 @@ def test_postgres_actualiza_hasta_entregado_y_despues_no_consulta(monkeypatch):
 
             def track_many(self, numeros):
                 self.pedidos.append(list(numeros))
-                return {n: _resultado("DL", "Entregado") for n in numeros}
+                estados = [
+                    ("OC", "Información del envío enviada a FedEx"),
+                    ("IT", "En tránsito"),
+                    ("DL", "Entregado"),
+                ]
+                codigo, texto = estados[min(len(self.pedidos) - 1, len(estados) - 1)]
+                return {n: _resultado(codigo, texto) for n in numeros}
 
         cliente = Cliente()
         primero = fedex.actualizar_trackings_diarios_fedex(cliente_fedex=cliente)
         with admin.cursor() as cur:
             cur.execute(f'SET search_path TO "{schema}"')
-            # Aunque sea otro día, un entregado ya no se vuelve a consultar.
+            cur.execute("SELECT estado, tracking_estado, tracking_estado_courier "
+                        "FROM solicitudes_guia WHERE id=%s", (solicitud_id,))
+            pre_retiro = cur.fetchone()
+            assert pre_retiro["estado"] == "GUIA_LISTA"
+            assert pre_retiro["tracking_estado"] is None
+            assert pre_retiro["tracking_estado_courier"] == "OC"
             cur.execute("UPDATE solicitudes_guia SET tracking_consultado_at = NOW() - INTERVAL '2 days'")
         segundo = fedex.actualizar_trackings_diarios_fedex(cliente_fedex=cliente)
+        with admin.cursor() as cur:
+            cur.execute("SELECT estado, tracking_estado FROM solicitudes_guia WHERE id=%s",
+                        (solicitud_id,))
+            en_transito = cur.fetchone()
+            assert en_transito["estado"] == "DESPACHADO"
+            assert en_transito["tracking_estado"] == "PROCESO_ENTREGA"
+            cur.execute("UPDATE solicitudes_guia SET tracking_consultado_at = NOW() - INTERVAL '2 days'")
+        tercero = fedex.actualizar_trackings_diarios_fedex(cliente_fedex=cliente)
+        with admin.cursor() as cur:
+            cur.execute("UPDATE solicitudes_guia SET tracking_consultado_at = NOW() - INTERVAL '2 days'")
+        cuarto = fedex.actualizar_trackings_diarios_fedex(cliente_fedex=cliente)
 
-        assert primero["entregados"] == 1 and segundo["candidatos"] == 0
-        assert cliente.pedidos == [["874423560428"]]
+        assert primero["actualizados"] == 1 and primero["entregados"] == 0
+        assert segundo["actualizados"] == 1 and segundo["entregados"] == 0
+        assert tercero["entregados"] == 1 and cuarto["candidatos"] == 0
+        assert cliente.pedidos == [["874423560428"]] * 3
         with admin.cursor() as cur:
             cur.execute("SELECT estado, tracking_estado, tracking_evento_at FROM solicitudes_guia WHERE id=%s",
                         (solicitud_id,))
