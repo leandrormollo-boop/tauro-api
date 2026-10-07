@@ -4300,9 +4300,10 @@ def _render_facturas_admin(
         ruta_facturas = "/admin/facturas-nacionales"
     else:
         couriers_disponibles = ("DHL", "FEDEX", "ANDREANI", "OCA", "CORREO_ARGENTINO")
-        titulo = "Control de envíos y facturas"
+        titulo = "Facturas de operadores"
         descripcion = (
-            "Control interno de facturas y envíos de todos los operadores."
+            "DHL, FedEx, Andreani, OCA y Correo Argentino: factura, guías, "
+            "costos finales y diferencias de cada cliente."
         )
         seccion = "conciliacion_couriers"
         ruta_facturas = "/admin/conciliacion-couriers"

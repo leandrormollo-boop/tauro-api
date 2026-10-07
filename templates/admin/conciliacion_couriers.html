@@ -11,8 +11,7 @@
   <header class="finance-header">
     <div><span class="finance-eyebrow">Administración / Control de operadores</span><h1>{{ titulo }}</h1><p>{{ descripcion }}</p></div>
     <div class="finance-actions">
-      {% if ambito == 'INTERNACIONAL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Importar facturas DHL</a>{% endif %}
-      <a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito }}" class="btn btn-ghost">Cargar factura</a>
+      <a href="/admin/conciliacion-couriers/nueva?ambito={{ ambito or 'INTERNACIONAL' }}" class="btn btn-primary">Cargar factura</a>
     </div>
   </header>
   {% if vista == 'resumen' and filtros.courier %}<p class="finance-footnote">Resumen de {{ filtros.courier }} · <a href="{{ enlace(courier='') }}" data-control-nav>Ver todos los operadores</a></p>{% endif %}

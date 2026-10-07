@@ -173,34 +173,28 @@
 
   <div class="admin-layout">
     <nav class="sidebar" aria-label="Administración">
+      {# Menú ordenado (Leandro, 07/10/2026): cuatro bloques y una entrada por
+         entidad. Las acciones (cargar factura, registrar pago, cargar cargo,
+         cargar envío) viven como botones dentro de su pantalla, no acá. #}
       <div class="sidebar-label">Negocio</div>
       <a href="/admin/home" {% if seccion=='home' %}class="active"{% endif %}>Panel de control</a>
-      <a href="/admin/clientes" {% if seccion=='clientes' %}class="active"{% endif %}>Clientes</a>
+      <a href="/admin/clientes" {% if seccion in ('clientes','cliente_nuevo') %}class="active"{% endif %}>Clientes</a>
       <a href="/admin/operadores" {% if seccion=='operadores' and request.url.path!='/admin/control-envios' %}class="active"{% endif %}>Proveedores</a>
       <div class="sidebar-label">Operación</div>
-      <a href="/admin/control-envios" {% if request.url.path=='/admin/control-envios' %}class="active"{% endif %}>Control de envíos</a>
+      <a href="/admin/control-envios" {% if request.url.path=='/admin/control-envios' or seccion=='envio_realizado' %}class="active"{% endif %}>Envíos</a>
       <a href="/admin/pedidos" {% if seccion=='pedidos' %}class="active"{% endif %}>Solicitudes y emisión</a>
       <a href="/admin/recolecciones" {% if seccion=='recolecciones' %}class="active"{% endif %}>Recolecciones</a>
       <a href="/admin/bandeja" {% if seccion=='bandeja' %}class="active"{% endif %}>Pendientes de atención</a>
-      <a href="/admin/pagos/pendientes" {% if seccion=='pagos_pendientes' %}class="active"{% endif %}>Revisar pagos</a>
-      <details class="sidebar-more" {% if seccion in ('facturas_internacionales','facturas_nacionales','conciliacion_couriers','envio_nuevo','pago_nuevo','importaciones_historicas') %}open{% endif %}>
-        <summary>Facturación y conciliación</summary><div class="sidebar-more-links">
-        <a href="/admin/facturas-internacionales" {% if seccion in ('facturas_internacionales','conciliacion_couriers') %}class="active"{% endif %}>Facturas internacionales</a>
-        <a href="/admin/facturas-nacionales" {% if seccion=='facturas_nacionales' %}class="active"{% endif %}>Facturas nacionales</a>
-        <a href="/admin/envios/nuevo">Cargar cargo manual</a><a href="/admin/pagos/nuevo">Registrar pago de cliente</a>
-        <a href="/admin/importaciones-historicas">Importaciones históricas</a>
-        </div>
-      </details>
-      <details class="sidebar-more" {% if seccion in ('envio_realizado','guias_reemplazadas','productos','rutas','comercial','referencia') %}open{% endif %}>
-        <summary>Herramientas de operación</summary><div class="sidebar-more-links">
-        <a href="/admin/envios-realizados/nuevo">Cargar envío externo</a><a href="/admin/guias-reemplazadas">Guías descartadas</a>
-        <a href="/admin/productos">Catálogo</a><a href="/admin/rutas">Rutas</a><a href="/admin/comercial">Prospectos</a><a href="/admin/referencia">Referencia de mercado</a>
-        </div>
-      </details>
-      <details class="sidebar-more" {% if seccion in ('config','precios_web','seguridad','shopify_privacidad','tiendanube_privacidad') %}open{% endif %}>
+      <div class="sidebar-label">Dinero</div>
+      <a href="/admin/pagos/pendientes" {% if seccion in ('pagos_pendientes','pago_nuevo','envio_nuevo') %}class="active"{% endif %}>Cuentas de clientes</a>
+      <a href="/admin/conciliacion-couriers" {% if seccion in ('facturas_internacionales','facturas_nacionales','conciliacion_couriers') and request.query_params.get('vista') != 'diferencias' %}class="active"{% endif %}>Facturas de operadores</a>
+      <a href="/admin/conciliacion-couriers?vista=diferencias" {% if seccion in ('facturas_internacionales','facturas_nacionales','conciliacion_couriers') and request.query_params.get('vista') == 'diferencias' %}class="active"{% endif %}>Diferencias</a>
+      <details class="sidebar-more" {% if seccion in ('config','precios_web','seguridad','shopify_privacidad','tiendanube_privacidad','importaciones_historicas','guias_reemplazadas','productos','rutas','comercial','referencia') %}open{% endif %}>
         <summary>Configuración</summary><div class="sidebar-more-links">
-        <a href="/admin/config">Configuración general</a><a href="/admin/precios-web" {% if seccion=='precios_web' %}class="active"{% endif %}>Precios de la web</a><a href="/admin/seguridad">Seguridad</a>
+        <a href="/admin/config">General</a><a href="/admin/precios-web" {% if seccion=='precios_web' %}class="active"{% endif %}>Precios de la web</a><a href="/admin/seguridad">Seguridad</a>
         <a href="/admin/shopify/privacidad">Privacidad Shopify</a><a href="/admin/tiendanube/privacidad">Privacidad Tiendanube</a>
+        <a href="/admin/productos">Catálogo</a><a href="/admin/rutas">Rutas</a><a href="/admin/comercial">Prospectos</a><a href="/admin/referencia">Referencia de mercado</a>
+        <a href="/admin/importaciones-historicas">Importaciones históricas</a><a href="/admin/guias-reemplazadas">Guías descartadas</a>
         </div>
       </details>
     </nav>

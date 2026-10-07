@@ -153,7 +153,7 @@
             {% if factura.revision_financiera %}<br><small>$ {{ dinero(guia.total_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
             <br>{% if guia.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(guia.remanente) }}</span>{% else %}<span class="badge ok">Guía asignada completa</span>{% endif %}</td>
           <td>{% set pi = guia.peso_inicial %}{% if pi %}<span class="mono">{{ pi.facturable_kg|kg }}</span> → <strong class="mono">{{ (guia.peso_facturado_kg or '—')|kg }}</strong>
-            <br><small>Inicial: real {{ (pi.real_kg or '—')|kg }}{% if pi.volumetrico_kg %} · vol. {{ pi.volumetrico_kg|kg }}{% endif %}{% if pi.cobra_por_volumen %} · por volumen{% endif %}</small>
+            {% if pi.real_kg or pi.volumetrico_kg %}<br><small>Inicial:{% if pi.real_kg %} real {{ pi.real_kg|kg }}{% endif %}{% if pi.volumetrico_kg %} · vol. {{ pi.volumetrico_kg|kg }}{% endif %}{% if pi.cobra_por_volumen %} · por volumen{% endif %}</small>{% endif %}
             <br><small>Facturado: {{ (guia.peso_base or 'no informado').replace('_',' ')|lower }}</small>
             {% if pi.facturado_mayor %}<br><span class="badge warn">+{{ pi.excedente_kg|kg }} facturados de más</span>{% elif pi.facturado_kg is not none %}<br><span class="badge ok">Peso dentro de lo cotizado</span>{% endif %}
           {% else %}<strong class="mono">{{ (guia.peso_facturado_kg or '—')|kg }}</strong><br><small>{{ (guia.peso_base or 'no informado').replace('_',' ')|lower }}</small>{% if guia.tracking_normalizado %}<br><small>Sin peso inicial: la guía no está vinculada.</small>{% endif %}{% endif %}</td>

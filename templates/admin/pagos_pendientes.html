@@ -2,10 +2,17 @@
 {% block title %}Pagos por verificar{% endblock %}
 
 {% block content %}
-<div class="page-title">
-  <div class="eyebrow">Cuenta corriente</div>
-  <h1>Pagos por verificar</h1>
-  <p>Comprobantes recibidos. Se descuentan del saldo al aprobarlos.</p>
+<div class="page-title page-title-row">
+  <div>
+    <div class="eyebrow">Dinero · Cuentas de clientes</div>
+    <h1>Pagos por verificar</h1>
+    <p>Comprobantes recibidos. Se descuentan del saldo al aprobarlos. La cuenta completa de cada cliente está en su ficha.</p>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+    <a href="/admin/pagos/nuevo" class="btn btn-primary">Registrar pago</a>
+    <a href="/admin/envios/nuevo" class="btn btn-ghost">Cargar cargo manual</a>
+    <a href="/admin/clientes" class="btn btn-ghost">Clientes ↗</a>
+  </div>
 </div>
 
 {% if pagos %}

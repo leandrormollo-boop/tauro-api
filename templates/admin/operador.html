@@ -10,7 +10,7 @@
 {% if courier in ('OCA','DHL') %}<div class="op-actions"><a href="/admin/precios-web" class="btn btn-ghost">Precios de la web</a></div>{% endif %}
 {% if vista=='cuenta' %}
 {{ op.resumen(resumen) }}
-<div class="op-actions"><a href="/admin/conciliacion-couriers?courier={{ courier }}" class="btn btn-ghost">Cargar / conciliar documentos</a>{% if courier=='DHL' %}<a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer PDF DHL</a>{% endif %}</div>
+<div class="op-actions"><a href="/admin/conciliacion-couriers?courier={{ courier }}&vista=facturas" class="btn btn-ghost">Ver sus facturas y guías ↗</a></div>
 <section class="card"><h2>Documentos</h2>
 <form method="GET" class="op-actions"><input type="hidden" name="vista" value="cuenta"><label>Pago<select name="estado"><option value="">Todos</option>{% for e,t in [('SIN_VERIFICAR','Sin verificar'),('IMPAGA','Impagas'),('PARCIAL','Pagos parciales'),('CANCELADA','Saldadas'),('CREDITO_SIN_VERIFICAR','NC sin verificar'),('CREDITO_DISPONIBLE','NC disponibles'),('CREDITO_AGOTADO','NC aplicadas'),('ANULADA','Anuladas')] %}<option value="{{ e }}" {% if estado_filtro==e %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label><button class="btn btn-ghost">Filtrar</button></form>
 <div class="op-table"><table><thead><tr><th>Documento</th><th>Emisión / antigüedad</th><th>Vencimiento</th><th>Total</th><th>Pago</th><th>Saldo registrado</th><th>Clientes</th></tr></thead><tbody>
