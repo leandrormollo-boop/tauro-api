@@ -675,3 +675,23 @@ requiere migración y conciliación antes de mostrar dos saldos.
   `core/security.py` era un paquete entero de defensas que NUNCA se montó, y
   `docs/SEGURIDAD.md` las daba por vigentes. Antes de escribir una línea en ese
   documento, medirla contra producción con `curl -I`.
+
+## 07/10/2026 — PR #36 (Shopify embebida + Tiendanube + hardening) puesto al día con main
+
+- Merge de `origin/main` en `codex/pr28-hardening`; 5 conflictos resueltos:
+  `requirements.lock` → lock con hashes de main; `ci.yml` → CI auditado de main +
+  10 tests nuevos + job `ecommerce-apps` (shopify_app y tiendanube_nube_app) sumado
+  al gate `ci`; 3 tests → asserts de main (#41, versiones de assets reales).
+- Dockerfile: restaurado `--require-hashes` (la rama lo había quitado).
+- Local (Py 3.11 + Postgres): lista completa del CI **1474 passed, 9 skipped**; apps
+  Node test/typecheck/build OK, `dist/main.min.js` reproducible.
+- PR #36: MERGEABLE, esperando checks. **No mergear a main sin OK de Leandro**:
+  dispara deploy productivo con `preDeployCommand: migrate_database.py`
+  (no destructivo: CREATE IF NOT EXISTS + backfills + readiness que aborta si falta algo).
+- Dos apps Shopify conviven por diseño: `SHOPIFY_PUBLIC_API_KEY/_SECRET` (app pública
+  nueva, client_id del toml) con fallback a `SHOPIFY_API_KEY/_SECRET` (histórica).
+  Para encender la app pública en prod: cargar las PUBLIC en Railway.
+- Pendientes externos (Leandro): decisión Billing con Shopify (3 ítems del self-review);
+  Level 2 protected customer data; dev store limpia + recorrido completo; ícono,
+  capturas y screencast. Tiendanube: UAT OCA + homologación síncrona. Apple: Xcode +
+  cuenta developer. TLS verificado (self-review 3.1.1 cerrado).

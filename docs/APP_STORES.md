@@ -96,3 +96,14 @@ Android e iOS).
 - **Capturas** de la app (celular): 2–8 imágenes. Se sacan del portal en
   modo standalone.
 - **Ícono 512×512 sin transparencia** para la ficha (el maskable ya sirve).
+
+## Estado 07/10/2026 — pata Apple
+
+- Esta Mac tiene sólo Command Line Tools: **no hay Xcode ni CocoaPods** →
+  no se puede compilar ni subir la app iOS hasta instalar Xcode (App Store,
+  ~12 GB, con el Apple ID de Leandro).
+- Prerrequisitos en orden: (1) Apple Developer Program USD 99/año; (2) Xcode;
+  (3) wrapper Capacitor + push notifications (guideline 4.2); (4) `APPLE_TEAM_ID`
+  en Railway para universal links (endpoint AASA ya desplegado).
+- Play Store: paquete v1 ya generado (ver arriba). `/privacidad` y `/terminos`
+  ya responden en producción.

@@ -12,7 +12,7 @@ Fuente: requisitos canónicos obtenidos con `shopify doc fetch` desde
 |---|---:|
 | ✅ Evidencia favorable | 27 |
 | ❌ Falla local detectada | 0 |
-| ⚠️ Requiere decisión/verificación externa | 4 |
+| ⚠️ Requiere decisión/verificación externa | 3 (todas = decisión Billing) |
 | ⏭️ No aplicable, grupos omitidos | 69 |
 
 Los 100 requisitos del archivo quedaron clasificados. Este control revisa lo
@@ -129,3 +129,9 @@ Estos puntos no cambian el conteo anterior, pero bloquean la presentación:
 - [Best practices for apps](https://shopify.dev/docs/apps/launch/shopify-app-store/best-practices)
 - [About billing for your app](https://shopify.dev/docs/apps/launch/billing)
 - [Submitting your app for review](https://shopify.dev/docs/apps/launch/app-store-review/submit-app-for-review)
+
+**Evidencia 07/10/2026 (verificado desde red externa contra `taurosolutions.ar`):**
+certificado `CN=taurosolutions.ar` emitido por Let's Encrypt (YR2), vigente
+20/09/2026 → 19/12/2026; TLS 1.3 (`TLS_AES_256_GCM_SHA384`); `Verify return
+code: 0 (ok)`; `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+Renovación automática (Railway). **Ítem cerrado.**
