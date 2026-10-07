@@ -309,7 +309,7 @@ def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
 
 def test_envios_concentra_acciones_y_no_renderiza_documentos_en_cada_fila():
     html = _template("envios.html")
-    assert '<details class="shipment-actions">' in html
+    assert '<details class="shipment-actions" data-dropdown>' in html
     assert "Ver información completa" in html
     assert "Ver guía en pantalla" in html
     assert "Descargar guía" in html

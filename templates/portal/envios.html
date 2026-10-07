@@ -1,6 +1,6 @@
 {% extends "portal/_partial.html" if parcial else "base.html" %}
 {% macro opciones_envio(s, es_baja) %}
-                        <details class="shipment-actions">
+                        <details class="shipment-actions" data-dropdown>
                             <summary>Opciones <span aria-hidden="true">⌄</span></summary>
                             <div class="shipment-actions-menu">
                             <a href="/portal/envios/{{ s.id }}/gestion" data-shipment-manage class="shipment-action">Gestionar envío</a>
