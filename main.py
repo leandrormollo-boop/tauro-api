@@ -6,8 +6,9 @@ from fastapi.responses import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, validator
 from apscheduler.schedulers.background import BackgroundScheduler
+from decimal import Decimal
 import hashlib
 import json
 import os
@@ -15,7 +16,7 @@ import secrets
 from dotenv import load_dotenv
 from typing import Optional
 
-from servicios.carriers import cotizar_carriers
+from servicios.carriers import cotizar_carriers_web as cotizar_carriers
 from core.email_sender import enviar_email_pedido
 from core.database import init_db
 from endpoints.portal_cliente import router as portal_router
@@ -39,6 +40,8 @@ from servicios.meta_ads import (
 from servicios.numeros_humanos import (
     parse_configuracion_numerica,
     parse_float_formulario,
+    parse_importe_humano,
+    parse_numero_humano,
 )
 
 
@@ -577,6 +580,41 @@ class CotizarWebRequest(BaseModel):
         return v
 
 
+class CotizarWebNacionalRequest(BaseModel):
+    """Datos mínimos que OCA requiere para tarifar una ruta nacional."""
+
+    # Un cotizador anónimo no necesita nombres, domicilios ni contactos.
+    # Rechazarlos evita que esos datos lleguen por accidente a logs o APIs.
+    model_config = ConfigDict(extra="forbid")
+
+    origen_cp: str = Field(..., min_length=4, max_length=16)
+    destino_cp: str = Field(..., min_length=4, max_length=16)
+    cantidad_bultos: Decimal
+    peso_kg: Decimal
+    largo_cm: Decimal
+    ancho_cm: Decimal
+    alto_cm: Decimal
+    valor_declarado_ars: Decimal
+
+    @field_validator(
+        "cantidad_bultos", "peso_kg", "largo_cm", "ancho_cm", "alto_cm",
+        mode="before",
+    )
+    @classmethod
+    def normalizar_decimal(cls, value):
+        numero = parse_numero_humano(value)
+        if numero is None:
+            raise ValueError("Ingresá un número válido.")
+        return numero
+
+    @field_validator("valor_declarado_ars", mode="before")
+    @classmethod
+    def normalizar_importe(cls, value):
+        numero = parse_importe_humano(value)
+        if numero is None:
+            raise ValueError("Ingresá un importe válido.")
+        return numero
+
 # ─────────────────────────────────────────────
 # AUTH HELPER
 # ─────────────────────────────────────────────
@@ -900,6 +938,127 @@ def paises_disponibles():
     """
     from servicios.paises import opciones
     return {"paises": [{"iso": iso, "nombre": nombre} for iso, nombre in opciones()]}
+
+
+@app.get("/cotizar-web/ubicaciones", tags=["public"])
+def ubicaciones_web_nacional(
+    request: Request,
+    q: str = "",
+    tipo: str = "city",
+    provincia: str = "",
+):
+    """Busca referencias argentinas de ciudad/CP sin pedir datos personales."""
+    import sqlite3
+
+    from servicios.rate_limit import check_rate, client_ip
+    from servicios.ubicaciones_cotizador import buscar_ubicaciones
+
+    if not check_rate(
+        f"cotweb_places:{client_ip(request)}",
+        max_attempts=90,
+        window_seconds=60,
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail="Esperá un momento para buscar otra ubicación.",
+        )
+    try:
+        return buscar_ubicaciones("AR", q, tipo, provincia)
+    except (OSError, sqlite3.Error):
+        return {"suggestions": [], "automatic": None, "unavailable": True}
+
+
+@app.post("/cotizar-web/nacional", tags=["public"])
+def cotizar_web_nacional(body: CotizarWebNacionalRequest, request: Request):
+    """Cotiza OCA puerta a puerta; nunca crea, reserva ni confirma una guía.
+
+    El cupo durable es 30 consultas por IP y 120 globales cada cinco minutos.
+    Ambos contadores se guardan en PostgreSQL antes de llamar a OCA; si la DB
+    no puede verificarlos, el cotizador falla cerrado con 503.
+    """
+    from servicios.cotizador_publico_nacional import (
+        CotizacionPublicaDesactivada,
+        CotizacionPublicaNoConfigurada,
+        CotizacionPublicaNoDisponible,
+        cotizar_publico_nacional,
+    )
+    from servicios.rate_limit import check_auth_rate, client_ip
+
+    try:
+        ip_habilitada = check_auth_rate(
+            f"cotweb-nacional:ip:{client_ip(request)}",
+            max_attempts=30,
+            window_seconds=300,
+        )
+        global_habilitada = ip_habilitada and check_auth_rate(
+            "cotweb-nacional:global",
+            max_attempts=120,
+            window_seconds=300,
+        )
+    except Exception as exc:
+        print(f"[cotweb-nacional] rate limit no disponible: {type(exc).__name__}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "detail": "El cotizador no está disponible en este momento. Probá de nuevo más tarde.",
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    if not ip_habilitada or not global_habilitada:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "status": "error",
+                "detail": "Estás cotizando muy seguido. Esperá un minuto y volvé a probar.",
+            },
+            headers={"Cache-Control": "no-store", "Retry-After": "300"},
+        )
+    try:
+        resultado = cotizar_publico_nacional(**body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except CotizacionPublicaDesactivada as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "code": "oca_public_quote_disabled",
+                "detail": str(exc),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    except CotizacionPublicaNoConfigurada as exc:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "code": "oca_public_quote_unavailable",
+                "detail": str(exc),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    except CotizacionPublicaNoDisponible as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": "error",
+                "code": "oca_quote_unavailable",
+                "detail": str(exc),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as exc:
+        # El cliente nunca recibe CUIT, operativa, pricing ni respuesta XML.
+        print(f"[cotweb-nacional] error: {type(exc).__name__}")
+        raise HTTPException(
+            status_code=502,
+            detail="No pudimos obtener la tarifa de OCA. Probá de nuevo en un momento.",
+        ) from None
+    return JSONResponse(
+        content=resultado,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.post("/cotizar-web", tags=["public"])

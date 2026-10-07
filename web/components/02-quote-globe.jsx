@@ -1,39 +1,71 @@
 /* Same globe as the portal. React owns quote values; the map only reads this local bridge. */
-function PublicQuoteGlobe({ origin, destination, countries, compact = false, busy = false }) {
+function PublicQuoteGlobe({
+  mode = "internacional",
+  origin,
+  destination,
+  countries,
+  nationalOrigin,
+  nationalDestination,
+  compact = false,
+  busy = false,
+}) {
   const rootRef = React.useRef(null);
-  const previous = React.useRef({ origin, destination, countries });
+  const previous = React.useRef({ mode, origin, destination, countries, nationalOrigin, nationalDestination });
   React.useEffect(() => {
     const root = rootRef.current;
+    window.TauroQuoteMap?.dispose(root);
     try { window.TauroQuoteMap?.attach(root); } catch (_) { /* Quoting remains available. */ }
     return () => window.TauroQuoteMap?.dispose(root);
-  }, []);
+  }, [mode]);
   React.useEffect(() => {
     const root = rootRef.current;
     const changed = [];
-    if (previous.current.origin !== origin) changed.push("origen_pais");
-    if (previous.current.destination !== destination) changed.push("destino_pais");
-    if (!changed.length && previous.current.countries !== countries) changed.push("destino_pais");
-    changed.forEach(name => root.querySelector(`[name="${name}"]`).dispatchEvent(new Event("change", { bubbles: true })));
-    previous.current = { origin, destination, countries };
-  }, [origin, destination, countries]);
+    if (mode === "nacional") {
+      if (previous.current.nationalOrigin?.province !== nationalOrigin?.province) changed.push("origen_provincia");
+      if (previous.current.nationalDestination?.province !== nationalDestination?.province) changed.push("destino_provincia");
+    } else {
+      if (previous.current.origin !== origin) changed.push("origen_pais");
+      if (previous.current.destination !== destination) changed.push("destino_pais");
+      if (!changed.length && previous.current.countries !== countries) changed.push("destino_pais");
+    }
+    changed.forEach((name) => root.querySelector(`[name="${name}"]`)?.dispatchEvent(new Event("change", { bubbles: true })));
+    previous.current = { mode, origin, destination, countries, nationalOrigin, nationalDestination };
+  }, [mode, origin, destination, countries, nationalOrigin, nationalDestination]);
+  const national = mode === "nacional";
+  const nationalOptions = [nationalOrigin, nationalDestination].filter((item) => item?.province);
   return (
-    <div ref={rootRef} className={`quote-screen unified-quote public-quote-map${compact ? " is-result" : ""}${busy ? " is-loading" : ""}`} data-quote-active="internacional" data-map-countries-only>
+    <div ref={rootRef} className={`quote-screen unified-quote public-quote-map${compact ? " is-result" : ""}${busy ? " is-loading" : ""}`} data-quote-active={mode} {...(!national ? { "data-map-countries-only": "" } : {})}>
       {/* Hidden presentation values never submit or change the quote. */}
-      <form hidden aria-hidden="true" data-unified-form="internacional" onSubmit={event => event.preventDefault()}>
-        <select name="origen_pais" value={origin} onChange={() => {}} tabIndex={-1}>
-          {countries.map(country => <option key={country.value} value={country.value}>{country.label}</option>)}
-        </select>
-        <select name="destino_pais" value={destination} onChange={() => {}} tabIndex={-1}>
-          {countries.map(country => <option key={country.value} value={country.value}>{country.label}</option>)}
-        </select>
-        <input name="origen_ciudad" type="hidden" value="" readOnly />
-        <input name="destino_ciudad_internacional" type="hidden" value="" readOnly />
-      </form>
-<aside className="quote-route-map" data-quote-map aria-label="Mapa de origen y destino">
+      {national ? (
+        <form hidden aria-hidden="true" data-unified-form="nacional" onSubmit={event => event.preventDefault()}>
+          <select name="origen_provincia" value={nationalOrigin?.province || ""} onChange={() => {}} tabIndex={-1}>
+            <option value="">Origen</option>
+            {nationalOptions.map((item, index) => <option key={`o-${item.province}-${index}`} value={item.province}>{item.region || item.city || item.province}</option>)}
+          </select>
+          <select name="destino_provincia" value={nationalDestination?.province || ""} onChange={() => {}} tabIndex={-1}>
+            <option value="">Destino</option>
+            {nationalOptions.map((item, index) => <option key={`d-${item.province}-${index}`} value={item.province}>{item.region || item.city || item.province}</option>)}
+          </select>
+          <input name="origen_ciudad" type="hidden" value={nationalOrigin?.city || ""} readOnly />
+          <input name="destino_ciudad_internacional" type="hidden" value={nationalDestination?.city || ""} readOnly />
+        </form>
+      ) : (
+        <form hidden aria-hidden="true" data-unified-form="internacional" onSubmit={event => event.preventDefault()}>
+          <select name="origen_pais" value={origin} onChange={() => {}} tabIndex={-1}>
+            {countries.map(country => <option key={country.value} value={country.value}>{country.label}</option>)}
+          </select>
+          <select name="destino_pais" value={destination} onChange={() => {}} tabIndex={-1}>
+            {countries.map(country => <option key={country.value} value={country.value}>{country.label}</option>)}
+          </select>
+          <input name="origen_ciudad" type="hidden" value="" readOnly />
+          <input name="destino_ciudad_internacional" type="hidden" value="" readOnly />
+        </form>
+      )}
+<aside className="quote-route-map" data-quote-map aria-label={national ? "Mapa de referencia entre provincias" : "Mapa de origen y destino"}>
   <div className="quote-map-heading"><span className="quote-map-live-dot" aria-hidden="true"></span></div>
   <div className="quote-map-art">
 
-    <canvas data-map-canvas aria-hidden={compact} tabIndex={compact ? -1 : 0} role="img" aria-roledescription="globo interactivo" aria-label="Mapa del mundo. Arrastrá para girar. Con teclado, usá las flechas para girar, más y menos para acercar y alejar, e Inicio para volver a la ruta."></canvas>
+    <canvas data-map-canvas aria-hidden={compact} tabIndex={compact ? -1 : 0} role="img" aria-roledescription="globo interactivo" aria-label={national ? "Mapa de Argentina de referencia provincial. No confirma cobertura. Usá las flechas para moverlo, más y menos para acercar y alejar." : "Mapa del mundo. Arrastrá para girar. Con teclado, usá las flechas para girar, más y menos para acercar y alejar, e Inicio para volver a la ruta."}></canvas>
     <svg className="quote-map-glint" data-map-glint aria-hidden="true" focusable="false" preserveAspectRatio="none">
       <defs>
         <linearGradient data-map-glint-gradient x1="0" y1="0" x2="1" y2="0">
@@ -73,8 +105,8 @@ function PublicQuoteGlobe({ origin, destination, countries, compact = false, bus
     <span className="quote-map-connector" aria-hidden="true">↗</span>
     <div className="quote-map-endpoint"><span className="quote-map-pin" aria-hidden="true"></span><div><small>DESTINO</small><strong data-map-destination>Elegí destino</strong><span data-map-destination-country></span></div></div>
   </div>
-  <div className="quote-map-footer"><span data-map-caption>Ruta orientativa entre países.</span><button type="button" className="quote-map-toggle" aria-pressed="false" data-map-toggle>Ocultar mapa</button></div>
-  <span className="quote-map-credit">Cartografía · Natural Earth</span>
+  <div className="quote-map-footer"><span data-map-caption>{national ? "Referencia entre provincias · sin validar cobertura." : "Ruta orientativa entre países."}</span><button type="button" className="quote-map-toggle" aria-pressed="false" data-map-toggle>Ocultar mapa</button></div>
+  <span className="quote-map-credit">{national ? "Cartografía · IGN / Georef · Natural Earth" : "Cartografía · Natural Earth"}</span>
 </aside>
 
     </div>
