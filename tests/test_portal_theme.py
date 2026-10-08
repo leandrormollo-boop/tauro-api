@@ -15,7 +15,7 @@ def test_tema_se_aplica_antes_del_css_sin_destello():
     assert 'localStorage.getItem("tauro.portal.theme")' in BASE
     assert 'if (tema !== "light" && tema !== "dark")' in BASE
     assert 'tema = "light";' in BASE
-    assert BASE.index('localStorage.getItem("tauro.portal.theme")') < BASE.index("tauro.css?v=50")
+    assert BASE.index('localStorage.getItem("tauro.portal.theme")') < BASE.index("tauro.css?v=51")
 
 
 def test_portal_ofrece_controles_en_shell_mobile_y_login():

@@ -39,10 +39,10 @@ def test_portal_resume_el_total_y_mantiene_el_desglose_en_el_detalle():
     assert "envio-price-extra diferencia" in listado
     assert "envio-price-extra tax" in listado
     assert 'id="costo-del-envio"' in detalle
-    assert "Precio inicial aceptado" in detalle
+    assert "Costo inicial" in detalle
     assert "Costo adicional de flete" in detalle
     assert "Impuesto adicional del envío" in detalle
-    assert "Precio final del envío" in detalle
+    assert "Saldo final del envío" in detalle
     assert consultas.count("AS diferencia_flete_ars") == 3
     assert consultas.count("AS tax_cliente_ars") == 3
 

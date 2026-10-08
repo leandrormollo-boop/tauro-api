@@ -145,21 +145,25 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                         {% if m.tipo not in ('DIFERENCIA', 'TAX', 'AJUSTE_PRECIO', 'PAGO', 'PAGO_PENDIENTE', 'PAGO_RECHAZADO') and m.valor_envio_ars is not none and not m.diferencia_detalle %}<small>Cargo del envío: <strong>{{ dinero(m.valor_envio_ars) }}</strong></small>{% endif %}
                         {% if m.diferencia_detalle %}
                           {% set d = m.diferencia_detalle %}
+                          {% set con_pesos = d.peso_inicial_kg is defined and d.peso_facturado_kg is defined and d.peso_inicial_kg is not none and d.peso_facturado_kg is not none and m.tipo not in ('TAX', 'AJUSTE_PRECIO') %}
                           {% if d.montos_completos %}
-                          <div class="account-difference-flow" aria-label="Cálculo del costo final">
-                              <span class="account-difference-value">
-                                  <small>{% if m.tipo == 'AJUSTE_PRECIO' %}Precio anterior{% elif m.tipo == 'TAX' %}Valor previo{% else %}Valor cotizado{% endif %}</small>
+                          <div class="account-difference-flow" aria-label="Cálculo del saldo final del envío">
+                              <span class="account-difference-value is-initial">
+                                  <small>{% if m.tipo == 'AJUSTE_PRECIO' %}Precio anterior{% elif m.tipo == 'TAX' %}Valor previo{% else %}Costo inicial{% endif %}</small>
                                   <strong>{{ dinero(d.valor_inicial_ars) }}</strong>
+                                  {% if con_pesos %}<em class="account-difference-weight">{{ d.peso_inicial_kg|kg }} cotizados</em>{% endif %}
                               </span>
-                              <span class="account-difference-operator">{% if d.es_credito %}−{% else %}+{% endif %}</span>
+                              <span class="account-difference-operator" aria-hidden="true">{% if d.es_credito %}−{% else %}+{% endif %}</span>
                               <span class="account-difference-value is-adjustment {% if d.es_credito %}is-credit{% endif %}">
                                   <small>{% if m.tipo == 'AJUSTE_PRECIO' %}{{ "Descuento" if d.es_credito else "Ajuste" }}{% elif m.tipo == 'TAX' %}TAX{% else %}Diferencia{% endif %}</small>
-                                  <strong>{{ dinero(d.diferencia_ars|abs) }}</strong>
+                                  <strong>{% if d.es_credito %}− {% else %}+ {% endif %}{{ dinero(d.diferencia_ars|abs) }}</strong>
+                                  {% if con_pesos %}<em class="account-difference-weight">{% if d.peso_facturado_kg >= d.peso_inicial_kg %}+{% else %}−{% endif %}{{ (d.peso_facturado_kg - d.peso_inicial_kg)|abs|kg }}</em>{% endif %}
                               </span>
-                              <span class="account-difference-operator">=</span>
+                              <span class="account-difference-operator" aria-hidden="true">=</span>
                               <span class="account-difference-value is-final">
-                                  <small>{{ "Nuevo precio" if m.tipo == 'AJUSTE_PRECIO' else "Costo final" }}</small>
+                                  <small>{{ "Nuevo precio" if m.tipo == 'AJUSTE_PRECIO' else "Saldo final" }}</small>
                                   <strong>{{ dinero(d.valor_final_ars) }}</strong>
+                                  {% if con_pesos %}<em class="account-difference-weight">{{ d.peso_facturado_kg|kg }} facturados</em>{% endif %}
                               </span>
                           </div>
                           {% endif %}
@@ -167,10 +171,12 @@ $ {{ "{:,.2f}".format(valor|default(0, true)).replace(",", "_").replace(".", ","
                           <small class="account-difference-reason">Motivo: {{ d.concepto_courier or d.motivo_legible }}</small>
                           {% elif m.tipo == 'TAX' %}
                           <small class="account-difference-reason">Impuesto asociado a esta guía.</small>
+                          {% elif con_pesos and d.montos_completos %}
+                          <small class="account-difference-reason">Motivo: {{ d.motivo_legible }}{% if d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
                           {% elif d.es_peso %}
-                          <small class="account-difference-reason">Peso cotizado {{ d.peso_inicial_kg }} kg → peso facturado por el courier {{ d.peso_facturado_kg }} kg · diferencia {{ d.diferencia_peso_kg }} kg{% if d.motivo == 'MIXTO' and d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
+                          <small class="account-difference-reason">Peso cotizado {{ d.peso_inicial_kg|kg }} → peso facturado por el courier {{ d.peso_facturado_kg|kg }} · diferencia {{ d.diferencia_peso_kg|kg }}{% if d.motivo == 'MIXTO' and d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
                           {% elif d.peso_facturado_kg %}
-                          <small class="account-difference-reason">Peso facturado por el courier: {{ d.peso_facturado_kg }} kg{% if d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
+                          <small class="account-difference-reason">Peso facturado por el courier: {{ d.peso_facturado_kg|kg }}{% if d.concepto_courier %} · {{ d.concepto_courier }}{% endif %}</small>
                           {% else %}
                           <small class="account-difference-reason">Motivo: {{ d.concepto_courier or d.motivo_legible }}</small>
                           {% endif %}

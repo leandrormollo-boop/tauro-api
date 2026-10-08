@@ -72,7 +72,9 @@ def test_costos_verdes_conservan_adicionales_separados():
         assert f'class="envio-price-extra {name}"' in html
         assert f'class="envio-price-extra {name} portal-money-green"' not in html
     detail = (ROOT / "templates/portal/envio_detalle.html").read_text()
-    assert 'class="portal-money-green">{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}' in detail
+    # El costo inicial va discreto (sin verde); el saldo final es el monto destacado.
+    assert '<strong>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}' in detail
+    assert 'class="mini-row envio-account-initial"' in detail
     assert 'class="portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}' in detail
     for name in ("diferencia", "tax"):
         assert f'class="mini-row envio-account-extra {name}"' in detail
@@ -95,9 +97,9 @@ def test_diferencia_muestra_una_sola_ecuacion_y_no_duplica_el_cargo():
 
     html = render_account("24571.34", movement=difference)
 
-    assert "Valor cotizado" in html
+    assert "Costo inicial" in html
     assert "Diferencia" in html
-    assert "Costo final" in html
+    assert "Saldo final" in html
     assert "$ 97.700,00" in html
     assert "$ 24.571,34" in html
     assert "$ 122.271,34" in html

@@ -353,19 +353,21 @@ $ {{ (valor or 0)|numero_ars }} ARS
         <div class="card-head">
             <div>
                 <h3>Cuenta del envío</h3>
-                <p>{% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}Este envío no genera cargos.{% else %}Precio aceptado y diferencias aprobadas por factura del operador.{% endif %}</p>
+                <p>{% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}Este envío no genera cargos.{% else %}Costo inicial y diferencias aprobadas por factura del operador.{% endif %}</p>
             </div>
         </div>
         {% if s.estado in ('CANCELADO', 'REEMPLAZADO') %}
         <div class="mini-row"><span class="badge warn">{{ s.estado }}</span><strong>Sin cargo</strong></div>
         {% else %}
-        <div class="mini-row">
-            <span>Precio inicial aceptado</span>
-            <strong class="portal-money-green">{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</strong>
+        {% set d = s.diferencia_detalle %}
+        {% set con_pesos = d and d.peso_inicial_kg is defined and d.peso_facturado_kg is defined and d.peso_inicial_kg is not none and d.peso_facturado_kg is not none %}
+        <div class="mini-row envio-account-initial">
+            <span>Costo inicial{% if con_pesos %}<small>{{ d.peso_inicial_kg|kg }} cotizados</small>{% endif %}</span>
+            <strong>{{ dinero_ars(s.precio_inicial_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
         {% if s.diferencia_flete_ars %}
         <div class="mini-row envio-account-extra diferencia">
-            <span><b>Diferencia</b><small>Costo adicional de flete</small></span>
+            <span><b>Diferencia</b><small>Costo adicional de flete{% if con_pesos and d.es_peso and d.diferencia_peso_kg is not none %} · {{ "+" if d.diferencia_peso_kg >= 0 else "−" }}{{ d.diferencia_peso_kg|abs|kg }}{% endif %}</small></span>
             <strong>{{ "+" if s.diferencia_flete_ars > 0 else "−" }} {{ dinero_ars(s.diferencia_flete_ars|abs) }}</strong>
         </div>
         {% endif %}
@@ -382,23 +384,14 @@ $ {{ (valor or 0)|numero_ars }} ARS
         </div>
         {% endif %}
         <div class="mini-row envio-account-total">
-            <span>Precio final del envío</span>
+            <span>Saldo final del envío{% if con_pesos %}<small>{{ d.peso_facturado_kg|kg }} facturados</small>{% endif %}</span>
             <strong class="portal-money-green">{{ dinero_ars(s.precio_final_cliente_ars or s.precio_tauro_ars) }}</strong>
         </div>
-        {% set d = s.diferencia_detalle %}
         {% if d and d.es_peso %}
         <hr class="divider">
         <div class="mini-row">
-            <span>Peso cotizado</span>
-            <strong>{{ (d.peso_inicial_kg)|kg }}</strong>
-        </div>
-        <div class="mini-row">
-            <span>Peso facturado por el courier</span>
-            <strong>{{ (d.peso_facturado_kg)|kg }} · {{ (d.base_peso or 'otro').replace('_', ' ')|title }}</strong>
-        </div>
-        <div class="mini-row">
-            <span>Diferencia de peso</span>
-            <strong>{{ (d.diferencia_peso_kg)|kg }}</strong>
+            <span>Peso cotizado → Peso facturado por el courier</span>
+            <strong>{{ (d.peso_inicial_kg)|kg }} → {{ (d.peso_facturado_kg)|kg }} · {{ (d.base_peso or 'otro').replace('_', ' ')|title }}</strong>
         </div>
         <div class="mini-row">
             <span>Motivo</span>
