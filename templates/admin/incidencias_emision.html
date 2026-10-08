@@ -1,0 +1,47 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}Intentos de emisión{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>Intentos de emisión</h1>
+  <p>Consultá qué pasó al intentar generar una guía.</p>
+  <a href="/admin/bandeja">Volver a Pendientes de atención</a>
+</div>
+<form method="get" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin-bottom:24px;">
+  <label>Solicitud
+    <input name="solicitud_id" type="number" min="1" value="{{ solicitud_id if solicitud_id > 0 else '' }}" placeholder="Número de solicitud">
+  </label>
+  <label>Resultado
+    <select name="resultado">
+      {% for valor, nombre in [('fallidos','Fallidos'),('exitosos','Exitosos'),('todos','Todos')] %}
+      <option value="{{ valor }}" {{ 'selected' if resultado == valor else '' }}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="btn btn-primary" type="submit">Buscar</button>
+</form>
+{% for intento in items %}
+<article style="padding:20px 0;border-bottom:1px solid var(--line-soft);overflow-wrap:anywhere;">
+  <div style="display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;">
+    <div>
+      {% if intento.solicitud_id %}<a href="{{ '/admin/conciliacion-couriers/envios/' ~ intento.solicitud_id if intento.tracking else '/admin/pedidos/' ~ intento.solicitud_id ~ '/editar' }}">Solicitud #{{ intento.solicitud_id }}</a>{% else %}Solicitud no disponible{% endif %}
+      {% if intento.cliente_id %} · <a href="/admin/clientes/{{ intento.cliente_id|urlencode }}">{{ intento.cliente_id }}</a>{% endif %}
+      {% if intento.courier %} · {{ intento.courier }}{% endif %}
+    </div>
+    <span>{{ intento.fecha.strftime('%d/%m/%Y %H:%M:%S') }} · Argentina</span>
+  </div>
+  <p><span class="badge {{ 'ok' if intento.success else 'error' }}">{{ 'Exitoso' if intento.success else 'Fallido' }}</span> · {{ 'Cliente' if intento.actor_type == 'cliente' else 'Admin' }}</p>
+  <p style="white-space:pre-line;">{{ intento.metadata.motivo }}</p>
+  <span class="mono">{{ intento.metadata.referencia }}</span>
+  {% if not intento.success %}
+  <details style="margin-top:12px;">
+    <summary>Detalle técnico</summary>
+    <p>Código: <span class="mono">{{ intento.metadata.codigo }}</span><br>Etapa: {{ intento.metadata.etapa }}{% if intento.metadata.error_tipo %}<br>Tipo de error: <span class="mono">{{ intento.metadata.error_tipo }}</span>{% endif %}</p>
+  </details>
+  {% endif %}
+  {% if intento.estado %}<p class="sub">Estado actual del envío: {{ intento.estado_cliente_ui.label }}{% if intento.tracking %} · Guía {{ intento.tracking }}{% endif %}</p>{% endif %}
+</article>
+{% else %}
+<p>No hay intentos registrados para este filtro. Los nuevos intentos aparecerán aquí.</p>
+{% endfor %}
+{% if siguiente %}<a class="btn btn-ghost" style="margin-top:20px;" href="?resultado={{ resultado }}&amp;solicitud_id={{ solicitud_id }}&amp;antes={{ siguiente }}">Ver anteriores</a>{% endif %}
+{% endblock %}

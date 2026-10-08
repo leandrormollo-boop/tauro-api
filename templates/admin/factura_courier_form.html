@@ -3,6 +3,12 @@
 {% block content %}
 <div class="page-title page-title-row"><div><div class="eyebrow">Control courier</div><h1>{{ titulo|default('Cargar factura del operador') }}</h1><p>Puede ser una factura individual o una factura mensual con muchas guías.</p></div><a href="{{ ruta_retorno|default('/admin/facturas-internacionales') }}" class="btn btn-ghost">Volver</a></div>
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
+{% if ambito|default('INTERNACIONAL') == 'INTERNACIONAL' %}
+<div class="card" style="max-width:980px;margin-bottom:16px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+  <div><strong>¿Es un PDF de DHL?</strong><p style="margin:4px 0 0;">El lector lo carga solo: documento, guías, pesos, importes y tipo de cambio. Después revisás y aprobás.</p></div>
+  <a href="/admin/conciliacion-couriers/entrada-dhl" class="btn btn-primary">Leer PDF de DHL</a>
+</div>
+{% endif %}
 <div class="card" style="max-width:980px;">
 <form method="POST" action="/admin/conciliacion-couriers/nueva" enctype="multipart/form-data">
   <input type="hidden" name="ambito" value="{{ ambito|default('INTERNACIONAL') }}">

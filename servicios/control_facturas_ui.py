@@ -3,6 +3,9 @@ from urllib.parse import urlencode, urlsplit, parse_qsl
 
 ESTADOS_CONTROL = (
     ('REQUIERE_ACCION', 'Requieren revisión'),
+    ('CANCELADO_FACTURADO', 'Cancelado pero facturado'),
+    ('REEMPLAZADO_FACTURADO', 'Reemplazado pero facturado'),
+    ('SIN_FACTURA_30D', 'Sin factura hace más de 30 días'),
     ('BASE_PENDIENTE', 'Falta costo estimado'),
     ('MATCH_PENDIENTE', 'Vinculación por confirmar'),
     ('EVIDENCIA_PENDIENTE', 'Falta evidencia'),
@@ -15,9 +18,19 @@ ESTADOS_CONTROL = (
 
 ESTADOS_FACTURA = (
     ('ABIERTAS', 'Control abierto'),
+    ('BANDEJAS_PENDIENTES', 'Con guías en bandeja'),
+    ('NO_CUADRA', 'No cuadra con el total'),
     ('GUIAS_SIN_MATCH', 'Con guías sin identificar'),
     ('MATCH_PENDIENTE', 'Vinculación por confirmar'),
     ('TERMINADAS', 'Control terminado'),
+)
+
+# Bandejas de una guía facturada (control de facturas de operadores).
+BANDEJAS_FACTURA = (
+    ('REEMPLAZADA', 'Guía reemplazada'),
+    ('CANCELADA', 'Guía cancelada'),
+    ('SIN_DUENO', 'Sin dueño'),
+    ('YA_FACTURADO', 'Ya facturado'),
 )
 
 
@@ -42,7 +55,7 @@ def retorno_control(valor, predeterminado):
     }:
         return predeterminado
     params = [(k, v) for k, v in parse_qsl(url.query) if k in {
-        'vista', 'pagina', 'courier', 'cliente', 'buscar', 'estado',
+        'vista', 'pagina', 'courier', 'cliente', 'buscar', 'estado', 'bandeja',
     }]
     return url.path + ('?' + urlencode(params) if params else '')
 
@@ -77,6 +90,13 @@ def preparar_presentacion(*, control, facturas, ajustes, filtros, ruta, vista, p
             filas = [f for f in filas if (f.get('propuestos') or 0) > 0]
         elif estado == 'TERMINADAS':
             filas = [f for f in filas if f.get('estado') in ('CONCILIADA', 'CERRADA')]
+        elif estado == 'BANDEJAS_PENDIENTES':
+            filas = [f for f in filas if (f.get('bandejas_pendientes') or 0) > 0]
+        elif estado == 'NO_CUADRA':
+            filas = [f for f in filas if f.get('cuadra_documento') is False and (f.get('lineas') or 0) > 0]
+        bandeja = (filtros.get('bandeja') or '').upper()
+        if bandeja:
+            filas = [f for f in filas if (f.get('bandejas_detalle') or {}).get(bandeja)]
     if vista == 'facturas' and filtros.get('buscar'):
         texto = filtros['buscar'].strip().casefold()
         filas = [f for f in filas if texto in str(f.get('numero', '')).casefold()]
@@ -96,5 +116,6 @@ def preparar_presentacion(*, control, facturas, ajustes, filtros, ruta, vista, p
                        hasta=min(inicio + 25, total), total=total)
     return {'enlace': enlace, 'estados_control': ESTADOS_CONTROL, 'estados_factura': ESTADOS_FACTURA,
             'etiquetas_control': dict(ESTADOS_CONTROL),
+            'bandejas_factura': BANDEJAS_FACTURA, 'etiquetas_bandeja': dict(BANDEJAS_FACTURA),
             'requieren_revision': requieren, 'ventana': ventana,
             'filas_visibles': visibles}

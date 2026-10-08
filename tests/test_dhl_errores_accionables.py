@@ -1,6 +1,7 @@
 """Casos oficiales y sintéticos de MyDHL, con HTTP simulado y sin emitir guías."""
 from copy import deepcopy
 from pathlib import Path
+import re
 from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
@@ -228,7 +229,9 @@ def test_admin_y_portal_no_recortan_el_motivo(monkeypatch):
     for response, key in ((admin.admin_pedido_generar_guia(request, 44), "guia_error"),
                           (pc.emitir_guia_portal(request, 44, cliente="DEMO"), "error")):
         assert response.status_code == 303
-        assert parse_qs(urlparse(response.headers["location"]).query)[key] == [error]
+        mensaje = parse_qs(urlparse(response.headers["location"]).query)[key][0]
+        assert mensaje.startswith(error)
+        assert re.fullmatch(r" Referencia: EMI-[A-F0-9]{12}\.", mensaje[len(error):])
 
 
 def test_mensaje_en_html_escapa_datos_y_separa_observaciones():

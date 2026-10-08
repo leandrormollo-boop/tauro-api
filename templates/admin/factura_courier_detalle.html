@@ -31,14 +31,64 @@
     </form>
     {% if factura.tiene_evidencia %}<a href="/admin/conciliacion-couriers/facturas/{{ factura.id }}/pdf" target="_blank" class="btn btn-ghost">Ver PDF</a>{% endif %}
     {% if ns.hay_activos and not financiera_pendiente %}
-    <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar los matches y calcular los envíos vinculados? Si hay borradores anteriores a la aprobación financiera se anularán conservando su historial. Las nuevas diferencias quedarán pendientes de aprobación.">
-      <button class="btn btn-primary">Confirmar y calcular</button>
-    </form>
+      {% set clientes_factura = factura.clientes|default([]) %}
+      {% if clientes_factura|length > 1 %}
+        {# Factura de varios clientes: se confirma un cliente por vez. #}
+        {% for c in clientes_factura if c.propuestas %}
+        <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar las guías de {{ c.cliente_id }} y calcular sus envíos? Las guías en bandeja no se tocan. Las diferencias quedan pendientes de aprobación; nada se cobra en este paso.">
+          <input type="hidden" name="cliente_id" value="{{ c.cliente_id }}">
+          <button class="btn btn-primary">Confirmar y calcular · {{ c.cliente_id }} ({{ c.propuestas }})</button>
+        </form>
+        {% endfor %}
+      {% else %}
+        <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/confirmar" data-confirm="¿Confirmar los matches y calcular los envíos vinculados? Las guías en bandeja no se tocan. Si hay borradores anteriores a la aprobación financiera se anularán conservando su historial. Las nuevas diferencias quedarán pendientes de aprobación.">
+          {% if clientes_factura %}<input type="hidden" name="cliente_id" value="{{ clientes_factura[0].cliente_id }}">{% endif %}
+          <button class="btn btn-primary">Confirmar y calcular</button>
+        </form>
+      {% endif %}
     {% endif %}
   </div>
 </div>
 
-{% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada. El historial quedó auditado.</div>{% endif %}
+{% set cuadres = factura.cuadres %}
+{% if cuadres %}
+<div class="card" style="margin-bottom:18px;">
+  <div class="card-head">
+    <div><h3>Cuadre de la factura<span data-help="Cuadre">Dos controles: los renglones suman el total del documento, y cada guía tiene un destino. La factura se cierra sola cuando los dos cuadran.</span></h3></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      {% if cuadres.cuadre_documento_ok %}<span class="badge ok">Documento cuadra</span>{% else %}<span class="badge error">No cuadra: {{ (factura.moneda)|simbolo_moneda }} {{ dinero(cuadres.diferencia_documento) }}</span>{% endif %}
+      {% if cuadres.cuadre_destinos_ok %}<span class="badge ok">Todo con destino</span>{% elif factura.bandejas_pendientes %}<span class="badge warn">{{ factura.bandejas_pendientes }} en bandeja</span>{% else %}<span class="badge warn">Faltan destinos</span>{% endif %}
+      <span class="badge {% if factura.estado in ('CERRADA','CONCILIADA') %}ok{% elif factura.estado == 'OBSERVADA' %}error{% else %}muted{% endif %}">{{ factura.estado|title }}</span>
+    </div>
+  </div>
+  <div class="dashboard-stats" style="margin:0;">
+    <div class="card"><small>Clientes</small><h2>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(cuadres.asignado_clientes) }}</h2><p>Guías vinculadas a envíos</p></div>
+    <div class="card"><small>Reclamo al operador</small><h2>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(cuadres.reclamado_operador) }}</h2><p>A descontar del pago</p></div>
+    <div class="card"><small>Absorbe TAURO</small><h2>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(cuadres.absorbido_tauro) }}</h2><p>Costo propio</p></div>
+    <div class="card"><small>Impuestos y generales</small><h2>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(cuadres.cargos_generales) }}</h2><p>Sin guía, a nivel factura</p></div>
+    <div class="card"><small>Sin destino</small><h2>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(cuadres.pendiente_bandeja + cuadres.sin_destino) }}</h2><p>{{ cuadres.guias_pendientes|length }} en bandeja · {{ cuadres.guias_sin_destino|length }} sin vincular</p></div>
+  </div>
+  <p style="margin:12px 0 0;"><small>Total del documento {{ (factura.moneda)|simbolo_moneda }} {{ dinero(cuadres.total) }} · renglones {{ dinero(cuadres.suma_renglones) }}{% if cuadres.subtotal > 0 %} · subtotal {{ dinero(cuadres.subtotal) }} + impuestos {{ dinero(cuadres.impuestos_documento) }}{% endif %}.</small></p>
+</div>
+{% endif %}
+
+{% if factura.posibles_duplicadas %}
+<div class="msg error" style="margin-bottom:18px;">
+  <strong>Posible factura duplicada.</strong> Hay {{ factura.posibles_duplicadas|length }} documento{{ 's' if factura.posibles_duplicadas|length != 1 }} del mismo operador que parece{{ 'n' if factura.posibles_duplicadas|length != 1 }} el mismo:
+  <ul style="margin:6px 0 0 18px;">
+  {% for d in factura.posibles_duplicadas %}
+    <li><a href="/admin/conciliacion-couriers/facturas/{{ d.id }}">{{ d.tipo_documento }} {{ d.numero }}</a> · {{ (d.moneda)|simbolo_moneda }} {{ dinero(d.total) }} · {{ d.estado|title }} · <small>{% for m in d.motivos %}{{ {'MISMO_NUMERO_OTRO_TIPO':'mismo número con otro tipo','MISMO_NUMERO_SIN_CEROS':'mismo número sin ceros a la izquierda','MISMO_PDF':'mismo PDF','MISMAS_GUIAS_E_IMPORTES':'mismas guías e importes','CONTROL_HISTORICO_MISMA_FC':'control histórico de esta FC'}.get(m, m) }}{% if not loop.last %} · {% endif %}{% endfor %}</small></li>
+  {% endfor %}
+  </ul>
+  <small>Ninguna se borra: si es la misma factura, anulá la que sobra y dejá la evidencia.</small>
+</div>
+{% endif %}
+
+{% set ok = request.query_params.get('ok') %}
+{% if ok == 'bandeja_resuelta' %}<div class="msg ok">Guía resuelta. Si fue a un cliente, el match quedó propuesto: confirmalo y calculá como siempre.</div>
+{% elif ok == 'bandeja_vinculada' %}<div class="msg ok">La guía ya está vigente en el portal: quedó vinculada y propuesta.</div>
+{% elif ok == 'bandeja_sigue_pendiente' %}<div class="msg ok">Se volvió a revisar: la guía sigue en bandeja. Elegí un destino.</div>
+{% elif ok %}<div class="msg ok">Operación registrada. El historial quedó auditado.</div>{% endif %}
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
 
 {% if financiera_pendiente %}
@@ -80,7 +130,7 @@
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Guía</th><th>Costo facturado</th><th>Peso facturado</th><th style="min-width:410px;">Único match del envío</th></tr></thead>
+      <thead><tr><th>Guía</th><th>Costo facturado</th><th>Peso inicial → facturado<span data-help="Peso">El peso inicial de la guía es el mayor entre el real declarado y el volumétrico de sus cajas, como al cotizar. Si el operador facturó más kilos, se marca.</span></th><th style="min-width:410px;">Bandeja y destino</th></tr></thead>
       <tbody>
       {% for guia in factura.envios_facturados %}
         <tr>
@@ -102,7 +152,11 @@
           <td class="mono"><strong>{{ (factura.moneda)|simbolo_moneda }} {{ dinero(guia.total_importe) }}</strong><br><small>$ {{ dinero(guia.total_importe_ars) }}{% if factura.revision_financiera_requerida %} documental{% endif %}</small>
             {% if factura.revision_financiera %}<br><small>$ {{ dinero(guia.total_conciliacion_ars) }} (TC aprobado)</small>{% endif %}
             <br>{% if guia.remanente > 0.02 %}<span class="badge warn">Pendiente {{ dinero(guia.remanente) }}</span>{% else %}<span class="badge ok">Guía asignada completa</span>{% endif %}</td>
-          <td>{{ (guia.peso_facturado_kg or '—')|kg }}<br><small>{{ (guia.peso_base or '').replace('_',' ')|title }}</small></td>
+          <td>{% set pi = guia.peso_inicial %}{% if pi %}<span class="mono">{{ pi.facturable_kg|kg }}</span> → <strong class="mono">{{ (guia.peso_facturado_kg or '—')|kg }}</strong>
+            {% if pi.real_kg or pi.volumetrico_kg %}<br><small>Inicial:{% if pi.real_kg %} real {{ pi.real_kg|kg }}{% endif %}{% if pi.volumetrico_kg %} · vol. {{ pi.volumetrico_kg|kg }}{% endif %}{% if pi.cobra_por_volumen %} · por volumen{% endif %}</small>{% endif %}
+            <br><small>Facturado: {{ (guia.peso_base or 'no informado').replace('_',' ')|lower }}</small>
+            {% if pi.facturado_mayor %}<br><span class="badge warn">+{{ pi.excedente_kg|kg }} facturados de más</span>{% elif pi.facturado_kg is not none %}<br><span class="badge ok">Peso dentro de lo cotizado</span>{% endif %}
+          {% else %}<strong class="mono">{{ (guia.peso_facturado_kg or '—')|kg }}</strong><br><small>{{ (guia.peso_base or 'no informado').replace('_',' ')|lower }}</small>{% if guia.tracking_normalizado %}<br><small>Sin peso inicial: la guía no está vinculada.</small>{% endif %}{% endif %}</td>
           <td>
             {% if guia.referencias_tauro_2026 %}
               <div style="padding:9px 10px;margin-bottom:9px;border:1px solid rgba(65,210,150,.28);border-radius:10px;background:rgba(65,210,150,.07);">
@@ -117,6 +171,45 @@
                 </div>
                 {% set referencia = guia.referencias_tauro_2026[0] %}
                 <small>{{ referencia.remitente or referencia.cliente }} → {{ referencia.destinatario or 'Destinatario no informado' }}{% if referencia.pais %} · {{ referencia.pais }}{% endif %}{% if referencia.fecha_envio %} · {{ referencia.fecha_envio }}{% endif %}</small>
+              </div>
+            {% endif %}
+            {% set r = guia.resolucion %}
+            {% if r %}
+              <div style="padding:9px 10px;margin-bottom:9px;border:1px solid {% if r.estado == 'PENDIENTE' %}rgba(245,158,11,.4){% else %}var(--line){% endif %};border-radius:10px;background:{% if r.estado == 'PENDIENTE' %}rgba(245,158,11,.07){% else %}rgba(255,255,255,.02){% endif %};">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                  <span class="badge {% if r.estado == 'PENDIENTE' %}warn{% else %}ok{% endif %}">{{ guia.bandeja_etiqueta }}</span>
+                  {% if r.estado == 'RESUELTA' %}<strong>{{ guia.destino_etiqueta }}</strong>{% if r.cliente_id %} · {{ r.cliente_id }}{% endif %}{% if r.solicitud_id %} · <a href="/admin/conciliacion-couriers/envios/{{ r.solicitud_id }}" class="mono">envío #{{ r.solicitud_id }}</a>{% endif %}{% endif %}
+                  {% if r.solicitud_referencia_id %}<small>guía {% if r.referencia_estado %}{{ r.referencia_estado|lower }}{% endif %} <a href="/admin/conciliacion-couriers/envios/{{ r.solicitud_referencia_id }}" class="mono">#{{ r.solicitud_referencia_id }}</a>{% if r.referencia_cliente_id %} de {{ r.referencia_cliente_id }}{% endif %}</small>{% endif %}
+                </div>
+                {% set det = r.detalle or {} %}
+                <small style="display:block;margin-top:4px;">
+                  {% if r.bandeja == 'REEMPLAZADA' %}La guía fue corregida{% if det.tracking_nuevo %} y reemplazada por <span class="mono">{{ det.tracking_nuevo }}</span>{% if det.solicitud_nueva_id %} (#{{ det.solicitud_nueva_id }}){% endif %}{% endif %}. {% if det.nueva_facturada %}<strong>La nueva también fue facturada: reclamá al operador.</strong>{% elif det.nueva_facturada is sameas false %}La nueva no fue facturada: podés trasladar el costo a #{{ det.solicitud_nueva_id }}.{% endif %}
+                  {% elif r.bandeja == 'CANCELADA' %}TAURO anuló esta guía y el operador la facturó igual. Riesgo: {{ (det.riesgo_estado or 'sin dato')|lower }}{% if det.tracking_estado %} · tracking {{ det.tracking_estado|lower }}{% endif %}{% if det.tracking_descripcion %} · {{ det.tracking_descripcion }}{% endif %}. Sin movimiento, se reclama. Con movimiento, la guía se usó: vuelve a entregada, su cargo se reactiva y se le cobra al cliente como cualquier envío.
+                  {% elif r.bandeja == 'SIN_DUENO' %}{% if det.causa == 'GUIA_OCULTA' %}Sólo coincide con una guía histórica oculta, sin precio ni cargo{% if det.cliente_id %} de {{ det.cliente_id }}{% endif %}. {{ det.ayuda }}{% elif det.causa == 'AMBIGUO' %}Coincide con más de un envío: {% for c in det.candidatos %}#{{ c.solicitud_id }} {{ c.cliente_id }} ({{ c.estado|lower }}){% if not loop.last %}, {% endif %}{% endfor %}.{% elif det.causa == 'CLIENTE_DISTINTO' %}TAURO 2026 la atribuye a {{ det.cliente_referencia }}, pero en el portal es de {% for c in det.candidatos %}{{ c.cliente_id }} (#{{ c.solicitud_id }}){% if not loop.last %}, {% endif %}{% endfor %}.{% else %}El tracking no existe en el portal. Buscalo en la planilla y en los chats antes de decidir.{% endif %}
+                  {% elif r.bandeja == 'YA_FACTURADO' %}El flete de esta guía ya está en <a href="/admin/conciliacion-couriers/facturas/{{ det.factura_anterior_id }}">{{ det.factura_anterior_tipo }} {{ det.factura_anterior_numero }}</a>. Si es un re-pesaje legítimo, aceptalo; si no, reclamá el doble cobro.
+                  {% endif %}
+                </small>
+                {% if r.estado == 'PENDIENTE' %}
+                <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/bandejas/{{ r.id }}/resolver" data-confirm="¿Registrar esta decisión? Queda auditada y no se puede reabrir. Si va a un cliente, el match queda propuesto y nada se cobra todavía." style="margin-top:9px;display:grid;gap:7px;">
+                  <div class="form-grid-2">
+                    <div class="form-group"><label>Destino del renglón</label>
+                      <select name="destino" required>
+                        <option value="">Elegir</option>
+                        {% if r.bandeja == 'CANCELADA' %}<option value="REACTIVAR_GUIA">La guía se usó igual: cobrar al cliente y pasarla a entregada</option>{% endif %}
+                        <option value="CLIENTE">{% if r.bandeja == 'REEMPLAZADA' %}Trasladar a la guía vigente del cliente{% elif r.bandeja == 'CANCELADA' %}Cobrar a otro envío vigente del cliente{% else %}Cuenta de un cliente (envío vigente){% endif %}</option>
+                        <option value="RECLAMO_OPERADOR">Reclamo al operador</option>
+                        {% if r.bandeja == 'YA_FACTURADO' %}<option value="ES_CORRECTO">Cobro correcto: sumar al envío</option>{% endif %}
+                        <option value="ABSORBE_TAURO">Lo absorbe TAURO</option>
+                      </select></div>
+                    <div class="form-group"><label>Envío que recibe el costo (si va a un cliente)</label><input name="identificador_envio" placeholder="{% if det.solicitud_nueva_id %}#{{ det.solicitud_nueva_id }}{% else %}Tracking o #ID{% endif %}"></div>
+                  </div>
+                  <div class="form-group"><label>Motivo</label><input name="motivo" required minlength="8" placeholder="Qué verificaste y por qué"></div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn btn-primary btn-sm">Resolver</button></div>
+                </form>
+                <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/bandejas/{{ r.id }}/reintentar" style="margin-top:6px;"><button class="btn btn-ghost btn-sm">Volver a vincular</button><small style="margin-left:8px;">Si la guía ya quedó vigente en el portal.</small></form>
+                {% else %}
+                <small style="display:block;margin-top:4px;">{{ r.motivo }} · {{ r.resuelto_por }}{% if r.resuelto_at %} · {{ r.resuelto_at.strftime('%d/%m/%Y %H:%M') }}{% endif %}</small>
+                {% endif %}
               </div>
             {% endif %}
             {% for m in guia.matches %}
@@ -144,13 +237,16 @@
               {% elif guia.referencias_tauro_2026 %}
                 <span class="badge warn">Envío no importado al portal</span>
                 <small>La FC y la guía coinciden en TAURO 2026, pero todavía no existe una solicitud del cliente a la cual aplicar la conciliación.</small>
-              {% else %}
+              {% elif not guia.tracking_normalizado %}
+                <span class="badge muted">Cargo de la factura</span>
+                <small>Impuesto o cargo general sin guía: cuenta a nivel factura y no se reparte entre clientes. Sólo asignalo si corresponde a un envío puntual.</small>
+              {% elif not r %}
                 <span class="badge error">Sin coincidencia</span>
-                <small>No coincide con el portal ni con TAURO 2026.</small>
+                <small>No coincide con el portal ni con TAURO 2026. Volvé a vincular la factura para clasificarla.</small>
               {% endif %}
             {% endfor %}
 
-            {% if guia.remanente > 0.02 %}
+            {% if guia.remanente > 0.02 and not (r and r.estado == 'PENDIENTE' and r.bandeja != 'SIN_DUENO') and not (r and r.estado == 'RESUELTA' and r.destino in ('RECLAMO_OPERADOR','ABSORBE_TAURO')) %}
             <form method="POST" action="/admin/conciliacion-couriers/facturas/{{ factura.id }}/items/{{ guia.item_referencia_id }}/match-manual" style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px;">
               <strong>{% if guia.tracking_normalizado %}Asignar la guía completa manualmente{% else %}Asignar este cargo general manualmente{% endif %}</strong>
               <div class="form-grid-2" style="margin-top:8px;">

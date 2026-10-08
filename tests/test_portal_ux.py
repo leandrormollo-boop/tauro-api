@@ -37,7 +37,7 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
     assert "Cotizar envío" in _template("home.html")
     assert selector.count('class="scope-cta"') == 2
     assert ".shell .btn-primary:not(.is-loading)" in css
-    assert "tauro.css?v=50" in base
+    assert "tauro.css?v=51" in base
 
 
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
@@ -300,10 +300,10 @@ def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
         assert f">{encabezado}<" in html
     assert "Total registrado · ARS" in html
     assert "Ver desglose" in html
-    assert "Precio inicial aceptado" in detalle
+    assert "Costo inicial" in detalle
     assert "Diferencia" in detalle
     assert "TAX" in detalle
-    assert "Precio final del envío" in detalle
+    assert "Saldo final del envío" in detalle
     assert "registrado en esta página" in html
     assert "Cargos y facturas:" in html
     assert "No suma guías canceladas o reemplazadas" in html

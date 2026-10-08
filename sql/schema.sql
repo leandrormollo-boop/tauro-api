@@ -3488,7 +3488,8 @@ CREATE TABLE IF NOT EXISTS conciliaciones_envio (
     CONSTRAINT ck_conciliacion_motivo CHECK (
         motivo_diferencia IN (
             'PESO_REAL','PESO_VOLUMETRICO','RECARGO','IMPUESTOS',
-            'DEVOLUCION','DESCUENTO','MIXTO','SIN_DIFERENCIA','OTRO'
+            'DEVOLUCION','DESCUENTO','MIXTO','SIN_DIFERENCIA',
+            'AHORRO_TAURO','OTRO'
         )
     ),
     CONSTRAINT ck_conciliacion_hash CHECK (
@@ -3563,6 +3564,8 @@ BEGIN
        OR OLD.peso_final_facturado_kg IS DISTINCT FROM NEW.peso_final_facturado_kg
        OR OLD.peso_base_facturado IS DISTINCT FROM NEW.peso_base_facturado
        OR OLD.motivo_diferencia IS DISTINCT FROM NEW.motivo_diferencia
+       OR OLD.ahorro_tauro_ars IS DISTINCT FROM NEW.ahorro_tauro_ars
+       OR OLD.regla_aplicada IS DISTINCT FROM NEW.regla_aplicada
        OR OLD.formula_version IS DISTINCT FROM NEW.formula_version
        OR OLD.calculo_hash IS DISTINCT FROM NEW.calculo_hash
        OR OLD.evidencias IS DISTINCT FROM NEW.evidencias
@@ -4371,6 +4374,175 @@ CREATE INDEX IF NOT EXISTS ix_auditoria_courier_fecha
 CREATE INDEX IF NOT EXISTS ix_auditoria_courier_solicitud
     ON auditoria_facturas_courier (solicitud_id, created_at DESC);
 
+-- 8) Control de facturas de operadores (Leandro, 07/10/2026).
+--    Una factura trae guías de varios clientes. Cada guía facturada
+--    (factura + tracking) cae en UNA bandeja. Sólo VIGENTE propone un match
+--    normal; las demás quedan bloqueadas hasta que una persona decide su
+--    destino: cuenta de un cliente, reclamo al operador o lo absorbe TAURO.
+--    No se crean solicitudes ocultas para renglones sin dueño.
+CREATE TABLE IF NOT EXISTS factura_courier_guia_resoluciones (
+    id                    BIGSERIAL PRIMARY KEY,
+    factura_id            BIGINT NOT NULL REFERENCES facturas_courier(id)
+        ON DELETE RESTRICT,
+    tracking_normalizado  TEXT NOT NULL,
+    bandeja               TEXT NOT NULL,
+    -- Envío que motivó la bandeja (la guía cancelada o reemplazada, o el
+    -- único candidato descartado). Referencia, no asignación contable.
+    solicitud_referencia_id INTEGER REFERENCES solicitudes_guia(id)
+        ON DELETE RESTRICT,
+    detalle               JSONB NOT NULL DEFAULT '{}'::jsonb,
+    estado                TEXT NOT NULL DEFAULT 'PENDIENTE',
+    destino               TEXT,
+    cliente_id            TEXT REFERENCES clientes(cliente_id)
+        ON DELETE RESTRICT,
+    solicitud_id          INTEGER REFERENCES solicitudes_guia(id)
+        ON DELETE RESTRICT,
+    motivo                TEXT,
+    evidencia_uri         TEXT,
+    resuelto_por          TEXT,
+    resuelto_at           TIMESTAMPTZ,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_factura_guia_resolucion UNIQUE (factura_id, tracking_normalizado),
+    CONSTRAINT ck_guia_resolucion_tracking CHECK (BTRIM(tracking_normalizado) <> ''),
+    CONSTRAINT ck_guia_resolucion_bandeja CHECK (
+        bandeja IN ('VIGENTE','REEMPLAZADA','CANCELADA','SIN_DUENO','YA_FACTURADO')
+    ),
+    CONSTRAINT ck_guia_resolucion_estado CHECK (estado IN ('PENDIENTE','RESUELTA')),
+    CONSTRAINT ck_guia_resolucion_destino CHECK (
+        destino IS NULL
+        OR destino IN ('CLIENTE','RECLAMO_OPERADOR','ABSORBE_TAURO','ES_CORRECTO','REACTIVAR_GUIA')
+    ),
+    CONSTRAINT ck_guia_resolucion_resuelta CHECK (
+        estado <> 'RESUELTA'
+        OR (destino IS NOT NULL
+            AND NULLIF(BTRIM(motivo), '') IS NOT NULL
+            AND NULLIF(BTRIM(resuelto_por), '') IS NOT NULL
+            AND resuelto_at IS NOT NULL)
+    ),
+    CONSTRAINT ck_guia_resolucion_cliente CHECK (
+        destino NOT IN ('CLIENTE','REACTIVAR_GUIA')
+        OR (cliente_id IS NOT NULL AND solicitud_id IS NOT NULL)
+    )
+);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'factura_courier_guia_resoluciones'::regclass
+           AND conname = 'ck_guia_resolucion_destino'
+           AND pg_get_constraintdef(oid) NOT LIKE '%REACTIVAR_GUIA%'
+    ) THEN
+        ALTER TABLE factura_courier_guia_resoluciones DROP CONSTRAINT ck_guia_resolucion_destino;
+        ALTER TABLE factura_courier_guia_resoluciones ADD CONSTRAINT ck_guia_resolucion_destino CHECK (
+            destino IS NULL
+            OR destino IN ('CLIENTE','RECLAMO_OPERADOR','ABSORBE_TAURO','ES_CORRECTO','REACTIVAR_GUIA')
+        );
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS ix_guia_resolucion_pendiente
+    ON factura_courier_guia_resoluciones (factura_id, estado, bandeja);
+CREATE INDEX IF NOT EXISTS ix_guia_resolucion_referencia
+    ON factura_courier_guia_resoluciones (solicitud_referencia_id, estado);
+
+-- Una resolución registrada no cambia de identidad ni se reabre.
+CREATE OR REPLACE FUNCTION tauro_proteger_guia_resolucion()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.factura_id IS DISTINCT FROM NEW.factura_id
+       OR OLD.tracking_normalizado IS DISTINCT FROM NEW.tracking_normalizado
+       OR OLD.bandeja IS DISTINCT FROM NEW.bandeja THEN
+        RAISE EXCEPTION 'La identidad de la bandeja es inmutable';
+    END IF;
+    IF OLD.estado = 'RESUELTA' AND (
+        NEW.estado <> 'RESUELTA'
+        OR OLD.destino IS DISTINCT FROM NEW.destino
+        OR OLD.cliente_id IS DISTINCT FROM NEW.cliente_id
+        OR OLD.solicitud_id IS DISTINCT FROM NEW.solicitud_id
+        OR OLD.motivo IS DISTINCT FROM NEW.motivo
+    ) THEN
+        RAISE EXCEPTION 'Una bandeja resuelta no se reabre ni se reescribe';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_proteger_guia_resolucion
+    ON factura_courier_guia_resoluciones;
+CREATE TRIGGER trg_proteger_guia_resolucion
+BEFORE UPDATE ON factura_courier_guia_resoluciones
+FOR EACH ROW EXECUTE FUNCTION tauro_proteger_guia_resolucion();
+
+-- Regla comercial de diferencias por cliente (Leandro, 07/10/2026): la
+-- diferencia de flete se cobra SOLO si el operador cobró más que el costo
+-- inicial. Si cobró menos, el ahorro es margen de TAURO. El TAX facturado se
+-- traslada siempre. COBRAR_SIEMPRE conserva el comportamiento anterior
+-- (crédito al cliente). Vive en clientes, junto a tax_paga: es una política
+-- del cliente, no del operador.
+ALTER TABLE IF EXISTS clientes
+    ADD COLUMN IF NOT EXISTS regla_diferencia_courier TEXT NOT NULL
+        DEFAULT 'COBRAR_SOLO_SI_MAYOR';
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'clientes'::regclass
+           AND conname = 'ck_clientes_regla_diferencia_courier'
+    ) THEN
+        ALTER TABLE clientes
+            ADD CONSTRAINT ck_clientes_regla_diferencia_courier CHECK (
+                regla_diferencia_courier IN ('COBRAR_SOLO_SI_MAYOR','COBRAR_SIEMPRE')
+            );
+    END IF;
+END $$;
+
+-- El cálculo guarda qué regla aplicó y cuánto ahorro quedó para TAURO.
+-- Los cálculos anteriores quedan con ahorro 0 y regla COBRAR_SIEMPRE, que
+-- es exactamente lo que hicieron: nada histórico se convierte.
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ADD COLUMN IF NOT EXISTS ahorro_tauro_ars NUMERIC(18,4) NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS conciliaciones_envio
+    ADD COLUMN IF NOT EXISTS regla_aplicada TEXT NOT NULL DEFAULT 'COBRAR_SIEMPRE';
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'conciliaciones_envio'::regclass
+           AND conname = 'ck_conciliacion_motivo'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'conciliaciones_envio'::regclass
+           AND conname = 'ck_conciliacion_motivo'
+           AND pg_get_constraintdef(oid) LIKE '%AHORRO_TAURO%'
+    ) THEN
+        ALTER TABLE conciliaciones_envio DROP CONSTRAINT ck_conciliacion_motivo;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'conciliaciones_envio'::regclass
+           AND conname = 'ck_conciliacion_motivo'
+    ) THEN
+        ALTER TABLE conciliaciones_envio
+            ADD CONSTRAINT ck_conciliacion_motivo CHECK (
+                motivo_diferencia IN (
+                    'PESO_REAL','PESO_VOLUMETRICO','RECARGO','IMPUESTOS',
+                    'DEVOLUCION','DESCUENTO','MIXTO','SIN_DIFERENCIA',
+                    'AHORRO_TAURO','OTRO'
+                )
+            );
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conrelid = 'conciliaciones_envio'::regclass
+           AND conname = 'ck_conciliacion_regla'
+    ) THEN
+        ALTER TABLE conciliaciones_envio
+            ADD CONSTRAINT ck_conciliacion_regla CHECK (
+                regla_aplicada IN ('COBRAR_SOLO_SI_MAYOR','COBRAR_SIEMPRE')
+                AND ahorro_tauro_ars >= 0
+            );
+    END IF;
+END $$;
+
 -- Ningún documento financiero se borra físicamente. Los errores se anulan o
 -- rechazan preservando evidencia. DROP SCHEMA de tests/migraciones no dispara
 -- estos triggers y sigue siendo posible.
@@ -4408,7 +4580,8 @@ BEGIN
         'ajustes_cliente',
         'facturas_cliente',
         'facturas_cliente_items',
-        'auditoria_facturas_courier'
+        'auditoria_facturas_courier',
+        'factura_courier_guia_resoluciones'
     ]
     LOOP
         trigger_nombre := 'trg_no_delete_' || tabla;

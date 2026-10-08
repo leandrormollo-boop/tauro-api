@@ -205,6 +205,12 @@ templates.env.globals["es_nacional"] = es_nacional
 templates.env.globals["ambito_envio"] = ambito_envio
 
 
+def _normalizar_regla_diferencia(valor: str) -> str:
+    """Regla comercial de diferencias de courier del cliente (07/10/2026)."""
+    regla = str(valor or "").strip().upper()
+    return regla if regla in ("COBRAR_SOLO_SI_MAYOR", "COBRAR_SIEMPRE") else "COBRAR_SOLO_SI_MAYOR"
+
+
 def _pendientes_admin() -> int:
     """Globo rojo del menú: guías esperando que Tauro las emita."""
     try:
@@ -1417,6 +1423,28 @@ def admin_bandeja(request: Request, admin_token: Optional[str] = Cookie(None)):
     )
 
 
+@router.get("/incidencias-emision", response_class=HTMLResponse)
+def admin_incidencias_emision(
+    request: Request, solicitud_id: str = "", antes: int = 0,
+    resultado: str = "fallidos", admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.incidencias_emision import listar_intentos
+    # Un formulario GET envía el filtro opcional vacío como solicitud_id=.
+    try:
+        solicitud_id = max(0, int(solicitud_id or 0))
+    except (TypeError, ValueError):
+        solicitud_id = 0
+    resultado = resultado if resultado in {"todos", "fallidos", "exitosos"} else "fallidos"
+    datos = listar_intentos(solicitud_id=solicitud_id, antes=antes, resultado=resultado)
+    return templates.TemplateResponse(
+        request=request, name="admin/incidencias_emision.html",
+        context={"seccion": "bandeja", "solicitud_id": solicitud_id,
+                 "resultado": resultado, **datos},
+    )
+
+
 @router.get("/backup.json")
 def admin_backup(admin_token: Optional[str] = Cookie(None)):
     """Descarga una exportación parcial para consulta; no es restaurable."""
@@ -1513,6 +1541,7 @@ def admin_cliente_nuevo(
     # Quién paga los impuestos de destino por defecto en los envíos de este
     # cliente. Se puede pisar por envío desde el wizard del portal.
     tax_paga: str = Form(""),
+    regla_diferencia_courier: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     admin_token: Optional[str] = Cookie(None),
@@ -1546,8 +1575,8 @@ def admin_cliente_nuevo(
                         (cliente_id, email, password_hash, markup_pct, markup_tipo, markup_valor, activo,
                          nombre, cuit, direccion, cp, ciudad, pais, telefono, notas,
                          markup_nac_tipo, markup_nac_valor, puede_emitir, puede_recolectar,
-                         tope_deuda_ars, tax_paga, courier_default)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         tope_deuda_ars, tax_paga, courier_default, regla_diferencia_courier)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cliente_id, email.strip().lower(), password_hash_db, markup_pct_db,
@@ -1560,6 +1589,7 @@ def admin_cliente_nuevo(
                         False, False, None,
                         normalizar_tax(tax_paga),
                         "",
+                        _normalizar_regla_diferencia(regla_diferencia_courier),
                     ),
                 )
         return RedirectResponse(url=f"/admin/clientes/{cliente_id}?ok=creado", status_code=303)
@@ -2447,6 +2477,7 @@ def admin_cliente_editar(
     # Quién paga los impuestos de destino por defecto en los envíos de este
     # cliente. Se puede pisar por envío desde el wizard del portal.
     tax_paga: str = Form(""),
+    regla_diferencia_courier: str = Form(""),
     notas: str = Form(""),
     activo: str = Form("true"),
     # Cuenta de prueba: queda fuera de listados, bandeja y totales del
@@ -2489,7 +2520,7 @@ def admin_cliente_editar(
                         email=%s, markup_pct=%s, markup_tipo=%s, markup_valor=%s, activo=%s, nombre=%s, cuit=%s,
                         direccion=%s, cp=%s, ciudad=%s, pais=%s, telefono=%s, notas=%s,
                         markup_nac_tipo=%s, markup_nac_valor=%s,
-                        tax_paga=%s, test=%s
+                        tax_paga=%s, test=%s, regla_diferencia_courier=%s
                     WHERE cliente_id=%s
                     """,
                     (
@@ -2501,6 +2532,7 @@ def admin_cliente_editar(
                         telefono or None, notas or None,
                         nac_tipo, nac_valor, normalizar_tax(tax_paga),
                         es_prueba,
+                        _normalizar_regla_diferencia(regla_diferencia_courier),
                         cliente_id.strip().upper(),
                     ),
                 )
@@ -2529,6 +2561,7 @@ def admin_cliente_editar(
             "markup_nac_tipo": markup_nac_tipo,
             "markup_nac_valor": markup_nac_valor,
             "tax_paga": normalizar_tax(tax_paga),
+            "regla_diferencia_courier": _normalizar_regla_diferencia(regla_diferencia_courier),
             "notas": notas,
             "activo": activo.lower() == "true",
             "test": es_prueba,
@@ -3443,11 +3476,11 @@ def admin_pedido_generar_guia(
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    resultado = generar_guia(solicitud_id)
+    from servicios.incidencias_emision import ejecutar_emision_registrada
+    resultado = ejecutar_emision_registrada(
+        request, solicitud_id, "admin", "admin", lambda: generar_guia(solicitud_id)
+    )
     if resultado.get("ok"):
-        from servicios.auditoria import registrar_desde_request
-        registrar_desde_request(request, event="admin.emitir_guia", actor_type="admin",
-                                actor_ref=str(solicitud_id), metadata={"solicitud_id": solicitud_id})
         _notificar_estado_async(solicitud_id, "GUIA_LISTA")
         return RedirectResponse(url="/admin/pedidos?ok=guia_generada", status_code=303)
 
@@ -3907,6 +3940,9 @@ async def admin_envio_realizado_post(
     producto: str = Form(...),
     cantidad: str = Form("1"),
     peso_kg: str = Form("1"),
+    largo_cm: str = Form(""),
+    ancho_cm: str = Form(""),
+    alto_cm: str = Form(""),
     tracking: str = Form(...),
     precio_ars: str = Form(...),
     costo_courier_estimado_ars: str = Form(...),
@@ -3935,6 +3971,17 @@ async def admin_envio_realizado_post(
     try:
         cantidad_num = _entero_form(cantidad, "Cajas", minimo=1)
         peso_num = _numero_form(peso_kg, "Peso", minimo=0.01)
+        # Medidas opcionales: las tres o ninguna. Con ellas el peso inicial
+        # de la guía es el mayor entre el real y el volumétrico.
+        medidas = [str(v or "").strip() for v in (largo_cm, ancho_cm, alto_cm)]
+        if any(medidas) and not all(medidas):
+            raise ValueError("Cargá las tres medidas de la caja (largo, ancho y alto) o ninguna.")
+        largo_num, ancho_num, alto_num = (
+            (_numero_form(largo_cm, "Largo", minimo=0.1),
+             _numero_form(ancho_cm, "Ancho", minimo=0.1),
+             _numero_form(alto_cm, "Alto", minimo=0.1))
+            if all(medidas) else (0, 0, 0)
+        )
         precio_num = _numero_form(
             precio_ars, "Precio al cliente", importe=True, minimo=0.01
         )
@@ -3969,6 +4016,7 @@ async def admin_envio_realizado_post(
             remitente_nombre=remitente_nombre,
             costo_courier_estimado_ars=costo_estimado_num,
             fecha_envio=fecha_real,
+            largo_cm=largo_num, ancho_cm=ancho_num, alto_cm=alto_num,
         )
     except Exception as e:
         resultado = {"ok": False, "error": str(e)}
@@ -4223,6 +4271,7 @@ def admin_conciliacion_couriers(
     buscar: str = "",
     vista: str = "resumen",
     pagina: str = "1",
+    bandeja: str = "",
     admin_token: Optional[str] = Cookie(None),
 ):
     """Control financiero por envío; costos reales nunca salen al portal."""
@@ -4230,7 +4279,7 @@ def admin_conciliacion_couriers(
         return _redirect_login()
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
-        estado=estado, buscar=buscar, vista=vista, pagina=pagina,
+        estado=estado, buscar=buscar, vista=vista, pagina=pagina, bandeja=bandeja,
     )
 
 
@@ -4244,13 +4293,14 @@ def _render_facturas_admin(
     ambito: str = "",
     vista: str = "resumen",
     pagina: str = "1",
+    bandeja: str = "",
 ):
     from servicios.conciliacion_couriers import (
         listar_ajustes_para_revision,
         listar_control_envios,
         listar_facturas_courier_control,
     )
-    from servicios.control_facturas_ui import ESTADOS_CONTROL, ESTADOS_FACTURA, numero_pagina, preparar_presentacion
+    from servicios.control_facturas_ui import BANDEJAS_FACTURA, ESTADOS_CONTROL, ESTADOS_FACTURA, numero_pagina, preparar_presentacion
     ambito_normalizado = str(ambito or "").strip().upper()
     if ambito_normalizado == "INTERNACIONAL":
         couriers_disponibles = ("DHL", "FEDEX")
@@ -4272,9 +4322,10 @@ def _render_facturas_admin(
         ruta_facturas = "/admin/facturas-nacionales"
     else:
         couriers_disponibles = ("DHL", "FEDEX", "ANDREANI", "OCA", "CORREO_ARGENTINO")
-        titulo = "Control de envíos y facturas"
+        titulo = "Facturas de operadores"
         descripcion = (
-            "Control interno de facturas y envíos de todos los operadores."
+            "DHL, FedEx, Andreani, OCA y Correo Argentino: factura, guías, "
+            "costos finales y diferencias de cada cliente."
         )
         seccion = "conciliacion_couriers"
         ruta_facturas = "/admin/conciliacion-couriers"
@@ -4292,6 +4343,9 @@ def _render_facturas_admin(
     if estado not in dict(estados_validos):
         estado = ''
     buscar = str(buscar or '').strip() if vista_normalizada in ('conciliacion', 'facturas') else ''
+    bandeja = str(bandeja or '').strip().upper() if vista_normalizada == 'facturas' else ''
+    if bandeja not in dict(BANDEJAS_FACTURA):
+        bandeja = ''
     control = listar_control_envios(
         cliente=cliente, courier=courier_normalizado, ambito=ambito_normalizado,
         estado=estado if vista_normalizada == 'conciliacion' else '', buscar=buscar if vista_normalizada == 'conciliacion' else '',
@@ -4329,7 +4383,21 @@ def _render_facturas_admin(
         ),
         "diferencias": len(ajustes),
     }
-    filtros = {'cliente': cliente, 'courier': courier_normalizado, 'estado': estado, 'buscar': buscar}
+    # Control de facturas de operadores (bandejas, cuadres y alertas).
+    metricas_control = {
+        "bandejas_pendientes": sum(
+            int(factura.get("bandejas_pendientes") or 0) for factura in facturas
+        ),
+        "facturas_no_cuadran": sum(
+            1 for factura in facturas
+            if factura.get("cuadra_documento") is False and int(factura.get("lineas") or 0) > 0
+        ),
+        "envios_alerta": sum(
+            int(control.get("totales", {}).get(k, 0))
+            for k in ("CANCELADO_FACTURADO", "REEMPLAZADO_FACTURADO", "SIN_FACTURA_30D")
+        ),
+    }
+    filtros = {'cliente': cliente, 'courier': courier_normalizado, 'estado': estado, 'buscar': buscar, 'bandeja': bandeja}
     presentacion = preparar_presentacion(
         control=control, facturas=facturas, ajustes=ajustes, filtros=filtros,
         ruta=ruta_facturas, vista=vista_normalizada, pagina=pagina,
@@ -4346,6 +4414,7 @@ def _render_facturas_admin(
             "couriers_disponibles": couriers_disponibles,
             "vista": vista_normalizada,
             "metricas": metricas,
+            "metricas_control": metricas_control,
             **presentacion,
             "control": control,
             "facturas": facturas,
@@ -4353,7 +4422,7 @@ def _render_facturas_admin(
             "clientes": _get_clientes_lista(),
             "filtros": {
                 "cliente": cliente, "courier": courier_normalizado,
-                "estado": estado, "buscar": buscar,
+                "estado": estado, "buscar": buscar, "bandeja": bandeja,
             },
         },
     )
@@ -4368,6 +4437,7 @@ def admin_facturas_internacionales(
     buscar: str = "",
     vista: str = "resumen",
     pagina: str = "1",
+    bandeja: str = "",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -4375,6 +4445,7 @@ def admin_facturas_internacionales(
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
         estado=estado, buscar=buscar, ambito="INTERNACIONAL", vista=vista, pagina=pagina,
+        bandeja=bandeja,
     )
 
 
@@ -4387,6 +4458,7 @@ def admin_facturas_nacionales(
     buscar: str = "",
     vista: str = "resumen",
     pagina: str = "1",
+    bandeja: str = "",
     admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
@@ -4394,6 +4466,7 @@ def admin_facturas_nacionales(
     return _render_facturas_admin(
         request=request, cliente=cliente, courier=courier,
         estado=estado, buscar=buscar, ambito="NACIONAL", vista=vista, pagina=pagina,
+        bandeja=bandeja,
     )
 
 
@@ -4752,14 +4825,22 @@ def admin_factura_courier_match_rechazar(
 @router.post("/conciliacion-couriers/facturas/{factura_id}/confirmar")
 def admin_factura_courier_confirmar(
     factura_id: int,
+    cliente_id: str = Form(""),
     admin_token: Optional[str] = Cookie(None),
 ):
+    """Confirma y calcula las guías de UN cliente de la factura.
+
+    Sin ``cliente_id`` sólo funciona en facturas de un único cliente; en una
+    factura mixta el servicio exige elegir el cliente.
+    """
     if not _is_auth(admin_token):
         return _redirect_login()
     from urllib.parse import quote
     from servicios.conciliacion_couriers import confirmar_y_calcular_factura
     try:
-        resultado = confirmar_y_calcular_factura(factura_id, actor="admin")
+        resultado = confirmar_y_calcular_factura(
+            factura_id, actor="admin", cliente_id=cliente_id or None,
+        )
         if resultado["errores"]:
             errores = "; ".join(error["error"] for error in resultado["errores"][:3])
             return RedirectResponse(
@@ -4778,6 +4859,86 @@ def admin_factura_courier_confirmar(
              "?ok=calculada"),
         status_code=303,
     )
+
+
+@router.post("/conciliacion-couriers/facturas/{factura_id}/bandejas/{resolucion_id}/resolver")
+def admin_factura_courier_resolver_bandeja(
+    factura_id: int,
+    resolucion_id: int,
+    destino: str = Form(""),
+    motivo: str = Form(""),
+    identificador_envio: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Decide el destino de una guía facturada que quedó en bandeja.
+
+    Cliente, reclamo al operador, lo absorbe TAURO o cobro correcto. Una
+    sola decisión por guía; nada se cobra al cliente en este paso.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.control_facturas_operadores import resolver_bandeja
+    destino_url = f"/admin/conciliacion-couriers/facturas/{factura_id}"
+    try:
+        resultado = resolver_bandeja(
+            resolucion_id, actor="admin", destino=destino, motivo=motivo,
+            identificador_envio=identificador_envio or None,
+        )
+        if int(resultado["factura_id"]) != int(factura_id):
+            raise ValueError("La bandeja no pertenece a esta factura.")
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"{destino_url}?error={quote(str(exc))}", status_code=303,
+        )
+    return RedirectResponse(url=f"{destino_url}?ok=bandeja_resuelta", status_code=303)
+
+
+@router.post("/conciliacion-couriers/facturas/{factura_id}/bandejas/{resolucion_id}/reintentar")
+def admin_factura_courier_reintentar_bandeja(
+    factura_id: int,
+    resolucion_id: int,
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Vuelve a clasificar una guía en bandeja (por ejemplo, después de
+    completar una guía histórica con 'Cargar envío realizado')."""
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.control_facturas_operadores import reintentar_bandeja
+    destino_url = f"/admin/conciliacion-couriers/facturas/{factura_id}"
+    try:
+        resultado = reintentar_bandeja(resolucion_id, actor="admin")
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"{destino_url}?error={quote(str(exc))}", status_code=303,
+        )
+    estado = "bandeja_vinculada" if resultado.get("cambio") else "bandeja_sigue_pendiente"
+    return RedirectResponse(url=f"{destino_url}?ok={estado}", status_code=303)
+
+
+@router.post("/conciliacion-couriers/envios/{solicitud_id}/cerrar-sin-costo-inicial")
+def admin_conciliacion_cerrar_sin_costo_inicial(
+    solicitud_id: int,
+    motivo: str = Form(""),
+    admin_token: Optional[str] = Cookie(None),
+):
+    """Cierra sin diferencia un envío que nunca tuvo costo cotizado.
+
+    Congela el costo real facturado como base y cierra. Nada se cobra.
+    """
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from urllib.parse import quote
+    from servicios.conciliacion_couriers import cerrar_sin_costo_inicial
+    destino_url = f"/admin/conciliacion-couriers/envios/{solicitud_id}"
+    try:
+        cerrar_sin_costo_inicial(solicitud_id, actor="admin", motivo=motivo)
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"{destino_url}?error={quote(str(exc))}", status_code=303,
+        )
+    return RedirectResponse(url=f"{destino_url}?ok=sin_costo_inicial", status_code=303)
 
 
 @router.get(

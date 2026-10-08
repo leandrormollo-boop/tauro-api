@@ -4217,18 +4217,17 @@ def emitir_guia_portal(
     se traduce el resultado a la pantalla.
     """
     from servicios.solicitudes_guia import emitir_guia_como_cliente
+    from servicios.incidencias_emision import ejecutar_emision_registrada
 
-    if gestion_ventana == "1":
-        if not isinstance(revision_envio, str) or not revision_envio:
-            resultado = {"ok": False, "error": "Volvé a abrir el envío y revisá sus datos antes de emitir."}
-        else:
-            resultado = emitir_guia_como_cliente(solicitud_id, cliente, revision=revision_envio)
-    else:
-        resultado = emitir_guia_como_cliente(solicitud_id, cliente)
+    def emitir():
+        if gestion_ventana == "1":
+            if not isinstance(revision_envio, str) or not revision_envio:
+                return {"ok": False, "error": "Volvé a abrir el envío y revisá sus datos antes de emitir."}
+            return emitir_guia_como_cliente(solicitud_id, cliente, revision=revision_envio)
+        return emitir_guia_como_cliente(solicitud_id, cliente)
+
+    resultado = ejecutar_emision_registrada(request, solicitud_id, "cliente", cliente, emitir)
     if resultado.get("ok"):
-        from servicios.auditoria import registrar_desde_request
-        registrar_desde_request(request, event="portal.emitir_guia", actor_type="cliente",
-                                actor_ref=cliente, metadata={"solicitud_id": solicitud_id})
         return RedirectResponse(url=f"/portal/envios/{solicitud_id}" + ("/gestion?ventana=1&ok=guia" if gestion_ventana == "1" else "?gestionar=1&ok=guia"),
                                 status_code=303)
     return RedirectResponse(
