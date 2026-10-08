@@ -280,6 +280,23 @@ def _revision(fila: dict[str, Any], historial: dict[str, Any]) -> str:
     return hashlib.sha256(canonica.encode("utf-8")).hexdigest()
 
 
+def _retiros_agendados(historial: dict[str, Any]) -> list[dict[str, Any]]:
+    """Retiros confirmados por el courier: la cancelación los anula primero."""
+    return [
+        item for item in historial["recolecciones_activas"]
+        if str(item.get("estado") or "").upper() == "AGENDADA"
+    ]
+
+
+def _retiros_en_curso(historial: dict[str, Any]) -> list[dict[str, Any]]:
+    """Retiros a mitad de camino (agendando, cancelando, por verificar): nadie
+    puede anularlos a ciegas; se resuelven en Recolecciones."""
+    return [
+        item for item in historial["recolecciones_activas"]
+        if str(item.get("estado") or "").upper() != "AGENDADA"
+    ]
+
+
 def _bloqueo_cancelacion(fila: dict[str, Any], historial: dict[str, Any]) -> tuple[str | None, str | None]:
     estado_solicitud = str(fila.get("solicitud_estado") or "").upper()
     estado_cargo = str(fila.get("cargo_estado") or "").upper()
@@ -294,10 +311,11 @@ def _bloqueo_cancelacion(fila: dict[str, Any], historial: dict[str, Any]) -> tup
         )
     if fila.get("cargo_pendiente"):
         return "CARGO_PENDIENTE", "El cargo todavía se está registrando."
-    if historial["recolecciones_activas"]:
+    if _retiros_en_curso(historial):
         return (
             "RECOLECCION_ACTIVA",
-            "Cancelá o resolvé la recolección activa antes de quitar el cargo.",
+            "Hay una recolección en curso o por verificar con el courier. "
+            "Resolvela en Recolecciones antes de cancelar el cargo.",
         )
     if historial["controles_previos"]:
         return (
@@ -385,6 +403,7 @@ def _armar_contexto(cur, fila: dict[str, Any]) -> dict[str, Any]:
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
     codigo, motivo = _bloqueo_cancelacion(fila, historial)
+    retiros_agendados = _retiros_agendados(historial) if codigo is None else []
     precio_habilitado = (
         fila.get("envio_id") is not None
         and fila.get("solicitud_id") is not None
@@ -418,6 +437,16 @@ def _armar_contexto(cur, fila: dict[str, Any]) -> dict[str, Any]:
                 "SOLICITUD_SIN_CARGO" if fila.get("envio_id") is None
                 else "CANCELACION_COMERCIAL"
             ),
+            # Un solo botón: si hay retiro agendado, cancelar lo anula primero.
+            "retiros": [
+                {
+                    "id": item["id"],
+                    "courier": item.get("courier"),
+                    "fecha": item.get("fecha"),
+                    "confirmation_code": item.get("confirmation_code"),
+                }
+                for item in retiros_agendados
+            ],
         },
         "precio": {
             "habilitada": precio_habilitado,
@@ -435,8 +464,11 @@ def _armar_contexto(cur, fila: dict[str, Any]) -> dict[str, Any]:
         "revision": _revision(fila, historial),
         "historial": historial,
         "aviso_alcance": (
+            "La cancelación anula primero el retiro agendado ante el courier y "
+            "después quita el cargo de la cuenta del cliente. La guía no se anula."
+            if retiros_agendados else
             "La cancelación quita el cargo de la cuenta del cliente. "
-            "No cancela la guía ni la recolección ante el courier."
+            "No cancela la guía ante el courier."
         ),
     }
 
@@ -481,6 +513,9 @@ def cancelar_envio_admin(
             codigo="CAMBIO_CONCURRENTE",
         )
     sid, eid = _identificadores(solicitud_id, envio_id)
+    revision_limpia, retiros_cancelados = _anular_retiros_agendados(
+        sid=sid, eid=eid, cliente_id=cliente_id, revision=revision_limpia,
+    )
     with get_conn() as conn:
         with conn.cursor() as cur:
             preliminar = _resolver(
@@ -579,6 +614,7 @@ def cancelar_envio_admin(
                     "ajustes_preservados": len(contexto["historial"]["ajustes"]),
                     "alcance": "CUENTA_CLIENTE",
                     "courier_cancelado": False,
+                    "retiros_cancelados": retiros_cancelados,
                 },
             )
             return {
@@ -591,5 +627,64 @@ def cancelar_envio_admin(
                 "monto_anulado_ars": contexto["precio"]["vigente_ars"],
                 "alcance": "CUENTA_CLIENTE",
                 "courier_cancelado": False,
+                "retiros_cancelados": retiros_cancelados,
                 "aviso": contexto["aviso_alcance"],
             }
+
+
+def _anular_retiros_agendados(
+    *, sid: int | None, eid: int | None, cliente_id: str | None, revision: str,
+) -> tuple[str, list[str]]:
+    """Paso 0 de la cancelación: anular ante el courier los retiros AGENDADOS.
+
+    Va fuera de la transacción del cargo porque llama al courier (DHL) y esa
+    llamada no se puede deshacer con un rollback. Si el courier no confirma,
+    se corta acá y el cargo no se toca: el retiro queda en VERIFICAR_COURIER y
+    el control pasa a bloquear la cancelación hasta resolverlo.
+
+    La revisión que vio el admin incluye los retiros; después de anularlos se
+    recalcula, exigiendo que NADA más haya cambiado en el medio.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            fila = _resolver(cur, solicitud_id=sid, envio_id=eid, cliente_id=cliente_id)
+            contexto = _armar_contexto(cur, fila)
+    if contexto["revision"] != revision:
+        raise ControlEnvioAdminError(
+            "El envío cambió desde que abriste el control. Recargá antes de cancelar.",
+            codigo="CAMBIO_CONCURRENTE",
+        )
+    if not contexto["cancelacion"]["habilitada"]:
+        raise ControlEnvioAdminError(
+            contexto["cancelacion"]["motivo"], codigo=contexto["cancelacion"]["codigo"],
+        )
+    retiros = contexto["cancelacion"]["retiros"]
+    if not retiros:
+        return revision, []
+    from servicios import recolecciones as recolecciones_srv
+    cancelados: list[str] = []
+    for rec in retiros:
+        etiqueta = str(rec.get("confirmation_code") or rec["id"])
+        resultado = recolecciones_srv.cancelar(int(rec["id"]))
+        if not resultado.get("ok"):
+            raise ControlEnvioAdminError(
+                f"No se pudo anular el retiro {etiqueta} ante "
+                f"{rec.get('courier') or 'el courier'}: "
+                f"{resultado.get('error') or 'sin confirmación'}. El cargo no se tocó.",
+                codigo="RECOLECCION_NO_CANCELADA",
+            )
+        cancelados.append(etiqueta)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            fila = _resolver(cur, solicitud_id=sid, envio_id=eid, cliente_id=cliente_id)
+            historial = _historial(cur, fila)
+    sin_cambio_de_retiros = {
+        **historial,
+        "recolecciones_activas": contexto["historial"]["recolecciones_activas"],
+    }
+    if _revision(fila, sin_cambio_de_retiros) != revision:
+        raise ControlEnvioAdminError(
+            "El envío cambió mientras se anulaba el retiro. Recargá antes de cancelar.",
+            codigo="CAMBIO_CONCURRENTE",
+        )
+    return _revision(fila, historial), cancelados

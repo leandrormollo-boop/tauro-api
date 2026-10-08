@@ -47,6 +47,7 @@ def _control_base() -> dict:
             "codigo": None,
             "motivo": None,
             "modo": "CANCELACION_COMERCIAL",
+            "retiros": [],
         },
         "precio": {
             "habilitada": True,
@@ -435,3 +436,72 @@ def test_guia_reemplazada_se_presenta_como_reemplazada(web):
     assert respuesta.status_code == 200
     assert "Reemplazado" in respuesta.text
     assert ">Cargo activo<" not in respuesta.text
+
+
+def test_cancelacion_bloqueada_se_ve_y_senala_el_paso_que_la_destraba(web):
+    """Caso real (WAIMAO 5827610390, 08/10/2026): con un retiro agendado el
+    admin apretó "Cancelar en cuenta", vio sólo el formulario de precio y puso
+    $0 creyendo que cancelaba. El bloqueo tiene que verse como aviso, con el
+    paso que lo destraba como botón, y el precio tiene que advertir que $0 no
+    cancela."""
+    web.estado.control = {
+        **_control_base(),
+        "cancelacion": {
+            "habilitada": False,
+            "codigo": "RECOLECCION_ACTIVA",
+            "motivo": "Hay una recolección en curso o por verificar con el courier. Resolvela en Recolecciones antes de cancelar el cargo.",
+            "modo": "CANCELACION_COMERCIAL",
+            "retiros": [],
+        },
+    }
+
+    respuesta = web.client.get(RUTA_PEDIDO)
+
+    assert respuesta.status_code == 200
+    html = respuesta.text
+    assert "Todavía no se puede cancelar." in html
+    assert "Hay una recolección en curso o por verificar" in html
+    assert "Revisar la recolección" in html
+    assert 'href="/admin/recolecciones"' in html
+    assert 'href="#cancelacion" title="Hay una recolección en curso' in html
+    assert "no lo cancela: lo bonifica" in html
+    assert "Un precio de $0 <strong>bonifica</strong> el envío" in html
+    # Sin bloqueo, el formulario de cancelación está a la vista, no plegado.
+    web.estado.control = _control_base()
+    abierto = web.client.get(RUTA_PEDIDO).text
+    assert "<summary>Cancelar este envío</summary>" not in abierto
+    assert 'name="accion" value="cancelar"' in abierto
+
+
+def test_cancelar_con_retiro_agendado_lo_dice_y_confirma_la_anulacion(web):
+    web.estado.control = {
+        **_control_base(),
+        "cancelacion": {
+            "habilitada": True,
+            "codigo": None,
+            "motivo": None,
+            "modo": "CANCELACION_COMERCIAL",
+            "retiros": [{
+                "id": 11, "courier": "DHL", "fecha": date(2026, 10, 9),
+                "confirmation_code": "CBJ261009027902",
+            }],
+        },
+        "aviso_alcance": (
+            "La cancelación anula primero el retiro agendado ante el courier y "
+            "después quita el cargo de la cuenta del cliente. La guía no se anula."
+        ),
+    }
+    html = web.client.get(RUTA_PEDIDO).text
+    assert "Se anulará el retiro" in html
+    assert "CBJ261009027902" in html
+    assert "y la anulación del retiro ante el courier" in html
+
+    web.cancelar.return_value = {"ok": True, "retiros_cancelados": ["CBJ261009027902"]}
+    respuesta = _post(
+        web, ruta=RUTA_PEDIDO, accion="cancelar",
+        extra={"motivo": "Guía duplicada, se reemplaza por otra"},
+    )
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"] == RUTA_PEDIDO + "?ok=cancelado_con_retiro"
+    confirmacion = web.client.get(RUTA_PEDIDO + "?ok=cancelado_con_retiro").text
+    assert "se anuló el retiro ante el courier" in confirmacion

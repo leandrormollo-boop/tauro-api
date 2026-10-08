@@ -444,7 +444,18 @@ def test_bloquea_factura_pago_recoleccion_y_emision_en_curso(db):
             (cliente_pickup, sid_pickup),
         )
     retiro = control.obtener_control_envio_admin(solicitud_id=sid_pickup)
-    assert retiro["cancelacion"]["codigo"] == "RECOLECCION_ACTIVA"
+    # Un retiro AGENDADO no bloquea: la cancelación lo anula primero (un solo botón).
+    assert retiro["cancelacion"]["habilitada"] is True
+    assert [r["confirmation_code"] for r in retiro["cancelacion"]["retiros"]] == ["PICKUP-QA"]
+    assert "anula primero el retiro" in retiro["aviso_alcance"]
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE recolecciones SET estado='VERIFICAR_COURIER' WHERE solicitud_id=%s",
+            (sid_pickup,),
+        )
+    en_curso = control.obtener_control_envio_admin(solicitud_id=sid_pickup)
+    assert en_curso["cancelacion"]["codigo"] == "RECOLECCION_ACTIVA"
+    assert en_curso["cancelacion"]["retiros"] == []
 
     sid_emision = _crear_solicitud(db, sufijo="EMITIENDO", precio=Decimal("500"))
     with db() as conn, conn.cursor() as cur:
@@ -711,3 +722,102 @@ def test_revision_vencida_no_cancela_ni_audita(db):
             "SELECT COUNT(*) AS n FROM security_audit WHERE event='admin.envio_cancelacion_comercial'"
         )
         assert cur.fetchone()["n"] == 0
+
+
+def _agendar_retiro(db, sid, cliente, codigo):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO recolecciones(
+                cliente_id,solicitud_id,fecha,ready_time,close_time,bultos,
+                peso_kg,courier,estado,confirmation_code
+            ) VALUES(%s,%s,CURRENT_DATE,'09:00','17:00',1,1,'DHL','AGENDADA',%s)
+            RETURNING id
+            """,
+            (cliente, sid, codigo),
+        )
+        return int(cur.fetchone()["id"])
+
+
+def _estado_cargo_y_retiro(db, eid, rec_id):
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT estado FROM envios WHERE id=%s", (eid,))
+        cargo = cur.fetchone()["estado"]
+        cur.execute("SELECT estado FROM recolecciones WHERE id=%s", (rec_id,))
+        retiro = cur.fetchone()["estado"]
+    return cargo, retiro
+
+
+def test_cancelar_anula_primero_el_retiro_agendado_y_despues_el_cargo(db, monkeypatch):
+    """Caso WAIMAO 5827610390: con retiro DHL agendado, un solo botón tiene que
+    anular el retiro ante el courier y recién después quitar el cargo."""
+    import servicios.recolecciones as recolecciones_srv
+    sid, eid, cliente = _envio(db, "RETIRO_OK")
+    rec_id = _agendar_retiro(db, sid, cliente, "CBJ-OK-1")
+    llamadas = []
+
+    def cancelar_simulado(rec, cliente_id=None):
+        llamadas.append((rec, cliente_id))
+        with db() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE recolecciones SET estado='CANCELADA' WHERE id=%s", (rec,)
+            )
+        return {"ok": True}
+
+    monkeypatch.setattr(recolecciones_srv, "cancelar", cancelar_simulado)
+    contexto = control.obtener_control_envio_admin(solicitud_id=sid, envio_id=eid, cliente_id=cliente)
+    assert contexto["cancelacion"]["habilitada"] is True
+    resultado = control.cancelar_envio_admin(
+        solicitud_id=sid, envio_id=eid, cliente_id=cliente,
+        motivo="Guía duplicada, se reemplaza por otra", actor="admin@test",
+        revision=contexto["revision"],
+    )
+    assert resultado["ok"] is True
+    assert resultado["retiros_cancelados"] == ["CBJ-OK-1"]
+    assert llamadas == [(rec_id, None)]  # modo admin: sin cliente_id
+    assert _estado_cargo_y_retiro(db, eid, rec_id) == ("CANCELADO", "CANCELADA")
+
+
+def test_si_el_courier_no_confirma_la_anulacion_el_cargo_no_se_toca(db, monkeypatch):
+    import servicios.recolecciones as recolecciones_srv
+    sid, eid, cliente = _envio(db, "RETIRO_FALLA")
+    rec_id = _agendar_retiro(db, sid, cliente, "CBJ-FALLA-1")
+
+    def cancelar_fallido(rec, cliente_id=None):
+        with db() as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE recolecciones SET estado='VERIFICAR_COURIER' WHERE id=%s", (rec,)
+            )
+        return {"ok": False, "error": "No recibimos confirmación del courier."}
+
+    monkeypatch.setattr(recolecciones_srv, "cancelar", cancelar_fallido)
+    contexto = control.obtener_control_envio_admin(solicitud_id=sid, envio_id=eid, cliente_id=cliente)
+    with pytest.raises(control.ControlEnvioAdminError) as exc:
+        control.cancelar_envio_admin(
+            solicitud_id=sid, envio_id=eid, cliente_id=cliente,
+            motivo="Guía duplicada, se reemplaza por otra", actor="admin@test",
+            revision=contexto["revision"],
+        )
+    assert exc.value.codigo == "RECOLECCION_NO_CANCELADA"
+    assert "El cargo no se tocó" in str(exc.value)
+    assert _estado_cargo_y_retiro(db, eid, rec_id) == ("ACTIVO", "VERIFICAR_COURIER")
+    # Ahora el control bloquea hasta resolver el retiro en Recolecciones.
+    despues = control.obtener_control_envio_admin(solicitud_id=sid, envio_id=eid, cliente_id=cliente)
+    assert despues["cancelacion"]["codigo"] == "RECOLECCION_ACTIVA"
+
+
+def test_una_revision_vieja_no_pasa_aunque_haya_retiro_para_anular(db, monkeypatch):
+    import servicios.recolecciones as recolecciones_srv
+    sid, eid, cliente = _envio(db, "RETIRO_STALE")
+    _agendar_retiro(db, sid, cliente, "CBJ-STALE-1")
+    monkeypatch.setattr(
+        recolecciones_srv, "cancelar",
+        lambda rec, cliente_id=None: pytest.fail("no debe llamar al courier con revisión vieja"),
+    )
+    with pytest.raises(control.ControlEnvioAdminError) as exc:
+        control.cancelar_envio_admin(
+            solicitud_id=sid, envio_id=eid, cliente_id=cliente,
+            motivo="Guía duplicada, se reemplaza por otra", actor="admin@test",
+            revision="f" * 64,
+        )
+    assert exc.value.codigo == "CAMBIO_CONCURRENTE"

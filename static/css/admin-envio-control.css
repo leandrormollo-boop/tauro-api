@@ -40,3 +40,9 @@
 .ec-history-row>strong { white-space:nowrap;font-variant-numeric:tabular-nums; }
 @media(max-width:850px) { .ec-heading { flex-wrap:wrap; }.ec-total { align-items:flex-start; }.ec-summary { grid-template-columns:1fr 1fr; } }
 @media(max-width:650px) { .ec-actions,.ec-summary { grid-template-columns:1fr; }.ec-actions { gap:12px; }.ec-nav { gap:12px; }.ec-history-row { flex-wrap:wrap; }.ec-heading { gap:16px; }.ec-total>strong { font-size:26px; } }
+/* Cancelación bloqueada: que se vea, y que el paso que la destraba sea un botón. */
+.ec-action-nav .ec-blocked{opacity:.6;cursor:help}
+.ec-cancel .ec-cancel-blocked{display:flex;flex-direction:column;gap:4px;margin:0 0 12px}
+.ec-cancel .ec-cancel-blocked .ec-note{margin:0}
+.ec-price-warning{margin:8px 0 0;max-width:520px}
+.ec-price-warning a{text-decoration:underline}
