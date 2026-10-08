@@ -435,3 +435,37 @@ def test_guia_reemplazada_se_presenta_como_reemplazada(web):
     assert respuesta.status_code == 200
     assert "Reemplazado" in respuesta.text
     assert ">Cargo activo<" not in respuesta.text
+
+
+def test_cancelacion_bloqueada_se_ve_y_senala_el_paso_que_la_destraba(web):
+    """Caso real (WAIMAO 5827610390, 08/10/2026): con un retiro agendado el
+    admin apretó "Cancelar en cuenta", vio sólo el formulario de precio y puso
+    $0 creyendo que cancelaba. El bloqueo tiene que verse como aviso, con el
+    paso que lo destraba como botón, y el precio tiene que advertir que $0 no
+    cancela."""
+    web.estado.control = {
+        **_control_base(),
+        "cancelacion": {
+            "habilitada": False,
+            "codigo": "RECOLECCION_ACTIVA",
+            "motivo": "Cancelá o resolvé la recolección activa antes de quitar el cargo.",
+            "modo": "CANCELACION_COMERCIAL",
+        },
+    }
+
+    respuesta = web.client.get(RUTA_PEDIDO)
+
+    assert respuesta.status_code == 200
+    html = respuesta.text
+    assert "Todavía no se puede cancelar." in html
+    assert "Cancelá o resolvé la recolección activa" in html
+    assert "Paso 1 · Cancelar la recolección" in html
+    assert 'href="/admin/recolecciones"' in html
+    assert 'href="#cancelacion" title="Cancelá o resolvé la recolección activa' in html
+    assert "no lo cancela: lo bonifica" in html
+    assert "Un precio de $0 <strong>bonifica</strong> el envío" in html
+    # Sin bloqueo, el formulario de cancelación está a la vista, no plegado.
+    web.estado.control = _control_base()
+    abierto = web.client.get(RUTA_PEDIDO).text
+    assert "<summary>Cancelar este envío</summary>" not in abierto
+    assert 'name="accion" value="cancelar"' in abierto

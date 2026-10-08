@@ -1,7 +1,7 @@
 {% extends 'admin/base_admin.html' %}
 {% block title %}Control del envío{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/css/admin-envio-control.css?v=1">
+<link rel="stylesheet" href="/static/css/admin-envio-control.css?v=2">
 {% set s = c.detalle %}
 {% set sid = c.solicitud.id if c.solicitud else none %}
 {% macro campos(accion) %}
@@ -30,7 +30,7 @@
   <nav class="ec-action-nav" aria-label="Controles del envío">
     <a class="btn btn-sm btn-ghost" href="#precio">Modificar precio</a>
     <a class="btn btn-sm btn-ghost" href="#recoleccion">Recolección</a>
-    <a class="btn btn-sm btn-ghost" href="#cancelacion">Cancelar en cuenta</a>
+    <a class="btn btn-sm btn-ghost{% if not c.cancelacion.habilitada %} ec-blocked{% endif %}" href="#cancelacion"{% if not c.cancelacion.habilitada %} title="{{ c.cancelacion.motivo }}"{% endif %}>Cancelar en cuenta{% if not c.cancelacion.habilitada %} <span aria-hidden="true">🔒</span>{% endif %}</a>
   </nav>
   {% if control_error %}<div class="msg error" role="alert">{{ control_error }}</div>{% endif %}
   {% if control_ok %}<div class="msg ok" role="status">{{ control_ok }}</div>{% endif %}
@@ -56,6 +56,7 @@
         <label>Motivo del cambio<textarea name="motivo" minlength="8" maxlength="500" rows="2" required>{{ valores.get('motivo', '') if valores.get('accion') == 'precio' else '' }}</textarea></label>
         <label class="ec-confirm"><input type="checkbox" name="confirmar" value="1" required>Confirmo el nuevo precio y su impacto en la cuenta.</label>
         <button class="btn btn-primary" type="submit">Guardar precio</button>
+        <p class="ec-note ec-price-warning">Un precio de $0 <strong>bonifica</strong> el envío: sigue vigente en la cuenta y en el portal del cliente. Para quitarlo de la cuenta usá <a href="#cancelacion">Cancelar en cuenta</a>.</p>
         <span data-help="Cómo se guarda el precio">Se conserva el importe original y se registra la diferencia con su motivo. Un precio de $0 bonifica el envío y mantiene la guía activa. El costo interno del operador no cambia.</span>
       </form>
       {% else %}<p class="ec-note">{{ c.precio.motivo }}</p>{% endif %}
@@ -87,18 +88,22 @@
     <h2>Cancelar en la cuenta corriente<span data-help="Historial de la cancelación">Se conservan el envío, su importe original y el motivo de la cancelación para auditoría.</span></h2>
     {% if c.cancelacion.habilitada %}
     <p class="ec-note">{{ c.aviso_alcance }}</p>
-    <details><summary>Cancelar este envío</summary>
+    <div class="ec-cancel-open">
       <form method="post" action="{{ ruta_control }}" class="ec-form">
         {{ campos('cancelar') }}
         <label>Motivo de la cancelación<textarea name="motivo" minlength="8" maxlength="500" rows="2" required>{{ valores.get('motivo', '') if valores.get('accion') == 'cancelar' else '' }}</textarea></label>
         <label class="ec-confirm"><input type="checkbox" name="confirmar" value="1" required>Confirmo la cancelación en TAURO. La guía del operador no se anula con esta acción.</label>
         <button class="btn btn-ghost ec-danger" type="submit">Confirmar cancelación</button>
       </form>
-    </details>
-    {% else %}<p class="ec-note">{{ c.cancelacion.motivo }}</p>
-      {% if c.cancelacion.codigo in ('REQUIERE_NOTA_CREDITO','DOCUMENTO_FISCAL_EMITIDO','COBERTURA_FISCAL_INCOMPLETA') %}<a href="/admin/clientes/{{ c.cliente_id|urlencode }}/facturas">Revisar facturas y notas de crédito</a>{% endif %}
-      {% if c.cancelacion.codigo == 'PAGO_IMPUTADO' %}<a href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=pagos">Revisar pagos imputados</a>{% endif %}
-      {% if c.cancelacion.codigo == 'RECOLECCION_ACTIVA' %}<a href="/admin/recolecciones">Revisar recolección</a>{% endif %}
+    </div>
+    {% else %}
+    <div class="msg warn ec-cancel-blocked" role="status">
+      <strong>Todavía no se puede cancelar.</strong> {{ c.cancelacion.motivo }}
+      <span class="ec-note">Modificar el precio a $0 no lo cancela: lo bonifica y sigue vigente para el cliente.</span>
+    </div>
+      {% if c.cancelacion.codigo in ('REQUIERE_NOTA_CREDITO','DOCUMENTO_FISCAL_EMITIDO','COBERTURA_FISCAL_INCOMPLETA') %}<a class="btn btn-sm btn-primary" href="/admin/clientes/{{ c.cliente_id|urlencode }}/facturas">Revisar facturas y notas de crédito</a>{% endif %}
+      {% if c.cancelacion.codigo == 'PAGO_IMPUTADO' %}<a class="btn btn-sm btn-primary" href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=pagos">Revisar pagos imputados</a>{% endif %}
+      {% if c.cancelacion.codigo == 'RECOLECCION_ACTIVA' %}<a class="btn btn-sm btn-primary" href="/admin/recolecciones">Paso 1 · Cancelar la recolección</a> <span class="ec-note">Después volvé acá para el paso 2.</span>{% endif %}
     {% endif %}
   </section>
   <details class="ec-history"><summary>Historial de importes y documentos</summary>
