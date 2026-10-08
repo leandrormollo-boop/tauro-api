@@ -12,7 +12,24 @@ def test_sidebar_prioriza_clientes_proveedores_y_operacion():
         assert ruta in principal
     assert principal.index('/admin/clientes') < principal.index('/admin/operadores')
     assert 'Más herramientas' not in html
-    assert 'Facturación y conciliación' in html
+    # Menú ordenado (07/10/2026): cuatro bloques, una entrada por entidad y
+    # ninguna acción suelta. Las acciones viven como botones en su pantalla.
+    for bloque in ('Negocio', 'Operación', 'Dinero', 'Configuración'):
+        assert bloque in principal or bloque in html
+    assert 'Facturación y conciliación' not in html
+    assert 'Herramientas de operación' not in html
+    assert 'href="/admin/conciliacion-couriers"' in principal
+    assert 'href="/admin/conciliacion-couriers?vista=diferencias"' in principal
+    for accion in ('/admin/envios/nuevo', '/admin/pagos/nuevo', '/admin/envios-realizados/nuevo',
+                   '/admin/facturas-nacionales', '/admin/facturas-internacionales'):
+        assert accion not in html, accion
+    assert html.count('href="/admin/conciliacion-couriers/nueva') == 0
+    # Un solo "Cargar factura": en la pantalla de facturas de operadores.
+    facturas = (ROOT / "templates/admin/conciliacion_couriers.html").read_text()
+    assert facturas.count('conciliacion-couriers/nueva') == 1
+    assert 'entrada-dhl' not in facturas
+    assert 'conciliacion-couriers/nueva' not in (ROOT / "templates/admin/operadores.html").read_text()
+    assert 'entrada-dhl' not in (ROOT / "templates/admin/operador.html").read_text()
 
 
 def test_facturas_internacionales_filtra_dhl_y_fedex(monkeypatch):

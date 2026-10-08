@@ -3,7 +3,7 @@
 {% block title %}Proveedores{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="/static/css/operadores.css?v=3">
-<header class="business-heading"><div><div class="eyebrow">Control del negocio</div><h1>Proveedores</h1><p>Cada envío aparece en el operador que lo realiza.</p></div><a href="/admin/conciliacion-couriers" class="btn btn-ghost">Cargar facturas</a></header>
+<header class="business-heading"><div><div class="eyebrow">Control del negocio</div><h1>Proveedores</h1><p>Cada envío aparece en el operador que lo realiza.</p></div><a href="/admin/conciliacion-couriers?vista=facturas" class="btn btn-ghost">Facturas de operadores ↗</a></header>
 <div class="business-card-grid operadores">
 {% for m in mundos %}<section class="card business-provider-card">
 <header><h2><a href="/admin/operadores/{{ m.courier }}">{{ op.nombre(m.courier) }}</a></h2><a class="op-logo-button" href="/admin/operadores/{{ m.courier }}" aria-label="Abrir {{ op.nombre(m.courier) }}">{% if m.courier!='CORREO_ARGENTINO' %}{{ op.logo(m.courier) }}{% else %}<span class="business-lettermark">CA</span>{% endif %}</a></header>

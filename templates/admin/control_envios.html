@@ -1,6 +1,6 @@
 {% extends 'admin/base_admin.html' %}
-{% block title %}Control de envíos{% endblock %}
+{% block title %}Envíos{% endblock %}
 {% block content %}
-<div class="business-heading"><div><div class="eyebrow">Operación</div><h1>Control de envíos</h1><p>Cliente, proveedor y documentos conectados en una misma fila.</p></div><a href="/admin/pedidos" class="btn btn-ghost">Solicitudes y emisión</a></div>
+<div class="business-heading"><div><div class="eyebrow">Operación</div><h1>Envíos</h1><p>Cliente, proveedor y documentos conectados en una misma fila.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><a href="/admin/envios-realizados/nuevo" class="btn btn-primary">Cargar envío realizado</a><a href="/admin/pedidos" class="btn btn-ghost">Solicitudes y emisión</a></div></div>
 {% include 'admin/negocio_envios.html' %}
 {% endblock %}
