@@ -101,7 +101,8 @@ def _cargar(**extra):
 
 def test_envio_tardio_queda_con_fecha_real(envio_db):
     fecha = _hoy() - timedelta(days=26)
-    resultado = _cargar(fecha_envio=fecha)
+    tracking = "9912345678"
+    resultado = _cargar(fecha_envio=fecha, tracking=tracking)
     assert resultado["ok"], resultado
     with envio_db() as conn:
         with conn.cursor() as cur:
@@ -111,7 +112,8 @@ def test_envio_tardio_queda_con_fecha_real(envio_db):
             )
             cargo = cur.fetchone()
             cur.execute(
-                "SELECT created_at, guia_generada_at, estado FROM solicitudes_guia WHERE id=%s",
+                "SELECT created_at, guia_generada_at, estado, tracking "
+                "FROM solicitudes_guia WHERE id=%s",
                 (resultado["solicitud_id"],),
             )
             solicitud = cur.fetchone()
@@ -120,7 +122,8 @@ def test_envio_tardio_queda_con_fecha_real(envio_db):
     assert float(cargo["monto_ars"]) == 756755.0
     assert solicitud["created_at"].astimezone(AR).date() == fecha
     assert solicitud["guia_generada_at"].astimezone(AR).date() == fecha
-    assert solicitud["estado"] == "GUIA_LISTA"
+    assert solicitud["estado"] == "DESPACHADO"
+    assert solicitud["tracking"] == tracking
 
 
 def test_sin_fecha_sigue_siendo_hoy(envio_db):
@@ -223,8 +226,15 @@ def test_sin_fecha_conserva_la_fecha_original_de_la_guia(envio_db):
             assert cur.fetchone()["fecha"] == date(2026, 8, 29)
 
 
-@pytest.mark.parametrize("cliente,estado", [("OTRO", "ENTREGADO"), ("WAIMAO", "CANCELADO")])
-def test_no_completa_guia_de_otro_cliente_ni_cancelada(envio_db, cliente, estado):
+@pytest.mark.parametrize(
+    "cliente,estado",
+    [
+        ("OTRO", "ENTREGADO"),
+        ("WAIMAO", "CANCELADO"),
+        ("WAIMAO", "REEMPLAZADO"),
+    ],
+)
+def test_no_completa_guia_de_otro_cliente_ni_anulada(envio_db, cliente, estado):
     _guia_historica(envio_db, cliente=cliente, estado=estado)
     resultado = _cargar(tracking="5377135584", precio_tauro_ars=1028160.0)
     assert not resultado["ok"]

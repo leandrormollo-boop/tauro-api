@@ -2560,16 +2560,10 @@ def envios_view(
         pagina=pagina,
         buscar=busqueda_global,
     )
-    # El contador del inicio también incluye ventas sin convertir en envío.
-    # Se muestran aparte: todavía no son solicitudes ni filas del historial.
+    # Mi tienda mantiene sus pedidos por armar en su propia sección. Este
+    # filtro y su contador sólo incluyen acciones sobre envíos existentes.
     pedidos_por_armar = 0
     pedidos_por_armar_error = False
-    if vista["paso_filtro"] == "requieren_accion":
-        embudo = embudo_envios(cliente)
-        pedidos_por_armar_error = not embudo
-        pedidos_por_armar = next(
-            (p["cantidad"] for p in embudo if p["clave"] == "por_armar"), 0,
-        )
     # El período puede no tener filas aunque el cliente sí tenga historia. La
     # pantalla debe decir "sin envíos en agosto", no "nunca hiciste envíos".
     vista["tiene_historial"] = periodo["tiene_actividad_historica"]

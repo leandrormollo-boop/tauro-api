@@ -1275,8 +1275,8 @@ def listar_solicitudes_cliente(
                        s.dest_ciudad, s.observaciones, s.peso_kg,
                        s.valor_declarado_usd, s.precio_tauro_ars,
                        s.precio_tauro_usd, s.precio_cliente_final_ars, s.tracking,
-                       s.guia_url, s.created_at, s.courier, s.bultos,
-                       s.guia_descargada_at,
+                       s.guia_url, s.created_at, s.courier, s.bultos, s.coti_id,
+                       s.guia_descargada_at, s.cargo_pendiente,
                        cargo_periodo.estado AS cargo_estado,
                        COALESCE(
                            cargo_periodo.fecha,
@@ -1327,6 +1327,7 @@ def listar_solicitudes_cliente(
                   ON vigente.id=re_next.solicitud_nueva_id
                 LEFT JOIN envios cargo_periodo
                   ON cargo_periodo.solicitud_id=s.id
+                 AND cargo_periodo.cliente_id=s.cliente_id
                 LEFT JOIN LATERAL (
                     SELECT c.precio_cliente_inicial_ars,
                            c.precio_cliente_final_ars, c.ajuste_cliente_ars,
@@ -1471,29 +1472,16 @@ def listar_envios_api(
 
 
 def contar_guias_listas(cliente_id: str) -> int:
-    """
-    Cuántas guías tiene el cliente listas para descargar. Es su tarea
-    pendiente real (las SOLICITADO esperan a Tauro, no a él), así que
-    es lo que alimenta el globo rojo del menú.
-    """
+    """Compatibilidad del menú: cuenta tareas concretas con la política común."""
+    from servicios.acciones_cliente import accion_cliente_sql
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS n
                 FROM solicitudes_guia s
-                WHERE s.cliente_id = %s AND s.estado = 'GUIA_LISTA'
-                  AND s.test=FALSE
-                  AND s.visible_cliente=TRUE
-                  AND s.guia_descargada_at IS NULL
-                  AND s.tracking_estado IS NULL
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM envios e
-                      WHERE e.solicitud_id = s.id
-                        AND e.cliente_id = s.cliente_id
-                        AND e.estado = 'CANCELADO'
-                  )
+                WHERE s.cliente_id = %s AND {accion_cliente_sql('s')}
                 """,
                 (cliente_id.strip().upper(),),
             )
@@ -1994,17 +1982,23 @@ def obtener_solicitud(solicitud_id: int) -> Optional[dict]:
 def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[bytes],
                           courier: str = "FEDEX",
                           message_reference: Optional[str] = None,
-                          commercial_invoice_pdf: Optional[bytes] = None) -> bool:
-    """Persiste tracking, documentos emitidos y estado de la guía."""
+                          commercial_invoice_pdf: Optional[bytes] = None,
+                          envio_ya_realizado: bool = False) -> bool:
+    """Persiste tracking, documentos emitidos y estado de la guía.
+
+    ``envio_ya_realizado`` se reserva para el alta manual de un despacho que
+    ya ocurrió; las emisiones ordinarias quedan en ``GUIA_LISTA``.
+    """
     tracking = (tracking or "").strip()[:120]
     if not tracking:
         raise ValueError("El courier no devolvió un tracking válido.")
+    estado_confirmado = "DESPACHADO" if envio_ya_realizado else "GUIA_LISTA"
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 UPDATE solicitudes_guia
-                SET estado='GUIA_LISTA', tracking=%s, label_pdf=%s,
+                SET estado=%s, tracking=%s, label_pdf=%s,
                     commercial_invoice_pdf=%s, courier=%s,
                     numero_guia_tauro=CASE WHEN test=FALSE THEN
                         COALESCE(numero_guia_tauro, nextval('numero_guia_tauro_seq'))
@@ -2019,7 +2013,8 @@ def guardar_guia_generada(solicitud_id: int, tracking: str, label_pdf: Optional[
                     guia_generada_at=NOW(), updated_at=NOW()
                 WHERE id=%s
                 """,
-                (tracking, psycopg2.Binary(label_pdf) if label_pdf else None,
+                (estado_confirmado, tracking,
+                 psycopg2.Binary(label_pdf) if label_pdf else None,
                  psycopg2.Binary(commercial_invoice_pdf)
                  if commercial_invoice_pdf else None,
                  courier, _clean(message_reference), solicitud_id),
@@ -2542,12 +2537,13 @@ def cargar_envio_externo(
         return {"ok": False, "error": f"No se pudo crear el envío: {e}"}
 
     sid = creada.get("id")
-    # guardar_guia_generada hace el resto: GUIA_LISTA + label + cargo
+    # guardar_guia_generada hace el resto: DESPACHADO + label + cargo
     # automático en cuenta corriente. El aviso a tienda sale limpio porque
     # no hay pedido vinculado.
     guardar_guia_generada(
         sid, tracking, label_pdf,
         courier=(courier or "FEDEX").strip().upper(),
+        envio_ya_realizado=True,
     )
     if fecha_envio is not None:
         _fechar_envio_externo(sid, fecha_envio)
