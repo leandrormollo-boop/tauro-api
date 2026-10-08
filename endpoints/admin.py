@@ -1423,6 +1423,23 @@ def admin_bandeja(request: Request, admin_token: Optional[str] = Cookie(None)):
     )
 
 
+@router.get("/incidencias-emision", response_class=HTMLResponse)
+def admin_incidencias_emision(
+    request: Request, solicitud_id: int = 0, antes: int = 0,
+    resultado: str = "fallidos", admin_token: Optional[str] = Cookie(None),
+):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.incidencias_emision import listar_intentos
+    resultado = resultado if resultado in {"todos", "fallidos", "exitosos"} else "fallidos"
+    datos = listar_intentos(solicitud_id=solicitud_id, antes=antes, resultado=resultado)
+    return templates.TemplateResponse(
+        request=request, name="admin/incidencias_emision.html",
+        context={"seccion": "bandeja", "solicitud_id": solicitud_id,
+                 "resultado": resultado, **datos},
+    )
+
+
 @router.get("/backup.json")
 def admin_backup(admin_token: Optional[str] = Cookie(None)):
     """Descarga una exportación parcial para consulta; no es restaurable."""
@@ -3454,11 +3471,11 @@ def admin_pedido_generar_guia(
     if not _is_auth(admin_token):
         return _redirect_login()
 
-    resultado = generar_guia(solicitud_id)
+    from servicios.incidencias_emision import ejecutar_emision_registrada
+    resultado = ejecutar_emision_registrada(
+        request, solicitud_id, "admin", "admin", lambda: generar_guia(solicitud_id)
+    )
     if resultado.get("ok"):
-        from servicios.auditoria import registrar_desde_request
-        registrar_desde_request(request, event="admin.emitir_guia", actor_type="admin",
-                                actor_ref=str(solicitud_id), metadata={"solicitud_id": solicitud_id})
         _notificar_estado_async(solicitud_id, "GUIA_LISTA")
         return RedirectResponse(url="/admin/pedidos?ok=guia_generada", status_code=303)
 

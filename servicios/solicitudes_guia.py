@@ -2980,16 +2980,19 @@ def _recotizar_dhl_antes_de_emitir(sol: dict) -> dict:
     )
     if abs(actual - anterior) <= 0.5:
         base_interna = opcion.get("_base_interna")
+        error_tipo = None
         try:
             congelada = _congelar_base_recotizada(sol, base_interna)
         except Exception as e:
             print(f"[solicitudes] tarifa privada inconsistente para {sol['id']}: "
                   f"{type(e).__name__}")
             congelada = False
+            error_tipo = type(e).__name__
         if not congelada:
-            return {"ok": False, "error":
-                    "No pudimos guardar la base interna de la tarifa DHL. "
-                    "No emitimos ni cobramos nada; probá de nuevo o pedí ayuda a Tauro."}
+            return {"ok": False, "codigo_error": "TARIFA_GUARDADA_INCONSISTENTE",
+                    "etapa": "validar_tarifa", "error_tipo": error_tipo,
+                    "error": "No pudimos validar la tarifa guardada. "
+                    "No se emitió la guía ni se generó un cargo. Pedí a Tauro que revise este envío."}
         return {"ok": True}
 
     with get_conn() as conn:

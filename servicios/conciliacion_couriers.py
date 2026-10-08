@@ -329,6 +329,44 @@ def calcular_precio_con_margen_protegido(
     }
 
 
+def _snapshot_equivalente(existente: dict, esperado: dict) -> bool:
+    """Compara contenido persistido, no huellas de escritores históricos distintos.
+
+    Crear/editar la solicitud usaba una huella reducida; emitir usaba otra.
+    No se actualiza ninguna fila ni se toleran cambios financieros: sólo se
+    normaliza a la precisión de las columnas PostgreSQL.
+    """
+    datos = {
+        "solicitud_id": int(existente["solicitud_id"]),
+        "coti_id": _texto(existente.get("coti_id")) or None,
+        "courier": normalizar_courier(existente["courier"]),
+        "servicio": _texto(existente.get("servicio_courier")) or None,
+        "markup_tipo": _texto(existente.get("markup_tipo")).upper() or None,
+        "markup_valor": str(
+            _dinero(existente["markup_valor"], "Markup")
+            if existente.get("markup_valor") is not None else None
+        ),
+        "moneda": _moneda(existente["moneda_courier"]),
+        "tipo_cambio": str(_decimal(existente["tipo_cambio_ars"], "Tipo de cambio").quantize(
+            SEIS_DECIMALES, rounding=ROUND_HALF_UP)),
+        "bultos": _json_seguro(existente.get("bultos") or []),
+    }
+    for clave, columna in (
+        ("costo_nativo", "costo_courier_estimado"),
+        ("costo_ars", "costo_courier_estimado_ars"),
+        ("precio", "precio_cliente_inicial_ars"),
+        ("margen", "margen_tauro_protegido_ars"),
+    ):
+        datos[clave] = str(_dinero(existente[columna], columna))
+    for clave, columna in (
+        ("peso_real", "peso_real_cotizado_kg"),
+        ("peso_volumetrico", "peso_volumetrico_cotizado_kg"),
+        ("peso_facturable", "peso_facturable_cotizado_kg"),
+    ):
+        datos[clave] = str(_peso_opcional(existente.get(columna), columna))
+    return datos == esperado
+
+
 def registrar_snapshot_cotizacion(
     *,
     solicitud_id: int,
@@ -441,7 +479,7 @@ def registrar_snapshot_cotizacion(
 
             cur.execute(
                 """
-                SELECT id, origen_calculo
+                SELECT *
                   FROM envio_cotizacion_snapshots
                  WHERE solicitud_id = %s
                 """,
@@ -450,7 +488,8 @@ def registrar_snapshot_cotizacion(
             existente = cur.fetchone()
             if existente:
                 origen_existente = existente.get("origen_calculo") or {}
-                if origen_existente.get("snapshot_sha256") == snapshot_hash:
+                if (origen_existente.get("snapshot_sha256") == snapshot_hash
+                        or _snapshot_equivalente(existente, datos_hash)):
                     return {"id": int(existente["id"]), "duplicado": True}
                 raise SnapshotInmutableError(
                     "La guía ya tiene otra cotización aceptada."
