@@ -161,13 +161,28 @@ def _action_shipments():
               ('CANCELADO', 'RETENIDO'), ('REEMPLAZADO', 'RETENIDO'),
               ('SOLICITADO', None), ('EN_PROCESO', None),
               ('EMITIENDO', None), ('VERIFICAR_COURIER', None)]
-    return [presentar_estados_envio(dict(
+    envios = [presentar_estados_envio(dict(
         id=n, estado=state, tracking_estado=tracking_state,
         courier='OCA' if n == 2 else 'DHL', remitente_pais='AR',
         destino_pais='AR' if n == 2 else 'US', tracking=f'DEMO-{n}',
         dest_nombre=f'Destinatario DEMO {n}', bultos=[], cantidad=1,
-        precio_tauro_ars=0, resumen_pesos={},
+        precio_tauro_ars=0, resumen_pesos={}, coti_id=f'COTI-{n}',
+        tiene_label=n == 1, guia_descargada_at=None,
     )) for n, (state, tracking_state) in enumerate(states, 1)]
+    envios.extend([
+        presentar_estados_envio(dict(
+            envios[0], id=11, tracking='DEMO-11',
+            guia_descargada_at='2026-10-08T10:00:00Z',
+        )),
+        presentar_estados_envio(dict(
+            envios[0], id=12, tracking='DEMO-12', coti_id='EXT-manual',
+        )),
+        presentar_estados_envio(dict(
+            envios[0], id=13, tracking='DEMO-13', tiene_label=False,
+            guia_url='https://example.invalid/guia',
+        )),
+    ])
+    return envios
 
 
 def test_tarjeta_accion_abre_todos_los_pendientes_y_separa_pedidos_de_tienda(monkeypatch):
@@ -185,7 +200,11 @@ def test_tarjeta_accion_abre_todos_los_pendientes_y_separa_pedidos_de_tienda(mon
 
     portal, request = _action_portal(monkeypatch, _action_shipments(), pedidos=3)
     inicio = portal.home(request(), cliente='DEMO')
-    assert inicio.context['resumen_inicio']['requieren_accion'] == 5
+    resumen = inicio.context['resumen_inicio']
+    assert resumen['requieren_accion'] == resumen['guias_por_descargar'] == 1
+    assert resumen['pedidos_por_armar'] == 3
+    assert resumen['retenidos'] == 1
+    assert 'Mi tienda: 3 pedidos por armar' in inicio.body.decode()
     parser = SummaryLinks()
     parser.feed(inicio.body.decode())
     link = urlsplit(parser.links[2])
@@ -194,23 +213,28 @@ def test_tarjeta_accion_abre_todos_los_pendientes_y_separa_pedidos_de_tienda(mon
 
     for parcial in (False, True):
         lista = portal.envios_view(request(link.path, link.query, parcial), cliente='DEMO', **query)
-        assert [s['id'] for s in lista.context['solicitudes']] == [1, 2]
-        assert lista.context['total_resultados'] == 2
-        assert lista.context['pedidos_por_armar'] == 3
-        assert lista.context['total_nacionales'] == lista.context['total_internacionales'] == 1
+        assert [s['id'] for s in lista.context['solicitudes']] == [1]
+        assert lista.context['total_resultados'] == 1
+        assert lista.context['pedidos_por_armar'] == 0
+        assert lista.context['total_nacionales'] == 0
+        assert lista.context['total_internacionales'] == 1
         html = lista.body.decode()
         assert '<h1>Requiere tu acción</h1>' in html
-        assert 'Mi tienda: 3 pedidos por armar' in html
+        assert 'Mi tienda: 3 pedidos por armar' not in html
         assert 'paso=requieren_accion' in html
-        assert 'class="chip-e on" aria-current="true"><b>2</b> Requiere tu acción' in html
+        assert 'class="chip-e on" aria-current="true"><b>1</b> Requiere tu acción' in html
 
 
-def test_accion_solo_pedidos_tienda_no_termina_en_una_lista_vacia_sin_salida(monkeypatch):
+def test_pedidos_tienda_quedan_en_su_acceso_y_no_inflan_acciones_de_envios(monkeypatch):
     portal, request = _action_portal(monkeypatch, [], pedidos=3)
-    assert portal.home(request(), cliente='DEMO').context['resumen_inicio']['requieren_accion'] == 3
+    inicio = portal.home(request(), cliente='DEMO')
+    resumen = inicio.context['resumen_inicio']
+    assert resumen['requieren_accion'] == 0
+    assert resumen['pedidos_por_armar'] == 3
+    assert '<a href="/portal/tienda"><strong>Mi tienda: 3 pedidos por armar</strong></a>' in inicio.body.decode()
     lista = portal.envios_view(request('/portal/envios', 'paso=requieren_accion'), cliente='DEMO', paso='requieren_accion')
     html = lista.body.decode()
-    assert '<a href="/portal/tienda"><strong>Mi tienda: 3 pedidos por armar</strong></a>' in html
+    assert 'Mi tienda: 3 pedidos por armar' not in html
     assert 'No tenés envíos que requieran acción' in html
     assert 'Todavía no hiciste envíos' not in html
     assert lista.context['total_resultados'] == 0
@@ -220,7 +244,7 @@ def test_filtro_accion_conserva_busqueda_ambito_y_paginacion():
     from servicios.panel_cliente import preparar_historial_envios
     historial = _action_shipments()
     nacional = preparar_historial_envios(historial, paso='requieren_accion', tipo='nacional')
-    assert [s['id'] for s in nacional['solicitudes']] == [2]
+    assert nacional['solicitudes'] == []
     buscada = preparar_historial_envios(historial, paso='requieren_accion', buscar='DEMO-1')
     assert [s['id'] for s in buscada['solicitudes']] == [1]
     assert buscada['total_requieren_accion'] == 1

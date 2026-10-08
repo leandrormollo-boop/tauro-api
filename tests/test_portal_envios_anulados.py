@@ -68,5 +68,8 @@ def test_contadores_separan_canceladas_sin_sumarlas_como_guias_listas():
     )
     embudo = _bloque(panel, "def embudo_envios(", "def checklist_arranque(")
 
-    assert "e.estado = 'CANCELADO'" in contador_guias
+    from servicios.acciones_cliente import accion_cliente_sql
+    assert "accion_cliente_sql('s')" in contador_guias
+    assert "accion_cargo_cancelado.estado" in accion_cliente_sql()
+    assert "= 'CANCELADO'" in accion_cliente_sql()
     assert 'return "canceladas"' in panel

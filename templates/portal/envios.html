@@ -73,7 +73,7 @@ $ {{ (valor or 0)|numero_ars }}
         <div>
             <div class="eyebrow">Operaciones</div>
             <h1>{{ "Requiere tu acción" if paso_filtro == "requieren_accion" else "Mis envíos" }}{% if tipo_filtro and paso_filtro != 'requieren_accion' %} {{ 'nacionales' if tipo_filtro == 'nacional' else 'internacionales' }}{% endif %}</h1>
-            <p>{% if paso_filtro == 'requieren_accion' %}Guías listas para despachar y envíos retenidos.{% elif tipo_filtro == 'nacional' %}Envíos dentro de Argentina.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones.{% else %}Tus envíos, del más reciente al más antiguo.{% endif %}</p>
+            <p>{% if paso_filtro == 'requieren_accion' %}Descargá estas guías para preparar tus envíos.{% elif paso_filtro == 'retenidos' %}Seguimiento a cargo de TAURO. Te pediremos lo que haga falta.{% elif tipo_filtro == 'nacional' %}Envíos dentro de Argentina.{% elif tipo_filtro == 'internacional' %}Importaciones y exportaciones.{% else %}Tus envíos, del más reciente al más antiguo.{% endif %}</p>
         </div>
         <div class="envios-page-actions">
             {# Backup personal: SUS envíos, cuenta y catálogo en Excel, para
@@ -306,11 +306,12 @@ $ {{ (valor or 0)|numero_ars }}
                     </td>
                     <td data-label="Estado" class="envio-status-cell">
                         <span class="badge {{ 'shipment-cancelled-badge' if es_baja else s.estado_cliente_ui.clase }}" title="Estado actual del envío">{{ s.estado_cliente_ui.label }}</span>
+                        {% if s.accion_cliente %}<small class="tracking-updated">{{ s.accion_cliente.detalle }}</small>{% elif s.seguimiento_pendiente_tauro or s.estado_cliente_ui.codigo == 'RETENIDO' %}<small class="tracking-updated">Seguimiento a cargo de TAURO</small>{% endif %}
                         {% if s.recoleccion and s.recoleccion.estado == 'AGENDADA' and s.estado_cliente_ui.codigo == 'GUIA_LISTA' %}<small class="tracking-updated">Recolección programada</small>{% endif %}
                         {% if s.seguimiento_sin_actualizaciones and not es_baja %}<small class="tracking-alert">Entrega aún no confirmada.</small>{% endif %}
                     </td>
                     <td data-label="Guía / opciones" class="shipment-actions-cell">
-                        {% if s.tiene_label and not es_baja %}<a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-ghost btn-sm" aria-label="{{ 'Descargar guía + invoice' if s.tiene_factura_comercial else 'Descargar guía' }}">Ver guía</a>
+                        {% if s.tiene_label and not es_baja %}<a href="/portal/envios/{{ s.id }}/guia.pdf" target="_blank" class="btn btn-ghost btn-sm" aria-label="{{ 'Descargar guía + invoice' if s.tiene_factura_comercial else 'Descargar guía' }}">{{ s.accion_cliente.titulo if s.accion_cliente else 'Ver guía' }}</a>
                         {% elif s.guia_url and not es_baja %}<a href="{{ s.guia_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Ver guía</a>
                         {% else %}<a href="/portal/envios/{{ s.id }}" class="btn btn-ghost btn-sm shipment-view-primary">Ver envío</a>{% endif %}
                         <div class="shipment-desktop-options">{{ opciones_envio(s, es_baja) }}</div>
@@ -319,6 +320,7 @@ $ {{ (valor or 0)|numero_ars }}
                         <details class="shipment-more">
                             <summary>Más datos</summary>
                             <div class="shipment-more-content">
+                                {% if s.accion_cliente %}<p>{{ s.accion_cliente.detalle }}</p>{% elif s.seguimiento_pendiente_tauro or s.estado_cliente_ui.codigo == 'RETENIDO' %}<p>Seguimiento a cargo de TAURO</p>{% endif %}
                                 <p>Fecha: {{ (s.fecha_operacion or s.created_at).strftime("%d/%m/%Y") if (s.fecha_operacion or s.created_at) else "Sin informar" }}</p>
                                 <p>Recorrido: {{ s.remitente_ciudad or nombre_pais(s.remitente_pais) if s.remitente_pais else s.remitente_ciudad or 'Origen sin informar' }} → {{ s.dest_ciudad or '' }} {{ nombre_pais(s.destino_pais) if s.destino_pais else '' }}</p>
                                 <p>{{ nombre_courier(s.courier) }}{% if s.etiqueta_cliente %} · {{ s.etiqueta_cliente }}{% endif %}</p>

@@ -43,8 +43,10 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
     html = _template("home.html")
     assert "Requiere tu acción" in html
-    assert "paso.accion_de == 'cliente'" in html
-    assert "paso.cantidad" in html
+    assert "if r.guias_por_descargar" in html
+    assert "paso=requieren_accion" in html
+    assert "Seguimiento de TAURO" in html
+    assert "paso=retenidos" in html
 
 
 def test_paises_largos_tienen_busqueda():

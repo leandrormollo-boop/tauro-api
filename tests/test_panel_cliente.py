@@ -114,15 +114,17 @@ def test_resumen_inicio_usa_historial_real_y_excluye_descartados():
     historial = [
         {"created_at": "2026-10-01", "estado": "DESPACHADO", "destino_pais": "US"},
         {"created_at": "2026-09-12", "estado": "ENTREGADO", "destino_pais": "US"},
-        {"created_at": "2026-09-14", "estado": "GUIA_LISTA", "destino_pais": "CL"},
+        {"created_at": "2026-09-14", "estado": "GUIA_LISTA", "destino_pais": "CL",
+         "tiene_label": True, "guia_descargada_at": None, "coti_id": "COTI-1"},
         {"created_at": "2026-09-15", "estado": "CANCELADO", "destino_pais": "US"},
         {"created_at": "2026-08-03", "estado": "REEMPLAZADO", "destino_pais": "BR"},
     ]
     embudo = [
         {"clave": "despachados", "cantidad": 1, "accion_de": None},
         {"clave": "entregados", "cantidad": 1, "accion_de": None},
-        {"clave": "guia_lista", "cantidad": 1, "accion_de": "cliente"},
-        {"clave": "retenidos", "cantidad": 0, "accion_de": "cliente"},
+        {"clave": "guia_lista", "cantidad": 1, "accion_de": None},
+        {"clave": "retenidos", "cantidad": 0, "accion_de": "tauro"},
+        {"clave": "por_armar", "cantidad": 2, "accion_de": "cliente"},
     ]
 
     resumen = pc.resumen_inicio_cliente(historial, embudo, hoy=date(2026, 10, 1))
@@ -132,6 +134,8 @@ def test_resumen_inicio_usa_historial_real_y_excluye_descartados():
     assert resumen["en_seguimiento"] == 1
     assert resumen["entregados"] == 1
     assert resumen["requieren_accion"] == 1
+    assert resumen["guias_por_descargar"] == 1
+    assert resumen["pedidos_por_armar"] == 2
     assert [mes["etiqueta"] for mes in resumen["serie_mensual"]] == [
         "May", "Jun", "Jul", "Ago", "Sep", "Oct",
     ]
@@ -140,6 +144,36 @@ def test_resumen_inicio_usa_historial_real_y_excluye_descartados():
         {"codigo": "US", "cantidad": 2, "porcentaje": 67},
         {"codigo": "CL", "cantidad": 1, "porcentaje": 33},
     ]
+
+
+def test_inicio_y_lista_comparten_accion_sin_mezclar_retenidos_tienda_o_ext():
+    base = {
+        "estado": "GUIA_LISTA",
+        "tracking_estado": None,
+        "tiene_label": True,
+        "guia_descargada_at": None,
+        "coti_id": "COTI-PORTAL",
+        "remitente_pais": "AR",
+        "destino_pais": "US",
+    }
+    historial = [
+        {**base, "id": 1},
+        {**base, "id": 2, "estado": "DESPACHADO", "tracking_estado": "RETENIDO"},
+        {**base, "id": 3, "coti_id": "EXT-manual", "tracking": "EXT-TRACK"},
+        {**base, "id": 4, "guia_descargada_at": "2026-10-08T10:00:00Z"},
+        {**base, "id": 5, "tiene_label": False,
+         "guia_url": "https://example.invalid/guia"},
+    ]
+    embudo = [{"clave": "por_armar", "cantidad": 4}]
+
+    resumen = pc.resumen_inicio_cliente(historial, embudo, hoy=date(2026, 10, 8))
+    lista = pc.preparar_historial_envios(historial, paso="requieren_accion")
+
+    assert resumen["requieren_accion"] == resumen["guias_por_descargar"] == 1
+    assert resumen["retenidos"] == 1
+    assert resumen["pedidos_por_armar"] == 4
+    assert lista["total_requieren_accion"] == lista["total_resultados"] == 1
+    assert [envio["id"] for envio in lista["solicitudes"]] == [1]
 
 
 # ── Checklist ────────────────────────────────────────────────

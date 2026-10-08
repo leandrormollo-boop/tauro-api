@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 
 from servicios import operadores_logisticos as servicio
 from servicios import admin_negocio as negocio
+from servicios.disponibilidad_tracking import disponibilidad_tracking_fedex
 from servicios.numeros_humanos import parse_numero_humano
 
 router = APIRouter()
@@ -172,4 +173,5 @@ def control_envios(request: Request, pagina: int=1, admin_token: str | None=Cook
         return _admin()._redirect_login()
     datos=negocio.listar_envios(pagina=pagina,q=request.query_params.get('q',''),
         estado=request.query_params.get('estado','vigentes'))
-    return _render(request,'control_envios.html',operacion=datos)
+    return _render(request,'control_envios.html',operacion=datos,
+        tracking_fedex=disponibilidad_tracking_fedex())

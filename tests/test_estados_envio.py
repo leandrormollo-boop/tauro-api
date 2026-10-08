@@ -110,3 +110,30 @@ def test_schema_restringe_estados_operativos():
     schema = (ROOT / "sql/schema.sql").read_text()
     assert "ck_solicitudes_guia_estado" in schema
     assert "'ENTREGADO', 'REEMPLAZADO', 'CANCELADO'" in schema
+
+
+def test_envio_realizado_presenta_despacho_declarado_sin_reescribir_historia():
+    from decimal import Decimal
+    datos = dict(estado='GUIA_LISTA', coti_id='EXT-declarado', tracking='123',
+                 precio_tauro_ars=Decimal('1234.5678'), created_at='2026-10-01')
+    envio = presentar_estados_envio(dict(datos))
+    assert envio['estado_cliente_ui']['label'] == 'Despachado'
+    assert envio['seguimiento_pendiente_tauro'] is True
+    assert {k: envio[k] for k in datos} == datos
+    vista = preparar_historial_envios([envio], paso='despachados')
+    assert len(vista['solicitudes']) == 1
+    assert vista['total_requieren_accion'] == 0
+
+
+def test_presentacion_manual_no_infiere_despacho_por_edad_ni_pisa_estados_finales():
+    from servicios.estados_envio import estado_operativo_presentado
+    for estado in ('CANCELADO', 'REEMPLAZADO', 'ENTREGADO', 'SOLICITADO'):
+        assert estado_operativo_presentado(dict(
+            estado=estado, coti_id='EXT-declarado', tracking='123')) == estado
+    for datos in ({'coti_id': 'EXT-declarado'}, {'tracking': '123'}):
+        assert estado_operativo_presentado(dict(
+            estado='GUIA_LISTA', created_at='2020-01-01', **datos)) == 'GUIA_LISTA'
+    entregado = presentar_estados_envio(dict(estado='GUIA_LISTA', coti_id='EXT-real',
+                                            tracking='123', tracking_estado='ENTREGADO'))
+    assert entregado['estado_cliente_ui']['label'] == 'Entregado'
+    assert entregado['seguimiento_pendiente_tauro'] is False
