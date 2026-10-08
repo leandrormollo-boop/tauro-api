@@ -98,7 +98,11 @@ def test_globo_se_recrea_por_ambito_y_nacional_usa_provincias_verificadas():
     assert 'name="destino_provincia"' in GLOBE
     assert "nationalOrigin?.province || \"\"" in GLOBE
     assert "nationalDestination?.province || \"\"" in GLOBE
-    assert "sin validar cobertura" in GLOBE
+    # Las leyendas "orientativa / sin validar cobertura" y el crédito cartográfico
+    # salieron del globo a pedido de Leandro (08/10/2026); la atribución vive en el pie.
+    assert "sin validar cobertura" not in GLOBE
+    assert "Conexión orientativa" not in GLOBE
+    assert "quote-map-credit" not in GLOBE
 
 
 def test_resultado_acepta_shape_backend_mayuscula_y_cp_explicitos():
@@ -109,5 +113,5 @@ def test_resultado_acepta_shape_backend_mayuscula_y_cp_explicitos():
 
 
 def test_html_publico_referencia_el_bundle_nuevo():
-    assert '/static/js/app.js?v=22' in WEB_HTML
+    assert '/static/js/app.js?v=23' in WEB_HTML
     assert '/static/js/app.js?v=21' not in WEB_HTML
