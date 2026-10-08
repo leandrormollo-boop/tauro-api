@@ -695,3 +695,13 @@ requiere migración y conciliación antes de mostrar dos saldos.
   Level 2 protected customer data; dev store limpia + recorrido completo; ícono,
   capturas y screencast. Tiendanube: UAT OCA + homologación síncrona. Apple: Xcode +
   cuenta developer. TLS verificado (self-review 3.1.1 cerrado).
+
+## 08/10/2026 — Causa raíz del crash de staging (PR #36): pre-deploy no configurado
+
+- Log de Railway (leído con la sesión de Leandro): `Schema crítico no listo` → la app aborta
+  por diseño. El pre-deploy `migrate_database.py` nunca corrió en staging: el servicio no
+  lee `railway.json` (Config as Code deprecado; staging nunca lo usó). Prod sí lo lee hoy,
+  pero deja de funcionar el 01/12/2026. Receta y detalle en `docs/RAILWAY_DEPLOY.md`.
+- Reproducido local: base con schema del 30/09 → mismo error; `migrate_database.py` → OK.
+- Fix: cargar en el panel de staging Pre-deploy + Healthcheck `/health` (pendiente OK de
+  Leandro); después push → CI + staging → verificar → re-merge main → mergear PR a main.
