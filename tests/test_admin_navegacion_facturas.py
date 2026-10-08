@@ -174,6 +174,7 @@ def test_lista_clientes_muestra_control_financiero_consolidado(monkeypatch):
     ]
     monkeypatch.setattr(admin, "_is_auth", lambda token: True)
     monkeypatch.setattr(admin, "_get_clientes_lista", lambda: clientes)
+    monkeypatch.setattr(admin, "_get_clientes_prueba", lambda: [])
     monkeypatch.setattr(
         admin,
         "get_resumen_clientes_bulk",

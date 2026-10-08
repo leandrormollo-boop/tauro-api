@@ -185,7 +185,10 @@ def test_direccion_guardada_desde_shopify_conserva_origen(monkeypatch):
         if "INSERT INTO direcciones" in sql
     )
     assert "origen_plataforma, origen_dominio, origen_pedido_externo_id" in sql
-    assert params[-3:] == ("shopify", "pesca-jacks.myshopify.com", "123")
+    # El origen viaja normalizado y consecutivo; después pueden venir más
+    # columnas (datos_nacionales), así que no se ancla al final de la tupla.
+    i = params.index("shopify")
+    assert tuple(params[i:i + 3]) == ("shopify", "pesca-jacks.myshopify.com", "123")
 
 
 def test_automatico_conserva_origen_aunque_falle_marcar_convertido(monkeypatch):

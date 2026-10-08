@@ -83,112 +83,11 @@ jobs:
           truststore==0.10.4
           httpx==0.28.1
           httpcore==1.0.9
-      - name: Probar controles auditados y presentación web
+      - name: Probar la suite completa
         run: |
-          python -m pytest \
-            tests/test_integridad_pagos_postgres.py \
-            tests/test_adjuntar_comprobante_pago_postgres.py \
-            tests/test_adjuntar_comprobante_portal.py \
-            tests/test_adjuntar_comprobante_admin.py \
-            tests/test_pagos_documentales_postgres.py \
-            tests/test_imputacion_pagos_portal.py \
-            tests/test_conciliacion_couriers_postgres.py \
-            tests/test_libreta_aislada.py \
-            tests/test_visibilidad_envios_cliente.py \
-            tests/test_invoice_marca.py \
-            tests/test_portal_pdf_unificado.py \
-            tests/test_documentos_portal.py \
-            tests/test_numeracion_guias_tauro.py \
-            tests/test_shopify_catalogo_postgres.py \
-            tests/test_fedex_emision_recuperacion.py \
-            tests/test_dhl_emision.py \
-            tests/test_dhl_client.py \
-            tests/test_carrier_http_performance.py \
-            tests/test_cotizador_concurrencia.py \
-            tests/test_portal_quote_stream.py \
-            tests/test_portal_tanda1.py \
-            tests/test_portal_tanda3.py \
-            tests/test_portal_tanda3_postgres.py \
-            tests/test_portal_ronda4.py \
-            tests/test_cuenta_claridad_cliente.py \
-            tests/test_tracking_fedex_portal.py \
-            tests/test_tracking_presentacion.py \
-            tests/test_cotizar_sentido.py \
-            tests/test_portal_experiencia_cliente.py \
-            tests/test_accesos_directos.py \
-            tests/test_cotizacion_portal_handoff.py \
-            tests/test_ubicaciones_handoff.py \
-            tests/test_control_automatizaciones.py \
-            tests/test_backup_privacy.py \
-            tests/test_restauracion_aislada.py \
-            tests/test_experiencia_cuenta.py \
-            tests/test_periodo_cuenta.py \
-            tests/test_periodo_visual_cuenta.py \
-            tests/test_portal_cuenta_experiencia.py \
-            tests/test_portal_cuenta_ambitos_ux.py \
-            tests/test_admin_cuenta_ambitos.py \
-            tests/test_admin_pago_revision_ui.py \
-            tests/test_ups_emision.py \
-            tests/test_monitoreo_guias_reemplazadas.py \
-            tests/test_recolecciones_portal_claridad.py \
-            tests/test_recolecciones_permiso.py \
-            tests/test_recolecciones_concurrencia.py \
-            tests/test_recolecciones_origen_servicio.py \
-            tests/test_recolecciones_origen_migracion.py \
-            tests/test_pickup_dhl.py \
-            tests/test_edicion_solicitud_postgres.py \
-            tests/test_envio_gestion.py \
-            tests/test_envio_externo_fecha.py \
-            tests/test_portal_mis_clientes.py \
-            tests/test_estadisticas_contactos.py \
-            tests/test_portal_home_panorama.py \
-            tests/test_agenda_nacional.py \
-            tests/test_carrier_contract.py \
-            tests/test_tiendanube_app.py \
-            tests/test_tiendanube_preflight.py \
-            tests/test_admin_negocio_postgres.py \
-            tests/test_control_negocio.py \
-            tests/test_numeros_operativos_fail_closed.py \
-            tests/test_dhl_financial_safety.py \
-            tests/test_cotizador_publico_ambito.py \
-            tests/test_cotizador_publico_nacional.py \
-            tests/test_precios_web_nacional.py \
-            tests/test_precios_web_nacional_postgres.py \
-            tests/test_admin_precios_web.py \
-            tests/test_admin_precio_web_dhl.py \
-            tests/test_precios_web_dhl.py \
-            tests/test_pricing_rangos_usd.py \
-            tests/test_precios_web_dhl_postgres.py \
-            tests/test_pricing_carriers.py \
-            tests/test_numeros_config_carriers_integracion.py \
-            tests/test_portal_cotizador_multicourier.py \
-            tests/test_snapshot_reemision_dhl.py \
-            tests/test_dhl_snapshot_compatible_postgres.py \
-            tests/test_incidencias_emision.py \
-            tests/test_catalogo_errores_emision.py \
-            tests/test_agente_incidencias_ia.py \
-            tests/test_control_incidencias_emision_postgres.py \
-            tests/test_admin_incidencias.py \
-            tests/test_admin_control_envios_http.py \
-            tests/test_control_envios_admin_postgres.py \
-            tests/test_ajustes_precio_admin_postgres.py \
-            tests/test_recolecciones_admin.py \
-            tests/test_cancelacion_comercial_tracking.py \
-            tests/test_dhl_errores_accionables.py \
-            tests/test_oca_adapter.py \
-            tests/test_quote_result_experience.py \
-            tests/test_integraciones_contacto.py \
-            tests/test_operator_catalog_ui.py \
-            tests/test_precio_web_fedex.py \
-            tests/test_smart_select_public.py \
-            tests/test_web_copy_parise_369.py \
-            tests/test_importacion_cuenta_cliente.py \
-            tests/test_cuenta_corriente_presentacion_postgres.py \
-            tests/test_diferencia_tax_envio.py \
-            tests/test_diferencias_cliente.py \
-            tests/test_portal_raiz.py \
-            tests/test_cliente_cuenta_prueba_postgres.py \
-            tests/test_invoice_asistente.py
+          # Toda la suite, no una lista fija: una lista de 'auditados' dejó
+          # 128 archivos sin correr y 20 tests rotos con el semáforo verde.
+          python -m pytest -q tests/
 
   web-audit:
     name: Build web y contratos JavaScript

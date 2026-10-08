@@ -2166,7 +2166,10 @@ BEGIN
            OR NEW.fecha IS DISTINCT FROM OLD.fecha
            OR NEW.courier IS DISTINCT FROM OLD.courier
            OR NEW.solicitud_id IS DISTINCT FROM OLD.solicitud_id
-           OR NEW.direccion IS DISTINCT FROM OLD.direccion
+           -- La dirección sólo puede cambiar hacia NULL: es la redacción GDPR
+           -- (shop/redact, customers/redact), nunca una reescritura.
+           OR (NEW.direccion IS DISTINCT FROM OLD.direccion
+               AND NEW.direccion IS NOT NULL)
            OR NEW.origen_retiro IS DISTINCT FROM OLD.origen_retiro
            OR NEW.origen_clave IS DISTINCT FROM OLD.origen_clave THEN
             RAISE EXCEPTION USING

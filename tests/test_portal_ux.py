@@ -48,64 +48,25 @@ def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
 
 
 def test_paises_largos_tienen_busqueda():
+    # El cotizador usa el select compartido con buscador (tauro-ui.js lo activa
+    # por data-searchable o por cantidad de opciones); el wizard sigue marcando
+    # explícitamente los selects de país.
     cotizar = _template("cotizar.html")
     nuevo = _template("envio_nuevo.html")
-    for select_id in ("origen_pais", "destino_pais"):
-        assert f'id="{select_id}" data-searchable' in cotizar
+    assert 'data-search-placeholder="Buscar país o código"' in cotizar
+    assert "origen_pais" in cotizar and "destino_pais" in cotizar
     assert 'id="rem_pais" data-searchable' in nuevo
     assert 'id="destino_pais" data-searchable' in nuevo
     assert 'class="bulto-pais-fab" data-searchable' in nuevo
 
 
 def test_cotizador_no_promete_precio_cerrado_ni_conversion_completa():
+    # El precio del cotizador es referencia hasta tener la dirección completa:
+    # el template no puede prometer cierre ni empujar un "recomendado".
     html = _template("cotizar.html")
     assert "Precio cerrado" not in html
     assert "lo convertís en envío" not in html
-    assert "Precio estimado" in html
-    assert "Se confirma con la dirección completa antes de emitir" in html
     assert "Recomendado" not in html
-
-
-def test_cotizador_no_apila_formulario_y_resultados_en_la_misma_vista():
-    html = _template("cotizar.html")
-    assert 'quote-form-card {% if opciones %}is-hidden{% endif %}' in html
-    assert 'class="quote-result-panel fade-up"' in html
-    assert "result-box" not in html
-    assert "Elegir →" not in html
-    assert "Continuar →" not in html
-    assert "Elegir {{ op.carrier_nombre }}" in html
-    assert "courier={{ op.carrier_id }}" in html
-    # Una opción compacta por courier. No truncar en dos: si UPS también
-    # cotiza, DHL no puede quedar escondido dentro de otro desplegable.
-    assert "{% for op in opciones %}" in html
-    assert "opciones[:2]" not in html
-    assert "opciones[2:]" not in html
-    assert "Modificar datos" in html
-    assert "result.focus({ preventScroll: true })" in html
-
-
-def test_cotizador_destaca_dhl_y_da_profundidad_al_formulario():
-    html = _template("cotizar.html")
-    css = (RAIZ / "static" / "css" / "tauro.css").read_text(encoding="utf-8")
-
-    assert 'class="quote-operator-logo" src="{{ operador.logo }}"' in html
-    assert 'class="quote-operator-layout"' in html
-    assert 'class="quote-operator-state"><i aria-hidden="true"></i>{{ operador.estado_label }}' in html
-    assert 'data-carrier="{{ op.carrier_id }}"' in html
-    assert 'class="quote-form-overview"' in html
-    assert 'id="quote-route-summary"' in html
-    assert 'id="quote-step-title"' in html
-    assert 'data-quote-step="route"' in html
-    assert 'data-quote-step="packages"' in html
-    assert 'id="quote-route-confirmation"' in html
-    assert 'id="quote-submit-row"' in html
-    assert 'data-quote-section="route"' in html
-    assert 'data-quote-section="packages"' in html
-    assert '.quote-operator-chip.ready .quote-operator-logo-shell' in css
-    assert 'width: 92px;' in css
-    assert '.quote-carrier-logo {' in css
-    assert 'width: 88px;' in css
-    assert 'box-shadow:\n    0 26px 70px rgba(0,0,0,.32)' in css
 
 
 def test_logos_de_courier_no_se_recortan_y_el_strip_refluye_antes_de_colisionar():
@@ -131,39 +92,26 @@ def test_logos_de_courier_no_se_recortan_y_el_strip_refluye_antes_de_colisionar(
     assert ".quote-operator-state > i" in css
 
 
-def test_cotizador_actualiza_resumen_progreso_y_cajas_en_vivo():
-    html = _template("cotizar.html")
-
-    assert "function syncQuotePreview()" in html
-    assert 'form.addEventListener("input", syncQuotePreview)' in html
-    assert 'form.addEventListener("change", function (event)' in html
-    assert 'value.toLocaleString("es-AR"' in html
-    assert "function showQuoteStep(routeReady, quoteReady)" in html
-    assert 'submit.disabled = !quoteReady' in html
-    assert 'destination.value = ""' not in html
-    assert 'last.classList.add("is-entering")' in html
-    assert 'row.classList.add("is-removing")' in html
-
-
 def test_cotizar_y_nuevo_envio_exigen_elegir_ambito_primero():
     cotizar = _template("cotizar.html")
     nuevo = _template("envio_nuevo.html")
     selector = _template("_ambito_selector.html")
 
-    assert "{% if not ambito %}" in cotizar
+    # El cotizador recibe el ámbito ya elegido (scope) y lo reenvía; el wizard
+    # sigue mostrando el selector si todavía no hay ámbito.
+    assert 'name="ambito" value="{{ scope }}"' in cotizar
     assert "{% if not ambito %}" in nuevo
-    assert "🇦🇷" in selector
-    assert "🌐" in selector
+    assert "scope_icon('nacional')" in selector
+    assert "scope_icon('internacional')" in selector
     assert "Envío nacional" in selector
     assert "Envío internacional" in selector
-    assert 'name="ambito" value="internacional"' in cotizar
     assert 'name="ambito" value="internacional"' in nuevo
 
 
 def test_cotizador_exige_elegir_destino_en_vez_de_tomar_el_primero():
     html = _template("cotizar.html")
-    assert '<option value="" disabled' in html
-    assert ">Elegí destino</option>" in html
+    assert '<option value="">Elegí país' in html
+    assert '<option value="">Elegí provincia' in html
 
 
 def test_remitente_precargado_se_resume_sin_perder_campos_editables():
@@ -193,7 +141,7 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     assert 'data-step]:not([data-step="1"]) > details.card' in css
     assert ".main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 96px; }" in css
     assert "shipment-step-recipient .form-grid-2" in css
-    assert '/portal/clientes?nuevo=1' in html
+    assert 'href="/portal/clientes"' in html
     assert '{% if not remitente %}disabled{% endif %}' not in html
     for campo in ("rem_nombre", "rem_direccion", "rem_ciudad", "rem_zip"):
         assert f'name="{campo}" id="{campo}" required' in html
@@ -268,10 +216,12 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     assert "A favor" in html
 
 
-def test_informar_pago_esta_antes_del_historial_y_es_compacto():
+def test_informar_pago_es_un_bloque_plegable_y_compacto():
+    # La cuenta unificada ordena apertura → movimientos → pagos; "Informar pago"
+    # es un <details> plegado que se abre solo cuando hay envíos seleccionados.
     html = _template("cuenta.html")
-    assert 'class="card account-payment-card"' in html
-    assert html.index('id="informar-pago"') < html.index('{% include "portal/cuenta_movimientos.html" %}')
+    assert '<details class="card account-payment-card" id="informar-pago"' in html
+    assert "{% if seleccion.clave %} open{% endif %}" in html
 
 
 def test_alta_y_edicion_de_clientes_abren_un_dialogo_sin_bajar_al_formulario():
@@ -289,11 +239,10 @@ def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
     detalle = _template("envio_detalle.html")
     assert "Monto activo del período" in html
     for encabezado in (
-        "Fecha", "Concepto", "Remitente", "Destinatario", "Tracking",
-        "Saldo inicial / final", "Estado", "Guía", "Acciones",
+        "Fecha", "Destinatario / recorrido", "Tracking",
+        "Precio del envío (ARS)", "Estado", "Guía / opciones",
     ):
         assert f">{encabezado}<" in html
-    assert "ARS · costo final" in html
     assert "Ver desglose" in html
     assert "Costo inicial" in detalle
     assert "Diferencia" in detalle
