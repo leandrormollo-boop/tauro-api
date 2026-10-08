@@ -125,16 +125,22 @@ def test_admin_factura_cargo_legacy_redirige_al_lote_sin_escribir_envios(
     )
 
 
-def test_admin_no_permite_cancelar_una_fc_facturada(monkeypatch, admin_autenticado):
-    monkeypatch.setattr(admin, "cancelar_envio", lambda *_a, **_k: False)
+def test_admin_cancelacion_legacy_abre_control_sin_modificar_cargo(monkeypatch, admin_autenticado):
+    from servicios import control_envios_admin
+    llamadas = []
+    monkeypatch.setattr(admin, "cancelar_envio", lambda *a, **k: llamadas.append(a))
+    monkeypatch.setattr(control_envios_admin, "obtener_control_envio_admin", lambda **kw: {
+        "solicitud": None, "cargo": {"cliente_id": "WAIMAO", "nro_fc": "0001-00000077"},
+    })
 
     respuesta = admin.admin_envio_cancelar(77, admin_token="token")
 
-    assert respuesta.status_code == 409
-    assert "nota de crédito" in respuesta.body.decode("utf-8")
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"] == "/admin/clientes/WAIMAO/envios/77/control#cancelacion"
+    assert llamadas == []
 
 
-def test_admin_anula_con_ownership_y_confirma_ocultamiento(
+def test_admin_anulacion_legacy_exige_ficha_con_revision_y_motivo(
     monkeypatch, admin_autenticado,
 ):
     llamadas = []
@@ -155,24 +161,20 @@ def test_admin_anula_con_ownership_y_confirma_ocultamiento(
 
     assert respuesta.status_code == 303
     assert respuesta.headers["location"] == (
-        "/admin/clientes/WAIMAO?ok=envio_anulado"
+        "/admin/clientes/WAIMAO/envios/77/control#cancelacion"
     )
-    assert llamadas == [((77,), {
-        "cliente_id": "WAIMAO",
-        "actor_tipo": "admin",
-        "actor_ref": "admin",
-    })]
+    assert llamadas == []
 
 
-def test_admin_explica_que_anular_no_borra_la_auditoria():
+def test_admin_separa_gestion_comercial_y_ocultamiento():
     plantilla = (
         Path(admin.__file__).resolve().parents[1]
         / "templates" / "admin" / "cliente_detail.html"
     ).read_text(encoding="utf-8")
 
-    assert "Anular prueba" in plantilla
-    assert "dejará de mostrarse en el portal del cliente" in plantilla
-    assert "seguirá guardado en ADMIN para auditoría" in plantilla
+    assert "Gestionar envío" in plantilla
+    assert "Anular prueba" not in plantilla
+    assert '/envios/{{ e.id }}/control' in plantilla
     assert "Oculto del portal" in plantilla
 
 

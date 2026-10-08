@@ -3685,7 +3685,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
             }
     except ValueError as exc:
         _liberar_reserva(solicitud_id)
-        return {"ok": False, "error": (
+        return {"ok": False, "codigo_error": "DATOS_ENVIO_INVALIDOS", "etapa": "validar_datos", "error": (
             f"Datos numéricos inválidos: {exc}. No llamamos al courier ni generamos ningún cargo."
         )}
 
@@ -3729,7 +3729,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         print(f"[guia] no pude persistir la referencia de {courier} para "
               f"{solicitud_id}: {e}")
         _liberar_reserva(solicitud_id)
-        return {"ok": False, "error":
+        return {"ok": False, "codigo_error": "EMISION_SEGURA_NO_PREPARADA", "etapa": "preparar_emision", "error":
                 f"No pudimos preparar la emisión segura. No llamamos a {courier} "
                 "ni generamos ningún cargo."}
     datos_envio["message_reference"] = referencia_previa
@@ -3741,7 +3741,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         incierto = {"incierto": True, "message_reference": referencia_previa,
                     "error": f"La respuesta de {courier} fue incierta: {e}"}
         _marcar_verificacion_courier(solicitud_id, incierto)
-        return {"ok": False, "error":
+        return {"ok": False, "codigo_error": "RESULTADO_NO_CONFIRMADO", "etapa": "courier", "error":
                 f"No pudimos confirmar la emisión en {courier}. Tauro la va a "
                 "verificar; no vuelvas a emitir."}
 
@@ -3751,7 +3751,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
             # perdido la respuesta. Bloquear el reintento evita dos guías
             # facturadas para la misma solicitud.
             _marcar_verificacion_courier(solicitud_id, resultado)
-            return {"ok": False,
+            return {"ok": False, "codigo_error": "RESULTADO_NO_CONFIRMADO", "etapa": "courier",
                     "error": (resultado.get("error") or
                               "La respuesta del courier fue incierta.") +
                              " Tauro la va a verificar; no vuelvas a emitir."}
@@ -3785,7 +3785,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
         print(f"[guia] ⛔ GUÍA EMITIDA SIN GUARDAR — solicitud {solicitud_id}, "
               f"tracking {tracking}. Cargalo a mano antes de reintentar: el "
               f"envío YA existe en {courier}.")
-        return {"ok": False,
+        return {"ok": False, "codigo_error": "GUIA_EMITIDA_SIN_GUARDAR", "etapa": "guardar_guia",
                 "error": f"La guía se emitió en {courier} (tracking {tracking}) pero no "
                          f"pudimos guardarla. Anotá ese número y avisá a soporte: "
                          f"NO vuelvas a generar la guía o saldría duplicada."}
@@ -3793,6 +3793,7 @@ def generar_guia_internacional(solicitud_id: int, courier: str = "FEDEX",
     if sol.get("reemplaza_solicitud_id") and not cargo_confirmado:
         return {
             "ok": False,
+            "codigo_error": "CARGO_PENDIENTE", "etapa": "guardar_cargo",
             "error": (
                 f"La nueva guía existe en {courier} (tracking {tracking}), pero "
                 "la cuenta corriente no pudo cerrar el reemplazo. El PDF queda "

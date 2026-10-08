@@ -2,6 +2,7 @@
 {% block title %}Editar solicitud #{{ s.id }}{% endblock %}
 
 {% block content %}
+<a class="btn btn-ghost btn-sm" href="/admin/pedidos/{{ s.id }}/control">Volver al control del envío</a>
 <div class="page-title">
   <div class="eyebrow">Operaciones</div>
   <h1>Editar solicitud #{{ s.id }} · {{ s.cliente_id }}</h1>
@@ -14,8 +15,8 @@
 
 {% if emitida %}
 <div class="msg warn">
-  Esta solicitud ya tiene guía emitida (tracking {{ s.tracking }}). No se puede editar:
-  si los datos están mal, anulá con el courier y creá una solicitud nueva.
+  La guía {{ s.tracking }} ya fue emitida. Los datos de su etiqueta no se pueden modificar aquí.
+  Podés ajustar el precio, controlar su cargo y pedir una recolección desde el control del envío.
 </div>
 <a href="/admin/pedidos" class="btn btn-ghost">← Volver</a>
 {% else %}

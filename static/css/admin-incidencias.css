@@ -1,0 +1,10 @@
+.inc-actions,.inc-between{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.inc-actions{margin:18px 0}.inc-actions form{margin:0}.inc-between{justify-content:space-between}
+.inc-row{padding:20px 0;border-bottom:1px solid var(--line-soft);overflow-wrap:anywhere}
+.inc-row h2{font-size:20px;margin:0 0 10px}.inc-row summary{cursor:pointer;font-weight:600;padding:8px 0}
+.inc-code{overflow-wrap:anywhere;font-size:12px}.inc-checks{padding-left:20px;line-height:1.8}
+.inc-notification{display:inline-flex;align-items:center;gap:6px;color:var(--fg);padding:7px 10px;border:1px solid var(--line);border-radius:10px;font-size:12px}
+.inc-notification svg{width:18px;height:18px;flex-shrink:0}.inc-notification [data-inc-count]{color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}
+.inc-notification[data-status="pending"]{border-color:var(--warn,#F5B800)}
+.inc-notification:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media(max-width:480px){.inc-notification-label{display:none}.inc-notification{padding:7px}.inc-row h2{font-size:18px}}

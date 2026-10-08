@@ -9,6 +9,7 @@ import uuid
 from core.database import get_conn
 from servicios.auditoria import registrar_desde_request
 from servicios.estados_envio import presentar_estados_envio
+from servicios.control_incidencias_emision import iniciar_intento, finalizar_intento
 
 
 def _mensaje_registro(valor) -> str:
@@ -25,6 +26,17 @@ def _mensaje_registro(valor) -> str:
 def ejecutar_emision_registrada(request, solicitud_id, actor_type, actor_ref, emitir):
     """Un resultado incierto nunca provoca un reintento ni libera la reserva."""
     referencia = "EMI-" + uuid.uuid4().hex[:12].upper()
+    try:
+        intento_id = iniciar_intento(solicitud_id, referencia, actor_type, actor_ref)
+    except Exception as exc:
+        print(json.dumps({'event':'emision.registro_no_disponible','referencia':referencia,
+                          'solicitud_id':solicitud_id,'error_tipo':type(exc).__name__}))
+        return {'ok':False,'codigo_error':'REGISTRO_NO_DISPONIBLE',
+                'referencia_error':referencia,
+                'error':'No pudimos preparar el registro del envío. No intentamos emitir la guía. '
+                        f'Pedí a Tauro que revise el sistema. Referencia: {referencia}.'}
+    if intento_id is None:
+        return {'ok':False,'error':'Esa solicitud no existe o no corresponde a tu cuenta.'}
     try:
         resultado = emitir()
     except Exception as exc:
@@ -55,6 +67,13 @@ def ejecutar_emision_registrada(request, solicitud_id, actor_type, actor_ref, em
         actor_ref=actor_ref, success=ok, status_code=200 if ok else 409,
         metadata=metadata,
     )
+    try:
+        finalizar_intento(intento_id, resultado, metadata)
+    except Exception as exc:
+        # La guía podría existir. Mantener INICIADO dispara la alerta de
+        # intento inconcluso; nunca repetir emitir() por un fallo del registro.
+        print(json.dumps({'event':'emision.registro_inconcluso','referencia':referencia,
+                          'error_tipo':type(exc).__name__}))
     if not ok:
         resultado = {**resultado, "referencia_error": referencia,
                      "error": f"{resultado.get('error') or 'No se pudo emitir.'} Referencia: {referencia}."}

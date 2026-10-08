@@ -1,0 +1,111 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Control del envío{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/css/admin-envio-control.css?v=1">
+{% set s = c.detalle %}
+{% set sid = c.solicitud.id if c.solicitud else none %}
+{% macro campos(accion) %}
+<input type="hidden" name="accion" value="{{ accion }}">
+<input type="hidden" name="revision" value="{{ c.revision }}">
+<input type="hidden" name="precio_esperado" value="{{ precio_esperado }}">
+<input type="hidden" name="idempotency_key" value="{{ operaciones[accion].clave }}">
+<input type="hidden" name="csrf" value="{{ operaciones[accion].csrf }}">
+{% endmacro %}
+<div class="envio-control">
+  <nav class="ec-nav" aria-label="Volver a operaciones">
+    <a href="/admin/control-envios?{% if c.cliente_id %}q={{ c.cliente_id|urlencode }}{% endif %}">Todos los envíos</a>
+    <a href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=envios">Envíos de {{ c.cliente_id }}</a>
+    <a href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=cuenta">Cuenta corriente</a>
+  </nav>
+  <header class="ec-heading">
+    <div><h1>{{ s.dest_nombre or 'Control del envío' }}</h1>
+      <p><a href="/admin/clientes/{{ c.cliente_id|urlencode }}">{{ c.cliente_id }}</a> · {{ nombre_courier(s.courier or '') }}{% if sid %} · Solicitud #{{ sid }}{% else %} · Cargo #{{ c.cargo.id }}{% endif %}</p>
+      {% if s.tracking %}<strong class="mono ec-tracking">{{ s.tracking }}</strong>{% endif %}
+    </div>
+    <div class="ec-total"><span>Precio cobrado al cliente</span>
+      <strong>{{ dinero_ars(0 if c.cancelado else c.precio.vigente_ars) if c.precio.vigente_ars is not none else 'Sin cargo' }}</strong>
+      <span class="badge {{ 'warn' if (c.solicitud or {}).get('estado') == 'REEMPLAZADO' else 'error' if c.cancelado else '' }}">{{ 'Reemplazado' if (c.solicitud or {}).get('estado') == 'REEMPLAZADO' else 'Cancelado' if c.cancelado else {'GUIA_LISTA':'Guía lista','SOLICITADO':'Solicitado','DESPACHADO':'Despachado','ENTREGADO':'Entregado','EN_PROCESO':'En proceso','EMITIENDO':'Emitiendo','VERIFICAR_COURIER':'Verificar emisión'}.get((c.solicitud or {}).get('estado'), 'Cargo activo') }}</span>
+    </div>
+  </header>
+  <nav class="ec-action-nav" aria-label="Controles del envío">
+    <a class="btn btn-sm btn-ghost" href="#precio">Modificar precio</a>
+    <a class="btn btn-sm btn-ghost" href="#recoleccion">Recolección</a>
+    <a class="btn btn-sm btn-ghost" href="#cancelacion">Cancelar en cuenta</a>
+  </nav>
+  {% if control_error %}<div class="msg error" role="alert">{{ control_error }}</div>{% endif %}
+  {% if control_ok %}<div class="msg ok" role="status">{{ control_ok }}</div>{% endif %}
+  {% if s.cancelacion_comercial and s.tracking %}<div class="msg warn">Cancelación en la cuenta de TAURO. La guía puede seguir activa en {{ nombre_courier(s.courier) }}; su seguimiento se conserva.</div>{% endif %}
+  <section class="ec-summary" aria-label="Datos del envío">
+    <div><span>Ruta</span><strong>{{ s.remitente_ciudad or s.remitente_pais or 'Origen sin informar' }} → {{ s.dest_ciudad or s.destino_pais or 'Destino sin informar' }}</strong></div>
+    <div><span>Paquetes</span><strong>{% if sid %}{{ s.cantidad or 1 }} bultos · {{ (s.peso_kg or 0)|kg }}{% else %}Sin detalle de paquetes{% endif %}</strong></div>
+    <div><span>Tracking del operador</span><strong>{{ s.tracking_descripcion or s.tracking_estado or 'Sin actualización' }}</strong></div>
+    <div class="ec-links">
+      {% if sid %}<a href="/admin/pedidos/{{ sid }}/editar">Revisar datos</a>{% endif %}
+      {% if sid and s.tiene_label %}<a href="/admin/pedidos/{{ sid }}/guia.pdf" target="_blank" rel="noopener">Ver guía</a>{% endif %}
+      {% if sid %}<a href="/admin/conciliacion-couriers/envios/{{ sid }}">Factura del operador</a>{% endif %}
+    </div>
+  </section>
+  <div class="ec-actions">
+    <section id="precio" class="ec-section">
+      <h2>Precio al cliente</h2>
+      {% if c.precio.original_ars is not none %}<p class="ec-note">Inicial {{ dinero_ars(c.precio.original_ars) }} · Ajustes {{ dinero_ars(c.precio.ajustes_ars) }}</p>{% endif %}
+      {% if c.precio.habilitada %}
+      <form method="post" action="{{ ruta_control }}" class="ec-form">
+        {{ campos('precio') }}
+        <label>Nuevo precio total (ARS)<input type="text" name="nuevo_precio_ars" inputmode="decimal" required value="{{ valores.get('nuevo_precio_ars', c.precio.vigente_ars|numero_ars) }}" data-numero="monto"></label>
+        <label>Motivo del cambio<textarea name="motivo" minlength="8" maxlength="500" rows="2" required>{{ valores.get('motivo', '') if valores.get('accion') == 'precio' else '' }}</textarea></label>
+        <label class="ec-confirm"><input type="checkbox" name="confirmar" value="1" required>Confirmo el nuevo precio y su impacto en la cuenta.</label>
+        <button class="btn btn-primary" type="submit">Guardar precio</button>
+        <span data-help="Cómo se guarda el precio">Se conserva el importe original y se registra la diferencia con su motivo. Un precio de $0 bonifica el envío y mantiene la guía activa. El costo interno del operador no cambia.</span>
+      </form>
+      {% else %}<p class="ec-note">{{ c.precio.motivo }}</p>{% endif %}
+    </section>
+    <section id="recoleccion" class="ec-section">
+      <h2>Recolección</h2>
+      {% set rec = c.retiro.recoleccion_activa %}
+      {% if rec %}
+        <p class="ec-note">{{ {'AGENDADA':'Confirmada','AGENDANDO':'Pendiente de confirmación','CANCELANDO':'Cancelación en curso','VERIFICAR_COURIER':'Requiere verificación'}.get(rec.estado, rec.estado) }}</p>
+        {% if rec.confirmation_code %}<span class="ec-note">Número de recolección</span><strong class="ec-pickup-code mono">{{ rec.confirmation_code }}</strong>{% endif %}
+        <p>{{ rec.fecha.strftime('%d/%m/%Y') if rec.fecha else '' }}{% if rec.ready_time %} · {{ rec.ready_time }} a {{ rec.close_time }}{% endif %}</p>
+        <a href="/admin/recolecciones">Controlar recolección</a>
+      {% elif c.retiro.habilitada %}
+      <p class="ec-note">Retiro en el origen de esta guía.<span data-help="Dirección de retiro">Se usan el remitente y los paquetes guardados al emitir la guía.</span></p>
+      {% if c.retiro.origen %}<p class="ec-origin">{{ c.retiro.origen.get('calle') or s.remitente_direccion }} · {{ c.retiro.origen.get('ciudad') or s.remitente_ciudad }}</p>{% endif %}
+      <form method="post" action="{{ ruta_control }}" class="ec-form">
+        {{ campos('recoleccion') }}
+        <label>Fecha de retiro<input type="date" name="fecha" min="{{ hoy }}" value="{{ valores.get('fecha', '') }}" required></label>
+        <div class="ec-times"><label>Desde<input type="time" name="ready_time" value="{{ valores.get('ready_time','09:00') }}" required></label><label>Hasta<input type="time" name="close_time" value="{{ valores.get('close_time','18:00') }}" required></label></div>
+        <p class="ec-note">Horario local del lugar de retiro.</p>
+        <label>Indicaciones para retirar <span class="ec-note">(opcional)</span><textarea name="instrucciones" rows="2" maxlength="500">{{ valores.get('instrucciones', '') }}</textarea></label>
+        <label class="ec-confirm"><input type="checkbox" name="confirmar" value="1" required>Confirmo que el envío estará listo para retirar.</label>
+        <button class="btn btn-ghost" type="submit">Programar recolección</button>
+      </form>
+      {% else %}<p class="ec-note">{{ c.retiro.motivo }}</p>{% endif %}
+    </section>
+  </div>
+  <section id="cancelacion" class="ec-section ec-cancel">
+    <h2>Cancelar en la cuenta corriente<span data-help="Historial de la cancelación">Se conservan el envío, su importe original y el motivo de la cancelación para auditoría.</span></h2>
+    {% if c.cancelacion.habilitada %}
+    <p class="ec-note">{{ c.aviso_alcance }}</p>
+    <details><summary>Cancelar este envío</summary>
+      <form method="post" action="{{ ruta_control }}" class="ec-form">
+        {{ campos('cancelar') }}
+        <label>Motivo de la cancelación<textarea name="motivo" minlength="8" maxlength="500" rows="2" required>{{ valores.get('motivo', '') if valores.get('accion') == 'cancelar' else '' }}</textarea></label>
+        <label class="ec-confirm"><input type="checkbox" name="confirmar" value="1" required>Confirmo la cancelación en TAURO. La guía del operador no se anula con esta acción.</label>
+        <button class="btn btn-ghost ec-danger" type="submit">Confirmar cancelación</button>
+      </form>
+    </details>
+    {% else %}<p class="ec-note">{{ c.cancelacion.motivo }}</p>
+      {% if c.cancelacion.codigo in ('REQUIERE_NOTA_CREDITO','DOCUMENTO_FISCAL_EMITIDO','COBERTURA_FISCAL_INCOMPLETA') %}<a href="/admin/clientes/{{ c.cliente_id|urlencode }}/facturas">Revisar facturas y notas de crédito</a>{% endif %}
+      {% if c.cancelacion.codigo == 'PAGO_IMPUTADO' %}<a href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=pagos">Revisar pagos imputados</a>{% endif %}
+      {% if c.cancelacion.codigo == 'RECOLECCION_ACTIVA' %}<a href="/admin/recolecciones">Revisar recolección</a>{% endif %}
+    {% endif %}
+  </section>
+  <details class="ec-history"><summary>Historial de importes y documentos</summary>
+    {% if c.historial.cancelacion %}<p><strong>Cancelación:</strong> {{ c.historial.cancelacion.motivo }}<br><span class="ec-note">{{ c.historial.cancelacion.created_at.strftime('%d/%m/%Y %H:%M') }} · Admin</span></p>{% endif %}
+    {% for a in c.historial.ajustes %}<div class="ec-history-row"><div><strong>{{ a.motivo }}</strong><span>{{ a.created_at.strftime('%d/%m/%Y %H:%M') if a.created_at else '' }} · {{ a.estado }}</span></div><strong>{{ dinero_ars(a.monto_ars) }}</strong></div>{% else %}<p class="ec-note">No hay ajustes de precio registrados.</p>{% endfor %}
+    {% for f in c.historial.facturas %}<p><a href="/admin/clientes/{{ c.cliente_id|urlencode }}/facturas#factura-{{ f.id }}">{{ f.tipo }} {{ '%04d'|format(f.punto_venta) }}-{{ '%08d'|format(f.numero) }}</a> · {{ f.estado }}</p>{% endfor %}
+    {% for p in c.historial.aplicaciones_pago %}<p><a href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=pagos">Pago #{{ p.pago_id }}</a> · {{ dinero_ars(p.monto_ars) }} · {{ p.estado }}</p>{% endfor %}
+  </details>
+</div>
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}Incidencias{% endblock %}
+{% block content %}
+<div class="page-title">
+  <h1>Incidencias</h1>
+  <p>Errores al emitir guías, con su explicación y próximos pasos.</p>
+</div>
+<nav class="inc-actions" aria-label="Estado de incidencias">
+  {% for valor,nombre in [('pendientes','Pendientes'),('resueltos','Resueltas'),('catalogo','Catálogo de errores')] %}
+  <a class="btn {{ 'btn-primary' if estado==valor else 'btn-ghost' }}" href="?estado={{ valor }}" {% if estado==valor %}aria-current="page"{% endif %}>{{ nombre }}</a>
+  {% endfor %}
+  <a href="/admin/incidencias-emision?resultado=todos">Historial de intentos</a>
+</nav>
+{% if verificacion=='pendiente' %}<p class="flash-msg error">Todavía falta confirmar el resultado. Revisá el envío y el panel del courier antes de emitir.</p>{% endif %}
+{% if verificacion=='resuelto' %}<p class="flash-msg ok">Guía, documento y cargo verificados. La alerta quedó resuelta.</p>{% endif %}
+{% if estado=='catalogo' %}
+  {% for ficha in catalogo %}
+  <details class="inc-row"><summary>{{ ficha.titulo }}</summary>
+    <p>{{ ficha.explicacion }}</p><p><strong>Qué hacer:</strong> {{ ficha.accion }}</p>
+    <span class="mono inc-code">{{ ficha.codigo }}</span>
+  </details>
+  {% endfor %}
+{% else %}
+  {% if inconclusos and estado=='pendientes' %}
+  <section class="card" aria-labelledby="inconclusos-titulo">
+    <h2 id="inconclusos-titulo">Intentos sin resultado</h2>
+    <p>Hace más de 10 minutos que no recibimos el resultado. Verificá el envío antes de volver a emitir.</p>
+    {% for intento in inconclusos %}
+    <div class="inc-row">
+      <a href="/admin/pedidos/{{ intento.solicitud_id }}/editar">Solicitud #{{ intento.solicitud_id }}</a>
+      · <a href="/admin/clientes/{{ intento.cliente_id|urlencode }}">{{ intento.cliente_id }}</a>
+      <p class="sub">{{ intento.fecha.strftime('%d/%m/%Y %H:%M') }} · Argentina · {{ intento.referencia }}</p>
+      <form method="post" action="/admin/incidencias/intentos/{{ intento.id }}/verificar" data-inc-analysis>
+        <input type="hidden" name="csrf" value="{{ intento.csrf }}"><button type="submit" class="btn btn-ghost">Comprobar resolución</button>
+      </form>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+  {% for item in items %}
+  <article class="inc-row">
+    <div class="inc-between"><h2><a href="/admin/incidencias/{{ item.id }}">{{ item.diagnostico.titulo }}</a></h2>
+      <span class="badge {{ 'ok' if item.estado=='RESUELTO' else 'warn' }}">{{ {'PENDIENTE':'Pendiente','EN_REVISION':'En revisión','RESUELTO':'Resuelta'}[item.estado] }}</span>
+    </div>
+    <p><a href="/admin/clientes/{{ item.cliente_id|urlencode }}">{{ item.cliente_id }}</a> · {{ item.courier }} · Solicitud #{{ item.solicitud_id }}</p>
+    <p>{{ item.diagnostico.explicacion }}</p>
+    <div class="inc-between"><span class="sub">{{ item.cantidad }} {{ 'intento' if item.cantidad==1 else 'intentos' }} · {{ item.fecha.strftime('%d/%m/%Y %H:%M') }}</span>
+      <a href="/admin/incidencias/{{ item.id }}">Revisar caso →</a></div>
+  </article>
+  {% else %}
+  <p>{{ 'No hay incidencias resueltas todavía.' if estado=='resueltos' else 'No hay errores de emisión pendientes. Los nuevos aparecerán aquí.' }}</p>
+  {% endfor %}
+  {% if siguiente %}<a class="btn btn-ghost" href="?estado={{ estado }}&amp;antes={{ siguiente }}">Ver anteriores</a>{% endif %}
+{% endif %}
+{% endblock %}

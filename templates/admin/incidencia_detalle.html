@@ -1,0 +1,68 @@
+{% extends 'admin/base_admin.html' %}
+{% block title %}{{ item.diagnostico.titulo }}{% endblock %}
+{% block content %}
+<div class="page-title">
+  <a href="/admin/incidencias">Volver a incidencias</a>
+  <h1>{{ item.diagnostico.titulo }}</h1>
+  <p><a href="/admin/clientes/{{ item.cliente_id|urlencode }}">{{ item.cliente_id }}</a> · {{ item.courier }} · Solicitud #{{ item.solicitud_id }}</p>
+</div>
+{% if revision_resultado in ['sin_cambios','desactualizado'] %}<p class="flash-msg error">El caso cambió o ya se está revisando. Revisá el estado actualizado antes de continuar.</p>{% endif %}
+<div class="inc-between"><span class="badge {{ 'ok' if item.estado=='RESUELTO' else 'warn' }}">{{ {'PENDIENTE':'Pendiente','EN_REVISION':'En revisión','RESUELTO':'Resuelta'}[item.estado] }}</span>
+  <span class="sub">{{ item.cantidad }} {{ 'intento' if item.cantidad==1 else 'intentos' }} · {{ item.fecha.strftime('%d/%m/%Y %H:%M') }} · Argentina</span></div>
+{% if item.resolucion %}<p class="flash-msg ok">{{ item.resolucion }}</p>{% endif %}
+<section class="inc-row">
+  <h2>Qué pasó</h2><p>{{ item.diagnostico.explicacion }}</p>
+  {% if not item.diagnostico.confirmado %}<p class="sub">Causa pendiente de confirmar.</p>{% endif %}
+  <h2>Qué hacer</h2><p>{{ item.diagnostico.accion }}</p>
+  <div class="inc-actions">
+    <a class="btn btn-primary" href="{{ '/admin/conciliacion-couriers/envios/' ~ item.solicitud_id if item.tracking else '/admin/pedidos/' ~ item.solicitud_id ~ '/editar' }}">Abrir envío</a>
+    {% if item.estado=='PENDIENTE' %}
+    <form method="post" action="/admin/incidencias/{{ item.id }}/revision">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="intento_id" value="{{ item.ultimo_intento_id }}">
+      <button class="btn btn-ghost" type="submit">Tomar en revisión</button>
+    </form>{% endif %}
+  </div>
+</section>
+<section class="inc-row" aria-labelledby="agente-titulo">
+  <h2 id="agente-titulo">Asistente de resolución<span data-help="Cómo revisa este caso">Comprueba los registros del envío. Sólo cierra la alerta si encuentra guía, documento y cargo coherentes. Las sugerencias de IA requieren revisión.</span></h2>
+  <ul class="inc-checks">
+    <li>Guía registrada: <strong>{{ 'Sí' if item.evidencia.tiene_tracking else 'Sin registro local' }}</strong></li>
+    <li>Emisión con fecha y referencia: <strong>{{ 'Sí' if item.evidencia.fecha_guia_confirmada and item.evidencia.tiene_referencia_courier else 'Pendiente de verificar' }}</strong></li>
+    <li>Documento disponible: <strong>{{ 'Sí' if item.evidencia.tiene_documento else 'Sin registro local' }}</strong></li>
+    <li>Cargo coincide con el envío: <strong>{{ 'Sí' if item.evidencia.cargo_registrado and not item.evidencia.cargo_pendiente else 'Pendiente de verificar' }}</strong></li>
+    <li>Precio, cotización y operador coinciden con la tarifa guardada: <strong>{{ 'Sí' if item.evidencia.tarifa_coincide else 'Pendiente de verificar' }}</strong></li>
+  </ul>
+  {% if item.estado!='RESUELTO' %}
+  <div class="inc-actions">
+    <form method="post" action="/admin/incidencias/{{ item.id }}/analizar" data-inc-analysis>
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="intento_id" value="{{ item.ultimo_intento_id }}">
+      <button class="btn btn-ghost" type="submit">Comprobar resolución</button>
+    </form>
+    {% if not item.diagnostico.confirmado %}
+      {% if ia.configurado %}
+      <form method="post" action="/admin/incidencias/{{ item.id }}/analizar" data-inc-analysis>
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="intento_id" value="{{ item.ultimo_intento_id }}"><input type="hidden" name="usar_ia" value="true">
+        <button class="btn btn-ghost" type="submit">Analizar con IA</button>
+      </form>
+      {% else %}<span class="sub">IA pendiente de conectar. La revisión de registros está disponible.</span>{% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if item.analisis %}
+    {% if item.analisis.ia %}
+      {% if item.analisis.ia.status!='ok' %}<p>No pudimos completar el análisis de IA. El caso sigue disponible para revisión.</p>{% endif %}
+      <div class="card"><h3>Hipótesis para revisar</h3><p>{{ item.analisis.ia.hipotesis }}</p><p>{{ item.analisis.ia.comprobacion }}</p></div>
+    {% elif item.estado!='RESUELTO' %}<p>El caso sigue pendiente. Revisá los datos indicados arriba.</p>{% endif %}
+  {% endif %}
+</section>
+<details class="inc-row"><summary>Detalle técnico e historial</summary>
+  <p class="mono inc-code">{{ item.codigo }} · {{ item.referencia }}</p>
+  {% for intento in item.intentos %}
+    <article class="inc-row"><strong>{{ intento.fecha.strftime('%d/%m/%Y %H:%M:%S') }} · {{ intento.estado }}</strong>
+      <p>{{ intento.metadata.motivo or 'El intento todavía no tiene resultado registrado.' }}</p>
+      <p class="sub inc-code">{{ intento.metadata.referencia }} · {{ intento.metadata.etapa }} · {{ intento.metadata.error_tipo }}</p>
+    </article>
+  {% endfor %}
+  <a href="/admin/incidencias-emision?solicitud_id={{ item.solicitud_id }}&amp;resultado=todos">Ver historial completo</a>
+</details>
+{% endblock %}

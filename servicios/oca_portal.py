@@ -396,6 +396,7 @@ def emitir(sol, *, ya_reservada=False):
         )
         return {
             "ok": False,
+            "codigo_error": "RESULTADO_NO_CONFIRMADO", "etapa": "courier",
             "error": "La emisión OCA requiere verificación. No vuelvas a emitir esta solicitud.",
         }
     try:
