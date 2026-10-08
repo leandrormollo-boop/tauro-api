@@ -145,7 +145,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% if e.estado=='ACTIVO' and e.monto_ars %}<small class="business-status error">Revisar cargo activo</small>{% else %}<small>Sin cargo vigente</small>{% endif %}
             {% else %}
             <span class="admin-shipment-amount"><small>Inicial</small>$ {{ (e.monto_ars or 0)|numero_ars }}</span>
-            <span class="admin-shipment-amount is-final"><small>Final</small>$ {{ (e.precio_final_ars or e.monto_ars or 0)|numero_ars }}</span>
+            <span class="admin-shipment-amount is-final"><small>Final</small>$ {{ (e.precio_final_ars if e.precio_final_ars is not none else e.monto_ars or 0)|numero_ars }}</span>
             {% if e.ajuste_comercial_ars %}
             <small style="display:block;color:{% if e.ajuste_comercial_ars < 0 %}var(--ok){% else %}var(--warn){% endif %};">
               Ajuste ADMIN {{ "+" if e.ajuste_comercial_ars > 0 else "−" }} $ {{ (e.ajuste_comercial_ars|abs)|numero_ars }}
@@ -197,7 +197,8 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             <a href="{{ e.guia_url }}" class="btn btn-sm btn-ghost" target="_blank" rel="noopener">Ver guía</a>
             {% else %}<span class="admin-shipment-empty">—</span>{% endif %}
           </td>
-          <td><details class="business-row-actions"><summary>Acciones</summary>
+          <td><a class="btn btn-sm btn-ghost" href="/admin/clientes/{{ cliente.cliente_id|urlencode }}/envios/{{ e.id }}/control">Gestionar envío</a>
+          <details class="business-row-actions"><summary>Más acciones</summary>
             {% if e.solicitud_id %}
             <a href="/admin/pedidos/{{ e.solicitud_id }}/editar" class="btn btn-sm btn-ghost">Ver envío</a>
             <a href="/admin/envios-realizados/nuevo?repetir={{ e.solicitud_id }}" class="btn btn-sm btn-ghost">Repetir envío</a>
@@ -207,11 +208,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% if e.estado == 'ACTIVO' and not e.nro_fc and not e.factura_cliente_id %}
             <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/nueva?envio={{ e.id }}"
                class="btn btn-sm btn-primary">Facturar</a>
-            <form method="POST" action="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/anular"
-                  style="display:inline;"
-                  data-confirm="¿Anular este envío? Se descontará de la cuenta corriente y dejará de mostrarse en el portal del cliente. El registro seguirá guardado en ADMIN para auditoría.">
-              <button type="submit" class="btn btn-sm btn-ghost" style="color:var(--error)">Anular prueba</button>
-            </form>
+
             {% elif e.factura_cliente_id and e.tiene_factura_cliente_pdf %}
             <a href="/admin/clientes/{{ cliente.cliente_id }}/facturas/{{ e.factura_cliente_id }}/pdf" class="btn btn-sm btn-ghost">Ver PDF</a>
             {% elif e.nro_fc and e.tiene_factura_pdf %}
@@ -230,33 +227,7 @@ formularioPeriodoAdmin.querySelectorAll("[data-periodo-admin]").forEach(function
             {% elif e.solicitud_test %}
             <small style="display:block;color:var(--fg-4);margin-top:6px;">Caso de prueba: oculto automáticamente.</small>
             {% endif %}
-            {% if e.solicitud_id and not e.solicitud_test and e.estado == 'ACTIVO' and e.solicitud_estado not in ('CANCELADO', 'REEMPLAZADO') %}
-            <details style="margin-top:6px;min-width:220px;">
-              <summary class="btn btn-sm btn-ghost" style="list-style:none;cursor:pointer;">Ajustar precio</summary>
-              <form method="POST"
-                    action="/admin/clientes/{{ cliente.cliente_id }}/envios/{{ e.id }}/precio"
-                    style="display:grid;gap:7px;margin-top:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-2);"
-                    data-confirm="¿Confirmás el nuevo precio final? La cotización original no se modifica y la diferencia impactará en la cuenta corriente del cliente.">
-                <input type="hidden" name="csrf_precio" value="{{ e.precio_csrf }}">
-                <input type="hidden" name="idempotency_key" value="{{ e.precio_idempotency }}">
-                <label style="font-size:11px;color:var(--fg-3);">
-                  Nuevo precio final (ARS)
-                  <input type="text" name="nuevo_precio_ars" required inputmode="decimal"
-                         value="{{ (e.precio_final_ars)|numero_ars }}"
-                         aria-label="Nuevo precio final en pesos">
-                </label>
-                <label style="font-size:11px;color:var(--fg-3);">
-                  Motivo del cambio
-                  <textarea name="motivo" required minlength="8" maxlength="500"
-                            rows="2" placeholder="Ej.: descuento comercial acordado"></textarea>
-                </label>
-                <small style="color:var(--fg-4);line-height:1.35;">
-                  Vigente: $ {{ (e.precio_final_ars)|numero_ars }} · original: $ {{ (e.monto_ars)|numero_ars }}
-                </small>
-                <button type="submit" class="btn btn-sm btn-primary">Aplicar nuevo precio</button>
-              </form>
-            </details>
-            {% endif %}
+
           </details></td>
         </tr>
         {% else %}

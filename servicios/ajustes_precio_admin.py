@@ -47,6 +47,7 @@ def aplicar_nuevo_precio(
     motivo: str,
     actor: str,
     idempotency_key: str,
+    precio_esperado_ars: Any | None = None,
 ) -> dict[str, Any]:
     """Aplica un nuevo precio final sin modificar el cargo original.
 
@@ -58,6 +59,11 @@ def aplicar_nuevo_precio(
     motivo_limpio = _texto(motivo)[:500]
     clave = _texto(idempotency_key)
     nuevo = _dinero(nuevo_precio_ars, "Nuevo precio")
+    esperado = (
+        _dinero(precio_esperado_ars, "Precio vigente")
+        if precio_esperado_ars is not None
+        else None
+    )
     if not cliente:
         raise AjustePrecioAdminError("Falta el cliente del envío.")
     if len(motivo_limpio) < 8:
@@ -69,10 +75,17 @@ def aplicar_nuevo_precio(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # La restricción UNIQUE resuelve el alta, pero este lock también
+            # serializa el chequeo de identidad. Así un doble envío devuelve
+            # el resultado original y una clave reciclada falla de forma clara.
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"AJUSTE_PRECIO_ADMIN:{clave}",),
+            )
             cur.execute(
                 """
                 SELECT id, solicitud_id, precio_anterior_ars,
-                       precio_nuevo_ars, monto_ars, tipo
+                       precio_nuevo_ars, monto_ars, tipo, motivo, propuesto_por
                 FROM ajustes_cliente
                 WHERE idempotency_key=%s
                 """,
@@ -80,15 +93,19 @@ def aplicar_nuevo_precio(
             )
             repetido = cur.fetchone()
             if repetido:
-                cur.execute(
-                    "SELECT cliente_id FROM envios WHERE solicitud_id=%s",
-                    (repetido["solicitud_id"],),
-                )
+                cur.execute("""
+                    SELECT id, cliente_id FROM envios
+                    WHERE solicitud_id=%s
+                    ORDER BY id DESC LIMIT 1
+                """, (repetido["solicitud_id"],))
                 duenio = cur.fetchone()
                 if (
                     not duenio
+                    or int(duenio["id"]) != int(envio_id)
                     or duenio["cliente_id"] != cliente
                     or Decimal(str(repetido["precio_nuevo_ars"])) != nuevo
+                    or _texto(repetido.get("motivo")) != motivo_limpio
+                    or _texto(repetido.get("propuesto_por")) != actor_limpio
                 ):
                     raise AjustePrecioAdminError(
                         "La clave de operación ya fue usada con otros datos."
@@ -108,18 +125,34 @@ def aplicar_nuevo_precio(
                     "tipo": repetido["tipo"],
                 }
 
+            # Todos los flujos que mutan solicitud+cargo toman los locks en
+            # este orden. Evita mezclar un ajuste con una cancelación que leyó
+            # un precio anterior.
             cur.execute(
                 """
-                SELECT e.id, e.solicitud_id, e.monto_ars, e.estado,
-                       s.test AS solicitud_test,
+                SELECT s.id, s.test AS solicitud_test,
                        s.estado AS solicitud_estado
-                FROM envios e
-                JOIN solicitudes_guia s
-                  ON s.id=e.solicitud_id AND s.cliente_id=e.cliente_id
+                FROM solicitudes_guia s
+                JOIN envios e
+                  ON e.solicitud_id=s.id AND e.cliente_id=s.cliente_id
                 WHERE e.id=%s AND e.cliente_id=%s
-                FOR UPDATE OF e, s
+                FOR UPDATE OF s
                 """,
                 (int(envio_id), cliente),
+            )
+            solicitud = cur.fetchone()
+            if not solicitud:
+                raise AjustePrecioAdminError(
+                    "El envío no existe o pertenece a otro cliente."
+                )
+            cur.execute(
+                """
+                SELECT id, solicitud_id, monto_ars, estado
+                FROM envios
+                WHERE id=%s AND cliente_id=%s AND solicitud_id=%s
+                FOR UPDATE
+                """,
+                (int(envio_id), cliente, int(solicitud["id"])),
             )
             envio = cur.fetchone()
             if not envio:
@@ -130,11 +163,11 @@ def aplicar_nuevo_precio(
                 raise AjustePrecioAdminError(
                     "Sólo se puede ajustar un cargo activo."
                 )
-            if envio["solicitud_test"]:
+            if solicitud["solicitud_test"]:
                 raise AjustePrecioAdminError(
                     "Un envío de prueba no admite ajustes comerciales."
                 )
-            if envio["solicitud_estado"] in ("CANCELADO", "REEMPLAZADO"):
+            if solicitud["solicitud_estado"] in ("CANCELADO", "REEMPLAZADO"):
                 raise AjustePrecioAdminError(
                     "El envío está cancelado o reemplazado y debe conciliarse."
                 )
@@ -150,6 +183,10 @@ def aplicar_nuevo_precio(
             precio_anterior = _dinero(
                 cur.fetchone()["precio_vigente"], "Precio vigente"
             )
+            if esperado is not None and esperado != precio_anterior:
+                raise AjustePrecioAdminError(
+                    "El precio cambió desde que abriste el control. Recargá antes de guardar."
+                )
             delta = (nuevo - precio_anterior).quantize(
                 CENTAVO, rounding=ROUND_HALF_UP
             )
