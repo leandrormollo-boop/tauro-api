@@ -178,9 +178,13 @@
 </section>
 </dialog>
 
+{% if flash_ok %}
+{# Marca de 'agenda tocada' para el borrador del wizard. Va en su propio
+   bloque: nada de Jinja adentro del script principal (test_templates_js). #}
+<script nonce="{{ request.state.csp_nonce }}">try {localStorage.setItem('tauro:agenda:'+document.body.dataset.draftScope, String(Date.now()));} catch (error) {}</script>
+{% endif %}
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
-    {% if flash_ok %}try {localStorage.setItem('tauro:agenda:'+document.body.dataset.draftScope, String(Date.now()));} catch (error) {}{% endif %}
     var search = document.getElementById("client-search");
     var cards = Array.prototype.slice.call(document.querySelectorAll(".client-card"));
     var counter = document.getElementById("client-visible-count");

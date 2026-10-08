@@ -35,6 +35,8 @@ def test_schema_agrega_objetivos_deriva_ambito_y_preserva_legado():
 
 def test_formularios_ofrecen_facturas_envios_parcial_y_saldo_a_favor():
     portal = (ROOT / "templates" / "portal" / "cuenta.html").read_text(encoding="utf-8")
+    assert 'include "portal/cuenta_pagos.html"' in portal
+    portal += (ROOT / "templates" / "portal" / "cuenta_pagos.html").read_text(encoding="utf-8")
     portal_js = (ROOT / "static" / "js" / "portal-cuenta.js").read_text(encoding="utf-8")
     admin = (ROOT / "templates" / "admin" / "pago_form.html").read_text()
     pendientes = (ROOT / "templates" / "admin" / "pagos_pendientes.html").read_text()
