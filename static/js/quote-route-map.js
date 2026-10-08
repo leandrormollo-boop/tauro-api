@@ -95,7 +95,7 @@
       f[side+'City'].setAttribute('list',list.id);form.appendChild(list);f[side+'List']=list;
     });
     box.hidden=false;root.classList.add('has-route-map');
-    if(national){box.querySelector('.quote-map-heading').lastChild.textContent=' TU ENVÍO, EN ARGENTINA';box.querySelector('.quote-map-credit').textContent='Cartografía · IGN / Georef · Natural Earth';}
+    if(national){box.querySelector('.quote-map-heading').lastChild.textContent=' TU ENVÍO, EN ARGENTINA';}
     var themeColors=null;
     function palette(){
       var theme=document.documentElement.dataset.theme;
@@ -279,7 +279,7 @@
         if(version!==state.version||state.disposed)return;
         if(a)a.side='origin';if(b)b.side='destination';state.route=[a,b].filter(Boolean);label('origin',a);label('destination',b);
         var unknown=[a,b].some(function(l){return l&&l.unresolved;});
-        box.querySelector('[data-map-caption]').textContent=national?'Referencia entre provincias · sin validar cobertura.':unknown?'Ciudad sin ubicar · mostramos el país.':a&&b&&a.precise&&b.precise?'Conexión orientativa de origen a destino.':'Conexión orientativa entre países.';
+        box.querySelector('[data-map-caption]').textContent=unknown?'Ciudad sin ubicar · mostramos el país.':'';
         var key=state.route.map(function(l){return l.country+':'+l.point.join(',');}).join('|');
         if(key===state.key&&state.target){draw();return;}state.key=key;
         var target=national?ARGENTINA:a&&b?routeCenter(a.point,b.point,state.geo.geoInterpolate(a.point,b.point)(.5)):side&&(a||b)?(a||b).point:WORLD;
