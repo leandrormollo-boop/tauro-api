@@ -23,7 +23,7 @@
 <article style="padding:20px 0;border-bottom:1px solid var(--line-soft);overflow-wrap:anywhere;">
   <div style="display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;">
     <div>
-      {% if intento.solicitud_id %}<a href="/admin/conciliacion-couriers/envios/{{ intento.solicitud_id }}">Solicitud #{{ intento.solicitud_id }}</a>{% else %}Solicitud no disponible{% endif %}
+      {% if intento.solicitud_id %}<a href="{{ '/admin/conciliacion-couriers/envios/' ~ intento.solicitud_id if intento.tracking else '/admin/pedidos/' ~ intento.solicitud_id ~ '/editar' }}">Solicitud #{{ intento.solicitud_id }}</a>{% else %}Solicitud no disponible{% endif %}
       {% if intento.cliente_id %} · <a href="/admin/clientes/{{ intento.cliente_id|urlencode }}">{{ intento.cliente_id }}</a>{% endif %}
       {% if intento.courier %} · {{ intento.courier }}{% endif %}
     </div>
