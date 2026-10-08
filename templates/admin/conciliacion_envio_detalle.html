@@ -22,7 +22,7 @@ $ {{ (valor|default(0, true))|numero_ars }}
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
 
 <div class="dashboard-stats" style="margin-bottom:18px;">
-  <div class="card"><small>Precio aceptado</small><h2>{{ dinero(envio.precio_tauro_ars) }}</h2><p>{{ (envio.peso_kg or '—')|kg }} emitido</p></div>
+  <div class="card"><small>Precio aceptado</small><h2>{{ dinero(envio.precio_tauro_ars) }}</h2><p>Peso inicial {{ (envio.peso_facturable_cotizado_kg or envio.peso_kg or '—')|kg }}{% if envio.peso_real_cotizado_kg or envio.peso_volumetrico_cotizado_kg %} <small>(real {{ (envio.peso_real_cotizado_kg or envio.peso_kg or '—')|kg }}{% if envio.peso_volumetrico_cotizado_kg %} · vol. {{ envio.peso_volumetrico_cotizado_kg|kg }}{% endif %})</small>{% endif %}{% if envio.peso_final_facturado_kg %}<br>Facturado {{ envio.peso_final_facturado_kg|kg }}{% if envio.peso_facturable_cotizado_kg and envio.peso_final_facturado_kg > envio.peso_facturable_cotizado_kg + 0.009 %} <span class="badge warn">+{{ (envio.peso_final_facturado_kg - envio.peso_facturable_cotizado_kg)|kg }} de más</span>{% else %} <span class="badge ok">dentro de lo cotizado</span>{% endif %}{% endif %}</p></div>
   <div class="card"><small>Costo estimado interno</small><h2>{{ dinero(envio.costo_courier_estimado_ars) if envio.snapshot_id else 'Pendiente' }}</h2><p>{% if envio.snapshot_id %}Margen protegido {{ dinero(envio.margen_tauro_protegido_ars) }}{% else %}Falta congelar la base{% endif %}</p></div>
   <div class="card"><small>Costo real courier</small><h2>{{ dinero(envio.costo_courier_real_ars) if envio.conciliacion_id else 'Pendiente' }}</h2><p>Dato interno, nunca visible al cliente</p></div>
   <div class="card"><small>Precio final cliente</small><h2>{{ dinero(envio.precio_cliente_final_ars) if envio.conciliacion_id else dinero(envio.precio_tauro_ars) }}</h2><p>{% if envio.conciliacion_id %}Diferencia {{ dinero(envio.diferencia_flete_ars) }} · TAX {{ dinero(envio.tax_cliente_ars) }}{% else %}Sin factura conciliada{% endif %}</p></div>
@@ -33,11 +33,22 @@ $ {{ (valor|default(0, true))|numero_ars }}
     <div><h3>Estado y próxima acción<span data-help="Ajustes al cliente">Cada diferencia aprobada se registra por separado. El precio original se conserva.</span></h3></div>
     <span class="badge {% if envio.control_estado == 'CONCILIADO' %}ok{% elif envio.control_estado in ('BASE_PENDIENTE','DIFERENCIA_PENDIENTE') %}warn{% else %}muted{% endif %}">{{ envio.control_estado.replace('_',' ')|title }}</span>
   </div>
-  {% if envio.control_estado == 'BASE_PENDIENTE' %}
+  {% if envio.control_estado in ('CANCELADO_FACTURADO','REEMPLAZADO_FACTURADO') %}
+  <div class="msg error" style="margin:0;">El operador facturó esta guía aunque está {{ 'cancelada' if envio.control_estado == 'CANCELADO_FACTURADO' else 'reemplazada' }}. La decisión se toma en la factura: <a href="/admin/conciliacion-couriers/facturas/{{ envio.bandeja_factura_id }}">resolver la bandeja</a>.</div>
+  {% elif envio.control_estado == 'SIN_FACTURA_30D' %}
+  <p>El envío salió hace más de 30 días y ningún operador lo facturó. Revisá si realmente se despachó o si la factura entró en otra cuenta.</p>
+  {% elif envio.control_estado == 'BASE_PENDIENTE' %}
   <form method="POST" action="/admin/conciliacion-couriers/envios/{{ envio.solicitud_id }}/snapshot" class="form-grid-3" data-confirm="¿Congelar este costo estimado como base histórica? Después no podrá modificarse.">
     <div class="form-group"><label>Costo courier estimado ARS</label><input name="costo_estimado_ars" required inputmode="decimal" data-numero="monto" placeholder="Ej. 100.000"></div>
     <div class="form-group" style="align-self:end;"><button class="btn btn-primary">Guardar base inmutable</button></div>
   </form>
+  {% if envio.matches_confirmados %}
+  <form method="POST" action="/admin/conciliacion-couriers/envios/{{ envio.solicitud_id }}/cerrar-sin-costo-inicial" class="form-grid-3" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);" data-confirm="¿Cerrar sin diferencia? El costo real facturado queda como base y no se cobra nada al cliente. No se puede deshacer.">
+    <div class="form-group"><label>Cerrar sin diferencia (sin costo inicial)</label><input name="motivo" required minlength="8" placeholder="Por qué no hubo costo cotizado"></div>
+    <div class="form-group" style="align-self:end;"><button class="btn btn-ghost">Cerrar sin diferencia</button></div>
+    <p style="grid-column:1/-1;margin:0;"><small>Para envíos históricos sin cotización. Si la factura trae TAX o el costo supera el precio cobrado, no cierra: cargá el costo inicial a mano.</small></p>
+  </form>
+  {% endif %}
   {% elif envio.control_estado == 'LISTO_PARA_CALCULAR' %}
   <form method="POST" action="/admin/conciliacion-couriers/envios/{{ envio.solicitud_id }}/calcular"><button class="btn btn-primary">Calcular diferencia</button></form>
   {% elif envio.ajuste_id and envio.ajuste_estado == 'PROPUESTO' %}
@@ -79,7 +90,7 @@ $ {{ (valor|default(0, true))|numero_ars }}
     {% for c in envio.conciliaciones %}
       <tr>
         <td class="mono">v{{ c.version }}<br><small>{{ c.calculado_at.strftime('%d/%m/%Y %H:%M') if c.calculado_at else '' }}</small></td>
-        <td class="mono">Real {{ dinero(c.costo_courier_real_ars) }}<br><small>Margen {{ dinero(c.margen_tauro_protegido_ars) }}</small></td>
+        <td class="mono">Real {{ dinero(c.costo_courier_real_ars) }}<br><small>Margen {{ dinero(c.margen_tauro_protegido_ars) }}{% if c.ahorro_tauro_ars and c.ahorro_tauro_ars > 0 %} · ahorro {{ dinero(c.ahorro_tauro_ars) }}{% endif %}</small></td>
         <td class="mono">{{ dinero(c.precio_cliente_inicial_ars) }} → <strong>{{ dinero(c.precio_cliente_final_ars) }}</strong><br><small>Diferencia {{ dinero(c.diferencia_flete_ars) }} · TAX {{ dinero(c.tax_cliente_ars) }}</small></td>
         <td>{% if c.ajuste_id %}<span class="badge {% if c.ajuste_tipo == 'CREDITO' %}ok{% else %}warn{% endif %}">{{ c.ajuste_tipo|title }} {{ dinero(c.movimiento_cliente_ars|abs) }}</span><br><small>{{ dinero(c.movimiento_desde_ars) }} → {{ dinero(c.movimiento_hasta_ars) }} · {{ c.ajuste_estado|title }}</small>{% else %}Sin movimiento{% endif %}</td>
         <td>{{ c.peso_cotizado_kg|kg }} → {{ (c.peso_final_facturado_kg or '—')|kg }}<br><small>{{ c.motivo_diferencia.replace('_',' ')|title }}</small></td>
