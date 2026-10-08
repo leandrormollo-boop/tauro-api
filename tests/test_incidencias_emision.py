@@ -99,3 +99,27 @@ def test_historial_http_acepta_formulario_con_solicitud_opcional(monkeypatch, qu
     assert 'Intentos de emisión' in response.text
     assert 'No hay intentos registrados para este filtro' in response.text
     consulta.assert_called_once_with(solicitud_id=esperado, antes=0, resultado='todos')
+
+
+@pytest.mark.parametrize('tracking,enlace', [
+    (None, '/admin/pedidos/123/editar'),
+    ('PRUEBA123', '/admin/conciliacion-couriers/envios/123'),
+])
+def test_historial_enlaza_pedido_pendiente_y_control_de_guia_emitida(monkeypatch, tracking, enlace):
+    from datetime import datetime
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from endpoints import admin
+
+    intento = {'solicitud_id':123, 'cliente_id':'PRUEBA', 'courier':'DHL',
+               'fecha':datetime(2026,10,8,12), 'success':False, 'actor_type':'cliente',
+               'tracking':tracking, 'estado_cliente_ui':{'label':'Solicitado'},
+               'metadata':{'motivo':'Revisá los datos.', 'referencia':'EMI-PRUEBA'}}
+    monkeypatch.setattr(inc, 'listar_intentos', lambda **kw: {'items':[intento], 'siguiente':0})
+    monkeypatch.setattr(admin, '_is_auth', lambda _:True)
+    app = FastAPI()
+    app.include_router(admin.router)
+    with TestClient(app) as client:
+        response = client.get('/admin/incidencias-emision')
+    assert response.status_code == 200
+    assert f'href="{enlace}">Solicitud #123</a>' in response.text
