@@ -116,7 +116,6 @@ jobs:
           tests/js/presentacion-portal.test.cjs
           tests/js/shipment-focus.test.cjs
           tests/js/dropdown-dismiss.test.cjs
-          tests/js/shipment-location-confirmation.test.cjs
           tests/js/web-quote-presentation.test.cjs
           tests/js/web-quote-national.test.cjs
           tests/js/admin-precios-web.test.cjs

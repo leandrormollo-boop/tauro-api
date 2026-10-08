@@ -4,8 +4,6 @@
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/shipment-package-fields.css?v=1">
 <link rel="stylesheet" href="/static/css/invoice-compact.css?v=1">
-<link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1">
-<script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>
 <script src="/static/js/shipment-focus.js?v=1" defer></script>
 {% endblock %}
 
@@ -69,18 +67,6 @@
 {% if form.valor_total_cotizado_usd %}
     <div class="msg ok" role="status">Recuperamos las cajas de tu cotización y su valor declarado total de <b>{{ ((form.valor_total_cotizado_usd))|dinero_usd }}</b>. Completá el contenido y el valor de cada caja en la invoice. El transporte se cotiza nuevamente con los datos completos.</div>
 {% endif %}
-
-<details class="card shipment-paste" style="margin-bottom:8px;padding:14px 20px;border-color:rgba(167,139,250,.35);">
-    <summary>Pegar pedido recibido por mail</summary>
-    <div style="margin-top:14px;">
-        <label for="pedido-pegado">Texto del pedido</label>
-        <textarea id="pedido-pegado" rows="7" placeholder="Pegá el texto del pedido tal como te llegó (cajas, medidas, quien envía, quien recibe...)"></textarea>
-        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-            <button type="button" id="btn-parsear" class="btn btn-primary btn-sm">Leer pedido y precargar</button>
-            <span id="parse-status" style="font-size:12.5px;color:var(--fg-3);"></span>
-        </div>
-    </div>
-</details>
 
 <!-- Cuatro pantallas independientes: cada tema se completa sin mezclar datos. -->
 <div class="stepper" id="stepper-envio">
@@ -1305,83 +1291,6 @@
   });
   refreshLivePrice();
 
-  // ── Pegar pedido → precargar form ─────────────────────────
-  const btnParsear = document.getElementById("btn-parsear");
-  const parseStatus = document.getElementById("parse-status");
-
-  function setIf(id, value) {
-    if (value === null || value === undefined || value === "") return false;
-    const el = document.getElementById(id);
-    if (!el) return false;
-    el.value = value;
-    return true;
-  }
-
-  if (btnParsear) {
-    btnParsear.addEventListener("click", function () {
-      var texto = (document.getElementById("pedido-pegado") || {}).value || "";
-      if (!texto.trim()) { parseStatus.textContent = "Pegá el texto del pedido primero."; return; }
-      parseStatus.textContent = "Leyendo…";
-
-      fetch("/portal/api/parsear-pedido", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto: texto }),
-      })
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (!data.ok) { parseStatus.textContent = "No pude leer ese texto. Cargalo a mano, perdón."; return; }
-          var llenados = 0;
-          var d = data.destinatario || {};
-          [["dest_nombre", d.nombre], ["dest_direccion", d.direccion], ["dest_ciudad", d.ciudad],
-           ["dest_estado", d.estado], ["dest_zip", d.cp], ["dest_email", d.email],
-           ["dest_telefono", d.telefono], ["dest_documento", d.documento]].forEach(function (par) {
-            if (setIf(par[0], par[1])) llenados++;
-          });
-          if (d.pais_iso && countrySelect) {
-            for (var i = 0; i < countrySelect.options.length; i++) {
-              if (countrySelect.options[i].value === d.pais_iso) {
-                countrySelect.value = d.pais_iso;
-                llenados++;
-                break;
-              }
-            }
-          }
-          // Bultos del mail → una fila de caja por cada uno.
-          var paquetes = data.paquetes || [];
-          if (paquetes.length) {
-            // Re-parse: sacar las filas que sobran de un pegado anterior,
-            // para que el form quede EXACTAMENTE como el pedido nuevo.
-            var limiteFilas = Math.max(paquetes.length, 1);
-            bultoRows().slice(limiteFilas).forEach(function (r) { r.remove(); });
-            invoiceRows().slice(limiteFilas).forEach(function (r) { r.remove(); });
-            var rows = bultoRows();
-            paquetes.slice(0, 20).forEach(function (p, i) {
-              var row = rows[i] || agregarBulto("", 1);
-              var cant = row.querySelector(".bulto-cantidad");
-              if (cant && p.cantidad) { cant.value = p.cantidad; llenados++; }
-              var invoiceRow = invoiceRows()[i];
-              var unidades = invoiceRow && invoiceRow.querySelector(".bulto-unidades-aduana");
-              if (unidades && (p.unidades_aduana || p.cantidad)) {
-                unidades.value = p.unidades_aduana || p.cantidad;
-              }
-            });
-            renumerarBultos();
-          }
-          var aviso = "Listo: " + llenados + " campos precargados.";
-          if (paquetes.length > 1) {
-            aviso += " El pedido trae " + paquetes.length + " bultos distintos — te armé una fila por cada uno; elegí el producto del catálogo en cada fila.";
-          } else if (paquetes.length) {
-            var p = paquetes[0];
-            aviso += " Elegí el producto del catálogo que corresponda" +
-              (p.peso_kg ? " (el mail dice " + Number(p.peso_kg).toLocaleString("es-AR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) + " kg c/u" + (p.hs_code ? ", HS " + p.hs_code : "") + ")." : ".");
-          }
-          parseStatus.textContent = aviso;
-          refreshLivePrice();
-        })
-        .catch(function () { parseStatus.textContent = "Error de conexión al leer el pedido."; });
-    });
-  }
 
   // ── Pasos navegables (guía HAILU, 05/08) ─────────────────────
   // Como la web de DHL: un paso por pantalla — 1 Remitente,
