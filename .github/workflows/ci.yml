@@ -169,6 +169,11 @@ jobs:
             tests/test_agente_incidencias_ia.py \
             tests/test_control_incidencias_emision_postgres.py \
             tests/test_admin_incidencias.py \
+            tests/test_admin_control_envios_http.py \
+            tests/test_control_envios_admin_postgres.py \
+            tests/test_ajustes_precio_admin_postgres.py \
+            tests/test_recolecciones_admin.py \
+            tests/test_cancelacion_comercial_tracking.py \
             tests/test_dhl_errores_accionables.py \
             tests/test_oca_adapter.py \
             tests/test_quote_result_experience.py \

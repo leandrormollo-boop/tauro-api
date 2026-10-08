@@ -1668,6 +1668,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     origen_dominio           TEXT,
     origen_pedido_externo_id TEXT,
     visible_cliente          BOOLEAN NOT NULL DEFAULT TRUE,
+    cancelacion_comercial    BOOLEAN NOT NULL DEFAULT FALSE,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1826,6 +1827,13 @@ ALTER TABLE IF EXISTS solicitudes_guia
 -- cargo, factura, pago o trazabilidad interna.
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS visible_cliente BOOLEAN NOT NULL DEFAULT TRUE;
+-- Una cancelacion comercial quita el cargo de la cuenta de TAURO pero no
+-- anula la guia ante el courier. La solicitud conserva estado CANCELADO para
+-- el cliente y este flag mantiene el tracking fisico hasta su estado final.
+-- Las cancelaciones operativas anteriores conservan FALSE y siguen fuera del
+-- rastreo normal.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS cancelacion_comercial BOOLEAN NOT NULL DEFAULT FALSE;
 -- Empresa y CONTACTO separados (guía real de HAILU, 05/08): los couriers
 -- piden companyName (razón social) Y personName (quién atiende). Antes un
 -- solo campo forzaba a elegir, y la emisión ponía como empresa al cliente
@@ -1900,6 +1908,18 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_tracking_dhl_pendiente
       AND tracking IS NOT NULL AND BTRIM(tracking) <> ''
       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
       AND estado <> 'REEMPLAZADO'
+      AND (tracking_estado IS NULL OR tracking_estado <> 'ENTREGADO');
+
+-- Las bajas comerciales son una cola chica y distinta de las guias vigentes.
+-- Este indice parcial evita recorrer todo el historial cancelado para seguir
+-- el movimiento real que el courier todavia puede informar.
+CREATE INDEX IF NOT EXISTS idx_solicitudes_tracking_comercial_pendiente
+    ON solicitudes_guia (
+        UPPER(courier), tracking_consultado_at ASC NULLS FIRST, id
+    )
+    WHERE cancelacion_comercial=TRUE
+      AND estado='CANCELADO'
+      AND tracking IS NOT NULL AND BTRIM(tracking) <> ''
       AND (tracking_estado IS NULL OR tracking_estado <> 'ENTREGADO');
 
 -- ── Corrección, reemisión y cancelación de guías DHL ────────
@@ -3658,6 +3678,33 @@ BEGIN
            OR factura_actual.estado <> 'EMITIDA' OR factura_actual.tipo <> 'FC' THEN
             RAISE EXCEPTION 'La factura no pertenece al cliente o no es imputable';
         END IF;
+        -- La cancelación comercial y una nueva imputación no pueden cruzarse.
+        -- Se bloquean todos los cargos documentados en orden estable y se lee
+        -- el estado después del lock. Si la cancelación ganó la carrera, el
+        -- pago falla; si el pago ganó, la cancelación ve su aplicación y falla.
+        FOR envio_actual IN
+            SELECT e.id, e.estado
+              FROM envios e
+             WHERE e.id IN (
+                   SELECT i.envio_id
+                     FROM facturas_cliente_items i
+                    WHERE i.factura_id=NEW.factura_id
+                      AND i.envio_id IS NOT NULL
+                   UNION
+                   SELECT ea.id
+                     FROM facturas_cliente_items i
+                     JOIN ajustes_cliente a ON a.id=i.ajuste_id
+                     JOIN envios ea ON ea.solicitud_id=a.solicitud_id
+                    WHERE i.factura_id=NEW.factura_id
+               )
+             ORDER BY e.id
+             FOR UPDATE
+        LOOP
+            IF envio_actual.estado <> 'ACTIVO' THEN
+                RAISE EXCEPTION
+                    'La factura contiene un cargo cancelado y no admite nuevas imputaciones';
+            END IF;
+        END LOOP;
         SELECT MIN(COALESCE(e.ambito, ea.ambito)),
                MAX(COALESCE(e.ambito, ea.ambito))
           INTO ambito_documento, ambito_documento_max

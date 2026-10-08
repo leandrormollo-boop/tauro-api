@@ -136,7 +136,11 @@ def _guardar(cur, solicitud_id: int, tracking: str, normalizado: dict) -> bool:
                 tracking_error_at = NULL,
                 updated_at = NOW()
             WHERE id = %s AND tracking = %s AND UPPER(courier) = 'FEDEX'
-              AND estado NOT IN ('CANCELADO', 'ENTREGADO', 'REEMPLAZADO')
+              AND (
+                  (estado NOT IN ('CANCELADO', 'ENTREGADO')
+                   AND estado <> 'REEMPLAZADO')
+                  OR (estado='CANCELADO' AND cancelacion_comercial=TRUE)
+              )
               AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
             RETURNING id
             """,
@@ -157,7 +161,11 @@ def _guardar(cur, solicitud_id: int, tracking: str, normalizado: dict) -> bool:
             SET tracking_consultado_at = NOW(), tracking_error = %s,
                 tracking_error_at = NOW(), updated_at = NOW()
             WHERE id = %s AND tracking = %s AND UPPER(courier) = 'FEDEX'
-              AND estado NOT IN ('CANCELADO', 'ENTREGADO', 'REEMPLAZADO')
+              AND (
+                  (estado NOT IN ('CANCELADO', 'ENTREGADO')
+                   AND estado <> 'REEMPLAZADO')
+                  OR (estado='CANCELADO' AND cancelacion_comercial=TRUE)
+              )
               AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
             RETURNING id
             """,
@@ -192,7 +200,11 @@ def actualizar_trackings_diarios_fedex(limite: Optional[int] = None, *, cliente_
                     FROM solicitudes_guia
                     WHERE UPPER(courier) = 'FEDEX'
                       AND NULLIF(BTRIM(tracking), '') IS NOT NULL
-                      AND estado NOT IN ('CANCELADO', 'ENTREGADO', 'REEMPLAZADO')
+                      AND (
+                          (estado NOT IN ('CANCELADO', 'ENTREGADO')
+                           AND estado <> 'REEMPLAZADO')
+                          OR (estado='CANCELADO' AND cancelacion_comercial=TRUE)
+                      )
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                       AND test = FALSE
                       AND EXISTS (SELECT 1 FROM clientes c

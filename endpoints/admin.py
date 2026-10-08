@@ -2203,38 +2203,13 @@ def admin_ajustar_precio_envio(
     csrf_precio: str = Form(...),
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Cambia el precio final con un asiento auditable; nunca pisa el original."""
+    """Los formularios anteriores pasan por la ficha con revisión de importe."""
     if not _is_auth(admin_token):
         return _redirect_login()
-
-    cliente = cliente_id.strip().upper()
-    destino = f"/admin/clientes/{quote(cliente)}"
-    alcance = f"precio:{cliente}:{int(envio_id)}"
-    if not _csrf_dhl_valido(csrf_precio, alcance):
-        return RedirectResponse(
-            url=f"{destino}?error={quote('El formulario venció. Recargá la página e intentá nuevamente.')}",
-            status_code=303,
-        )
-    try:
-        clave = _idempotency_key_form(idempotency_key)
-        nuevo = _importe_contable_form(
-            nuevo_precio_ars, "Nuevo precio", permitir_cero=True
-        )
-        from servicios.ajustes_precio_admin import aplicar_nuevo_precio
-        resultado = aplicar_nuevo_precio(
-            cliente_id=cliente,
-            envio_id=int(envio_id),
-            nuevo_precio_ars=nuevo,
-            motivo=motivo,
-            actor="admin",
-            idempotency_key=clave,
-        )
-    except ValueError as exc:
-        return RedirectResponse(
-            url=f"{destino}?error={quote(str(exc)[:300])}", status_code=303
-        )
-    ok = "precio_sin_cambios" if resultado.get("sin_cambios") else "precio_ajustado"
-    return RedirectResponse(url=f"{destino}?ok={ok}#envios-cliente", status_code=303)
+    return RedirectResponse(
+        url=f"/admin/clientes/{quote(cliente_id.strip().upper(), safe='')}/envios/{envio_id}/control#precio",
+        status_code=303,
+    )
 
 
 @router.get("/clientes/{cliente_id}/acceso-precios", response_class=HTMLResponse)
@@ -3054,22 +3029,16 @@ def admin_envio_cancelar(
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
-
-    resultado = cancelar_envio(
-        envio_id,
-        actor_tipo="admin",
-        actor_ref="admin",
+    from servicios.control_envios_admin import obtener_control_envio_admin, ControlEnvioAdminError
+    try:
+        dato = obtener_control_envio_admin(envio_id=envio_id)
+    except ControlEnvioAdminError:
+        return Response("El envío no existe.", status_code=404)
+    cliente = (dato.get("solicitud") or dato["cargo"])["cliente_id"]
+    return RedirectResponse(
+        url=f"/admin/clientes/{quote(cliente, safe='')}/envios/{envio_id}/control#cancelacion",
+        status_code=303,
     )
-    if not resultado:
-        return Response(
-            content=(
-                "No se puede cancelar este cargo. Si ya tiene factura, "
-                "requiere una nota de crédito documentada."
-            ),
-            status_code=409,
-        )
-    cliente_id = resultado["cliente_id"]
-    return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
 
 
 @router.post("/clientes/{cliente_id}/envios/{envio_id}/anular")
@@ -3078,27 +3047,11 @@ def admin_envio_anular(
     envio_id: int,
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Anula el cargo con ownership; el registro histórico nunca se borra."""
+    """Una baja necesita el motivo y la revisión de la ficha de control."""
     if not _is_auth(admin_token):
         return _redirect_login()
-
-    cliente_normalizado = cliente_id.strip().upper()
-    resultado = cancelar_envio(
-        envio_id,
-        cliente_id=cliente_normalizado,
-        actor_tipo="admin",
-        actor_ref="admin",
-    )
-    if not resultado:
-        return Response(
-            content=(
-                "No se puede anular este envío. Si ya tiene factura, "
-                "requiere una nota de crédito documentada."
-            ),
-            status_code=409,
-        )
     return RedirectResponse(
-        url=f"/admin/clientes/{cliente_normalizado}?ok=envio_anulado",
+        url=f"/admin/clientes/{quote(cliente_id.strip().upper(), safe='')}/envios/{envio_id}/control#cancelacion",
         status_code=303,
     )
 
@@ -6186,3 +6139,5 @@ async def admin_importar_waimao_dhl_historico(
 # Comparte la autenticación ADMIN; ningún endpoint de proveedores se monta en portal.
 from endpoints.admin_operadores import router as operadores_router
 router.include_router(operadores_router)
+from endpoints.admin_control_envios import router as control_envios_router
+router.include_router(control_envios_router)
