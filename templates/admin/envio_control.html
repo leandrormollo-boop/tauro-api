@@ -88,11 +88,12 @@
     <h2>Cancelar en la cuenta corriente<span data-help="Historial de la cancelación">Se conservan el envío, su importe original y el motivo de la cancelación para auditoría.</span></h2>
     {% if c.cancelacion.habilitada %}
     <p class="ec-note">{{ c.aviso_alcance }}</p>
+    {% for r in c.cancelacion.retiros %}<p class="ec-note ec-cancel-pickup">Se anulará el retiro <strong class="mono">{{ r.confirmation_code or r.id }}</strong>{% if r.courier %} de {{ nombre_courier(r.courier) }}{% endif %}{% if r.fecha %} del {{ r.fecha.strftime('%d/%m/%Y') }}{% endif %}.</p>{% endfor %}
     <div class="ec-cancel-open">
       <form method="post" action="{{ ruta_control }}" class="ec-form">
         {{ campos('cancelar') }}
         <label>Motivo de la cancelación<textarea name="motivo" minlength="8" maxlength="500" rows="2" required>{{ valores.get('motivo', '') if valores.get('accion') == 'cancelar' else '' }}</textarea></label>
-        <label class="ec-confirm"><input type="checkbox" name="confirmar" value="1" required>Confirmo la cancelación en TAURO. La guía del operador no se anula con esta acción.</label>
+        <label class="ec-confirm"><input type="checkbox" name="confirmar" value="1" required>Confirmo la cancelación en TAURO{% if c.cancelacion.retiros %} y la anulación del retiro ante el courier{% endif %}. La guía del operador no se anula con esta acción.</label>
         <button class="btn btn-ghost ec-danger" type="submit">Confirmar cancelación</button>
       </form>
     </div>
@@ -103,7 +104,7 @@
     </div>
       {% if c.cancelacion.codigo in ('REQUIERE_NOTA_CREDITO','DOCUMENTO_FISCAL_EMITIDO','COBERTURA_FISCAL_INCOMPLETA') %}<a class="btn btn-sm btn-primary" href="/admin/clientes/{{ c.cliente_id|urlencode }}/facturas">Revisar facturas y notas de crédito</a>{% endif %}
       {% if c.cancelacion.codigo == 'PAGO_IMPUTADO' %}<a class="btn btn-sm btn-primary" href="/admin/clientes/{{ c.cliente_id|urlencode }}?vista=pagos">Revisar pagos imputados</a>{% endif %}
-      {% if c.cancelacion.codigo == 'RECOLECCION_ACTIVA' %}<a class="btn btn-sm btn-primary" href="/admin/recolecciones">Paso 1 · Cancelar la recolección</a> <span class="ec-note">Después volvé acá para el paso 2.</span>{% endif %}
+      {% if c.cancelacion.codigo == 'RECOLECCION_ACTIVA' %}<a class="btn btn-sm btn-primary" href="/admin/recolecciones">Revisar la recolección</a>{% endif %}
     {% endif %}
   </section>
   <details class="ec-history"><summary>Historial de importes y documentos</summary>

@@ -77,6 +77,7 @@ def _render(request, dato, ruta, *, error=None, status=200, form=None):
                 "precio": "Precio actualizado. El cambio ya figura en la cuenta del cliente.",
                 "sin_cambios": "El precio ya tenía ese importe.",
                 "cancelado": "Cancelado en TAURO. El cargo ya no suma en la cuenta del cliente.",
+                "cancelado_con_retiro": "Cancelado en TAURO: se anuló el retiro ante el courier y el cargo ya no suma en la cuenta del cliente.",
                 "recoleccion": "Recolección confirmada por el operador.",
             }.get(request.query_params.get("ok", "")),
         }, status_code=status, headers={"Cache-Control": "private, no-store"},
@@ -123,10 +124,10 @@ async def _post(request, admin_token, **identidad):
     actor = "admin:" + hashlib.sha256(str(admin_token).encode()).hexdigest()[:12]
     try:
         if accion == "cancelar":
-            control.cancelar_envio_admin(
+            resultado = control.cancelar_envio_admin(
                 **identidad, motivo=str(form.get("motivo") or ""), actor=actor, revision=revision,
             )
-            ok = "cancelado"
+            ok = "cancelado_con_retiro" if (resultado or {}).get("retiros_cancelados") else "cancelado"
         elif accion == "precio":
             if not dato["precio"]["habilitada"]:
                 raise ValueError(dato["precio"]["motivo"])
