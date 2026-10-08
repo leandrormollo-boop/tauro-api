@@ -165,6 +165,10 @@ jobs:
             tests/test_snapshot_reemision_dhl.py \
             tests/test_dhl_snapshot_compatible_postgres.py \
             tests/test_incidencias_emision.py \
+            tests/test_catalogo_errores_emision.py \
+            tests/test_agente_incidencias_ia.py \
+            tests/test_control_incidencias_emision_postgres.py \
+            tests/test_admin_incidencias.py \
             tests/test_dhl_errores_accionables.py \
             tests/test_oca_adapter.py \
             tests/test_quote_result_experience.py \

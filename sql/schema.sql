@@ -4936,3 +4936,47 @@ CREATE TABLE IF NOT EXISTS automatizaciones_historial (
     fecha TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_automatizaciones_historial_clave ON automatizaciones_historial(clave,id DESC);
+
+-- Incidencias de emisión: evidencia operacional independiente de la retención
+-- de security_audit. No contiene formularios ni costos internos.
+CREATE TABLE IF NOT EXISTS emision_catalogo_errores (
+    codigo TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    contenido JSONB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS emision_intentos (
+    id BIGSERIAL PRIMARY KEY,
+    referencia TEXT NOT NULL UNIQUE,
+    solicitud_id INTEGER NOT NULL REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('cliente','admin')),
+    estado TEXT NOT NULL DEFAULT 'INICIADO'
+        CHECK (estado IN ('INICIADO','EXITOSO','FALLIDO','INCIERTO','CONCILIADO')),
+    iniciado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finalizado_en TIMESTAMPTZ,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    UNIQUE(id,solicitud_id)
+);
+CREATE INDEX IF NOT EXISTS idx_emision_intentos_solicitud ON emision_intentos(solicitud_id,id DESC);
+CREATE INDEX IF NOT EXISTS idx_emision_intentos_inconclusos ON emision_intentos(iniciado_en)
+    WHERE estado='INICIADO';
+CREATE TABLE IF NOT EXISTS emision_incidencias (
+    id BIGSERIAL PRIMARY KEY,
+    solicitud_id INTEGER NOT NULL REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    codigo TEXT NOT NULL REFERENCES emision_catalogo_errores(codigo),
+    estado TEXT NOT NULL DEFAULT 'PENDIENTE'
+        CHECK (estado IN ('PENDIENTE','EN_REVISION','RESUELTO')),
+    diagnostico JSONB NOT NULL,
+    cantidad INTEGER NOT NULL DEFAULT 1 CHECK (cantidad > 0),
+    ultimo_intento_id BIGINT NOT NULL REFERENCES emision_intentos(id),
+    creada_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resuelta_en TIMESTAMPTZ,
+    resolucion TEXT,
+    analisis JSONB,
+    analisis_token TEXT,
+    analisis_desde TIMESTAMPTZ,
+    UNIQUE(solicitud_id,codigo),
+    FOREIGN KEY(ultimo_intento_id,solicitud_id) REFERENCES emision_intentos(id,solicitud_id)
+);
+CREATE INDEX IF NOT EXISTS idx_emision_incidencias_pendientes ON emision_incidencias(actualizada_en DESC,id DESC)
+    WHERE estado <> 'RESUELTO';

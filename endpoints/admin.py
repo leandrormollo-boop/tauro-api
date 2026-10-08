@@ -1445,6 +1445,93 @@ def admin_incidencias_emision(
     )
 
 
+@router.get('/incidencias/resumen')
+def admin_incidencias_resumen(admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return JSONResponse({'error':'Sesión cerrada.'},status_code=401)
+    from servicios.control_incidencias_emision import resumen_incidencias
+    try:
+        return JSONResponse(resumen_incidencias(),headers={'Cache-Control':'no-store'})
+    except Exception:
+        return JSONResponse({'disponible':False},status_code=503,headers={'Cache-Control':'no-store'})
+
+
+@router.get('/incidencias', response_class=HTMLResponse)
+def admin_incidencias(request: Request, estado: str='pendientes', antes: int=0,
+                      admin_token: Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.control_incidencias_emision import listar_incidencias
+    from servicios.catalogo_errores_emision import catalogo_errores
+    estado=estado if estado in {'pendientes','resueltos','catalogo'} else 'pendientes'
+    datos=({'items':[],'inconclusos':[],'siguiente':0} if estado=='catalogo'
+           else listar_incidencias(estado,max(0,antes)))
+    for intento in datos['inconclusos']:
+        intento['csrf']=_csrf_dhl(f"intento:{intento['id']}")
+    return templates.TemplateResponse(request=request,name='admin/incidencias.html',
+        headers={'Cache-Control':'private, no-store'},
+        context={'seccion':'bandeja','estado':estado,'catalogo':catalogo_errores(),
+                 'verificacion':request.query_params.get('verificacion',''),**datos})
+
+
+@router.post('/incidencias/intentos/{intento_id}/verificar')
+def admin_intento_verificar(request:Request,intento_id:int,csrf:str=Form(''),
+                            admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf,f'intento:{intento_id}'):
+        return HTMLResponse('La pantalla venció. Volvé a abrir incidencias.',status_code=403)
+    from servicios.control_incidencias_emision import verificar_inconcluso
+    resuelto=verificar_inconcluso(intento_id,request)
+    return RedirectResponse('/admin/incidencias?verificacion='+('resuelto' if resuelto else 'pendiente'),status_code=303)
+
+
+@router.get('/incidencias/{incidencia_id}', response_class=HTMLResponse)
+def admin_incidencia_detalle(request:Request, incidencia_id:int,
+                            admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.control_incidencias_emision import obtener_incidencia
+    from servicios.agente_incidencias_ia import estado_agente_ia
+    item=obtener_incidencia(incidencia_id)
+    if not item:
+        return HTMLResponse('No encontramos esa incidencia.',status_code=404)
+    return templates.TemplateResponse(request=request,name='admin/incidencia_detalle.html',
+        headers={'Cache-Control':'private, no-store'},
+        context={'seccion':'bandeja','item':item,'ia':estado_agente_ia(),
+                 'revision_resultado':request.query_params.get('revision',''),
+                 'csrf':_csrf_dhl(f"incidencia:{incidencia_id}:{item['ultimo_intento_id']}")})
+
+
+@router.post('/incidencias/{incidencia_id}/analizar')
+def admin_incidencia_analizar(request:Request,incidencia_id:int,
+    intento_id:int=Form(...),csrf:str=Form(''),usar_ia:bool=Form(False),
+    admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf,f'incidencia:{incidencia_id}:{intento_id}'):
+        return HTMLResponse('La pantalla venció. Volvé a abrir la incidencia.',status_code=403)
+    if not check_rate('admin:incidencias:analizar',max_attempts=12,window_seconds=600):
+        return HTMLResponse('Hay varios análisis recientes. Esperá unos minutos.',status_code=429)
+    if usar_ia and not check_auth_rate('admin:incidencias:ia',max_attempts=12,window_seconds=600):
+        return HTMLResponse('Se alcanzó el límite de análisis de IA. Esperá unos minutos.',status_code=429)
+    from servicios.control_incidencias_emision import analizar_incidencia
+    resultado=analizar_incidencia(incidencia_id,intento_id,usar_ia=usar_ia,request=request)
+    return RedirectResponse(f'/admin/incidencias/{incidencia_id}?revision={resultado}',status_code=303)
+
+
+@router.post('/incidencias/{incidencia_id}/revision')
+def admin_incidencia_revision(request:Request,incidencia_id:int,
+    intento_id:int=Form(...),csrf:str=Form(''),admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf,f'incidencia:{incidencia_id}:{intento_id}'):
+        return HTMLResponse('La pantalla venció. Volvé a abrir la incidencia.',status_code=403)
+    from servicios.control_incidencias_emision import tomar_revision
+    tomada=tomar_revision(incidencia_id,intento_id,request)
+    return RedirectResponse(f'/admin/incidencias/{incidencia_id}'+('' if tomada else '?revision=sin_cambios'),status_code=303)
+
+
 @router.get("/backup.json")
 def admin_backup(admin_token: Optional[str] = Cookie(None)):
     """Descarga una exportación parcial para consulta; no es restaurable."""

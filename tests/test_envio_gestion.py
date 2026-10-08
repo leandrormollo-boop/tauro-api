@@ -84,6 +84,8 @@ def request(path='/portal/envios/81/gestion'):
 
 @pytest.mark.parametrize('revision', ['', '2026-10-01T00:00:00+00:00'])
 def test_confirmar_exige_revision_y_regresa_a_ventana(monkeypatch, revision):
+    monkeypatch.setattr('servicios.incidencias_emision.iniciar_intento',lambda *a:1)
+    monkeypatch.setattr('servicios.incidencias_emision.finalizar_intento',lambda *a:None)
     emitir = Mock(return_value=dict(ok=True))
     monkeypatch.setattr(sg, 'emitir_guia_como_cliente', emitir)
     monkeypatch.setattr('servicios.auditoria.registrar_desde_request', Mock())
