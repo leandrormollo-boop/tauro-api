@@ -163,6 +163,9 @@ jobs:
             tests/test_numeros_config_carriers_integracion.py \
             tests/test_portal_cotizador_multicourier.py \
             tests/test_snapshot_reemision_dhl.py \
+            tests/test_dhl_snapshot_compatible_postgres.py \
+            tests/test_incidencias_emision.py \
+            tests/test_dhl_errores_accionables.py \
             tests/test_oca_adapter.py \
             tests/test_quote_result_experience.py \
             tests/test_integraciones_contacto.py \
