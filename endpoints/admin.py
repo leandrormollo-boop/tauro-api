@@ -1425,12 +1425,17 @@ def admin_bandeja(request: Request, admin_token: Optional[str] = Cookie(None)):
 
 @router.get("/incidencias-emision", response_class=HTMLResponse)
 def admin_incidencias_emision(
-    request: Request, solicitud_id: int = 0, antes: int = 0,
+    request: Request, solicitud_id: str = "", antes: int = 0,
     resultado: str = "fallidos", admin_token: Optional[str] = Cookie(None),
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
     from servicios.incidencias_emision import listar_intentos
+    # Un formulario GET envía el filtro opcional vacío como solicitud_id=.
+    try:
+        solicitud_id = max(0, int(solicitud_id or 0))
+    except (TypeError, ValueError):
+        solicitud_id = 0
     resultado = resultado if resultado in {"todos", "fallidos", "exitosos"} else "fallidos"
     datos = listar_intentos(solicitud_id=solicitud_id, antes=antes, resultado=resultado)
     return templates.TemplateResponse(

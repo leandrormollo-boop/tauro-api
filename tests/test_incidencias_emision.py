@@ -76,3 +76,26 @@ def test_historial_admin_con_filtros(monkeypatch):
     res=admin.admin_incidencias_emision(SimpleNamespace(),solicitud_id=123,resultado='todos',antes=50,admin_token='test')
     consulta.assert_called_once_with(solicitud_id=123,resultado='todos',antes=50)
     assert res['name']=='admin/incidencias_emision.html'
+
+
+@pytest.mark.parametrize('query,esperado', [
+    ('resultado=todos', 0),
+    ('solicitud_id=&resultado=todos', 0),
+    ('solicitud_id=123&resultado=todos', 123),
+])
+def test_historial_http_acepta_formulario_con_solicitud_opcional(monkeypatch, query, esperado):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from endpoints import admin
+
+    consulta = Mock(return_value={'items': [], 'siguiente': 0})
+    monkeypatch.setattr(inc, 'listar_intentos', consulta)
+    monkeypatch.setattr(admin, '_is_auth', lambda _: True)
+    app = FastAPI()
+    app.include_router(admin.router)
+    with TestClient(app) as client:
+        response = client.get('/admin/incidencias-emision?' + query)
+    assert response.status_code == 200
+    assert 'Intentos de emisión' in response.text
+    assert 'No hay intentos registrados para este filtro' in response.text
+    consulta.assert_called_once_with(solicitud_id=esperado, antes=0, resultado='todos')
