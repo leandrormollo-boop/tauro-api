@@ -284,6 +284,8 @@ async def headers_de_seguridad(request: Request, call_next):
 _db_init_error = None
 try:
     init_db()
+    from servicios.control_incidencias_emision import inicializar_catalogo
+    inicializar_catalogo()
 except Exception as _db_err:
     _db_init_error = type(_db_err).__name__
     print(f"[startup] DB init error: {type(_db_err).__name__}")

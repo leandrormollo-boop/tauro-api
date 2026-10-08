@@ -10,6 +10,8 @@ from servicios import incidencias_emision as inc
 def registro(monkeypatch):
     audit=Mock()
     monkeypatch.setattr(inc,'registrar_desde_request',audit)
+    monkeypatch.setattr(inc,'iniciar_intento',Mock(return_value=1))
+    monkeypatch.setattr(inc,'finalizar_intento',Mock())
     return audit
 
 
@@ -47,6 +49,31 @@ def test_exito_no_altera_resultado(registro):
 def test_no_guarda_correo_token_ni_url():
     texto=inc._mensaje_registro('Error test@example.invalid token=SECRETO https://api.test/?key=privada')
     assert 'test@example' not in texto and 'SECRETO' not in texto and 'key=privada' not in texto
+
+
+def test_sin_registro_durable_no_llama_al_courier(registro,monkeypatch):
+    monkeypatch.setattr(inc,'iniciar_intento',Mock(side_effect=RuntimeError('secreto')))
+    emitir=Mock()
+    resultado=inc.ejecutar_emision_registrada(None,123,'cliente','PRUEBA',emitir)
+    assert resultado['codigo_error']=='REGISTRO_NO_DISPONIBLE'
+    emitir.assert_not_called()
+
+
+def test_registro_previo_y_fallo_posterior_no_duplica_emision(registro,monkeypatch):
+    eventos=[]
+    monkeypatch.setattr(inc,'iniciar_intento',lambda *a: eventos.append('iniciado') or 1)
+    monkeypatch.setattr(inc,'finalizar_intento',Mock(side_effect=RuntimeError('fallo db')))
+    resultado=inc.ejecutar_emision_registrada(None,123,'cliente','PRUEBA',
+        lambda: eventos.append('emitido') or {'ok':True,'tracking':'PRUEBA'})
+    assert eventos==['iniciado','emitido']
+    assert resultado=={'ok':True,'tracking':'PRUEBA'}
+
+
+def test_solicitud_ajena_no_llega_al_courier(registro,monkeypatch):
+    monkeypatch.setattr(inc,'iniciar_intento',lambda *a:None)
+    emitir=Mock()
+    assert inc.ejecutar_emision_registrada(None,123,'cliente','OTRO',emitir)['ok'] is False
+    emitir.assert_not_called()
 
 
 @pytest.mark.parametrize('credencial', [

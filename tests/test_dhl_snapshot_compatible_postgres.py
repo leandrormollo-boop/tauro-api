@@ -94,8 +94,10 @@ def test_fallo_portal_queda_consultable_en_admin(caso,monkeypatch):
     from starlette.requests import Request
     from endpoints import portal_cliente as pc
     from servicios import incidencias_emision as inc, auditoria
+    from servicios import control_incidencias_emision as control
     db,sol,_=caso
     monkeypatch.setattr(inc,'get_conn',db)
+    monkeypatch.setattr(control,'get_conn',db)
     monkeypatch.setattr(auditoria,'get_conn',db)
     monkeypatch.setattr(sg,'emitir_guia_como_cliente',lambda *a,**kw:{
         'ok':False,'codigo_error':'TARIFA_GUARDADA_INCONSISTENTE',
