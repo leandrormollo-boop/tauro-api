@@ -709,3 +709,7 @@ requiere migración y conciliación antes de mostrar dos saldos.
   WAIMAO cotiza; emisión por cliente apagada; sin guía productiva aún). `/partners` no lo lista
   porque es la barra internacional. Fuente: vault `TAURO-OCA-Integracion`. Para el UAT de
   Tiendanube: cargar OCA_* **QA** en staging (cuenta 111757/001, operativa 64665, centro 2).
+- **Fix aplicado (08/10 19:02Z, con OK de Leandro):** en el panel de Railway, servicio tauro-api,
+  entorno staging → Pre-deploy `python scripts/migrate_database.py`, Healthcheck `/health`,
+  timeout 180. Redeploy: pre-deploy corrió, /health 200 a los 73 s, estable. Staging VIVO.
+  Pendiente: cargar lo mismo en production antes del 01/12/2026 (hoy lo toma de railway.json).
