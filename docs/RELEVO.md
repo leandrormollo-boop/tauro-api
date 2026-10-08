@@ -705,3 +705,7 @@ requiere migración y conciliación antes de mostrar dos saldos.
 - Reproducido local: base con schema del 30/09 → mismo error; `migrate_database.py` → OK.
 - Fix: cargar en el panel de staging Pre-deploy + Healthcheck `/health` (pendiente OK de
   Leandro); después push → CI + staging → verificar → re-merge main → mergear PR a main.
+- **Corrección OCA (08/10):** OCA está operativo en prod desde 25/09 (flags globales activos,
+  WAIMAO cotiza; emisión por cliente apagada; sin guía productiva aún). `/partners` no lo lista
+  porque es la barra internacional. Fuente: vault `TAURO-OCA-Integracion`. Para el UAT de
+  Tiendanube: cargar OCA_* **QA** en staging (cuenta 111757/001, operativa 64665, centro 2).
