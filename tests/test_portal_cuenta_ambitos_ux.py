@@ -322,7 +322,8 @@ def test_columna_cuenta_conserva_cargos_y_pagos_contables_con_copy_claro():
     assert "{{ dinero(m.haber_ars) }}" in html
     assert "{% elif m.debe_ars %}" in html
     assert "{{ dinero(m.debe_ars) }}" in html
-    assert "Valor cotizado" in html
+    assert "Costo inicial" in html
+    assert "Saldo final" in html
     assert "La diferencia ya está incluida en el costo final." in html
     assert "Se suma al saldo" in html
     assert "Se descuenta del saldo" in html

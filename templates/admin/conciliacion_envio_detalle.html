@@ -21,11 +21,42 @@ $ {{ (valor|default(0, true))|numero_ars }}
 {% if request.query_params.get('ok') %}<div class="msg ok">Operación registrada correctamente.</div>{% endif %}
 {% if request.query_params.get('error') %}<div class="msg error">{{ request.query_params.get('error') }}</div>{% endif %}
 
+{% set p_ini = (envio.peso_facturable_cotizado_kg or envio.peso_kg)|float if (envio.peso_facturable_cotizado_kg or envio.peso_kg) else none %}
+{% set p_fac = envio.peso_final_facturado_kg|float if envio.peso_final_facturado_kg else none %}
+{% set inicial = envio.precio_tauro_ars or 0 %}
+{% set final = envio.precio_cliente_final_ars if envio.conciliacion_id else none %}
+<div class="card" style="margin-bottom:12px;">
+  <div class="card-head"><div><h3>Cuenta del cliente<span data-help="Cuenta del cliente">Costo inicial cobrado al emitir la guía, la diferencia contra lo facturado por el operador y el saldo final del envío. El peso inicial es el mayor entre el real y el volumétrico.</span></h3></div>
+  {% if envio.ajuste_id and envio.ajuste_estado == 'PROPUESTO' %}<span class="badge warn">Diferencia sin aplicar</span>{% elif envio.ajuste_id %}<span class="badge ok">{{ envio.ajuste_estado|title }}</span>{% endif %}</div>
+  <div class="account-difference-flow" aria-label="Costo inicial más diferencia igual saldo final">
+    <span class="account-difference-value is-initial">
+      <small>Costo inicial</small>
+      <strong>{{ dinero(inicial) }}</strong>
+      <em class="account-difference-weight">{{ (p_ini or '—')|kg }} cotizados{% if envio.peso_real_cotizado_kg or envio.peso_volumetrico_cotizado_kg %} · real {{ (envio.peso_real_cotizado_kg or envio.peso_kg or '—')|kg }}{% if envio.peso_volumetrico_cotizado_kg %} · vol. {{ envio.peso_volumetrico_cotizado_kg|kg }}{% endif %}{% endif %}</em>
+    </span>
+    {% if final is not none %}
+    {% set dif = final - inicial %}
+    <span class="account-difference-operator" aria-hidden="true">{{ '−' if dif < 0 else '+' }}</span>
+    <span class="account-difference-value is-adjustment {% if dif < 0 %}is-credit{% endif %}">
+      <small>Diferencia{% if envio.tax_cliente_ars %} (incluye TAX {{ dinero(envio.tax_cliente_ars) }}){% endif %}</small>
+      <strong>{{ '−' if dif < 0 else '+' }} {{ dinero(dif|abs) }}</strong>
+      {% if p_ini and p_fac %}<em class="account-difference-weight">{{ '+' if p_fac >= p_ini else '−' }}{{ (p_fac - p_ini)|abs|kg }}{% if p_fac > p_ini + 0.009 %} facturados de más{% endif %}</em>{% endif %}
+    </span>
+    <span class="account-difference-operator" aria-hidden="true">=</span>
+    <span class="account-difference-value is-final">
+      <small>Saldo final</small>
+      <strong>{{ dinero(final) }}</strong>
+      <em class="account-difference-weight">{{ (p_fac or '—')|kg }} facturados</em>
+    </span>
+    {% else %}
+    <span class="account-difference-operator" aria-hidden="true">·</span>
+    <span class="account-difference-value"><small>Saldo final</small><strong>Sin factura conciliada</strong>{% if p_fac %}<em class="account-difference-weight">{{ p_fac|kg }} facturados</em>{% endif %}</span>
+    {% endif %}
+  </div>
+</div>
 <div class="dashboard-stats" style="margin-bottom:18px;">
-  <div class="card"><small>Precio aceptado</small><h2>{{ dinero(envio.precio_tauro_ars) }}</h2><p>Peso inicial {{ (envio.peso_facturable_cotizado_kg or envio.peso_kg or '—')|kg }}{% if envio.peso_real_cotizado_kg or envio.peso_volumetrico_cotizado_kg %} <small>(real {{ (envio.peso_real_cotizado_kg or envio.peso_kg or '—')|kg }}{% if envio.peso_volumetrico_cotizado_kg %} · vol. {{ envio.peso_volumetrico_cotizado_kg|kg }}{% endif %})</small>{% endif %}{% if envio.peso_final_facturado_kg %}<br>Facturado {{ envio.peso_final_facturado_kg|kg }}{% if envio.peso_facturable_cotizado_kg and envio.peso_final_facturado_kg > envio.peso_facturable_cotizado_kg + 0.009 %} <span class="badge warn">+{{ (envio.peso_final_facturado_kg - envio.peso_facturable_cotizado_kg)|kg }} de más</span>{% else %} <span class="badge ok">dentro de lo cotizado</span>{% endif %}{% endif %}</p></div>
   <div class="card"><small>Costo estimado interno</small><h2>{{ dinero(envio.costo_courier_estimado_ars) if envio.snapshot_id else 'Pendiente' }}</h2><p>{% if envio.snapshot_id %}Margen protegido {{ dinero(envio.margen_tauro_protegido_ars) }}{% else %}Falta congelar la base{% endif %}</p></div>
   <div class="card"><small>Costo real courier</small><h2>{{ dinero(envio.costo_courier_real_ars) if envio.conciliacion_id else 'Pendiente' }}</h2><p>Dato interno, nunca visible al cliente</p></div>
-  <div class="card"><small>Precio final cliente</small><h2>{{ dinero(envio.precio_cliente_final_ars) if envio.conciliacion_id else dinero(envio.precio_tauro_ars) }}</h2><p>{% if envio.conciliacion_id %}Diferencia {{ dinero(envio.diferencia_flete_ars) }} · TAX {{ dinero(envio.tax_cliente_ars) }}{% else %}Sin factura conciliada{% endif %}</p></div>
 </div>
 
 <div class="card" style="margin-bottom:18px;">

@@ -3250,6 +3250,22 @@ html[data-theme="light"] .account-total-card {
 .account-difference-value.is-final small { color: var(--accent-soft); font-weight: 600; }
 .account-difference-value.is-final strong { color: var(--fg); font-size: 17px; font-weight: 780; }
 .account-difference-operator { color: var(--fg-4); font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+/* Jerarquía: costo inicial discreto, diferencia destacada, saldo final grande. */
+.account-difference-value.is-initial small { color: var(--fg-4); }
+.account-difference-value.is-initial strong { color: var(--fg-3); font-size: 11px; font-weight: 400; }
+.account-difference-value.is-adjustment strong { font-size: 14px; font-weight: 720; }
+.account-difference-value.is-final strong { font-size: 19px; }
+.account-difference-weight {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+}
+.account-difference-value.is-initial .account-difference-weight { color: var(--fg-4); }
+.account-difference-value.is-adjustment .account-difference-weight { color: var(--warning, #fbbf24); font-weight: 650; }
+.account-difference-value.is-adjustment.is-credit .account-difference-weight { color: var(--ok); }
 .account-table td small.account-difference-reason { margin-top: 5px; color: var(--fg-3); }
 .account-table td small.account-difference-policy { color: var(--fg-4); font-size: 7.5px; }
 .account-document-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 3px; }
@@ -3761,7 +3777,13 @@ html[data-theme="light"] .account-total-card {
   padding-top: 11px;
   border-top: 1px solid var(--line-soft);
 }
-.envio-account-total strong { color: var(--accent-soft); font-size: 16px; }
+.envio-account-total span { display: flex; flex-direction: column; gap: 2px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; color: var(--fg); }
+.envio-account-total span small { text-transform: none; letter-spacing: 0; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; color: var(--fg-2); }
+.envio-account-total strong { color: var(--fg); font-size: 21px; font-weight: 760; }
+.envio-account-initial span { display: flex; flex-direction: column; gap: 2px; color: var(--fg-4); font-size: 11px; }
+.envio-account-initial span small { font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
+.envio-account-initial strong { color: var(--fg-3); font-size: 12px; font-weight: 400; }
+.envio-account-extra.diferencia strong { font-size: 15px; font-weight: 720; }
 .envios-table .row-actions {
   justify-content: flex-end;
   gap: 4px;
