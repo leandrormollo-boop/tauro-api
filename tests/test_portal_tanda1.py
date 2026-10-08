@@ -72,9 +72,10 @@ def test_pegar_pedido_para_clientes_cerrado_sin_gate_admin(wizard, monkeypatch, 
     parser = Mock(return_value={"campos": {"dest_nombre": "Prueba"}})
     monkeypatch.setattr(parser_pedidos, "parsear_pedido", parser)
     html = wizard(token)
-    assert '<details class="card shipment-paste"' in html
-    assert '<summary>Pegar pedido recibido por mail</summary>' in html
-    assert 'open' not in html.split('<details class="card shipment-paste"', 1)[1].split('>', 1)[0]
+    # El atajo "Pegar pedido" salió del wizard (no funcionaba; Leandro 02/10).
+    # La API queda disponible para cualquier cliente logueado, sin gate admin.
+    assert "shipment-paste" not in html
+    assert "btn-parsear" not in html
     api_request = request(token=token)
     api_request._body = json.dumps({"texto": "Pedido de prueba"}).encode()
     response = asyncio.run(pc.api_parsear_pedido(api_request, cliente="DEMO"))

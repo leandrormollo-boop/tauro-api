@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% from 'portal/_ubicacion_cotizada.html' import confirmar_ubicacion %}
 {% block title %}Envío nacional · OCA{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-nacional.css?v=2"><script src="/static/js/portal-agenda.js?v=2" defer></script><script src="/static/js/portal-nacional.js?v=3" defer></script><link rel="stylesheet" href="/static/css/shipment-location-confirmation.css?v=1"><script src="/static/js/shipment-location-confirmation.js?v=1" defer></script>{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="/static/css/portal-nacional.css?v=2"><script src="/static/js/portal-agenda.js?v=2" defer></script><script src="/static/js/portal-nacional.js?v=3" defer></script>{% endblock %}
 {% macro input(prefix,key,label,span=6,required=true,limit=30,kind='text') %}
 {% set name=prefix~'_'~key %}<div class="ns-field ns-span-{{span}}"><label for="ns_{{name}}">{{label}}{% if not required %}<small>Opcional</small>{% endif %}</label><input id="ns_{{name}}" name="{{name}}" value="{{form.get(name,'')}}" type="{{kind}}" maxlength="{{limit}}" {% if required %}required{% endif %}></div>
 {% endmacro %}
