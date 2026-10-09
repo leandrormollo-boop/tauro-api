@@ -82,7 +82,7 @@ def test_cotizador_movil_no_superpone_acciones_y_restituye_foco(browser, width):
 
         page.keyboard.press("Escape")
         assert not page.locator("#quote-window-dialog").evaluate("dialog => dialog.open")
-        assert page.evaluate("document.activeElement.id") == "quote-test-opener"
+        page.wait_for_function("document.activeElement.id === 'quote-test-opener'")
         assert errors == []
     finally:
         page.close()
