@@ -165,23 +165,17 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
   border-radius: 0 0 8px 8px;
   background: var(--accent-soft);
   transform-origin: bottom; transform: scaleY(0);
-  animation: home-bar-rise .9s cubic-bezier(.3,1.35,.45,1) var(--d, 0ms) forwards,
-             home-bar-bob 4.6s ease-in-out calc(var(--d, 0ms) + 1s) infinite;
+  animation: home-bar-rise .2s ease-out var(--d, 0ms) forwards;
   transition: filter .18s ease;
 }
 .portal-operacion .home-bar-fill::before,
 .portal-operacion .home-bar-fill::after {
   content: ""; position: absolute; top: 0; left: 50%; width: 46px; height: 46px;
   translate: -50% -50%; background: var(--accent-soft); border-radius: 42% 46% 44% 48%;
-  animation: home-bar-liquid 5.2s linear infinite;
 }
-.portal-operacion .home-bar-fill::after { background: var(--accent-soft); border-radius: 47% 42% 49% 43%; animation-duration: 7.4s; animation-direction: reverse; }
+.portal-operacion .home-bar-fill::after { background: var(--accent-soft); border-radius: 47% 42% 49% 43%; }
 .portal-operacion .home-monthly-bar:hover .home-bar-fill { filter: brightness(1.14) drop-shadow(0 0 7px rgba(167,139,250,.35)); }
-.portal-operacion .home-monthly-bar:hover .home-bar-fill::before { animation-duration: 1.8s; }
-.portal-operacion .home-monthly-bar:hover .home-bar-fill::after { animation-duration: 2.6s; }
 @keyframes home-bar-rise { to { transform: scaleY(1); } }
-@keyframes home-bar-bob { 0%, 100% { height: var(--p, 0%); } 50% { height: calc(var(--p, 0%) + 3px); } }
-@keyframes home-bar-liquid { to { rotate: 360deg; } }
 .portal-operacion .home-monthly-bar:hover strong { color: var(--accent-soft); transform: translateY(-1px); }
 .portal-operacion .home-destinations-list { list-style: none; margin: 0; padding: 0 20px 18px; }
 .portal-operacion .home-destinations-list li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; }
@@ -198,14 +192,13 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
   position: absolute; inset: 0 auto 0 0; width: var(--p, 0%); border-radius: 6px;
   background: linear-gradient(90deg, #6f45cf, #b99bff);
   transform-origin: left; transform: scaleX(0);
-  animation: home-dest-flow .9s cubic-bezier(.3,1.3,.5,1) var(--d, 0ms) forwards;
+  animation: home-dest-flow .2s ease-out var(--d, 0ms) forwards;
   transition: filter .18s ease;
 }
 .portal-operacion .home-dest-fill::before {
   content: ""; position: absolute; inset: 0; border-radius: 6px;
   background: linear-gradient(90deg, transparent 20%, rgba(255,255,255,.28) 50%, transparent 80%);
   background-size: 220% 100%;
-  animation: home-dest-stream 3.4s ease-in-out calc(var(--d, 0ms) + 1s) infinite;
 }
 .portal-operacion .home-dest-fill::after {
   content: ""; position: absolute; right: -1px; top: 50%; width: 9px; height: 9px; translate: 0 -50%;
@@ -213,7 +206,6 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 }
 .portal-operacion .home-destinations-list li:hover .home-dest-fill { filter: brightness(1.12); }
 @keyframes home-dest-flow { to { transform: scaleX(1); } }
-@keyframes home-dest-stream { 0% { background-position: 160% 0; } 100% { background-position: -90% 0; } }
 @media (prefers-reduced-motion: reduce) {
   .portal-operacion .home-bar-fill, .portal-operacion .home-dest-fill { animation: none; transform: none; }
   .portal-operacion .home-bar-fill::before, .portal-operacion .home-bar-fill::after, .portal-operacion .home-dest-fill::before { content: none; }
