@@ -30,7 +30,7 @@
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=3">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/documentos.css?v=3">
     <script src="/static/js/documentos.js?v=3" defer></script>{% endif %}
-    <link rel="stylesheet" href="/static/css/portal-cotizador.css?v=9">
+    <link rel="stylesheet" href="/static/css/portal-cotizador.css?v=11">
     <link rel="stylesheet" href="/static/css/quote-route-map.css?v=3">
     <link rel="stylesheet" href="/static/css/portal-claro.css?v=1">
     {% block extra_css %}{% endblock %}
@@ -50,7 +50,7 @@
     <script src="/static/js/quote-route.js?v=1" defer></script>
     <script src="/static/js/quote-route-map.js?v=2" defer></script>
     <script src="/static/js/quote-globe-portal.js?v=2" defer></script>
-    <script src="/static/js/portal-cotizador.js?v=13" defer></script>
+    <script src="/static/js/portal-cotizador.js?v=16" defer></script>
     <script src="/static/js/portal-theme.js?v=2" defer></script>
     <link rel="icon" type="image/png" href="/static/img/favicon.png?v=2">
     <link rel="apple-touch-icon" href="/static/img/favicon-180.png">
@@ -218,7 +218,7 @@
     <!-- ── MAIN ────────────────────────────────────────── -->
     <div class="main">
         <div class="mobile-bar">
-            <button type="button" class="burger" aria-label="Abrir menú" aria-controls="portal-sidebar" aria-expanded="false">
+            <button type="button" id="side-toggle-button" class="burger" aria-label="Abrir menú" aria-controls="portal-sidebar" aria-expanded="false">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
             </button>
             <a href="/portal/home" class="side-logo" style="padding:0;font-size:15px;">

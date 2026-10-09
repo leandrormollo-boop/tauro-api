@@ -86,15 +86,24 @@
     var timer = setTimeout(function () { if (!signal.aborted) callback(); }, delay);
     return function () { clearTimeout(timer); };
   }
+  function focusShift(rect, safeTop, safeBottom, padding) {
+    var gap = padding === undefined ? 12 : padding;
+    if (rect.bottom + gap > safeBottom) return rect.bottom + gap - safeBottom;
+    if (rect.top - gap < safeTop) return rect.top - gap - safeTop;
+    return 0;
+  }
   function resultState(block, complete) {
     var hasPrice = Boolean(block.querySelector('.uq-price'));
     var hasError = Boolean(block.querySelector('.uq-error'));
+    var hasUnavailable = Boolean(block.querySelector('.uq-unavailable'));
     return {
       hasPrice: hasPrice,
+      failed: hasError || (!hasPrice && hasUnavailable),
       current: hasPrice && !hasError,
       button: hasPrice && !hasError ? 'Ver tarifas' : 'Volver a consultar',
       status: !complete ? 'Consultando otros operadores…'
         : hasError && hasPrice ? 'Podés usar las tarifas recibidas o volver a consultar.'
+        : !hasPrice && hasUnavailable ? 'No recibimos una tarifa. Podés volver a consultar.'
         : hasPrice ? 'Tarifas actualizadas.' : 'Revisá el resultado de la consulta.',
     };
   }
@@ -153,6 +162,7 @@
   quoteRequest.readNdjson = readNdjson;
   quoteRequest.copyResellerInputs = copyResellerInputs;
   quoteRequest.armDeadline = armDeadline;
+  quoteRequest.focusShift = focusShift;
   quoteRequest.resultState = resultState;
   return quoteRequest;
 });
@@ -163,6 +173,26 @@
   var dialog = document.getElementById('quote-window-dialog');
   var content = dialog && dialog.querySelector('[data-cotizar-contenido]');
   var opener, loadingController, initialized = new WeakMap();
+
+  function keepDialogFocusVisible() {
+    if (!dialog || !dialog.open || !content || !content.contains(document.activeElement)) return;
+    window.requestAnimationFrame(function () {
+      var focused = document.activeElement;
+      if (!dialog.open || !focused || !content.contains(focused)) return;
+      var viewport = window.visualViewport;
+      var viewportTop = viewport ? viewport.offsetTop : 0;
+      var viewportBottom = viewportTop + (viewport ? viewport.height : window.innerHeight);
+      var contentRect = content.getBoundingClientRect();
+      var header = dialog.querySelector('.quote-window-head');
+      var headerBottom = header ? header.getBoundingClientRect().bottom : contentRect.top;
+      var safeTop = Math.max(viewportTop, headerBottom, contentRect.top);
+      var safeBottom = Math.min(viewportBottom, contentRect.bottom);
+      var shift = window.TauroQuoteRequest.focusShift(
+        focused.getBoundingClientRect(), safeTop, safeBottom, 12
+      );
+      if (shift && typeof content.scrollBy === 'function') content.scrollBy({top: shift, behavior: 'auto'});
+    });
+  }
 
   function numeric(value, kind) {
     if (window.TauroNumeros) {
@@ -188,6 +218,38 @@
     var detail = document.createElement('span'); detail.textContent = 'Origen, destino y peso listos. Esperando la tarifa.';
     var track = document.createElement('i'); track.setAttribute('aria-hidden', 'true');
     copy.append(title, detail); box.append(copy, track); container.replaceChildren(box);
+  }
+  function staleQuote(container, text) {
+    if (!container.querySelector('.uq-price')) return false;
+    var response = container.querySelector('[data-quote-response]') || container;
+    response.querySelectorAll('[data-quote-recovery]').forEach(function (node) { node.remove(); });
+    var notice = response.querySelector('[data-quote-stale]');
+    if (!notice) {
+      notice = document.createElement('p'); notice.className = 'uq-stale';
+      notice.dataset.quoteStale = ''; notice.setAttribute('role', 'status');
+      response.prepend(notice);
+    }
+    notice.textContent = text;
+    response.querySelectorAll('.uq-choose').forEach(function (link) {
+      link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true');
+      link.dataset.quoteStaleAction = '';
+    });
+    response.querySelectorAll('form').forEach(function (form) {
+      form.dataset.quoteStaleAction = '';
+      form.querySelectorAll('input,select,textarea,button').forEach(function (control) { control.disabled = true; });
+    });
+    return true;
+  }
+  function quoteRecovery(container) {
+    var response = container.querySelector('[data-quote-response]') || container;
+    var recovery = response.querySelector('[data-quote-recovery]');
+    if (recovery) return recovery;
+    recovery = document.createElement('div'); recovery.className = 'uq-recovery';
+    recovery.dataset.quoteRecovery = '';
+    var button = document.createElement('button'); button.type = 'button';
+    button.className = 'btn btn-ghost btn-sm'; button.dataset.quoteRetry = '';
+    button.textContent = 'Volver a consultar'; recovery.appendChild(button);
+    response.appendChild(recovery); return recovery;
   }
   function quoteError(container, text) {
     if (!container.querySelector('.uq-price')) { message(container, text, true); return false; }
@@ -219,6 +281,7 @@
       var result = panel.querySelector('[data-quote-results]');
       var resultPanel = result.closest('.uq-results');
       var status = form.querySelector('[data-quote-status]');
+      var resultStatus = panel.querySelector('[data-quote-results-status]');
       var submit = form.querySelector('[data-quote-submit]'), initial = true, hasCurrentQuote = false;
       var packageList = form.querySelector('#quote-package-list');
       var template = form.querySelector('#quote-package-template');
@@ -227,6 +290,10 @@
       var tabs = form.querySelector('[data-package-tabs]');
       if (tabs) form.querySelector('.uq-section-title').insertBefore(tabs, form.querySelector('#quote-add-package'));
       var stepNav = panel.querySelector('.uq-step-nav'), actions = panel.querySelector('.uq-mobile-actions');
+      result.setAttribute('aria-busy', 'false');
+      resultPanel.dataset.quoteState = result.querySelector('.uq-price') ? 'ready'
+        : result.querySelector('.uq-error,.uq-unavailable') ? 'error' : 'idle';
+      function announce(text) { status.textContent = text; resultStatus.textContent = text; }
       function showStep(step, focus) {
         mobileStep = Math.max(1, Math.min(3, step)); panel.dataset.mobileStep = mobileStep;
         stepNav.hidden = !mobile.matches; actions.hidden = !mobile.matches;
@@ -237,6 +304,8 @@
         actions.querySelector('[data-quote-back]').disabled = mobileStep === 1;
         actions.querySelector('[data-quote-next]').hidden = mobileStep === 3;
         actions.querySelector('[data-quote-step-status]').textContent = mobileStep + ' de 3';
+        status.setAttribute('aria-live', !mobile.matches || mobileStep !== 3 ? 'polite' : 'off');
+        resultStatus.setAttribute('aria-live', mobile.matches && mobileStep === 3 ? 'polite' : 'off');
         if (focus && mobile.matches) {
           var heading = mobileStep === 3 ? panel.querySelector('.uq-results h2') : mobileStep === 2 ? form.querySelector('.uq-section-title h2') : stepNav;
           heading.tabIndex = -1; heading.focus({preventScroll:true});
@@ -341,21 +410,26 @@
           initial = false;
           resultPanel.dataset.quoteState = complete ? 'editing' : 'idle';
           result.classList.remove('is-revealing');
+          result.querySelectorAll('[data-quote-stream-error]').forEach(function (node) { node.remove(); });
           result.setAttribute('aria-busy', 'false');
-          status.textContent = complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.';
-          message(result, complete ? 'Las tarifas se actualizan automáticamente.' : 'Tus opciones aparecerán al completar los datos.');
+          announce(complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.');
+          if (!staleQuote(result, complete
+            ? 'Datos modificados. La tarifa visible puede estar desactualizada mientras consultamos nuevamente.'
+            : 'Datos incompletos. La tarifa visible puede estar desactualizada; completá los datos para actualizarla.')) {
+            message(result, complete ? 'Las tarifas se actualizan automáticamente.' : 'Tus opciones aparecerán al completar los datos.');
+          }
         },
         loading: function () {
           resultPanel.dataset.quoteState = 'loading';
           result.classList.remove('is-revealing');
+          result.querySelectorAll('[data-quote-stream-error]').forEach(function (node) { node.remove(); });
           result.setAttribute('aria-busy', 'true');
-          status.textContent = 'Consultando la tarifa para esta ruta…';
-          quoteProgress(result);
+          announce('Consultando la tarifa para esta ruta…');
+          if (!staleQuote(result, 'Actualizando la tarifa. La opción visible corresponde a la última consulta.')) quoteProgress(result);
         },
         fetch: async function (signal, onProgress) {
           var clearDeadline = window.TauroQuoteRequest.armDeadline(signal, function () {
-            control.pause(); message(result, 'La consulta demoró demasiado. Volvé a consultar.', true);
-            result.setAttribute('aria-busy','false'); status.textContent='Volvé a consultar las tarifas.';
+            control.pause(); showError('La consulta demoró demasiado. Volvé a consultar.');
           }, 90000);
           try {
             var headers = {'X-Requested-With': 'TauroQuoteWindow'};
@@ -381,21 +455,36 @@
           result.classList.remove('is-revealing');
           result.replaceChildren(block); result.setAttribute('aria-busy', String(!complete));
           restoreResellerFocus();
-          resultPanel.dataset.quoteState = complete ? 'ready' : 'loading';
+          resultPanel.dataset.quoteState = !complete ? 'loading'
+            : state.failed ? 'error' : state.hasPrice ? 'ready' : 'empty';
+          if (complete && state.failed) quoteRecovery(result);
           window.requestAnimationFrame(function () { result.classList.add('is-revealing'); });
           hasCurrentQuote = state.current; submit.textContent = state.button;
-          status.textContent = state.status;
+          announce(state.status);
         },
-        error: function (error) {
-          resultPanel.dataset.quoteState = 'error'; result.setAttribute('aria-busy', 'false');
-          var keptPrice = quoteError(result, error.message); hasCurrentQuote = false;
-          submit.textContent = 'Volver a consultar';
-          status.textContent = keptPrice
-            ? 'Podés usar las tarifas recibidas o volver a consultar.'
-            : 'Podés volver a consultar.';
-        }
+        error: function (error) { showError(error.message); }
       });
+      function showError(text) {
+        resultPanel.dataset.quoteState = 'error'; result.setAttribute('aria-busy', 'false');
+        var keptPrice = quoteError(result, text); hasCurrentQuote = false;
+        if (keptPrice) staleQuote(result, 'No pudimos actualizar la tarifa. La opción visible corresponde a la última consulta.');
+        quoteRecovery(result); submit.textContent = 'Volver a consultar';
+        announce(keptPrice
+          ? 'No pudimos actualizar. Conservamos la última tarifa para que puedas volver a consultar.'
+          : 'No pudimos consultar. Podés volver a intentar sin cargar los datos otra vez.');
+      }
       controls[scope] = control;
+      result.addEventListener('click', function (event) {
+        if (event.target.closest('[data-quote-stale-action]')) { event.preventDefault(); return; }
+        if (!event.target.closest('[data-quote-retry]')) return;
+        control.resume(); control.run(true);
+      });
+      result.addEventListener('submit', function (event) {
+        if (event.target.matches('[data-quote-stale-action]')) event.preventDefault();
+      });
+      result.addEventListener('contextmenu', function (event) {
+        if (event.target.closest('[data-quote-stale-action]')) event.preventDefault();
+      });
       form.addEventListener('input', control.changed);
       form.addEventListener('change', function (event) {
         // Cambiar país invalida ciudad/CP; nunca inventamos un domicilio a
@@ -483,6 +572,12 @@
   }
   document.querySelectorAll('.unified-quote').forEach(init);
   if (!dialog) return;
+  content.addEventListener('focusin', keepDialogFocusVisible);
+  window.addEventListener('resize', keepDialogFocusVisible, {passive: true});
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', keepDialogFocusVisible, {passive: true});
+    window.visualViewport.addEventListener('scroll', keepDialogFocusVisible, {passive: true});
+  }
   async function open(trigger) {
     opener = trigger;
     if (!dialog.showModal) { location.assign(trigger.href); return; }
@@ -516,9 +611,21 @@
   });
   dialog.querySelector('[data-cotizar-cerrar]').addEventListener('click', function () { dialog.close(); });
   dialog.addEventListener('click', function (event) { if (event.target === dialog) dialog.close(); });
+  function canRestoreFocus(target) {
+    if (!target || !target.isConnected || target.closest('[inert]')) return false;
+    if (target.matches('[disabled], [aria-hidden="true"]')) return false;
+    var style = window.getComputedStyle(target);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    var rect = target.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
+      rect.top < window.innerHeight && rect.left < window.innerWidth;
+  }
   dialog.addEventListener('close', function () {
     if (loadingController) loadingController.abort();
     var root = content.querySelector('.unified-quote'); if (root) init(root).pause();
-    if (opener && document.contains(opener)) opener.focus({preventScroll: true});
+    var focusTarget = canRestoreFocus(opener) ? opener : document.getElementById('side-toggle-button');
+    window.setTimeout(function () {
+      if (canRestoreFocus(focusTarget)) focusTarget.focus({preventScroll: true});
+    }, 0);
   });
 })();

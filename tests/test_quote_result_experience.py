@@ -57,6 +57,7 @@ def test_resultado_renderiza_ruta_operador_y_precio_sin_imagen_de_marca():
     assert "Yiwu, CN" in html and "Polanco, MX" in html
     assert "DHL Express" in html and "Express Worldwide" in html
     assert "$ 776.702,00" in html
+    assert '<span class="uq-price-label">Precio estimado</span>' in html
     assert "quote-carrier-logo" not in html
 
 

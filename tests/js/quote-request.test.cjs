@@ -148,14 +148,28 @@ test('el deadline de una consulta abortada no cancela la siguiente',async()=>{
   assert.deepEqual(expired,['current']);
 });
 
+test('el foco se desplaza sólo cuando queda fuera del viewport visible',()=>{
+  assert.equal(make.focusShift({top:320,bottom:364},100,400,12),0);
+  assert.equal(make.focusShift({top:380,bottom:424},100,400,12),36);
+  assert.equal(make.focusShift({top:82,bottom:126},100,400,12),-30);
+});
+
 test('un cierre con error conserva la tarifa pero habilita volver a consultar',()=>{
   function block(price,error){return {querySelector:selector=>selector==='.uq-price'?(price?{}:null):(error?{}:null)};}
   assert.deepEqual(make.resultState(block(true,false),false),{
-    hasPrice:true,current:true,button:'Ver tarifas',status:'Consultando otros operadores…',
+    hasPrice:true,failed:false,current:true,button:'Ver tarifas',status:'Consultando otros operadores…',
   });
   assert.deepEqual(make.resultState(block(true,true),true),{
-    hasPrice:true,current:false,button:'Volver a consultar',
+    hasPrice:true,failed:true,current:false,button:'Volver a consultar',
     status:'Podés usar las tarifas recibidas o volver a consultar.',
+  });
+});
+
+test('una caída sin tarifas queda como error recuperable por operador',()=>{
+  const block={querySelector:selector=>selector==='.uq-unavailable'?{}:null};
+  assert.deepEqual(make.resultState(block,true),{
+    hasPrice:false,failed:true,current:false,button:'Volver a consultar',
+    status:'No recibimos una tarifa. Podés volver a consultar.',
   });
 });
 

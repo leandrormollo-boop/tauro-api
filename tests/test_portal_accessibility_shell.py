@@ -14,7 +14,7 @@ def test_inicio_no_anida_landmark_main():
 
 def test_drawer_movil_expone_estado_y_control_semantico():
     assert '<aside class="sidebar" id="portal-sidebar" aria-label="Navegación y cuenta">' in BASE
-    assert 'class="burger" aria-label="Abrir menú" aria-controls="portal-sidebar" aria-expanded="false"' in BASE
+    assert 'id="side-toggle-button" class="burger" aria-label="Abrir menú" aria-controls="portal-sidebar" aria-expanded="false"' in BASE
     assert 'class="side-overlay" aria-label="Cerrar menú"' in BASE
     assert 'burger.addEventListener("click"' in BASE
     assert 'event.key === "Escape"' in BASE
