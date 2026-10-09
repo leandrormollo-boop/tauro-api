@@ -70,11 +70,22 @@ def catalogo_db(monkeypatch):
         admin.close()
 
 
-def _upsert(variante: str, producto: str, source: str, observed: str, stock: int, run: str):
+def _upsert(
+    variante: str,
+    producto: str,
+    source: str,
+    observed: str,
+    stock: int,
+    run: str,
+    *,
+    imagen_url=None,
+    imagen_fuente_confirmada: bool = False,
+):
     return catalogo.upsert_producto_importado(
         "SMOKE",
         variante,
         variante,
+        imagen_url=imagen_url,
         tienda_dominio="smoke.myshopify.com",
         external_product_id=producto,
         external_variant_id=variante,
@@ -84,6 +95,7 @@ def _upsert(variante: str, producto: str, source: str, observed: str, stock: int
         source_observed_at=observed,
         sync_run_id=run,
         inventario_completo=True,
+        imagen_fuente_confirmada=imagen_fuente_confirmada,
     )
 
 
@@ -92,7 +104,7 @@ def _estado(get_conn_aislada, variante: str) -> dict:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT sync_activo, stock_disponible, sync_run_id,
+                SELECT sync_activo, stock_disponible, sync_run_id, imagen_url,
                        source_updated_at, source_deleted_at, source_observed_at
                   FROM productos
                  WHERE cliente_id='SMOKE' AND external_variant_id=%s
@@ -100,6 +112,35 @@ def _estado(get_conn_aislada, variante: str) -> dict:
                 (variante,),
             )
             return dict(cur.fetchone())
+
+
+def test_foto_eliminada_en_shopify_no_queda_obsoleta(catalogo_db):
+    get_conn_aislada = catalogo_db
+    variante = "gid://shopify/ProductVariant/401"
+    producto = "gid://shopify/Product/400"
+    _upsert(
+        variante, producto,
+        "2026-08-27T10:00:00Z", "2026-08-27T10:00:00Z", 1, "T10",
+        imagen_url="https://cdn.shopify.com/vieja.jpg",
+        imagen_fuente_confirmada=True,
+    )
+    assert _estado(get_conn_aislada, variante)["imagen_url"].endswith("vieja.jpg")
+
+    _upsert(
+        variante, producto,
+        "2026-08-27T11:00:00Z", "2026-08-27T11:00:00Z", 1, "T11",
+        imagen_url=None,
+        imagen_fuente_confirmada=True,
+    )
+    assert _estado(get_conn_aislada, variante)["imagen_url"] is None
+
+    _upsert(
+        variante, producto,
+        "2026-08-27T10:30:00Z", "2026-08-27T10:30:00Z", 1, "T10-viejo",
+        imagen_url="https://cdn.shopify.com/no-debe-volver.jpg",
+        imagen_fuente_confirmada=True,
+    )
+    assert _estado(get_conn_aislada, variante)["imagen_url"] is None
 
 
 def test_relojes_impiden_resucitar_stock_viejo(catalogo_db):

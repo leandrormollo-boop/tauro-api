@@ -1,9 +1,16 @@
 {% extends "base.html" %}
+{% from "portal/_product_thumbnail.html" import product_thumbnail %}
 {% block title %}Mis productos{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/product-thumbnails.css?v=1">
+{% endblock %}
 
 {% block content %}
 <link rel="stylesheet" href="/static/css/hs-assistant.css?v=2">
 <script src="/static/js/hs-assistant.js?v=2" defer nonce="{{ request.state.csp_nonce }}"></script>
+<script src="/static/js/product-thumbnails.js?v=1" defer></script>
+<script src="/static/js/catalog-sync.js?v=1" defer></script>
 <style nonce="{{ request.state.csp_nonce }}">
 .catalog-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .catalog-sync{margin-bottom:12px!important;padding:14px 18px!important}
@@ -87,29 +94,30 @@
     <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
         <div>
             <div class="eyebrow">Shopify conectado</div>
-            <h3 style="margin:3px 0 5px;">
+            <h3 style="margin:3px 0 5px;" data-catalog-sync-status role="status" aria-live="polite" aria-atomic="true">
                 {% if sync_estado.estado == 'COMPLETADO' %}Stock sincronizado
                 {% elif sync_estado.estado == 'SINCRONIZANDO' %}Sincronizando catálogo y stock…
                 {% elif sync_estado.estado == 'REAUTORIZAR' %}Falta autorizar catálogo y stock
                 {% else %}Revisando sincronización{% endif %}
             </h3>
             <p class="sub" style="margin:0;">
-                {{ stock_resumen.variantes or 0 }} variantes · {{ stock_resumen.unidades_disponibles or 0 }} unidades disponibles
-                {% if sync_estado.ultima_sincronizacion_at %}· actualizado {{ sync_estado.ultima_sincronizacion_at.strftime('%d/%m %H:%M') }}{% endif %}
+                <span data-catalog-sync-variants>{{ stock_resumen.variantes or 0 }}</span> variantes ·
+                <span data-catalog-sync-units>{{ stock_resumen.unidades_disponibles or 0 }}</span> unidades disponibles
+                <span data-catalog-sync-updated>{% if sync_estado.ultima_sincronizacion_at %}· actualizado {{ sync_estado.ultima_sincronizacion_at.strftime('%d/%m %H:%M') }}{% endif %}</span>
             </p>
         </div>
         {% if sync_estado.estado == 'REAUTORIZAR' %}
         <a class="btn btn-primary btn-sm" href="/shopify/install?shop={{ sync_estado.dominio }}&reautorizar=1">Autorizar en Shopify →</a>
         {% else %}
-        <form method="POST" action="/portal/tienda/sincronizar-catalogo">
-            <button class="btn btn-ghost btn-sm" type="submit">↻ Sincronizar ahora</button>
+        <form method="POST" action="/portal/tienda/sincronizar-catalogo" data-catalog-sync-form>
+            <button class="btn btn-ghost btn-sm" type="submit">Sincronizar ahora</button>
         </form>
         {% endif %}
     </div>
 </div>
 {% endif %}
 
-<div class="card catalog-card">
+<div class="card catalog-card" data-catalog-results>
     <div class="card-head">
         <div>
             <h3>Productos</h3>
@@ -157,16 +165,9 @@
                     data-tax="{{ (taxes.get(p.alias_interno, 0))|numero_maquina }}">
                     <td style="width:31%;min-width:205px;">
                         {% set incompleto = (not p.hs_code) or (p.largo_cm|float <= 0) or (p.valor_usd_default|float <= 0) %}
-                        <div style="display:flex;align-items:center;gap:9px;">
-                            {% if p.imagen_url %}
-                                <img src="{{ p.imagen_url }}" alt="{{ p.titulo_tienda or p.alias_interno }}" loading="lazy"
-                                     style="width:44px;height:44px;object-fit:cover;border-radius:9px;background:var(--bg-2);flex:0 0 auto;">
-                            {% else %}
-                                <span style="display:inline-flex;width:44px;height:44px;border-radius:9px;
-                                             background:var(--bg-2);align-items:center;justify-content:center;
-                                             color:var(--fg-3);font-size:18px;flex:0 0 auto;">📦</span>
-                            {% endif %}
-                            <div>
+                        <div class="product-identity">
+                            {{ product_thumbnail(p.imagen_url, p.titulo_tienda or p.alias_interno, 'catalog', 'catalog:' ~ p.alias_interno) }}
+                            <div class="product-identity__text">
                                 <strong>{{ p.titulo_tienda or p.alias_interno }}</strong>
                                 {% if p.variante_tienda %}<div style="font-size:12px;color:var(--fg-2);">{{ p.variante_tienda }}</div>{% endif %}
                                 <div class="mono" style="font-size:11px;color:var(--fg-3);">SKU {{ p.sku_tienda or p.alias_interno }}</div>
@@ -328,8 +329,9 @@ if (cerrarProducto && productoDialog) cerrarProducto.addEventListener("click", f
     productoDialog.close();
     location.href = "/portal/catalogo";
 });
-document.querySelectorAll(".prod-editar").forEach(function (btn) {
-    btn.addEventListener("click", function () {
+document.addEventListener("click", function (event) {
+    var btn = event.target.closest && event.target.closest(".prod-editar");
+    if (!btn) return;
         var tr = btn.closest("tr");
         if (!tr) return;
         var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v || ""; };
@@ -347,7 +349,6 @@ document.querySelectorAll(".prod-editar").forEach(function (btn) {
         document.getElementById("btn-guardar-prod").textContent = "Guardar cambios";
         productoDialog.showModal();
         document.getElementById("cat-alias").focus();
-    });
 });
 
 // Costo de envío POR UNIDAD con el descuento del cliente aplicado.
@@ -357,14 +358,14 @@ document.querySelectorAll(".prod-editar").forEach(function (btn) {
 // cotización pega en FedEx y dispararlas todas juntas es la clase de
 // ráfaga que hace que el courier te empiece a rebotar.
 (function () {
-    var sel = document.getElementById("cat-destino");
-    if (!sel) return;
-    var nota = document.getElementById("cat-destino-nota");
     var fmt = function (n) {
         return "$ " + Number(n).toLocaleString("es-AR", {minimumFractionDigits:2, maximumFractionDigits:2});
     };
 
-    sel.addEventListener("change", async function () {
+    document.addEventListener("change", async function (event) {
+        var sel = event.target;
+        if (!sel || sel.id !== "cat-destino") return;
+        var nota = document.getElementById("cat-destino-nota");
         var destino = sel.value;
         var celdas = Array.from(document.querySelectorAll(".precio-unidad"));
         if (!destino) {

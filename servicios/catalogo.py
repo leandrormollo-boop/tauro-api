@@ -230,9 +230,22 @@ def get_producto_por_variante(cliente: str, external_variant_id: str) -> Optiona
     return _row_a_producto(dict(row)) if row else None
 
 
-def enriquecer_items_catalogo(cliente: str, items: list[dict]) -> list[dict]:
-    """Añade imagen/alias/stock a una orden sin consultar Shopify en el request."""
+def enriquecer_items_catalogo(
+    cliente: str,
+    items: list[dict],
+    *,
+    plataforma: str = "",
+    tienda_dominio: str = "",
+) -> list[dict]:
+    """Añade datos del catálogo sin cruzar tiendas del mismo cliente.
+
+    Los filtros de plataforma y dominio son opcionales para conservar los
+    consumidores anteriores. El portal los informa desde el pedido y así un
+    variant ID o SKU repetido en dos tiendas nunca toma la imagen equivocada.
+    """
     cliente = (cliente or "").strip().upper()
+    plataforma = (plataforma or "").strip().lower()
+    tienda_dominio = (tienda_dominio or "").strip().lower()
     salida = [dict(item) for item in (items or []) if isinstance(item, dict)]
     if not cliente or not salida:
         return salida
@@ -244,21 +257,30 @@ def enriquecer_items_catalogo(cliente: str, items: list[dict]) -> list[dict]:
     variantes.discard("")
     skus = {str(item.get("sku") or "").strip().upper() for item in salida}
     skus.discard("")
+    filtros = ["cliente_id = %s"]
+    parametros: list[object] = [cliente]
+    if plataforma:
+        filtros.append("LOWER(COALESCE(plataforma, '')) = %s")
+        parametros.append(plataforma)
+    if tienda_dominio:
+        filtros.append("LOWER(COALESCE(tienda_dominio, '')) = %s")
+        parametros.append(tienda_dominio)
+    parametros.extend((list(variantes), list(skus)))
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT external_variant_id, alias_interno, sku_tienda, imagen_url,
                        titulo_tienda, variante_tienda, stock_controlado,
                        stock_disponible, sync_activo
                 FROM productos
-                WHERE cliente_id = %s
+                WHERE {' AND '.join(filtros)}
                   AND (
                     external_variant_id = ANY(%s)
                     OR UPPER(COALESCE(sku_tienda, alias_interno)) = ANY(%s)
                   )
                 """,
-                (cliente, list(variantes), list(skus)),
+                tuple(parametros),
             )
             filas = [dict(r) for r in cur.fetchall()]
 
@@ -533,6 +555,7 @@ def upsert_producto_importado(
     sync_run_id: str = "",
     ubicaciones: Optional[list[dict]] = None,
     inventario_completo: bool = False,
+    imagen_fuente_confirmada: bool = False,
 ) -> str:
     """
     Alta/actualización de un producto traído de la tienda (Shopify).
@@ -668,8 +691,10 @@ def upsert_producto_importado(
                         sku_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.sku_tienda END,
                         titulo_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.titulo_tienda END,
                         variante_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.variante_tienda END,
-                        imagen_url=CASE WHEN incoming.aplicar
-                            THEN COALESCE(%s, p.imagen_url) ELSE p.imagen_url END,
+                        imagen_url=CASE
+                            WHEN incoming.aplicar AND %s THEN NULLIF(%s, '')
+                            WHEN incoming.aplicar THEN COALESCE(%s, p.imagen_url)
+                            ELSE p.imagen_url END,
                         precio_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.precio_tienda END,
                         moneda_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.moneda_tienda END,
                         hs_code_tienda=CASE WHEN incoming.aplicar THEN %s ELSE p.hs_code_tienda END,
@@ -713,7 +738,8 @@ def upsert_producto_importado(
                     (
                         dominio, external_product_id, variante_id,
                         external_inventory_item_id, sku, nombre, variante_tienda,
-                        imagen_url, precio, moneda_tienda, hs_crudo,
+                        bool(imagen_fuente_confirmada), imagen_url, imagen_url,
+                        precio, moneda_tienda, hs_crudo,
                         pais_origen_tienda, nombre, hs_tauro, hs_tauro,
                         peso, peso, precio_declarado_sugerido,
                         precio_declarado_sugerido, bool(stock_controlado),

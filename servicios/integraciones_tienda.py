@@ -1694,9 +1694,13 @@ def listar_pedidos(cliente_id: str, estado: str = "PENDIENTE", limite: int = 100
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT * FROM pedidos_tienda
-                WHERE cliente_id = %s AND estado = %s
-                ORDER BY id DESC
+                SELECT p.*, t.dominio AS tienda_dominio
+                FROM pedidos_tienda p
+                LEFT JOIN tiendas_conectadas t
+                  ON t.id = p.tienda_id
+                 AND UPPER(t.cliente_id) = UPPER(p.cliente_id)
+                WHERE p.cliente_id = %s AND p.estado = %s
+                ORDER BY p.id DESC
                 LIMIT %s
             """, (cliente_id, estado, limite))
             return [dict(r) for r in cur.fetchall()]

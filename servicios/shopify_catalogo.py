@@ -36,7 +36,7 @@ _sync_executor = ThreadPoolExecutor(
     max_workers=3,
     thread_name_prefix="shopify-catalog-sync",
 )
-_sync_en_curso: set[tuple[str, str]] = set()
+_sync_en_curso: dict[tuple[str, str], datetime] = {}
 _sync_en_curso_lock = threading.Lock()
 
 
@@ -351,14 +351,27 @@ def traer_variantes(dominio: str, token: str, query: Optional[str] = None) -> li
 traer_productos = traer_variantes
 
 
-def _actualizar_estado(dominio: str, cliente: str, estado: str, **valores) -> None:
+def _actualizar_estado(
+    dominio: str,
+    cliente: str,
+    estado: str,
+    *,
+    intento_at=None,
+    **valores,
+) -> None:
     permitidos = {
         "ultimo_error_codigo", "ultimo_error", "productos_total", "variantes_total",
         "creados", "actualizados", "desactivados",
     }
     datos = {k: v for k, v in valores.items() if k in permitidos}
     columnas = ["dominio", "cliente_id", "estado", "ultimo_intento_at", *datos]
-    params = [dominio, cliente, estado, datetime.now(timezone.utc), *datos.values()]
+    params = [
+        dominio,
+        cliente,
+        estado,
+        intento_at or datetime.now(timezone.utc),
+        *datos.values(),
+    ]
     updates = ["cliente_id=EXCLUDED.cliente_id", "estado=EXCLUDED.estado",
                "ultimo_intento_at=EXCLUDED.ultimo_intento_at", "updated_at=NOW()"]
     updates.extend(f"{campo}=EXCLUDED.{campo}" for campo in datos)
@@ -413,6 +426,7 @@ def _guardar_variantes(
             sync_run_id=run_id,
             ubicaciones=fila.get("ubicaciones") or [],
             inventario_completo=True,
+            imagen_fuente_confirmada=True,
         )
         if estado == "creado":
             creados += 1
@@ -421,7 +435,7 @@ def _guardar_variantes(
     return creados, actualizados
 
 
-def importar_catalogo(dominio: str, cliente_id: str) -> dict:
+def importar_catalogo(dominio: str, cliente_id: str, intento_at=None) -> dict:
     dominio = (dominio or "").strip().lower()
     cliente = (cliente_id or "").strip().upper()
     if not dominio or not cliente:
@@ -448,11 +462,12 @@ def importar_catalogo(dominio: str, cliente_id: str) -> dict:
         }
 
     run_id = uuid.uuid4().hex
-    sincronizacion_iniciada_at = datetime.now(timezone.utc)
+    sincronizacion_iniciada_at = intento_at or datetime.now(timezone.utc)
     try:
         with _bloqueo_generacion_operativa(dominio, cliente, generation):
             _actualizar_estado(
                 dominio, cliente, "SINCRONIZANDO",
+                intento_at=sincronizacion_iniciada_at,
                 ultimo_error_codigo=None, ultimo_error=None,
             )
         filas = traer_variantes(dominio, token)
@@ -470,6 +485,7 @@ def importar_catalogo(dominio: str, cliente_id: str) -> dict:
             productos_total = len({f.get("external_product_id") for f in filas})
             _actualizar_estado(
                 dominio, cliente, "COMPLETADO",
+                intento_at=sincronizacion_iniciada_at,
                 ultimo_error_codigo=None, ultimo_error=None,
                 productos_total=productos_total, variantes_total=len(filas),
                 creados=creados, actualizados=actualizados, desactivados=desactivados,
@@ -484,6 +500,7 @@ def importar_catalogo(dominio: str, cliente_id: str) -> dict:
         if exc.codigo != "GENERACION_OBSOLETA":
             _actualizar_estado_si_actual(
                 dominio, cliente, generation, "ERROR",
+                intento_at=sincronizacion_iniciada_at,
                 ultimo_error_codigo=exc.codigo,
                 ultimo_error="No pudimos completar la sincronización.",
             )
@@ -492,6 +509,7 @@ def importar_catalogo(dominio: str, cliente_id: str) -> dict:
         print(f"[shopify_sync] {dominio}: {type(exc).__name__}")
         _actualizar_estado_si_actual(
             dominio, cliente, generation, "ERROR",
+            intento_at=sincronizacion_iniciada_at,
             ultimo_error_codigo="ERROR_INTERNO",
             ultimo_error="No pudimos completar la sincronización.",
         )
@@ -524,7 +542,7 @@ def sincronizar_para_cliente(cliente_id: str) -> dict:
     if not dominio:
         return {"ok": False, "codigo": "SIN_TIENDA",
                 "error": "Todavía no tenés una tienda Shopify conectada por la app oficial."}
-    return importar_catalogo(dominio, cliente_id)
+    return _sincronizar_coordinado(dominio, cliente_id)
 
 
 def solicitar_sincronizacion_cliente(cliente_id: str) -> dict:
@@ -541,42 +559,79 @@ def solicitar_sincronizacion_cliente(cliente_id: str) -> dict:
             "error": "Autorizá una vez el catálogo y el inventario de Shopify.",
             "reautorizar_url": f"/shopify/install?shop={dominio}&reautorizar=1",
         }
-    iniciada = lanzar_sincronizacion(dominio, cliente_id)
+    iniciada, intento = _encolar_sincronizacion(dominio, cliente_id)
     return {
         "ok": True,
         "iniciada": iniciada,
         "en_curso": not iniciada,
         "dominio": dominio,
+        "sync_intento_id": intento.isoformat(),
     }
 
 
-def lanzar_sincronizacion(dominio: str, cliente_id: str) -> bool:
-    """Encola una sola sincronización por tienda y limita el uso del pool SQL."""
+def _encolar_sincronizacion(
+    dominio: str,
+    cliente_id: str,
+) -> tuple[bool, datetime]:
+    """Encola una sola ejecución y devuelve su marca estable de seguimiento."""
+    clave, iniciada, intento = _reservar_sincronizacion(dominio, cliente_id)
+    if not iniciada:
+        return False, intento
+
+    def _run():
+        try:
+            importar_catalogo(clave[0], clave[1], intento_at=intento)
+        except Exception as exc:
+            print(f"[shopify_sync] hilo inicial falló: {type(exc).__name__}")
+        finally:
+            _liberar_sincronizacion(clave, intento)
+
+    try:
+        _sync_executor.submit(_run)
+    except Exception:
+        _liberar_sincronizacion(clave, intento)
+        raise
+    return True, intento
+
+
+def _reservar_sincronizacion(
+    dominio: str,
+    cliente_id: str,
+) -> tuple[tuple[str, str], bool, datetime]:
     clave = (
         (dominio or "").strip().lower(),
         (cliente_id or "").strip().upper(),
     )
     with _sync_en_curso_lock:
-        if clave in _sync_en_curso:
-            return False
-        _sync_en_curso.add(clave)
+        existente = _sync_en_curso.get(clave)
+        if existente is not None:
+            return clave, False, existente
+        intento = datetime.now(timezone.utc)
+        _sync_en_curso[clave] = intento
+        return clave, True, intento
 
-    def _run():
-        try:
-            importar_catalogo(clave[0], clave[1])
-        except Exception as exc:
-            print(f"[shopify_sync] hilo inicial falló: {type(exc).__name__}")
-        finally:
-            with _sync_en_curso_lock:
-                _sync_en_curso.discard(clave)
 
+def _liberar_sincronizacion(clave: tuple[str, str], intento: datetime) -> None:
+    with _sync_en_curso_lock:
+        if _sync_en_curso.get(clave) == intento:
+            _sync_en_curso.pop(clave, None)
+
+
+def _sincronizar_coordinado(dominio: str, cliente_id: str) -> dict:
+    """Ejecuta una full sync sin competir con el botón ni el reconciliador."""
+    clave, iniciada, intento = _reservar_sincronizacion(dominio, cliente_id)
+    if not iniciada:
+        return {"ok": True, "en_curso": True}
     try:
-        _sync_executor.submit(_run)
-    except Exception:
-        with _sync_en_curso_lock:
-            _sync_en_curso.discard(clave)
-        raise
-    return True
+        return importar_catalogo(clave[0], clave[1], intento_at=intento)
+    finally:
+        _liberar_sincronizacion(clave, intento)
+
+
+def lanzar_sincronizacion(dominio: str, cliente_id: str) -> bool:
+    """Encola una sola sincronización por tienda y limita el uso del pool SQL."""
+    iniciada, _intento = _encolar_sincronizacion(dominio, cliente_id)
+    return iniciada
 
 
 def sincronizar_producto(
@@ -911,7 +966,11 @@ def reconciliar_tiendas_pendientes(limite: int = 2) -> dict:
 
     ok = errores = 0
     for tienda in tiendas:
-        resultado = importar_catalogo(tienda["dominio"], tienda["cliente_id"])
+        resultado = _sincronizar_coordinado(
+            tienda["dominio"], tienda["cliente_id"],
+        )
+        if resultado.get("en_curso"):
+            continue
         if resultado.get("ok"):
             ok += 1
         else:

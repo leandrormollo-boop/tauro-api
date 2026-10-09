@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,62 @@ def test_graphql_mapea_variante_imagen_peso_hs_y_stock(monkeypatch):
     assert fila["stock_entrante"] == 4
     assert fila["source_updated_at"] == "2026-08-27T01:03:00+00:00"
     assert [u["ubicacion_nombre"] for u in fila["ubicaciones"]] == ["Depósito", "Local"]
+
+
+def test_imagen_de_producto_respalda_variante_sin_foto(monkeypatch):
+    variante = _variante()
+    variante["image"] = None
+    variante["product"]["featuredMedia"] = {
+        "preview": {"image": {"url": "https://cdn.shopify.com/reel-principal.jpg"}}
+    }
+    monkeypatch.setattr(sc, "_graphql", lambda *_args, **_kwargs: {
+        "shop": {"currencyCode": "ARS"},
+        "productVariants": {
+            "nodes": [variante],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        },
+    })
+
+    fila = sc.traer_variantes("pesca-jacks.myshopify.com", "token")[0]
+
+    assert fila["imagen_src"] == "https://cdn.shopify.com/reel-principal.jpg"
+
+
+def test_producto_sin_imagen_se_guarda_sin_url(monkeypatch):
+    variante = _variante()
+    variante["image"] = None
+    variante["product"]["featuredMedia"] = None
+    monkeypatch.setattr(sc, "_graphql", lambda *_args, **_kwargs: {
+        "shop": {"currencyCode": "ARS"},
+        "productVariants": {
+            "nodes": [variante],
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+        },
+    })
+
+    fila = sc.traer_variantes("pesca-jacks.myshopify.com", "token")[0]
+
+    assert fila["imagen_src"] == ""
+
+
+def test_guardado_confirma_imagen_aunque_shopify_no_tenga_foto(monkeypatch):
+    guardadas = []
+    monkeypatch.setattr(
+        sc,
+        "upsert_producto_importado",
+        lambda *args, **kwargs: guardadas.append((args, kwargs)) or "actualizado",
+    )
+    fila = sc._mapear_variante({**_variante(), "image": None}, "ARS")
+
+    sc._guardar_variantes(
+        "pesca-jacks.myshopify.com",
+        "PESCA_JACKS",
+        [fila],
+        "run-1",
+    )
+
+    assert guardadas[0][0][4] is None
+    assert guardadas[0][1]["imagen_fuente_confirmada"] is True
 
 
 def test_variante_sin_sku_no_se_descarta(monkeypatch):
@@ -224,6 +281,7 @@ def test_sync_fallida_no_archiva_el_catalogo_existente(monkeypatch):
     assert resultado["codigo"] == "SHOPIFY_NO_RESPONDE"
     assert archivados == []
     assert estados[-1][0][2] == "ERROR"
+    assert estados[0][1]["intento_at"] == estados[-1][1]["intento_at"]
 
 
 def test_evento_de_generacion_anterior_no_consulta_ni_escribe(monkeypatch):
@@ -326,7 +384,7 @@ def test_lanzar_sincronizacion_deduplica_y_limita_el_ejecutor(monkeypatch):
     monkeypatch.setattr(
         sc,
         "importar_catalogo",
-        lambda dominio, cliente: importaciones.append((dominio, cliente)),
+        lambda dominio, cliente, intento_at=None: importaciones.append((dominio, cliente)),
     )
     with sc._sync_en_curso_lock:
         sc._sync_en_curso.clear()
@@ -347,6 +405,89 @@ def test_lanzar_sincronizacion_deduplica_y_limita_el_ejecutor(monkeypatch):
         assert sc.lanzar_sincronizacion(
             "pesca-jacks.myshopify.com", "PESCA_JACKS"
         ) is True
+    finally:
+        with sc._sync_en_curso_lock:
+            sc._sync_en_curso.clear()
+
+
+def test_solicitud_devuelve_id_atomico_del_intento_para_evitar_carrera(monkeypatch):
+    intento = datetime(2026, 10, 9, 18, 20, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        sc, "_dominio_instalado_de", lambda _cliente: "pesca-jacks.myshopify.com",
+    )
+    monkeypatch.setattr(
+        sc,
+        "instalacion",
+        lambda _dominio: {"scopes": "read_products,read_inventory"},
+    )
+    monkeypatch.setattr(sc, "_encolar_sincronizacion", lambda *_args: (True, intento))
+
+    resultado = sc.solicitar_sincronizacion_cliente("PESCA_JACKS")
+
+    assert resultado["ok"] is True
+    assert resultado["sync_intento_id"] == intento.isoformat()
+
+
+def test_encolado_duplicado_comparte_el_mismo_id_de_intento(monkeypatch):
+    trabajos = []
+
+    class Executor:
+        def submit(self, trabajo):
+            trabajos.append(trabajo)
+
+    monkeypatch.setattr(sc, "_sync_executor", Executor())
+    with sc._sync_en_curso_lock:
+        sc._sync_en_curso.clear()
+
+    try:
+        iniciada, intento = sc._encolar_sincronizacion(
+            "pesca-jacks.myshopify.com", "PESCA_JACKS",
+        )
+        repetida, mismo_intento = sc._encolar_sincronizacion(
+            "PESCA-JACKS.MYSHOPIFY.COM", "pesca_jacks",
+        )
+
+        assert iniciada is True
+        assert repetida is False
+        assert mismo_intento == intento
+        assert len(trabajos) == 1
+    finally:
+        with sc._sync_en_curso_lock:
+            sc._sync_en_curso.clear()
+
+
+def test_sincronizacion_directa_respeta_el_coordinador(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(
+        sc,
+        "importar_catalogo",
+        lambda dominio, cliente, intento_at=None: llamadas.append(
+            (dominio, cliente, intento_at)
+        ) or {"ok": True},
+    )
+    with sc._sync_en_curso_lock:
+        sc._sync_en_curso.clear()
+
+    try:
+        resultado = sc._sincronizar_coordinado(
+            "PESCA-JACKS.MYSHOPIFY.COM", "pesca_jacks",
+        )
+        assert resultado == {"ok": True}
+        assert llamadas[0][0:2] == (
+            "pesca-jacks.myshopify.com", "PESCA_JACKS",
+        )
+        assert isinstance(llamadas[0][2], datetime)
+
+        clave, iniciada, intento = sc._reservar_sincronizacion(
+            "pesca-jacks.myshopify.com", "PESCA_JACKS",
+        )
+        assert iniciada is True
+        repetida = sc._sincronizar_coordinado(
+            "pesca-jacks.myshopify.com", "PESCA_JACKS",
+        )
+        assert repetida == {"ok": True, "en_curso": True}
+        assert len(llamadas) == 1
+        sc._liberar_sincronizacion(clave, intento)
     finally:
         with sc._sync_en_curso_lock:
             sc._sync_en_curso.clear()
@@ -424,6 +565,7 @@ def test_snapshot_viejo_no_habilita_regresion_de_stock(monkeypatch):
     update = next(
         (q, p) for q, p in ejecuciones if "UPDATE productos AS p SET" in q
     )
+    assert update[0].count("%s") == len(update[1])
     assert update[1][-4] is False
     assert update[1][-3] is False
     assert "CASE WHEN incoming.aplicar" in update[0]
