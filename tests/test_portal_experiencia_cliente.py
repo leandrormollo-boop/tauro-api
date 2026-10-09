@@ -1,6 +1,7 @@
 """Regresiones de estados contradictorios y respuestas parciales de Mis envíos."""
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from urllib.parse import urlencode
 
 import pytest
@@ -103,8 +104,9 @@ def test_respuesta_parcial_conserva_estado_y_menu_sin_repetir_navegacion():
         assert 'no ejecutar</script>' not in html
         assert '&lt;script&gt;no ejecutar&lt;/script&gt;' not in html
         assert 'Sincronizado 14/09/2026 08:20 UTC' not in html
-    assert '<aside class="sidebar">' in full
-    assert '<aside class="sidebar">' not in partial
+    sidebar = r'<aside\b(?=[^>]*\bclass="sidebar")(?=[^>]*\bid="portal-sidebar")[^>]*>'
+    assert re.search(sidebar, full)
+    assert not re.search(sidebar, partial)
     assert '<script' not in partial
     assert 'id="shipment-verification-dialog"' not in partial
     assert len(partial.encode()) < len(full.encode())
