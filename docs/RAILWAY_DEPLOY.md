@@ -19,12 +19,11 @@ Reproducido localmente: base con schema del 30/09 → mismo error; corriendo
 `scripts/migrate_database.py` → readiness OK → la app arranca.
 
 ## Producción
-El servicio de **production** sí lee `/railway.json` (healthcheck y restart
-policy figuran "set in /railway.json"), así que al mergear PR #36 el
-`preDeployCommand` **sí** corre en prod. **Pero Config as Code deja de
-funcionar el 2026-12-01.** Antes de esa fecha hay que cargar en el panel de
-production: pre-deploy `python scripts/migrate_database.py`, healthcheck
-`/health`, timeout 180, restart On Failure (10).
+El servicio de **production** leía `/railway.json` (healthcheck y restart
+policy figuraban "set in /railway.json"), así que al mergear PR #36 el
+`preDeployCommand` corrió en prod. Como Config as Code deja de funcionar el
+2026-12-01, el 09/10/2026 se cargó lo mismo en el panel de production
+(sin redeploy). Ya no depende de `railway.json`.
 
 ## Receta por entorno (panel → servicio tauro-api → Settings → Deploy)
 | Campo | Valor |
@@ -32,11 +31,15 @@ production: pre-deploy `python scripts/migrate_database.py`, healthcheck
 | Pre-deploy step | `python scripts/migrate_database.py` |
 | Healthcheck Path | `/health` |
 | Healthcheck Timeout | `180` |
-| Restart Policy | On Failure · 10 reintentos |
+| Restart Policy | On Failure · 10 reintentos (default de Railway, no hace falta tocarlo) |
 
-Staging (entorno `staging`, rama `codex/pr28-hardening`): **pendiente de cargar**.
-Production (entorno `production`, rama `main`): hoy vía railway.json; cargar en el
-panel antes del 01/12/2026.
+Staging (entorno `staging`, rama `codex/pr28-hardening`): cargado el 08/10/2026.
+Production (entorno `production`, rama `main`): cargado el 09/10/2026.
+
+Verificación sin entrar al panel (no imprime variables):
+```bash
+railway environment config --environment production --json | python3 -c 'import json,sys; c=json.load(sys.stdin); c=c.get("config",c); [print(k, s.get("deploy")) for k,s in c["services"].items()]'
+```
 
 ## Orden correcto de un release con schema nuevo
 1. Pre-deploy: `migrate_database.py` (schema.sql idempotente + backfills + readiness).

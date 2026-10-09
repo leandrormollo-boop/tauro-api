@@ -1,4 +1,4 @@
-# RELEVO — estado y reglas del proyecto (act. 17/09/2026)
+# RELEVO — estado y reglas del proyecto (act. 09/10/2026)
 
 Este documento existe para que CUALQUIER agente (Codex, Claude, humano) pueda
 retomar el trabajo sin contexto previo. Leelo entero antes de tocar código.
@@ -712,4 +712,29 @@ requiere migración y conciliación antes de mostrar dos saldos.
 - **Fix aplicado (08/10 19:02Z, con OK de Leandro):** en el panel de Railway, servicio tauro-api,
   entorno staging → Pre-deploy `python scripts/migrate_database.py`, Healthcheck `/health`,
   timeout 180. Redeploy: pre-deploy corrió, /health 200 a los 73 s, estable. Staging VIVO.
-  Pendiente: cargar lo mismo en production antes del 01/12/2026 (hoy lo toma de railway.json).
+  Production: cargado el 09/10 (ver entrada siguiente).
+
+## 09/10/2026 — PR #36 en producción + pre-deploy/healthcheck en el panel de prod
+
+- Con OK de Leandro: PR #36 mergeado a `main` (merge `05d2393`). Deploy prod `20e817e3`:
+  build + pre-deploy (`[migrate] Schema, API keys y secretos OAuth listos.`) + arranque
+  (`[db] Schema inicializado OK.`) en ~1 min, SUCCESS y estable.
+- Verificado en prod: `/health` 200, `/portal/login` 200, `/admin/login` 200, `/partners` 200,
+  `/privacidad` y `/terminos` 200, manifest PWA y `/.well-known/assetlinks.json` 200.
+  `/shopify/app` pasó de 404 a **400 "Contexto inválido"**: la ruta existe y rechaza pedidos sin
+  firma de Shopify (correcto; con `shop`/`host`/`hmac` válidos abre la app embebida).
+- Variables presentes en prod (sólo nombres, verificado): `SHOPIFY_PUBLIC_API_KEY/_SECRET`,
+  `SHOPIFY_API_KEY/_SECRET` (legado), `SHOPIFY_TOKEN_ENCRYPTION_KEY`, `TIENDANUBE_*`, `OCA_*`.
+  Falta `ANDROID_ASSETLINKS_SHA256` (la carga Leandro cuando suba el `.aab` a Play).
+- Panel de production (con OK de Leandro): Pre-deploy `python scripts/migrate_database.py`,
+  Healthcheck `/health`, timeout 180, aplicado por API de Railway con `skipDeploys` (sin
+  reinicio). Ya no depende de `railway.json` para el 01/12/2026.
+- **Bug previo, no de este PR:** cada arranque de prod loguea
+  `[tracking-dhl] vigilancia de reemplazadas falló: IndexError` (ya estaba en los deploys
+  del 08/10). Causa probable: `LIKE '...registró%'` con `%` sin escapar en una consulta con
+  parámetros en `servicios/monitoreo_guias_reemplazadas.py`. Queda como tarea aparte.
+- Staging sigue apuntando a la rama `codex/pr28-hardening` (ya mergeada). Para el próximo frente,
+  cambiarle la rama en el panel o recrear la rama desde `main`.
+- Siguiente en Shopify (todo en la cuenta Partners de Leandro): `shopify app deploy`, mail de
+  Billing (`docs/SHOPIFY_BILLING_CONSULTA.md`), Level 2 protected customer data, recorrido
+  completo en dev store, assets del listing (`docs/SHOPIFY_LISTING.md`) y envío a revisión.
