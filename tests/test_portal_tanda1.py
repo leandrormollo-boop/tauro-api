@@ -125,6 +125,13 @@ def test_mismo_envio_mismo_estado_en_tres_handlers(monkeypatch, estado, tracking
                portal.envio_detalle(req("/portal/envios/1"), 1, cliente="DEMO")]
     for indice, pagina in enumerate(paginas):
         parsed = EstadoActual(pagina.body.decode())
+        if indice == 0 and estado in {"CANCELADO", "REEMPLAZADO"}:
+            # Inicio muestra actividad vigente; las bajas se siguen viendo
+            # con el mismo estado en su pestaña histórica y en el detalle.
+            assert parsed.estados == []
+            assert parsed.clases == []
+            assert pagina.context["solicitudes_internacionales"] == []
+            continue
         assert parsed.estados == [label]
         # En el listado las bajas conservan su estilo tachado propio.
         clase = ("shipment-cancelled-badge" if indice == 1 and estado in {"CANCELADO", "REEMPLAZADO"}

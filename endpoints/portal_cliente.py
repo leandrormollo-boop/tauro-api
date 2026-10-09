@@ -893,15 +893,21 @@ def portal_raiz():
 def home(request: Request, cliente: str = Depends(cliente_actual)):
     facturado = get_facturado_real(cliente)
     saldo_data = saldo(cliente, total_facturado_ars=facturado)
-    # Se separa antes de limitar: tomar sólo las últimas 12 globales puede
-    # ocultar nacionales más viejos y dibujar un falso "sin envíos".
+    # Las bajas conservan su historial, pero no desplazan a envíos vigentes
+    # en la actividad reciente. Filtrar por ámbito antes de limitar también
+    # evita ocultar nacionales más viejos.
     historial = listar_solicitudes_cliente(cliente, limite=None)
-    solicitudes_nacionales = [
+    vigentes = [
         solicitud for solicitud in historial
+        if str(solicitud.get("estado") or "").upper()
+        not in {"CANCELADO", "REEMPLAZADO"}
+    ]
+    solicitudes_nacionales = [
+        solicitud for solicitud in vigentes
         if ambito_envio(solicitud) == "nacional"
     ][:3]
     solicitudes_internacionales = [
-        solicitud for solicitud in historial
+        solicitud for solicitud in vigentes
         if ambito_envio(solicitud) == "internacional"
     ][:3]
     embudo = embudo_envios(cliente)

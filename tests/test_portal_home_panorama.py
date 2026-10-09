@@ -240,6 +240,56 @@ def test_pedidos_tienda_quedan_en_su_acceso_y_no_inflan_acciones_de_envios(monke
     assert lista.context['total_resultados'] == 0
 
 
+def test_inicio_toma_tres_vigentes_por_ambito_sin_perder_los_historicos(monkeypatch):
+    from copy import deepcopy
+    from servicios.estados_envio import presentar_estados_envio
+
+    base = _action_shipments()[0]
+    historial = []
+    for offset, courier, destino in ((0, 'DHL', 'US'), (10, 'OCA', 'AR')):
+        for numero, estado in enumerate((
+            'REEMPLAZADO', 'CANCELADO', 'GUIA_LISTA',
+            'DESPACHADO', 'ENTREGADO', 'DESPACHADO',
+        ), 1):
+            historial.append(presentar_estados_envio(dict(
+                base, id=offset + numero, estado=estado, courier=courier,
+                destino_pais=destino, tracking=f'FICTICIO-{offset + numero}',
+                dest_nombre=f'Destinatario ficticio {offset + numero}',
+            )))
+    original = deepcopy(historial)
+    portal, request = _action_portal(monkeypatch, historial)
+
+    inicio = portal.home(request(), cliente='DEMO')
+
+    assert [s['id'] for s in inicio.context['solicitudes_internacionales']] == [3, 4, 5]
+    assert [s['id'] for s in inicio.context['solicitudes_nacionales']] == [13, 14, 15]
+    assert inicio.context['resumen_inicio']['envios_total'] == 8
+    assert 'Destinatario ficticio 1</strong>' not in inicio.body.decode()
+    assert 'Destinatario ficticio 2</strong>' not in inicio.body.decode()
+    assert historial == original
+
+    # Cambia la selección reciente, no la accesibilidad de la historia.
+    for paso, esperados in (('modificados', [1, 11]), ('canceladas', [2, 12])):
+        lista = portal.envios_view(
+            request('/portal/envios', f'paso={paso}'), cliente='DEMO', paso=paso,
+        )
+        assert [s['id'] for s in lista.context['solicitudes']] == esperados
+
+
+def test_inicio_solo_con_bajas_muestra_estados_vacios_y_conserva_sus_conteos(monkeypatch):
+    historial = [s for s in _action_shipments() if s['estado'] in ('CANCELADO', 'REEMPLAZADO')]
+    portal, request = _action_portal(monkeypatch, historial)
+
+    inicio = portal.home(request(), cliente='DEMO')
+
+    assert inicio.context['solicitudes_nacionales'] == []
+    assert inicio.context['solicitudes_internacionales'] == []
+    assert inicio.context['resumen_inicio']['envios_total'] == 0
+    assert {p['clave']: p['cantidad'] for p in inicio.context['embudo']}['modificados'] == 1
+    assert {p['clave']: p['cantidad'] for p in inicio.context['embudo']}['canceladas'] == 1
+    assert 'No hay envíos internacionales vigentes.' in inicio.body.decode()
+
+
 def test_filtro_accion_conserva_busqueda_ambito_y_paginacion():
     from servicios.panel_cliente import preparar_historial_envios
     historial = _action_shipments()
