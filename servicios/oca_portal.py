@@ -13,7 +13,6 @@ from servicios.carrier_adapter import OperationState, Package, QuoteRequest
 from servicios.carrier_contract import Ambito
 from servicios.configuracion_couriers_cliente import obtener_matriz
 from servicios.cotizador_nacional import preparar_cotizacion_nacional
-from servicios.ubicaciones_envio import validar_ubicacion_cotizada
 from servicios.oca_adapter import OCAAdapter, OCAConfig, _shipment_xml
 
 
@@ -74,8 +73,6 @@ def adapter_cliente(cliente, permiso="cotizar"):
 
 
 def preparar(form, config):
-    for lado in ("origen", "destino"):
-        validar_ubicacion_cotizada(form, lado)
     normal = preparar_cotizacion_nacional(
         **{
             k: form.get(k, "")
@@ -396,6 +393,7 @@ def emitir(sol, *, ya_reservada=False):
         )
         return {
             "ok": False,
+            "codigo_error": "RESULTADO_NO_CONFIRMADO", "etapa": "courier",
             "error": "La emisión OCA requiere verificación. No vuelvas a emitir esta solicitud.",
         }
     try:

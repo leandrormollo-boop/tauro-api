@@ -103,6 +103,7 @@
             {% endif %}
           </td>
           <td class="admin-pedido-management" data-label="Guía y acciones">
+            <a href="/admin/pedidos/{{ s.id }}/control" class="btn btn-sm btn-ghost">Gestionar envío</a>
             <div class="admin-pedido-guide">
             {% if s.tracking and s.tiene_label %}
               <span class="badge ok">Guía lista</span>

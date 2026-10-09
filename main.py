@@ -294,7 +294,9 @@ async def headers_de_seguridad(request: Request, call_next):
 # Railway: el proceso web no ejecuta CREATE/ALTER ni toma AccessExclusiveLock.
 _db_init_error = None
 try:
-    verificar_readiness_db()
+    init_db()
+    from servicios.control_incidencias_emision import inicializar_catalogo
+    inicializar_catalogo()
 except Exception as _db_err:
     _db_init_error = type(_db_err).__name__
     print(f"[startup] DB init error: {type(_db_err).__name__}")
@@ -1103,7 +1105,7 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
         "ES": {"city": "MADRID",     "state": "M",  "postal_code": "28001"},
     }
 
-    from servicios.paises import nombre as nombre_pais, normalizar_iso2, referencia
+    from servicios.paises import nombre as nombre_pais, normalizar_iso2, referencia_estimacion
 
     destino_entrada = (body.destino_pais or "").strip()
     origen_entrada = (body.origen_pais or "").strip()
@@ -1144,8 +1146,8 @@ def cotizar_web(body: CotizarWebRequest, request: Request):
     # Dirección de REFERENCIA de cada país: alcanza para una estimación
     # pública. En el portal, con destinatario cargado, se cotiza contra el
     # CP real porque los recargos por zona remota dependen de él.
-    origen = {**referencia(origen_iso), "street": "Main St 100"}
-    destino = {**referencia(destino_iso), "street": "Main St 100"}
+    origen = {**referencia_estimacion(origen_iso), "street": "Main St 100"}
+    destino = {**referencia_estimacion(destino_iso), "street": "Main St 100"}
 
     paquete = {
         "peso_kg": body.peso_kg,

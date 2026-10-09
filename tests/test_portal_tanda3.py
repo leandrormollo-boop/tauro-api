@@ -212,7 +212,7 @@ def test_8_todos_los_datos_y_acciones_se_conservan_en_mas_datos(monkeypatch):
     assert html.count('<summary>Más datos</summary>') == 3
     assert "Fecha: 06/10/2026" in html and "Recorrido: Shanghai" in html
     assert "TAURO TAURO-2026-0123456789" in html
-    assert "Ver envío</a>" in html and "Ver guía</a>" in html
+    assert "Ver envío</a>" in html and "Descargar guía</a>" in html
     assert "Ver desglose" in html and "Opciones" in html
 
 

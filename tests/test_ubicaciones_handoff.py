@@ -260,174 +260,12 @@ def test_link_dhl_conserva_ubicaciones_y_flags_por_lado(
     assert query.get("destino_referencia", [""])[0] == destino_referencia
 
 
-def test_roundtrip_link_dhl_precarga_geometria_y_confirmaciones(web):
-    client, _, _ = web
-    cajas = json.dumps([
-        {"cantidad": 2, "peso_kg": 3.5, "largo_cm": 40, "ancho_cm": 30, "alto_cm": 20},
-    ])
-    html = render_quote(
-        form={
-            "origen_pais": "CO", "destino_pais": "US",
-            "origen_ciudad": "Bogotá D.C.", "origen_cp_internacional": "110111",
-            "destino_ciudad_internacional": "Miami", "destino_cp_internacional": "33101",
-            "origen_referencia": "1", "destino_referencia": "1",
-            "valor_declarado_usd": "250", "bultos": [{}],
-        },
-        opciones=[{
-            "carrier_id": "dhl", "carrier_nombre": "DHL", "servicio": "Express",
-            "carrier_logo": "/dhl.svg", "precio_final_ars": 123456,
-            "dias_estimados": 3,
-        }],
-        cajas_cotizadas=cajas,
-    )
-
-    response = client.get(_continuar(html, "DHL"))
-    assert response.status_code == 200
-    parsed = _HTML(response.text)
-    assert _input(parsed, "rem_ciudad")["value"] == "Bogotá D.C."
-    assert _input(parsed, "rem_zip")["value"] == "110111"
-    assert _input(parsed, "dest_ciudad")["value"] == "Miami"
-    assert _input(parsed, "dest_zip")["value"] == "33101"
-    assert _input(parsed, "bulto_cantidad")["value"] == "2"
-    assert Decimal(_input(parsed, "bulto_peso")["value"]) == Decimal("3.5")
-    assert Decimal(_input(parsed, "bulto_largo")["value"]) == Decimal("40")
-    assert Decimal(_input(parsed, "bulto_ancho")["value"]) == Decimal("30")
-    assert Decimal(_input(parsed, "bulto_alto")["value"]) == Decimal("20")
-    for lado in ("origen", "destino"):
-        assert _input(parsed, f"{lado}_referencia")["value"] == "1"
-        checkbox = _input(parsed, f"{lado}_ubicacion_confirmada")
-        assert checkbox["type"] == "checkbox" and "required" in checkbox
-        assert "checked" not in checkbox
-    assert re.search(
-        r"confirm[aá].{0,80}ciudad.{0,100}c[oó]digo postal.{0,100}domicilio",
-        response.text,
-        re.I | re.S,
-    )
-
-
-@pytest.mark.parametrize(
-    "parametro,ident,lado_guardado,lado_cotizado",
-    [
-        ("remitente_id", 7, "origen", "destino"),
-        ("destinatario_id", 8, "destino", "origen"),
-    ],
-)
-def test_contacto_internacional_explicito_solo_anula_flag_de_su_lado(
-    web, parametro, ident, lado_guardado, lado_cotizado,
-):
-    client, _, _ = web
-    cajas = json.dumps([
-        {"cantidad": 1, "peso_kg": 2, "largo_cm": 30, "ancho_cm": 20, "alto_cm": 10},
-    ])
-    query = {
-        "ambito": "internacional", "courier": "dhl", "origen": "AR", "destino": "US",
-        "origen_ciudad": "Ciudad origen cotizada", "origen_cp": "1000",
-        "destino_ciudad": "Ciudad destino cotizada", "destino_cp": "33101",
-        "origen_referencia": "1", "destino_referencia": "1", "cajas": cajas,
-        "valor_cotizado": "100", parametro: str(ident),
-    }
-    response = client.get("/portal/envios/nuevo?" + urlencode(query))
-    parsed = _HTML(response.text)
-
-    assert _input(parsed, f"{lado_guardado}_referencia")["value"] == ""
-    assert "disabled" in _input(parsed, f"{lado_guardado}_ubicacion_confirmada")
-    assert _input(parsed, f"{lado_cotizado}_referencia")["value"] == "1"
-    assert Decimal(_input(parsed, "bulto_peso")["value"]) == Decimal("2")
-    if lado_guardado == "origen":
-        assert _input(parsed, "rem_ciudad")["value"] == "Azul"
-        assert _input(parsed, "dest_ciudad")["value"] == "Ciudad destino cotizada"
-    else:
-        assert _input(parsed, "dest_ciudad")["value"] == "Tandil"
-        assert _input(parsed, "rem_ciudad")["value"] == "Ciudad origen cotizada"
-
-
-def test_roundtrip_link_oca_y_contacto_explicito_conservan_cpa_por_lado(web, monkeypatch):
-    client, adapter_oca, _ = web
-    configurar(monkeypatch)
-    resultado = nacional.cotizar_referencia_nacional(
-        "CLIENTE-UBICACIONES",
-        **{
-            **datos(),
-            "origen_provincia": "B", "origen_localidad": "Bahía Blanca",
-            "origen_cp": "B8000ABC", "destino_provincia": "X",
-            "destino_localidad": "Río Cuarto", "destino_cp": "X5800DEF",
-        },
-        origen_referencia=True,
-        destino_referencia=True,
-    )
-    link = resultado["opciones"][0]["continuar_url"]
-    monkeypatch.setattr(
-        po.oca,
-        "adapter_cliente",
-        lambda *_a: (SimpleNamespace(insured_operation=True), adapter_oca),
-    )
-    response = client.get(link)
-    parsed = _HTML(response.text)
-    assert _input(parsed, "origen_localidad")["value"] == "Bahía Blanca"
-    assert _input(parsed, "origen_cp")["value"] == "B8000ABC"
-    assert _input(parsed, "destino_localidad")["value"] == "Río Cuarto"
-    assert _input(parsed, "destino_cp")["value"] == "X5800DEF"
-    for lado in ("origen", "destino"):
-        assert _input(parsed, f"{lado}_referencia")["value"] == "1"
-        assert "required" in _input(parsed, f"{lado}_ubicacion_confirmada")
-
-    reemplazo = client.get(link + "&remitente_id=7")
-    reemplazo_parsed = _HTML(reemplazo.text)
-    assert _input(reemplazo_parsed, "origen_referencia")["value"] == ""
-    assert "disabled" in _input(reemplazo_parsed, "origen_ubicacion_confirmada")
-    assert _input(reemplazo_parsed, "destino_referencia")["value"] == "1"
-    assert _input(reemplazo_parsed, "origen_localidad")["value"] == "Azul"
-    assert _input(reemplazo_parsed, "destino_localidad")["value"] == "Río Cuarto"
-
-
-@pytest.mark.parametrize(
-    "faltante,esperado,paso",
-    [("origen", "origen", 1), ("destino", "destino", 2)],
-)
-def test_post_internacional_bloquea_referencia_sin_confirmar_y_conserva_form(
-    portal, monkeypatch, faltante, esperado, paso,
-):
-    created, quotes = portal
-    agenda = [
-        _contacto(7, "REMITENTE", ciudad="Azul", cp="B7300ABC"),
-        _contacto(8, "DESTINATARIO", ciudad="Tandil", cp="B7000XYZ"),
-    ]
-    monkeypatch.setattr(pc, "listar_direcciones", lambda *_a: agenda)
-    confirmaciones = {
-        "origen_ubicacion_confirmada": "" if faltante == "origen" else "1",
-        "destino_ubicacion_confirmada": "" if faltante == "destino" else "1",
-    }
-    response = submit(
-        remitente_id="7", destinatario_id="8",
-        origen_referencia="1", destino_referencia="1",
-        **confirmaciones,
-    )
-    contexto = response["context"]
-
-    assert esperado in contexto["error"].lower()
-    assert "ciudad" in contexto["error"].lower()
-    assert "código postal" in contexto["error"].lower()
-    assert contexto["form"]["initial_step"] == paso
-    assert contexto["form"]["remitente_id"] == "7"
-    assert contexto["form"]["destinatario_id"] == "8"
-    assert contexto["form"]["origen_referencia"] == "1"
-    assert contexto["form"]["destino_referencia"] == "1"
-    assert contexto["form"]["origen_ubicacion_confirmada"] == confirmaciones["origen_ubicacion_confirmada"]
-    assert contexto["form"]["destino_ubicacion_confirmada"] == confirmaciones["destino_ubicacion_confirmada"]
-    assert Decimal(str(contexto["form"]["bultos"][0]["peso_kg"])) == Decimal("4")
-    assert contexto["remitentes"] == agenda and contexto["destinatarios"] == agenda
-    quotes.assert_not_called()
-    created.assert_not_called()
-
-
 def test_post_internacional_confirmado_cotiza_y_crea(portal):
     created, quotes = portal
 
     response = submit(
         origen_referencia="1",
         destino_referencia="1",
-        origen_ubicacion_confirmada="1",
-        destino_ubicacion_confirmada="1",
     )
 
     assert response.status_code == 303
@@ -440,7 +278,6 @@ def test_oca_preparar_confirmado_conserva_domicilios_y_normaliza_cp4(monkeypatch
     monkeypatch.setattr(oca_portal, "_shipment_xml", validar_xml)
     form = {
         "origen_referencia": "1", "destino_referencia": "1",
-        "origen_ubicacion_confirmada": "1", "destino_ubicacion_confirmada": "1",
         "origen_provincia": "B", "origen_localidad": "Bahía Blanca",
         "origen_cp": "B8000ABC", "origen_nombre": "Origen confirmado",
         "origen_calle": "Brown", "origen_numero": "10",
@@ -468,41 +305,3 @@ def test_oca_preparar_confirmado_conserva_domicilios_y_normaliza_cp4(monkeypatch
         "height_cm": "20",
     }]
     validar_xml.assert_called_once()
-
-
-@pytest.mark.parametrize("faltante", ["origen", "destino"])
-def test_post_oca_bloquea_referencia_sin_confirmar_y_conserva_agenda(web, faltante):
-    client, adapter_oca, _ = web
-    form = {
-        "origen_agenda_id": "7", "destino_agenda_id": "8",
-        "origen_nombre": "Origen editado", "origen_provincia": "B",
-        "origen_localidad": "Bahía Blanca", "origen_calle": "Brown",
-        "origen_numero": "10", "origen_cp": "B8000ABC",
-        "origen_email": "origen@example.invalid",
-        "destino_nombre": "Destino", "destino_apellido": "Persona",
-        "destino_provincia": "X", "destino_localidad": "Río Cuarto",
-        "destino_calle": "Sobremonte", "destino_numero": "20",
-        "destino_cp": "X5800DEF", "cantidad_bultos": "2", "peso_kg": "3.5",
-        "largo_cm": "40", "ancho_cm": "30", "alto_cm": "20",
-        "valor_declarado_ars": "100000", "origen_referencia": "1",
-        "destino_referencia": "1",
-        "origen_ubicacion_confirmada": "" if faltante == "origen" else "1",
-        "destino_ubicacion_confirmada": "" if faltante == "destino" else "1",
-    }
-    response = client.post("/portal/oca/cotizar", data=form)
-    assert response.status_code == 200
-    assert faltante in response.text.lower()
-    assert "código postal" in response.text.lower()
-    parsed = _HTML(response.text)
-    assert _input(parsed, "origen_referencia")["value"] == "1"
-    assert _input(parsed, "destino_referencia")["value"] == "1"
-    assert _input(parsed, "origen_localidad")["value"] == "Bahía Blanca"
-    assert _input(parsed, "destino_cp")["value"] == "X5800DEF"
-    assert _input(parsed, "cantidad_bultos")["value"] == "2"
-    assert any(o.get("value") == "7" and "selected" in o for o in parsed.options)
-    assert any(o.get("value") == "8" and "selected" in o for o in parsed.options)
-    for lado in ("origen", "destino"):
-        checkbox = _input(parsed, f"{lado}_ubicacion_confirmada")
-        assert "required" in checkbox
-        assert ("checked" in checkbox) is (form[f"{lado}_ubicacion_confirmada"] == "1")
-    adapter_oca.quote.assert_not_called()

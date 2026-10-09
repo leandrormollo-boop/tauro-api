@@ -12,7 +12,7 @@
 <th>Envío</th><th>Cliente / proveedor</th><th>Destino</th><th>Cobro al cliente</th><th>Factura del proveedor</th><th>Estado</th>
 </tr></thead><tbody>
 {% for s in operacion['items'] %}<tr>
-<td data-label="Envío"><a class="business-primary" href="/admin/pedidos/{{ s.id }}/editar">{{ s.tracking or ('TAURO ' ~ s.numero_guia_tauro if s.numero_guia_tauro else 'Envío #' ~ s.id) }}</a>
+<td data-label="Envío"><a class="business-primary" href="/admin/pedidos/{{ s.id }}/control">{{ s.tracking or ('TAURO ' ~ s.numero_guia_tauro if s.numero_guia_tauro else 'Envío #' ~ s.id) }}</a>
 {% if s.numero_guia_tauro %}<small>TAURO {{ s.numero_guia_tauro }}</small>{% endif %}<small>{{ op.fecha(s.created_at) }}</small></td>
 <td data-label="Cliente / proveedor"><a class="business-primary" href="{{ s.cliente_url }}">{{ s.cliente_id }}</a><small>{% if s.proveedor_url %}<a class="business-chip" href="{{ s.proveedor_url }}">{{ s.proveedor_nombre }} ↗</a>{% else %}{{ s.proveedor_nombre }}{% endif %}</small></td>
 <td data-label="Destino"><strong>{{ s.dest_nombre }}</strong><small>{{ s.dest_ciudad }} · {{ s.destino_pais }}</small><small>{{ s.remitente_pais or 'Origen sin informar' }} → {{ s.destino_pais }}</small></td>
@@ -26,7 +26,7 @@
 {% if f.match_estado!='CONFIRMADO' %}<small><a class="business-status warn" href="/admin/conciliacion-couriers/envios/{{ s.id }}">Vínculo propuesto · revisar</a></small>{% else %}
 <small>{{ op.estado(f) }}</small>{% if f.tipo_documento!='NC' %}<small>Vence: {{ op.fecha(f.vencimiento) }}</small>{% else %}<small>Crédito · no pagable</small>{% endif %}{% endif %}</div>
 {% else %}<span class="business-status muted">Sin factura vinculada</span><small><a href="/admin/conciliacion-couriers/envios/{{ s.id }}">Conciliar envío ↗</a></small>{% endfor %}</td>
-<td data-label="Estado"><span class="badge {{ 'error' if s.estado=='CANCELADO' else 'warn' if s.estado=='REEMPLAZADO' or s.tracking_estado=='RETENIDO' else '' }}">{{ 'MODIFICADO' if s.estado=='REEMPLAZADO' else 'CANCELADO' if s.estado=='CANCELADO' else {'GUIA_LISTA':'GUÍA EMITIDA','GUIA_CARGADA':'GUÍA EMITIDA','PROCESO_ENTREGA':'EN CAMINO','SOLICITADO':'SOLICITADO','EN_PROCESO':'EN PREPARACIÓN'}.get(s.tracking_estado or s.estado,s.tracking_estado or s.estado) }}</span><small><a href="/admin/pedidos/{{ s.id }}/editar">Abrir envío ↗</a></small></td>
+<td data-label="Estado"><span class="badge {{ 'error' if s.estado=='CANCELADO' else 'warn' if s.estado=='REEMPLAZADO' or s.tracking_estado=='RETENIDO' else '' }}">{{ 'MODIFICADO' if s.estado=='REEMPLAZADO' else 'CANCELADO' if s.estado=='CANCELADO' else {'GUIA_LISTA':'GUÍA EMITIDA','GUIA_CARGADA':'GUÍA EMITIDA','PROCESO_ENTREGA':'EN CAMINO','SOLICITADO':'SOLICITADO','EN_PROCESO':'EN PREPARACIÓN'}.get(s.tracking_estado or s.estado,s.tracking_estado or s.estado) }}</span><small><a href="/admin/pedidos/{{ s.id }}/control">Gestionar envío ↗</a></small></td>
 </tr>{% else %}<tr><td colspan="6" class="business-empty">No hay envíos en esta selección.</td></tr>{% endfor %}
 </tbody></table></div>
 <div class="business-pagination"><span>Página {{ operacion.pagina }} de {{ operacion.paginas }}</span><div>{% if operacion.pagina>1 %}<a class="btn btn-sm btn-ghost" href="{{ operacion.prev_url }}">Anterior</a>{% endif %}{% if operacion.pagina<operacion.paginas %}<a class="btn btn-sm btn-ghost" href="{{ operacion.next_url }}">Siguiente</a>{% endif %}</div></div>

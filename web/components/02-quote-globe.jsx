@@ -105,8 +105,7 @@ function PublicQuoteGlobe({
     <span className="quote-map-connector" aria-hidden="true">↗</span>
     <div className="quote-map-endpoint"><span className="quote-map-pin" aria-hidden="true"></span><div><small>DESTINO</small><strong data-map-destination>Elegí destino</strong><span data-map-destination-country></span></div></div>
   </div>
-  <div className="quote-map-footer"><span data-map-caption>{national ? "Referencia entre provincias · sin validar cobertura." : "Ruta orientativa entre países."}</span><button type="button" className="quote-map-toggle" aria-pressed="false" data-map-toggle>Ocultar mapa</button></div>
-  <span className="quote-map-credit">{national ? "Cartografía · IGN / Georef · Natural Earth" : "Cartografía · Natural Earth"}</span>
+  <div className="quote-map-footer"><span data-map-caption></span><button type="button" className="quote-map-toggle" aria-pressed="false" data-map-toggle>Ocultar mapa</button></div>
 </aside>
 
     </div>

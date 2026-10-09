@@ -85,7 +85,7 @@ $ {{ (valor|abs)|numero_ars }}
     <a href="/portal/envios?paso=requieren_accion" class="home-summary-item{% if r.requieren_accion %} needs-attention{% endif %}">
         <span>Requiere tu acción</span>
         <strong>{{ r.requieren_accion }}</strong>
-        <small>{% if r.requieren_accion %}Ver todos los pendientes{% else %}Nada pendiente{% endif %}</small>
+        <small>{% if r.requieren_accion %}Guías por descargar{% else %}Nada pendiente{% endif %}</small>
     </a>
     <a href="/portal/cuenta" class="home-summary-item home-summary-balance{% if balance > 0 %} has-debt{% endif %}">
         <span>{% if balance > 0 %}Pendiente de pago{% elif balance < 0 %}Saldo a favor{% else %}Cuenta corriente{% endif %}</span>
@@ -94,16 +94,23 @@ $ {{ (valor|abs)|numero_ars }}
     </a>
 </section>
 
-{% if r.requieren_accion %}
+{% if r.requieren_accion or r.pedidos_por_armar %}
 <aside class="home-action-reminder" aria-label="Pendientes que requieren tu acción">
     <span>Requiere tu acción</span>
     <div>
-        {% for paso in embudo %}
-        {% if paso.cantidad and paso.accion_de == 'cliente' %}
-        <a href="{{ paso.url }}"><strong>{{ paso.cantidad }} {{ paso.titulo|lower }}</strong><small>{{ paso.detalle }}</small></a>
+        {% if r.guias_por_descargar %}
+        <a href="/portal/envios?paso=requieren_accion"><strong>{{ r.guias_por_descargar }} guía{{ 's' if r.guias_por_descargar != 1 else '' }} por descargar</strong><small>Descargá la guía para preparar el envío.</small></a>
         {% endif %}
-        {% endfor %}
+        {% if r.pedidos_por_armar %}
+        <a href="/portal/tienda"><strong>Mi tienda: {{ r.pedidos_por_armar }} pedido{{ 's' if r.pedidos_por_armar != 1 else '' }} por armar</strong></a>
+        {% endif %}
     </div>
+</aside>
+{% endif %}
+{% if r.retenidos %}
+<aside class="home-action-reminder" aria-label="Seguimiento a cargo de TAURO">
+    <span>Seguimiento de TAURO</span>
+    <a href="/portal/envios?paso=retenidos">{{ r.retenidos }} envío{{ 's' if r.retenidos != 1 else '' }} retenido{{ 's' if r.retenidos != 1 else '' }}</a>
 </aside>
 {% endif %}
 

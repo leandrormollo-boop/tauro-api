@@ -26,7 +26,8 @@ import re
 from zoneinfo import ZoneInfo
 
 from core.database import get_conn
-from servicios.estados_envio import estado_principal_envio, presentar_estados_envio
+from servicios.estados_envio import estado_principal_envio, estado_operativo_presentado, presentar_estados_envio
+from servicios.acciones_cliente import accion_pendiente_cliente, requiere_accion_cliente
 from servicios.paises import normalizar_iso2
 
 
@@ -51,9 +52,9 @@ PASOS_EMBUDO = [
     {
         "clave": "guia_lista",
         "titulo": "Guías listas",
-        "detalle": "Para descargar y entregar al courier",
+        "detalle": "Guías emitidas, todavía sin despacho confirmado",
         "url": "/portal/envios?paso=guia_lista",
-        "accion_de": "cliente",
+        "accion_de": None,
     },
     {
         "clave": "despachados",
@@ -65,9 +66,9 @@ PASOS_EMBUDO = [
     {
         "clave": "retenidos",
         "titulo": "Retenidos",
-        "detalle": "Revisá el último aviso del courier",
+        "detalle": "Seguimiento a cargo de TAURO",
         "url": "/portal/envios?paso=retenidos",
-        "accion_de": "cliente",
+        "accion_de": "tauro",
     },
     {
         "clave": "entregados",
@@ -91,12 +92,6 @@ PASOS_EMBUDO = [
         "accion_de": None,
     },
 ]
-
-
-# El filtro combinado usa la misma definición que el contador del inicio.
-PASOS_ACCION_CLIENTE = frozenset(
-    paso["clave"] for paso in PASOS_EMBUDO if paso["accion_de"] == "cliente"
-)
 
 
 # Diez filas permiten recorrer el historial sin saltar de página a cada rato.
@@ -146,10 +141,8 @@ def resumen_inicio_cliente(
         if str(solicitud.get("estado") or "").upper()
         not in {"CANCELADO", "REEMPLAZADO"}
     ]
-    conteos_embudo = {
-        str(paso.get("clave") or ""): int(paso.get("cantidad") or 0)
-        for paso in embudo
-    }
+    conteos_embudo = Counter(_paso_solicitud(s) for s in historial)
+    pendientes = sum(requiere_accion_cliente(s) for s in historial)
 
     meses: list[tuple[int, int]] = []
     cursor = (hoy.year, hoy.month)
@@ -195,11 +188,10 @@ def resumen_inicio_cliente(
         "entregados": conteos_embudo.get("entregados", 0),
         "guias_listas": conteos_embudo.get("guia_lista", 0),
         "retenidos": conteos_embudo.get("retenidos", 0),
-        "requieren_accion": sum(
-            int(paso.get("cantidad") or 0)
-            for paso in embudo
-            if paso.get("accion_de") == "cliente"
-        ),
+        "requieren_accion": pendientes,
+        "guias_por_descargar": pendientes,
+        "pedidos_por_armar": next((int(p.get("cantidad") or 0) for p in embudo
+                                   if p.get("clave") == "por_armar"), 0),
         "serie_mensual": serie_mensual,
         "maximo_mensual": maximo_mensual,
         "destinos_frecuentes": destinos_frecuentes,
@@ -238,6 +230,10 @@ def paso_de_estado(estado: str, tracking_estado: str | None = None) -> str | Non
         return "canceladas"
     print(f"[panel] estado sin mapear en el embudo: {estado!r}")
     return None
+
+
+def _paso_solicitud(solicitud: dict) -> str | None:
+    return paso_de_estado(estado_operativo_presentado(solicitud), solicitud.get("tracking_estado"))
 
 
 def _pagina_pedida(valor) -> int:
@@ -289,6 +285,7 @@ def preparar_historial_envios(
     historial = list(solicitudes or [])
     for solicitud in historial:
         presentar_estados_envio(solicitud)
+        solicitud["accion_cliente"] = accion_pendiente_cliente(solicitud)
         solicitud["_ambito_portal"] = ambito_envio(solicitud)
     tiene_historial = bool(historial)
 
@@ -367,7 +364,7 @@ def preparar_historial_envios(
     )
     conteos: dict[str, int] = {}
     for solicitud in filtradas:
-        clave = paso_de_estado(solicitud.get("estado"), solicitud.get("tracking_estado"))
+        clave = _paso_solicitud(solicitud)
         if clave:
             conteos[clave] = conteos.get(clave, 0) + 1
     chips = [
@@ -377,16 +374,16 @@ def preparar_historial_envios(
     ]
 
     paso = (paso or "").strip().lower()
-    total_requieren_accion = sum(conteos.get(clave, 0) for clave in PASOS_ACCION_CLIENTE)
+    total_requieren_accion = sum(requiere_accion_cliente(s) for s in filtradas)
     if paso == "requieren_accion":
         filtradas = [
             s for s in filtradas
-            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) in PASOS_ACCION_CLIENTE
+            if requiere_accion_cliente(s)
         ]
     elif paso in {chip["clave"] for chip in chips}:
         filtradas = [
             s for s in filtradas
-            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) == paso
+            if _paso_solicitud(s) == paso
         ]
     else:
         paso = ""
@@ -400,7 +397,7 @@ def preparar_historial_envios(
     if paso == "requieren_accion":
         historial_del_grupo = [
             s for s in historial_del_grupo
-            if paso_de_estado(s.get("estado"), s.get("tracking_estado")) in PASOS_ACCION_CLIENTE
+            if requiere_accion_cliente(s)
         ]
     por_pagina = max(1, int(por_pagina or ENVIOS_POR_PAGINA))
     total_resultados = len(filtradas)
@@ -451,12 +448,21 @@ def embudo_envios(cliente_id: str) -> list[dict]:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT estado, tracking_estado, COUNT(*) AS n
+                    SELECT CASE
+                        WHEN EXISTS (
+                            SELECT 1 FROM envios e WHERE e.solicitud_id=s.id
+                            AND e.cliente_id=s.cliente_id AND e.estado='CANCELADO'
+                        ) THEN 'CANCELADO'
+                        WHEN s.estado='GUIA_LISTA' AND LEFT(BTRIM(s.coti_id), 4) = 'EXT-'
+                             AND NULLIF(BTRIM(s.tracking), '') IS NOT NULL
+                        THEN 'DESPACHADO'
+                        ELSE s.estado END AS estado,
+                        s.tracking_estado, COUNT(*) AS n
                     FROM solicitudes_guia s
                     WHERE s.cliente_id = %s
                       AND s.test=FALSE
                       AND s.visible_cliente=TRUE
-                    GROUP BY s.estado, s.tracking_estado
+                    GROUP BY 1, 2
                     """,
                     (cliente_id,),
                 )

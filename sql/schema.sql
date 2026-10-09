@@ -2094,6 +2094,7 @@ CREATE TABLE IF NOT EXISTS solicitudes_guia (
     origen_dominio           TEXT,
     origen_pedido_externo_id TEXT,
     visible_cliente          BOOLEAN NOT NULL DEFAULT TRUE,
+    cancelacion_comercial    BOOLEAN NOT NULL DEFAULT FALSE,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -2310,6 +2311,13 @@ ALTER TABLE IF EXISTS solicitudes_guia
 -- cargo, factura, pago o trazabilidad interna.
 ALTER TABLE IF EXISTS solicitudes_guia
     ADD COLUMN IF NOT EXISTS visible_cliente BOOLEAN NOT NULL DEFAULT TRUE;
+-- Una cancelacion comercial quita el cargo de la cuenta de TAURO pero no
+-- anula la guia ante el courier. La solicitud conserva estado CANCELADO para
+-- el cliente y este flag mantiene el tracking fisico hasta su estado final.
+-- Las cancelaciones operativas anteriores conservan FALSE y siguen fuera del
+-- rastreo normal.
+ALTER TABLE IF EXISTS solicitudes_guia
+    ADD COLUMN IF NOT EXISTS cancelacion_comercial BOOLEAN NOT NULL DEFAULT FALSE;
 -- Empresa y CONTACTO separados (guía real de HAILU, 05/08): los couriers
 -- piden companyName (razón social) Y personName (quién atiende). Antes un
 -- solo campo forzaba a elegir, y la emisión ponía como empresa al cliente
@@ -2384,6 +2392,18 @@ CREATE INDEX IF NOT EXISTS idx_solicitudes_tracking_dhl_pendiente
       AND tracking IS NOT NULL AND BTRIM(tracking) <> ''
       AND estado NOT IN ('CANCELADO', 'ENTREGADO')
       AND estado <> 'REEMPLAZADO'
+      AND (tracking_estado IS NULL OR tracking_estado <> 'ENTREGADO');
+
+-- Las bajas comerciales son una cola chica y distinta de las guias vigentes.
+-- Este indice parcial evita recorrer todo el historial cancelado para seguir
+-- el movimiento real que el courier todavia puede informar.
+CREATE INDEX IF NOT EXISTS idx_solicitudes_tracking_comercial_pendiente
+    ON solicitudes_guia (
+        UPPER(courier), tracking_consultado_at ASC NULLS FIRST, id
+    )
+    WHERE cancelacion_comercial=TRUE
+      AND estado='CANCELADO'
+      AND tracking IS NOT NULL AND BTRIM(tracking) <> ''
       AND (tracking_estado IS NULL OR tracking_estado <> 'ENTREGADO');
 
 -- ── Corrección, reemisión y cancelación de guías DHL ────────
@@ -2630,7 +2650,10 @@ BEGIN
            OR NEW.fecha IS DISTINCT FROM OLD.fecha
            OR NEW.courier IS DISTINCT FROM OLD.courier
            OR NEW.solicitud_id IS DISTINCT FROM OLD.solicitud_id
-           OR NEW.direccion IS DISTINCT FROM OLD.direccion
+           -- La dirección sólo puede cambiar hacia NULL: es la redacción GDPR
+           -- (shop/redact, customers/redact), nunca una reescritura.
+           OR (NEW.direccion IS DISTINCT FROM OLD.direccion
+               AND NEW.direccion IS NOT NULL)
            OR NEW.origen_retiro IS DISTINCT FROM OLD.origen_retiro
            OR NEW.origen_clave IS DISTINCT FROM OLD.origen_clave THEN
             RAISE EXCEPTION USING
@@ -4142,6 +4165,33 @@ BEGIN
            OR factura_actual.estado <> 'EMITIDA' OR factura_actual.tipo <> 'FC' THEN
             RAISE EXCEPTION 'La factura no pertenece al cliente o no es imputable';
         END IF;
+        -- La cancelación comercial y una nueva imputación no pueden cruzarse.
+        -- Se bloquean todos los cargos documentados en orden estable y se lee
+        -- el estado después del lock. Si la cancelación ganó la carrera, el
+        -- pago falla; si el pago ganó, la cancelación ve su aplicación y falla.
+        FOR envio_actual IN
+            SELECT e.id, e.estado
+              FROM envios e
+             WHERE e.id IN (
+                   SELECT i.envio_id
+                     FROM facturas_cliente_items i
+                    WHERE i.factura_id=NEW.factura_id
+                      AND i.envio_id IS NOT NULL
+                   UNION
+                   SELECT ea.id
+                     FROM facturas_cliente_items i
+                     JOIN ajustes_cliente a ON a.id=i.ajuste_id
+                     JOIN envios ea ON ea.solicitud_id=a.solicitud_id
+                    WHERE i.factura_id=NEW.factura_id
+               )
+             ORDER BY e.id
+             FOR UPDATE
+        LOOP
+            IF envio_actual.estado <> 'ACTIVO' THEN
+                RAISE EXCEPTION
+                    'La factura contiene un cargo cancelado y no admite nuevas imputaciones';
+            END IF;
+        END LOOP;
         SELECT MIN(COALESCE(e.ambito, ea.ambito)),
                MAX(COALESCE(e.ambito, ea.ambito))
           INTO ambito_documento, ambito_documento_max
@@ -5420,3 +5470,47 @@ CREATE TABLE IF NOT EXISTS automatizaciones_historial (
     fecha TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_automatizaciones_historial_clave ON automatizaciones_historial(clave,id DESC);
+
+-- Incidencias de emisión: evidencia operacional independiente de la retención
+-- de security_audit. No contiene formularios ni costos internos.
+CREATE TABLE IF NOT EXISTS emision_catalogo_errores (
+    codigo TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    contenido JSONB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS emision_intentos (
+    id BIGSERIAL PRIMARY KEY,
+    referencia TEXT NOT NULL UNIQUE,
+    solicitud_id INTEGER NOT NULL REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('cliente','admin')),
+    estado TEXT NOT NULL DEFAULT 'INICIADO'
+        CHECK (estado IN ('INICIADO','EXITOSO','FALLIDO','INCIERTO','CONCILIADO')),
+    iniciado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finalizado_en TIMESTAMPTZ,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    UNIQUE(id,solicitud_id)
+);
+CREATE INDEX IF NOT EXISTS idx_emision_intentos_solicitud ON emision_intentos(solicitud_id,id DESC);
+CREATE INDEX IF NOT EXISTS idx_emision_intentos_inconclusos ON emision_intentos(iniciado_en)
+    WHERE estado='INICIADO';
+CREATE TABLE IF NOT EXISTS emision_incidencias (
+    id BIGSERIAL PRIMARY KEY,
+    solicitud_id INTEGER NOT NULL REFERENCES solicitudes_guia(id) ON DELETE RESTRICT,
+    codigo TEXT NOT NULL REFERENCES emision_catalogo_errores(codigo),
+    estado TEXT NOT NULL DEFAULT 'PENDIENTE'
+        CHECK (estado IN ('PENDIENTE','EN_REVISION','RESUELTO')),
+    diagnostico JSONB NOT NULL,
+    cantidad INTEGER NOT NULL DEFAULT 1 CHECK (cantidad > 0),
+    ultimo_intento_id BIGINT NOT NULL REFERENCES emision_intentos(id),
+    creada_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizada_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resuelta_en TIMESTAMPTZ,
+    resolucion TEXT,
+    analisis JSONB,
+    analisis_token TEXT,
+    analisis_desde TIMESTAMPTZ,
+    UNIQUE(solicitud_id,codigo),
+    FOREIGN KEY(ultimo_intento_id,solicitud_id) REFERENCES emision_intentos(id,solicitud_id)
+);
+CREATE INDEX IF NOT EXISTS idx_emision_incidencias_pendientes ON emision_incidencias(actualizada_en DESC,id DESC)
+    WHERE estado <> 'RESUELTO';

@@ -167,3 +167,18 @@ def test_helpers_publicos_aceptan_nombre_o_alias():
     assert existe("méxico") is True
     assert nombre("USA") == "Estados Unidos"
     assert referencia("United States")["country"] == "US"
+
+
+def test_todo_pais_del_desplegable_tiene_ciudad_de_referencia():
+    """El cotizador público no pide dirección: si un país del desplegable no
+    tiene ciudad de referencia, la cotización muere con un error genérico
+    (pasó con Polonia y Arabia Saudita el 08/10/2026)."""
+    from servicios.paises import PAISES, opciones, referencia, referencia_estimacion
+    sin_ciudad = [iso for iso, _ in opciones() if not referencia_estimacion(iso).get("city")]
+    assert sin_ciudad == []
+    assert len(PAISES) == len(opciones()) >= 249
+    # El portal sigue pidiendo la ubicación real: la capital es sólo para la web.
+    assert referencia("PL")["city"] == ""
+    assert referencia_estimacion("PL")["city"] == "WARSZAWA"
+    assert referencia_estimacion("SA")["postal_code"] == "11564"
+    assert referencia_estimacion("US")["city"] == referencia("US")["city"]

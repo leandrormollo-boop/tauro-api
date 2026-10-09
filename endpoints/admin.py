@@ -1445,6 +1445,93 @@ def admin_incidencias_emision(
     )
 
 
+@router.get('/incidencias/resumen')
+def admin_incidencias_resumen(admin_token: Optional[str] = Cookie(None)):
+    if not _is_auth(admin_token):
+        return JSONResponse({'error':'Sesión cerrada.'},status_code=401)
+    from servicios.control_incidencias_emision import resumen_incidencias
+    try:
+        return JSONResponse(resumen_incidencias(),headers={'Cache-Control':'no-store'})
+    except Exception:
+        return JSONResponse({'disponible':False},status_code=503,headers={'Cache-Control':'no-store'})
+
+
+@router.get('/incidencias', response_class=HTMLResponse)
+def admin_incidencias(request: Request, estado: str='pendientes', antes: int=0,
+                      admin_token: Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.control_incidencias_emision import listar_incidencias
+    from servicios.catalogo_errores_emision import catalogo_errores
+    estado=estado if estado in {'pendientes','resueltos','catalogo'} else 'pendientes'
+    datos=({'items':[],'inconclusos':[],'siguiente':0} if estado=='catalogo'
+           else listar_incidencias(estado,max(0,antes)))
+    for intento in datos['inconclusos']:
+        intento['csrf']=_csrf_dhl(f"intento:{intento['id']}")
+    return templates.TemplateResponse(request=request,name='admin/incidencias.html',
+        headers={'Cache-Control':'private, no-store'},
+        context={'seccion':'bandeja','estado':estado,'catalogo':catalogo_errores(),
+                 'verificacion':request.query_params.get('verificacion',''),**datos})
+
+
+@router.post('/incidencias/intentos/{intento_id}/verificar')
+def admin_intento_verificar(request:Request,intento_id:int,csrf:str=Form(''),
+                            admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf,f'intento:{intento_id}'):
+        return HTMLResponse('La pantalla venció. Volvé a abrir incidencias.',status_code=403)
+    from servicios.control_incidencias_emision import verificar_inconcluso
+    resuelto=verificar_inconcluso(intento_id,request)
+    return RedirectResponse('/admin/incidencias?verificacion='+('resuelto' if resuelto else 'pendiente'),status_code=303)
+
+
+@router.get('/incidencias/{incidencia_id}', response_class=HTMLResponse)
+def admin_incidencia_detalle(request:Request, incidencia_id:int,
+                            admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    from servicios.control_incidencias_emision import obtener_incidencia
+    from servicios.agente_incidencias_ia import estado_agente_ia
+    item=obtener_incidencia(incidencia_id)
+    if not item:
+        return HTMLResponse('No encontramos esa incidencia.',status_code=404)
+    return templates.TemplateResponse(request=request,name='admin/incidencia_detalle.html',
+        headers={'Cache-Control':'private, no-store'},
+        context={'seccion':'bandeja','item':item,'ia':estado_agente_ia(),
+                 'revision_resultado':request.query_params.get('revision',''),
+                 'csrf':_csrf_dhl(f"incidencia:{incidencia_id}:{item['ultimo_intento_id']}")})
+
+
+@router.post('/incidencias/{incidencia_id}/analizar')
+def admin_incidencia_analizar(request:Request,incidencia_id:int,
+    intento_id:int=Form(...),csrf:str=Form(''),usar_ia:bool=Form(False),
+    admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf,f'incidencia:{incidencia_id}:{intento_id}'):
+        return HTMLResponse('La pantalla venció. Volvé a abrir la incidencia.',status_code=403)
+    if not check_rate('admin:incidencias:analizar',max_attempts=12,window_seconds=600):
+        return HTMLResponse('Hay varios análisis recientes. Esperá unos minutos.',status_code=429)
+    if usar_ia and not check_auth_rate('admin:incidencias:ia',max_attempts=12,window_seconds=600):
+        return HTMLResponse('Se alcanzó el límite de análisis de IA. Esperá unos minutos.',status_code=429)
+    from servicios.control_incidencias_emision import analizar_incidencia
+    resultado=analizar_incidencia(incidencia_id,intento_id,usar_ia=usar_ia,request=request)
+    return RedirectResponse(f'/admin/incidencias/{incidencia_id}?revision={resultado}',status_code=303)
+
+
+@router.post('/incidencias/{incidencia_id}/revision')
+def admin_incidencia_revision(request:Request,incidencia_id:int,
+    intento_id:int=Form(...),csrf:str=Form(''),admin_token:Optional[str]=Cookie(None)):
+    if not _is_auth(admin_token):
+        return _redirect_login()
+    if not _csrf_dhl_valido(csrf,f'incidencia:{incidencia_id}:{intento_id}'):
+        return HTMLResponse('La pantalla venció. Volvé a abrir la incidencia.',status_code=403)
+    from servicios.control_incidencias_emision import tomar_revision
+    tomada=tomar_revision(incidencia_id,intento_id,request)
+    return RedirectResponse(f'/admin/incidencias/{incidencia_id}'+('' if tomada else '?revision=sin_cambios'),status_code=303)
+
+
 @router.get("/backup.json")
 def admin_backup(admin_token: Optional[str] = Cookie(None)):
     """Descarga una exportación parcial para consulta; no es restaurable."""
@@ -2116,38 +2203,13 @@ def admin_ajustar_precio_envio(
     csrf_precio: str = Form(...),
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Cambia el precio final con un asiento auditable; nunca pisa el original."""
+    """Los formularios anteriores pasan por la ficha con revisión de importe."""
     if not _is_auth(admin_token):
         return _redirect_login()
-
-    cliente = cliente_id.strip().upper()
-    destino = f"/admin/clientes/{quote(cliente)}"
-    alcance = f"precio:{cliente}:{int(envio_id)}"
-    if not _csrf_dhl_valido(csrf_precio, alcance):
-        return RedirectResponse(
-            url=f"{destino}?error={quote('El formulario venció. Recargá la página e intentá nuevamente.')}",
-            status_code=303,
-        )
-    try:
-        clave = _idempotency_key_form(idempotency_key)
-        nuevo = _importe_contable_form(
-            nuevo_precio_ars, "Nuevo precio", permitir_cero=True
-        )
-        from servicios.ajustes_precio_admin import aplicar_nuevo_precio
-        resultado = aplicar_nuevo_precio(
-            cliente_id=cliente,
-            envio_id=int(envio_id),
-            nuevo_precio_ars=nuevo,
-            motivo=motivo,
-            actor="admin",
-            idempotency_key=clave,
-        )
-    except ValueError as exc:
-        return RedirectResponse(
-            url=f"{destino}?error={quote(str(exc)[:300])}", status_code=303
-        )
-    ok = "precio_sin_cambios" if resultado.get("sin_cambios") else "precio_ajustado"
-    return RedirectResponse(url=f"{destino}?ok={ok}#envios-cliente", status_code=303)
+    return RedirectResponse(
+        url=f"/admin/clientes/{quote(cliente_id.strip().upper(), safe='')}/envios/{envio_id}/control#precio",
+        status_code=303,
+    )
 
 
 @router.get("/clientes/{cliente_id}/acceso-precios", response_class=HTMLResponse)
@@ -2967,22 +3029,16 @@ def admin_envio_cancelar(
 ):
     if not _is_auth(admin_token):
         return _redirect_login()
-
-    resultado = cancelar_envio(
-        envio_id,
-        actor_tipo="admin",
-        actor_ref="admin",
+    from servicios.control_envios_admin import obtener_control_envio_admin, ControlEnvioAdminError
+    try:
+        dato = obtener_control_envio_admin(envio_id=envio_id)
+    except ControlEnvioAdminError:
+        return Response("El envío no existe.", status_code=404)
+    cliente = (dato.get("solicitud") or dato["cargo"])["cliente_id"]
+    return RedirectResponse(
+        url=f"/admin/clientes/{quote(cliente, safe='')}/envios/{envio_id}/control#cancelacion",
+        status_code=303,
     )
-    if not resultado:
-        return Response(
-            content=(
-                "No se puede cancelar este cargo. Si ya tiene factura, "
-                "requiere una nota de crédito documentada."
-            ),
-            status_code=409,
-        )
-    cliente_id = resultado["cliente_id"]
-    return RedirectResponse(url=f"/admin/clientes/{cliente_id}", status_code=303)
 
 
 @router.post("/clientes/{cliente_id}/envios/{envio_id}/anular")
@@ -2991,27 +3047,11 @@ def admin_envio_anular(
     envio_id: int,
     admin_token: Optional[str] = Cookie(None),
 ):
-    """Anula el cargo con ownership; el registro histórico nunca se borra."""
+    """Una baja necesita el motivo y la revisión de la ficha de control."""
     if not _is_auth(admin_token):
         return _redirect_login()
-
-    cliente_normalizado = cliente_id.strip().upper()
-    resultado = cancelar_envio(
-        envio_id,
-        cliente_id=cliente_normalizado,
-        actor_tipo="admin",
-        actor_ref="admin",
-    )
-    if not resultado:
-        return Response(
-            content=(
-                "No se puede anular este envío. Si ya tiene factura, "
-                "requiere una nota de crédito documentada."
-            ),
-            status_code=409,
-        )
     return RedirectResponse(
-        url=f"/admin/clientes/{cliente_normalizado}?ok=envio_anulado",
+        url=f"/admin/clientes/{quote(cliente_id.strip().upper(), safe='')}/envios/{envio_id}/control#cancelacion",
         status_code=303,
     )
 
@@ -6099,3 +6139,5 @@ async def admin_importar_waimao_dhl_historico(
 # Comparte la autenticación ADMIN; ningún endpoint de proveedores se monta en portal.
 from endpoints.admin_operadores import router as operadores_router
 router.include_router(operadores_router)
+from endpoints.admin_control_envios import router as control_envios_router
+router.include_router(control_envios_router)

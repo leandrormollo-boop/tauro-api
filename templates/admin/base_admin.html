@@ -158,6 +158,8 @@
   </style>
 <link rel="stylesheet" href="/static/css/admin-negocio.css?v=1">
 <link rel="stylesheet" href="/static/css/admin-theme.css?v=1">
+<link rel="stylesheet" href="/static/css/admin-incidencias.css?v=1">
+<script src="/static/js/admin-incidencias.js?v=1" defer></script>
 </head>
 <body data-draft-scope="admin">
   <header class="admin-topbar">
@@ -166,6 +168,10 @@
       <span class="admin-badge">ADMIN</span>
     </div>
     <div class="admin-topbar-actions">
+      <a href="/admin/incidencias" class="inc-notification" data-inc-notification aria-label="Ver incidencias de emisión">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M9 20h6"/></svg>
+        <span class="inc-notification-label">Incidencias</span><span data-inc-count aria-live="polite">…</span>
+      </a>
       {% include 'admin/_theme_selector.html' %}
       <a href="/admin/logout" class="logout" style="font-size:12px;color:var(--fg-4);padding:5px 12px;border:1px solid var(--line);border-radius:999px;">Salir</a>
     </div>
@@ -181,7 +187,7 @@
       <a href="/admin/clientes" {% if seccion in ('clientes','cliente_nuevo') %}class="active"{% endif %}>Clientes</a>
       <a href="/admin/operadores" {% if seccion=='operadores' and request.url.path!='/admin/control-envios' %}class="active"{% endif %}>Proveedores</a>
       <div class="sidebar-label">Operación</div>
-      <a href="/admin/control-envios" {% if request.url.path=='/admin/control-envios' or seccion=='envio_realizado' %}class="active"{% endif %}>Envíos</a>
+      <a href="/admin/control-envios" {% if request.url.path=='/admin/control-envios' or seccion in ('envio_realizado', 'control_envios') %}class="active"{% endif %}>Envíos</a>
       <a href="/admin/pedidos" {% if seccion=='pedidos' %}class="active"{% endif %}>Solicitudes y emisión</a>
       <a href="/admin/recolecciones" {% if seccion=='recolecciones' %}class="active"{% endif %}>Recolecciones</a>
       <a href="/admin/bandeja" {% if seccion=='bandeja' %}class="active"{% endif %}>Pendientes de atención</a>

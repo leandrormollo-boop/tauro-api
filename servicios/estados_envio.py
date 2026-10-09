@@ -49,6 +49,20 @@ HITOS_ENVIO_UI = tuple(
 )
 
 
+def es_envio_realizado(envio: dict) -> bool:
+    """Procedencia explícita del alta Admin; nunca se deduce por antigüedad."""
+    return str(envio.get("coti_id") or "").strip().startswith("EXT-")
+
+
+def estado_operativo_presentado(envio: dict) -> str:
+    """Presenta el despacho declarado por Admin sin reescribir su historial."""
+    estado = str(envio.get("estado") or "").strip().upper()
+    if (estado == "GUIA_LISTA" and es_envio_realizado(envio)
+            and str(envio.get("tracking") or "").strip()):
+        return "DESPACHADO"
+    return estado
+
+
 def estado_principal_envio(estado: Any, tracking_estado: Any = None) -> str:
     """La anulación prevalece; el tracking confirmado supera hitos anteriores."""
     operacion = str(estado or "").strip().upper()
@@ -72,8 +86,9 @@ def _presentacion(codigo: Any, mapa: dict, *, vacio: tuple[str, str]) -> dict:
 
 def presentar_estados_envio(envio: dict) -> dict:
     """Agrega las presentaciones canónicas sin borrar el dato original."""
+    operacion = estado_operativo_presentado(envio)
     envio["estado_operacion_ui"] = _presentacion(
-        envio.get("estado"),
+        operacion,
         ESTADOS_OPERACION_UI,
         vacio=("Solicitado", "warn"),
     )
@@ -83,12 +98,20 @@ def presentar_estados_envio(envio: dict) -> dict:
         vacio=("Sin movimientos", "muted"),
     )
     envio["estado_cliente_ui"] = _presentacion(
-        estado_principal_envio(envio.get("estado"), envio.get("tracking_estado")),
+        estado_principal_envio(operacion, envio.get("tracking_estado")),
         {**ESTADOS_OPERACION_UI, **ESTADOS_TRACKING_UI,
          "EMITIENDO": ("Generando guía", "warn"),
          "VERIFICAR_COURIER": ("Confirmando emisión", "warn")},
         vacio=("Por confirmar", "muted"),
     )
+    envio["seguimiento_pendiente_tauro"] = (
+        es_envio_realizado(envio)
+        and operacion == "DESPACHADO"
+        and not envio.get("tracking_estado")
+    )
+    if envio["seguimiento_pendiente_tauro"]:
+        envio["estado_cliente_ui"]["label"] = "Despachado"
+        envio["estado_operacion_ui"]["label"] = "Despachado"
     # Este aviso de DHL cierra la disponibilidad del rastreo, no acredita
     # entrega. Se conserva el último estado conocido y el mensaje original.
     envio["seguimiento_sin_actualizaciones"] = (

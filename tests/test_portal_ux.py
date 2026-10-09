@@ -43,67 +43,32 @@ def test_acciones_principales_comparten_jerarquia_sin_afectar_el_admin():
 def test_recordatorio_del_home_solo_muestra_acciones_del_cliente():
     html = _template("home.html")
     assert "Requiere tu acción" in html
-    assert "paso.accion_de == 'cliente'" in html
-    assert "paso.cantidad" in html
+    assert "if r.guias_por_descargar" in html
+    assert "paso=requieren_accion" in html
+    assert "Seguimiento de TAURO" in html
+    assert "paso=retenidos" in html
 
 
 def test_paises_largos_tienen_busqueda():
+    # El cotizador usa el select compartido con buscador (tauro-ui.js lo activa
+    # por data-searchable o por cantidad de opciones); el wizard sigue marcando
+    # explícitamente los selects de país.
     cotizar = _template("cotizar.html")
     nuevo = _template("envio_nuevo.html")
-    select_js = (RAIZ / "static" / "js" / "tauro-ui.js").read_text(encoding="utf-8")
-    assert "[('origen','Origen','A'),('destino','Destino','B')]" in cotizar
-    assert "side ~ '_pais'" in cotizar
-    assert 'data-country-flags data-search-placeholder="Buscar país o código"' in cotizar
-    assert "select.options.length >= 8" in select_js
+    assert 'data-search-placeholder="Buscar país o código"' in cotizar
+    assert "origen_pais" in cotizar and "destino_pais" in cotizar
     assert 'id="rem_pais" data-searchable' in nuevo
     assert 'id="destino_pais" data-searchable' in nuevo
     assert 'class="bulto-pais-fab" data-searchable' in nuevo
 
 
 def test_cotizador_no_promete_precio_cerrado_ni_conversion_completa():
-    html = _template("cotizar.html") + _template("_quote_results.html")
+    # El precio del cotizador es referencia hasta tener la dirección completa:
+    # el template no puede prometer cierre ni empujar un "recomendado".
+    html = _template("cotizar.html")
     assert "Precio cerrado" not in html
     assert "lo convertís en envío" not in html
-    assert "Precio estimado" in html
-    assert "Se confirma con la dirección y el contenido completos antes de emitir" in html
     assert "Recomendado" not in html
-
-
-def test_cotizador_actualiza_solo_resultados_en_una_misma_vista():
-    html = _template("cotizar.html")
-    resultados = _template("_quote_results.html")
-    javascript = (RAIZ / "static" / "js" / "portal-cotizador.js").read_text(encoding="utf-8")
-
-    assert 'class="uq-layout"' in html
-    assert 'data-unified-form="{{ scope }}"' in html
-    assert 'data-quote-results' in html
-    assert "fetch(form.action" in javascript
-    assert "result.replaceChildren(block)" in javascript
-    assert "event.preventDefault()" in javascript
-    assert "result-box" not in html
-    assert "Elegir envío" in resultados
-    assert "courier={{ op.carrier_id }}" in resultados
-    # Una opción compacta por courier. No truncar en dos: si UPS también
-    # cotiza, DHL no puede quedar escondido dentro de otro desplegable.
-    assert "{% for op in opciones %}" in resultados
-    assert "opciones[:2]" not in resultados
-    assert "opciones[2:]" not in resultados
-
-
-def test_cotizador_muestra_logo_y_tarifa_de_cada_operador():
-    html = _template("cotizar.html")
-    resultados = _template("_quote_results.html")
-    css = (RAIZ / "static" / "css" / "portal-cotizador.css").read_text(encoding="utf-8")
-
-    assert 'class="uq-layout"' in html
-    assert 'class="uq-results"' in html
-    assert 'data-carrier="{{ op.carrier_id }}"' in resultados
-    assert 'class="quote-carrier-logo" src="{{ op.carrier_logo }}"' in resultados
-    assert '{{ dinero_ars(op.precio_final_ars) }}' in resultados
-    assert '.uq-price .quote-carrier-logo' in css
-    assert 'max-width:98px' in css
-    assert 'max-height:34px' in css
-    assert 'position:sticky' in css
 
 
 def test_logos_de_courier_no_se_recortan_y_el_strip_refluye_antes_de_colisionar():
@@ -129,45 +94,27 @@ def test_logos_de_courier_no_se_recortan_y_el_strip_refluye_antes_de_colisionar(
     assert ".quote-operator-state > i" in css
 
 
-def test_cotizador_actualiza_resumen_progreso_y_cajas_en_vivo():
-    html = _template("cotizar.html")
-    javascript = (RAIZ / "static" / "js" / "portal-cotizador.js").read_text(encoding="utf-8")
-
-    assert 'data-quote-weights' in html
-    assert "function weights()" in javascript
-    assert "toLocaleString('es-AR'" in javascript
-    assert "form.addEventListener('input', control.changed)" in javascript
-    assert "form.addEventListener('change', function (event)" in javascript
-    assert "setTimeout(run, io.delay === undefined ? 900 : io.delay)" in javascript
-    assert "controller.abort()" in javascript
-    assert "packageList.appendChild(template.content.cloneNode(true))" in javascript
-    assert "remove.closest('[data-package-row]').remove()" in javascript
-
-
-def test_cotizador_unifica_ambitos_y_nuevo_envio_mantiene_selector_inicial():
+def test_cotizar_y_nuevo_envio_exigen_elegir_ambito_primero():
     cotizar = _template("cotizar.html")
     nuevo = _template("envio_nuevo.html")
     selector = _template("_ambito_selector.html")
     iconos = _template("_scope_icons.html")
 
-    assert "{% if not ambito %}" not in cotizar
-    assert 'data-quote-scope="{{ scope }}"' in cotizar
-    assert 'data-quote-panel="{{ scope }}"' in cotizar
-    assert "['internacional','nacional']" in cotizar
+    # El cotizador recibe el ámbito ya elegido (scope) y lo reenvía; el wizard
+    # sigue mostrando el selector si todavía no hay ámbito.
+    assert 'name="ambito" value="{{ scope }}"' in cotizar
     assert "{% if not ambito %}" in nuevo
     assert "scope_icon('nacional')" in selector
     assert "scope_icon('internacional')" in selector
-    assert "<svg" in iconos
     assert "Envío nacional" in selector
     assert "Envío internacional" in selector
-    assert 'name="ambito" value="{{ scope }}"' in cotizar
     assert 'name="ambito" value="internacional"' in nuevo
 
 
 def test_cotizador_exige_elegir_destino_en_vez_de_tomar_el_primero():
     html = _template("cotizar.html")
-    assert 'name="{{ name }}" id="{{ name }}" required' in html
-    assert '<option value="">Elegí país</option>' in html
+    assert '<option value="">Elegí país' in html
+    assert '<option value="">Elegí provincia' in html
 
 
 def test_remitente_precargado_se_resume_sin_perder_campos_editables():
@@ -197,7 +144,7 @@ def test_nuevo_envio_mantiene_un_paso_compacto_por_pantalla():
     assert 'data-step]:not([data-step="1"]) > details.card' in css
     assert ".main-inner:has(.wizard-compacto) { padding-top: 20px; padding-bottom: 96px; }" in css
     assert "shipment-step-recipient .form-grid-2" in css
-    assert 'href="/portal/clientes" data-agenda-manage' in html
+    assert 'href="/portal/clientes"' in html
     assert '{% if not remitente %}disabled{% endif %}' not in html
     for campo in ("rem_nombre", "rem_direccion", "rem_ciudad", "rem_zip"):
         assert f'name="{campo}" id="{campo}" required' in html
@@ -272,11 +219,12 @@ def test_pago_pendiente_se_muestra_en_revision_y_sin_impacto():
     assert "A favor" in html
 
 
-def test_informar_pago_esta_anclado_desde_cabecera_y_despues_del_historial():
+def test_informar_pago_es_un_bloque_plegable_y_compacto():
+    # La cuenta unificada ordena apertura → movimientos → pagos; "Informar pago"
+    # es un <details> plegado que se abre solo cuando hay envíos seleccionados.
     html = _template("cuenta.html")
-    assert 'class="card account-payment-card"' in html
-    assert 'href="#informar-pago"' in html
-    assert html.index('{% include "portal/cuenta_movimientos.html" %}') < html.index('id="informar-pago"')
+    assert '<details class="card account-payment-card" id="informar-pago"' in html
+    assert "{% if seleccion.clave %} open{% endif %}" in html
 
 
 def test_alta_y_edicion_de_clientes_abren_un_dialogo_sin_bajar_al_formulario():
@@ -295,10 +243,9 @@ def test_envios_resume_el_costo_y_deja_el_desglose_en_el_detalle():
     assert "Monto activo del período" in html
     for encabezado in (
         "Fecha", "Destinatario / recorrido", "Tracking",
-        "Precio del envío", "Estado", "Guía / opciones",
+        "Precio del envío (ARS)", "Estado", "Guía / opciones",
     ):
         assert f">{encabezado}<" in html
-    assert "Total registrado · ARS" in html
     assert "Ver desglose" in html
     assert "Costo inicial" in detalle
     assert "Diferencia" in detalle

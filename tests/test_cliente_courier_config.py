@@ -365,7 +365,8 @@ def test_schema_y_admin_exponen_la_matriz_completa():
     raiz = Path(__file__).resolve().parents[1]
     schema = (raiz / "sql/schema.sql").read_text()
     template = (raiz / "templates/admin/cliente_acceso_precios.html").read_text()
-    workspace = (raiz / "templates/admin/cliente_workspace.html").read_text()
+    # El hub del cliente es cliente_workspace; cliente_detail quedó como vista secundaria.
+    detalle = (raiz / "templates/admin/cliente_workspace.html").read_text()
 
     assert "CREATE TABLE IF NOT EXISTS cliente_courier_config" in schema
     assert "puede_cotizar     BOOLEAN NOT NULL DEFAULT FALSE" in schema
@@ -375,7 +376,7 @@ def test_schema_y_admin_exponen_la_matriz_completa():
     assert "Crear guías" in template and "Pickups" in template
     assert "Ganancia de TAURO" in template
     assert "estado_integracion" in template and "detalle_integracion" in template
-    assert "/acceso-precios" in workspace
+    assert "/acceso-precios" in detalle
 
 
 def test_formulario_general_no_puede_escribir_permisos_operativos():

@@ -223,8 +223,11 @@ def _candidato_dhl(solicitud_id: int) -> Optional[dict]:
                 WHERE id = %s
                   AND UPPER(courier) = 'DHL'
                   AND NULLIF(BTRIM(tracking), '') IS NOT NULL
-                  AND estado NOT IN ('CANCELADO', 'ENTREGADO')
-                  AND estado <> 'REEMPLAZADO'
+                  AND (
+                      (estado NOT IN ('CANCELADO', 'ENTREGADO')
+                       AND estado <> 'REEMPLAZADO')
+                      OR (estado='CANCELADO' AND cancelacion_comercial=TRUE)
+                  )
                   AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                   AND test=FALSE
                   AND EXISTS (SELECT 1 FROM clientes c
@@ -302,8 +305,11 @@ def actualizar_tracking_dhl(
                         updated_at = NOW()
                     WHERE id = %s
                       AND tracking = %s AND UPPER(courier)='DHL'
-                      AND estado NOT IN ('CANCELADO', 'ENTREGADO')
-                      AND estado <> 'REEMPLAZADO'
+                      AND (
+                          (estado NOT IN ('CANCELADO', 'ENTREGADO')
+                           AND estado <> 'REEMPLAZADO')
+                          OR (estado='CANCELADO' AND cancelacion_comercial=TRUE)
+                      )
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                     RETURNING id
                     """,
@@ -333,8 +339,11 @@ def actualizar_tracking_dhl(
                         updated_at = NOW()
                     WHERE id = %s
                       AND tracking = %s AND UPPER(courier)='DHL'
-                      AND estado NOT IN ('CANCELADO', 'ENTREGADO')
-                      AND estado <> 'REEMPLAZADO'
+                      AND (
+                          (estado NOT IN ('CANCELADO', 'ENTREGADO')
+                           AND estado <> 'REEMPLAZADO')
+                          OR (estado='CANCELADO' AND cancelacion_comercial=TRUE)
+                      )
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                     RETURNING id
                     """,
@@ -392,8 +401,11 @@ def actualizar_trackings_diarios_dhl(limite: Optional[int] = None, *,
                     FROM solicitudes_guia
                     WHERE UPPER(courier) = 'DHL'
                       AND NULLIF(BTRIM(tracking), '') IS NOT NULL
-                      AND estado NOT IN ('CANCELADO', 'ENTREGADO')
-                      AND estado <> 'REEMPLAZADO'
+                      AND (
+                          (estado NOT IN ('CANCELADO', 'ENTREGADO')
+                           AND estado <> 'REEMPLAZADO')
+                          OR (estado='CANCELADO' AND cancelacion_comercial=TRUE)
+                      )
                       AND tracking_estado IS DISTINCT FROM 'ENTREGADO'
                       AND test=FALSE
                       AND EXISTS (SELECT 1 FROM clientes c

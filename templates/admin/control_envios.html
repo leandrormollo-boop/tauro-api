@@ -2,5 +2,11 @@
 {% block title %}Envíos{% endblock %}
 {% block content %}
 <div class="business-heading"><div><div class="eyebrow">Operación</div><h1>Envíos</h1><p>Cliente, proveedor y documentos conectados en una misma fila.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap;"><a href="/admin/envios-realizados/nuevo" class="btn btn-primary">Cargar envío realizado</a><a href="/admin/pedidos" class="btn btn-ghost">Solicitudes y emisión</a></div></div>
+{% if tracking_fedex and not tracking_fedex.disponible %}
+<div class="alert alert-warn" role="status">
+  <strong>{{ tracking_fedex.titulo }}</strong><br>
+  {{ tracking_fedex.detalle }}
+</div>
+{% endif %}
 {% include 'admin/negocio_envios.html' %}
 {% endblock %}

@@ -208,6 +208,7 @@ function Footer() {
         </div>
         <div className="footer-bottom">
           <span>© 2026 Tauro Solutions</span>
+          <span>Cartografía: Natural Earth · IGN / Georef</span>
           <span>Buenos Aires · Argentina</span>
         </div>
       </div>

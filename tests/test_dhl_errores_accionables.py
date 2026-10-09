@@ -216,6 +216,10 @@ def test_bulto_corrupto_indica_el_campo_y_libera_reserva(monkeypatch):
 
 
 def test_admin_y_portal_no_recortan_el_motivo(monkeypatch):
+    # Este test de presentación no usa PostgreSQL. El registro durable se
+    # prueba con base real en test_control_incidencias_emision_postgres.
+    monkeypatch.setattr('servicios.incidencias_emision.iniciar_intento',lambda *a:1)
+    monkeypatch.setattr('servicios.incidencias_emision.finalizar_intento',lambda *a:None)
     from endpoints import admin, portal_cliente as pc
     error = DHLClient._error_legible(respuesta({"additionalDetails": [
         "#/customerDetails/receiverDetails/postalAddress/cityName: city not found",

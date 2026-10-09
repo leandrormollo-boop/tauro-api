@@ -287,7 +287,7 @@ def test_http_portal_auth_propiedad_y_precio_privado(db, monkeypatch):
             b = await client.post(url + "/confirmar")
             assert a.headers["location"] == b.headers["location"]
             detail = await client.get(a.headers["location"])
-            assert detail.status_code == 200 and "Emitir guía ahora" in detail.text
+            assert detail.status_code == 200 and "Revisar y emitir guía" in detail.text
             client.cookies.set(
                 "token", auth.generar_token("otro@example.invalid", "OTRO")
             )
