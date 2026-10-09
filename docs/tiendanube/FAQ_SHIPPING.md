@@ -1,4 +1,4 @@
-# FAQ de homologación Shipping · TAURO Solutions Ar
+# FAQ de homologación Shipping · Tauro Solutions Ar
 
 Documento candidato basado en la plantilla oficial de métodos de envío. Los
 campos `[DEFINIR]` deben aprobarse antes de compartirlo con Tiendanube.
@@ -7,7 +7,7 @@ campos `[DEFINIR]` deben aprobarse antes de compartirlo con Tiendanube.
 
 ### 1.1. ¿Qué método logístico utiliza y para qué sirve?
 
-TAURO Solutions Ar integra Tiendanube con la operación nacional de TAURO
+Tauro Solutions Ar integra Tiendanube con la operación nacional de TAURO
 Solutions. Cotiza entregas a domicilio en Argentina, importa los pedidos que
 eligieron esa opción y centraliza su gestión operativa.
 
@@ -69,14 +69,15 @@ Panel y preferencias: `https://taurosolutions.ar/portal/tienda`.
 - SLA/OTD, pérdidas y extravíos: `[CONFIRMAR CONTRATO OCA]`.
 - Alcance de origen y destino: Argentina, entrega domicilio→domicilio en la
   primera versión; cobertura validada en cada cotización.
-- El comprador elige TAURO Solutions Ar en checkout.
+- El comprador elige Tauro Solutions Ar en checkout.
 - Tiendanube notifica el pedido mediante webhook y TAURO importa solamente los
   Fulfillment Orders de su carrier.
 - Recibir una venta no emite una guía automáticamente.
 - La emisión requiere una acción deliberada del comercio en TAURO.
 - Tracking: se informa a Tiendanube cuando el paquete está realmente
   despachado, mediante Fulfillment Orders.
-- Cancelación, etiqueta y códigos de tracking OCA: `[IMPLEMENTAR Y VALIDAR UAT]`.
+- Cancelación, etiqueta y códigos de tracking OCA: implementados localmente;
+  `[VALIDAR UAT Y CONTRATO]`.
 - Exportación CSV: `[DEFINIR]`.
 - Mercadería prohibida/restringida: `[CONFIRMAR CONTRATO OCA]`.
 
@@ -88,4 +89,5 @@ Panel y preferencias: `https://taurosolutions.ar/portal/tienda`.
 - Recolección: `[CONFIRMAR CONTRATO OCA]`.
 - Seguro y valor declarado: `[CONFIRMAR CONTRATO OCA]`.
 - Forma de pago del envío: `[DEFINIR]`.
-- Emisión y cancelación de etiquetas: `[IMPLEMENTAR Y VALIDAR UAT]`.
+- Emisión y cancelación de etiquetas: implementadas localmente;
+  `[VALIDAR UAT ANTES DE ACTIVAR]`.

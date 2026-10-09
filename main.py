@@ -43,6 +43,7 @@ from servicios.numeros_humanos import (
     parse_importe_humano,
     parse_numero_humano,
 )
+from servicios.runtime_jobs import automatic_background_jobs_enabled
 
 
 def _decimal_json(valor):
@@ -171,9 +172,9 @@ async def headers_de_seguridad(request: Request, call_next):
       `/web`, y sólo si existe un `META_PIXEL_ID` válido, se habilitan los dos
       orígenes exactos que necesita el Pixel de Meta.
 
-    La app pública de Shopify es externa (`embedded = false`): sus páginas se
-    abren como navegación principal y declaran su propia CSP. Nunca deben poder
-    incrustarse en un iframe; por eso /shopify recibe X-Frame-Options: DENY.
+    Shopify App Home es la única superficie embebida. `/shopify/app` declara
+    una CSP dinámica con la tienda autenticable y `admin.shopify.com`; el resto
+    de `/shopify` conserva `frame-ancestors 'none'` y X-Frame-Options DENY.
     """
     import secrets as _secrets
     path = request.scope.get("path", "")
@@ -247,7 +248,16 @@ async def headers_de_seguridad(request: Request, call_next):
     response.headers.setdefault(
         "Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=()")
 
-    if path.startswith("/shopify"):
+    if path in {"/shopify/app", "/shopify/app/"}:
+        # X-Frame-Options no permite expresar los dos ancestros válidos de
+        # Shopify. La defensa correcta para App Home es la CSP dinámica que
+        # escribe el endpoint; no se agrega SAMEORIGIN ni DENY acá.
+        # ``MutableHeaders`` implementa borrado, pero no ``dict.pop`` en las
+        # versiones fijadas de Starlette. Usar la API del mapping evita que
+        # el shell embebido termine en 500 justo al retirar el header.
+        if "x-frame-options" in response.headers:
+            del response.headers["x-frame-options"]
+    elif path.startswith("/shopify"):
         response.headers.setdefault("X-Frame-Options", "DENY")
     else:
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
@@ -280,7 +290,8 @@ async def headers_de_seguridad(request: Request, call_next):
 
     return response
 
-# Inicializar base de datos PostgreSQL al arrancar
+# Verificar PostgreSQL al arrancar. Las migraciones corren en el pre-deploy de
+# Railway: el proceso web no ejecuta CREATE/ALTER ni toma AccessExclusiveLock.
 _db_init_error = None
 try:
     init_db()
@@ -300,19 +311,18 @@ except Exception as _db_err:
             "El schema de PostgreSQL no quedó listo; se aborta el arranque."
         ) from _db_err
 
-# Migrar api_key → api_key_hash UNA vez, en el arranque y no en el primer
-# request. La migración hace ALTER TABLE (lock exclusivo sobre `clientes`)
-# seguido de los UPDATE: hacerlo en el request-path serializaba cualquier
-# lectura de clientes detrás de ese lock. Sigue siendo idempotente, así que
-# queda como red si el arranque no llegó a correrla.
+# Verificación read-only de la migración api_key → api_key_hash. El UPDATE
+# irreversible de claves legacy pertenece también al pre-deploy.
 try:
     from servicios.api_b2b import _ensure_hash_migrado
     _ensure_hash_migrado()
 except Exception as _mig_err:
-    print(
-        "[startup] migración de api_key diferida al primer uso: "
-        f"{type(_mig_err).__name__}"
-    )
+    _db_init_error = _db_init_error or type(_mig_err).__name__
+    print(f"[startup] API keys no listas: {type(_mig_err).__name__}")
+    if os.getenv("DATABASE_URL"):
+        raise RuntimeError(
+            "La migración de API keys no quedó lista; se aborta el arranque."
+        ) from _mig_err
 
 # Static files (CSS, JS, imágenes), portal del cliente y admin
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -501,7 +511,7 @@ def servir_terminos():
 
 @app.get("/ayuda/tiendanube", include_in_schema=False)
 def servir_ayuda_tiendanube():
-    """Requisitos y diagnóstico público del medio TAURO Solutions Ar."""
+    """Requisitos y diagnóstico público del medio Tauro Solutions Ar."""
     from servicios.paginas_legales import pagina_ayuda_tiendanube
     return HTMLResponse(pagina_ayuda_tiendanube())
 
@@ -1769,6 +1779,7 @@ CRON_HORA = int(os.getenv("CRON_HORA", 6))
 from servicios.control_automatizaciones import observar as observar_tarea
 
 scheduler = BackgroundScheduler(timezone="America/Argentina/Buenos_Aires")
+_AUTOMATIC_BACKGROUND_JOBS_ENABLED = automatic_background_jobs_enabled()
 scheduler.add_job(
     job_actualizar_precios_fedex,
     trigger="cron",
@@ -1981,6 +1992,9 @@ from servicios.tiendanube_app import (
     procesar_cola_eventos as procesar_webhooks_tiendanube,
     reconciliar_instalaciones_pendientes as reconciliar_tiendanube,
 )
+from servicios.tiendanube_label_worker import (
+    process_label_outbox as procesar_labels_tiendanube,
+)
 scheduler.add_job(
     procesar_webhooks_tiendanube,
     trigger="interval",
@@ -1990,6 +2004,61 @@ scheduler.add_job(
 )
 scheduler.add_job(
     reconciliar_tiendanube,
+    trigger="interval",
+    minutes=5,
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    procesar_labels_tiendanube,
+    trigger="interval",
+    seconds=5,
+    max_instances=1,
+    coalesce=True,
+    id="tiendanube_label_outbox",
+    replace_existing=True,
+)
+
+# Conversión de pedidos y publicación de tracking: ambos efectos viven en
+# PostgreSQL. Los hilos de webhook sólo despiertan estos mismos workers; un
+# restart recupera claims stale y la reconciliación repone filas ausentes.
+from servicios.ecommerce_outbox import (
+    procesar_solicitudes_automaticas,
+    reconciliar_pedidos_faltantes,
+    procesar_fulfillments,
+    reconciliar_fulfillments_faltantes,
+)
+scheduler.add_job(
+    procesar_solicitudes_automaticas,
+    trigger="interval",
+    seconds=15,
+    max_instances=1,
+    coalesce=True,
+)
+scheduler.add_job(
+    procesar_fulfillments,
+    trigger="interval",
+    seconds=20,
+    max_instances=1,
+    coalesce=True,
+)
+
+
+def job_reconciliar_ecommerce_outbox():
+    try:
+        pedidos = reconciliar_pedidos_faltantes()
+        fulfillments = reconciliar_fulfillments_faltantes()
+        if pedidos or fulfillments:
+            print(
+                "[scheduler] ecommerce outbox reconciliada: "
+                f"pedidos={pedidos}, fulfillments={fulfillments}"
+            )
+    except Exception as exc:
+        print(f"[scheduler] reconciliación ecommerce falló: {type(exc).__name__}")
+
+
+scheduler.add_job(
+    job_reconciliar_ecommerce_outbox,
     trigger="interval",
     minutes=5,
     max_instances=1,
@@ -2092,7 +2161,10 @@ if _sheet_conf():
     scheduler.add_job(sincronizar_seguro, trigger="interval", minutes=30)
     print("[scheduler] Espejo en Google Sheet: cada 30 min (PLATAFORMA_SIN_PII)")
 else:
-    print("[scheduler] Espejo en Google Sheet APAGADO (falta GOOGLE_CREDENTIALS_JSON)")
+    print(
+        "[scheduler] Espejo en Google Sheet APAGADO "
+        "(sin credenciales o bloqueado por entorno)"
+    )
 
 # Cola comercial: apagada por default. El panel puede preparar trabajos sin
 # que ningun agente se ejecute; para procesarlos hacen falta la key y el flag
@@ -2127,8 +2199,6 @@ if _crm_agents_on():
 else:
     print("[scheduler] Agentes comerciales APAGADOS (flag, key o módulo faltante)")
 
-scheduler.start()
-
 
 def _tarifas_al_arrancar():
     """
@@ -2158,27 +2228,34 @@ def _tarifas_al_arrancar():
 # En un hilo aparte: el arranque no puede esperar ~66 cotizaciones, y
 # Railway mata el deploy si el healthcheck no responde a tiempo.
 import threading
-threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
-# Ejecuta el primer control sin esperar al próximo horario de cron. El filtro
-# por fecha de Argentina y el advisory lock mantienen, aun con reinicios o
-# varios workers, una consulta diaria normal y una por cada media jornada
-# argentina para las guías en vigilancia.
-threading.Thread(
-    target=actualizar_trackings_diarios_seguro,
-    daemon=True,
-).start()
+if _AUTOMATIC_BACKGROUND_JOBS_ENABLED:
+    scheduler.start()
+    threading.Thread(target=_tarifas_al_arrancar, daemon=True).start()
+    # Ejecuta el primer control sin esperar al próximo horario de cron. El
+    # filtro por fecha de Argentina y el advisory lock mantienen, aun con
+    # reinicios o varios workers, una consulta diaria normal y una por cada
+    # media jornada argentina para las guías en vigilancia.
+    threading.Thread(
+        target=actualizar_trackings_diarios_seguro,
+        daemon=True,
+    ).start()
 
-print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
-print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
-print(
-    "[scheduler] Rastreo DHL diario: "
-    f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
-)
-print("[scheduler] Segunda ronda DHL en vigilancia: "
-      f"{(_DHL_TRACKING_HORA + 12) % 24:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)")
-print(
-    "[scheduler] Facturas DHL por Gmail: lunes y viernes "
-    f"{_DHL_GMAIL_HORA:02d}:{_DHL_GMAIL_MINUTO:02d} (Argentina; si está conectado)"
-)
-print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
-print(f"[scheduler] Centinela del checkout: cada 15 min")
+    print(f"[scheduler] Job semanal precios FedEx: {CRON_DIA} {CRON_HORA}:00 (Argentina)")
+    print(f"[scheduler] Job diario limpiar_sessions: 3:00 (Argentina)")
+    print(
+        "[scheduler] Rastreo DHL diario: "
+        f"{_DHL_TRACKING_HORA:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)"
+    )
+    print("[scheduler] Segunda ronda DHL en vigilancia: "
+          f"{(_DHL_TRACKING_HORA + 12) % 24:02d}:{_DHL_TRACKING_MINUTO:02d} (Argentina)")
+    print(
+        "[scheduler] Facturas DHL por Gmail: lunes y viernes "
+        f"{_DHL_GMAIL_HORA:02d}:{_DHL_GMAIL_MINUTO:02d} (Argentina; si está conectado)"
+    )
+    print(f"[scheduler] Job diario tarifas del checkout: 4:00 (Argentina)")
+    print(f"[scheduler] Centinela del checkout: cada 15 min")
+else:
+    print(
+        "[scheduler] Automatizaciones y tareas de arranque APAGADAS "
+        "por ENV=STAGING"
+    )

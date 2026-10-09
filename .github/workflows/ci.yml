@@ -125,10 +125,39 @@ jobs:
           tests/js/portal-agenda.test.cjs
           tests/js/invoice-asistente.test.cjs
 
+  ecommerce-apps:
+    name: Apps Shopify y Tiendanube (test, typecheck, build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            shopify_app/package-lock.json
+            tiendanube_nube_app/package-lock.json
+      - name: Shopify — test, typecheck y build
+        working-directory: shopify_app
+        run: |
+          npm ci
+          npm test
+          npm run typecheck
+          npm run build -- --skip-dependencies-installation
+      - name: Tiendanube — test, typecheck y build reproducible
+        working-directory: tiendanube_nube_app
+        run: |
+          npm ci
+          npm test
+          npm run typecheck
+          npm run build
+          git diff --exit-code -- dist/main.min.js
+
   ci:
     name: ci
     if: ${{ always() }}
-    needs: [container-build, python-audit, web-audit]
+    needs: [container-build, python-audit, web-audit, ecommerce-apps]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -137,7 +166,9 @@ jobs:
           CONTAINER_BUILD_RESULT: ${{ needs.container-build.result }}
           PYTHON_AUDIT_RESULT: ${{ needs.python-audit.result }}
           WEB_AUDIT_RESULT: ${{ needs.web-audit.result }}
+          ECOMMERCE_APPS_RESULT: ${{ needs.ecommerce-apps.result }}
         run: |
           test "$CONTAINER_BUILD_RESULT" = "success"
           test "$PYTHON_AUDIT_RESULT" = "success"
           test "$WEB_AUDIT_RESULT" = "success"
+          test "$ECOMMERCE_APPS_RESULT" = "success"

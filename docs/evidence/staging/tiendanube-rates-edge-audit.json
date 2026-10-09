@@ -1,0 +1,47 @@
+{
+  "schema_version": 2,
+  "environment": "staging",
+  "probe_started_at": "2026-09-29T20:05:43.161688Z",
+  "probe_finished_at": "2026-09-29T20:05:56.439774Z",
+  "deployment_ref": "803c496",
+  "deployment_id": "76d75212-f615-4373-9b1b-4e9f59090955",
+  "discrimination": {
+    "same_valid_body": {
+      "kind": "minimal_store_id_json",
+      "raw_body_persisted": false
+    },
+    "without_callback_token_status": 422,
+    "with_fictitious_callback_token_status": 401,
+    "expected_without_token_status": 422,
+    "expected_with_token_status": 401,
+    "passed": true
+  },
+  "request": {
+    "method": "POST",
+    "path_recorded_by_edge": "/integraciones/tiendanube/shipping/rates",
+    "http_status": 401,
+    "railway_total_duration_ms": 43,
+    "request_id": "TutJ19ASQB-zHMYV2prcFg",
+    "edge_region": "us-west2",
+    "client_user_agent": "Tauro-Staging-Edge-Redaction/20260929T200543-9e66f573-token"
+  },
+  "probe": {
+    "callback_token_sent_in_query": true,
+    "callback_token_parameter": "callback_token",
+    "token_kind": "cryptographically_random_fictitious_callback_token",
+    "token_sha256": "234d01fc44957fa147e203ae17b2b26153e647e13688b29179cbb6b82f8fbdf6",
+    "raw_token_persisted": false
+  },
+  "log_inspection": {
+    "source": "Railway HTTP edge and deployment logs",
+    "http_filter_path": "/integraciones/tiendanube/shipping/rates",
+    "window_started_at": "2026-09-29T20:05:43.161688Z",
+    "window_finished_at": "2026-09-29T20:05:56.439774Z",
+    "matching_http_edge_records_by_unique_user_agent": 1,
+    "exact_token_occurrences_in_http_edge_output": 0,
+    "exact_token_occurrences_in_application_or_deploy_output": 0,
+    "application_or_deploy_log_lines_inspected": 0,
+    "query_string_present_in_recorded_path": false
+  },
+  "passed": true
+}

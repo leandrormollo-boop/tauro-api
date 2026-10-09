@@ -98,6 +98,7 @@ def test_cotizar_y_nuevo_envio_exigen_elegir_ambito_primero():
     cotizar = _template("cotizar.html")
     nuevo = _template("envio_nuevo.html")
     selector = _template("_ambito_selector.html")
+    iconos = _template("_scope_icons.html")
 
     # El cotizador recibe el ámbito ya elegido (scope) y lo reenvía; el wizard
     # sigue mostrando el selector si todavía no hay ámbito.
