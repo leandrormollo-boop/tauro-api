@@ -4451,8 +4451,8 @@ def tienda_tiendanube_instalar(cliente: str = Depends(cliente_actual)):
     if not app_configurada() or not app_publicable():
         return RedirectResponse(
             url="/portal/tienda?error=" + quote(
-                "La app de Tiendanube sigue en piloto. Falta completar Shipping, "
-                "tarifas, UAT y homologación antes de habilitar instalaciones."),
+                "La conexión con Tiendanube está en piloto y todavía no se puede "
+                "instalar. Escribinos si querés probarla cuando esté disponible."),
             status_code=303)
     import secrets as _secrets
     state = _secrets.token_urlsafe(24)
