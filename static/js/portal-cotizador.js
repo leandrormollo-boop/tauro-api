@@ -230,6 +230,14 @@
       response.prepend(notice);
     }
     notice.textContent = text;
+    response.querySelectorAll('.uq-choose').forEach(function (link) {
+      link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true');
+      link.dataset.quoteStaleAction = '';
+    });
+    response.querySelectorAll('form').forEach(function (form) {
+      form.dataset.quoteStaleAction = '';
+      form.querySelectorAll('input,select,textarea,button').forEach(function (control) { control.disabled = true; });
+    });
     return true;
   }
   function quoteRecovery(container) {
@@ -273,6 +281,7 @@
       var result = panel.querySelector('[data-quote-results]');
       var resultPanel = result.closest('.uq-results');
       var status = form.querySelector('[data-quote-status]');
+      var resultStatus = panel.querySelector('[data-quote-results-status]');
       var submit = form.querySelector('[data-quote-submit]'), initial = true, hasCurrentQuote = false;
       var packageList = form.querySelector('#quote-package-list');
       var template = form.querySelector('#quote-package-template');
@@ -284,6 +293,7 @@
       result.setAttribute('aria-busy', 'false');
       resultPanel.dataset.quoteState = result.querySelector('.uq-price') ? 'ready'
         : result.querySelector('.uq-error,.uq-unavailable') ? 'error' : 'idle';
+      function announce(text) { status.textContent = text; resultStatus.textContent = text; }
       function showStep(step, focus) {
         mobileStep = Math.max(1, Math.min(3, step)); panel.dataset.mobileStep = mobileStep;
         stepNav.hidden = !mobile.matches; actions.hidden = !mobile.matches;
@@ -294,6 +304,8 @@
         actions.querySelector('[data-quote-back]').disabled = mobileStep === 1;
         actions.querySelector('[data-quote-next]').hidden = mobileStep === 3;
         actions.querySelector('[data-quote-step-status]').textContent = mobileStep + ' de 3';
+        status.setAttribute('aria-live', !mobile.matches || mobileStep !== 3 ? 'polite' : 'off');
+        resultStatus.setAttribute('aria-live', mobile.matches && mobileStep === 3 ? 'polite' : 'off');
         if (focus && mobile.matches) {
           var heading = mobileStep === 3 ? panel.querySelector('.uq-results h2') : mobileStep === 2 ? form.querySelector('.uq-section-title h2') : stepNav;
           heading.tabIndex = -1; heading.focus({preventScroll:true});
@@ -400,7 +412,7 @@
           result.classList.remove('is-revealing');
           result.querySelectorAll('[data-quote-stream-error]').forEach(function (node) { node.remove(); });
           result.setAttribute('aria-busy', 'false');
-          status.textContent = complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.';
+          announce(complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.');
           if (!staleQuote(result, complete
             ? 'Datos modificados. La tarifa visible puede estar desactualizada mientras consultamos nuevamente.'
             : 'Datos incompletos. La tarifa visible puede estar desactualizada; completá los datos para actualizarla.')) {
@@ -412,7 +424,7 @@
           result.classList.remove('is-revealing');
           result.querySelectorAll('[data-quote-stream-error]').forEach(function (node) { node.remove(); });
           result.setAttribute('aria-busy', 'true');
-          status.textContent = 'Consultando la tarifa para esta ruta…';
+          announce('Consultando la tarifa para esta ruta…');
           if (!staleQuote(result, 'Actualizando la tarifa. La opción visible corresponde a la última consulta.')) quoteProgress(result);
         },
         fetch: async function (signal, onProgress) {
@@ -448,7 +460,7 @@
           if (complete && state.failed) quoteRecovery(result);
           window.requestAnimationFrame(function () { result.classList.add('is-revealing'); });
           hasCurrentQuote = state.current; submit.textContent = state.button;
-          status.textContent = state.status;
+          announce(state.status);
         },
         error: function (error) { showError(error.message); }
       });
@@ -457,14 +469,21 @@
         var keptPrice = quoteError(result, text); hasCurrentQuote = false;
         if (keptPrice) staleQuote(result, 'No pudimos actualizar la tarifa. La opción visible corresponde a la última consulta.');
         quoteRecovery(result); submit.textContent = 'Volver a consultar';
-        status.textContent = keptPrice
+        announce(keptPrice
           ? 'No pudimos actualizar. Conservamos la última tarifa para que puedas volver a consultar.'
-          : 'No pudimos consultar. Podés volver a intentar sin cargar los datos otra vez.';
+          : 'No pudimos consultar. Podés volver a intentar sin cargar los datos otra vez.');
       }
       controls[scope] = control;
       result.addEventListener('click', function (event) {
+        if (event.target.closest('[data-quote-stale-action]')) { event.preventDefault(); return; }
         if (!event.target.closest('[data-quote-retry]')) return;
         control.resume(); control.run(true);
+      });
+      result.addEventListener('submit', function (event) {
+        if (event.target.matches('[data-quote-stale-action]')) event.preventDefault();
+      });
+      result.addEventListener('contextmenu', function (event) {
+        if (event.target.closest('[data-quote-stale-action]')) event.preventDefault();
       });
       form.addEventListener('input', control.changed);
       form.addEventListener('change', function (event) {
