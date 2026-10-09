@@ -446,9 +446,12 @@ def embudo_envios(cliente_id: str) -> list[dict]:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
+                # Reemplazar anula el cargo anterior, pero la guía conserva
+                # su categoría histórica: Modificados, no Cancelados.
                 cur.execute(
                     """
                     SELECT CASE
+                        WHEN s.estado='REEMPLAZADO' THEN 'REEMPLAZADO'
                         WHEN EXISTS (
                             SELECT 1 FROM envios e WHERE e.solicitud_id=s.id
                             AND e.cliente_id=s.cliente_id AND e.estado='CANCELADO'

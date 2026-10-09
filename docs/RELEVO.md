@@ -6,7 +6,22 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
-## 09/10/2026 — Corrección preparada: SQL de vigilancia DHL de guías descartadas
+## 09/10/2026 — T01 preparada: estados consistentes en el portal
+
+Rama `codex/portal-estados-consistentes`, base `af3d577`. El embudo conserva
+`REEMPLAZADO` aunque el cargo anterior esté cancelado; se reutiliza el mapeo
+existente a Modificados. El respaldo por cargo cancelado para solicitudes
+activas sigue vigente. Inicio filtra bajas antes de elegir los tres envíos
+recientes por ámbito. Los históricos permanecen en sus pestañas.
+
+Regresiones con PostgreSQL local y datos ficticios: clasificación, aislamiento
+por cliente/visibilidad/test, enlaces e importes intactos. Pruebas de Inicio
+cubren selección, límite por ámbito, historial y estado vacío. Sin cambios de
+CSS, tarifas, cargos, pagos, saldo, esquema ni dependencias.
+Revisión independiente aprobada. PR independiente; requiere OK de Leandro
+antes de merge/deploy y antes de iniciar la siguiente tarea de la auditoría.
+
+## 09/10/2026 — Publicado: SQL de vigilancia DHL de guías descartadas
 
 Base `origin/main` `05d2393`. Reproducido en PostgreSQL real el
 `IndexError: tuple index out of range`, incluso sin candidatos. Cuatro consultas
@@ -19,7 +34,9 @@ Ocho regresiones nuevas ejecutan el SQL real con DHL simulado y schema
 descartable: lote vacío, límite/backoff, prefijo de cierre automático, cierres
 manuales, actualización con y sin movimiento, auditoría y cargo intacto.
 El job CI «Python 3.11 y PostgreSQL» las incluye al ejecutar toda `tests/`.
-**Pendiente de aprobación para merge/deploy; sin operaciones en producción.**
+Publicado con aprobación de Leandro en PR #79, merge `af3d577`. Railway
+`05c930b4-9998-4293-ac8e-0634498b206c` verificado SUCCESS: salud y base OK;
+la vigilancia procesó dos guías, sin errores. No se emitieron guías de prueba.
 
 ## 17/09/2026 — Publicación autorizada de navegación y solapas históricas
 
