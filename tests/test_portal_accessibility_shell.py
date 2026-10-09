@@ -21,6 +21,8 @@ def test_drawer_movil_expone_estado_y_control_semantico():
     assert 'sidebar.inert = mobile.matches && !open' in BASE
     assert 'if (main) main.inert = open' in BASE
     assert 'if (tabbar) tabbar.inert = open' in BASE
+    assert 'element.getClientRects().length > 0' in BASE
+    assert 'if (mobile.matches && toggle.checked)' in BASE
 
 
 def test_drawer_cerrado_no_pinta_sombra_lateral():
