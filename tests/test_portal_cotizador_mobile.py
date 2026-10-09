@@ -86,3 +86,39 @@ def test_cotizador_movil_no_superpone_acciones_y_restituye_foco(browser, width):
         assert errors == []
     finally:
         page.close()
+
+
+def test_cotizador_desde_drawer_restituye_foco_al_burger_visible(browser):
+    page = browser.new_page(viewport={"width": 390, "height": 844})
+    try:
+        html = render_quote()
+
+        def respond(route):
+            path = urlsplit(route.request.url).path
+            if path.startswith("/static/"):
+                asset = ROOT / path.lstrip("/")
+                if asset.is_file():
+                    route.fulfill(path=str(asset))
+                    return
+            if route.request.resource_type == "document" or path == "/portal/cotizar":
+                route.fulfill(body=html, content_type="text/html")
+            else:
+                route.abort()
+
+        page.route("**/*", respond)
+        page.goto("https://portal.test/portal/home")
+        page.locator("#side-toggle-button").click()
+        assert page.locator("#side-toggle").is_checked()
+
+        opener = page.locator(".sidebar a[data-cotizar-ventana]")
+        opener.click()
+        page.locator("#quote-window-dialog[open] .unified-quote").wait_for()
+        assert not page.locator("#side-toggle").is_checked()
+
+        page.locator(".sidebar").evaluate("sidebar => { sidebar.inert = true; }")
+        page.keyboard.press("Escape")
+
+        assert not page.locator("#quote-window-dialog").evaluate("dialog => dialog.open")
+        page.wait_for_function("document.activeElement.id === 'side-toggle-button'")
+    finally:
+        page.close()
