@@ -114,6 +114,15 @@ function Industries() {
    CTA / CONTACT
    ============================================================ */
 function ContactCTA({ onCotizarClick }) {
+  const [copyStatus, setCopyStatus] = useState("");
+  async function copyEmail() {
+    try {
+      await navigator.clipboard.writeText("cotizaciones@taurosolutions.ar");
+      setCopyStatus("Correo copiado.");
+    } catch {
+      setCopyStatus("No pudimos copiarlo. Seleccioná el correo y copialo manualmente.");
+    }
+  }
   return (
     <section id="contacto" data-screen-label="Contacto" style={{ paddingBottom: 60 }}>
       <div className="container">
@@ -154,7 +163,11 @@ function ContactCTA({ onCotizarClick }) {
               <button className="btn btn-ghost btn-lg" onClick={onCotizarClick}>Cotizá un envío</button>
             </div>
             <div style={{ marginTop: 56, display: "flex", justifyContent: "center", gap: 48, flexWrap: "wrap", fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-3)" }}>
-              <span>cotizaciones@taurosolutions.ar</span>
+              <div style={{ minWidth: 0 }}>
+                <a href={CUENTA_MAILTO} style={{ color: "inherit", overflowWrap: "anywhere", userSelect: "text" }}>cotizaciones@taurosolutions.ar</a>
+                <button type="button" className="btn btn-ghost" onClick={copyEmail} style={{ display: "block", margin: "12px auto 0" }}>Copiar correo</button>
+                <div role="status" aria-live="polite" style={{ minHeight: "3em", maxWidth: 300, marginTop: 8, fontFamily: "var(--font-body)", color: "var(--fg-2)" }}>{copyStatus}</div>
+              </div>
               <span>Buenos Aires, Argentina</span>
             </div>
           </div>

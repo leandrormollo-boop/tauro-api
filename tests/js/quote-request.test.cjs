@@ -148,6 +148,12 @@ test('el deadline de una consulta abortada no cancela la siguiente',async()=>{
   assert.deepEqual(expired,['current']);
 });
 
+test('el foco se desplaza sólo cuando queda fuera del viewport visible',()=>{
+  assert.equal(make.focusShift({top:320,bottom:364},100,400,12),0);
+  assert.equal(make.focusShift({top:380,bottom:424},100,400,12),36);
+  assert.equal(make.focusShift({top:82,bottom:126},100,400,12),-30);
+});
+
 test('un cierre con error conserva la tarifa pero habilita volver a consultar',()=>{
   function block(price,error){return {querySelector:selector=>selector==='.uq-price'?(price?{}:null):(error?{}:null)};}
   assert.deepEqual(make.resultState(block(true,false),false),{

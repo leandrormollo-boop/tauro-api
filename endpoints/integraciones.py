@@ -399,9 +399,9 @@ border-radius:999px;text-decoration:none;font-weight:600;}}
                     status=503)
     if not app_publicable():
         return _pag(
-            "Piloto en preparación",
-            "La app todavía no completó Shipping, tarifas, UAT y homologación. "
-            "No iniciamos instalaciones nuevas hasta cerrar esos controles.",
+            "Conexión en piloto",
+            "La conexión con Tiendanube todavía no se puede instalar. "
+            "Escribinos si querés probarla cuando esté disponible.",
             '<a href="https://taurosolutions.ar/portal/tienda">Ir al portal</a>',
             status=503,
         )

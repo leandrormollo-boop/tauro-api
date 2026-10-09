@@ -86,6 +86,12 @@
     var timer = setTimeout(function () { if (!signal.aborted) callback(); }, delay);
     return function () { clearTimeout(timer); };
   }
+  function focusShift(rect, safeTop, safeBottom, padding) {
+    var gap = padding === undefined ? 12 : padding;
+    if (rect.bottom + gap > safeBottom) return rect.bottom + gap - safeBottom;
+    if (rect.top - gap < safeTop) return rect.top - gap - safeTop;
+    return 0;
+  }
   function resultState(block, complete) {
     var hasPrice = Boolean(block.querySelector('.uq-price'));
     var hasError = Boolean(block.querySelector('.uq-error'));
@@ -153,6 +159,7 @@
   quoteRequest.readNdjson = readNdjson;
   quoteRequest.copyResellerInputs = copyResellerInputs;
   quoteRequest.armDeadline = armDeadline;
+  quoteRequest.focusShift = focusShift;
   quoteRequest.resultState = resultState;
   return quoteRequest;
 });
@@ -163,6 +170,26 @@
   var dialog = document.getElementById('quote-window-dialog');
   var content = dialog && dialog.querySelector('[data-cotizar-contenido]');
   var opener, loadingController, initialized = new WeakMap();
+
+  function keepDialogFocusVisible() {
+    if (!dialog || !dialog.open || !content || !content.contains(document.activeElement)) return;
+    window.requestAnimationFrame(function () {
+      var focused = document.activeElement;
+      if (!dialog.open || !focused || !content.contains(focused)) return;
+      var viewport = window.visualViewport;
+      var viewportTop = viewport ? viewport.offsetTop : 0;
+      var viewportBottom = viewportTop + (viewport ? viewport.height : window.innerHeight);
+      var contentRect = content.getBoundingClientRect();
+      var header = dialog.querySelector('.quote-window-head');
+      var headerBottom = header ? header.getBoundingClientRect().bottom : contentRect.top;
+      var safeTop = Math.max(viewportTop, headerBottom, contentRect.top);
+      var safeBottom = Math.min(viewportBottom, contentRect.bottom);
+      var shift = window.TauroQuoteRequest.focusShift(
+        focused.getBoundingClientRect(), safeTop, safeBottom, 12
+      );
+      if (shift && typeof content.scrollBy === 'function') content.scrollBy({top: shift, behavior: 'auto'});
+    });
+  }
 
   function numeric(value, kind) {
     if (window.TauroNumeros) {
@@ -483,6 +510,12 @@
   }
   document.querySelectorAll('.unified-quote').forEach(init);
   if (!dialog) return;
+  content.addEventListener('focusin', keepDialogFocusVisible);
+  window.addEventListener('resize', keepDialogFocusVisible, {passive: true});
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', keepDialogFocusVisible, {passive: true});
+    window.visualViewport.addEventListener('scroll', keepDialogFocusVisible, {passive: true});
+  }
   async function open(trigger) {
     opener = trigger;
     if (!dialog.showModal) { location.assign(trigger.href); return; }
