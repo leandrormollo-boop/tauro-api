@@ -152,6 +152,23 @@
 @media(max-width:779px){.uq-section-title>.uq-box-tabs{gap:3px;margin-left:0}.uq-box-tabs button{padding:5px 7px;font-size:10px}.uq-box-tabs .uq-box-remove{padding:2px 5px}.uq-section-title h2{font-size:13px}.uq-add{font-size:9px;padding:5px 8px}}
 @media(min-width:780px){.uq-results [data-option-count="1"],.uq-results [data-option-count="2"]{max-height:none;overflow:visible}}
 
+/* Reserva el espacio que ocuparán las mejoras progresivas antes de que sus
+   scripts lleguen. Sin JavaScript, la ayuda conserva el texto y el formulario
+   no muestra navegación ni espacios inertes. */
+@media(scripting:enabled){
+ .unified-quote [data-help]:not(.tauro-help){display:inline-grid;place-items:center;width:28px;height:28px;overflow:hidden;margin-left:3px;font-size:0;vertical-align:middle}
+ .unified-quote [data-help]:not(.tauro-help)::before{content:"i";display:grid;place-items:center;width:16px;height:16px;border:1px solid currentColor;border-radius:50%;font:600 12px/1 var(--font-body)}
+ .unified-quote .uq-draft-slot{display:flex;min-height:24px;visibility:hidden}
+}
+@media(scripting:enabled) and (max-width:779px){
+ .unified-quote [data-help]:not(.tauro-help){width:44px;height:44px;margin-left:3px}
+ .unified-quote .uq-draft-slot{min-height:44px}
+ .unified-quote .uq-step-nav[hidden]{display:flex!important;visibility:hidden}
+ .unified-quote .uq-mobile-map{display:block;visibility:hidden}
+ .unified-quote.has-quote-globe .uq-mobile-map{visibility:visible}
+}
+@media(scripting:none){.unified-quote .uq-draft-slot{display:none}}
+
 /* Campos oscuros compartidos: leve tinte TAURO y relieve, sin cambiar medidas. */
 html[data-theme="dark"] :is(.unified-quote,.national-shipment,.client-dialog)
   :where(input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]),select,textarea,.tselect-btn):not(:disabled):not([readonly]) {

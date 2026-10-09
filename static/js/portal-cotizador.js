@@ -369,8 +369,11 @@
           Array.from(packageList.children).slice(count).forEach(function (row) { row.remove(); });
         }
       });
-      var draftBar = form.querySelector('.draft-bar');
-      if (draftBar) form.querySelector('.uq-route-tools').prepend(draftBar);
+      var draftBar = form.querySelector('.draft-bar:not([data-quote-draft-slot])');
+      var draftSlot = form.querySelector('[data-quote-draft-slot]');
+      if (draftBar && draftSlot) draftSlot.replaceWith(draftBar);
+      else if (draftBar) form.querySelector('.uq-route-tools').prepend(draftBar);
+      else if (draftSlot) draftSlot.remove();
       renumber(); showStep(mobileStep, false);
       var locations = window.TauroQuoteLocations && window.TauroQuoteLocations.attach(form);
       locationControls[scope] = locations;
