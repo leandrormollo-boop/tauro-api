@@ -25,6 +25,8 @@ CERRADA = "CERRADA"
 RIESGOS_VALIDOS = {VIGILAR, ALERTA_MOVIMIENTO, CERRADA}
 
 _LOCK_NAME = "tauro:tracking:dhl:reemplazadas:diario:v1"
+# Se pasa como dato: el % de LIKE no es un placeholder de psycopg2.
+_PATRON_CIERRE_AUTOMATICO = "Cancelación confirmada: DHL no registró%"
 
 
 def _texto(valor: Any, maximo: int = 300) -> str:
@@ -136,14 +138,13 @@ def _candidato(reemision_id: int) -> Optional[dict]:
                       OR (
                           r.riesgo_estado='CERRADA'
                           AND r.alerta_movimiento_at IS NULL
-                          AND r.riesgo_resuelto_nota LIKE
-                              'Cancelación confirmada: DHL no registró%'
+                          AND r.riesgo_resuelto_nota LIKE %s
                       )
                   )
                   AND UPPER(anterior.courier)='DHL'
                   AND NULLIF(BTRIM(r.tracking_anterior), '') IS NOT NULL
                 """,
-                (int(reemision_id),),
+                (int(reemision_id), _PATRON_CIERRE_AUTOMATICO),
             )
             fila = cur.fetchone()
     return dict(fila) if fila else None
@@ -194,8 +195,7 @@ def actualizar_tracking_reemplazado_dhl(
                             OR (
                                 riesgo_estado='CERRADA'
                                 AND alerta_movimiento_at IS NULL
-                                AND riesgo_resuelto_nota LIKE
-                                    'Cancelación confirmada: DHL no registró%'
+                                AND riesgo_resuelto_nota LIKE %s
                             )
                         )
                         FOR UPDATE
@@ -220,6 +220,7 @@ def actualizar_tracking_reemplazado_dhl(
                     """,
                     (
                         int(reemision_id),
+                        _PATRON_CIERRE_AUTOMATICO,
                         normalizado.get("estado_courier") or "",
                         normalizado.get("descripcion") or "",
                         normalizado.get("evento_fecha") or "",
@@ -271,13 +272,12 @@ def actualizar_tracking_reemplazado_dhl(
                             OR (
                                 riesgo_estado='CERRADA'
                                 AND alerta_movimiento_at IS NULL
-                                AND riesgo_resuelto_nota LIKE
-                                    'Cancelación confirmada: DHL no registró%'
+                                AND riesgo_resuelto_nota LIKE %s
                             )
                         )
                         RETURNING id
                         """,
-                        (int(reemision_id),),
+                        (int(reemision_id), _PATRON_CIERRE_AUTOMATICO),
                     )
                     guardado = cur.fetchone()
                     if guardado:
@@ -403,8 +403,7 @@ def actualizar_trackings_reemplazados_dhl(
                           OR (
                               r.riesgo_estado='CERRADA'
                               AND r.alerta_movimiento_at IS NULL
-                              AND r.riesgo_resuelto_nota LIKE
-                                  'Cancelación confirmada: DHL no registró%'
+                              AND r.riesgo_resuelto_nota LIKE %s
                           )
                       )
                       AND UPPER(anterior.courier)='DHL'
@@ -428,7 +427,7 @@ def actualizar_trackings_reemplazados_dhl(
                         r.id ASC
                     LIMIT %s
                     """,
-                    (limite,),
+                    (_PATRON_CIERRE_AUTOMATICO, limite),
                 )
                 ids = [int(fila["id"]) for fila in cur.fetchall()]
 

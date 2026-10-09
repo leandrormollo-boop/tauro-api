@@ -6,6 +6,21 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
+## 09/10/2026 — Corrección preparada: SQL de vigilancia DHL de guías descartadas
+
+Base `origin/main` `05d2393`. Reproducido en PostgreSQL real el
+`IndexError: tuple index out of range`, incluso sin candidatos. Cuatro consultas
+parametrizadas de `monitoreo_guias_reemplazadas.py` contenían un `%` literal de
+`LIKE`; ahora el patrón completo viaja como parámetro. El defecto ya estaba
+en `06b5bc9`, antecesor del merge #36. Revisado también `tracking_envios.py`,
+sin otras apariciones de ese patrón. No cambia ventanas, estados ni importes.
+
+Ocho regresiones nuevas ejecutan el SQL real con DHL simulado y schema
+descartable: lote vacío, límite/backoff, prefijo de cierre automático, cierres
+manuales, actualización con y sin movimiento, auditoría y cargo intacto.
+El job CI «Python 3.11 y PostgreSQL» las incluye al ejecutar toda `tests/`.
+**Pendiente de aprobación para merge/deploy; sin operaciones en producción.**
+
 ## 17/09/2026 — Publicación autorizada de navegación y solapas históricas
 
 Rama `codex/navigation-history-20260917`, base `c1ad266`. Cotizador, nueva guía
