@@ -1,5 +1,6 @@
 """El comprobante confirma una reserva propia, nunca una visita o una URL."""
-from datetime import date
+from datetime import date, datetime, timezone
+import re
 from urllib.parse import parse_qs, urlsplit
 from unittest import mock
 
@@ -20,6 +21,10 @@ def request(query=''):
 def pickup(**changes):
     return dict(dict(id=71,solicitud_id=81,courier='DHL',estado='AGENDADA',
                      confirmation_code='CBJ-DEMO-71',fecha=date(2026,9,18),
+                     created_at=datetime(2026,9,17,12,0,tzinfo=timezone.utc),
+                     updated_at=datetime(2026,9,17,13,0,tzinfo=timezone.utc),
+                     reserva_fecha_accion='actualizado',
+                     reserva_fecha_label='17/09/2026 10:00',
                      ready_time='09:00',close_time='17:00',bultos=1,peso_kg=20,
                      direccion='Dirección de prueba',
                      envio_tracking='DEMO-TRACKING',
@@ -67,6 +72,7 @@ def test_exito_muestra_numero_y_no_invita_a_repetir_retiro(page):
     assert 'CBJ-DEMO-71' in body and '18/09/2026' in body
     assert 'Horario en el origen' in body
     assert 'La reserva no confirma que los paquetes ya hayan sido retirados' in body
+    assert 'TAURO · actualizado 17/09/2026 10:00' in body
     assert 'action="/portal/recolecciones/nueva"' not in body
     assert 'primero emití la guía' not in body
 
@@ -102,7 +108,12 @@ def test_fecha_pasada_es_historial_sin_preparar_ni_inventar_retiro(page):
 
 def test_envio_entregado_deriva_historial_sin_confirmar_visita_fisica(page):
     page.update(rec.presentar_recoleccion(
-        dict(page, fecha=date(2026, 10, 2), envio_tracking_estado='ENTREGADO'),
+        dict(
+            page,
+            fecha=date(2026, 10, 2),
+            envio_tracking_estado='ENTREGADO',
+            envio_tracking_evento_at=datetime(2026, 10, 3, 15, 30, tzinfo=timezone.utc),
+        ),
         hoy=date(2026, 9, 29),
     ))
 
@@ -110,6 +121,7 @@ def test_envio_entregado_deriva_historial_sin_confirmar_visita_fisica(page):
 
     assert 'Envío entregado' in body
     assert 'no confirma por sí solo la visita física del chofer' in body
+    assert 'DHL · entrega 03/10/2026 12:30' in body
     assert 'Prepará los paquetes' not in body
     assert 'Cancelar recolección' not in body
 
@@ -120,6 +132,52 @@ def test_cancelada_permite_nuevo_form_sin_confundir_reserva_anterior(page):
     assert 'Recolección cancelada' in body
     assert 'action="/portal/recolecciones/nueva"' in body
     assert 'DHL confirmó tu recolección' not in body
+    assert 'confirmada por DHL' not in body
+
+
+@pytest.mark.parametrize("estado,etiqueta", [
+    ("CANCELADA", "Cancelada"),
+    ("CANCELANDO", "Cancelando"),
+])
+def test_cancelacion_con_envio_entregado_conserva_estado_de_reserva(page, estado, etiqueta):
+    page.update(rec.presentar_recoleccion(
+        dict(page, estado=estado, envio_tracking_estado='ENTREGADO'),
+        hoy=date(2026, 9, 17),
+    ))
+
+    body = html(recoleccion=71)
+
+    assert re.search(rf'<span class="badge [^"]*">\s*{etiqueta}\s*</span>', body)
+    assert 'DHL · estado de entrega informado' in body
+
+
+def test_entrega_manual_no_se_atribuye_al_courier(page):
+    page.update(rec.presentar_recoleccion(
+        dict(page, envio_estado='ENTREGADO', envio_tracking_estado=None),
+        hoy=date(2026, 9, 17),
+    ))
+
+    body = html(recoleccion=71)
+
+    assert 'figura entregado en TAURO' in body
+    assert 'DHL informa entrega' not in body
+
+
+def test_ultima_consulta_no_se_presenta_como_fecha_del_evento(page):
+    page.update(rec.presentar_recoleccion(
+        dict(
+            page,
+            envio_tracking_estado='ENTREGADO',
+            envio_tracking_evento_at=None,
+            envio_tracking_actualizado_at=datetime(2026, 10, 3, 16, 0, tzinfo=timezone.utc),
+        ),
+        hoy=date(2026, 9, 17),
+    ))
+
+    body = html(recoleccion=71)
+
+    assert 'DHL · consultado 03/10/2026 13:00' in body
+    assert 'entrega 03/10/2026 13:00' not in body
 
 
 @pytest.mark.parametrize('query',['ok=1','ok=2'])

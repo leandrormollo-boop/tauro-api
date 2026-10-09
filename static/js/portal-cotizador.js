@@ -95,12 +95,15 @@
   function resultState(block, complete) {
     var hasPrice = Boolean(block.querySelector('.uq-price'));
     var hasError = Boolean(block.querySelector('.uq-error'));
+    var hasUnavailable = Boolean(block.querySelector('.uq-unavailable'));
     return {
       hasPrice: hasPrice,
+      failed: hasError || (!hasPrice && hasUnavailable),
       current: hasPrice && !hasError,
       button: hasPrice && !hasError ? 'Ver tarifas' : 'Volver a consultar',
       status: !complete ? 'Consultando otros operadores…'
         : hasError && hasPrice ? 'Podés usar las tarifas recibidas o volver a consultar.'
+        : !hasPrice && hasUnavailable ? 'No recibimos una tarifa. Podés volver a consultar.'
         : hasPrice ? 'Tarifas actualizadas.' : 'Revisá el resultado de la consulta.',
     };
   }
@@ -216,6 +219,30 @@
     var track = document.createElement('i'); track.setAttribute('aria-hidden', 'true');
     copy.append(title, detail); box.append(copy, track); container.replaceChildren(box);
   }
+  function staleQuote(container, text) {
+    if (!container.querySelector('.uq-price')) return false;
+    var response = container.querySelector('[data-quote-response]') || container;
+    response.querySelectorAll('[data-quote-recovery]').forEach(function (node) { node.remove(); });
+    var notice = response.querySelector('[data-quote-stale]');
+    if (!notice) {
+      notice = document.createElement('p'); notice.className = 'uq-stale';
+      notice.dataset.quoteStale = ''; notice.setAttribute('role', 'status');
+      response.prepend(notice);
+    }
+    notice.textContent = text;
+    return true;
+  }
+  function quoteRecovery(container) {
+    var response = container.querySelector('[data-quote-response]') || container;
+    var recovery = response.querySelector('[data-quote-recovery]');
+    if (recovery) return recovery;
+    recovery = document.createElement('div'); recovery.className = 'uq-recovery';
+    recovery.dataset.quoteRecovery = '';
+    var button = document.createElement('button'); button.type = 'button';
+    button.className = 'btn btn-ghost btn-sm'; button.dataset.quoteRetry = '';
+    button.textContent = 'Volver a consultar'; recovery.appendChild(button);
+    response.appendChild(recovery); return recovery;
+  }
   function quoteError(container, text) {
     if (!container.querySelector('.uq-price')) { message(container, text, true); return false; }
     var response = container.querySelector('[data-quote-response]') || container;
@@ -254,6 +281,9 @@
       var tabs = form.querySelector('[data-package-tabs]');
       if (tabs) form.querySelector('.uq-section-title').insertBefore(tabs, form.querySelector('#quote-add-package'));
       var stepNav = panel.querySelector('.uq-step-nav'), actions = panel.querySelector('.uq-mobile-actions');
+      result.setAttribute('aria-busy', 'false');
+      resultPanel.dataset.quoteState = result.querySelector('.uq-price') ? 'ready'
+        : result.querySelector('.uq-error,.uq-unavailable') ? 'error' : 'idle';
       function showStep(step, focus) {
         mobileStep = Math.max(1, Math.min(3, step)); panel.dataset.mobileStep = mobileStep;
         stepNav.hidden = !mobile.matches; actions.hidden = !mobile.matches;
@@ -368,21 +398,26 @@
           initial = false;
           resultPanel.dataset.quoteState = complete ? 'editing' : 'idle';
           result.classList.remove('is-revealing');
+          result.querySelectorAll('[data-quote-stream-error]').forEach(function (node) { node.remove(); });
           result.setAttribute('aria-busy', 'false');
           status.textContent = complete ? 'Actualizando con tus datos…' : 'Completá los datos para ver las tarifas.';
-          message(result, complete ? 'Las tarifas se actualizan automáticamente.' : 'Tus opciones aparecerán al completar los datos.');
+          if (!staleQuote(result, complete
+            ? 'Datos modificados. La tarifa visible puede estar desactualizada mientras consultamos nuevamente.'
+            : 'Datos incompletos. La tarifa visible puede estar desactualizada; completá los datos para actualizarla.')) {
+            message(result, complete ? 'Las tarifas se actualizan automáticamente.' : 'Tus opciones aparecerán al completar los datos.');
+          }
         },
         loading: function () {
           resultPanel.dataset.quoteState = 'loading';
           result.classList.remove('is-revealing');
+          result.querySelectorAll('[data-quote-stream-error]').forEach(function (node) { node.remove(); });
           result.setAttribute('aria-busy', 'true');
           status.textContent = 'Consultando la tarifa para esta ruta…';
-          quoteProgress(result);
+          if (!staleQuote(result, 'Actualizando la tarifa. La opción visible corresponde a la última consulta.')) quoteProgress(result);
         },
         fetch: async function (signal, onProgress) {
           var clearDeadline = window.TauroQuoteRequest.armDeadline(signal, function () {
-            control.pause(); message(result, 'La consulta demoró demasiado. Volvé a consultar.', true);
-            result.setAttribute('aria-busy','false'); status.textContent='Volvé a consultar las tarifas.';
+            control.pause(); showError('La consulta demoró demasiado. Volvé a consultar.');
           }, 90000);
           try {
             var headers = {'X-Requested-With': 'TauroQuoteWindow'};
@@ -408,21 +443,29 @@
           result.classList.remove('is-revealing');
           result.replaceChildren(block); result.setAttribute('aria-busy', String(!complete));
           restoreResellerFocus();
-          resultPanel.dataset.quoteState = complete ? 'ready' : 'loading';
+          resultPanel.dataset.quoteState = !complete ? 'loading'
+            : state.failed ? 'error' : state.hasPrice ? 'ready' : 'empty';
+          if (complete && state.failed) quoteRecovery(result);
           window.requestAnimationFrame(function () { result.classList.add('is-revealing'); });
           hasCurrentQuote = state.current; submit.textContent = state.button;
           status.textContent = state.status;
         },
-        error: function (error) {
-          resultPanel.dataset.quoteState = 'error'; result.setAttribute('aria-busy', 'false');
-          var keptPrice = quoteError(result, error.message); hasCurrentQuote = false;
-          submit.textContent = 'Volver a consultar';
-          status.textContent = keptPrice
-            ? 'Podés usar las tarifas recibidas o volver a consultar.'
-            : 'Podés volver a consultar.';
-        }
+        error: function (error) { showError(error.message); }
       });
+      function showError(text) {
+        resultPanel.dataset.quoteState = 'error'; result.setAttribute('aria-busy', 'false');
+        var keptPrice = quoteError(result, text); hasCurrentQuote = false;
+        if (keptPrice) staleQuote(result, 'No pudimos actualizar la tarifa. La opción visible corresponde a la última consulta.');
+        quoteRecovery(result); submit.textContent = 'Volver a consultar';
+        status.textContent = keptPrice
+          ? 'No pudimos actualizar. Conservamos la última tarifa para que puedas volver a consultar.'
+          : 'No pudimos consultar. Podés volver a intentar sin cargar los datos otra vez.';
+      }
       controls[scope] = control;
+      result.addEventListener('click', function (event) {
+        if (!event.target.closest('[data-quote-retry]')) return;
+        control.resume(); control.run(true);
+      });
       form.addEventListener('input', control.changed);
       form.addEventListener('change', function (event) {
         // Cambiar país invalida ciudad/CP; nunca inventamos un domicilio a

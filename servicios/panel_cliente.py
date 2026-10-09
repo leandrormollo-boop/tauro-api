@@ -172,14 +172,15 @@ def resumen_inicio_cliente(
         if codigo:
             destinos[codigo] += 1
     total_destinos = sum(destinos.values())
-    destinos_frecuentes = [
+    destinos_ordenados = [
         {
             "codigo": codigo,
             "cantidad": int(cantidad),
             "porcentaje": round(cantidad * 100 / total_destinos) if total_destinos else 0,
         }
-        for codigo, cantidad in destinos.most_common(5)
+        for codigo, cantidad in destinos.most_common()
     ]
+    destinos_frecuentes = destinos_ordenados[:5]
 
     return {
         "envios_mes": int(conteos_mes[(hoy.year, hoy.month)]),
@@ -195,6 +196,8 @@ def resumen_inicio_cliente(
         "serie_mensual": serie_mensual,
         "maximo_mensual": maximo_mensual,
         "destinos_frecuentes": destinos_frecuentes,
+        "destinos_restantes": destinos_ordenados[5:],
+        "destinos_total_envios": total_destinos,
         "paises_total": len(destinos),
     }
 

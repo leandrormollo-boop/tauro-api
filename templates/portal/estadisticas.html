@@ -72,7 +72,7 @@
         <section class="home-panel stats-destinations" id="destinos" aria-labelledby="stats-destinations-title">
             <header class="home-panel-head">
                 <div>
-                    <span class="eyebrow">Distribución</span>
+                    <span class="eyebrow">Principales destinos</span>
                     <h2 id="stats-destinations-title">Destinos de tus envíos</h2>
                     <p>Incluye importaciones con destino Argentina.</p>
                 </div>
@@ -92,6 +92,30 @@
                 </li>
                 {% endfor %}
             </ol>
+            <p class="sub" style="margin:0 20px 14px;">
+                Base: {{ r.destinos_total_envios }} envíos vigentes con destino registrado.
+                <span data-help="Redondeo">Los porcentajes pueden no sumar 100% porque se muestran sin decimales.</span>
+            </p>
+            {% if r.destinos_restantes %}
+            <details style="margin:0 20px 18px;">
+                <summary style="cursor:pointer;color:var(--accent);padding:6px 0;">
+                    Ver {{ r.destinos_restantes|length }} destino{{ 's' if r.destinos_restantes|length != 1 else '' }} restante{{ 's' if r.destinos_restantes|length != 1 else '' }}
+                </summary>
+                <ol class="home-destinations-list" style="padding:8px 0 0;">
+                    {% for destino in r.destinos_restantes %}
+                    <li>
+                        <span class="home-country-code">{{ destino.codigo }}</span>
+                        <div>
+                            <span><strong>{{ nombre_pais(destino.codigo) }}</strong><small>{{ destino.cantidad }} envíos · {{ destino.porcentaje }}%</small></span>
+                            <div class="home-dest-track" role="img" aria-label="{{ nombre_pais(destino.codigo) }}: {{ destino.porcentaje }} por ciento">
+                                <div class="home-dest-fill" style="--p:{{ destino.porcentaje }}%;--d:{{ loop.index0 * 90 }}ms"></div>
+                            </div>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ol>
+            </details>
+            {% endif %}
             {% else %}
             <div class="home-insight-empty">Los destinos aparecerán cuando generes tus primeros envíos.</div>
             {% endif %}

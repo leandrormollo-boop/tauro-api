@@ -16,7 +16,7 @@
 {% for op in opciones %}
 <article class="uq-price" data-carrier="{{ op.carrier_id }}">
     <div class="uq-price-head"><div class="uq-carrier"><strong>{{ op.carrier_nombre }}</strong><span>Operador logístico</span></div><small>{{ op.servicio[4:] if op.carrier_id == 'oca' and op.servicio.startswith('OCA ') else op.servicio }}</small></div>
-    <div class="uq-price-amount">{{ dinero_ars(op.precio_final_ars) }} <small>ARS</small></div>
+    <span class="uq-price-label">Precio estimado</span><div class="uq-price-amount">{{ dinero_ars(op.precio_final_ars) }} <small>ARS</small></div>
     <dl class="uq-conditions">
     {% for label, valor in condiciones_cotizacion(op, nacional=ambito == 'nacional', tax_paga=tax_paga_cotizacion|default(none)) %}
         <div><dt>{{ label }}</dt><dd>{{ valor }}</dd></div>
@@ -38,7 +38,7 @@
     {% endif %}
 </article>
 {% endfor %}
-<p class="uq-price-note">Precio estimado <span data-help="Sobre la cotización">Se confirma con la dirección y el contenido completos antes de emitir. El plazo es estimado por el operador y puede variar por aduana y condiciones de entrega.</span></p>
+<p class="uq-price-note">Importe sujeto a confirmación <span data-help="Sobre la cotización">Se confirma con la dirección y el contenido completos antes de emitir. El plazo es estimado por el operador y puede variar por aduana y condiciones de entrega.</span></p>
 {% endif %}
 {% if no_disponibles %}<div class="uq-unavailable">{% for courier in no_disponibles %}<p><strong>{{ courier.nombre }}</strong><span>{{ courier.motivo }}</span></p>{% endfor %}</div>{% endif %}
 {% if not opciones and not error and not no_disponibles %}<div class="uq-empty"><span class="uq-empty-symbol" aria-hidden="true">↗</span><strong>Tu próxima ruta empieza acá</strong><p>Completá origen, destino y paquetes.<br>Las tarifas aparecen automáticamente.</p></div>{% endif %}

@@ -2,7 +2,7 @@
         <div class="account-section-heading"><div><span class="account-kicker">Tus pagos</span><h2 id="account-payments-title">Tus pagos y a qué se aplicaron</h2></div><a class="account-text-action" href="{{ cuenta_url(tipo='pagos', pagina=None) }}#movimientos" data-account-link="pagos">Ver movimientos <span aria-hidden="true">↗</span></a></div>
         {% set exp = experiencia|default(none) %}
         {% set pp = exp.pagos_paginacion if exp else none %}
-        <p class="account-due-note">{{ ventana_label }}{% if pp %} · {{ pp.total }} {{ 'pago' if pp.total == 1 else 'pagos' }}{% endif %}</p>
+        <p class="account-due-note">{{ ventana_label }}{% if pp and pp.total %} · Mostrando {{ pp.pagina_desde }}–{{ pp.pagina_hasta }} de {{ pp.total }} {{ 'pago' if pp.total == 1 else 'pagos' }}{% elif pp %} · Sin pagos registrados{% endif %}</p>
         {% if experiencia_error %}<p role="status">{{ experiencia_error }}</p>{% endif %}
         {% for pago in exp.pagos if exp %}
         <article class="account-payment-item" id="pago-{{ pago.id }}">
