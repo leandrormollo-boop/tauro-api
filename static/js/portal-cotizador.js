@@ -617,8 +617,7 @@
     var style = window.getComputedStyle(target);
     if (style.display === 'none' || style.visibility === 'hidden') return false;
     var rect = target.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
-      rect.top < window.innerHeight && rect.left < window.innerWidth;
+    return rect.width > 0 && rect.height > 0;
   }
   dialog.addEventListener('close', function () {
     if (loadingController) loadingController.abort();
