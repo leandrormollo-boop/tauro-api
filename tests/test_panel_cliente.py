@@ -144,6 +144,38 @@ def test_resumen_inicio_usa_historial_real_y_excluye_descartados():
         {"codigo": "US", "cantidad": 2, "porcentaje": 67},
         {"codigo": "CL", "cantidad": 1, "porcentaje": 33},
     ]
+    assert resumen["destinos_restantes"] == []
+    assert resumen["destinos_total_envios"] == 3
+
+
+def test_destinos_conserva_el_top_cinco_y_representa_los_restantes():
+    cantidades = {"US": 20, "AR": 15, "CL": 10, "UY": 8, "BR": 5, "MX": 4, "ES": 2}
+    historial = [
+        {
+            "estado": "ENTREGADO",
+            "destino_pais": codigo,
+            "created_at": "2026-10-01",
+        }
+        for codigo, cantidad in cantidades.items()
+        for _ in range(cantidad)
+    ]
+    historial.extend([
+        {"estado": "CANCELADO", "destino_pais": "JP", "created_at": "2026-10-01"},
+        {"estado": "REEMPLAZADO", "destino_pais": "CA", "created_at": "2026-10-01"},
+        {"estado": "ENTREGADO", "destino_pais": "PAIS_INVALIDO", "created_at": "2026-10-01"},
+    ])
+
+    resumen = pc.resumen_inicio_cliente(historial, [], hoy=date(2026, 10, 9))
+
+    assert [d["codigo"] for d in resumen["destinos_frecuentes"]] == [
+        "US", "AR", "CL", "UY", "BR",
+    ]
+    assert [d["codigo"] for d in resumen["destinos_restantes"]] == ["MX", "ES"]
+    assert resumen["destinos_total_envios"] == 64
+    assert resumen["envios_total"] == 65
+    assert sum(d["cantidad"] for d in (
+        resumen["destinos_frecuentes"] + resumen["destinos_restantes"]
+    )) == resumen["destinos_total_envios"]
 
 
 def test_inicio_y_lista_comparten_accion_sin_mezclar_retenidos_tienda_o_ext():

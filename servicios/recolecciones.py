@@ -28,6 +28,7 @@ from psycopg2.extras import Json
 
 from core.database import get_conn
 from servicios.numeros_humanos import parse_entero_formulario, parse_float_formulario
+from servicios.tracking_presentacion import fecha_hora_ar
 
 ESTADOS = [
     "AGENDANDO", "AGENDADA", "CANCELANDO", "VERIFICAR_COURIER",
@@ -52,10 +53,13 @@ def presentar_recoleccion(fila: dict, *, hoy: Optional[date] = None) -> dict:
     item = dict(fila)
     hoy = hoy or date.today()
     estado = str(item.get("estado") or "").strip().upper()
+    envio_entregado_courier = (
+        str(item.get("envio_tracking_estado") or "").strip().upper()
+        == "ENTREGADO"
+    )
     envio_entregado = (
         str(item.get("envio_estado") or "").strip().upper() == "ENTREGADO"
-        or str(item.get("envio_tracking_estado") or "").strip().upper()
-        == "ENTREGADO"
+        or envio_entregado_courier
     )
     fecha = item.get("fecha")
     fecha_pasada = bool(isinstance(fecha, date) and fecha < hoy)
@@ -75,9 +79,20 @@ def presentar_recoleccion(fila: dict, *, hoy: Optional[date] = None) -> dict:
         seccion = "PENDIENTES"
     item.update(
         envio_entregado=envio_entregado,
+        envio_entregado_courier=envio_entregado_courier,
         fecha_pasada=fecha_pasada,
         vista_historica=vista_historica,
         seccion_operativa=seccion,
+        reserva_fecha_accion=("actualizado" if item.get("updated_at") else "registrado"),
+        reserva_fecha_label=fecha_hora_ar(
+            item.get("updated_at") or item.get("created_at")
+        ),
+        envio_tracking_evento_fecha_label=fecha_hora_ar(
+            item.get("envio_tracking_evento_at")
+        ),
+        envio_tracking_consulta_fecha_label=fecha_hora_ar(
+            item.get("envio_tracking_actualizado_at")
+        ),
     )
     return item
 
@@ -628,6 +643,8 @@ def listar(cliente_id: str, limite: int = 50) -> list[dict]:
             cur.execute("""
                 SELECT r.*, s.estado AS envio_estado,
                        s.tracking_estado AS envio_tracking_estado,
+                       s.tracking_evento_at AS envio_tracking_evento_at,
+                       s.tracking_actualizado_at AS envio_tracking_actualizado_at,
                        s.tracking AS envio_tracking,
                        s.etiqueta_cliente AS envio_etiqueta,
                        s.dest_nombre AS envio_destinatario,
@@ -650,6 +667,8 @@ def obtener(cliente_id: str, rec_id: int) -> Optional[dict]:
             cur.execute("""
                 SELECT r.*, s.estado AS envio_estado,
                        s.tracking_estado AS envio_tracking_estado,
+                       s.tracking_evento_at AS envio_tracking_evento_at,
+                       s.tracking_actualizado_at AS envio_tracking_actualizado_at,
                        s.tracking AS envio_tracking,
                        s.etiqueta_cliente AS envio_etiqueta,
                        s.dest_nombre AS envio_destinatario,
@@ -676,8 +695,11 @@ def listar_de_solicitudes(cliente_id: str, solicitudes: list[int]) -> dict[int, 
                 SELECT DISTINCT ON (r.solicitud_id)
                        r.id, r.solicitud_id, r.estado, r.confirmation_code,
                        r.courier, r.fecha, r.ready_time, r.close_time,
+                       r.created_at, r.updated_at,
                        s.estado AS envio_estado,
                        s.tracking_estado AS envio_tracking_estado,
+                       s.tracking_evento_at AS envio_tracking_evento_at,
+                       s.tracking_actualizado_at AS envio_tracking_actualizado_at,
                        s.tracking AS envio_tracking,
                        s.etiqueta_cliente AS envio_etiqueta,
                        s.dest_nombre AS envio_destinatario,
@@ -713,6 +735,8 @@ def obtener_de_solicitud(cliente_id: str, solicitud_id: int) -> Optional[dict]:
                        r.confirmation_code, r.ubicacion, r.created_at,
                        r.updated_at, s.estado AS envio_estado,
                        s.tracking_estado AS envio_tracking_estado,
+                       s.tracking_evento_at AS envio_tracking_evento_at,
+                       s.tracking_actualizado_at AS envio_tracking_actualizado_at,
                        s.tracking AS envio_tracking,
                        s.etiqueta_cliente AS envio_etiqueta,
                        s.dest_nombre AS envio_destinatario,

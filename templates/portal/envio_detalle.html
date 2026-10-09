@@ -117,7 +117,7 @@ $ {{ (valor or 0)|numero_ars }} ARS
         {% elif s.estado == "GUIA_LISTA" %}
             ¡Tu guía está lista! Descargá el PDF, imprimí las etiquetas y prepará las cajas.
         {% elif s.estado == "DESPACHADO" %}
-            {{ courier_nombre }} ya recolectó tu envío. Seguilo con el tracking de abajo.
+            El envío figura despachado. Seguilo con el tracking de abajo para ver los movimientos confirmados por {{ courier_nombre }}.
         {% endif %}
     </p>
 </div>
@@ -232,7 +232,7 @@ $ {{ (valor or 0)|numero_ars }} ARS
             {% if s.tracking_descripcion %}
             <div class="msg{% if s.estado_cliente_ui.codigo == 'RETENIDO' %} error{% endif %}">
                 <strong>Último movimiento</strong><br>{{ tu.mensaje or s.tracking_descripcion }}
-                {% if tu.evento_label %}<br><small class="tracking-event-time">{{ tu.evento_label }} · hora de Argentina</small>{% endif %}
+                <br><small class="tracking-event-time">Fuente: {{ courier_nombre }}{% if tu.evento_label %} · {{ tu.evento_label }} (hora de Argentina){% endif %}</small>
                 {% if tu.original %}<br><small class="tracking-original">Mensaje de {{ courier_nombre }}: {{ tu.original }}</small>{% endif %}
             </div>
             {% endif %}

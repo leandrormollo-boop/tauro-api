@@ -6,7 +6,34 @@ Regla general: **este repo despliega solo a producción en cada push a main**
 (Railway, https://taurosolutions.ar) — no hay staging. Compilá, testeá con
 mocks y verificá producción después de cada push (patrón abajo).
 
-## 09/10/2026 — T01 preparada: estados consistentes en el portal
+## 09/10/2026 — Auditoría completa: integración final autorizada
+
+Leandro autorizó avanzar con todas las mejoras verificadas y publicarlas.
+Las ramas de T02–T13 conservan sus PRs independientes (#82–#93; T04 no se
+reprodujo y no tuvo cambio). Se reúnen en `codex/auditoria-integracion-20261009`
+para cumplir el control obligatorio de CI sobre una rama actualizada con main.
+No usar `--admin`, no desactivar reglas, no incluir PRs ajenos a esta auditoría.
+
+Cambios: legibilidad de Inicio, cotizador móvil y recuperación de errores,
+acciones bloqueadas sobre tarifas desactualizadas, textos de Mi tienda,
+destinos restantes, fuente/fecha de recolecciones, alcance del historial de
+pagos, animaciones operativas, menú accesible, compresión de recursos públicos,
+estabilidad inicial del cotizador, copia del correo y canonical de la web.
+Se mantienen identidad, importes, tarifas, cargos, pagos, saldos e históricos.
+No se agregan dependencias ni operaciones con couriers.
+
+Validación local integrada: 3773 pruebas y 5 subtests aprobados, más las mismas
+3 fallas del baseline local: `portal_ronda4` busca `.shipment-paste` retirado,
+`privacy_hardening` difiere por ENV=STAGING y el subproceso de restauración no
+abre la base local. Node: 101 contratos aprobados; build web reproducible.
+Datos ficticios, PostgreSQL local y red externa bloqueada. CI de GitHub debe
+terminar verde antes de integrar. Verificar después Railway SUCCESS para el
+commit final y salud/assets públicos; no emitir guías ni registrar pagos.
+El informe y las capturas de escritorio/móvil están en la entrega local
+`outputs/auditoria-restante-20261009/informe.html` de la carpeta TAURO.
+Las métricas de laboratorio no son p75 de usuarios ni certificación WCAG.
+
+## 09/10/2026 — T01 integrada: estados consistentes en el portal
 
 Rama `codex/portal-estados-consistentes`, base `af3d577`. El embudo conserva
 `REEMPLAZADO` aunque el cargo anterior esté cancelado; se reutiliza el mapeo
@@ -18,8 +45,8 @@ Regresiones con PostgreSQL local y datos ficticios: clasificación, aislamiento
 por cliente/visibilidad/test, enlaces e importes intactos. Pruebas de Inicio
 cubren selección, límite por ámbito, historial y estado vacío. Sin cambios de
 CSS, tarifas, cargos, pagos, saldo, esquema ni dependencias.
-Revisión independiente aprobada. PR independiente; requiere OK de Leandro
-antes de merge/deploy y antes de iniciar la siguiente tarea de la auditoría.
+Revisión independiente aprobada. PR #80 integrado con autorización de Leandro
+en main `3b91d54`. La autorización posterior incluye el resto de la auditoría.
 
 ## 09/10/2026 — Publicado: SQL de vigilancia DHL de guías descartadas
 

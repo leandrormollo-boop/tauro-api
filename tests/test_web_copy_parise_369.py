@@ -68,11 +68,11 @@ def test_seo_social_y_datos_estructurados_quedan_alineados():
     assert "Shopify" in description
     assert "envíos internacionales" in description
     assert "envíos nacionales" not in description
-    assert '<link rel="canonical" href="https://taurosolutions.ar/"' in HTML
+    assert '<link rel="canonical" href="https://taurosolutions.ar/web"' in HTML
     assert 'property="og:title" content="Conectá. Centralizá. Expandí. | Tauro Solutions"' in HTML
     assert 'name="twitter:card" content="summary_large_image"' in HTML
     assert 'styles.css?v=15' in HTML
-    assert '/static/js/app.js?v=23' in HTML
+    assert '/static/js/app.js?v=24' in HTML
 
     structured = re.search(
         r'<script type="application/ld\+json">\s*(\{.*?\})\s*</script>',

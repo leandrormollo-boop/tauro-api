@@ -393,6 +393,30 @@ def test_pagos_se_filtran_por_intervalo_y_paginan_veinticinco(cuenta_aislada):
     assert "PRIVADO" not in str(primera) + str(segunda)
 
 
+def test_historial_anual_muestra_23_pagos_ficticios_sin_recorte(cuenta_aislada):
+    with cuenta_aislada() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO clientes VALUES ('DEMO_CUENTA_23',NULL,false)")
+            cur.execute("""
+                INSERT INTO pagos
+                    (id,cliente_id,fecha,created_at,monto_ars,metodo,referencia,estado)
+                SELECT n,'DEMO_CUENTA_23',DATE '2026-06-15',
+                       TIMESTAMPTZ '2026-06-15 12:00+00' + n * INTERVAL '1 second',
+                       n,'Transferencia','DEMO-'||n,'APROBADO'
+                FROM generate_series(200,222) n
+            """)
+
+    resultado = ec.obtener_experiencia_cuenta(
+        "DEMO_CUENTA_23", {}, desde="2026-01-01", hasta="2026-12-31",
+    )
+
+    assert len(resultado["pagos"]) == 23
+    assert resultado["pagos_paginacion"] == {
+        "pagina_actual": 1, "total_paginas": 1, "total": 23,
+        "pagina_desde": 1, "pagina_hasta": 23,
+    }
+
+
 def test_pago_devuelve_todas_las_guias_propias_sin_limite_oculto(cuenta_aislada):
     with cuenta_aislada() as conn:
         with conn.cursor() as cur:

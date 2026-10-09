@@ -592,7 +592,7 @@ h1, h2, h3, h4 {
   flex: 1;
 }
 
-/* topbar mobile (hamburguesa sin JS: checkbox hack) */
+/* topbar y drawer móviles */
 .mobile-bar { display: none; }
 #side-toggle { display: none; }
 /* el overlay solo existe en mobile — fuera del flujo del grid en desktop */
@@ -2179,12 +2179,18 @@ td.mono, th.mono { font-family: var(--font-mono); font-size: 12px; }
     width: min(300px, 84vw);
     z-index: 100;
     transform: translateX(-102%);
-    transition: transform .22s cubic-bezier(.2,.7,.3,1);
-    box-shadow: 20px 0 60px rgba(0,0,0,.5);
+    visibility: hidden;
+    transition: transform .22s cubic-bezier(.2,.7,.3,1), visibility 0s linear .22s;
+    box-shadow: none !important;
     height: 100vh;
     height: 100dvh;
   }
-  #side-toggle:checked ~ .shell .sidebar { transform: translateX(0); }
+  #side-toggle:checked ~ .shell .sidebar {
+    transform: translateX(0);
+    visibility: visible;
+    transition-delay: 0s;
+    box-shadow: 20px 0 60px rgba(0,0,0,.5) !important;
+  }
   .side-overlay {
     display: block;
     position: fixed;

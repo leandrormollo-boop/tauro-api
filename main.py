@@ -19,6 +19,7 @@ from typing import Optional
 from servicios.carriers import cotizar_carriers_web as cotizar_carriers
 from core.email_sender import enviar_email_pedido
 from core.database import init_db
+from core.static_compression import PublicStaticGZipMiddleware
 from endpoints.portal_cliente import router as portal_router
 from endpoints.admin import router as admin_router
 from endpoints.integraciones import router as integraciones_router
@@ -109,6 +110,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+app.add_middleware(PublicStaticGZipMiddleware)
 
 
 # ── Hosts permitidos ────────────────────────────────────────
