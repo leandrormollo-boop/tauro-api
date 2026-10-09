@@ -113,5 +113,5 @@ def test_resultado_acepta_shape_backend_mayuscula_y_cp_explicitos():
 
 
 def test_html_publico_referencia_el_bundle_nuevo():
-    assert '/static/js/app.js?v=23' in WEB_HTML
+    assert '/static/js/app.js?v=24' in WEB_HTML
     assert '/static/js/app.js?v=21' not in WEB_HTML

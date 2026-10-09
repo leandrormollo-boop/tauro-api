@@ -17,7 +17,7 @@ def test_cta_integraciones_apunta_a_casilla_corporativa():
     assert "mailto:cotizaciones@taurosolutions.ar" in hero
     assert hero.count("href={CUENTA_MAILTO}") == 5
     assert "href: INTEGRACIONES_MAILTO" in servicios
-    assert contacto.count("href={CUENTA_MAILTO}") == 2
+    assert contacto.count("href={CUENTA_MAILTO}") == 3
 
 
 def test_bundle_publico_publica_el_mailto_y_cache_nuevo():
@@ -26,4 +26,4 @@ def test_bundle_publico_publica_el_mailto_y_cache_nuevo():
 
     assert "integraciones@taurosolutions.ar" in bundle
     assert "Quiero integrar mi tienda con TAURO" in bundle
-    assert 'src="/static/js/app.js?v=23"' in html
+    assert 'src="/static/js/app.js?v=24"' in html
