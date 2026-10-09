@@ -433,7 +433,7 @@ def test_css_tabbar_respeta_safe_area_touch_print_y_escritorio():
 def test_base_html_versiona_el_css_nuevo():
     base = BASE_HTML_PATH.read_text(encoding="utf-8")
     assert "tauro.css?v=51" in base
-    assert "portal-cotizador.js?v=15" in base
+    assert "portal-cotizador.js?v=16" in base
     assert "portal-dock.css?v=4" in base
     assert "portal-cotizador.css?v=11" in base
     assert "quote-locations.js?v=4" in base

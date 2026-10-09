@@ -611,9 +611,21 @@
   });
   dialog.querySelector('[data-cotizar-cerrar]').addEventListener('click', function () { dialog.close(); });
   dialog.addEventListener('click', function (event) { if (event.target === dialog) dialog.close(); });
+  function canRestoreFocus(target) {
+    if (!target || !target.isConnected || target.closest('[inert]')) return false;
+    if (target.matches('[disabled], [aria-hidden="true"]')) return false;
+    var style = window.getComputedStyle(target);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    var rect = target.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 &&
+      rect.top < window.innerHeight && rect.left < window.innerWidth;
+  }
   dialog.addEventListener('close', function () {
     if (loadingController) loadingController.abort();
     var root = content.querySelector('.unified-quote'); if (root) init(root).pause();
-    if (opener && document.contains(opener)) opener.focus({preventScroll: true});
+    var focusTarget = canRestoreFocus(opener) ? opener : document.getElementById('side-toggle-button');
+    window.setTimeout(function () {
+      if (canRestoreFocus(focusTarget)) focusTarget.focus({preventScroll: true});
+    }, 0);
   });
 })();
