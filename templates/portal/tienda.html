@@ -1,7 +1,14 @@
 {% extends "base.html" %}
+{% from "portal/_product_thumbnail.html" import product_thumbnail %}
 {% block title %}Mi tienda{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/product-thumbnails.css?v=1">
+{% endblock %}
+
 {% block content %}
+<script src="/static/js/product-thumbnails.js?v=1" defer></script>
+<script src="/static/js/catalog-sync.js?v=1" defer></script>
 <div class="page-head">
     <a href="/portal/paquetes" class="btn btn-ghost">Configurar embalajes</a>
     <div>
@@ -25,7 +32,7 @@
     <div style="display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap;">
         <div>
             <div class="eyebrow">Shopify · catálogo y stock</div>
-            <h3 style="margin:3px 0 6px;">
+            <h3 style="margin:3px 0 6px;" data-catalog-sync-status role="status" aria-live="polite" aria-atomic="true">
                 {% if sync_estado.estado == 'COMPLETADO' %}Sincronizado
                 {% elif sync_estado.estado == 'SINCRONIZANDO' %}Sincronizando…
                 {% elif sync_estado.estado == 'REAUTORIZAR' %}Requiere autorización
@@ -39,9 +46,9 @@
             </p>
         </div>
         <div style="display:flex;gap:18px;flex-wrap:wrap;">
-            <div><strong style="display:block;font-size:24px;">{{ stock_resumen.variantes or 0 }}</strong><span class="sub">variantes</span></div>
-            <div><strong style="display:block;font-size:24px;">{{ stock_resumen.unidades_disponibles or 0 }}</strong><span class="sub">disponibles</span></div>
-            <div><strong style="display:block;font-size:24px;{% if stock_resumen.agotadas %}color:#ff8a8a;{% endif %}">{{ stock_resumen.agotadas or 0 }}</strong><span class="sub">agotadas</span></div>
+            <div><strong style="display:block;font-size:24px;" data-catalog-sync-variants>{{ stock_resumen.variantes or 0 }}</strong><span class="sub">variantes</span></div>
+            <div><strong style="display:block;font-size:24px;" data-catalog-sync-units>{{ stock_resumen.unidades_disponibles or 0 }}</strong><span class="sub">disponibles</span></div>
+            <div><strong class="catalog-out-of-stock{% if stock_resumen.agotadas %} is-active{% endif %}" style="display:block;font-size:24px;" data-catalog-sync-out-of-stock>{{ stock_resumen.agotadas or 0 }}</strong><span class="sub">agotadas</span></div>
         </div>
     </div>
     {% if sync_estado.estado == 'REAUTORIZAR' and sync_estado.dominio %}
@@ -78,10 +85,9 @@
                     <span style="font-size:12px;color:var(--fg-3);">{{ d.cp or '' }}</span></td>
                 <td style="max-width:260px;">
                     {% for it in (p['items'] or [])[:3] %}
-                        <div style="font-size:13px;display:flex;gap:8px;align-items:center;margin:3px 0;">
-                            {% if it.imagen_url %}<img src="{{ it.imagen_url }}" alt="" loading="lazy"
-                                style="width:34px;height:34px;object-fit:cover;border-radius:7px;background:var(--bg-2);">{% endif %}
-                            <span><b>{{ it.cantidad }}x</b> {{ it.titulo }}{% if it.variante %}<br><span style="color:var(--fg-3);font-size:11px;">{{ it.variante }}</span>{% endif %}</span>
+                        <div class="product-identity" style="font-size:13px;margin:5px 0;">
+                            {{ product_thumbnail(it.imagen_url, it.titulo, 'order', 'order:' ~ p.id ~ ':' ~ loop.index0) }}
+                            <span class="product-identity__text"><b>{{ it.cantidad }}x</b> {{ it.titulo }}{% if it.variante %}<br><span style="color:var(--fg-3);font-size:11px;">{{ it.variante }}</span>{% endif %}</span>
                         </div>
                     {% endfor %}
                     {% if (p['items'] or [])|length > 3 %}<div style="font-size:12px;color:var(--fg-3);">+{{ (p['items'] or [])|length - 3 }} más</div>{% endif %}
@@ -186,8 +192,8 @@
         </div>
         {% endfor %}
         <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <form method="POST" action="/portal/tienda/sincronizar-catalogo">
-                <button type="submit" class="btn btn-ghost btn-sm">↻ Sincronizar catálogo y stock</button>
+            <form method="POST" action="/portal/tienda/sincronizar-catalogo" data-catalog-sync-form>
+                <button type="submit" class="btn btn-ghost btn-sm">Sincronizar catálogo y stock</button>
             </form>
             <span class="sub" style="margin:0;font-size:12px;">Shopify avisa cada cambio. Este botón fuerza una conciliación completa sin frenar el portal.</span>
         </div>

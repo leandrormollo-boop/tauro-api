@@ -1,0 +1,22 @@
+{% macro product_thumbnail(url, nombre, tamano='catalog', clave='') -%}
+{% set nombre_producto = nombre or 'producto' %}
+{% if url %}
+<button type="button"
+        class="product-thumb product-thumb--{{ tamano }}"
+        data-product-thumb data-product-image-open
+        data-product-thumb-key="{{ clave }}"
+        data-product-image-url="{{ url }}"
+        data-product-image-name="{{ nombre_producto }}"
+        aria-label="Ampliar imagen de {{ nombre_producto }}">
+    <span class="product-thumb__fallback" aria-hidden="true">Sin foto</span>
+    <img class="product-thumb__image" src="{{ url }}" alt="" loading="lazy"
+         width="72" height="72" data-product-image>
+</button>
+{% else %}
+<span class="product-thumb product-thumb--{{ tamano }} product-thumb--missing"
+      data-product-thumb data-product-thumb-key="{{ clave }}"
+      role="img" aria-label="Sin foto disponible">
+    <span class="product-thumb__fallback" aria-hidden="true">Sin foto</span>
+</span>
+{% endif %}
+{%- endmacro %}

@@ -4250,7 +4250,12 @@ def tienda_view(
             resumen_stock_cliente,
         )
         for pedido in pedidos:
-            pedido["items"] = enriquecer_items_catalogo(cliente, pedido.get("items") or [])
+            pedido["items"] = enriquecer_items_catalogo(
+                cliente,
+                pedido.get("items") or [],
+                plataforma=pedido.get("plataforma") or "",
+                tienda_dominio=pedido.get("tienda_dominio") or "",
+            )
         sync_estado = estado_sincronizacion_cliente(cliente)
         stock_resumen = resumen_stock_cliente(cliente)
     except Exception as e:
@@ -4619,7 +4624,10 @@ def tienda_pedido_descartar(
 
 
 @router.post("/tienda/sincronizar-catalogo")
-def tienda_sincronizar_catalogo(cliente: str = Depends(cliente_actual)):
+def tienda_sincronizar_catalogo(
+    request: Request,
+    cliente: str = Depends(cliente_actual),
+):
     """Reimporta el catálogo desde Shopify a pedido del cliente. El alta ya
     ocurre sola al instalar; esto es para volver a traer productos nuevos."""
     try:
@@ -4628,12 +4636,62 @@ def tienda_sincronizar_catalogo(cliente: str = Depends(cliente_actual)):
     except Exception as e:
         print(f"[portal] error sincronizando catálogo: {type(e).__name__}")
         r = {"ok": False, "error": "No pudimos sincronizar ahora. Probá de nuevo."}
+    quiere_json = "application/json" in request.headers.get("accept", "").lower()
     if not r.get("ok"):
+        if quiere_json:
+            return JSONResponse(
+                {"ok": False, "error": r.get("error", "No se pudo sincronizar.")},
+                status_code=400,
+            )
         return RedirectResponse(
             url=f"/portal/tienda?error={quote(r.get('error', 'No se pudo sincronizar.'))}",
             status_code=303)
+    if quiere_json:
+        return JSONResponse({
+            "ok": True,
+            "iniciada": bool(r.get("iniciada")),
+            "en_curso": bool(r.get("en_curso")),
+            "sync_intento_id": r.get("sync_intento_id"),
+        })
     msg = "Sincronización iniciada. Podés seguir trabajando; el stock se actualiza en segundo plano."
     return RedirectResponse(url=f"/portal/tienda?ok={quote(msg)}", status_code=303)
+
+
+@router.get("/api/catalogo/sync-estado")
+def catalogo_sync_estado(cliente: str = Depends(cliente_actual)):
+    """Estado liviano para actualizar la pantalla sin recargarla."""
+    try:
+        from servicios.catalogo import (
+            estado_sincronizacion_cliente,
+            resumen_stock_cliente,
+        )
+        sincronizacion = estado_sincronizacion_cliente(cliente) or {}
+        resumen = resumen_stock_cliente(cliente) or {}
+    except Exception as e:
+        print(f"[portal] error leyendo estado de catálogo: {type(e).__name__}")
+        return JSONResponse(
+            {"ok": False, "error": "No pudimos leer el estado del catálogo."},
+            status_code=503,
+        )
+    actualizado = sincronizacion.get("ultima_sincronizacion_at")
+    return JSONResponse({
+        "ok": True,
+        "sincronizacion": {
+            "estado": sincronizacion.get("estado"),
+            "sync_intento_id": (
+                sincronizacion.get("ultimo_intento_at").isoformat()
+                if hasattr(sincronizacion.get("ultimo_intento_at"), "isoformat")
+                else sincronizacion.get("ultimo_intento_at")
+            ),
+            "ultima_sincronizacion_at": actualizado.isoformat()
+            if hasattr(actualizado, "isoformat") else actualizado,
+        },
+        "resumen": {
+            "variantes": int(resumen.get("variantes") or 0),
+            "unidades_disponibles": int(resumen.get("unidades_disponibles") or 0),
+            "agotadas": int(resumen.get("agotadas") or 0),
+        },
+    }, headers={"Cache-Control": "private, no-store"})
 
 
 # ── Mis clientes (agenda privada) ─────────────────
