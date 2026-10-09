@@ -362,7 +362,7 @@ def test_pagos_se_filtran_por_intervalo_y_paginan_veinticinco(cuenta_aislada):
                 SELECT n,'WAIMAO',DATE '2026-02-15',
                        TIMESTAMPTZ '2026-02-15 12:00+00' + n * INTERVAL '1 second',
                        n,'Transferencia','FEB-'||n,'APROBADO'
-                FROM generate_series(30,49) n;
+                FROM generate_series(30,52) n;
                 INSERT INTO pagos
                     (id,cliente_id,fecha,created_at,monto_ars,metodo,referencia,estado)
                 VALUES (100,'OTRO','2026-01-15','2026-01-15 23:59+00',999,
@@ -375,7 +375,7 @@ def test_pagos_se_filtran_por_intervalo_y_paginan_veinticinco(cuenta_aislada):
     segunda = ec.obtener_experiencia_cuenta(
         "WAIMAO", {}, desde="2026-01-01", hasta="2026-01-31", pagina_pagos=2,
     )
-    veinte = ec.obtener_experiencia_cuenta(
+    veintitres = ec.obtener_experiencia_cuenta(
         "WAIMAO", {}, desde="2026-02-01", hasta="2026-02-28",
     )
     assert [p["id"] for p in primera["pagos"]] == list(range(27, 2, -1))
@@ -388,8 +388,11 @@ def test_pagos_se_filtran_por_intervalo_y_paginan_veinticinco(cuenta_aislada):
         "pagina_actual": 2, "total_paginas": 2, "total": 26,
         "pagina_desde": 26, "pagina_hasta": 26,
     }
-    assert len(veinte["pagos"]) == veinte["pagos_paginacion"]["total"] == 20
-    assert veinte["pagos_paginacion"]["total_paginas"] == 1
+    assert len(veintitres["pagos"]) == veintitres["pagos_paginacion"]["total"] == 23
+    assert veintitres["pagos_paginacion"] == {
+        "pagina_actual": 1, "total_paginas": 1, "total": 23,
+        "pagina_desde": 1, "pagina_hasta": 23,
+    }
     assert "PRIVADO" not in str(primera) + str(segunda)
 
 
