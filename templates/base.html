@@ -360,7 +360,8 @@
   if (!burger || !toggle || !sidebar || !overlay) return;
 
   function focusables() {
-    return Array.from(sidebar.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"));
+    return Array.from(sidebar.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"))
+      .filter(function (element) { return element.getClientRects().length > 0; });
   }
   function sync(open, moveFocus, restoreFocus) {
     open = mobile.matches && open;
@@ -375,7 +376,9 @@
     if (open) {
       sidebar.setAttribute("role", "dialog");
       sidebar.setAttribute("aria-modal", "true");
-      if (moveFocus) window.setTimeout(function () { (focusables()[0] || sidebar).focus(); }, 30);
+      if (moveFocus) window.setTimeout(function () {
+        if (mobile.matches && toggle.checked) (focusables()[0] || sidebar).focus();
+      }, 30);
     } else {
       sidebar.removeAttribute("role");
       sidebar.removeAttribute("aria-modal");
