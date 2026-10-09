@@ -51,11 +51,11 @@
             {% elif confirmada %}Recolección programada. Retiro reservado. Prepará los paquetes antes del horario de inicio.
             {% else %}Recolección pendiente de confirmación. TAURO está verificando la reserva. No vuelvas a solicitarla todavía.{% endif %}
         </small>
-        <small class="pickup-status-source">
+        <small class="pickup-status-source" style="max-width:170px;">
             TAURO{% if r.reserva_fecha_label|default(false) %} · {{ r.reserva_fecha_accion|default('actualizado') }} {{ r.reserva_fecha_label }}{% endif %} (hora de Argentina)
         </small>
         {% if r.envio_entregado_courier|default(false) %}
-        <small class="pickup-status-source">
+        <small class="pickup-status-source" style="max-width:170px;">
             {{ courier }}{% if r.envio_tracking_evento_fecha_label|default(false) %} · entrega {{ r.envio_tracking_evento_fecha_label }}{% elif r.envio_tracking_consulta_fecha_label|default(false) %} · consultado {{ r.envio_tracking_consulta_fecha_label }}{% else %} · estado de entrega informado{% endif %} (hora de Argentina)
         </small>
         {% endif %}
