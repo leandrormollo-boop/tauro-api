@@ -83,8 +83,10 @@ def presentar_recoleccion(fila: dict, *, hoy: Optional[date] = None) -> dict:
         fecha_pasada=fecha_pasada,
         vista_historica=vista_historica,
         seccion_operativa=seccion,
-        reserva_creada_fecha_label=fecha_hora_ar(item.get("created_at")),
-        reserva_actualizada_fecha_label=fecha_hora_ar(item.get("updated_at")),
+        reserva_fecha_accion=("actualizado" if item.get("updated_at") else "registrado"),
+        reserva_fecha_label=fecha_hora_ar(
+            item.get("updated_at") or item.get("created_at")
+        ),
         envio_tracking_evento_fecha_label=fecha_hora_ar(
             item.get("envio_tracking_evento_at")
         ),

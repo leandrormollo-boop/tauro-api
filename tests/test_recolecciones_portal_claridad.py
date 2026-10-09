@@ -1,5 +1,6 @@
 """El comprobante confirma una reserva propia, nunca una visita o una URL."""
 from datetime import date, datetime, timezone
+import re
 from urllib.parse import parse_qs, urlsplit
 from unittest import mock
 
@@ -22,8 +23,8 @@ def pickup(**changes):
                      confirmation_code='CBJ-DEMO-71',fecha=date(2026,9,18),
                      created_at=datetime(2026,9,17,12,0,tzinfo=timezone.utc),
                      updated_at=datetime(2026,9,17,13,0,tzinfo=timezone.utc),
-                     reserva_creada_fecha_label='17/09/2026 09:00',
-                     reserva_actualizada_fecha_label='17/09/2026 10:00',
+                     reserva_fecha_accion='actualizado',
+                     reserva_fecha_label='17/09/2026 10:00',
                      ready_time='09:00',close_time='17:00',bultos=1,peso_kg=20,
                      direccion='Dirección de prueba',
                      envio_tracking='DEMO-TRACKING',
@@ -71,8 +72,7 @@ def test_exito_muestra_numero_y_no_invita_a_repetir_retiro(page):
     assert 'CBJ-DEMO-71' in body and '18/09/2026' in body
     assert 'Horario en el origen' in body
     assert 'La reserva no confirma que los paquetes ya hayan sido retirados' in body
-    assert 'Reserva en TAURO · registrada 17/09/2026 09:00' in body
-    assert 'última actualización 17/09/2026 10:00' in body
+    assert 'TAURO · actualizado 17/09/2026 10:00' in body
     assert 'action="/portal/recolecciones/nueva"' not in body
     assert 'primero emití la guía' not in body
 
@@ -121,8 +121,7 @@ def test_envio_entregado_deriva_historial_sin_confirmar_visita_fisica(page):
 
     assert 'Envío entregado' in body
     assert 'no confirma por sí solo la visita física del chofer' in body
-    assert 'DHL informa entrega · evento 03/10/2026 12:30' in body
-    assert 'Es distinto de la reserva del retiro' in body
+    assert 'DHL · entrega 03/10/2026 12:30' in body
     assert 'Prepará los paquetes' not in body
     assert 'Cancelar recolección' not in body
 
@@ -134,6 +133,22 @@ def test_cancelada_permite_nuevo_form_sin_confundir_reserva_anterior(page):
     assert 'action="/portal/recolecciones/nueva"' in body
     assert 'DHL confirmó tu recolección' not in body
     assert 'confirmada por DHL' not in body
+
+
+@pytest.mark.parametrize("estado,etiqueta", [
+    ("CANCELADA", "Cancelada"),
+    ("CANCELANDO", "Cancelando"),
+])
+def test_cancelacion_con_envio_entregado_conserva_estado_de_reserva(page, estado, etiqueta):
+    page.update(rec.presentar_recoleccion(
+        dict(page, estado=estado, envio_tracking_estado='ENTREGADO'),
+        hoy=date(2026, 9, 17),
+    ))
+
+    body = html(recoleccion=71)
+
+    assert re.search(rf'<span class="badge [^"]*">\s*{etiqueta}\s*</span>', body)
+    assert 'DHL · estado de entrega informado' in body
 
 
 def test_entrega_manual_no_se_atribuye_al_courier(page):
@@ -161,8 +176,8 @@ def test_ultima_consulta_no_se_presenta_como_fecha_del_evento(page):
 
     body = html(recoleccion=71)
 
-    assert 'última consulta 03/10/2026 13:00' in body
-    assert 'evento 03/10/2026 13:00' not in body
+    assert 'DHL · consultado 03/10/2026 13:00' in body
+    assert 'entrega 03/10/2026 13:00' not in body
 
 
 @pytest.mark.parametrize('query',['ok=1','ok=2'])

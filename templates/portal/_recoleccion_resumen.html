@@ -34,29 +34,29 @@
     <div class="pickup-state">
         <span class="badge {% if confirmada or r.estado == 'COMPLETADA' %}ok{% elif r.estado != 'CANCELADA' %}warn{% endif %}">
             {% if r.estado == 'COMPLETADA' %}Completada
+            {% elif r.estado == 'CANCELADA' %}Cancelada
+            {% elif r.estado == 'CANCELANDO' %}Cancelando
             {% elif r.envio_entregado|default(false) %}Envío entregado
             {% elif historica %}Historial
             {% elif confirmada %}Programada
-            {% elif r.estado == 'CANCELADA' %}Cancelada
-            {% elif r.estado == 'CANCELANDO' %}Cancelando
             {% else %}En verificación{% endif %}
         </span>
         <small class="pickup-status-note">
             {% if r.estado == 'COMPLETADA' %}La finalización del retiro fue registrada.
+            {% elif r.estado == 'CANCELADA' %}Recolección cancelada. La guía se conserva y puede volver a programarse.
+            {% elif r.estado == 'CANCELANDO' %}Estamos confirmando la cancelación con {{ courier }}.
             {% elif r.envio_entregado_courier|default(false) %}El courier informa la entrega del envío; no confirma por sí solo la visita física del chofer durante este retiro.
             {% elif r.envio_entregado|default(false) %}El envío figura entregado en TAURO, sin un evento de entrega del courier asociado a esta vista.
             {% elif historica %}Fecha de recolección pasada. La fecha programada ya pasó; esta vista no confirma que el courier haya retirado los paquetes.
             {% elif confirmada %}Recolección programada. Retiro reservado. Prepará los paquetes antes del horario de inicio.
-            {% elif r.estado == 'CANCELADA' %}Recolección cancelada. La guía se conserva y puede volver a programarse.
-            {% elif r.estado == 'CANCELANDO' %}Estamos confirmando la cancelación con {{ courier }}.
             {% else %}Recolección pendiente de confirmación. TAURO está verificando la reserva. No vuelvas a solicitarla todavía.{% endif %}
         </small>
-        <small class="pickup-status-source" style="max-width:180px;">
-            Reserva en TAURO{% if r.reserva_creada_fecha_label|default(false) %} · registrada {{ r.reserva_creada_fecha_label }} (hora de Argentina){% endif %}{% if r.reserva_actualizada_fecha_label|default(false) %} · última actualización {{ r.reserva_actualizada_fecha_label }}{% endif %}.
+        <small class="pickup-status-source">
+            TAURO{% if r.reserva_fecha_label|default(false) %} · {{ r.reserva_fecha_accion|default('actualizado') }} {{ r.reserva_fecha_label }}{% endif %} (hora de Argentina)
         </small>
         {% if r.envio_entregado_courier|default(false) %}
-        <small class="pickup-status-source" style="max-width:180px;">
-            Seguimiento: {{ courier }} informa entrega{% if r.envio_tracking_evento_fecha_label|default(false) %} · evento {{ r.envio_tracking_evento_fecha_label }}{% endif %}{% if r.envio_tracking_consulta_fecha_label|default(false) %} · última consulta {{ r.envio_tracking_consulta_fecha_label }}{% endif %} (hora de Argentina). Es distinto de la reserva del retiro.
+        <small class="pickup-status-source">
+            {{ courier }}{% if r.envio_tracking_evento_fecha_label|default(false) %} · entrega {{ r.envio_tracking_evento_fecha_label }}{% elif r.envio_tracking_consulta_fecha_label|default(false) %} · consultado {{ r.envio_tracking_consulta_fecha_label }}{% else %} · estado de entrega informado{% endif %} (hora de Argentina)
         </small>
         {% endif %}
     </div>
