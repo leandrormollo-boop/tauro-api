@@ -58,8 +58,11 @@ def test_inicio_compacta_sin_scroll_horizontal_en_mobile():
 def test_barras_mensuales_entran_una_vez_y_respetan_movimiento_reducido():
     assert "@keyframes home-bar-rise" in CSS
     assert "animation: home-bar-rise" in CSS
-    assert "home-bar-bob" in CSS
-    assert "home-bar-liquid" in CSS
+    assert "home-bar-bob" not in CSS
+    assert "home-bar-liquid" not in CSS
+    assert "home-dest-stream" not in CSS
+    assert "animation: home-bar-rise .2s ease-out" in CSS
+    assert "animation: home-dest-flow .2s ease-out" in CSS
     assert "@media (prefers-reduced-motion: reduce)" in CSS
 
 
@@ -86,7 +89,7 @@ def test_estadisticas_no_desborda_en_mobile():
     assert ".portal-operacion .stats-layout { grid-template-columns: 1fr; }" in CSS
     assert ".portal-operacion .stats-summary { grid-template-columns: 1fr; }" in CSS
     assert ".portal-operacion .stats-destinations .home-destinations-list { grid-template-columns: 1fr; }" in CSS
-    assert 'portal-operacion.css?v=10' in BASE
+    assert 'portal-operacion.css?v=11' in BASE
 
 
 def test_estadisticas_renderiza_aun_sin_historial():
