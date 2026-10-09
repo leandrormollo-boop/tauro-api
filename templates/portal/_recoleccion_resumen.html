@@ -50,6 +50,14 @@
             {% elif r.estado == 'CANCELANDO' %}Estamos confirmando la cancelación con {{ courier }}.
             {% else %}Recolección pendiente de confirmación. TAURO está verificando la reserva. No vuelvas a solicitarla todavía.{% endif %}
         </small>
+        <small class="pickup-status-source">
+            Reserva: {% if r.confirmation_code %}confirmada por {{ r.reserva_fuente|default(courier) }}{% else %}registrada en {{ r.reserva_fuente|default('TAURO') }}{% endif %}{% if r.reserva_fecha_label|default(false) %} · {{ r.reserva_fecha_label }} (hora de Argentina){% endif %}.
+        </small>
+        {% if r.envio_entregado|default(false) %}
+        <small class="pickup-status-source">
+            Seguimiento del envío: entrega confirmada por {{ courier }}{% if r.envio_tracking_fecha_label|default(false) %} · {{ r.envio_tracking_fecha_label }} (hora de Argentina){% endif %}. Es un evento distinto de la reserva del retiro.
+        </small>
+        {% endif %}
     </div>
 
     <details class="pickup-menu" data-dropdown>
