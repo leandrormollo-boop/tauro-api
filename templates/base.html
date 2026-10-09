@@ -25,8 +25,8 @@
       document.getElementById("portal-theme-color").content = tema === "light" ? "#f8f7fc" : "#0c0a14";
     })();
     </script>
-    <link rel="stylesheet" href="/static/css/tauro.css?v=51">
-    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=9">{% endif %}
+    <link rel="stylesheet" href="/static/css/tauro.css?v=52">
+    {% if cliente %}<link rel="stylesheet" href="/static/css/portal-operacion.css?v=11">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/portal-recolecciones.css?v=3">{% endif %}
     {% if cliente %}<link rel="stylesheet" href="/static/css/documentos.css?v=3">
     <script src="/static/js/documentos.js?v=3" defer></script>{% endif %}
@@ -81,10 +81,10 @@
 {% if cliente %}
 <input type="checkbox" id="side-toggle" aria-hidden="true">
 <div class="shell">
-    <label for="side-toggle" class="side-overlay" aria-hidden="true"></label>
+    <button type="button" class="side-overlay" aria-label="Cerrar menú" aria-hidden="true" tabindex="-1"></button>
 
     <!-- ── SIDEBAR ─────────────────────────────────────── -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="portal-sidebar" aria-label="Navegación y cuenta">
         <a href="/portal/home" class="side-logo">
             <span class="mark">
                 <img src="/static/img/logo-mark-white.png" alt="" style="height:24px;width:auto;">
@@ -218,9 +218,9 @@
     <!-- ── MAIN ────────────────────────────────────────── -->
     <div class="main">
         <div class="mobile-bar">
-            <label for="side-toggle" id="side-toggle-button" class="burger" role="button" tabindex="0" aria-label="Abrir menú">
+            <button type="button" id="side-toggle-button" class="burger" aria-label="Abrir menú" aria-controls="portal-sidebar" aria-expanded="false">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
-            </label>
+            </button>
             <a href="/portal/home" class="side-logo" style="padding:0;font-size:15px;">
                 <span class="mark" style="width:28px;height:28px;">
                     <img src="/static/img/logo-mark-white.png" alt="" style="height:20px;width:auto;">
@@ -348,18 +348,65 @@
   }, { passive: true });
 })();
 
-// Hamburguesa operable por teclado (Enter/Espacio togglea el checkbox)
+// Drawer móvil: estado accesible, foco contenido y cierre predecible.
 (function () {
   var burger = document.querySelector(".burger");
   var toggle = document.getElementById("side-toggle");
-  if (!burger || !toggle) return;
-  burger.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      toggle.checked = !toggle.checked;
-      burger.setAttribute("aria-expanded", toggle.checked ? "true" : "false");
+  var sidebar = document.getElementById("portal-sidebar");
+  var overlay = document.querySelector(".side-overlay");
+  var main = document.querySelector(".shell > .main");
+  var tabbar = document.querySelector(".tabbar");
+  var mobile = window.matchMedia("(max-width: 900px)");
+  if (!burger || !toggle || !sidebar || !overlay) return;
+
+  function focusables() {
+    return Array.from(sidebar.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"))
+      .filter(function (element) { return element.getClientRects().length > 0; });
+  }
+  function sync(open, moveFocus, restoreFocus) {
+    open = mobile.matches && open;
+    toggle.checked = open;
+    burger.setAttribute("aria-expanded", open ? "true" : "false");
+    burger.setAttribute("aria-label", open ? "Cerrar menú" : "Abrir menú");
+    sidebar.inert = mobile.matches && !open;
+    sidebar.setAttribute("aria-hidden", mobile.matches && !open ? "true" : "false");
+    overlay.setAttribute("aria-hidden", open ? "false" : "true");
+    if (main) main.inert = open;
+    if (tabbar) tabbar.inert = open;
+    if (open) {
+      sidebar.setAttribute("role", "dialog");
+      sidebar.setAttribute("aria-modal", "true");
+      if (moveFocus) window.setTimeout(function () {
+        if (mobile.matches && toggle.checked) (focusables()[0] || sidebar).focus();
+      }, 30);
+    } else {
+      sidebar.removeAttribute("role");
+      sidebar.removeAttribute("aria-modal");
+      if (restoreFocus) burger.focus();
     }
+  }
+
+  burger.addEventListener("click", function () { sync(!toggle.checked, true, false); });
+  overlay.addEventListener("click", function () { sync(false, false, true); });
+  sidebar.addEventListener("click", function (event) {
+    if (mobile.matches && event.target.closest("a[href]")) sync(false, false, false);
   });
+  document.addEventListener("keydown", function (event) {
+    if (!mobile.matches || !toggle.checked) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      sync(false, false, true);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    var items = focusables();
+    if (!items.length) return;
+    var first = items[0], last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  mobile.addEventListener("change", function () { sync(false, false, false); });
+  sync(false, false, false);
 })();
 
 // Confirmaciones sin JavaScript inline en los formularios.
