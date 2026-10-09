@@ -43,7 +43,8 @@
         </span>
         <small class="pickup-status-note">
             {% if r.estado == 'COMPLETADA' %}La finalización del retiro fue registrada.
-            {% elif r.envio_entregado|default(false) %}El tracking confirma la entrega; no confirma por sí solo la visita física del chofer.
+            {% elif r.envio_entregado_courier|default(false) %}El courier informa la entrega del envío; no confirma por sí solo la visita física del chofer durante este retiro.
+            {% elif r.envio_entregado|default(false) %}El envío figura entregado en TAURO, sin un evento de entrega del courier asociado a esta vista.
             {% elif historica %}Fecha de recolección pasada. La fecha programada ya pasó; esta vista no confirma que el courier haya retirado los paquetes.
             {% elif confirmada %}Recolección programada. Retiro reservado. Prepará los paquetes antes del horario de inicio.
             {% elif r.estado == 'CANCELADA' %}Recolección cancelada. La guía se conserva y puede volver a programarse.
@@ -51,11 +52,11 @@
             {% else %}Recolección pendiente de confirmación. TAURO está verificando la reserva. No vuelvas a solicitarla todavía.{% endif %}
         </small>
         <small class="pickup-status-source">
-            Reserva: {% if r.confirmation_code %}confirmada por {{ r.reserva_fuente|default(courier) }}{% else %}registrada en {{ r.reserva_fuente|default('TAURO') }}{% endif %}{% if r.reserva_fecha_label|default(false) %} · {{ r.reserva_fecha_label }} (hora de Argentina){% endif %}.
+            Reserva en TAURO{% if r.reserva_creada_fecha_label|default(false) %} · registrada {{ r.reserva_creada_fecha_label }} (hora de Argentina){% endif %}{% if r.reserva_actualizada_fecha_label|default(false) %} · última actualización {{ r.reserva_actualizada_fecha_label }}{% endif %}.
         </small>
-        {% if r.envio_entregado|default(false) %}
+        {% if r.envio_entregado_courier|default(false) %}
         <small class="pickup-status-source">
-            Seguimiento del envío: entrega confirmada por {{ courier }}{% if r.envio_tracking_fecha_label|default(false) %} · {{ r.envio_tracking_fecha_label }} (hora de Argentina){% endif %}. Es un evento distinto de la reserva del retiro.
+            Seguimiento: {{ courier }} informa entrega{% if r.envio_tracking_evento_fecha_label|default(false) %} · evento {{ r.envio_tracking_evento_fecha_label }}{% endif %}{% if r.envio_tracking_consulta_fecha_label|default(false) %} · última consulta {{ r.envio_tracking_consulta_fecha_label }}{% endif %} (hora de Argentina). Es distinto de la reserva del retiro.
         </small>
         {% endif %}
     </div>

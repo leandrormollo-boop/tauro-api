@@ -53,10 +53,13 @@ def presentar_recoleccion(fila: dict, *, hoy: Optional[date] = None) -> dict:
     item = dict(fila)
     hoy = hoy or date.today()
     estado = str(item.get("estado") or "").strip().upper()
+    envio_entregado_courier = (
+        str(item.get("envio_tracking_estado") or "").strip().upper()
+        == "ENTREGADO"
+    )
     envio_entregado = (
         str(item.get("envio_estado") or "").strip().upper() == "ENTREGADO"
-        or str(item.get("envio_tracking_estado") or "").strip().upper()
-        == "ENTREGADO"
+        or envio_entregado_courier
     )
     fecha = item.get("fecha")
     fecha_pasada = bool(isinstance(fecha, date) and fecha < hoy)
@@ -76,17 +79,17 @@ def presentar_recoleccion(fila: dict, *, hoy: Optional[date] = None) -> dict:
         seccion = "PENDIENTES"
     item.update(
         envio_entregado=envio_entregado,
+        envio_entregado_courier=envio_entregado_courier,
         fecha_pasada=fecha_pasada,
         vista_historica=vista_historica,
         seccion_operativa=seccion,
-        reserva_fuente=(str(item.get("courier") or "courier").upper()
-                        if item.get("confirmation_code") else "TAURO"),
-        reserva_fecha_label=fecha_hora_ar(
-            item.get("updated_at") or item.get("created_at")
-        ),
-        envio_tracking_fecha_label=fecha_hora_ar(
+        reserva_creada_fecha_label=fecha_hora_ar(item.get("created_at")),
+        reserva_actualizada_fecha_label=fecha_hora_ar(item.get("updated_at")),
+        envio_tracking_evento_fecha_label=fecha_hora_ar(
             item.get("envio_tracking_evento_at")
-            or item.get("envio_tracking_actualizado_at")
+        ),
+        envio_tracking_consulta_fecha_label=fecha_hora_ar(
+            item.get("envio_tracking_actualizado_at")
         ),
     )
     return item
