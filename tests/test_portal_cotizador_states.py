@@ -74,9 +74,13 @@ def _fill_complete(page):
 
 def test_estados_reintento_y_respuesta_obsoleta_conservan_los_datos(browser):
     page = browser.new_page(viewport={"width": 1440, "height": 900})
-    old_html = render_quote(opciones=[_option("DHL", "236077")])
     stale_html = render_quote(opciones=[_option("DHL", "999999")])
-    new_html = render_quote(opciones=[_option("DHL", "240500")])
+    old_option = _option("DHL", "236077")
+    old_option["portal_quote_id"] = "old-quote"
+    old_html = render_quote(opciones=[old_option])
+    new_option = _option("DHL", "240500")
+    new_option["portal_quote_id"] = "new-quote"
+    new_html = render_quote(opciones=[new_option])
     retry_html = render_quote(opciones=[_option("DHL", "241000")])
     try:
         _serve(page, render_quote())
@@ -91,6 +95,8 @@ def test_estados_reintento_y_respuesta_obsoleta_conservan_los_datos(browser):
         page.evaluate("html => window.__resolveQuote(0, html)", old_html)
         panel.locator(".uq-price").wait_for()
         assert panel.locator(".uq-results").get_attribute("data-quote-state") == "ready"
+        assert results.locator(".uq-choose").get_attribute("href") is not None
+        assert results.locator(".uq-client-download button").is_enabled()
 
         page.evaluate("""() => {
           const form = document.querySelector('[data-unified-form="internacional"]');
@@ -100,6 +106,16 @@ def test_estados_reintento_y_respuesta_obsoleta_conservan_los_datos(browser):
         page.wait_for_function("window.__quotePending.length === 2")
         assert results.locator("[data-quote-stale]").is_visible()
         assert results.locator(".uq-price").is_visible()
+        stale_link = results.locator(".uq-choose")
+        assert stale_link.get_attribute("href") is None
+        assert stale_link.get_attribute("aria-disabled") == "true"
+        assert results.locator(".uq-client-download button").is_disabled()
+        current_url = page.url
+        stale_link.click()
+        assert page.url == current_url
+        assert results.locator(".uq-client-download").evaluate(
+            "form => form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}))"
+        ) is False
 
         page.evaluate("""() => {
           const form = document.querySelector('[data-unified-form="internacional"]');
@@ -110,6 +126,8 @@ def test_estados_reintento_y_respuesta_obsoleta_conservan_los_datos(browser):
         assert page.evaluate("window.__quotePending[1].signal.aborted") is True
         page.evaluate("html => window.__resolveQuote(2, html)", new_html)
         results.get_by_text("$ 240.500,00").wait_for()
+        assert results.locator(".uq-choose").get_attribute("href") is not None
+        assert results.locator(".uq-client-download button").is_enabled()
         page.evaluate("html => window.__resolveQuote(1, html)", stale_html)
         page.wait_for_timeout(20)
         assert results.get_by_text("$ 240.500,00").is_visible()
@@ -130,7 +148,12 @@ def test_estados_reintento_y_respuesta_obsoleta_conservan_los_datos(browser):
 
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(50)
-        panel.evaluate("panel => { panel.dataset.mobileStep = '3'; }")
+        panel.locator('[data-quote-step="3"]').click()
+        assert panel.locator("[data-quote-status]").get_attribute("aria-live") == "off"
+        assert panel.locator("[data-quote-results-status]").get_attribute("aria-live") == "polite"
+        assert panel.locator("[data-quote-results-status]").text_content().startswith(
+            "No pudimos actualizar"
+        )
         results.locator("[data-quote-retry]").click()
         page.wait_for_function("window.__quotePending.length === 5")
         page.evaluate("html => window.__resolveQuote(4, html)", retry_html)

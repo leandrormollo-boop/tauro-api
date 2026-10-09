@@ -42,6 +42,7 @@
 .uq-error{font-size:12px;line-height:1.6;padding:14px;border-radius:12px;background:var(--error-glow);color:var(--fg);overflow-wrap:anywhere}
 .uq-stale{font-size:11px;line-height:1.55;margin:0 0 12px;padding:11px 12px;border:1px solid color-mix(in srgb,var(--warning,#fbbf24) 35%,var(--line));border-radius:12px;background:color-mix(in srgb,var(--warning,#fbbf24) 8%,var(--bg));color:var(--fg-2)}
 .uq-recovery{display:flex;justify-content:flex-start;margin-top:12px}.uq-recovery .btn{min-height:38px}
+.uq-results-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.uq-choose[aria-disabled=true]{opacity:.55;cursor:not-allowed}
 .uq-idle{font-size:12px;line-height:1.7;color:var(--fg-3);padding:32px 5px;text-align:center}
 [data-quote-results][aria-busy=true] .uq-idle{color:var(--accent);animation:uq-breathe 1.2s ease-in-out infinite alternate}
 .uq-form-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}.uq-form-foot>span{font-size:11px;color:var(--fg-3)}
