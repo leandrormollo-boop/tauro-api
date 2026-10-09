@@ -123,19 +123,20 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-panel-head > a { align-self: center; color: var(--accent-soft); font-size: 12px; text-decoration: none; }
 .portal-operacion .home-panel-head > small { align-self: center; color: var(--fg-3); font-size: 11px; }
 
+.portal-operacion .home-activity-panel { container: home-activity / inline-size; }
 .portal-operacion .home-activity-scopes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); }
 .portal-operacion .home-scope { min-width: 0; padding: 0 20px 6px; }
 .portal-operacion .home-scope + .home-scope { border-left: 1px solid var(--line); }
 .portal-operacion .home-scope-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0 10px; }
-.portal-operacion .home-scope-name { display: flex; min-width: 0; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+.portal-operacion .home-scope-name { display: flex; min-width: 0; flex: 1 1 190px; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
 .portal-operacion .home-scope-name .scope-symbol { width: 28px; height: 28px; flex: 0 0 28px; }
 .portal-operacion .home-scope-name h3 { margin: 0; color: var(--fg-1); font-size: 14px; line-height: 1.2; transition: color .16s ease; }
 .portal-operacion .home-scope-name:hover h3 { color: var(--accent-soft); }
-.portal-operacion .home-scope-name span { display: block; margin-top: 2px; color: var(--fg-3); font-size: 10px; }
-.portal-operacion .home-scope-head > a { color: var(--accent-soft); font-size: 11px; text-decoration: none; white-space: nowrap; }
+.portal-operacion .home-scope-name span { display: block; margin-top: 2px; color: var(--fg-3); font-size: 12px; line-height: 1.35; }
+.portal-operacion .home-scope-head > a { color: var(--accent-soft); font-size: 12px; text-decoration: none; white-space: nowrap; }
 .portal-operacion .home-scope-list { border-top: 1px solid var(--line); }
 .portal-operacion .home-scope-row {
-  display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 14px;
+  display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) minmax(112px, auto); align-items: center; gap: 14px;
   margin-inline: -8px; padding: 13px 8px; color: var(--fg-1); text-decoration: none; border-bottom: 1px solid var(--line);
   border-radius: 9px; transition: background-color .16s ease, transform .16s ease;
 }
@@ -144,15 +145,26 @@ html[data-theme="light"] .portal-operacion { --fg-3: #5e566b; --fg-4: #696174; }
 .portal-operacion .home-scope-row:hover .home-shipment-copy strong { color: var(--accent-soft); }
 .portal-operacion .home-shipment-copy { display: block; min-width: 0; }
 .portal-operacion .home-shipment-copy strong,
-.portal-operacion .home-shipment-copy small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.portal-operacion .home-shipment-copy strong { color: var(--fg-1); font-size: 13px; font-weight: 680; }
-.portal-operacion .home-shipment-copy small { margin-top: 4px; color: var(--fg-3); font-size: 10px; }
-.portal-operacion .home-shipment-state { display: flex; max-width: 46%; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 5px; }
-.portal-operacion .home-shipment-state .badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.portal-operacion .home-shipment-state small { max-width: 100%; overflow: hidden; color: var(--fg-3); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.portal-operacion .home-shipment-copy small {
+  display: block; min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere;
+}
+.portal-operacion .home-shipment-copy strong { color: var(--fg-1); font-size: 13px; font-weight: 680; line-height: 1.35; }
+.portal-operacion .home-shipment-copy small { margin-top: 4px; color: var(--fg-3); font-size: 12px; line-height: 1.4; }
+.portal-operacion .home-shipment-state { display: flex; min-width: 0; flex-direction: column; align-items: flex-end; gap: 5px; text-align: right; }
+.portal-operacion .home-shipment-state .badge {
+  max-width: 100%; overflow: visible; font-size: 12px; text-overflow: clip; white-space: normal; overflow-wrap: anywhere;
+}
+.portal-operacion .home-shipment-state small {
+  max-width: 100%; overflow: visible; color: var(--fg-3); font-size: 12px; line-height: 1.35;
+  text-overflow: clip; white-space: normal; overflow-wrap: anywhere;
+}
 .portal-operacion .home-scope-empty { display: flex; min-height: 126px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; border-top: 1px solid var(--line); }
 .portal-operacion .home-scope-empty p { margin: 0; color: var(--fg-3); font-size: 12px; }
 .portal-operacion .home-scope-empty a { color: var(--accent-soft); font-size: 12px; text-decoration: none; }
+@container home-activity (max-width: 760px) {
+  .portal-operacion .home-activity-scopes { grid-template-columns: 1fr; }
+  .portal-operacion .home-scope + .home-scope { border-top: 1px solid var(--line); border-left: 0; }
+}
 
 .portal-operacion .home-insights-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr); gap: 16px; }
 .portal-operacion .home-monthly-chart { display: grid; min-height: 196px; grid-template-columns: repeat(6, minmax(36px, 1fr)); gap: 10px; align-items: end; padding: 6px 20px 20px; }
@@ -442,8 +454,10 @@ html[data-theme="light"] .portal-operacion .quote-form-card { background: var(--
   .portal-operacion .home-activity-scopes { grid-template-columns: 1fr; }
   .portal-operacion .home-scope { padding-inline: 16px; }
   .portal-operacion .home-scope + .home-scope { border-top: 1px solid var(--line); border-left: 0; }
-  .portal-operacion .home-scope-row { gap: 10px; }
-  .portal-operacion .home-shipment-state { max-width: 43%; }
+  .portal-operacion .home-scope-row { grid-template-columns: 1fr; gap: 9px; }
+  .portal-operacion .home-shipment-state {
+    width: 100%; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; text-align: left;
+  }
   .portal-operacion .home-insights-grid,
   .portal-operacion .home-dashboard-rail { grid-template-columns: 1fr; }
   .portal-operacion .home-monthly-chart { gap: 4px; padding-inline: 12px; }
