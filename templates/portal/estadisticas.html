@@ -93,7 +93,8 @@
                 {% endfor %}
             </ol>
             <p class="sub" style="margin:0 20px 14px;">
-                Porcentajes sobre {{ r.destinos_total_envios }} envíos vigentes. Pueden no sumar 100% por redondeo.
+                Base: {{ r.destinos_total_envios }} envíos vigentes con destino registrado.
+                <span data-help="Redondeo">Los porcentajes pueden no sumar 100% porque se muestran sin decimales.</span>
             </p>
             {% if r.destinos_restantes %}
             <details style="margin:0 20px 18px;">

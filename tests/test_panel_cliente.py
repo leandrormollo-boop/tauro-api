@@ -159,6 +159,11 @@ def test_destinos_conserva_el_top_cinco_y_representa_los_restantes():
         for codigo, cantidad in cantidades.items()
         for _ in range(cantidad)
     ]
+    historial.extend([
+        {"estado": "CANCELADO", "destino_pais": "JP", "created_at": "2026-10-01"},
+        {"estado": "REEMPLAZADO", "destino_pais": "CA", "created_at": "2026-10-01"},
+        {"estado": "ENTREGADO", "destino_pais": "PAIS_INVALIDO", "created_at": "2026-10-01"},
+    ])
 
     resumen = pc.resumen_inicio_cliente(historial, [], hoy=date(2026, 10, 9))
 
@@ -167,6 +172,7 @@ def test_destinos_conserva_el_top_cinco_y_representa_los_restantes():
     ]
     assert [d["codigo"] for d in resumen["destinos_restantes"]] == ["MX", "ES"]
     assert resumen["destinos_total_envios"] == 64
+    assert resumen["envios_total"] == 65
     assert sum(d["cantidad"] for d in (
         resumen["destinos_frecuentes"] + resumen["destinos_restantes"]
     )) == resumen["destinos_total_envios"]

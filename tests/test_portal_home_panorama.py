@@ -80,7 +80,8 @@ def test_estadisticas_usa_datos_reales_y_lleva_al_historial_filtrado():
     assert "r.destinos_restantes" in STATS
     assert "r.destinos_total_envios" in STATS
     assert "Principales destinos" in STATS
-    assert "Pueden no sumar 100% por redondeo" in STATS
+    assert "envíos vigentes con destino registrado" in STATS
+    assert "pueden no sumar 100%" in STATS
     assert "{% for paso in embudo %}" in STATS
     assert '/portal/envios?anio={{ mes.anio }}&amp;mes={{ mes.mes }}' in STATS
     assert "574" not in STATS
